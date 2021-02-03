@@ -1,0 +1,61 @@
+<?php
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
+	
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require $composer_dir.'autoload.php';
+	use MailchimpAPI\Mailchimp;
+	
+	$event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.');
+	$event = new Event($event_id, TRUE);
+
+	$session = SessionControl::get_instance();
+	//$session->set_return();
+
+	
+	if($_POST){
+		
+		$user = NULL;
+		if($session->get_user_id()){
+			$user = new User($session->get_user_id(), TRUE);
+		}
+		else{
+	
+			if(!FormWriterPublic::honeypot_check($_POST)){
+				throw new SystemDisplayableError(
+					'Please leave the "Extra email" field blank.');			
+			}
+			
+			if(!FormWriterPublic::antispam_question_check($_POST)){
+				throw new SystemDisplayableError(
+					'Please type the correct value into the anti-spam field.');			
+			}		
+		
+	
+			$captcha_success = FormWriterPublic::captcha_check($_POST);
+			if (!$captcha_success) {
+				$errormsg = 'Sorry, '.strip_tags($_POST['usr_first_name']).' '.strip_tags($_POST['usr_last_name']).', you must click the CAPTCHA to submit the form.';
+				throw new SystemDisplayableError($errormsg);	
+			}	
+			
+			if(!$user = User::GetByEmail($_POST['usr_email'])){
+				$user = User::CreateNewUser($_POST['usr_first_name'], $_POST['usr_last_name'], $_POST['usr_email'], NULL, TRUE);
+			}			
+		}			
+
+		//ADD TO WAITING LIST
+		$group = Group::add_group($event->get('evt_name') . ' waiting list', 1);
+		$group->add_user($user->key);
+		$display_message = 'You have been added to the '.$event->get('evt_name').' waiting list.';
+		$message_type = 'status_announcement';	
+
+		if($_POST['newsletter']){
+			$status = $user->add_to_mailing_list();	
+		}				
+				
+	}
+	
+?>

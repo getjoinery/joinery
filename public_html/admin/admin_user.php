@@ -1,0 +1,828 @@
+<?php
+
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
+
+
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/log_form_errors_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipients_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_logs_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
+	
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_users_class.php');
+	
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+	
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(5);
+
+
+	$user = new User($_GET['usr_user_id'], TRUE);
+
+	if($_POST){ 
+
+		if($_POST['action'] == 'add_to_group'){
+			//ADD THE USER TO A GROUP
+			$group = new Group($_POST['grp_group_id'], TRUE);
+			$group->add_user($user->key);
+			$returnurl = $session->get_return();
+			header("Location: $returnurl");
+			exit();			
+		}
+		else if($_POST['action'] == 'remove_from_group'){
+			$groupuser = new GroupUser($_POST['gru_group_user_id'], TRUE);
+			$groupuser->remove();
+
+			$returnurl = $session->get_return();
+			header("Location: $returnurl");
+			exit();				
+		}
+		else if($_POST['action'] == 'add_to_event'){
+			//ADD THE USER TO AN EVENT
+			$event = new Event($_POST['evt_event_id'], TRUE);
+			$event->add_registrant($user->key);
+			$returnurl = $session->get_return();
+			header("Location: $returnurl");
+			exit();			
+		}
+		else if($_POST['action'] == 'remove_from_event'){
+			$event = new Event($_POST['evt_event_id'], TRUE);
+			$event->remove_registrant($user->key);
+			$returnurl = $session->get_return();
+			header("Location: $returnurl");
+			exit();					
+		}		
+	}
+
+	$session->set_return();
+
+	$phone_numbers = new MultiPhoneNumber(
+		array('user_id'=>$user->key),
+		NULL,
+		30,
+		0);
+	$phone_numbers->load();
+	$numphonerecords = $phone_numbers->count_all();
+
+	$phone_numbers_ver = new MultiPhoneNumber(
+		array('user_id'=>$user->key, 'verified'=>TRUE),
+		NULL,
+		30,
+		0);
+	$numphoneverified = $phone_numbers_ver->count_all();
+
+	$addresses = new MultiAddress(
+		array('user_id'=>$user->key),
+		NULL,
+		30,
+		0);
+	$addresses->load();
+
+	/*
+	$form_errors = new MultiFormError(
+		array('user_id'=>$user->key),
+		NULL,
+		10,
+		0);
+	$form_errors->load();
+	*/
+	
+
+	$search_criteria = array();
+	$search_criteria['user_id'] = $user->key;
+	//$search_criteria['deleted'] = FALSE;
+
+	$orders = new MultiOrder(
+		$search_criteria,
+		array('ord_order_id'=>'DESC'),
+		NULL,
+		NULL);
+	$orders->load();
+	$numorders = $orders->count_all();	
+	
+	
+	
+
+	
+	$searches['user_id'] = $user->key;
+	$event_registrations = new MultiEventRegistrant(
+		$searches,
+		NULL, //array('event_id'=>'DESC'),
+		NULL,
+		NULL);
+	$event_registrations->load();	
+	$numeventsregistrations = $event_registrations->count_all();	
+	
+	
+
+	/*
+	$search_criteria = NULL;
+	$search_criteria['user_id'] = $user->key;
+
+	$details = new MultiProductDetail(
+		$search_criteria,
+		array('product_detail_id'=>'DESC'),
+		NULL,
+		NULL);
+	$numrecords = $details->count_all();
+	$details->load();
+	*/
+	
+	
+
+/*
+	$phonereveals = new MultiEventLog(
+		array('user_id'=>$user->key, 'event' => EventLog::SHOW_PHONE)
+		);
+	$numphonereveal = $phonereveals->count_all();
+
+	$websiteclick = new MultiEventLog(
+		array('user_id'=>$user->key, 'event' => EventLog::WEBSITE_CLICK)
+		);
+	$numwebsiteclick = $websiteclick->count_all();
+*/
+
+
+	$dbhelper = DbConnector::get_instance();
+	$dblink = $dbhelper->get_db_link();
+	// Get activation entries for user
+	/*
+	$sql_activations = "SELECT * FROM act_activation_codes WHERE (act_usr_email ILIKE :usr_email OR act_usr_user_id = :usr_user_id) AND (act_purpose = 2 OR  act_purpose = 3)";
+
+	try
+	{
+		$q = $dblink->prepare($sql_activations);
+		$q->bindParam(':usr_email', $user->get('usr_email'), PDO::PARAM_STR);
+		$q->bindParam(':usr_user_id', $user->key, PDO::PARAM_INT);
+		$count = $q->execute();
+		$q->setFetchMode(PDO::FETCH_OBJ);
+	}
+	catch(PDOException $e){
+		$dbhelper->handle_query_error($e);
+	}
+
+	$activations = $q->fetchAll();
+	*/
+
+	$sql = 'SELECT * FROM log_logins WHERE log_usr_user_id='.$user->key.' ORDER BY log_login_time DESC LIMIT 10';
+
+	try{
+		$q = $dblink->prepare($sql);
+		$count = $q->execute();
+		$q->setFetchMode(PDO::FETCH_OBJ);
+	}
+	catch(PDOException $e){
+		$dbhelper->handle_query_error($e);
+	}
+	$logins = $q->fetchAll();
+
+
+
+	$page = new AdminPage();
+	$page->admin_header(	
+	array(
+		'menu-id'=> 1,
+		'page_title' => 'User',
+		'readable_title' => 'User',
+		'breadcrumbs' => array(
+			'Users'=>'/admin/admin_users', 
+			$user->display_name() => '',
+		),
+		'session' => $session,
+	)
+	);
+
+	$settings = Globalvars::get_instance();
+	$CDN = $settings->get_setting('CDN');
+	$webDir = $settings->get_setting('webDir');
+
+
+		$options['title'] = $user->display_name() . ' (' . $user->key . ')';
+		
+		if(!$user->get('usr_is_disabled') && !$user->get('usr_is_admin_disabled')) {
+			if($_SESSION['permission'] > 7){
+				$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
+				$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
+
+				$options['altlinks']['Change password'] = '/admin/admin_users_password_edit?usr_user_id='.$user->key;
+				//$options['altlinks']['Soft Delete'] = '/admin/admin_softdelete?usr_user_id='.$user->key;
+
+
+				if(!$user->get('usr_is_activated')) {
+					$options['altlinks']['Activate User'] = '/admin/admin_activate?usr_user_id='.$user->key;
+				}
+				if ($_SESSION['permission'] == 10) {
+					//$options['altlinks']['Admin Delete'] = '/admin/admin_users_admin_delete?usr_user_id='.$user->key;
+					$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
+					$options['altlinks']['Log in as user'] = '/admin/admin_user_login_as?usr_user_id='.$user->key;
+				}
+
+			}
+		} else if(!$user->get('usr_is_admin_disabled')) {
+			$options['altlinks']['Undelete'] = '/admin/admin_users_undelete?usr_user_id='.$user->key;
+		}
+		else {
+			$options['altlinks']['Undelete'] = '/admin/admin_users_undelete?usr_user_id='.$user->key;
+		}		
+
+		$page->begin_box($options);
+	?>
+
+	
+
+
+          <!-- Profile Image -->
+              <!--<img class="profile-user-img rounded-circle img-fluid mx-auto d-block" src="../../../images/5.jpg" alt="User profile picture">-->
+			<?php
+			//if ($event->get('evt_picture_link')) {
+				//echo '<img src="' .  $event->get('evt_picture_link') . '" alt="' . htmlspecialchars($event->get('evt_name'), ENT_QUOTES) . '" width="450" />';
+			//}
+			?>	
+			
+
+
+              <p class="text-center"><?php echo 'Signed up: '.LibraryFunctions::convert_time($user->get('usr_signup_date'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></p>
+			  
+			  <p class="text-center">
+			  <?php
+				if($user->get('usr_is_admin_disabled')) {
+					echo 'Admin Disabled (' . $user->get('usr_admin_disabled_comment') .')';
+				} else if($user->get('usr_is_disabled')) {
+					echo 'Disabled';
+				}
+				else {	
+
+
+
+					$settings = Globalvars::get_instance();
+					if($settings->get_setting('stripe_api_key')){					
+						\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
+
+						$customer_ids = array();
+						if($user->get('usr_stripe_customer_id')){
+							$customer_ids[] = $user->get('usr_stripe_customer_id');
+						}
+
+						$stripe_customers = \Stripe\Customer::all(["email" => $user->get('usr_email')]);	
+
+						foreach($stripe_customers[data] as $stripe_customer){
+							if(!in_array($stripe_customer[id], $customer_ids)){
+								$customer_ids[] = $stripe_customer[id];
+							}
+						}
+
+
+						foreach($customer_ids as $customer_id){	
+							$subs = \Stripe\Subscription::all(['limit' => 5, 'customer' => $customer_id, 'status' => 'all']);
+
+							foreach($subs as $sub) {
+								$gmtime = gmdate("Y-m-d\TH:i:s\Z", $sub['created']);
+								
+								$cancelled = '';
+								if($sub['ended_at']){
+									$cancelled = LibraryFunctions::convert_time(gmdate("Y-m-d\TH:i:s\Z", $sub['ended_at']), 'UTC', $session->get_timezone());
+								}
+								
+								if($sub['status'] != 'canceled'){
+									$actions = '<a href="/profile/orders_recurring_action?stripe_sid='. $sub['id']. '">Cancel subscription</a>';
+								}
+								else{
+									$actions = 'canceled';
+								}
+								
+								if(!$cancelled){
+									echo '<p><strong>Active recurring donation:  $'.$sub['plan']['amount']/100 .'/month</strong> starting '.LibraryFunctions::convert_time($gmtime, 'UTC', $session->get_timezone()). ' (Sub id: ' . $sub['id'].') '. $actions .'</p>';
+								}
+								
+								/*
+								$rowvalues = array();
+								array_push($rowvalues, $sub['id']);
+								array_push($rowvalues,  '$'.$sub['plan']['amount']/100 .'/month'); 
+								array_push($rowvalues, LibraryFunctions::convert_time($gmtime, 'UTC', $session->get_timezone()));
+								array_push($rowvalues, $cancelled);
+								array_push($rowvalues, $actions);
+								$page->disprow($rowvalues);
+								*/
+							}
+						}
+						//$page->endtable();	
+
+
+
+
+						/*
+						if($user->get('usr_stripe_customer_id')){
+							$settings = Globalvars::get_instance();
+							\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));	
+							$subs = \Stripe\Subscription::all(['limit' => 3, 'customer' => $user->get('usr_stripe_customer_id'), 'status' => 'all']);
+
+							if($subs){	
+								foreach($subs as $sub) {
+									$gmtime = gmdate("Y-m-d\TH:i:s\Z", $sub['plan']['created']);
+									
+									if($sub['status'] != 'canceled'){
+										//$actions = '<a href="/profile/orders_recurring_action?stripe_sid='. $sub['id']. '">Cancel subscription</a>';
+										$actions = '';
+									}
+									else{
+										$actions = 'canceled';
+									}
+										
+									echo '<li><strong>Active - $'.$sub['plan']['amount']/100 .'/month</strong> beginning '.LibraryFunctions::convert_time($gmtime, 'UTC', $session->get_timezone(), 'M j, Y'). ' ' .$actions.'</li>';
+							
+								}
+								echo ' ';	
+							}
+						}	
+						*/		
+					}						
+				}		
+				?>
+				</p>
+
+  
+             
+						<p class="text-center">
+						<?php
+						echo 'Email address:  <strong>'.$user->get('usr_email').'</strong> ';
+						if($user->get('usr_email_is_verified')) {
+							echo ' Verified';
+						}
+						else{
+							echo ' Unverified';
+						}	
+
+						if($user->get('usr_contact_preferences')) {
+							echo '<strong> Subscribed to newsletter</strong>';
+						}
+						else{
+							echo '<strong> Unsubscribed from newsletter</strong>';
+						}	
+						if($user->get('usr_contact_preferences_last_change')) {
+							echo ', last change:  '. LibraryFunctions::convert_time($event_registration->get('usr_contact_preferences_last_change'), 'UTC', $session->get_timezone());
+						}						
+						?>
+						</p>
+
+						<p class="text-center">
+						<?php
+						foreach($phone_numbers as $phone_number)	 {
+							echo 'Phone: '.$phone_number->get_phone_string() . ' [<a class="sortlink" href="/admin/admin_phone_edit.php?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]<br />';
+						}
+						?>
+						</p> 
+
+						<p class="text-center">
+						<?php
+						foreach($addresses as $address) {
+
+							echo 'Address:  ('.$address->key.') '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit.php?usa_address_id='. $address->key .'">edit</a>]<br />' ;
+
+
+							$page->disprow($rowvalues);
+						}	
+						echo '<br />Timezone: '.$user->get('usr_timezone'). ' [<a href="/admin/admin_users_edit?usr_user_id='.$user->key.'">edit</a>]';
+						?>
+						</p>
+
+  
+              
+
+
+
+	
+	
+	<?php $page->end_box(); ?>
+<?php
+
+	$headers = array("Event", "Registered");
+	$altlinks = array();
+	$box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => "Events"
+	);
+	$page->tableheader($headers, $box_vars);
+
+	foreach ($event_registrations as $event_registration){
+		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);	 
+
+		$rowvalues = array();
+
+		array_push($rowvalues, '('.$event->key.') <a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->getString('evt_name', 50). '</strong> '. $event->get('evt_location').'</a>');
+
+		array_push($rowvalues, LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone()));
+
+		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='.$user->key.'">
+		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
+		<input type="hidden" class="hidden" name="evt_event_id" id="evt_event_id" value="'.$event->key.'" />
+		<button type="submit">Remove</button>
+		</form>';
+		array_push($rowvalues, $delform);			
+		
+		$page->disprow($rowvalues);
+	}
+	
+	echo '<tr><td colspan="3">';
+	$formwriter = new FormWriterMaster('form3');
+	$validation_rules = array();
+	$validation_rules['evt_event_id']['required']['value'] = 'true';
+	echo $formwriter->set_validate($validation_rules);
+	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
+	
+	$events = new MultiEvent(
+		array('deleted'=>false),
+		array('start_time'=>'DESC'),		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$events->load();
+	
+	$optionvals = $events->get_dropdown_array();
+	echo $formwriter->hiddeninput('action', 'add_to_event');
+	echo $formwriter->hiddeninput('usr_user_id', $user->key);
+	echo $formwriter->dropinput("Add to event", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+	echo $formwriter->new_form_button('Add');
+	echo $formwriter->end_form();	
+	echo '</td></tr>';		
+	
+	$page->endtable(); 
+
+
+	$groupusers = new MultiGroupUser(array(
+		'user_id' => $user->key,
+	));
+	$groupusers->load();
+	
+	$headers = array("Group", "Action");
+	$altlinks = array();
+	$box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => "Groups"
+	);
+	$page->tableheader($headers, $box_vars);
+
+    foreach($groupusers as $groupuser) {
+		$group = new Group($groupuser->get('gru_grp_group_id'), TRUE);
+		$rowvalues = array();
+		array_push($rowvalues, $group->get('grp_name'));
+		$delform = '<form id="form4" class="form4" name="form4" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
+		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_group" />
+		<input type="hidden" class="hidden" name="gru_group_user_id" id="gru_group_user_id" value="'.$groupuser->key.'" />
+		<button type="submit">Remove</button>
+		</form>';
+		array_push($rowvalues, $delform);	
+		
+		$page->disprow($rowvalues);
+	}
+	
+	echo '<tr><td colspan="2">';
+	$formwriter = new FormWriterMaster('form5');
+	$validation_rules = array();
+	$validation_rules['grp_group_id']['required']['value'] = 'true';
+	echo $formwriter->set_validate($validation_rules);	
+	echo $formwriter->begin_form('form5', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
+	
+	$groups = new MultiGroup(
+		NULL,  //SEARCH 
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$groups->load();
+	
+	$optionvals = $groups->get_dropdown_array();
+	echo $formwriter->hiddeninput('action', 'add_to_group');
+	echo $formwriter->hiddeninput('usr_user_id', $user->key);
+	echo $formwriter->dropinput("Add to group", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+	echo $formwriter->new_form_button('Add');
+	echo $formwriter->end_form();	
+	echo '</td></tr>';	
+	
+	
+	$page->endtable();
+
+
+
+	//VIEW STATS
+
+	$headers = array("Session", "Last Viewed", "# Views");
+	$altlinks = array();
+	$box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => "Session Visits"
+	);
+	$page->tableheader($headers, $box_vars);
+
+	foreach ($event_registrations as $event_registration){
+		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);	
+		$searches = array();
+		$searches['event_id'] = $event_registration->get('evr_evt_event_id');
+		$event_sessions = new MultiEventSessions(
+			$searches,
+			array('session_number_then_title' => 'DESC'));
+		$event_sessions->load();
+		
+		foreach ($event_sessions as $event_session){
+			$rowvalues = array();
+			
+			if($visit_time = $event_session->get_last_visited_time_for_user($user->key)){
+				if($event_session->get('evs_session_number')){
+					$session_num = 'Session '.$event_session->get('evs_session_number'). ' - ';
+				}
+				else{
+					$session_num = '';
+				}
+				array_push($rowvalues, $event->get('evt_name') . ' - '. $session_num . $event_session->get('evs_title'));
+				array_push($rowvalues, LibraryFunctions::convert_time($visit_time, 'UTC', $session->get_timezone()));
+				array_push($rowvalues, $event_session->get_number_visits_for_user($user->key));
+			
+			}
+			$page->disprow($rowvalues);
+		}
+	}
+	
+	
+	$page->endtable(); 
+
+
+
+
+
+
+
+	$headers = array('Order ID', 'Order Time', 'Products', 'Total');
+	$altlinks = array();
+	$box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => "Orders"
+	);
+	$page->tableheader($headers, $box_vars);
+
+	
+	foreach($orders as $order) {
+		$rowvalues = array();
+		
+		if($order->get('ord_usr_user_id')){
+			$order_user = new User($order->get('ord_usr_user_id'), TRUE);
+		}
+		else{
+			$order_user = new User(NULL);
+		}
+		
+		
+		$min_status = NULL;
+
+		$order_items = $order->get_order_items();
+		$order_items_out = array();
+		foreach($order_items as $order_item) {
+
+			if (array_key_exists($order_item->get('odi_pro_product_id'), $PRODUCT_ID_TO_NAME_CACHE)) {
+				$title = $PRODUCT_ID_TO_NAME_CACHE[$order_item->get('odi_pro_product_id')];
+			} else {
+				$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
+				$title = $product->get('pro_name');
+				$PRODUCT_ID_TO_NAME_CACHE[$product->key] = $title;
+			}
+			
+			
+			$this_out = $title . ' ($'. $order_item->get('odi_price') .')';
+			
+
+			if($_SESSION['permission'] == 10){
+				$this_out .= ' <a href="/admin/admin_item_details?oi=' . $order_item->key . '">[details]</a>';
+				/*
+				if($order_item->get('odi_pro_product_id') != 18){
+					if($order_item->get('odi_refunded')){
+						$this_out .= ' REFUNDED ';
+					}
+					else{
+						$this_out .= '| <a href="/admin/admin_order_refund?oi=' . $order_item->key . '">[refund]</a>';
+					}
+				}
+				*/
+
+			}
+			
+			$order_items_out[] = $this_out;
+
+		}
+
+		array_push($rowvalues, '<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>');
+
+	
+		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone()));
+		array_push($rowvalues, implode($order_items_out, '<br>'));
+		array_push($rowvalues, '$'.$order->get('ord_total_cost'));
+		
+		//array_push($rowvalues, $status_to_html[$min_status ?: 1]);
+		$page->disprow($rowvalues);
+	}
+	$page->endtable();			
+
+
+	
+	
+	/*
+	?>	
+
+     <h2>Addresses</h2>
+	<?php
+	$address_headers = array("Address");
+	$page->tableheader($address_headers, "admin_table");
+
+    foreach($addresses as $address) {
+		$rowvalues = array();
+
+        if($address->get('usa_is_default')){
+            $setdefault = '';
+        }
+        else{
+            $setdefault = '(<a class="sortlink" href="/profile/users_addrs_setdefault?a=' . LibraryFunctions::encode($address->key) . '&u=' . LibraryFunctions::encode($user->key) . '">Set Default</a>)';
+        }
+
+
+		array_push($rowvalues, '('.$address->key.') '.$address->get_address_string(' '));
+
+		$page->disprow($rowvalues);
+	}
+	$page->endtable();
+	*/
+	/*
+	?>
+
+
+
+     <h2>Phone Numbers</h2>
+	<?php
+
+
+	$phone_headers = array("Phone");
+	$page->tableheader($phone_headers, "admin_table");
+
+	foreach($phone_numbers as $phone_number)	 {
+		$rowvalues=array();
+		
+		array_push($rowvalues, $phone_number->get_phone_string() . '[<a class="sortlink" href="phone_numbers_edit.php?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]');
+		
+        $page->disprow($rowvalues);
+	}
+
+	$page->endtable();
+	*/
+
+	$received_emails = new MultiEmailRecipient(
+		array('user_id' => $user->key, 'sent' => TRUE),
+		NULL,
+		20,
+		0);
+	$received_emails->load();
+
+
+	$headers = array("Subject", "Status", "Sent Date", "Recipients");
+	$altlinks = array();
+	$box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => "Received Emails"
+	);
+	$page->tableheader($headers, $box_vars);		
+		
+
+	foreach ($received_emails as $received_email) {
+		$email = new Email($received_email->get('erc_eml_email_id'), TRUE);
+		$rowvalues = array();
+
+		array_push($rowvalues, '('.$email->key.') <a href="/admin/admin_email_view?eml_email_id='.$email->key.'">'.$email->get('eml_subject').'</a>');
+		array_push($rowvalues, $email->get_status_text());
+		array_push($rowvalues, LibraryFunctions::convert_time( $email->get('eml_sent_time'), "UTC", $session->get_timezone()));
+
+		$emails = new MultiEmailRecipient(
+			array('email_id' => $email->key, 'sent' => TRUE)
+			);
+		$numemails = $emails->count_all();
+
+		array_push($rowvalues, $numemails);
+		$page->disprow($rowvalues);
+	}
+	$page->endtable();	
+		
+	
+	if($user->get('usr_permission') > 0){
+		
+
+		$emails = new MultiEmail(
+			array('user_id' => $user->key),
+			NULL,
+			20,
+			0);
+		$emails->load();
+
+		$headers = array("Subject", "Status", "Sent Date", "Recipients");
+		$altlinks = array();
+		$box_vars =	array(
+			'altlinks' => $altlinks,
+			'title' => "Sent Emails"
+		);
+		$page->tableheader($headers, $box_vars);
+		
+		foreach ($emails as $email) {
+			$rowvalues = array();
+
+			array_push($rowvalues, '('.$email->key.') '.$email->get('eml_subject'));
+			array_push($rowvalues, $email->get_status_text());
+			array_push($rowvalues, LibraryFunctions::convert_time( $email->get('eml_sent_time'), "UTC", $session->get_timezone()));
+
+			$emails = new MultiEmailRecipient(
+				array('email_id' => $email->key, 'sent' => TRUE)
+				);
+			$numemails = $emails->count_all();
+
+			array_push($rowvalues, $numemails);
+			$page->disprow($rowvalues);
+		}
+		$page->endtable();	
+		
+	}
+	
+	
+
+/*
+?>
+		<h2>Recurring Emails Sent</h2>
+
+<?php
+
+	$page->tableheader(array('Send Time', 'Email Address', 'Template'), 'recurring_mail_table');
+
+	foreach (RecurringMailer::GetSentEmails($user->key) as $email) {
+		$page->disprow(
+			array(
+				$email['ers_send_time'],
+				$email['ers_usr_email'],
+				$email['ers_template_name'])
+			);
+	}
+
+	$page->endtable();
+*/
+
+
+
+	$headers = array("Time");
+	$altlinks = array();
+	$box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => "Logins"
+	);
+	$page->tableheader($headers, $box_vars);
+
+	foreach ($logins as $login)
+	{
+		$rowvalues = array();
+		array_push($rowvalues, LibraryFunctions::convert_time($login->log_login_time, "UTC", $session->get_timezone()));
+		$page->disprow($rowvalues);
+	}
+
+  	$page->endtable();
+
+	if($_SESSION['permission'] == 10){
+		/*
+		?>
+		<h2>Errors</h2>
+		<?php
+		$page->tableheader(
+			array(
+				"Error",
+				),
+			"admin_table");
+
+		foreach ($form_errors as $form_error) {
+			$rowvalues = array();
+
+			array_push($rowvalues, '(' .$form_error->key.')<a href="/admin/admin_form_error?lfe_log_form_error_id=' . $form_error->key . '"> '. $form_error->display_time($session). '</a> (' . $form_error->get('lfe_page') . ')');
+			$page->disprow($rowvalues);
+		}
+		$page->endtable();
+		*/
+	}
+	
+
+
+
+
+	$page->admin_footer();
+
+?>
+
+
