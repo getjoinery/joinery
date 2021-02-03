@@ -11,7 +11,7 @@ $site_template = $settings->get_setting('site_template');
 
 //ROBOTS.TXT
 if($params[0] == 'robots.txt'){
-	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'robots.php';
+	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/robots.php';
 	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/robots.php';
 	if(file_exists($template_file)){
 		require_once($template_file);
