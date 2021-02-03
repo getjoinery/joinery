@@ -6,9 +6,25 @@ $full_path = $_REQUEST['path'];
 $static_routes_path = rtrim($_REQUEST['path'], '/');
 $static_routes_path = ltrim($static_routes_path, '/');
 
-//CHECK IF ACTUAL FILE EXISTS
 $settings = Globalvars::get_instance();
 $site_template = $settings->get_setting('site_template');
+
+//ROBOTS.TXT
+if($params[0] == 'robots.txt'){
+	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'robots.php';
+	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/robots.php';
+	if(file_exists($template_file)){
+		require_once($template_file);
+		exit();
+	}
+	else{
+		require_once($base_file); 
+		exit();		
+	}
+}
+
+//CHECK IF ACTUAL FILE EXISTS
+
 if($params[0]){
 	if($params[0] == 'profile'){
 		if($params[1]){
