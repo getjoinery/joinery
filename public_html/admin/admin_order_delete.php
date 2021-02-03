@@ -1,0 +1,82 @@
+<?php
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(10);
+	
+if ($_POST){
+
+	$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to delete here.');
+	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');
+	
+
+	
+	if ($confirm) {
+
+		$order = new Order($ord_order_id, TRUE);
+		$order->authenticate_write($session);
+		$order->permanent_delete();
+					
+	}
+
+	//NOW REDIRECT
+	$session = SessionControl::get_instance();
+	$returnurl = $session->get_return();
+	header("Location: $returnurl");
+	exit();
+
+}
+else{
+	$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to edit.');
+
+	$order = new Order($ord_order_id, TRUE);
+	
+	$session = SessionControl::get_instance();
+	$session->set_return("/admin/admin_orders");
+
+	$page = new AdminPage();
+	$page->admin_header(	
+	array(
+		'menu-id'=> 4,
+		'breadcrumbs' => array(
+			'Orders'=>'/admin/admin_orders', 
+			'Order '.$order->key => '',
+		),
+		//'page_title' => 'Event Sessions',
+		//'readable_title' => 'Event Sessions',
+		'session' => $session,
+	)
+	);	
+
+	echo '<h1>Delete Order</h1>';
+
+	$formwriter = new FormWriterMaster("form1");
+	echo $formwriter->begin_form("form", "post", "/admin/admin_order_delete");
+
+	echo '<fieldset><h4>Confirm Delete</h4>';
+		echo '<div class="fields full">';
+		echo '<p>WARNING:  This will administratively delete this order ('.$order->key . ').</p>';
+
+	echo $formwriter->hiddeninput("confirm", 1);
+	echo $formwriter->hiddeninput("ord_order_id", $ord_order_id);
+
+			echo $formwriter->start_buttons();
+		echo $formwriter->new_form_button('Submit');
+		echo $formwriter->end_buttons();
+
+		echo '</div>';
+	echo '</fieldset>';
+	echo $formwriter->end_form();
+
+	$page->admin_footer();
+
+
+}
+?>

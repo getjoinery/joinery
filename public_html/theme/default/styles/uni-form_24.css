@@ -1,0 +1,476 @@
+@import "uni-form-generic.css";
+/* Keep in mind that wherever you see 'Required property' it means that the property must exist */
+
+/* ------------------------------------------------------------------------------ */
+
+  /* Generals */
+  .uniForm fieldset{}
+    .uniForm fieldset legend{ color: #333; font-weight: bold; font-size: 100%; margin: 0; padding: 1.5em 0; }
+    
+    /* This is the main unit that contains our form elements */
+    .uniForm .ctrlHolder{ padding: 7px 0; border-bottom: 1px solid #dfdfdf; }
+    
+    .buttonHolder{ text-align: right; }
+      .uniForm .resetButton{ float: left; }
+      .uniForm .primaryAction{ font-weight: bold; }
+    
+    /* This class gets added to div.ctrlHolder to highlight the row */
+    .uniForm .focused{ background: #fffcdf; }
+      
+      /* .inlineLabel is used for inputs within labels - checkboxes and radio buttons */
+      .uniForm .inlineLabel input,
+      .uniForm .inlineLabels .inlineLabel input,
+      .uniForm .blockLabels .inlineLabel input { margin-right: .4em; float: left; }
+        .uniForm .inlineLabel span { vertical-align: middle; } 
+        
+/* ------------------------------------------------------------------------------ */
+
+    /* .blockLabels (default style, will be applied even if you don't class the parent element) */
+    .uniForm .blockLabels .ctrlHolder{}
+      
+      .uniForm label,
+      .uniForm .blockLabels label,
+      .uniForm .blockLabels .label{ margin: 0 0 .5em 0; }
+      
+      .uniForm .textInput,
+      .uniForm .blockLabels .textInput,
+      .uniForm .blockLabels .fileUpload{ width: 53%; /* <- Required property */ }
+    
+      .uniForm .selectInput,
+      .uniForm select,
+      .uniForm .blockLabels .selectInput,
+      .uniForm .blockLabels select{ width: 53.5%; /* <- Required property */ }
+      .uniForm textarea,
+      .uniForm .blockLabels textarea{ width: 53%; /* <- Required property */ height: 12em; }
+
+      .uniForm .formHint,
+      .uniForm .blockLabels .formHint{ width: 45%; /* <- Required property */ font-size: .9em; color: #777; position: relative; top: -.5em; }
+      
+      .uniForm .multiField,
+      .uniForm .blockLabels .multiField{ width: 53%; }
+        .uniForm .multiField .inlineLabel,
+        .uniForm .blockLabels .multiField .inlineLabel{ display: block; margin: 0 0 .5em 0; }
+        .uniForm .multiField .blockLabel,
+        .uniForm .blockLabels .multiField .blockLabel{ width: 30%; margin: 0 10px 0 0; }
+        .uniForm .multiField .blockLabel .textInput,
+        .uniForm .multiField .blockLabel .selectInput,
+        .uniForm .multiField .blockLabel select,
+        .uniForm .blockLabels .multiField .blockLabel .textInput,
+        .uniForm .blockLabels .multiField .blockLabel .selectInput,
+        .uniForm .blockLabels .multiField .blockLabel select{ width: 100%; margin: .3em 0 0 0; }
+
+/* ------------------------------------------------------------------------------ */
+
+    /* .inlineLabels */
+    .uniForm .inlineLabels .ctrlHolder{}
+    
+    .uniForm .inlineLabels label,
+    .uniForm .inlineLabels .label{ width: 45%; /* <- Required property */ margin: .3em 2% 0 0; /* <- Required property */  position: relative; top: -2px; }
+    
+    .uniForm .inlineLabels .textInput,
+    .uniForm .inlineLabels .fileUpload{ width: 45%; /* <- Required property */ }
+    
+    .uniForm .inlineLabels .selectInput,
+    .uniForm .inlineLabels select{ width: 45%; /* <- Required property */ }
+    .uniForm .inlineLabels select.datedrop { width: 70%; /* <- Required property */ }
+    
+    .uniForm .inlineLabels textarea{  width: 45%; /* <- Required property */ height: 12em; }
+
+    .uniForm .inlineLabels .formHint{ margin-top: 0; margin-left: 47%; font-size: .9em; color: #777; position: static; }
+    
+    .uniForm .inlineLabels .multiField{ width: 45%; /* <- Required property */ margin: 0 0 .3em 0; }
+      .uniForm .inlineLabels .multiField .inlineLabel{ display: block; margin: 0 0 .5em 0; }
+      .uniForm .inlineLabels .multiField .blockLabel{ float: left; width: 26%; margin: 0 3% 0 0; }
+      .uniForm .inlineLabels .multiField .blockLabel .textInput,
+      .uniForm .inlineLabels .multiField .blockLabel .selectInput,
+      .uniForm .inlineLabels .multiField .blockLabel select{ width: 100%; margin: .3em 0 0 0; }
+
+/* Focus pseudoclasses */
+.uniForm .ctrlHolder .textInput:focus{ outline: none; /* Get rid of the 'glow' effect in WebKit, optional */ }
+.uniForm .ctrlHolder textarea:focus{ outline: none; /* Get rid of the 'glow' effect in WebKit, optional */ }
+.uniForm div.focused .formHint{ color: #333; }
+
+/* Columns (they are floated left by default) */
+.uniForm .col{ width: 47.9%; /* <- Required property */ margin: 0 2% 20px 0; }
+/* Use .first and .last classes to control the layout/spacing of your columns */
+.uniForm .col.first{ width: 49%; /* <- Required property */ float: left; clear: none; }
+.uniForm .col.last{ width: 49%; /* <- Required property */ float: right; clear: none; margin-right: 0; }
+
+/* Messages */
+.uniForm #errorMsg{ background: #ffdfdf; border: 1px solid #df7d7d; border-width: 1px 0; margin: 0 0 1.5em 0; padding: 7px; }
+.uniForm .error{ background: #ffdfdf; border: 1px solid #df7d7d; border-width: 1px 0; }
+
+  .uniForm #errorMsg dt, .uniForm #errorMsg h3{ margin: 0 0 .5em 0; font-size: 100%; line-height: 100%; font-weight: bold; }
+  .uniForm #errorMsg dd{ margin: 0; padding: 0; }
+    .uniForm #errorMsg ol{ margin: 0; padding: 0; }
+      .uniForm #errorMsg ol li{ margin: 0; padding: 2px; list-style-position: inside; border-bottom: 1px dotted #df7d7d; position: relative; }
+    .uniForm .errorField{ color: #af4c4c; margin: 0 0 6px 0; padding: 4px; background: #ffbfbf; }
+
+.uniForm #OKMsg{ background: #C8FFBF; border: 1px solid #A2EF95; border-width: 1px 0; margin: 0 0 1.5em 0; padding: 7px; }
+  .uniForm #OKMsg p{ margin: 0; }
+
+/*
+IT IS STRONGLY ADVISED TO MAKE YOUR CHANGES AFTER THIS COMMENT BY REPEATING (COPYING) THE SELECTOR FROM ABOVE, 
+AND MODIFYING IT WITH YOUR OWN PROPERTIES/VALUES. THIS IS RECOMMENDED BECAUSE IF YOU HAPPEN TO RUN INTO TROUBLE, 
+YOU CAN VERY EASILY REVERT TO A GENERIC STYLE OF UNI-FORM. BEST OF LUCK... 
+*/
+
+/* ------------------------------------------------------------------------------ */
+
+.uniForm fieldset{ font-size: 93% }
+.uniForm fieldset legend,
+.uniForm div.focused .formHint { color: #695C54 }
+
+.uniForm .blockLabels .formHint,
+.uniForm .inlineLabels .formHint { color: #695C54 }
+
+.uniForm .ctrlHolder:after { content: "."; display: block; height: 0; clear: both; visibility: hidden;}
+.uniForm .ctrlHolder { display: inline-block; }
+/* Hides from IE-mac \*/
+* html .uniForm .ctrlHolder { height: 1%; }
+.uniForm .ctrlHolder { display: block; }
+/* End hide from IE-mac */
+.uniForm .ctrlHolder { border-bottom: none; }
+
+
+/* Use this custom class at confirmation pages; <div class="textPlain"/> instead of <input /> or <select /> or <textarea /> */
+.uniForm .inlineLabels .textPlain { float: left; /*font-size: 116%; font-weight: bold;*/ width: 60%; }
+
+.uniForm .gridForm .focused,
+.uniForm .focused{ background: #F5F4F2;/*#DDDAD3;*/ }
+
+.uniForm .textInput,
+.uniForm .selectInput,
+.uniForm select,
+.uniForm textarea { border: 1px solid #DDDAD3; background-color: #F5F5F5;padding:3px }
+.uniForm textarea,
+.uniForm .inlineLabels textarea,
+.uniForm .blockLabels textarea { height:16em; }
+.uniForm div.short-textarea textarea { height: 8em !important; }
+
+.uniForm .focused .textInput,
+.uniForm .focused .selectInput,
+.uniForm .focused select,
+.uniForm .focused textarea {border: 1px solid #695c54; background-color: #FFF;padding:3px }
+
+
+/* .inlineLabels */
+.uniForm .inlineLabels .ctrlHolder{position:relative;}
+.uniForm .inlineLabels label, .uniForm .inlineLabels .label { width: 30% }
+.uniForm .inlineLabels .formHint { margin-left: 32% }
+
+.uploadPic .inlineLabels .textInput, .uploadPic .inlineLabels .fileUpload{ width: 100%; }
+
+.uniForm label,
+.uniForm .label { text-align: right }
+
+.uniForm .multiField label,
+.uniForm .multiField .label { text-align: left }
+
+
+.uniForm .inlineLabels label em,
+.uniForm .inlineLabels .label em { display: inline; left: auto; position: static; right: auto; }
+.uniForm #errorMsg ol li { border-bottom: 1px dotted #AF4C4C; }
+.uniForm #errorMsg ol li a { color: #AF4C4C }
+.uniForm .errorField { background: transparent; color: #AF4C4C; margin: 0 0 6px; padding: 4px; }
+
+.status_announcement,
+.uniForm .status_announcement { 
+	background: #e4efd8; 
+	border: 1px solid #b9cba5; 
+	border-width: 1px 0; padding:10px; 
+}
+.status_warning,
+.uniForm .status_warning {
+	background: #fffabc; 
+	border: 1px solid #eae6ae; 
+	border-width: 1px 0; padding:10px; 
+}
+.status_error,
+.uniForm .status_error,
+.uniForm .error { 
+	background: #ffdfdf;
+	border: 1px solid #AF4C4C;
+	border-width: 1px 0;
+	padding:10px; 
+}
+
+
+
+.uniForm label.textAlignLeft { text-align: left }
+
+/* Overwriting certain items' styles */
+.uniForm .inlineLabels .ctrlHolder select#contact_prefix,
+.uniForm .inlineLabels .ctrlHolder input#contact_zip,
+.uniForm .inlineLabels .ctrlHolder input#billing_zip,
+.uniForm .inlineLabels .ctrlHolder input#payment_card_cvv { width: 6em }
+
+.uniForm .inlineLabels .ctrlHolder input#contact_city,
+.uniForm .inlineLabels .ctrlHolder input#contact_state,
+.uniForm .inlineLabels .ctrlHolder input#billing_city,
+.uniForm .inlineLabels .ctrlHolder input#billing_state,
+.uniForm .inlineLabels .ctrlHolder select#payment_card_type { width: 12em }
+
+.uniForm .inlineLabels .ctrlHolder .multiField .blockLabel input#contact_phone_area{ width: 4em; }
+
+
+
+
+
+
+
+
+/*DEFAULT ALIGNMENT BUTTONS - RIGHT JUSTIFIED */
+.buttonHolder { margin: 1em 0; text-align: right; /*width: 85%;*/ display: table-cell; vertical-align: middle; float: right; }
+.buttonHolder button { width: 77px; height: 24px; border: 0 none; cursor: pointer; background-color: transparent; background-image: none; background-position: top left; background-repeat: no-repeat; position: relative; margin-left: 1em; }
+.buttonHolder button span { position: absolute; left: -999999px; }
+
+.buttonHolder a { margin-left: 20px; margin-right: 20px; }
+.buttonHolder input { vertical-align: middle; }
+
+/*SPECIAL ALIGNMENT BUTTON*/
+.uniForm .centerAlignmentButton.buttonHolder {
+	float:left; 
+	padding:3px 0 15px 410px;
+}
+
+
+.buttonHolder button.resetButton { float: none }
+.buttonHolder button.btnCancel  { background-image: url(../images/btn_Cancel.png) }
+.buttonHolder button.btnNext    { background-image: url(../images/btn_Next.png) }
+.buttonHolder button.btnSubmit  { background-image: url(../images/btn_Submit.png) }
+.buttonHolder button.btn_update_terms  { background-image: url(../images/btn_update_terms.png); width: 126px;}
+.buttonHolder button.btnFinish  { background-image: url(../images/btn_Finish.png) }
+.buttonHolder button.btnApprove { background-image: url(../images/btn_Approve.png); width: 93px }
+.buttonHolder button.btnConfirm { background-image: url(../images/btn_Confirm.png); width: 93px }
+
+.buttonHolder button.btn_Buyservice { background-image: url(../images/btn_Buyservice.png); width: 111px }
+.buttonHolder button.btnConfirm { background-image: url(../images/btn_Confirm.png); width: 111px }
+.buttonHolder button.btn_ConfirmTerms { background-image: url(../images/btn_ConfirmTerms.png); width: 160px }
+.buttonHolder button.btn_Importcontacts { background-image: url(../images/btn_Importcontacts.png); width: 160px }
+
+.buttonHolder button.btn_Resendemail { background-image: url(../images/btn_Resendemail.png); width: 160px }
+.buttonHolder button.btn_Resendtext { background-image: url(../images/btn_Resendtext.png); width: 160px }
+.buttonHolder button.btn_Sendemail { background-image: url(../images/btn_Sendemail.png); width: 111px }
+.buttonHolder button.btn_Sendemails { background-image: url(../images/btSendemails.png); width: 111px }
+.buttonHolder button.btn_Sendtext { background-image: url(../images/btn_Sendtext.png); width: 111px }
+.buttonHolder button.btn_Verify { background-image: url(../images/btn_Verify.png); width: 111px }
+.buttonHolder button.btn_Login { background-image: url(/theme/roundedcorners/images/btn_login.png); width: 72px; height:28px; }
+
+
+.buttonHolder button.btn_booknow { background-image: url(/theme/roundedcorners/images/btn_booknow_2.png); width: 87px; height:28px; }
+.buttonHolder button.btn_buynow { background-image: url(/theme/roundedcorners/images/btn_buynow.png); width: 106px; height:27px; }
+.buttonHolder button.btn_canceljob { background-image: url(/theme/roundedcorners/images/btn_canceljob.png); width:115px; height:27px; }
+.buttonHolder button.btn_changepassword { background-image: url(/theme/roundedcorners/images/btn_changepassword.png); width:126px; height:22px; }
+.buttonHolder button.btn_changepicture { background-image: url(/theme/roundedcorners/images/btn_changepicture.png); width:112px; height:22px; }
+.buttonHolder button.btn_checkout{ background-image: url(/theme/roundedcorners/images/btn_checkout.png); width:103px; height:27px; }
+.buttonHolder button.btn_confirmjob { background-image: url(/theme/roundedcorners/images/btn_confirmjob.png); width: 123px; height:27px; }
+.buttonHolder button.btn_declinejob { background-image: url(/theme/roundedcorners/images/btn_declinejob.png); width:120px; height:27px; }
+.buttonHolder button.btn_deletevideo { background-image: url(/theme/roundedcorners/images/btn_deletevideo.png); width:85px; height:23px; }
+.buttonHolder button.btn_editinfo { background-image: url(/theme/roundedcorners/images/btn_editinfo.png); width:74px; height:22px; }
+.buttonHolder button.btn_finish { background-image: url(/theme/roundedcorners/images/btn_finish_2.png); width:93px; height:27px; }
+.buttonHolder button.btn_fixlater { background-image: url(/theme/roundedcorners/images/btn_fixlater_2.png); width:100px; height:27px; }
+.buttonHolder button.btn_importcontacts { background-image: url(/theme/roundedcorners/images/btn_importcontacts_2.png); width:101px; height:22px; }
+.buttonHolder button.btn_learnmore { background-image: url(/theme/roundedcorners/images/btn_learnmore.png); width:112px; height:28px; }
+.buttonHolder button.btn_login { background-image: url(/theme/roundedcorners/images/btn_login_2.png); width: 93px; height:27px; }
+.buttonHolder button.btn_next { background-image: url(/theme/roundedcorners/images/btn_next.png); width: 93px; height:27px; }
+.buttonHolder button.btn_proceedtocheckout { background-image: url(/theme/roundedcorners/images/btn_proceedtocheckout.png); width:176px; height:28px; }
+.buttonHolder button.btn_proceedtonextstep { background-image: url(/theme/roundedcorners/images/btn_proceedtonextstep.png); width:176px; height:28px; }
+.buttonHolder button.btn_purchasenow { background-image: url(/theme/roundedcorners/images/btn_purchasenow.png); width:132px; height:28px; }
+.buttonHolder button.btn_reply { background-image: url(/theme/roundedcorners/images/btn_reply_2.png); width: 93px; height:27px; }
+.buttonHolder button.btn_requestanestimate { background-image: url(/theme/roundedcorners/images/btn_requestanestimate_2.png); width:180px; height:28px; }
+.buttonHolder button.btn_Resend_gray { background-image: url(/theme/roundedcorners/images/btn_resend_2.png); width:85px; height:23px; }
+.buttonHolder button.btn_save { background-image: url(/theme/roundedcorners/images/btn_save.png); width:93px; height:27px; }
+.buttonHolder button.btn_sendamessage { background-image: url(/theme/roundedcorners/images/btn_sendamessage.png); width:150px; height:28px; }
+.buttonHolder button.btn_sendemail { background-image: url(/theme/roundedcorners/images/btn_sendemail.png); width:113px; height:28px; }
+.buttonHolder button.btn_sendemails { background-image: url(/theme/roundedcorners/images/btn_sendemails.png); width:118px; height:28px; }
+.buttonHolder button.btn_submit { background-image: url(/theme/roundedcorners/images/btn_submit_2.png); width:93px; height:27px; }
+.buttonHolder button.btn_submitanestimate { background-image: url(/theme/roundedcorners/images/btn_submitanestimate.png); width:180px; height:28px; }
+.buttonHolder button.btn_updateterms { background-image: url(/theme/roundedcorners/images/btn_updateterms.png); width:133px; height:28px; }
+.buttonHolder button.btn_updatetotal { background-image: url(/theme/roundedcorners/images/btn_updatetotal.png); width:84px; height:22px; }
+.buttonHolder button.btn_verify { background-image: url(/theme/roundedcorners/images/btn_verify.png); width:93px; height:27px; }
+
+
+
+.uniForm .inlineLabels .multiField .customBlock { float: left; width: 42%; margin: 0 3% 0 0; }
+.uniForm .inlineLabels .multiField .customBlock .blockLabel { width:75% }
+.uniForm .inlineLabels .multiField .customBlock .blockLabel .textInput,
+.uniForm .inlineLabels .multiField .customBlock .blockLabel .selectInput,
+.uniForm .inlineLabels .multiField .customBlock .blockLabel select{ width: 87%; margin: .3em 0 0 0; }
+.uniForm .inlineLabels .multiField .customBlock a.iconLink { float: left; margin-top: 1.5em; }
+.uniForm .inlineLabels .multiField .customBlock .formHint { margin-left: 0; width: 100%; }
+
+
+.uniForm .lighterLabels label, .uniForm .lighterLabels .label { color: #a89d97 }
+
+#ui-datepicker-div {z-index: 1050;}
+
+/* Page specific style altering */
+#footer-form-container { padding-top:10px; }
+#footer-form-container h4 { margin:0.5em 13px }
+#footer-form-container .uniForm fieldset { font-size: 85% }
+#footer-form-container .uniForm .ctrlHolder { padding:17px 13px;border-bottom: 0 none; }
+#footer-form-container .uniForm .focused { /*background:#DDDAD3*/ }
+#footer-form-container .uniForm .blockLabels .multiField { width: 100% }
+#footer-form-container .uniForm .blockLabels textarea { height:2.5em }
+#footer-form-container .uniForm .blockLabels .multiField .blockLabel { width:20%;margin-right:5% }
+#footer-form-container .uniForm .blockLabels .multiField .blockLabel .btnSubmit { margin-top:1.5em }
+#footer-form-container .uniForm .blockLabels .multiField .blockLabel span.editable { display: block; font-size:larger;margin-top:10px }
+#footer-form-container label#label_detail   { margin-right: 15px; padding-right: 10px; width: 200px; }
+#footer-form-container label#label_detail textarea { width: 90% }
+#footer-form-container label#label_location { margin-right: 15px; padding-right: 10px; width: 150px; }
+#footer-form-container label#label_price    { margin-right: 15px; padding-right: 10px; width: 100px; }
+#footer-form-container label#label_submit   { margin-right: 15px; text-align: right; width: 173px; }
+
+
+#availabilitySchedule {}
+#availabilitySchedule .ctrlHolder {margin-bottom:2em}
+#availabilitySchedule .multiField {width:668px}
+#availabilitySchedule .multiField .inlineText {width:auto;float:left;margin-top:0.5em;padding-right:1em;}
+#availabilitySchedule .multiField .text-iamavailable{display:block;width:75px}
+#availabilitySchedule .multiField .text-to {width: 12px}
+#availabilitySchedule .multiField .text-allday {width:75px}
+#availabilitySchedule .multiField .inlineText .blockLabel {width:6em}
+#availabilitySchedule .multiField .customBlock {display:block;margin-right:10px !important;width:100px;}
+#availabilitySchedule .multiField .customBlock .blockLabel {width:80px;margin-right:2px}
+#availabilitySchedule .multiField .customBlock .blockLabel input {float:left;width:70px;}
+#availabilitySchedule .multiField .customBlock .iconLink {margin-top:0.5em}
+#availabilitySchedule .multiField .customBlock .formHint {}
+
+
+
+
+
+/*******************************************************/
+/* CALL OUT											   */
+/*******************************************************/
+
+.focused .form_callout {
+  position:absolute;
+  top:-5px;
+  right:-45px;
+  width:189px;
+  margin:0;
+  padding:0;
+  z-index:10;
+}
+.focused .form_callout_top {
+  float:left;
+  width:189px;
+  height: 12px;
+  background:url(/theme/images/bg_callout_top.png) bottom left no-repeat;
+}
+.focused .form_callout_content {
+  float:left;
+  width:189px;
+  background:url(/theme/images/bg_callout_pointer.png) left top no-repeat;
+}
+.focused .form_callout_content p {
+	display:block;
+}
+.form_callout_content p {
+	margin:0px;
+	padding: 5px 10px 5px 45px;
+	display:none;
+}
+.focused .form_callout_bottom {
+  float:left;
+  width:189px;
+  height: 12px;
+  background:url(/theme/images/bg_callout_bottom.png) bottom left no-repeat;
+}
+
+
+/*******************************************************/
+/* Styles for pricing pathway 						   */
+/*******************************************************/
+.uniForm .inlineLabels .disabled {
+  color: #dddad3;
+}
+.uniForm .inlineLabels .pricewrapper {
+  position:relative;
+}
+.uniForm .inlineLabels .short-textfield {
+  position: static;
+  float:left;
+  width:320px;
+}
+.uniForm .inlineLabels .short-textfield label {
+  width:207px;
+}
+.uniForm .inlineLabels .short-textfield input{
+  width:85px;
+}
+.uniForm .inlineLabels #sav_price_container {
+  position:absolute;
+  top:1px;
+  left:310px;
+  *left:320px; /* to fix spacing in IE */
+  width:105px;
+  padding:0;
+  border:none;
+}
+.uniForm .inlineLabels #sav_price_container input {
+  width: 80px;
+}
+.uniForm .inlineLabels #sav_price_container label {
+  padding-top:2px;
+  width:14px;
+}
+
+
+/*******************************************************/
+/* Styles for job status page 						   */
+/*******************************************************/
+.job-status-message-nextstep .uniForm label, 
+.job-status-message-nextstep .uniForm .label {
+	text-align:left;
+}
+.job-status-message-nextstep .uniForm .inlineLabels label, 
+.job-status-message-nextstep .uniForm .inlineLabels .label {
+	width: 15%;
+}
+.job-status-message-nextstep .uniForm .ctrlHolder {
+	padding:0;
+	padding-top:10px;
+	border-bottom-color: #fff;
+}
+.job-status-message-nextstep .uniForm .inlineLabels label, 
+.job-status-message-nextstep .uniForm .inlineLabels .label {
+	margin-top:0;
+}
+.job-status-message-nextstep .uniForm .inlineLabels .multiField {
+	width:400px;
+}
+.job-status-message-nextstep .uniForm .inlineLabels .multiField .inlineLabel {
+	display:block;
+	width:100%;
+}
+.job-status-message-nextstep .uniForm .inlineLabels .multiField .inlineLabel input {
+	*margin-top:-5px;
+}
+
+
+/* ------------------------------------------------------------------------------ */
+/* form styles based on 960's 12 Column Grid
+/* ------------------------------------------------------------------------------ */
+    .uniForm .gridForm { width:540px; }
+    .uniForm .gridForm .ctrlHolder{ clear:none; float:left; }
+      
+      .uniForm .gridForm label,
+      .uniForm .gridForm .label{ margin: 0 0 .5em 0; text-align:left; }
+    
+      .uniForm .gridForm .textInput,
+      .uniForm .gridForm .selectInput,
+      .uniForm .gridForm select{ width: 90%; /* <- Required property */ }
+      .uniForm .gridForm textarea{ width: 90%; /* <- Required property */ height: 12em; }
+
+
+      .uniForm .gridForm .grid540px { width:540px; }
+	  .uniForm .gridForm .grid460px { width:460px; }
+	  .uniForm .gridForm .grid380px { width:380px; }
+	  .uniForm .gridForm .grid300px { width:300px; }
+	  .uniForm .gridForm .grid220px { width:220px; }
+	  .uniForm .gridForm .grid140px { width:140px; }
+	  .uniForm .gridForm .grid60px { width:60px; }
+
