@@ -23,30 +23,59 @@ if($params[0] == 'robots.txt'){
 	}
 }
 
-//CHECK IF ACTUAL FILE EXISTS
+//HOMEPAGE
 
-if($params[0]){
-	if($params[0] == 'profile'){
-		if($params[1]){
-			$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/profile/'.$params[1].'.php';
-		}
-		else{
-			$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/profile/profile.php';
-		}
+if(!$params[0]){
+	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/index.php';
+	if(file_exists($template_file)){
+		require_once($template_file);
+		exit();
+	}
+}
+
+//ADMIN SECTION
+if($params[0] == 'admin'){
+	if(!$params[1]){
+		header("HTTP/1.0 404 Not Found");
+		include_once("404.php");
+		exit();
+	}
+	$theme_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/adm/'.$params[1].'.php';
+	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/adm/'.$params[1].'.php';
+
+	if(file_exists($theme_file)){
+		require_once($theme_file);
+		exit();
+	}
+	else if(file_exists($base_file)){
+		require_once($base_file); 
+		exit();		
+	}
+}
+
+//PROFILE SECTION
+if($params[0] == 'profile'){
+	if($params[1]){
+		$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/profile/'.$params[1].'.php';
 	}
 	else{
-		$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/'.$params[0].'.php';
+		$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/profile/profile.php';
+	}
+	if(file_exists($template_file)){
+		require_once($template_file);
+		exit();
+	}	
+}
+
+
+//ROOT PAGES
+if($params[0]){
+	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/'.$params[0].'.php';
+	if(file_exists($template_file)){
+		require_once($template_file);
+		exit();
 	}
 }
-else{
-	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/'.'index.php';
-}
-
-if(file_exists($template_file)){
-	require_once($template_file);
-	exit();
-}
-
 
 
 //CHECK BLOG URLS THAT ARE NOT UNDER /POST/
@@ -95,11 +124,11 @@ if($urls->count()){
 		exit();	
 	}
 }
-else{	
-	header("HTTP/1.0 404 Not Found");
-	include_once("404.php");
-	exit();
-}
+	
+header("HTTP/1.0 404 Not Found");
+include_once("404.php");
+exit();
+
  
 
   

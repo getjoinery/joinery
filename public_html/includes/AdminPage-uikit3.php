@@ -56,9 +56,12 @@ class AdminPage{
 
 		$session = $pagevars['session'];		
 		
-		if($session){
+		if($session->get_user_id()){
 			$user = new User($session->get_user_id(), TRUE);
 			$user_name = $user->display_name();
+		}
+		else{
+			$user = new User(NULL);
 		}
 		
 		$settings = Globalvars::get_instance();
@@ -92,16 +95,16 @@ class AdminPage{
 			<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"	/>
 
 			<!-- CSS FILES -->
-			<link rel="stylesheet" type="text/css" href="/admin/includes/uikit-3.6.14/css/uikit.min.css">
-			<link rel="stylesheet" type="text/css" href="/admin/includes/uikit-3.6.14/css/main_admin.css">
+			<link rel="stylesheet" type="text/css" href="/adm/includes/uikit-3.6.14/css/uikit.min.css">
+			<link rel="stylesheet" type="text/css" href="/adm/includes/uikit-3.6.14/css/main_admin.css">
 		
 			<!-- jQuery 3 -->
-			<!-- jQuery 3.2.1 <script src="/admin/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
+			<!-- jQuery 3.2.1 <script src="/adm/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
 			<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 			<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 			
 			<!-- jQuery validate -->
-			<script type="text/javascript" src="/admin/includes/scripts/jquery.validate-1.9.1.js"></script>
+			<script type="text/javascript" src="/adm/includes/scripts/jquery.validate-1.9.1.js"></script>
 
 
 			<!--jQuery UI, needed for blueimp uploader -->
@@ -126,16 +129,16 @@ class AdminPage{
 		else{
 			?>
 			<!-- CSS FILES -->
-			<link rel="stylesheet" type="text/css" href="/admin/includes/uikit-3.6.14/css/uikit.min.css">
-			<link rel="stylesheet" type="text/css" href="/admin/includes/uikit-3.6.14/css/main_admin.css">
+			<link rel="stylesheet" type="text/css" href="/adm/includes/uikit-3.6.14/css/uikit.min.css">
+			<link rel="stylesheet" type="text/css" href="/adm/includes/uikit-3.6.14/css/main_admin.css">
 		
 			<!-- jQuery 3 -->
-			<!-- jQuery 3.2.1 <script src="/admin/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
+			<!-- jQuery 3.2.1 <script src="/adm/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
 			<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 			<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 			
 			<!-- jQuery validate -->
-			<script type="text/javascript" src="/admin/includes/scripts/jquery.validate-1.9.1.js"></script>			
+			<script type="text/javascript" src="/adm/includes/scripts/jquery.validate-1.9.1.js"></script>			
 			
 			<?php
 		}
@@ -471,9 +474,12 @@ $("#admin_panel").toggle();
 		$CDN = $settings->get_setting('CDN');
 		
 		$session = SessionControl::get_instance();
-		if($session){
+		if($session->get_user_id()){
 			$user = new User($session->get_user_id(), TRUE);
 			$user_name = $user->display_name();
+		}
+		else{
+			$user = new User(NULL);
 		}
 
 
@@ -573,8 +579,8 @@ $("#admin_panel").toggle();
 		<!-- /OFFCANVAS -->
 		
 		<!-- JS FILES -->
-		<script src="/admin/includes/uikit-3.6.14/js/uikit.min.js"></script>
-		<script src="/admin/includes/uikit-3.6.14/js/uikit-icons.min.js"></script>
+		<script src="/adm/includes/uikit-3.6.14/js/uikit.min.js"></script>
+		<script src="/adm/includes/uikit-3.6.14/js/uikit-icons.min.js"></script>
 
 	</body>
 </html>

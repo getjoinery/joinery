@@ -1,5 +1,4 @@
 <?php
-
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
@@ -13,13 +12,13 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();	
-	
+
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'event_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 
-	
+
 	
 	$searches = array();
 	
