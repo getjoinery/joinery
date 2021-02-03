@@ -48,7 +48,7 @@
 		 tabindex="-1" data-uk-slider="autoplay: true">
 			<ul class="uk-slider-items uk-child-width-1-1">
 				<li>
-					<img src="/img/DSC07869-5800x3301.jpg" alt="Slide">
+					<img src="/theme/zoukroom/img/DSC07869-5800x3301.jpg" alt="Slide">
 					<div class="uk-position-cover uk-overlay-light uk-flex uk-flex-middle uk-padding-slide">
 						<div class="uk-width-3-4@m">
 							<h2 class="uk-heading-medium uk-letter-spacing-medium">Online Zouk Lessons</h2>
@@ -59,7 +59,7 @@
 					</div>
 				</li>
 				<li>
-					<img src="/img/DSC04428-5800x3300.jpg" alt="Slide">
+					<img src="/theme/zoukroom/img/DSC04428-5800x3300.jpg" alt="Slide">
 					<div class="uk-position-cover uk-overlay-xlight uk-flex uk-flex-middle uk-padding-slide">
 						<div class="uk-width-1-2@m">
 							<h1 class="uk-heading-medium uk-letter-spacing-medium">From Your Living Room</h1>
@@ -70,7 +70,7 @@
 					</div>
 				</li>
 				<li>
-					<img src="/img/DSC08382-5800x3300.jpg" alt="Slide">
+					<img src="/theme/zoukroom/img/DSC08382-5800x3300.jpg" alt="Slide">
 					<div class="uk-position-cover uk-overlay-xlight uk-flex uk-flex-middle uk-padding-slide">
 						<div class="uk-width-1-2@m">
 							<h1 class="uk-heading-medium uk-letter-spacing-medium">Support Our Artists</h1>

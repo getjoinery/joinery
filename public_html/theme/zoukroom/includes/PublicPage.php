@@ -126,8 +126,8 @@ class PublicPage {
   <base href="/">
   <link rel="shortcut icon" type="image/png" href="img/favicon.png" >
   <link href="https://fonts.googleapis.com/css?family=Nunito+Sans:400,600,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/main.css" />
-  <script src="/js/uikit.js"></script>
+  <link rel="stylesheet" href="/theme/zoukroom/css/main.css" />
+  <script src="/theme/zoukroom/js/uikit.js"></script>
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
   
  		<!--
