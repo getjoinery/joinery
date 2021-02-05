@@ -55,6 +55,7 @@ class LibraryFunctions {
 		
 		$theme_file = $siteDir.'/theme/'.$site_template.'/logic/'.$filename;
 		$main_file = $siteDir.'/logic/'.$filename;
+
 		if(file_exists($theme_file)){
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
