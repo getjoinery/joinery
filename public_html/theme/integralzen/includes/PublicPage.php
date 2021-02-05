@@ -233,7 +233,7 @@ class PublicPage {
 	<?php	
 	if(empty($options['noheader'])){
 		if($_SESSION['permission'] == 10){
-			include("admin_debug.php");
+			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/admin_debug.php');
 		}
 		?>		
 			
@@ -368,7 +368,7 @@ class PublicPage {
 			<!--Make sure https-->
 			<script type="text/javascript">
 			if (location.protocol !== 'https:') {
-				location.replace(`https:${location.href.substring(location.protocol.length)}`);
+				//location.replace(`https:${location.href.substring(location.protocol.length)}`);
 			}
 			</script>
 			

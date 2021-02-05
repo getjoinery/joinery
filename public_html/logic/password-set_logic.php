@@ -49,6 +49,6 @@ if ($_POST) {
 	$user->set('usr_password', User::GeneratePassword($_POST['usr_password']));
 	$user->save();
 
-	$message = '<p>Your password has been set. <a href="/login">Click here to log in</a>.</p>;
+	$message = '<p>Your password has been set. <a href="/login">Click here to log in</a>.</p>';
 } 
 ?>

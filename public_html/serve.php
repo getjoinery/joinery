@@ -37,7 +37,7 @@ if(!$params[0]){
 if($params[0] == 'admin'){
 	if(!$params[1]){
 		header("HTTP/1.0 404 Not Found");
-		include_once("404.php");
+		include_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php');
 		exit();
 	}
 	$theme_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/adm/'.$params[1].'.php';
@@ -118,7 +118,7 @@ if($urls->count()){
 	}
 	else{
 		header("HTTP/1.0 404 Not Found");
-		include_once("404.php");			
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php');			
 		//THIS IS TURNED OFF
 		//include($url->get('url_redirect_file'));
 		exit();	
@@ -126,7 +126,7 @@ if($urls->count()){
 }
 	
 header("HTTP/1.0 404 Not Found");
-include_once("404.php");
+require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php');
 exit();
 
  
