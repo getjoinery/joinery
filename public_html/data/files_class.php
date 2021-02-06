@@ -172,7 +172,7 @@ class File extends SystemBase {
 			try
 			{
 				$img = new Imagick($old_path);
-				$new_path = '/var/www/html/uploads/thumbnail/'.$this->get('fil_name');
+				$new_path = $upload_dir.'/thumbnail/'.$this->get('fil_name');
 				$img->thumbnailImage(80 , 80 , TRUE);
 				$img->writeImage($new_path);
 				
