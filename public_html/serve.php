@@ -23,8 +23,29 @@ if($params[0] == 'robots.txt'){
 	}
 }
 
-//HOMEPAGE
+//FILES
+if($params[0] == 'uploads'){
+	$upload_dir = $settings->get_setting('upload_dir');
+	if($params[2]){
+		//RESIZED FILE
+		$file = $upload_dir.'/'.$params[1].'/'.$params[2];
+	}
+	else{
+		$file = $upload_dir.'/'.$params[1];
+	}
+	//ORIGINAL FILE
+	if(file_exists($file)){
+		require_once($file);
+		exit();
+	}
+	else{
+		header("HTTP/1.0 404 Not Found");
+		include_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php');
+		exit();			
+	}	
+}
 
+//HOMEPAGE
 if(!$params[0]){
 	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/index.php';
 	if(file_exists($template_file)){
