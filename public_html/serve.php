@@ -8,10 +8,17 @@ $static_routes_path = ltrim($static_routes_path, '/');
 
 $settings = Globalvars::get_instance();
 $site_template = $settings->get_setting('site_template');
+$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template;
+
+//ALLOW CURRENT SITE TO OVERRIDE OR ADD ROUTES
+$template_file = $template_directory.'/serve.php';
+if(file_exists($template_file)){
+	require_once($template_file);
+}
 
 //ROBOTS.TXT
 if($params[0] == 'robots.txt'){
-	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/robots.php';
+	$template_file = $template_directory.'/robots.php';
 	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/robots.php';
 	if(file_exists($template_file)){
 		require_once($template_file);
@@ -42,14 +49,14 @@ if($params[0] == 'uploads'){
 	}
 	else{
 		header("HTTP/1.0 404 Not Found");
-		include_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php');
+		include_once($template_directory.'/404.php');
 		exit();			
 	}	
 }
 
 //HOMEPAGE
 if(!$params[0]){
-	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/index.php';
+	$template_file = $template_directory.'/index.php';
 	if(file_exists($template_file)){
 		require_once($template_file);
 		exit();
@@ -60,10 +67,10 @@ if(!$params[0]){
 if($params[0] == 'admin'){
 	if(!$params[1]){
 		header("HTTP/1.0 404 Not Found");
-		include_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php');
+		include_once($template_directory.'/404.php');
 		exit();
 	}
-	$theme_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/adm/'.$params[1].'.php';
+	$theme_file = $template_directory.'/adm/'.$params[1].'.php';
 	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/adm/'.$params[1].'.php';
 
 	if(file_exists($theme_file)){
@@ -79,10 +86,10 @@ if($params[0] == 'admin'){
 //PROFILE SECTION
 if($params[0] == 'profile'){
 	if($params[1]){
-		$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/profile/'.$params[1].'.php';
+		$template_file = $template_directory.'/profile/'.$params[1].'.php';
 	}
 	else{
-		$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/profile/profile.php';
+		$template_file = $template_directory.'/profile/profile.php';
 	}
 	if(file_exists($template_file)){
 		require_once($template_file);
@@ -93,28 +100,41 @@ if($params[0] == 'profile'){
 
 //ROOT PAGES
 if($params[0]){
-	$template_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/'.$params[0].'.php';
+	$template_file = $template_directory.'/'.$params[0].'.php';
 	if(file_exists($template_file)){
 		require_once($template_file);
 		exit();
 	}
 }
 
+//BLOG.  DEFAULT IS TO USE THE /POST/ SUBDIRECTORY
+$blog_active = $settings->get_setting('blog_active');
+if($blog_active){
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/posts_class.php');
+	$blog_subdirectory = $settings->get_setting('blog_subdirectory');
+	if($params[0] == $blog_subdirectory){
+		$post = Post::get_by_link($params[1]);
+		if($post){
+			require_once($template_directory.'/'.'post.php');
+			exit();
+		}			
+	}
+	else{
+		//CHECK BLOG URLS THAT ARE NOT UNDER /POST/
+		$post = Post::get_by_link('/'.$_REQUEST['path']);
+		if($post){
+			require_once($template_directory.'/post.php');
+			exit();
+		}
 
-//CHECK BLOG URLS THAT ARE NOT UNDER /POST/
-require_once($_SERVER['DOCUMENT_ROOT'].'/data/posts_class.php');
-$post = Post::get_by_link('/'.$_REQUEST['path']);
-if($post){
-	include($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/'.'post.php');
-	exit();
+		//CHECK WITHOUT THE SLASH
+		$post = Post::get_by_link($_REQUEST['path']);
+		if($post){
+			require_once($template_directory.'/post.php');
+			exit();
+		}			
+	}
 }
-
-//CHECK WITHOUT THE SLASH
-$post = Post::get_by_link($_REQUEST['path']);
-if($post){
-	include($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/'.'post.php');
-	exit();
-}	
 
 //CHECK REDIRECTS
 require_once($_SERVER['DOCUMENT_ROOT'].'/data/urls_class.php');
@@ -141,7 +161,7 @@ if($urls->count()){
 	}
 	else{
 		header("HTTP/1.0 404 Not Found");
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php');			
+		require_once($template_directory.'/404.php');			
 		//THIS IS TURNED OFF
 		//include($url->get('url_redirect_file'));
 		exit();	
@@ -149,7 +169,7 @@ if($urls->count()){
 }
 	
 header("HTTP/1.0 404 Not Found");
-require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php');
+require_once($template_directory.'/404.php');
 exit();
 
  
