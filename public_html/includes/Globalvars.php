@@ -5,7 +5,7 @@ class Globalvars {
 	private $settings;
 
 	private function __construct() {
-		require_once('../../config/Globalvars_site.php');
+		require_once(dirname(__DIR__, 2).'/config/Globalvars_site.php');
 	}
 
 	public static function get_instance(){
