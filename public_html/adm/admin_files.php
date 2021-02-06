@@ -63,13 +63,13 @@
 			array_push($rowvalues, '<img loading="lazy" src="/uploads/thumbnail/'.$file->get('fil_name').'">');
 		}
 		else if (strpos($file->get('fil_type'), 'application/pdf') !== false) { 
-			array_push($rowvalues, '<img loading="lazy" src="/admin/includes/images/pdf_icon_80px.png">');
+			array_push($rowvalues, '<img loading="lazy" src="/adm/includes/images/pdf_icon_80px.png">');
 		}
 		else if (strpos($file->get('fil_type'), 'application/msword') !== false || strpos($file->get('fil_type'), 'wordprocessingml.document') !== false || strpos($file->get('fil_name'), '.docx') !== false) { 
-			array_push($rowvalues, '<img loading="lazy" src="/admin/includes/images/microsoft_word_icon_80px.png">');
+			array_push($rowvalues, '<img loading="lazy" src="/adm/includes/images/microsoft_word_icon_80px.png">');
 		}
 		else if (strpos($file->get('fil_name'), '.xlsx') !== false) { 
-			array_push($rowvalues, '<img loading="lazy" src="/admin/includes/images/excel_icon_80px.png">');
+			array_push($rowvalues, '<img loading="lazy" src="/adm/includes/images/excel_icon_80px.png">');
 		}			
 		else{
 			array_push($rowvalues, '');

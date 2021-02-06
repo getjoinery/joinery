@@ -447,10 +447,10 @@ class FormWriterMaster {
 		if($htmlmode == 'yes'){
 			$output .= '
 			
-			<script src="/admin/includes/Trumbowyg-master/dist/trumbowyg.min.js"></script>
-			<link rel="stylesheet" href="/admin/includes/Trumbowyg-master/dist/ui/trumbowyg.min.css">
-			<script src="/admin/includes/Trumbowyg-master/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
-			<script src="/admin/includes/Trumbowyg-master/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
+			<script src="/adm/includes/Trumbowyg-master/dist/trumbowyg.min.js"></script>
+			<link rel="stylesheet" href="/adm/includes/Trumbowyg-master/dist/ui/trumbowyg.min.css">
+			<script src="/adm/includes/Trumbowyg-master/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
+			<script src="/adm/includes/Trumbowyg-master/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
 			<script type="text/javascript">';
 			$output .= "
 				$(document).ready(function() {
@@ -604,8 +604,8 @@ class FormWriterMaster {
 	function timeinput($label, $id, $class, $value, $hint) {
 
 		return '
-		<link rel="stylesheet" href="/admin/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.css"/>
-		<script type="text/javascript" src="/admin/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.js"></script>
+		<link rel="stylesheet" href="/adm/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.css"/>
+		<script type="text/javascript" src="/adm/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.js"></script>
 		<script type="text/javascript">
 		$(document).ready(function(){
 			$("input.timepicker").timepicker({
@@ -788,10 +788,10 @@ class FormWriterMaster {
 
 			if($showdefault){
 				if(is_null($input)){
-					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/admin/includes/images/image_placeholder_thumbnail.png"></span> No Image</label>';
+					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/adm/includes/images/image_placeholder_thumbnail.png"></span> No Image</label>';
 				}
 				else{
-					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/admin/includes/images/image_placeholder_thumbnail.png"></span> No Image</label>';
+					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/adm/includes/images/image_placeholder_thumbnail.png"></span> No Image</label>';
 				}
 			}
 
