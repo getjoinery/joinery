@@ -35,6 +35,8 @@ if($params[0] == 'uploads'){
 	}
 	//ORIGINAL FILE
 	if(file_exists($file)){
+		$the_content_type = 'Content-type: '.mime_content_type($file);
+		header($the_content_type);
 		require_once($file);
 		exit();
 	}
