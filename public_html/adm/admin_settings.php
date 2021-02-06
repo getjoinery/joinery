@@ -73,30 +73,28 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Newsletter active", "newsletter_active", "ctrlHolder", $optionvals, $settings->get_setting('newsletter_active'), '', FALSE);	
 	
-	echo '<h3>Blog Settings</h3>';
-	$optionvals = array("Yes"=>'1', 'No' => '0');
-	echo $formwriter->dropinput("Activate blog", "blog_active", "ctrlHolder", $optionvals, $settings->get_setting('blog_active'), '', FALSE);	
+	$blog_active = $settings->get_setting('blog_active');
+	if($blog_active){
+		echo '<h3>Blog Settings</h3>';
 
-	$optionvals = array("Yes"=>'1', 'No' => '0');
-	echo $formwriter->dropinput("Show comments", "show_comments", "ctrlHolder", $optionvals, $settings->get_setting('show_comments'), '', FALSE);	
+		$optionvals = array("Yes"=>'1', 'No' => '0');
+		echo $formwriter->dropinput("Show comments", "show_comments", "ctrlHolder", $optionvals, $settings->get_setting('show_comments'), '', FALSE);	
 
-	$optionvals = array("Yes"=>'1', 'No' => '0');
-	echo $formwriter->dropinput("Allow comments", "comments_active", "ctrlHolder", $optionvals, $settings->get_setting('comments_active'), '', FALSE);	
+		$optionvals = array("Yes"=>'1', 'No' => '0');
+		echo $formwriter->dropinput("Allow comments", "comments_active", "ctrlHolder", $optionvals, $settings->get_setting('comments_active'), '', FALSE);	
 
-	$optionvals = array("Yes"=>'1', 'No' => '0');
-	echo $formwriter->dropinput("Allow comments from unregistered users", "comments_unregistered_users", "ctrlHolder", $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
+		$optionvals = array("Yes"=>'1', 'No' => '0');
+		echo $formwriter->dropinput("Allow comments from unregistered users", "comments_unregistered_users", "ctrlHolder", $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
 
-	$optionvals = array("Approved"=>'approved', 'Unapproved' => 'unapproved');
-	echo $formwriter->dropinput("Default comment status", "default_comment_status", "ctrlHolder", $optionvals, $settings->get_setting('default_comment_status'), '', FALSE);	
+		$optionvals = array("Approved"=>'approved', 'Unapproved' => 'unapproved');
+		echo $formwriter->dropinput("Default comment status", "default_comment_status", "ctrlHolder", $optionvals, $settings->get_setting('default_comment_status'), '', FALSE);	
 
-	echo $formwriter->textinput("Comment anti spam word (blank for none)", "anti_spam_answer_comments", "ctrlHolder", 20, $settings->get_setting('anti_spam_answer'), "" , 255, "");
+		echo $formwriter->textinput("Comment anti spam word (blank for none)", "anti_spam_answer_comments", "ctrlHolder", 20, $settings->get_setting('anti_spam_answer'), "" , 255, "");
 
-	$optionvals = array("Yes"=>'1', 'No' => '0');
-	echo $formwriter->dropinput("Use captcha on comments", "use_captcha_comments", "ctrlHolder", $optionvals, $settings->get_setting('use_captcha_comments'), '', FALSE);	
-
-	$optionvals = array("Yes"=>'1', 'No' => '0');
-	echo $formwriter->dropinput("Should blog posts be in the /posts/ subdirectory", "blog_subdirectory", "ctrlHolder", $optionvals, $settings->get_setting('blog_subdirectory'), '', FALSE);	
+		$optionvals = array("Yes"=>'1', 'No' => '0');
+		echo $formwriter->dropinput("Use captcha on comments", "use_captcha_comments", "ctrlHolder", $optionvals, $settings->get_setting('use_captcha_comments'), '', FALSE);	
 	
+	}
  
 	echo '<hr>';
  
