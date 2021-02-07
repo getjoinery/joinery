@@ -4,7 +4,8 @@
 
 	$settings = Globalvars::get_instance();
 	if(!$settings->get_setting('newsletter_active')){
-		include("404.php");
+		header("HTTP/1.0 404 Not Found");
+		echo 'This feature is turned off';
 		exit();
 	}
 

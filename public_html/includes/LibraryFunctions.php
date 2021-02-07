@@ -48,6 +48,38 @@ class LibraryFunctions {
 		return $newdate;
 	}
 	
+	static function display_404_page(){
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');
+		$site_template = $settings->get_setting('site_template');
+		$theme_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php';
+		$base_file = $_SERVER['DOCUMENT_ROOT'] . '/views/404.php';
+
+		header("HTTP/1.0 404 Not Found");
+		if(file_exists($theme_file)){
+			//WE WANT A FILE PATH
+			require_once($theme_file);
+		}
+		else if(file_exists($base_file)){
+			//WE WANT A FILE PATH
+			require_once($base_file);
+		}
+		else{
+			echo 'Could not find Error 404 template file.';	
+			exit();
+		}
+
+	}		
+	
+	static function get_theme_includes_path(){
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');
+		$site_template = $settings->get_setting('site_template');
+		
+		$theme_dir = $siteDir.'/theme/'.$site_template.'/includes';
+		return $theme_dir;
+	}	
+	
 	static function get_logic_file_path($filename, $path_format='system'){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');

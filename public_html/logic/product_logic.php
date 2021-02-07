@@ -8,6 +8,13 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 
+$settings = Globalvars::get_instance();
+if(!$settings->get_setting('products_active')){
+	header("HTTP/1.0 404 Not Found");
+	echo 'This feature is turned off';
+	exit();
+}
+	
 $session = SessionControl::get_instance();
 //$session->check_permission(0);
 	

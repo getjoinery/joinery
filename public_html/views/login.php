@@ -3,20 +3,9 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
 	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
+	require_once (LibraryFunctions::get_logic_file_path('login_logic.php'));
+	
 
-$LOGIN_MESSAGES = array(
-	'email_verified'=>'Your email is now verified.  Please log in to improve your profile.',
-	'email_not_verified'=>'Your email address was unable to be verified because of an incorrect or expired verification code.  Please log in to resend your verification code',
-	'login_to_email_verify'=>'Please log in to verify your email address.',
-);
-
-$email = '';
-if (isset($_GET['e'])) {
-	$e = rawurldecode($_GET['e']);
-	if (LibraryFunctions::IsValidEmail($e)) {
-		$email = $e;
-	}
-}
 
 $page = new PublicPage(TRUE);
 $hoptions=array(
@@ -75,14 +64,14 @@ $(document).ready(function() {
 
 					<?php
 
-					$formwriter = new FormWriterIntegralZen("form1", TRUE, TRUE);
+					$formwriter = new FormWriterPublic("form1", TRUE, TRUE);
 
 					$validation_rules = array();
 					$validation_rules['email']['required']['value'] = 'true';
 					$validation_rules['password']['required']['value'] = 'true';
 					echo $formwriter->set_validate($validation_rules);							
 					
-					echo $formwriter->begin_form("uniForm", "post", "/login_process");
+					echo $formwriter->begin_form("uniForm", "post", "/login");
 					?>
 					<div class="body-title bottom-border">
 						<h2>Log In</h2>

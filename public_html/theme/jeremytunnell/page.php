@@ -7,16 +7,21 @@
 
 	$session = SessionControl::get_instance();
 	
-	if($params[0] != 'page'){
-		include("404.php");
+	$settings = Globalvars::get_instance();
+	if(!$settings->get_setting('page_contents_active')){
+		header("HTTP/1.0 404 Not Found");
+		echo 'This feature is turned off';
 		exit();
+	}
+
+	if($params[0] != 'page'){
+		require_once(LibraryFunctions::display_404_page());	
 	}
 
 	$page_content = PageContent::get_by_link($params[1]);
 
 	if(!$page_content || !$page_content->get('pac_is_published')){
-		include("404.php");
-		exit();
+		require_once(LibraryFunctions::display_404_page());	
 	}
 	
 	if(!$page_content->get('pac_link') && $page_content->get('pac_script_filename')){

@@ -1,25 +1,16 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once('includes/PublicPage.php');
-	require_once('includes/FormWriterPublic.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/page_contents_class.php');
 
 	$session = SessionControl::get_instance();
 
-	$settings = Globalvars::get_instance();
-	if(!$settings->get_setting('page_contents_active')){
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();
-	}
-
-	if($params[0] != 'page'){
+	if($params[0] != 'page' || !$page_content){
 		require_once(LibraryFunctions::display_404_page());	
 	}
-	
-	$page_content = PageContent::get_by_link($params[1]);
 	
 	if(!$page_content || !$page_content->get('pac_is_published')){
 		require_once(LibraryFunctions::display_404_page());	

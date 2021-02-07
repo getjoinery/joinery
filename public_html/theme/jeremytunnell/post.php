@@ -1,7 +1,8 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once('includes/PublicPage.php');
-	require_once('includes/FormWriterPublic.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/comments_class.php');
@@ -10,7 +11,7 @@
 	if(!$settings->get_setting('blog_active')){
 		//TURNED OFF
 		header("HTTP/1.0 404 Not Found");
-		include_once("404.php");
+		echo 'This feature is turned off';
 		exit();			
 	}
 
@@ -18,9 +19,7 @@
 		$post = Post::get_by_link($params[1]);
 	}
 	if(!$post || !$post->get('pst_is_published')){
-		header("HTTP/1.0 404 Not Found");
-		include_once("404.php");
-		exit();			
+		require_once(LibraryFunctions::display_404_page());			
 	}
 
 	$session = SessionControl::get_instance();

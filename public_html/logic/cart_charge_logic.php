@@ -9,6 +9,13 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 
+	$settings = Globalvars::get_instance();
+	if(!$settings->get_setting('products_active')){
+		header("HTTP/1.0 404 Not Found");
+		echo 'This feature is turned off';
+		exit();
+	}
+
 	$session = SessionControl::get_instance();
 	//$session->check_permission(0); 
 

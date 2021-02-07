@@ -1,6 +1,9 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once('includes/PublicPage.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Pager.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php'); 	
 
 	$session = SessionControl::get_instance();
@@ -57,7 +60,15 @@
 
     <div class="entry-content">
         
-                    <p><?php echo strip_tags(substr($post->get('pst_body'),0,300)) . '...'; ?></p>
+                    <p>					
+					<?php 
+					if($post->get('pst_short_description')){
+						echo $post->$post->get('pst_short_description');
+					}
+					else{
+						echo substr(strip_tags($post->get('pst_body'),0,300)) . '...'; 
+					}
+					?></p>
             </div>
     
           

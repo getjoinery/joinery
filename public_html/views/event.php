@@ -1,8 +1,8 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once('includes/PublicPage.php');
-	require_once('includes/FormWriterPublic.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_sessions_class.php');
@@ -12,7 +12,7 @@
 	
 	$event = Event::get_by_link($static_routes_path);
 	if(!$event || !$event->get('evt_visibility')){
-		require_once(LibraryFunctions::display_404_page());		
+		require_once(LibraryFunctions::display_404_page());				
 	}
 
 	

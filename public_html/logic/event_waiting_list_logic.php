@@ -9,6 +9,13 @@
 	require $composer_dir.'autoload.php';
 	use MailchimpAPI\Mailchimp;
 	
+	$settings = Globalvars::get_instance();
+	if(!$settings->get_setting('events_active')){
+		header("HTTP/1.0 404 Not Found");
+		echo 'This feature is turned off';
+		exit();
+	}
+	
 	$event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.');
 	$event = new Event($event_id, TRUE);
 

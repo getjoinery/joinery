@@ -6,8 +6,9 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 $settings = Globalvars::get_instance();
 if(!$settings->get_setting('register_active')){
-	include("404.php");
-	exit();
+		header("HTTP/1.0 404 Not Found");
+		echo 'This feature is turned off';
+		exit();
 }
 
 $act_code = LibraryFunctions::fetch_variable('act_code', '', 1, '');
