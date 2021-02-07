@@ -43,7 +43,14 @@
 				-->
 				<a class="posts-title" href="/blog_post?pst_post_id=<?php echo $post->key ?>"><h3><?php echo $post->get('pst_title'); ?></h3></a>
 				<p class="excert">
-					<?php echo strip_tags(substr($post->get('pst_body'),0,300)) . '...'; ?>
+					<?php 
+					if($post->get('pst_short_description')){
+						echo $post->get('pst_short_description');
+					}
+					else{
+						echo substr(strip_tags($post->get('pst_body'),0,300)) . '...'; 
+					}
+					?>
 				</p>
 				<a href="<?php echo $post->get_url() ?>" class="primary-btn">Read more</a>
 			</div>
