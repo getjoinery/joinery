@@ -766,11 +766,9 @@ $("#admin_panel").toggle();
 		$sortoptions= $options['sortoptions'];
 		$search_on = $options['search_on'];
 
-
 		if($sortoptions){
-			
 			echo '<div class="uk-align-left">';
-			printf('<form method="get" ACTION="%s">', $_SERVER['PHP_SELF']);
+			printf('<form method="get" ACTION="%s">', $_SERVER[REQUEST_URI]);
 			echo '<label for="'.$pager->prefix().'sort'.'">Sort: </label><select name="'.$pager->prefix().'sort'.'">';
 			foreach ($sortoptions as $key => $value) {
 				if($pager->sort() == $value){
@@ -810,7 +808,7 @@ $("#admin_panel").toggle();
 			
 			echo '<div id="example1_filter" class="uk-align-right">';
 			$formwriter = new FormWriterMaster("search_form");
-			echo $formwriter->begin_form("search_form", "get", $_SERVER['PHP_SELF']);
+			echo $formwriter->begin_form("search_form", "get", $_SERVER[REQUEST_URI]);
 			
 			echo '<label for="searchterm">Search: </label>
 						  <input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.$pager->search_term().'" size="20" type="text" class="textInput" maxlength="">';	
