@@ -17,7 +17,7 @@
 
 	if($_POST){
 		
-		$editable_fields = array('pst_body', 'pst_title', 'pst_is_published', 'pst_link');
+		$editable_fields = array('pst_body', 'pst_title', 'pst_is_published', 'pst_link', 'pst_short_description');
 
 		foreach($editable_fields as $field) {
 			$post->set($field, $_REQUEST[$field]);
@@ -114,6 +114,8 @@
 	}
 	
 	echo $formwriter->textinput('Post title', 'pst_title', NULL, 100, $title, '', 255, '');	
+	
+	echo $formwriter->textinput('Short description (optional)', 'pst_short_description', NULL, 100, $post->get('pst_short_description'), '', 255, '');	
 	
 	
 	if($_SESSION['permission'] == 10){
