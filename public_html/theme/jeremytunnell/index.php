@@ -57,7 +57,14 @@
 					<div class="post-letter"><?php echo $post->get('pst_title')[0]; ?></div>
 				</header>
 				<div class="entry-content">
-					<p><?php echo strip_tags(substr($post->get('pst_body'),0,300)) . '...'; ?></p>
+					<p><?php 
+					if($post->get('pst_short_description')){
+						echo $post->get('pst_short_description');
+					}
+					else{
+						echo substr(strip_tags($post->get('pst_body'),0,300)) . '...'; 
+					}
+					?></p>
 				</div>
 				<div class="entry-footer">
 					<a href="<?php echo $post->get('pst_link') ?>" class="typology-button">Read on</a><!--<a href="javascript:void(0);" class="typology-button button-invert typology-rl pocket" data-url="https://getpocket.com/edit?url=https%3A%2F%2Fjeremytestsite-1b8274.ingress-bonde.easywp.com%2Fwhy-do-people-think-clouds-are-so-interesting%2F"><i class="fa fa-bookmark-o"></i>Read later</a> -->       
