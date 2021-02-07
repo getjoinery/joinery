@@ -172,6 +172,9 @@ class Video extends SystemBase {
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)(&|$|"))', $vid_url, $matches)) {
 				$vid_video_number = $matches[1];
 			}
+			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/(\w+)(&|$|"))', $vid_url, $matches)) {
+				$vid_video_number = $matches[1];
+			}
 			else {
 				return FALSE;
 			}
