@@ -63,7 +63,7 @@
                     <p>					
 					<?php 
 					if($post->get('pst_short_description')){
-						echo $post->$post->get('pst_short_description');
+						echo $post->get('pst_short_description');
 					}
 					else{
 						echo substr(strip_tags($post->get('pst_body'),0,300)) . '...'; 
