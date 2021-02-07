@@ -25,6 +25,7 @@ class Post extends SystemBase {
 		'pst_published_time' => 'Time published',
 		'pst_is_on_homepage' => 'On homepage',
 		'pst_create_time' => 'Time Created',
+		'pst_short_description' => 'Short description, no html, max 255 chars'
 	);
 
 	public static $constants = array();
@@ -92,7 +93,7 @@ class Post extends SystemBase {
 		$settings = Globalvars::get_instance();
 		$blog_subdirectory = $settings->get_setting('blog_subdirectory');
 		if($blog_subdirectory){
-			return '/post/'.$this->get('pst_link');
+			return '/'.$blog_subdirectory.'/'.$this->get('pst_link');
 		}
 		else{
 			return $this->get('pst_link');
@@ -285,7 +286,8 @@ class Post extends SystemBase {
 			  "pst_is_deleted" bool DEFAULT false,
 			  "pst_is_published" bool DEFAULT true,
 			  "pst_is_on_homepage" bool DEFAULT true,
-			  "pst_create_time" timestamp(6)
+			  "pst_create_time" timestamp(6),
+			  "pst_short_description" varchar(255) COLLATE "pg_catalog"."default",
 			)
 			;';
 		$q = $dblink->prepare($sql);

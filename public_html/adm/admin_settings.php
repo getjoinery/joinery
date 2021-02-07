@@ -73,6 +73,10 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Newsletter active", "newsletter_active", "ctrlHolder", $optionvals, $settings->get_setting('newsletter_active'), '', FALSE);	
 	
+	if($settings->get_setting('tracking')){
+		echo $formwriter->textinput("Tracking code", "tracking_code", "ctrlHolder", 20, $settings->get_setting('tracking_code'), "" , 255, "");	
+	}
+	
 	$blog_active = $settings->get_setting('blog_active');
 	if($blog_active){
 		echo '<h3>Blog Settings</h3>';

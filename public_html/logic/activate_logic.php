@@ -8,8 +8,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
 $settings = Globalvars::get_instance();
 if(!$settings->get_setting('register_active')){
-	include("404.php");
-	exit();
+	require_once(LibraryFunctions::display_404_page());	
 }
 
 $session = SessionControl::get_instance();

@@ -7,17 +7,13 @@
 	if(!$settings->get_setting('blog_active')){
 		//TURNED OFF
 		header("HTTP/1.0 404 Not Found");
-		include_once("404.php");
+		echo 'This setting is turned off';
 		exit();			
 	}
 
-	if(!$post){
-		$post = Post::get_by_link($params[1]);
-	}
+
 	if(!$post || !$post->get('pst_is_published')){
-		header("HTTP/1.0 404 Not Found");
-		include_once("404.php");
-		exit();			
+		require_once(LibraryFunctions::display_404_page());		
 	}
 
 	$session = SessionControl::get_instance();

@@ -7,7 +7,13 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
 	
+	
 	$settings = Globalvars::get_instance();
+	if(!$settings->get_setting('events_active')){
+		header("HTTP/1.0 404 Not Found");
+		echo 'This feature is turned off';
+		exit();
+	}
 	
 if ($_POST){
 
