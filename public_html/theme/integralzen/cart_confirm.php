@@ -1,9 +1,10 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
-	require_once('includes/TableHelper.php');
-	require_once('includes/PublicPage.php');
-	require_once('includes/FormWriterPublic.php');	
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/TableHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');

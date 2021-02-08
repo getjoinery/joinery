@@ -1,10 +1,11 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once('includes/PublicPage.php');
-	require_once('includes/FormWriterPublic.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/integralzen/includes/TableHelper.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/TableHelper.php');
+
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
