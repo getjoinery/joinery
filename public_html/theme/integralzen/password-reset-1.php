@@ -35,5 +35,5 @@
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 
-}
+
 ?>

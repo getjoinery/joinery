@@ -17,7 +17,7 @@
 
 	
 	echo PublicPage::BeginPage('Newsletters');
-	if($message)[
+	if($message){
 		echo '<p>'.$message.'</p>';
 	}
 	
