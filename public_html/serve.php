@@ -49,7 +49,7 @@ if($settings->get_setting('files_active')){
 		if(file_exists($file)){
 			$the_content_type = 'Content-type: '.mime_content_type($file);
 			header($the_content_type);
-			require_once($file);
+			readfile($file);
 			exit();
 		}
 		else{
