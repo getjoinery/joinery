@@ -59,10 +59,12 @@ class LibraryFunctions {
 		if(file_exists($theme_file)){
 			//WE WANT A FILE PATH
 			require_once($theme_file);
+			exit();
 		}
 		else if(file_exists($base_file)){
 			//WE WANT A FILE PATH
 			require_once($base_file);
+			exit();
 		}
 		else{
 			echo 'Could not find Error 404 template file.';	
