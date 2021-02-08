@@ -62,7 +62,7 @@
 						echo $post->get('pst_short_description');
 					}
 					else{
-						echo substr(strip_tags($post->get('pst_body'),0,300)) . '...'; 
+						echo substr(strip_tags($post->get('pst_body')),0,300) . '...'; 
 					}
 					?></p>
 				</div>
