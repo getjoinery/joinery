@@ -9,11 +9,7 @@
 	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Password Reset', 
-		'disptitle'=>'Password Reset Step 1 of 2',
-		'crumbs'=>array('Home'=>'/', 'Password Reset'=>''),		
-		'showmap'=>FALSE,
-		'showheader'=>TRUE, 
-		'sectionstyle'=>'neutral');	
+	);	
 	$page->public_header($hoptions,NULL);
 	echo PublicPage::BeginPage('Reset Password - Step 1 of 2');
 

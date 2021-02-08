@@ -8,8 +8,6 @@
 	$page = new PublicPage();
 	$hoptions = array(
 		//'title' => '',
-		//'description' => '',
-		'body_id' => 'about-integral-zen',
 	);
 	$page->public_header($hoptions);
 	

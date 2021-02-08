@@ -31,8 +31,7 @@
 	
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
-	'title' => 'Checkout',
-	'profilenav' => TRUE,
+	'title' => 'Checkout'
 	));
 	echo PublicPage::BeginPage($page_content->get('pac_title'));
 	echo '<div>'. $page_content->get_filled_content() . '</div>';

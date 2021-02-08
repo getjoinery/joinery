@@ -9,12 +9,8 @@
 
 	$page = new PublicPage();
 	$page->public_header(array(
-		'title' => 'Log Out',
-		'disptitle'=>'Log Out',
-		'crumbs'=>array('Home'=>'/', 'Log Out'=>''),				
-		'showmap' => FALSE,
-		'showheader' => TRUE,
-		'sectionstyle' => 'neutral'),
+		'title' => 'Log Out'
+		),
 	NULL);
 
 	echo PublicPage::BeginPage();

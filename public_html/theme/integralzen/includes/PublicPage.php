@@ -10,10 +10,8 @@ class PublicPage {
 	private $rowcount;
 
 	private static $header_defaults = array(
-		//'title' => '',
+		'title' => '',
 		'showheader' => TRUE,
-		'currentmain' => NULL,
-		'currentsub' => NULL,
 		'noindex' => FALSE,
 		'nofollow' => FALSE,
 	);
@@ -68,19 +66,22 @@ class PublicPage {
 			$this->secure = FALSE;
 		}
 
-		// If secure is on, they are not HTTPS and on port 80, forward them to SSL
-		/*
-		if ($secure && $_SERVER["SERVER_PORT"] == 80) {
-			header("HTTP/1.1 301 Moved Permanently");
-			header("Location: https://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-			exit;
-		} else if (!$secure && $_SERVER["SERVER_PORT"] == 443) {
-			// Likewise if they aren't secure and reading an SSLed page, redirect them to non-SSL
-			header("HTTP/1.1 301 Moved Permanently");
-			header("Location: http://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-			exit;
+		$settings = Globalvars::get_instance();
+		if($settings->get_setting('force_https')){
+			// If secure is on, they are not HTTPS and on port 80, forward them to SSL
+			/*
+			if ($secure && $_SERVER["SERVER_PORT"] == 80) {
+				header("HTTP/1.1 301 Moved Permanently");
+				header("Location: https://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
+				exit;
+			} else if (!$secure && $_SERVER["SERVER_PORT"] == 443) {
+				// Likewise if they aren't secure and reading an SSLed page, redirect them to non-SSL
+				header("HTTP/1.1 301 Moved Permanently");
+				header("Location: http://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
+				exit;
+			}
+			*/
 		}
-		*/
 
 		$this->cdn = $settings->get_setting($this->secure ? 'CDN_SSL' : 'CDN');
 		$this->protocol = $this->secure ? 'https://' : 'http://';
@@ -99,7 +100,6 @@ class PublicPage {
 			$this->user = new User($session->get_user_id(), TRUE);
 		}
 
-		//$this->google_map_api_key = $settings->get_setting('GoogleMapAPIKey');
 	}
 
 	public function public_header($options=array()) {
@@ -108,13 +108,16 @@ class PublicPage {
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 
-		if(!isset($options['title']) || !$options['title']){
-			$options['title'] = $settings->get_setting('site_name');
+		$site_title = $settings->get_setting('site_name');
+		if(isset($options['title']) && $options['title']){
+			$site_title = $options['title'] . ' - ' . $settings->get_setting('site_name');
 		}
 		
-		if(!isset($options['description']) || !$options['description']){
-			$options['description'] = $settings->get_setting('site_description');
+		$site_description = $settings->get_setting('site_description');
+		if(isset($options['description']) & $options['description']){
+			$site_description = $options['description'];
 		}
+		
 		if(empty($options['noheader'])){
 			//TRACKING
 			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
@@ -133,9 +136,9 @@ class PublicPage {
 		<meta charset="utf-8">
 		<base href="/">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<meta name="description" content="<?php echo $settings->get_setting('site_description') ?>">
+		<meta name="description" content="<?php echo $site_description; ?>">
 
-		<title><?php echo $settings->get_setting('site_name') ?></title>
+		<title><?php echo $site_title; ?></title>
 
 		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->cdn; ?>/theme/integralzen/styles/integral_style1.css' type='text/css' media='all' />
 		<!--<link rel="stylesheet" href="<?php echo $this->cdn; ?>/theme/styles/4f877.css" media="all" />-->
@@ -364,15 +367,19 @@ class PublicPage {
 		$session = SessionControl::get_instance();
 		$session->clear_clearable_messages();
 	
+		$settings = Globalvars::get_instance();
+		if($settings->get_setting('force_https')){
 		?>
 			<!--Make sure https-->
 			<script type="text/javascript">
 			if (location.protocol !== 'https:') {
-				//location.replace(`https:${location.href.substring(location.protocol.length)}`);
+				location.replace(`https:${location.href.substring(location.protocol.length)}`);
 			}
 			</script>
-			
-			<script type="text/javascript">
+		<?php
+		} 
+		?>
+		<script type="text/javascript">
 			$('body').ihavecookies({
 			  title: "Cookies & Privacy",
 			  message: "This website uses cookies.",

@@ -6,9 +6,8 @@
 	
 	$page = new PublicPage();
 	$hoptions = array(
-		'title' => 'Integral Zen Waiting List',
-		'description' => '',
-		'body_id' => 'about-integral-zen',
+		'title' => 'Waiting List',
+		'description' => ''
 	);
 	$page->public_header($hoptions);
 	

@@ -44,8 +44,7 @@
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
-	'title' => 'Checkout',
-	'profilenav' => TRUE,
+	'title' => 'Checkout'
 	));
 	
 	$rownum=0;

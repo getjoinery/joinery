@@ -9,12 +9,8 @@
 
 $page = new PublicPage(TRUE);
 $hoptions=array(
-	'title'=>'Log In',
-	'disptitle'=>'Log In',
-	'crumbs'=>array('Home'=>'/', 'Log In'=>''),
-	'showmap'=>FALSE,
-	'showheader'=>TRUE,
-	'sectionstyle'=>'neutral');
+	'title'=>'Log In'
+	);
 $page->public_header($hoptions,NULL);
 
 echo PublicPage::BeginPage();

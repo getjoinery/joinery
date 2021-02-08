@@ -8,8 +8,8 @@
 	
 	$page = new PublicPage();
 		$hoptions=array(
-			'title'=>'Edit Phone Number',
-			'currentmain'=>'Account');
+			'title'=>'Edit Phone Number'
+			);
 	$page->public_header($hoptions);
 	echo '<a class="back-link" href="/profile/profile">My Profile</a> > Add/Edit Phone Number<br />';
 	echo PublicPage::BeginPage('Add/Edit Phone Number');

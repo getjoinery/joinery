@@ -12,8 +12,7 @@
 	$page = new PublicPage();
 	$hoptions = array(
 		//'title' => $sitename,
-		//'description' => 'Integral Zen',
-		'body_id' => 'about-integral-zen',
+	
 	);
 	$page->public_header($hoptions);
 	echo PublicPage::BeginPage('Sitemap');

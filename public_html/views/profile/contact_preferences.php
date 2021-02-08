@@ -8,8 +8,8 @@
 
 	$page = new PublicPage();
 	$hoptions=array(
-		'title'=>'Contact Preferences', 
-		'currentmain'=>'Contact Preferences');
+		'title'=>'Contact Preferences'
+	);
 	$page->public_header($hoptions);
 	echo '<a class="back-link" href="/profile/profile">My Profile</a> > Contact Preferences<br />';
 	echo PublicPage::BeginPage('Contact Preferences');

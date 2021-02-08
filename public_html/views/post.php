@@ -7,10 +7,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
-		'title' => 'Blog',
-		'description' => 'Blog.',
-		'banner' => 'Blog',
-		'submenu' => 'Blog',
+		'title' => 'Blog'
 	);
 	$page->public_header($hoptions); 
 	

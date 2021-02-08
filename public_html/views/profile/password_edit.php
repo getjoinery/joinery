@@ -13,8 +13,7 @@
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
-		'title' => $page_title, 
-		'currentmain'=>'Account'
+		'title' => $page_title
 	));
 	echo '<a class="back-link" href="/profile/profile">My Profile</a> > '.$page_title.'<br />';
 	echo PublicPage::BeginPage($page_title);

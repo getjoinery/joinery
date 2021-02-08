@@ -7,8 +7,8 @@
 
 	$page = new PublicPage();
 	$hoptions=array(
-		'title'=>'Edit Event Info',
-		'currentmain'=>'Account');
+		'title'=>'Edit Event Info'
+		);
 	$page->public_header($hoptions);
 
 	echo PublicPage::BeginPage('Edit Registrant Info');
