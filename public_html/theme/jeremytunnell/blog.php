@@ -29,9 +29,6 @@
 	$page = new PublicPage();
 	$hoptions = array(
 		'title' => 'Jeremy Tunnell Blog',
-		'description' => 'Jeremy Tunnell blog.',
-		'banner' => 'Blog',
-		'submenu' => 'Blog',
 	);
 	$page->public_header($hoptions); 
 	
@@ -66,7 +63,7 @@
 						echo $post->get('pst_short_description');
 					}
 					else{
-						echo strip_tags(substr($post->get('pst_body'),0,300)) . '...'; 
+						echo substr(strip_tags($post->get('pst_body'),0,300)) . '...'; 
 					}
 					?></p>
             </div>

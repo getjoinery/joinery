@@ -219,7 +219,7 @@ $("#admin_panel").toggle();
 					<div class="uk-navbar-left">
 					<!--
 						<div class="uk-navbar-item uk-hidden@m">
-							<a class="uk-logo" href="/admin"><img class="custom-logo" src="<?php 
+							<a class="uk-logo" href="/"><img class="custom-logo" src="<?php 
 							if($settings->get_setting('logo_link')){
 								echo $settings->get_setting('logo_link'); 
 							}
