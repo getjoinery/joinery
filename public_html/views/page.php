@@ -8,11 +8,18 @@
 
 	$session = SessionControl::get_instance();
 
+	$settings = Globalvars::get_instance();
+	if(!$settings->get_setting('page_contents_active')){
+		header("HTTP/1.0 404 Not Found");
+		echo 'This feature is turned off';
+		exit();
+	}
+
 	if($params[0] != 'page' || !$page_content){
 		require_once(LibraryFunctions::display_404_page());	
 	}
 	
-	if(!$page_content || !$page_content->get('pac_is_published')){
+	if(!$page_content->get('pac_is_published')){
 		require_once(LibraryFunctions::display_404_page());	
 	}
 	
