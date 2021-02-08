@@ -10,8 +10,6 @@
 	$hoptions = array(
 		'title' => 'Blog',
 		'description' => 'Blog.',
-		'banner' => 'Blog',
-		'submenu' => 'Blog',
 	);
 	$page->public_header($hoptions); 
 	

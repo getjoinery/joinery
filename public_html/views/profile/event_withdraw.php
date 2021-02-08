@@ -8,8 +8,8 @@
 
 	$page = new PublicPage();
 	$hoptions=array(
-		'title'=>'Withdraw from Event/Course', 
-		'currentmain'=>'Account');
+		'title'=>'Withdraw from Event/Course'
+		);
 	$page->public_header($hoptions);
 	echo '<a class="back-link" href="/profile/profile">My Profile</a> > Withdraw from Event/Course<br />';
 	echo PublicPage::BeginPage('Withdraw from Event/Course');

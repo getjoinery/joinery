@@ -9,8 +9,8 @@
 
 	$page = new PublicPage();
 	$hoptions=array(
-		'title'=>'Edit Address - My Profile',
-		'currentmain'=>'Account');
+		'title'=>'Edit Address'
+		);
 	$page->public_header($hoptions);
 	echo '<a class="back-link" href="/profile/profile">My Profile</a> > Address Edit<br />';
 	echo PublicPage::BeginPage('Edit Address');

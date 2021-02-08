@@ -7,11 +7,7 @@
 	$page = new PublicPage(TRUE);
 	$hoptions=array(
 		'title'=>'Password Reset', 
-		'disptitle'=>'Password Reset Step 2 of 2',
-		'crumbs'=>array('Home'=>'/', 'Password Reset'=>''),		
-		'showmap'=>FALSE,
-		'showheader'=>TRUE, 
-		'sectionstyle'=>'neutral');
+	);
 	$page->public_header($hoptions,NULL);
 
 	if($message){

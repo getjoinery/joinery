@@ -14,9 +14,8 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
-		//'title' => 'Integral Zen',
-		//'description' => 'Integral Zen',
-		'body_id' => 'homepage',
+		//'title' => '',
+		//'description' => ''
 	);
 	$page->public_header($hoptions);
 

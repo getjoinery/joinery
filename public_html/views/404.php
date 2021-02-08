@@ -7,7 +7,6 @@
 	$hoptions = array(
 		//'title' => $sitename,
 		//'description' => 'Integral Zen',
-		'body_id' => 'about-integral-zen',
 		'is_404' => 1,
 	);
 	$page->public_header($hoptions);

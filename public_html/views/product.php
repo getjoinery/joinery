@@ -7,8 +7,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
 $page = new PublicPage(TRUE);
 $page->public_header(array(
-	'title' => $product->get('pro_name'),
-	'currentmain' => 'Tools',
+	'title' => $product->get('pro_name')
 	));
 	echo PublicPage::BeginPage($product->get('pro_name'));
 

@@ -8,11 +8,7 @@ require_once (LibraryFunctions::get_logic_file_path('register_logic.php'));
 $page = new PublicPage(TRUE);
 $hoptions=array(
 	'title'=>'New User Registration',
-	'disptitle'=>'New User Registration',
-	'crumbs'=>array('Home'=>'/', 'New User Registration'=>''),			
-	'showmap'=>FALSE,
-	'showheader'=>TRUE, 
-	'sectionstyle'=>'neutral');
+);
 $page->public_header($hoptions,NULL);
 
 echo PublicPage::BeginPage('Register');

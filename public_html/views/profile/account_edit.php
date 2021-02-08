@@ -12,8 +12,7 @@
 
 	$page = new PublicPage();
 	$hoptions=array(
-		'title'=>'Edit Account - My Profile', 
-		'currentmain'=>'Account'
+		'title'=>'Edit Account', 
 	);
 	$page->public_header($hoptions);
 	echo '<a class="back-link" href="/profile/profile">My Profile</a> > Account Edit<br />';

@@ -25,8 +25,7 @@
 		
 		$page = new PublicPage(TRUE);
 		$page->public_header(array(
-		'title' => "Checkout confirmation",
-		'currentmain' => 'Tools',
+		'title' => "Checkout confirmation"
 		));
 		
 		echo PublicPage::BeginPage('Checkout confirmation');

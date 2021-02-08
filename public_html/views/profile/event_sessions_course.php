@@ -9,9 +9,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
-		'title' => 'Sessions - My Profile', 
-		'currentmain' => 'Account',
-		'currentsub' => 'Dashboard',
+		'title' => 'Sessions', 
 	);
 	$page->public_header($hoptions,NULL);
 	echo '<a class="back-link" href="/profile/profile">My Profile</a> > '.$event->get('evt_name').' sessions<br />';
