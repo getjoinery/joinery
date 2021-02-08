@@ -6,7 +6,6 @@
 	$page = new PublicPage();
 	$hoptions = array(
 		//'title' => $sitename,
-		//'description' => 'Integral Zen',
 		'is_404' => 1,
 	);
 	$page->public_header($hoptions);
