@@ -1,13 +1,10 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	$logic_path = LibraryFunctions::get_logic_file_path('event_sessions_course_logic.php');
-	require_once ($logic_path);	
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_logic_file_path('event_sessions_course_logic.php'));
 	
-	$settings = Globalvars::get_instance();
-	$site_template = $settings->get_setting('site_template');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/FormWriterPublic.php');
 
 
 	$page = new PublicPage();
