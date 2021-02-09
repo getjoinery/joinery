@@ -145,10 +145,10 @@ class PublicPage {
 		
 		<link type="text/css" href="<?php echo $this->cdn; ?>/theme/default/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
 	
-		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+		<script src="<?php echo $this->cdn; ?>/theme/default/includes/jquery-3.4.1.min.js"></script>
 		
 		<!-- jQuery validate -->
-		<script type="text/javascript" src="/theme/integralzen/scripts/js/jquery.validate-1.9.1.js"></script>				
+		<script type="text/javascript" src="/theme/default/scripts/js/jquery.validate-1.9.1.js"></script>				
 		
 		<!--
 		<link rel="icon" href="" sizes="32x32" />
