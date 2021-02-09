@@ -122,12 +122,12 @@ class PublicPage {
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('force_https')){
 			header('Strict-Transport-Security: max-age=3153600');
-			header("Content-Security-Policy: default-src https: 'unsafe-inline' fonts.googleapis.com fonts.gstatic.com");
+			header("Content-Security-Policy: default-src https: fonts.googleapis.com fonts.gstatic.com; style-src: 'unsafe-inline'; script-src: 'unsafe-inline'");
 			//header("Content-Security-Policy-Report-Only: default-src https:");
 		}
-		header('X-Frame-Options "SAMEORIGIN"');
+		header('X-Frame-Options SAMEORIGIN');
 		header('X-Content-Type-Options: nosniff');
-		header('Referrer-Policy: ""');
+		header('Referrer-Policy: unsafe-url');
 		
 		
 		?>

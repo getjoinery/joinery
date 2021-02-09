@@ -106,6 +106,9 @@ class PublicPage {
 		$_GLOBALS['page_header_loaded'] = true;
 		
 		header("Content-Security-Policy-Report-Only: default-src 'self' 'unsafe-inline'");
+		header('X-Frame-Options "SAMEORIGIN"');
+		header('X-Content-Type-Options: nosniff');
+		header('Referrer-Policy: unsafe-url'); 
 		
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
