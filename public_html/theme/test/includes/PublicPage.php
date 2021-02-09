@@ -105,6 +105,8 @@ class PublicPage {
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
 		
+		header("Content-Security-Policy-Report-Only: default-src 'self' 'unsafe-inline'");
+		
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 
