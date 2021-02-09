@@ -126,7 +126,7 @@ class PublicPage {
 		header('X-Frame-Options "SAMEORIGIN"');
 		header('X-Content-Type-Options: nosniff');
 		header('Referrer-Policy: ""');
-		header('Content-Security-Policy: default-src https://jeremytunnell.com fonts.googleapis.com fonts.gstatic.com');
+		//header('Content-Security-Policy: default-src https://jeremytunnell.com fonts.googleapis.com fonts.gstatic.com');
 		
 		?>
 <!DOCTYPE html>
