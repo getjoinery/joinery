@@ -122,11 +122,12 @@ class PublicPage {
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('force_https')){
 			header('Strict-Transport-Security: max-age=3153600');
+			header("Content-Security-Policy: default-src https:");
 		}
 		header('X-Frame-Options "SAMEORIGIN"');
 		header('X-Content-Type-Options: nosniff');
 		header('Referrer-Policy: ""');
-		header("Content-Security-Policy: default-src 'self' fonts.googleapis.com fonts.gstatic.com");
+		
 		
 		?>
 <!DOCTYPE html>
