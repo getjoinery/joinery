@@ -47,6 +47,11 @@ if($settings->get_setting('files_active')){
 		}
 		//ORIGINAL FILE
 		if(file_exists($file)){
+			$seconds_to_cache = 43200;
+			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+			header("Expires: $ts");
+			header("Pragma: cache");
+			header("Cache-Control: max-age=$seconds_to_cache");
 			$the_content_type = 'Content-type: '.mime_content_type($file);
 			header($the_content_type);
 			readfile($file);
