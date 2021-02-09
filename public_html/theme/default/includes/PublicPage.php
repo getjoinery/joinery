@@ -40,15 +40,16 @@ class PublicPage {
 	}
 	
 	public static function BeginPage($title='', $options=array()) {
-		$output = '<div>';
+		$output = '';
 		if($title){
-			$output .= '<h1>'.$title.'</h1>'; 
+			$output .= '<h1>'.$title.'</h1><hr>'; 
 		}
+		$output .= '';
 		return $output;
 	}	
 
 	public static function EndPage($options=array()) {
-		$output = '</div>'; 
+		$output = ''; 
 		return $output;
 	}	
 
@@ -166,7 +167,36 @@ class PublicPage {
     <header>
         <nav>
             <a href="/"><img alt="Logo" src="https://via.placeholder.com/200x70?text=Logo" height="70"></a>
-            <ul>
+			
+			<ul>
+			<?php 
+			if ($session->get_user_id()){
+				echo '<li><a href="/profile/profile">My Profile</a></li> '; 
+				if($_SESSION['permission'] >= 5){
+					echo '<li><a href="/admin/admin_users">Admin</a></li> ';
+				}
+
+				$cart = $session->get_shopping_cart();
+				if($numitems = $cart->count_items()){
+					echo '<li><a href="/cart">Cart ('. $numitems . ')</a></li> ';
+				}
+				else{
+					//echo '<li><span class="cartcontents">Cart</span></li> ';
+				}
+
+				echo '<li><a href="/logout">Log out</a></li>';
+
+			}
+			else{
+				echo '<li><a href="/login">Log in</a></li> | <a href="/register">Register</a></li>';
+			}
+			
+			if($_SESSION['permission'] == 10){
+				echo '<li><a id="admintoggle" href="#">Debug</a></li>';				
+			}
+			echo '<br />Timezone: '.$session->get_timezone().' (<a href="/profile/account_edit">change</a>)';
+			?>
+            <!--
                 <li>Menu Item 1</li>
                 <li><a href="#">Menu Item 2</a></li>
                 <li><a href="#">Dropdown Menu Item</a>
@@ -175,50 +205,18 @@ class PublicPage {
                         <li><a href="#">Short sublink</a></li>
                     </ul>
                 </li>
+				-->
             </ul>
         </nav>
+		<!--
         <h1>Page Heading with <i>Italics</i> and <u>Underline</u></h1>
         <p>Page Subheading with <mark>highlighting</mark></p>
         <br>
         <p><a href="#"><i>Italic Link Button</i></a><a href="#"><b>Bold Link Button &rarr;</b></a></p>
+		-->
     </header>
     <main>
-        <hr>
-        <section>
-            <header>
-                <h2>Section Heading</h2>
-                <p>Section Subheading</p>
 
-				<?php 
-				if ($session->get_user_id()){
-					echo '<a href="/profile/profile">My Profile</a> '; 
-					if($_SESSION['permission'] >= 5){
-						echo '| <a href="/admin/admin_users">Admin</a> ';
-					}
-
-					$cart = $session->get_shopping_cart();
-					if($numitems = $cart->count_items()){
-						echo '| <a href="/cart">Cart ('. $numitems . ')</a> ';
-					}
-					else{
-						//echo '<span class="cartcontents">Cart</span> ';
-					}
-
-					echo '| <a href="/logout">Log out</a>';
-
-				}
-				else{
-					echo '<a href="/login">Log in</a> | <a href="/register">Register</a>';
-				}
-				
-				if($_SESSION['permission'] == 10){
-					echo ' | <a id="admintoggle" href="#">Debug</a>';				
-				}
-				echo '<br />Timezone: '.$session->get_timezone().' (<a href="/profile/account_edit">change</a>)';
-				?>
-			</header>	
-			<main>
-			<h1><a href="/" rel="home">Welcome</a></h1>
 						
 								
 
