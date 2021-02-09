@@ -59,6 +59,14 @@ class PublicPage {
 		$this->remote_addr = $_SERVER['REMOTE_ADDR'];
 
 		$settings = Globalvars::get_instance();
+		if($settings->get_setting('force_https')){
+			header('Strict-Transport-Security: max-age=3153600');
+			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
+			//header("Content-Security-Policy-Report-Only: default-src https:");
+		}
+		header('X-Frame-Options: SAMEORIGIN');
+		header('X-Content-Type-Options: nosniff');
+		header('Referrer-Policy: unsafe-url');
 
 		$this->debug = $settings->get_setting('debug');
 		if ($this->debug == 1) {
