@@ -126,7 +126,7 @@ class PublicPage {
 		header('X-Frame-Options "SAMEORIGIN"');
 		header('X-Content-Type-Options: nosniff');
 		header('Referrer-Policy: ""');
-		header('Content-Security-Policy: default-src https://jeremytunnell.com fonts.googleapis.com');
+		header('Content-Security-Policy: default-src https://jeremytunnell.com fonts.googleapis.com fonts.gstatic.com');
 		
 		?>
 <!DOCTYPE html>
@@ -137,7 +137,7 @@ class PublicPage {
 		
 		<title>Jeremy Tunnell</title>
 		<base href="/">
-<link rel="dns-prefetch" href="//fonts.googleapis.com">
+		<link rel="dns-prefetch" href="//fonts.googleapis.com">
  
 
 <link rel="stylesheet" id="wp-block-library-css" href="/theme/jeremytunnell/includes/wp-includes/css/dist/block-library/style.min.css" type="text/css" media="all">
