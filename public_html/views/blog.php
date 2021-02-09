@@ -17,10 +17,9 @@
 	foreach ($posts as $post){  
 		$author = new User($post->get('pst_usr_user_id'), TRUE);
 
-
 		echo '<h2><a href="'.$post->get('pst_link').'">'.$post->get('pst_title').'</a></h2>';
 		
-		echo '<span>By '.$author->display_name().' at '.LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York').'</span>';
+		echo '<div>By '.$author->display_name().' at '.LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York').'</div>';
 
 		echo'<p>';					
 		if($post->get('pst_short_description')){

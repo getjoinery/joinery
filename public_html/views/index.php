@@ -17,6 +17,9 @@
 	echo PublicPage::BeginPage('');
 	
 	?>
+	    <p>Page Subheading with <mark>highlighting</mark></p>
+        <br>
+        <p><a href="#"><i>Italic Link Button</i></a><a href="#"><b>Bold Link Button &rarr;</b></a></p>
 	        <hr>
         <section>
             <header>
