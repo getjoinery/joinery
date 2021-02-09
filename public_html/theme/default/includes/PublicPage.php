@@ -131,7 +131,7 @@ class PublicPage {
 	
 		?>
 		<!DOCTYPE html>
-		<html lang="en-US" class="no-js no-svg">
+		<html lang="en-US">
 		<head>
 		<meta charset="utf-8">
 		<base href="/">
@@ -162,9 +162,33 @@ class PublicPage {
 		}
 		?>		
 			
-			
-			<body>
-			<div>
+<body>
+    <header>
+        <nav>
+            <a href="/"><img alt="Logo" src="https://via.placeholder.com/200x70?text=Logo" height="70"></a>
+            <ul>
+                <li>Menu Item 1</li>
+                <li><a href="#">Menu Item 2</a></li>
+                <li><a href="#">Dropdown Menu Item</a>
+                    <ul>
+                        <li><a href="#">Sublink with a long name</a></li>
+                        <li><a href="#">Short sublink</a></li>
+                    </ul>
+                </li>
+            </ul>
+        </nav>
+        <h1>Page Heading with <i>Italics</i> and <u>Underline</u></h1>
+        <p>Page Subheading with <mark>highlighting</mark></p>
+        <br>
+        <p><a href="#"><i>Italic Link Button</i></a><a href="#"><b>Bold Link Button &rarr;</b></a></p>
+    </header>
+    <main>
+        <hr>
+        <section>
+            <header>
+                <h2>Section Heading</h2>
+                <p>Section Subheading</p>
+
 				<?php 
 				if ($session->get_user_id()){
 					echo '<a href="/profile/profile">My Profile</a> '; 
@@ -192,7 +216,8 @@ class PublicPage {
 				}
 				echo '<br />Timezone: '.$session->get_timezone().' (<a href="/profile/account_edit">change</a>)';
 				?>
-			</div>	
+			</header>	
+			<main>
 			<h1><a href="/" rel="home">Welcome</a></h1>
 						
 								
@@ -216,7 +241,15 @@ class PublicPage {
 			<?php
 		} 
 		?>
+		</main>
+		<footer>
+			<hr>
+			<p>
+				<small>Contact info</small>
+			</p>
+		</footer>
 		</body>
+
 		</html>
 		<?php
 	}
