@@ -29,7 +29,7 @@
 			echo substr(strip_tags($post->get('pst_body')),0,300) . '...'; 
 		}
 		echo '</p>';
-        echo '<div><a href="'.$post->get('pst_link').'>Read on</a></div>';
+        echo '<div><a href="'.$post->get('pst_link').'">Read on</a></div>';
 	} 
 		
 	if($pager->is_valid_page('-1')){
