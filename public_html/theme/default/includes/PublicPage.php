@@ -140,6 +140,7 @@ class PublicPage {
 		<meta name="description" content="<?php echo $site_description; ?>">
 		<title><?php echo $site_title; ?></title>
 
+		<!-- MVP.css quickstart template: https://github.com/andybrewer/mvp/ -->
 		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->cdn; ?>/theme/default/includes/mvp-master/mvp.css' type='text/css' media='all' />
 		
 		<link type="text/css" href="<?php echo $this->cdn; ?>/theme/default/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
