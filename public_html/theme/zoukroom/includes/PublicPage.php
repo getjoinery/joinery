@@ -128,7 +128,7 @@ class PublicPage {
   <link href="https://fonts.googleapis.com/css?family=Nunito+Sans:400,600,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/theme/zoukroom/css/main.css" />
   <script src="/theme/zoukroom/js/uikit.js"></script>
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+  <script src="<?php echo $this->cdn; ?>/theme/zoukroom/includes/jquery-3.4.1.min.js"></script>
   
  		<!--
 <link rel="icon" href="/favicon.ico" />

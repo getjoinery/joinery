@@ -104,9 +104,13 @@ class PublicPage {
 
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
+
+		$settings = Globalvars::get_instance();
+		if($settings->get_setting('force_https')){
+			header('Strict-Transport-Security: max-age=3153600');
+		}
 		
 		$session = SessionControl::get_instance();
-		$settings = Globalvars::get_instance();
 
 		$site_title = $settings->get_setting('site_name');
 		if(isset($options['title']) && $options['title']){
@@ -191,7 +195,7 @@ class PublicPage {
 		<script src="<?php echo $this->cdn; ?>/theme/integralzen/scripts/df983.js"></script> 
 		
 		<!-- jQuery 3.2.1 <script src="/admin/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
-		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+		<script src="<?php echo $this->cdn; ?>/theme/integralzen/includes/jquery-3.4.1.min.js"></script>
 		<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 		
 		<!-- jQuery validate -->
