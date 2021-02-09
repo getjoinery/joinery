@@ -4,7 +4,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
 	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
-	require_once(LibraryFunctions::get_theme_includes_path().'/TableHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
 
@@ -75,13 +74,11 @@
 				<?php
 			} else {
 
-			
-				
-
-				$checkout_table = new GenericTable(new RowAlternate(array('even', 'odd')));
-				$checkout_table->add_headers(array('Item', 'Description', 'Price', ''));					
+				$headers = array('Item', 'Description', 'Price', '');
+				$page->tableheader($headers);
 
 				foreach($cart->items as $key => $cart_item) {
+					$rowvalues = array();
 					list($quantity, $product, $data) = $cart_item;
 					$product_version = $product->get_product_version($data);
 					$product = new Product($product->get('pro_product_id'), TRUE); 	
@@ -96,18 +93,17 @@
 						} else {
 							$price = $product->get('pro_price');
 						}
-					}					
-
-					$checkout_table->add_row(array(
-						$key+1,
-						$product->get('pro_name').' '. $product_version->prv_version_name . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') ',
-						'$' . money_format('%i', $price),
-						'<span class="icon-remove"><a href="/cart?r=' . $key	. '">Remove</a></span>'
-					));
+					}	
+					
+					array_push($rowvalues, $key+1);
+					array_push($rowvalues, $product->get('pro_name').' '. $product_version->prv_version_name . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') ');
+					array_push($rowvalues, '$' . money_format('%i', $price));
+					array_push($rowvalues, '<span class="icon-remove"><a href="/cart?r=' . $key	. '">Remove</a></span>');
+					$page->disprow($rowvalues);
+			
 					$itemcount++;
-				}
-
-				$checkout_table->end_table();	
+				}	
+				$page->endtable();	
 				?>
 				<p class="cart-total">Total: $<?php echo  money_format('%i', $cart->get_total()); ?>
 								

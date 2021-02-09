@@ -37,6 +37,16 @@ class EventUnviewableDisplayException extends EventException implements CustomEr
 
 class Event extends SystemBase {
 
+	const STATUS_ACTIVE = 1;
+	const STATUS_COMPLETED = 2;
+	const STATUS_CANCELLED = 3;
+	
+	const DISPLAY_CONDENSED = 1;
+	const DISPLAY_SEPARATE = 2;
+	
+	const VISIBILITY_PRIVATE = 0;
+	const VISIBILITY_PUBLIC = 1;
+	const VISIBILITY_PUBLIC_UNLISTED = 2;	
 
 	public static $fields = array(
 		'evt_event_id' => 'event ID',

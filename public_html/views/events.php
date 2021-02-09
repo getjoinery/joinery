@@ -1,44 +1,8 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once (LibraryFunctions::get_logic_file_path('events_logic.php'));
 	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
 	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
-
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
-
-	$session = SessionControl::get_instance();
-
-	$numperpage = 30;
-	$swaoffset = 0;
-	$swasort = 'start_time';
-	$swasdirection = 'ASC';
-	$searchterm = LibraryFunctions::fetch_variable('searchterm', NULL, 0, '');
-	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
-	
-	$searches = array();
-	$searches['deleted'] = FALSE;
-	$searches['visibility'] = 1;
-	if($_REQUEST['past']){
-		$searches['past'] = TRUE;
-	}
-	else{
-		$searches['past'] = FALSE;
-		$searches['status'] = 1;
-		$swasdirection = 'DESC';
-	}
-	
-	 
-
-	$events = new MultiEvent(
-		$searches,
-		array($swasort=>$swasdirection),
-		$numperpage,
-		$swaoffset,
-		'AND');
-	$events->load();	
-	$numeventsrecords = $events->count_all();	
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
@@ -82,8 +46,8 @@
 		if($event->get('evt_short_description')){
 			echo '<p>'. $event->get('evt_short_description').'</p>';
 		}
-		
-		echo '<a href="'.$event->get_url().'"></a>';
+
+		echo '<p><a href="'.$event->get_url().'">Read More</a></p><hr>'; 
 	}	
   
 	echo PublicPage::EndPage();
