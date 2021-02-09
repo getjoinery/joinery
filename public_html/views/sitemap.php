@@ -11,7 +11,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
-		//'title' => $sitename,
+		'title' => 'Sitemap',
 	
 	);
 	$page->public_header($hoptions);

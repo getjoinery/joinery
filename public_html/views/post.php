@@ -11,31 +11,16 @@
 	);
 	$page->public_header($hoptions); 
 	
-	echo PublicPage::BeginPage($post->get('pst_title'));	
+	echo PublicPage::BeginPage();	
 	
-	?>
+	echo '<h2>'.$post->get('pst_title').'</h2>';
+	echo '<div>'.LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York').'</div>';    
+    echo '<div>'.$post->get('pst_body').'</div>';
 
-        <span><?php echo LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'); ?></span>     
-          
-        <div>    
-            <?php echo $post->get('pst_body'); ?>
-        </div>
-        
-       <!--              	
-	
-		<div class="typology-social-icons">
-							<a href="javascript:void(0);" class="typology-facebook typology-share-item hover-on" data-url="http://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fjeremytunnell.com%2Fintegral-theory-mhcand-metamodernism-how-they-all-fit-together%2F&amp;t=Integral+Theory%2C+MHC%2C+and+Metamodernism+%26%238230%3Bhow+they+all+fit+together"><i class="fa fa-facebook"></i></a>							<a href="javascript:void(0);" class="typology-twitter typology-share-item hover-on" data-url="http://twitter.com/intent/tweet?url=https%3A%2F%2Fjeremytunnell.com%2Fintegral-theory-mhcand-metamodernism-how-they-all-fit-together%2F&amp;text=Integral+Theory%2C+MHC%2C+and+Metamodernism+%26%238230%3Bhow+they+all+fit+together"><i class="fa fa-twitter"></i></a>							<a href="javascript:void(0);"  class="typology-reddit typology-share-item hover-on" data-url="http://www.reddit.com/submit?url=https%3A%2F%2Fjeremytunnell.com%2Fintegral-theory-mhcand-metamodernism-how-they-all-fit-together%2F&amp;title=Integral+Theory%2C+MHC%2C+and+Metamodernism+%26%238230%3Bhow+they+all+fit+together"><i class="fa fa-reddit-alien"></i></a>					</div>
--->
-	        
-
-	<?php 
 	if($settings->get_setting('show_comments')){
-		?>
-			<h3>Comments</h3>
-			<div id="comments">
-			
-		<?php 
+		echo '<h3>Comments</h3>';		
 	}
+	
 	if($settings->get_setting('comments_active')){
 		if($settings->get_setting('comments_unregistered_users') || $session->get_user_id()){
 		
@@ -72,45 +57,20 @@
 		}
 
 
-	
-		if($settings->get_setting('show_comments')){
-				
-				$comments = new MultiComment(
-					array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false),
-					array('comment_id'=>'DESC'),
-					NULL,
-					NULL);	
-				$numcomments = $comments->count_all();	
-				$comments->load();	
-
-		
+		if($settings->get_setting('show_comments')){			
+			$comments = new MultiComment(
+				array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false),
+				array('comment_id'=>'DESC'),
+				NULL,
+				NULL);	
+			$numcomments = $comments->count_all();	
+			$comments->load();	
 
 			if($numcomments){
-			?>
-							
-				<ul>
-					<?php foreach($comments as $comment){ ?>
-					<li>
-						<div>					
-							<b class="fn"><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></b> <span class="says">says:</span>					
-						</div>
-
-						<div class="comment-metadata">
-								<time><?php echo LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></time>
-						</div>
-
-
-						<div>
-							<p><?php echo $comment->get_sanitized_comment(); ?></p>
-						</div>
-
-									
-					</li>
-					<?php } ?>
-				</ul>
-			</div>
-
-			<?php
+				echo '<ul>';
+				foreach($comments as $comment){ 
+					echo '<li>'.htmlspecialchars($comment->get('cmt_author_name')).' says: '.$comment->get_sanitized_comment().' at '. LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York').'</li>';
+				} 
 			}
 		}
 	}

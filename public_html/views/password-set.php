@@ -7,7 +7,7 @@
 
 	$page = new PublicPage(TRUE);
 	$hoptions=array(
-		'title'=>'Password Reset', 
+		'title'=>'Password Set', 
 	);
 	$page->public_header($hoptions,NULL);
 

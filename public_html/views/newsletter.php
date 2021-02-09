@@ -7,7 +7,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
-		//'title' => '',
+		'title' => 'Newsletter',
 	);
 	$page->public_header($hoptions);
 	
@@ -19,7 +19,7 @@
 	}
 	
 	?>
-	<h3>Get updates on upcoming retreats, online classes, and other news from Integral Zen.</h3>
+	<h3>Get updates on upcoming retreats, online classes, and other news.</h3>
 	<?php
 
 	$formwriter = new FormWriterPublic("form1", TRUE);
