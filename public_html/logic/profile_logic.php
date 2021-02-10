@@ -60,6 +60,21 @@
 	NULL //OFFSET
 	);
 	$messages->load();	
+	
+	
+	$settings = Globalvars::get_instance();
+	if($settings->get_setting('events_active')){
+		//REMOVE USER FROM ANY EVENTS THAT ARE EXPIRED
+		$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), NULL);
+		$event_registrants->load();
+		foreach($event_registrants as $event_registrant){
+			if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+				$event_registrant->remove();
+				//REFRESH THE PAGE
+				LibraryFunctions::Redirect($_SERVER['REQUEST_URI']); 
+			}
+		}			
+	}
 
 	
 

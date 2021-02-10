@@ -28,9 +28,7 @@
 		
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('events_active')){
-			//DISPLAY REGISTER FINISH LINKS FOR ANY EVENTS
-			$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), NULL);
-			$event_registrants->load();
+			//DISPLAY REGISTER FINISH LINKS FOR ANY EVENTS AND REMOVE USER FROM ANY EVENTS THAT ARE EXPIRED
 			foreach($event_registrants as $event_registrant){
 				if(!$event_registrant->get('evr_extra_info_completed')){
 					$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
