@@ -45,7 +45,7 @@
 				$_REQUEST['pro_price'] = (int)$_REQUEST['pro_price'];
 			}
 	
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_expires');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
@@ -70,6 +70,11 @@
 			else{
 				$product->set('pro_evt_event_id', intval($_REQUEST['pro_evt_event_id']));
 			}
+			
+			//PRICE MUST BE INTEGER
+			if($_REQUEST['pro_price']){
+				$_REQUEST['pro_price'] = (int)$_REQUEST['pro_price'];
+			}			
 			
 			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
 
@@ -164,8 +169,9 @@
 	echo $formwriter->dropinput("Event registration?", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);	
 
 
-	echo $formwriter->textinput('Minimum Purchase Price', 'pro_price', 'ctrlHolder', 100, $product->get('pro_price'), '', 255, '');
-	echo $formwriter->textinput('Max Number that can be added to cart:', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 255, '');
+	echo $formwriter->textinput('Price (no cents)', 'pro_price', 'ctrlHolder', 100, $product->get('pro_price'), '', 5, '');
+	echo $formwriter->textinput('Max Number that can be added to cart:', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 3, '');
+	echo $formwriter->textinput('Purchase expires after (days)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
 	
 
 	

@@ -118,10 +118,11 @@
 	<li><b>Active</b> If a product is disabled, it cannot be purchased.</li>
 	<li><b>Product name</b> However you want it described on the website</li>
 	<li><b>Event registration?</b> If this product is an event/course registration, choose the event here.</li>
-	<li><b>Minimum purchase price</b> This is the amount that will be considered a full purchase. Anything less will become a deposit.</li>
+	<li><b>Price</b> This is the amount that will be considered a full purchase. Anything less will become a deposit.  Whole dollar amounts only.</li>
 	<li><b>Max number that can be added to the cart</b> How many can one person purchase at the same time?</li>
+	<li><b>Purchase expires after (days)</b> How many days until whatever was purchased expires (usually, an event registration)?</li>
 	<li><b>Product group</b> Choose the group that most closely matches.</li>
-	<li><b>Info to collect</b> What information do you want to collect when the user purchases this product.  For example, if the event will be recorded, then recording consent should be chosen here. Choose the right combination from the drop-down.</li>
+	<li><b>Info to collect</b> What information do you want to collect when the user purchases this product.  For example, if the event will be recorded, then recording consent should be chosen here. Choose the right combination from the checkboxes.</li>
 	<li><b>Product description</b> One or two sentences describing what the person is buying.</li>
 	</ul>
 	

@@ -694,7 +694,8 @@ class Product extends SystemBase {
 		'pro_initial_odi_status' => 'After this product is purchased, what should the initial order status be',
 		'pro_evt_event_id' => 'Event id if the order is for an event',
 		'pro_user_choose_price' => 'When TRUE, the user can choose what price to pay.',
-		'pro_is_recurring' => 'This charge is a recurring charge',
+		'pro_recurring' => 'This charge is a recurring charge, valid values are "day", "week", "month", or "year"',
+		'pro_expires' => 'How much time until the purchase expires.',
 		'pro_is_active' => 'Active or disabled'
 	);
 	
@@ -1017,8 +1018,9 @@ class Product extends SystemBase {
 			  "pro_initial_odi_status" int4,
 			  "pro_evt_event_id" int4,
 			  "pro_user_choose_price" bool NOT NULL DEFAULT false,
-			  "pro_is_recurring" bool NOT NULL DEFAULT false,
+			  "pro_recurring" varchar(10) COLLATE "pg_catalog"."default" NOT NULL,
 			  "pro_is_active" bool DEFAULT true, 
+			  "pro_expires" int4,
 			)
 			;';
 		$q = $dblink->prepare($sql);

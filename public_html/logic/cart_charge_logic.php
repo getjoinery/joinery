@@ -108,7 +108,7 @@
 				//CREATE NEW PLAN
 				$plan = \Stripe\Plan::create([
 				  "amount" => (int)$cart_item['price'] * 100,
-				  "interval" => "month",
+				  "interval" => $cart_item['recurring'],
 				  "product" => [
 					"name" => 'Recurring donation $' . (int)$cart_item['price'],
 				  ],
