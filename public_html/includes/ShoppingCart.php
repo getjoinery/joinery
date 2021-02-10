@@ -138,7 +138,7 @@ class ShoppingCart {
 				'price' => $price,
 				'quantity' => $quantity,
 				'total' => $quantity * $price,
-				'recurring' => $product->get('pro_is_recurring'),
+				'recurring' => $product->get('pro_recurring'),
 			);
 		}
 		return $detailed_items;

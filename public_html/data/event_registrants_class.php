@@ -46,6 +46,7 @@ class EventRegistrant extends SystemBase {
 		'evr_health_notes' => 'Are we taking signups',
 		'evr_extra_info_completed' => 'Whether the person has entered the needed questions for the event',
 		'evr_ord_order_id' => 'Order for the registration',
+		'evr_expires_time' => 'Time at which this registration expires.'
 	);
 
 	public static $generated_fields = array(
