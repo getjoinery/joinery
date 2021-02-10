@@ -99,9 +99,19 @@
 		NULL, //array('event_id'=>'DESC'),
 		NULL,
 		NULL);	
+	
+	$event_registrations->load();
+	
+	foreach($event_registrations as $event_registrant){
+		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+			$event_registrant->remove();
+			//REFRESH THE PAGE
+			LibraryFunctions::Redirect($_SERVER['REQUEST_URI']); 
+		}
+	}
 		
 	if($_SESSION['permission'] < 5 && !$event_registrations->count_all()){
-		$error_message = '<p><strong>You are not registered for this event, so you cannot access the event materials.</strong></p>	
+		$error_message = '<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>	
 		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
 	} 
 	else{
