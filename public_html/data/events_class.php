@@ -212,7 +212,7 @@ class Event extends SystemBase {
 		}
 	}
 	
-	function add_registrant($usr_user_id, $ord_order_id = NULL){
+	function add_registrant($usr_user_id, $ord_order_id = NULL, $days_until_expire=NULL){
 		if($event_registrant = EventRegistrant::check_if_registrant_exists($usr_user_id, $this->get('evt_event_id'))){
 			return $event_registrant;
 		}
@@ -222,7 +222,13 @@ class Event extends SystemBase {
 			if($ord_order_id){
 				$event_registrant->set('evr_ord_order_id', $ord_order_id);
 			}
-			$event_registrant->set('evr_evt_event_id', $this->get('evt_event_id'));				
+			$event_registrant->set('evr_evt_event_id', $this->get('evt_event_id'));		
+
+			if($days_until_expire){
+				$date = new DateTime();
+				$date->add(new DateInterval('P'.$days_until_expire.'D'));
+				$event_registrant->set('evr_expires_time', $date->format('Y-m-d g:i:s'));	
+			}
 			$event_registrant->save();	
 			$event_registrant->load();	
 			return $event_registrant;
