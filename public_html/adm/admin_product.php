@@ -66,7 +66,10 @@
 		
 		$pg = new ProductGroup($product->get('pro_prg_product_group_id'), TRUE);
 		echo 'Product group: <b>'. $pg->get('prg_name').'</b><br>';
-		echo 'Product info collected: <b>'. $product->get_requirement_text().'</b><br>';
+		
+
+		$requirements = implode(', ', $product->get_requirement_info());
+		echo 'Product info collected at purchase: <b>'. $requirements.'</b><br>';
 		echo 'Product Description: <b>'. $product->get('pro_description').'</b><br>';
 		//echo 'After purchase message: <b>'. $product->get('pro_after_purchase_message').'</b><br>';
 

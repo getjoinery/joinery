@@ -23,22 +23,14 @@
 
 	if ($_POST || $_REQUEST['action']) {
 		if ($_REQUEST['action'] == 'edit') {
-
-			//PREVENT PRODUCTS FROM BEING ADDED TO MULTIPLE EVENTS
-			if($_REQUEST['pro_evt_event_id']){
-
-				$products = new MultiProduct(
-				array('event_id' => $_REQUEST['pro_evt_event_id'], 'product_id_is_not' => $product->key));
-				if($products->count_all()){
-					$products->load();
-					$otherproducts = '';
-					foreach ($products as $product){
-						$otherproducts = $product->get('pro_name');
-					}
-					throw new SystemDisplayableError('An event cannot be attached to two different products:  It is currently attached to: <a href="/admin/admin_products?p='. $product->key. '">'.$otherproducts.'</a>');
-					exit();
+			
+			if($_REQUEST['pro_requirements']){
+				$total_value = 0;
+				foreach ($_REQUEST['pro_requirements'] as $choice => $value){
+					$total_value += $value;			
 				}
-			}	
+				$product->set('pro_requirements', $total_value);
+			}
 			
 			if($_REQUEST['pro_evt_event_id'] == '' || $_REQUEST['pro_evt_event_id'] == 0){
 				$product->set('pro_evt_event_id', NULL);
@@ -53,7 +45,7 @@
 				$_REQUEST['pro_price'] = (int)$_REQUEST['pro_price'];
 			}
 	
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id', 'pro_requirements','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
@@ -61,22 +53,16 @@
 
 			$product->save();
 			$product->load();
-		} else if ($_REQUEST['action'] == 'add') {
-			
-			//PREVENT PRODUCTS FROM BEING ADDED TO MULTIPLE EVENTS
-			if($_REQUEST['pro_evt_event_id']){
-				$products = new MultiProduct(
-				array('event_id' => $_REQUEST['pro_evt_event_id'], 'product_id_is_not' => $product->key));
-				if($products->count_all()){
-					$products->load();
-					$otherproducts = '';
-					foreach ($products as $product){
-						$otherproducts = $product->get('pro_name');
-					}
-					throw new SystemDisplayableError('An event cannot be attached to two different products:  '. $otherproducts);
-					exit();
+		} 
+		else if ($_REQUEST['action'] == 'add') {
+
+			if($_REQUEST['pro_requirements']){
+				$total_value = 0;
+				foreach ($_REQUEST['pro_requirements'] as $choice => $value){
+					$total_value += $value;			
 				}
-			}	
+				$product->set('pro_requirements', $total_value);
+			}
 
 			if($_REQUEST['pro_evt_event_id'] == '' || $_REQUEST['pro_evt_event_id'] == 0){
 				$_REQUEST['pro_evt_event_id'] = NULL;
@@ -85,7 +71,7 @@
 				$product->set('pro_evt_event_id', intval($_REQUEST['pro_evt_event_id']));
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id', 'pro_requirements','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
@@ -94,11 +80,14 @@
 			$product->save();
 			$product->load();
 			
-		} else if ($_REQUEST['action'] == 'new_version') {
+		} 
+		else if ($_REQUEST['action'] == 'new_version') {
 			$product->add_product_version($_REQUEST['version_name'], $_REQUEST['version_price'], $_REQUEST['version_deposit']);
-		} else if ($_REQUEST['action'] == 'remove_version') {
+		} 
+		else if ($_REQUEST['action'] == 'remove_version') {
 			$product->change_product_version_status($_REQUEST['v'], ProductVersion::INACTIVE);
-		} else if ($_REQUEST['action'] == 'activate_version') {
+		} 
+		else if ($_REQUEST['action'] == 'activate_version') {
 			$product->change_product_version_status($_REQUEST['v'], ProductVersion::ACTIVE); 
 		}
 		
@@ -188,33 +177,32 @@
 	$pgs->load();
 	$optionvals = $pgs->get_dropdown_array();
 	echo $formwriter->dropinput("Product Group", "pro_prg_product_group_id", "ctrlHolder", $optionvals, $product->get('pro_prg_product_group_id'), '', TRUE);	
-	
 
-	/*
-	echo 'Product requirement options: <br />
-	Full name - 1<br />
-	Phone Number - 2<br />
-	Date of Birth - 4<br />
-	Address - 8<br />
-	GDPR Notice - 16<br />
-	Recording consent - 32<br />
-	Email - 64 <br />
-	User input price - 128<br />
-	';
-	echo $formwriter->textinput('Product Requirements', 'pro_requirements', 'ctrlHolder', 100, $product->get('pro_requirements'), '', 255, '');
-	*/
-	
 	$optionvals = array(
-	"Name, email, "=>65, 
-	"Name, email, newsletter signup, "=>321, 
-	"Name, email, recording consent"=>97,
-	"Name, email, recording consent, newsletter signup"=>353,
-	"Name, email, user input price"=> 193,
-	"Name, email, user input price, newsletter signup"=> 449,
-	"Name, email, user input price, comment"=> 705,
-	"Name, email, user input price, newsletter signup, comment"=> 961,	
+		'Name' => 1, 
+		'Email' => 64,
+		//'Phone Number' => 2,
+		//'Date of Birth' => 4,
+		//'Address' => 8,
+		//'GDPR Notice' => 16,
+		'Consent to record' => 32,
+		'User Chooses Price' => 128,
+		'Newsletter Signup' => 256,
+		'Comment' => 512
 	);
-	echo $formwriter->dropinput("Info to collect", "pro_requirements", "ctrlHolder", $optionvals, $product->get('pro_requirements'), '', FALSE);
+	if ($product->key) {
+		//FILL THE CHECKED VALUES AND DECLARE EMAIL AND NAME READ ONLY
+		$checkedvals = $product->get_requirement_info('ids');
+		$readonlyvals = array(1, 64); //DEFAULT
+	}
+	else{
+		$checkedvals = array(1, 64);
+		$readonlyvals = array(1, 64); //DEFAULT
+	}
+	$disabledvals = array();
+	
+	echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+
 
 	echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
 
