@@ -124,7 +124,6 @@
 	)
 	);
 
-
 	$page->begin_box($options);
 
 	// Editing an existing product

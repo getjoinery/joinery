@@ -297,14 +297,12 @@
 			}
 			
 			//ADD TO REGISTRANTS
-			$event_registrant = $event->add_registrant($user->key, $order->key);
+			$event_registrant = $event->add_registrant($user->key, $order->key, $product->get('pro_expires'));
 			//USER MUST HAVE CLICKED THE RECORDING CONSENT BOX
 			if(isset($data['record_terms'])){  //IF IT IS AN ONLINE COURSE
 				$event_registrant->set('evr_recording_consent', TRUE);
 				$event_registrant->save();		
 			} 				
-			
-			
 			
 			$email_fill['event_registrant_id'] = $event_registrant->key;
 			
