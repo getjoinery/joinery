@@ -536,23 +536,34 @@ class FormWriterMaster {
 	********************************/
 	
 	//IF TYPE IS 'RADIO' THIS BECOMES A RADIO INPUT
-	function checkboxList($label, $id, $class, $optionvals, $checkedvals, $arrange, $hint, $type='checkbox') {
-
+	function checkboxList($label, $id, $class, $optionvals, $checkedvals=array(), $disabledvals=array(), $readonlyvals=array(), $arrange='', $hint='', $type='checkbox') {
+		$output = '';
 
 		if(!is_array($checkedvals)){
 			$checkedvals = array();
 		}
-		
+
 		if($type=='checkbox'){
 			$class='uk-checkbox';
 		}
-		else{
+		else if($type=='radio'){
 			$type='radio';
 			$class='uk-radio';
+			
+			if(count($checkedvals) > 1){
+				throw new SystemDisplayableError('A radio field cannot have more than one checked value.');
+			}
+			
+			if(count($readonlyvals) > 0){
+				throw new SystemDisplayableError('A radio field cannot have read only values.');
+			}			
+		}
+		else{
+			throw new SystemDisplayableError('Invalid checkbox type.');
 		}
 
-
-
+		$output .= '<label for="'.$id.'">'.$label.'</label>';
+		$output .=  '<fieldset style="padding:30px; margin:0px;">';
 		foreach ($optionvals as $key => $value) {
 			$uniqid = $id . $value;
 			if(in_array($value, $checkedvals)){
@@ -561,21 +572,44 @@ class FormWriterMaster {
 			else{
 				$checked = '';
 			}
+			
+			//DISABLED MEANS THE VALUE IS NOT PASSED THROUGH POST
+			if(in_array($value, $disabledvals)){
+				$disabled = 'disabled="disabled"';
+			}
+			else{
+				$disabled = '';
+			}			
 
-			return '<div class="uk-margin errorplacement">
-					<div id="'.$id.'_container" class="uk-margin uk-grid-small uk-child-width-auto uk-grid">
-						<input class="'.$class.'" type="'.$type.'" id="'.$uniqid.'" name="'.$id.'[]" value="'.$truevalue.'" '.$checked.' />
-						<label for="'.$uniqid.'">'.$key.'</label>                  
-					</div>
-				   </div>';
+			//READONLY MEANS IT CANNOT BE CHANGED AND IS SUBMITTED THROUGH POST
+			if(in_array($value, $readonlyvals)){
+				if($checked){
+					$output .= $this->hiddeninput($id.'[]', $value);	
+					$output .= '<label for="'.$uniqid.'">'.$key.' (checked, read only)</label><br>';
+				}
+				else{
+					$output .= $this->hiddeninput($id.'[]', '');	
+					$output .= '<label for="'.$uniqid.'">'.$key.' (unchecked, read only)</label><br>';
+				}
+			}
+			else{
+
+				$output .= '<div class="uk-margin errorplacement">
+						<div id="'.$id.'_container" class="uk-margin uk-grid-small uk-child-width-auto uk-grid">
+							<input class="'.$class.'" type="'.$type.'" id="'.$uniqid.'" name="'.$id.'[]" value="'.$value.'" '.$checked.' '.$disabled.' />
+							<label for="'.$uniqid.'">'.$key.'</label>                  
+						</div>
+					   </div>';
+			}
 		}
+		$output .=  '</fieldset>';
+		
+		return $output;
 
 	}
 
 
 
-
-	//radioinput(string,string,associative array,integer)
 
 	function radioinput($label, $id, $class, &$optionvals, $input, $arrange, $hint,$enablestars=FALSE) {
 

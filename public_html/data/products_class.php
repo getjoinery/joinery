@@ -47,6 +47,14 @@ abstract class ProductRequirement {
 
 class FullNameRequirement extends ProductRequirement {
 	const ID = 1;
+	const LABEL = 'Name';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
 
 	public function get_form($formwriter, $user=NULL) {
 		echo $formwriter->textinput("First Name", "full_name_first", "ctrlHolder", 20, $user ? $user->get('usr_first_name') : '', '', 255, '');
@@ -86,7 +94,15 @@ class FullNameRequirement extends ProductRequirement {
 
 class PhoneNumberRequirement extends ProductRequirement {
 	const ID = 2;
-
+	const LABEL = 'Phone Number';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
+	
 	public function get_form($formwriter, $user=NULL) {
 		echo $formwriter->textinput("Phone Number", "phone", "ctrlHolder", 11, '', "Example: (+1) 123-456-6789", 17, "");
 	}
@@ -112,7 +128,15 @@ class PhoneNumberRequirement extends ProductRequirement {
 
 class DOBRequirement extends ProductRequirement {
 	const ID = 4;
-
+	const LABEL = 'Date of Birth';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
+	
 	public function get_form($formwriter, $user=NULL) {
 ?>
 			<div id="dob_container" class="ctrlHolder errorplacement">
@@ -188,6 +212,14 @@ class DOBRequirement extends ProductRequirement {
 
 class AddressRequirement extends ProductRequirement {
 	const ID = 8;
+	const LABEL = 'Address';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
 
 	public function get_form($formwriter, $user=NULL) {
 		$new_address_display = true;
@@ -277,7 +309,15 @@ class AddressRequirement extends ProductRequirement {
 
 class GDPRNoticeRequirement extends ProductRequirement {
 	const ID = 16;
-
+	const LABEL = 'GDPR Notice';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
+	
 	public function get_form($formwriter, $user=NULL) {
 		echo '<div id="gdpr_terms_container" class="ctrlHolder">';
 		echo '<label for="gdpr_terms">Privacy Notice</label>';
@@ -308,7 +348,15 @@ class GDPRNoticeRequirement extends ProductRequirement {
 
 class RecordConsentRequirement extends ProductRequirement {
 	const ID = 32;
-
+	const LABEL = 'Consent to Record';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
+	
 	public function get_form($formwriter, $user=NULL) {
 		echo '<div id="record_terms_container" class="ctrlHolder">';
 		echo '<label for="record_terms">Recording Notice</label>';
@@ -340,7 +388,15 @@ class RecordConsentRequirement extends ProductRequirement {
 
 class EmailRequirement extends ProductRequirement {
 	const ID = 64;
-
+	const LABEL = 'Email';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
+	
 	public function get_form($formwriter, $user=NULL) {
 		echo $formwriter->textinput("Email", "email", "ctrlHolder", 20, $user ? $user->get('usr_email') : '', '', 255, '');
 		
@@ -377,7 +433,15 @@ class EmailRequirement extends ProductRequirement {
 
 class UserPriceRequirement extends ProductRequirement {
 	const ID = 128;
-
+	const LABEL = 'User chooses price';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
+	
 	public function get_form($formwriter, $user=NULL) {
 		echo $formwriter->textinput("Amount of donation $", "user_price", "ctrlHolder", 20, '', '', 255, '');
 		
@@ -419,7 +483,15 @@ class UserPriceRequirement extends ProductRequirement {
 
 class NewsletterSignupRequirement extends ProductRequirement {
 	const ID = 256;
-
+	const LABEL = 'Newsletter Signup';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
+	
 	public function get_form($formwriter, $user=NULL) {
 		echo '<div id="newsletter_container" class="ctrlHolder">';
 		echo '<label for="newsletter">Newsletter Signup</label>';
@@ -452,7 +524,15 @@ class NewsletterSignupRequirement extends ProductRequirement {
 
 class CommentRequirement extends ProductRequirement {
 	const ID = 512;
-
+	const LABEL = 'Comment';
+	
+	function get_id() {
+        return  self::ID;
+    }
+	function get_label() {
+        return  self::LABEL;
+    }
+	
 	public function get_form($formwriter, $user=NULL) {
 		echo $formwriter->textinput("Optional comment", "comment", "ctrlHolder", 20, '', '', 255, '');
 		
@@ -618,20 +698,17 @@ class Product extends SystemBase {
 		'pro_is_active' => 'Active or disabled'
 	);
 	
-	public function get_requirement_text() {
-		if($this->get('pro_requirements') == 65) {
-			return 'Name, email';
-		} else if($this->get('pro_requirements') == 321) {
-			return 'Name, email, newsletter signup';
-		} else if($this->get('pro_requirements') == 97) {
-			return 'Name, email, recording consent';
-		} else if($this->get('pro_requirements') == 353) {
-			return 'Name, email, recording consent, newsletter signup';
-		} else if($this->get('pro_requirements') == 193) {
-			return 'Name, email, user input price';
-		} else if($this->get('pro_requirements') == 449) {
-			return 'Name, email, user input price, newsletter signup';
-		}
+	public function get_requirement_info($output='text') {
+		$requirements_out = array();
+		foreach ($this->get_product_requirements() as $productr){
+			if($output == 'text'){
+				$requirements_out[] = $productr->get_label();
+			}
+			else{
+				$requirements_out[] = $productr->get_id();
+			}
+		}	
+		return $requirements_out;
 	}	
 	
 
