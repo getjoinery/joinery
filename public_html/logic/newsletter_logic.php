@@ -43,24 +43,20 @@
 		}
 		
 		if($user->get('usr_contact_preferences')){
-			echo '<h1 class="entry-title">Newsletters</h1>';
-			echo '<p>You are already subscribed to our newsletter.  If you would like to unsubscribe, visit <a href="/profile">the My Profile page</a>.</p>';
-			$page->public_footer(array('track'=>TRUE));
-			exit();
-		}
-		
-
-		$status = $user->add_to_mailing_list();	
-			
-
-		if(!$status){
-			$message = '<p>We were unable to add you to our mailing list.  Please try again later.</p>';
-		}			
-		else if($status->title == 'Member Exists'){
-			$message =  '<p>You are already signed up for our mailing list.</p>';
+			$message = '<p>You are already subscribed to our newsletter.  If you would like to unsubscribe, visit <a href="/profile">the My Profile page</a></p>';
 		}
 		else{
-			$message =  '<p>You are now signed up for our mailing list.</p>';
+			$status = $user->add_to_mailing_list();		
+
+			if(!$status){
+				$message = '<p>We were unable to add you to our mailing list.  Please try again later.</p>';
+			}			
+			else if($status->title == 'Member Exists'){
+				$message =  '<p>You are already signed up for our mailing list.</p>';
+			}
+			else{
+				$message =  '<p>You are now signed up for our mailing list.</p>';
+			}
 		}
 				
 	}

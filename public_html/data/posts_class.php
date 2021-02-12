@@ -9,6 +9,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/content_versions_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 
 class PostException extends SystemClassException {}
 
@@ -99,6 +100,47 @@ class Post extends SystemBase {
 			return $this->get('pst_link');
 		}
 		
+	}	
+	
+	function get_tags($return_type = 'name'){ 
+		$tags = array();
+		$group_members = new MultiGroupMember(
+			array('post_id' => $this->key),  //SEARCH CRITERIA
+		);
+		$group_members->load();
+
+		foreach ($group_members as $group_member){
+			$group = new Group($group_member->get('grm_grp_group_id'), TRUE);
+			if($return_type == 'name'){
+				$tags[] = $group->get('grp_name');
+			}
+			else{
+				$tags[] = $group->key;
+			}
+		}	
+		return $tags;
+	}	
+
+	
+	function save_tags($tags_array){ 
+		$session = SessionControl::get_instance();
+		//OLD TAGS
+		$post_tag_ids = $this->get_tags('id');
+		foreach ($post_tag_ids as $post_tag_id){
+			$group = new Group($post_tag_id, TRUE);
+			$group->remove_member(NULL, NULL, $this->key);
+		}		
+		
+		//NEW TAGS
+		foreach ($tags_array as $tag){
+			$tag = trim($tag);
+			$tag = preg_replace("/[^A-Za-z0-9 -_]/", '', $tag);
+			
+			if(!$group = Group::get_by_name($tag)){
+				$group = Group::add_group($tag, $session->get_user_id(), Group::GROUP_TYPE_POST_TAG);
+			}
+			$group->add_member(NULL, NULL, $this->key);
+		}		
 	}	
 
 	function load() {
