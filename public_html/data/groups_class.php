@@ -16,7 +16,7 @@ class Group extends SystemBase {
 
 	const GROUP_TYPE_USER = 1;
 	const GROUP_TYPE_EVENT = 2;
-	const GROUP_TYPE_POST = 3;
+	const GROUP_TYPE_POST_TAG = 3;
 
 	public static $fields = array(
 		'grp_group_id' => 'ID of the group',
@@ -89,7 +89,7 @@ class Group extends SystemBase {
 	
 	function add_member($user_id=NULL, $event_id=NULL, $post_id=NULL){ 
 	
-		if(!$this->is_member_in_group($user_id)){
+		if(!$this->is_member_in_group($user_id, $event_id, $post_id)){
 			$groupmember = new GroupMember(NULL);
 			$groupmember->set('grm_usr_user_id', $user_id);	
 			$groupmember->set('grm_evt_event_id', $event_id);
@@ -109,28 +109,38 @@ class Group extends SystemBase {
 			throw new GroupException('To remove a group member, user_id, event_id, or post_id is required.');
 			exit();	
 		}
-	
-		$groupusers = new MultiGroupMember(array(
-			'user_id' => $user_id,
-			'event_id' => $event_id,
-			'post_id' => $post_id,
-			'group_id' => $this->key,
-		));
-		$groupuser = $groupusers->get(0);
-		$groupuser->remove();
+		$searches = array('group_id' => $this->key);
+		if($user_id){
+			$searches['user_id'] = $user_id;
+		}
+		if($event_id){
+			$searches['event_id'] = $event_id;
+		}
+		if($post_id){
+			$searches['post_id'] = $post_id;
+		}		
+		$group_members = new MultiGroupMember($searches);
+		$group_members->load();
+		$group_member = $group_members->get(0);
+		$group_member->remove();
 	}	
 	
 	function is_member_in_group($user_id=NULL, $event_id=NULL, $post_id=NULL) { 
-		$count = new MultiGroupMember(array(
-			'group_id' => $this->key,
-			'user_id' => $user_id,
-			'event_id' => $event_id,
-			'post_id' => $post_id,
-		));
+		$searches = array('group_id' => $this->key);
+		if($user_id){
+			$searches['user_id'] = $user_id;
+		}
+		if($event_id){
+			$searches['event_id'] = $event_id;
+		}
+		if($post_id){
+			$searches['post_id'] = $post_id;
+		}		
+		$group_members = new MultiGroupMember($searches);
 		
-		if ($count->count_all() > 0) {
-			$count->load();
-			return $count->get(0);
+		if ($group_members->count_all() > 0) {
+			$group_members->load();
+			return $group_members->get(0);
 		}
 		return NULL;
 	}	

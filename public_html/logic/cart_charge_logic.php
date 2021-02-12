@@ -2,6 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
@@ -307,6 +308,15 @@
 			$email_fill['event_registrant_id'] = $event_registrant->key;
 			
 
+		}
+		else if($product->get('pro_grp_group_id')){
+			//IT IS AN EVENT BUNDLE
+			$group = new Group($product->get('pro_grp_group_id'), TRUE);
+			$group_members = $group->get_member_list();
+			foreach ($group_members as $group_member){
+				$event = new Event($group_member->get('grm_evt_event_id'), TRUE);
+				$event->add_registrant($user->key, $order->key, $product->get('pro_expires'));
+			}
 		}
 		else{
 			//IT IS A DONATION OF SOME SORT

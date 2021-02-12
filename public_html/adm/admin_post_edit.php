@@ -4,6 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/content_versions_class.php');
 
 	$session = SessionControl::get_instance();
@@ -36,7 +37,7 @@
 			$post->set('pst_usr_user_id',$session->get_user_id());
 		}	
 				
-		
+
 		/*
 
 		if($_POST['pst_start_time_date'] && $_POST['pst_start_time_time']){
@@ -55,10 +56,13 @@
 		$post->prepare();
 		$post->save();
 		$post->load();
-		
-		
+
+		$tags_array = explode(',',$_REQUEST['tags']);
+		$post->save_tags($tags_array);
+
+
 		LibraryFunctions::redirect('/admin/admin_post?pst_post_id='. $post->key);
-		exit;
+		exit;		
 	}
 
 	$title = $post->get('pst_title');
@@ -108,15 +112,20 @@
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_post_edit');
 
+	$tags = '';
 	if($post->key){
 		echo $formwriter->hiddeninput('pst_post_id', $post->key);
 		echo $formwriter->hiddeninput('action', 'edit');
+		
+		$post_tags = $post->get_tags();
+		$tags = implode(', ', $post_tags);
 	}
 	
 	echo $formwriter->textinput('Post title', 'pst_title', NULL, 100, $title, '', 255, '');	
 	
 	echo $formwriter->textinput('Short description (optional)', 'pst_short_description', NULL, 100, $post->get('pst_short_description'), '', 255, '');	
 	
+	echo $formwriter->textinput('Tags (optional, separate with comma)', 'tags', NULL, 100, $tags, '', 255, '');	
 	
 	if($_SESSION['permission'] == 10){
 		echo $formwriter->textinput('Link (if standalone page, no spaces)', 'pst_link', NULL, 100, $post->get('pst_link'), '', 255, '');	
