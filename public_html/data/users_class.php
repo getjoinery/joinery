@@ -158,23 +158,23 @@ class User extends SystemBase {
 	public function add_user_to_automatic_groups(){
 
 		if(!$group_all_users = Group::get_by_name("All users")){
-			$group_all_users = Group::add_group('All users', $this->key);
+			$group_all_users = Group::add_group('All users', $this->key, Group::GROUP_TYPE_USER);
 		}
-		if($group_us_users = Group::get_by_name("US users")){
-			$group_us_users = Group::add_group('US users', $this->key);
+		if(!$group_us_users = Group::get_by_name("US users")){
+			$group_us_users = Group::add_group('US users', $this->key, Group::GROUP_TYPE_USER);
 		}
-		if($group_nus_users = Group::get_by_name("Non-US users")){
-			$group_nus_users = Group::add_group('Non-US users', $this->key);
+		if(!$group_nus_users = Group::get_by_name("Non-US users")){
+			$group_nus_users = Group::add_group('Non-US users', $this->key, Group::GROUP_TYPE_USER);
 		} 
 		
-		$group_all_users->add_user($this->key);
+		$group_all_users->add_member($this->key);
 		
 		if($address = $this->address()){
 			if($address->get('usa_cco_country_code_id') == 1){
-				$group_us_users->add_user($this->key);
+				$group_us_users->add_member($this->key);
 			}
 			else{
-				$group_nus_users->add_user($this->key);
+				$group_nus_users->add_member($this->key);
 			}
 		}		
 	}
@@ -988,15 +988,15 @@ class User extends SystemBase {
 		*/		
 
 
-		$group_users = new MultiGroupUser(
+		$group_members = new MultiGroupMember(
 		array('user_id'=>$this->key),
 		NULL,
 		NULL,
 		NULL);
-		$group_users->load();
+		$group_members->load();
 		
-		foreach ($group_users as $group_user){
-			$group_user->remove();
+		foreach ($group_members as $group_member){
+			$group_member->remove();
 		}			
 
 		$groups = new MultiGroup(

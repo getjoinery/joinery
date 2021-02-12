@@ -8,19 +8,24 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
 
-class GroupUserException extends SystemClassException {}
+require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
 
-class GroupUser extends SystemBase {
+	
+class GroupMemberException extends SystemClassException {}
+
+class GroupMember extends SystemBase {
 
 	public static $fields = array(
-		'gru_group_user_id' => 'ID of the group_user',
-		'gru_grp_group_id' => 'group id',
-		'gru_usr_user_id' => 'user id in group',
+		'grm_group_member_id' => 'ID of the group member',
+		'grm_grp_group_id' => 'group id',
+		'grm_usr_user_id' => 'User in group',
+		'grm_evt_event_id' => 'Event in group',
+		'grm_pst_post_id' => 'Post in group'
 	);
 	
 	public static $constants = array();
 
-	public static $required = array();
+	public static $required = array('grm_grp_group_id');
 
 	public static $field_constraints = array();	
 	
@@ -31,9 +36,12 @@ class GroupUser extends SystemBase {
 		
 	
 	private function _check_for_duplicates() {
-		$count = new MultiGroupUser(array(
-			'group_id' => $this->get('gru_grp_group_id'),
-			'user_id' => $this->get('gru_usr_user_id'),
+		
+		$count = new MultiGroupMember(array(
+			'group_id' => $this->get('grm_grp_group_id'),
+			'user_id' => $this->get('grm_usr_user_id'),
+			'event_id' => $this->get('grm_evt_event_id'),
+			'post_id' => $this->get('grm_pst_post_id')
 		));
 		 
 		if ($count->count_all() > 0) {
@@ -47,7 +55,7 @@ class GroupUser extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
-		$q = $dblink->prepare('DELETE FROM gru_group_users WHERE gru_group_user_id=?');
+		$q = $dblink->prepare('DELETE FROM grm_group_members WHERE grm_group_member_id=?');
 		$q->bindValue(1, $this->key, PDO::PARAM_INT);
 		
 		$success = $q->execute();
@@ -58,12 +66,27 @@ class GroupUser extends SystemBase {
 
 	function prepare() {	
 		if ($this->data === NULL) {
-			throw new GroupUserException('This has no data.');
+			throw new GroupMemberException('This has no data.');
+		}
+
+		//MAKE SURE THE RECORD HAS ONLY ONE FOREIGN KEY
+		$count = 0;
+		if($this->get('grm_usr_user_id')){
+			$count++;
+		}
+		if($this->get('grm_evt_event_id')){
+			$count++;
+		}
+		if($this->get('grm_pst_post_id')){
+			$count++;
+		}
+		if($count != 1){
+			throw new GroupMemberException('This GroupMember has more than one or zero foreign keys.');
 		}
 		
 		if(!$this->key){
 			if($this->_check_for_duplicates()){
-				throw new GroupUserException('This is a duplicate.');
+				throw new GroupMemberException('This is a duplicate.');
 			}
 		}
 		
@@ -108,23 +131,23 @@ class GroupUser extends SystemBase {
 
 	function load() {
 		parent::load();
-		$this->data = SingleRowFetch('gru_group_users', 'gru_group_user_id',
+		$this->data = SingleRowFetch('grm_group_members', 'grm_group_member_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
 		if ($this->data === NULL) {
 			throw new VideoException(
-				'This group_user does not exist');
+				'This group_member does not exist');
 		}
 	}
 	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
-		if ($this->get('gru_usr_user_id') != $current_user) {
+		if ($this->get('grm_usr_user_id') != $current_user) {
 			// If the user's ID doesn't match , we have to make
 			// sure they have admin access, otherwise denied.
 			if ($session->get_permission() < 5) {
 				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this group_user.');
+					'Current user does not have permission to edit this group_member.');
 			}
 		}
 	}
@@ -136,13 +159,13 @@ class GroupUser extends SystemBase {
 		}
 
 		if ($this->key) {
-			$p_keys = array('gru_group_user_id' => $this->key);
+			$p_keys = array('grm_group_member_id' => $this->key);
 			// Editing an existing record
 		} else {
 			$p_keys = NULL;
 			// Creating a new record
-			unset($rowdata['gru_group_user_id']);
-			//$rowdata['gru_create_time'] = 'now()';
+			unset($rowdata['grm_group_member_id']);
+			//$rowdata['grm_create_time'] = 'now()';
 			
 			if($this->_check_for_duplicates()){
 				return FALSE;
@@ -152,16 +175,16 @@ class GroupUser extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'gru_group_users', $p_keys, $rowdata, FALSE, 0);
+			$dbhelper, $dblink, 'grm_group_members', $p_keys, $rowdata, FALSE, 0);
 
-		$this->key = $p_keys_return['gru_group_user_id'];
+		$this->key = $p_keys_return['grm_group_member_id'];
 	}
 	
 	static function InitDB($mode='structure'){
 	
 		try{
 			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS gru_group_users_gru_group_user_id_seq
+				CREATE SEQUENCE IF NOT EXISTS grm_group_members_grm_group_member_id_seq
 				INCREMENT BY 1
 				NO MAXVALUE
 				NO MINVALUE
@@ -174,18 +197,20 @@ class GroupUser extends SystemBase {
 		}			
 		
 		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."gru_group_users" (
-			  "gru_group_user_id" int4 NOT NULL DEFAULT nextval(\'gru_group_users_gru_group_user_id_seq\'::regclass),
-			  "gru_usr_user_id" int4 NOT NULL,
-			  "gru_grp_group_id" int4 NOT NULL,
-			  "gru_created_time" timestamp(6) DEFAULT now()
+			CREATE TABLE IF NOT EXISTS "public"."grm_group_members" (
+			  "grm_group_member_id" int4 NOT NULL DEFAULT nextval(\'grm_group_members_grm_group_member_id_seq\'::regclass),
+			  "grm_usr_user_id" int4,
+			  "grm_evt_event_id" int4,
+			  "grm_pst_post_id" int4,
+			  "grm_grp_group_id" int4 NOT NULL,
+			  "grm_created_time" timestamp(6) DEFAULT now()
 			)
 			;';
 		$q = $dblink->prepare($sql);
 		$success = $q->execute();
 		
 		try{		
-			$sql = 'ALTER TABLE "public"."gru_group_users" ADD CONSTRAINT "gru_group_users_pkey" PRIMARY KEY ("gru_group_user_id");';
+			$sql = 'ALTER TABLE "public"."grm_group_members" ADD CONSTRAINT "grm_group_members_pkey" PRIMARY KEY ("grm_group_member_id");';
 			$q = $dblink->prepare($sql);
 			$success = $q->execute();
 		}
@@ -199,18 +224,17 @@ class GroupUser extends SystemBase {
 	
 }
 
-class MultiGroupUser extends SystemMultiBase {
-	function get_dropdown_array($include_new=FALSE) {
+class MultiGroupMember extends SystemMultiBase {
+	function get_user_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$user = new User($item->get('gru_usr_user_id'), TRUE);
+			$user = new User($item->get('grm_usr_user_id'), TRUE);
 			$items[$user->display_name()] = $user->key;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
 		}
 		return $items;
-
 	}
 	
 	private function _get_results($only_count=FALSE) { 
@@ -218,15 +242,24 @@ class MultiGroupUser extends SystemMultiBase {
 		$bind_params = array();
 
 		if (array_key_exists('group_id', $this->options)) {
-			$where_clauses[] = 'gru_grp_group_id = ?';
-			$bind_params[] = array($this->options['group_id'], PDO::PARAM_STR);
+			$where_clauses[] = 'grm_grp_group_id = ?';
+			$bind_params[] = array($this->options['group_id'], PDO::PARAM_INT);
 		}
 
 		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'gru_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_STR);
+			$where_clauses[] = 'grm_usr_user_id = ?';
+			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		}	
-				
+
+		if (array_key_exists('event_id', $this->options)) {
+			$where_clauses[] = 'grm_evt_event_id = ?';
+			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
+		}
+
+		if (array_key_exists('post_id', $this->options)) {
+			$where_clauses[] = 'grm_pst_post_id = ?';
+			$bind_params[] = array($this->options['post_id'], PDO::PARAM_INT);
+		}		
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
@@ -235,18 +268,18 @@ class MultiGroupUser extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM gru_group_users ' . $where_clause;
+			$sql = 'SELECT COUNT(1) FROM grm_group_members ' . $where_clause;
 		} else {
-			$sql = 'SELECT * FROM gru_group_users
+			$sql = 'SELECT * FROM grm_group_members
 				' . $where_clause . '
 				ORDER BY ';
 				
 			if (!$this->order_by) {
-				$sql .= " gru_group_user_id ASC ";
+				$sql .= " grm_group_member_id ASC ";
 			}
 			else {
-				if (array_key_exists('group_user_id', $this->order_by)) {
-					$sql .= ' gru_group_user_id ' . $this->order_by['group_user_id'];
+				if (array_key_exists('group_member_id', $this->order_by)) {
+					$sql .= ' grm_group_member_id ' . $this->order_by['group_member_id'];
 				}		
 			}				
 
@@ -270,8 +303,8 @@ class MultiGroupUser extends SystemMultiBase {
 	function load() {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
-			$child = new GroupUser($row->gru_group_user_id);
-			$child->load_from_data($row, array_keys(GroupUser::$fields));
+			$child = new GroupMember($row->grm_group_member_id);
+			$child->load_from_data($row, array_keys(GroupMember::$fields));
 			$this->add($child);
 		}
 	}

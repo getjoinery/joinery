@@ -8,11 +8,15 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_users_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_members_class.php');
 
 class GroupException extends SystemClassException {}
 
 class Group extends SystemBase {
+
+	const GROUP_TYPE_USER = 1;
+	const GROUP_TYPE_EVENT = 2;
+	const GROUP_TYPE_POST = 3;
 
 	public static $fields = array(
 		'grp_group_id' => 'ID of the group',
@@ -21,6 +25,7 @@ class Group extends SystemBase {
 		'grp_create_time' => 'Created',
 		'grp_update_time' => 'Updated',
 		'grp_delete_time' => 'Is this group deleted?',
+		'grp_type' => 'Type of group:  1-user, 2-event, 3-post'
 	);
 	
 	public static $constants = array();
@@ -41,7 +46,6 @@ class Group extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-		//SET ALL DEFAULT FOR THIS USER TO ZERO
 		$sql = "SELECT grp_group_id FROM grp_groups
 			WHERE grp_name = :grp_name";
 
@@ -56,7 +60,6 @@ class Group extends SystemBase {
 		}
 
 		if (!$q->rowCount()) {
-			//throw new AddressException('');
 			return FALSE;
 		}
 
@@ -65,73 +68,64 @@ class Group extends SystemBase {
 		return new Group($r->grp_group_id, TRUE);
 	}	
 	
-	public static function add_group($name, $user_id){
+	public static function add_group($name, $user_id, $type){
 
 		if($group = Group::get_by_name($name)){
-			return $group; 
+			throw new GroupException('A group named "'.$name.'" already exists.');
+			exit();	
 		}
 		else{
 			$group = new Group(NULL);
 			$group->set('grp_name', $name);
 			$group->set('grp_usr_user_id_created', $user_id);
-			$group->set('grp_create_time', 'now()');
-			$group->set('grp_update_time', 'now()');
+			$group->set('grp_type', $type);
+			$group->prepare();
 			$group->save();
+			$group->load();
 			return $group;
 		}
 		
 	}	
 	
-	function add_user($user_id){
-		
-		if(!$this->is_user_in_group($user_id)){
-			$groupuser = new GroupUser(NULL);
-			$groupuser->set('gru_usr_user_id', $user_id);	
-			$groupuser->set('gru_grp_group_id', $this->key);	
-			$groupuser->save();
+	function add_member($user_id=NULL, $event_id=NULL, $post_id=NULL){ 
+	
+		if(!$this->is_member_in_group($user_id)){
+			$groupmember = new GroupMember(NULL);
+			$groupmember->set('grm_usr_user_id', $user_id);	
+			$groupmember->set('grm_evt_event_id', $event_id);
+			$groupmember->set('grm_pst_post_id', $post_id);
+			$groupmember->set('grm_grp_group_id', $this->key);
+			$groupmember->prepare();
+			$groupmember->save();
 			
 			$this->set('grp_update_time', 'now()');
 			$this->save();
 		}
 	}
 	
-	function remove_user($user_id){
+	function remove_member($user_id=NULL, $event_id=NULL, $post_id=NULL){
+
+		if(!$user_id && !$event_id && !$post_id){
+			throw new GroupException('To remove a group member, user_id, event_id, or post_id is required.');
+			exit();	
+		}
 	
-		$groupusers = new MultiGroupUser(array(
-			'user_id' => $user->key,
+		$groupusers = new MultiGroupMember(array(
+			'user_id' => $user_id,
+			'event_id' => $event_id,
+			'post_id' => $post_id,
 			'group_id' => $this->key,
 		));
 		$groupuser = $groupusers->get(0);
 		$groupuser->remove();
 	}	
 	
-	function get_count() {
-		$count = new MultiGroupUser(array(
-			'group_id' => $this->key,
-		));
-		
-		$numrecords = $count->count_all();
-		return $numrecords;
-	}		
-	
-	function get_list() {
-		$group_users = new MultiGroupUser(array(
-			'group_id' => $this->key,
-		));
-		
-		$group_users->load();
-		
-		$list = array();
-		foreach ($group_users as $group_user){
-			$list[] = $group_user->get('gru_usr_user_id');
-		}
-		return $list; 
-	}
-	
-	function is_user_in_group($user_id) {
-		$count = new MultiGroupUser(array(
+	function is_member_in_group($user_id=NULL, $event_id=NULL, $post_id=NULL) { 
+		$count = new MultiGroupMember(array(
 			'group_id' => $this->key,
 			'user_id' => $user_id,
+			'event_id' => $event_id,
+			'post_id' => $post_id,
 		));
 		
 		if ($count->count_all() > 0) {
@@ -139,6 +133,25 @@ class Group extends SystemBase {
 			return $count->get(0);
 		}
 		return NULL;
+	}	
+	
+	function get_member_list() {
+		$group_members = new MultiGroupMember(array(
+			'group_id' => $this->key,
+		));
+		
+		$group_members->load();
+		
+		return $group_members;
+	}	
+	
+	function get_member_count() {
+		$count = new MultiGroupMember(array(
+			'group_id' => $this->key,
+		));
+		
+		$numrecords = $count->count_all();
+		return $numrecords;
 	}		
 	
 	private function _check_for_duplicate_group() {
@@ -275,17 +288,17 @@ class Group extends SystemBase {
 			$this_transaction = true;
 		}
 
-		$group_users = new MultiGroupUser(
+		$group_members = new MultiGroupMember(
 			array('group_id' => $this->key),  //SEARCH CRITERIA
 			NULL,  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 			NULL,  //NUM PER PAGE
 			NULL,  //OFFSET
 			NULL  //AND OR OR
 		);
-		$group_users->load();
+		$group_members->load();
 		
-		foreach ($group_users as $group_user){
-			$group_user->remove();
+		foreach ($group_members as $group_member){
+			$group_member->remove();
 		}	
 
 		$sql = 'DELETE FROM grp_groups WHERE grp_group_id=:grp_group_id';
@@ -385,6 +398,11 @@ class MultiGroup extends SystemMultiBase {
 			$where_clauses[] = 'grp_usr_user_id = ?';
 			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		}		
+
+		if (array_key_exists('type', $this->options)) {
+			$where_clauses[] = 'grp_type = ?';
+			$bind_params[] = array($this->options['type'], PDO::PARAM_INT);
+		}	
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';

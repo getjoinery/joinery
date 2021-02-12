@@ -19,9 +19,8 @@
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
 
-
 	$groups = new MultiGroup(
-		NULL,  //SEARCH CRITERIA
+		array('type' => Group::GROUP_TYPE_EVENT),  //SEARCH CRITERIA
 		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 		$numperpage,  //NUM PER PAGE
 		$offset,  //OFFSET
@@ -30,17 +29,14 @@
 	$groups->load();
 
 
-
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
-		'page_title' => 'Add User',
-		'readable_title' => 'Add User',
+		'menu-id'=> 2,
+		'page_title' => 'Event Bundles',
+		'readable_title' => 'Event Bundles',
 		'breadcrumbs' => array(
-			'Users'=>'/admin/admin_users', 
-			'Groups' => '',
+			'Events'=>'/admin/admin_events'
 		),
 		'session' => $session,
 	)
@@ -48,9 +44,9 @@
 
 
 
-	$headers = array("Group", "# Users", "Last Update", "Action");
+	$headers = array("Bundle", "# Events", "Last Update", "Action");
 	$altlinks = array();
-	$altlinks += array('Add Group'=> '/admin/admin_group_edit');
+	$altlinks += array('Add Bundle'=> '/admin/admin_event_bundle_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
@@ -65,10 +61,10 @@
 		$rowvalues = array();
 
 
-		array_push($rowvalues, "<a href='/admin/admin_group_members?grp_group_id=$group->key'>".$group->get('grp_name')."</a> ");
+		array_push($rowvalues, "<a href='/admin/admin_event_bundle?grp_group_id=$group->key'>".$group->get('grp_name')."</a> ");
 		
-		$numusers = (string)$group->get_member_count();
-		array_push($rowvalues, $numusers);
+		$num = (string)$group->get_member_count();
+		array_push($rowvalues, $num);
 
 		array_push($rowvalues, LibraryFunctions::convert_time($group->get('grp_update_time'), "UTC", $session->get_timezone(), 'M j, Y')); 
 
