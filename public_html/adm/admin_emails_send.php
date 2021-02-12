@@ -9,7 +9,7 @@
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_members_class.php');
 	
 	$session = SessionControl::get_instance();
 	//$session->set_return();

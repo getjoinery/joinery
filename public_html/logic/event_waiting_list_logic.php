@@ -54,8 +54,11 @@
 		}			
 
 		//ADD TO WAITING LIST
-		$group = Group::add_group($event->get('evt_name') . ' waiting list', 1);
-		$group->add_user($user->key);
+		$waiting_list_name = $event->get('evt_name') . ' waiting list';
+		if(!$group = Group::get_by_name($waiting_list_name)){
+			$group = Group::add_group($waiting_list_name, NULL, Group::GROUP_TYPE_USER);
+		}
+		$group->add_member($user->key);
 		$display_message = 'You have been added to the '.$event->get('evt_name').' waiting list.';
 		$message_type = 'status_announcement';	
 

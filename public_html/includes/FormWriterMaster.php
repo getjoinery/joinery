@@ -532,11 +532,11 @@ class FormWriterMaster {
 			id (str)
 			optionvals(associative array, 'label'=>'value')
 			checkedvals(single dimensional array)
-			arrange= InlineLabel or BlockLabel
+			readonlyvals(single dimensional array)
 	********************************/
 	
 	//IF TYPE IS 'RADIO' THIS BECOMES A RADIO INPUT
-	function checkboxList($label, $id, $class, $optionvals, $checkedvals=array(), $disabledvals=array(), $readonlyvals=array(), $arrange='', $hint='', $type='checkbox') {
+	function checkboxList($label, $id, $class, $optionvals, $checkedvals=array(), $disabledvals=array(), $readonlyvals=array(), $hint='', $type='checkbox') {
 		$output = '';
 
 		if(!is_array($checkedvals)){
@@ -610,10 +610,18 @@ class FormWriterMaster {
 
 
 
+	/*******************************
+	GENERATES A RADIO GROUP GIVEN AN ARRAY OF VALUES
 
-	function radioinput($label, $id, $class, &$optionvals, $input, $arrange, $hint,$enablestars=FALSE) {
-
-		return $this->checkboxList($label, $id, $class, $optionvals, $checkedvals, $arrange, $hint, 'uk-radio');
+	INPUT: 	label (str)
+			id (str)
+			optionvals(associative array, 'label'=>'value')
+			checkedval
+			readonlyvals(single dimensional array)
+	********************************/
+	function radioinput($label, $id, $class, &$optionvals, $checkedval, $disabledvals, $readonlyvals, $hint) {
+		$checkedvals = array($checkedval);
+		return $this->checkboxList($label, $id, $class, $optionvals, $checkedvals, $disabledvals, $readonlyvals, $hint, 'radio');
 		
 	}
 

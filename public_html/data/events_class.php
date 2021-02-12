@@ -668,6 +668,10 @@ class Multievent extends SystemMultiBase {
 			$bind_params[] = array($this->options['status'], PDO::PARAM_INT);
 		}
 
+		if (array_key_exists('status_not_cancelled', $this->options)) {
+			$where_clauses[] = '(evt_status = 1 OR evt_status = 2)';
+		}
+
 		if (array_key_exists('deleted', $this->options)) {
 			if ($this->options['deleted']) {
 				$where_clauses[] = 'evt_is_deleted is TRUE' ;

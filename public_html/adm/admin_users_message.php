@@ -150,7 +150,7 @@
 			
 		}
 		else if($group){
-			$group_users = NULL;
+			$group_members = NULL;
 			//EVENT-ONLY ENTRY, THIS IS SO WE CAN KEEP A RECORD OF THE EVENT MESSAGE
 			$message = new Message(NULL);
 			$message->set('msg_usr_user_id_sender', $sender->key); 
@@ -161,15 +161,15 @@
 			$message->save();			
 			
 			//REGISTRANTS
-			$group_users = new MultiGroupUser(
+			$group_members = new MultiGroupMember(
 				array('group_id' => $group->key),  //SEARCH CRITERIA
 				NULL,  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 				NULL,  //NUM PER PAGE
 				NULL,  //OFFSET
 				'AND'  //AND OR OR
 			);
-			//$numrecords = $group_users->count_all();
-			$group_users->load();
+			//$numrecords = $group_members->count_all();
+			$group_members->load();
 		
 			$settings = Globalvars::get_instance();
 			$email_inner_template = $settings->get_setting('group_email_inner_template');
@@ -184,9 +184,9 @@
 				'utm_source' => urlencode($_POST['eml_subject']),			
 			));
 			
-			foreach ($group_users as $group_user){
+			foreach ($group_members as $group_member){
 				
-				$recipient = new User($group_user->get('gru_usr_user_id'), TRUE);
+				$recipient = new User($group_member->get('grm_usr_user_id'), TRUE);
 						
 				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
 				$email->add_recipient($recipient->get('usr_email'), $recipient->display_name());

@@ -173,7 +173,7 @@
 	echo $formwriter->textinput('External register link (if needed)', 'evt_external_register_link', NULL, 100, $event->get('evt_external_register_link'), '', 255, '');
 
 		
-	$users = new MultiGroupUser(
+	$users = new MultiGroupMember(
 		array(
 			'group_id' => 27,
 		),
@@ -181,7 +181,7 @@
 		NULL,
 		NULL);
 	$users->load();
-	$optionvals = $users->get_dropdown_array();
+	$optionvals = $users->get_user_dropdown_array();
 
 	echo $formwriter->dropinput('Led by', 'evt_usr_user_id_leader', 'ctrlHolder', $optionvals, $event->get('evt_usr_user_id_leader'), '', TRUE);
 	

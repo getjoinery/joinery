@@ -6,7 +6,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipients_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_members_class.php');
 	
 	$session = SessionControl::get_instance();
 	//$session->set_return();
@@ -41,10 +41,10 @@
 	foreach($recipient_groups as $recipient_group){
 
 		$group = new Group($recipient_group->erg_grp_group_id, TRUE);
-		$members = $group->get_list();
+		$members = $group->get_member_list();
 			
 		foreach($members as $member){
-			$user= new User($member, TRUE);
+			$user= new User($member->get('grm_usr_user_id'), TRUE);
 			
 			if($user->get('usr_contact_preferences') == 0 && $email->get('eml_type') == Email::TYPE_MARKETING){
 				echo '<font color="red">Unsubscribed: '.$user->display_name() .'</font><br>';

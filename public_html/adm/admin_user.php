@@ -22,7 +22,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_members_class.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 	
@@ -38,14 +38,14 @@
 		if($_POST['action'] == 'add_to_group'){
 			//ADD THE USER TO A GROUP
 			$group = new Group($_POST['grp_group_id'], TRUE);
-			$group->add_user($user->key);
+			$group->add_member($user->key);
 			$returnurl = $session->get_return();
 			header("Location: $returnurl");
 			exit();			
 		}
 		else if($_POST['action'] == 'remove_from_group'){
-			$groupuser = new GroupUser($_POST['gru_group_user_id'], TRUE);
-			$groupuser->remove();
+			$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
+			$groupmember->remove();
 
 			$returnurl = $session->get_return();
 			header("Location: $returnurl");
@@ -461,10 +461,10 @@
 	$page->endtable(); 
 
 
-	$groupusers = new MultiGroupUser(array(
+	$groupmembers = new MultiGroupMember(array(
 		'user_id' => $user->key,
 	));
-	$groupusers->load();
+	$groupmembers->load();
 	
 	$headers = array("Group", "Action");
 	$altlinks = array();
@@ -474,13 +474,13 @@
 	);
 	$page->tableheader($headers, $box_vars);
 
-    foreach($groupusers as $groupuser) {
-		$group = new Group($groupuser->get('gru_grp_group_id'), TRUE);
+    foreach($groupmembers as $groupmember) {
+		$group = new Group($groupmember->get('grm_grp_group_id'), TRUE);
 		$rowvalues = array();
 		array_push($rowvalues, $group->get('grp_name'));
 		$delform = '<form id="form4" class="form4" name="form4" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_group" />
-		<input type="hidden" class="hidden" name="gru_group_user_id" id="gru_group_user_id" value="'.$groupuser->key.'" />
+		<input type="hidden" class="hidden" name="grm_group_member_id" id="grm_group_member_id" value="'.$groupmember->key.'" />
 		<button type="submit">Remove</button>
 		</form>';
 		array_push($rowvalues, $delform);	
