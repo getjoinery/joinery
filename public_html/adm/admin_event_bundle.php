@@ -58,10 +58,8 @@
 	$headers = array('Event', 'Action');
 	$altlinks = array();
 	if(!$group->get('grp_delete_time')) {
-		if($group->get_member_count() > 0){
-			$altlinks +=  array('Edit bundle' => '/admin/admin_event_bundle_edit?grp_group_id='.$group->key);
-			//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';
-		} 
+		$altlinks +=  array('Edit bundle' => '/admin/admin_event_bundle_edit?grp_group_id='.$group->key);
+		//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';
 	}	
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(

@@ -14,12 +14,14 @@ class FormWriterMaster {
 	protected $validate_style_info = 'errorElement: "p",
 							errorClass: "error help-block text-red uk-form-danger",
 							highlight: function(element, errorClass) {
-								$("#"+element.name+"_container").addClass("uk-form-danger");
-
+								//REMOVE BRACKETS FOR CHECKBOX LISTS
+								var name = element.name.replace(/[\[\]]/gi, "");
+								$("#"+name+"_container").addClass("uk-form-danger");
 							  },
 							  unhighlight: function(element, errorClass) {
-								  $("#"+element.name+"_container").removeClass("uk-form-danger");
-
+								//REMOVE BRACKETS FOR CHECKBOX LISTS
+								var name = element.name.replace(/[\[\]]/gi, "");
+								  $("#"+name+"_container").removeClass("uk-form-danger");
 							  },
 							errorPlacement: function(error, element) {
 								error.appendTo(element.parents(".errorplacement").eq(0));
@@ -562,6 +564,7 @@ class FormWriterMaster {
 			throw new SystemDisplayableError('Invalid checkbox type.');
 		}
 
+		$output .= '<div id="'.$id.'_container" class="uk-margin errorplacement">';
 		$output .= '<label for="'.$id.'">'.$label.'</label>';
 		$output .=  '<fieldset style="padding:30px; margin:0px;">';
 		foreach ($optionvals as $key => $value) {
@@ -594,15 +597,15 @@ class FormWriterMaster {
 			}
 			else{
 
-				$output .= '<div class="uk-margin errorplacement">
-						<div id="'.$id.'_container" class="uk-margin uk-grid-small uk-child-width-auto uk-grid">
+				$output .= '<div class="uk-margin">
+						<div class="uk-margin uk-grid-small uk-child-width-auto uk-grid">
 							<input class="'.$class.'" type="'.$type.'" id="'.$uniqid.'" name="'.$id.'[]" value="'.$value.'" '.$checked.' '.$disabled.' />
 							<label for="'.$uniqid.'">'.$key.'</label>                  
 						</div>
 					   </div>';
 			}
 		}
-		$output .=  '</fieldset>';
+		$output .=  '</fieldset></div>';
 		
 		return $output;
 

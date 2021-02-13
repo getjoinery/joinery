@@ -125,6 +125,15 @@ class Group extends SystemBase {
 		$group_member->remove();
 	}	
 	
+	function remove_all_members(){
+		$searches = array('group_id' => $this->key);	
+		$group_members = new MultiGroupMember($searches);
+		$group_members->load();
+		foreach($group_members as $group_member){
+			$group_member->remove();
+		}
+	}	
+	
 	function is_member_in_group($user_id=NULL, $event_id=NULL, $post_id=NULL) { 
 		$searches = array('group_id' => $this->key);
 		if($user_id){

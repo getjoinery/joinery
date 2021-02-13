@@ -12,15 +12,17 @@
 	if (isset($_REQUEST['grp_group_id'])) {
 		$group = new Group($_REQUEST['grp_group_id'], TRUE);
 	} else {
-		$group = new Group(NULL);
+		$group = NULL;
 	}
 
 	if($_POST){
-		
-		if (!isset($_REQUEST['grp_group_id'])){
+		if ($group){
+			$group->remove_all_members();	
+		}
+		else{
 			$group = Group::add_group(strip_tags(trim($_POST['grp_name'])), $session->get_user_id(), Group::GROUP_TYPE_EVENT);
 		}
-		
+	
 
 		foreach ($_REQUEST['event_list'] as $event_id){
 			$group->add_member(NULL, $event_id, NULL);	
@@ -51,7 +53,8 @@
 	$formwriter = new FormWriterMaster('form1');
 	
 	$validation_rules = array();
-	$validation_rules['grp_name']['required']['value'] = 'true';	
+	$validation_rules['grp_name']['required']['value'] = 'true';	 
+	$validation_rules['"event_list[]"']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 
 
