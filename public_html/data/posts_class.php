@@ -389,6 +389,10 @@ class MultiPost extends SystemMultiBase {
 			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
 		}			
 
+		if (array_key_exists('published', $this->options)) {
+		 	$where_clauses[] = 'pst_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');
+		}
+		
 		if (array_key_exists('deleted', $this->options)) {
 		 	$where_clauses[] = 'pst_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
 		} 
