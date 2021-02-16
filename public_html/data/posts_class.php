@@ -122,7 +122,11 @@ class Post extends SystemBase {
 	}	
 
 	
-	function save_tags($tags_array){ 
+	function save_tags($tags_array){
+		if(count($tags_array) == 0){
+			return false;
+		}
+		
 		$session = SessionControl::get_instance();
 		//OLD TAGS
 		$post_tag_ids = $this->get_tags('id');
