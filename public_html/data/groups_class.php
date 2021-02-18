@@ -20,7 +20,7 @@ class Group extends SystemBase {
 
 	public static $fields = array(
 		'grp_group_id' => 'ID of the group',
-		'grp_name' => 'Name',
+		'grp_name' => 'Group Name',
 		'grp_usr_user_id_created' => 'User who created the group',
 		'grp_create_time' => 'Created',
 		'grp_update_time' => 'Updated',
@@ -69,6 +69,10 @@ class Group extends SystemBase {
 	}	
 	
 	public static function add_group($name, $user_id, $type){
+		if(!$name){
+			throw new GroupException('You cannot create a group without a name.');
+			exit();			
+		}
 
 		if($group = Group::get_by_name($name)){
 			throw new GroupException('A group named "'.$name.'" already exists.');
