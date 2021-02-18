@@ -37,21 +37,6 @@
 			$post->set('pst_usr_user_id',$session->get_user_id());
 		}	
 				
-
-		/*
-
-		if($_POST['pst_start_time_date'] && $_POST['pst_start_time_time']){
-			$time_combined = LibraryFunctions::datetoISO8601($_POST['pst_start_time_date']) . ' ' . LibraryFunctions::toDBTime($_POST['pst_start_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $post->get('pst_timezone'),  'UTC');
-			$post->set('pst_start_time', $utc_time);
-		}
-		
-		if($_POST['pst_end_time_date'] && $_POST['pst_end_time_time']){
-			$time_combined = LibraryFunctions::datetoISO8601($_POST['pst_end_time_date']) . ' ' . LibraryFunctions::toDBTime($_POST['pst_end_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $post->get('pst_timezone'),  'UTC', '%Y-%m-%d %H:%M:%S');
-			$post->set('pst_end_time', $utc_time);		
-		}
-		*/
 		
 		$post->prepare();
 		$post->save();

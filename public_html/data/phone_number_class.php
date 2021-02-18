@@ -31,7 +31,19 @@ class PhoneNumber extends SystemBase {
 	public static $required = array(
 		'phn_phone_number', 'phn_usr_user_id');
 
-	public static $field_constraints = array();	
+	public static $field_constraints = array(
+	/*
+		'phn_field' => array(
+			array('WordLength', 0, 255),
+			'NoSymbols',
+			'NoCaps',
+			),
+		'phn_field' => array(
+			array('WordLength', 50, 100000),
+			'NoEmailAddress',
+			'NoCaps',
+			),*/
+		);
 
 	public static $initial_default_values = array(
 		'phn_create_time' => 'now()');	
