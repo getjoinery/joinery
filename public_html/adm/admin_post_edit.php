@@ -42,9 +42,10 @@
 		$post->save();
 		$post->load();
 
-		$tags_array = explode(',',$_REQUEST['tags']);
-		$post->save_tags($tags_array);
-
+		if($_REQUEST['tags']){
+			$tags_array = explode(',',$_REQUEST['tags']);
+			$post->save_tags($tags_array);
+		}
 
 		LibraryFunctions::redirect('/admin/admin_post?pst_post_id='. $post->key);
 		exit;		

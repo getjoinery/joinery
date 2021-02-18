@@ -123,7 +123,7 @@ class Post extends SystemBase {
 
 	
 	function save_tags($tags_array){
-		if(count($tags_array) == 0){
+		if(empty($tags_array)){
 			return false;
 		}
 		
