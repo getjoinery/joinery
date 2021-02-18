@@ -41,14 +41,11 @@
 	}
 	
 	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$post->get_url().'</a><br />';	
-	//echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($post->get('pst_create_time'), 'UTC', $session->get_timezone()) .'<br />';
-	echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description')'</p><br />';
+	echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description').'</p><br />';
 	
 	echo '<h2> '.$post->get('pst_title').'</h2>';
 	echo '<iframe src="/ajax/blog_post_preview_ajax?pst_post_id='.$post->key.'" width="100%" height="500" style="border:1px solid black;"></iframe>';
-
-	//echo '<strong>Post:</strong><br /> '.$post->get('pst_body').'<br />';	
 
 	$page->end_box();		
 	
