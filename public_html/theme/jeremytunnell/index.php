@@ -73,8 +73,8 @@
 
 			<?php } ?>
 		</div>
-
-		<div class="typology-pagination">
+			<div class="entry-footer">
+		
 			<?php
 			
 			if($pager->is_valid_page('-1')){
@@ -86,6 +86,8 @@
 				echo '<a class="typology-button" href="'.$pager->get_url('+1', '').'">Next Page</a>';
 			}
 			?>
+			</div>
+			<div class="typology-pagination">
 		<nav class="navigation load-more">
 
 	    
