@@ -31,9 +31,6 @@
 		foreach ($page_contents as $page_content){
 			echo '<li><a href="/page/'.$page_content->get('pac_link').'">'.$page_content->get('pac_location_name').'</a></li>';
 		}
-		echo '<li><a href="/dana">Dana (donations)</a></li>';
-		echo '<li><a href="/newsletter">Newsletter</a></li>';
-		echo '<li><a href="/password-reset-1">Reset Password</a></li>';
 		echo '</ul>';
 	}
 

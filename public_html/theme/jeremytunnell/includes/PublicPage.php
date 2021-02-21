@@ -361,6 +361,7 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 																	<div class="textwidget"><div style="text-align: center">
 <!--<img style="width: 111px; margin-bottom: 10px" src="https://demo.mekshq.com/typology/dc/typology_logo_invert.png" alt="Typology">-->
 <p>Copyright Jeremy Tunnell <br> All rights reserved</p>
+<p><a href="/sitemap">Sitemap</a></p>
 </div></div>
 		</div></div>
                                                                     

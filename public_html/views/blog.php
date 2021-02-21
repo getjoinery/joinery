@@ -32,6 +32,8 @@
         echo '<div><a href="'.$post->get('pst_link').'">Read on</a></div>';
 	} 
 		
+		
+		
 	if($pager->is_valid_page('-1')){
 		echo '<a href="'.$pager->get_url('-1', '').'">Previous Page</a>';
 	}
