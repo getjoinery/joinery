@@ -30,7 +30,7 @@
 		$page_offset);	
 	$numrecords = $posts->count_all();	
 	$posts->load();	
-	
+
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 
 ?>
