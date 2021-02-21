@@ -75,19 +75,19 @@
 		</div>
 
 		<div class="typology-pagination">
-
-		<nav class="navigation load-more">
 			<?php
-			/*
+			
 			if($pager->is_valid_page('-1')){
-				echo '<a href="'.$pager->get_url('-1', '').'">Previous Page</a>';
+				echo '<a class="typology-button" href="'.$pager->get_url('-1', '').'">Previous Page</a>';
 			}
-			*/
+			
 			
 			if($pager->is_valid_page('+1')){
-				echo '<a href="'.$pager->get_url('+1', '').'">Next Page</a>';
+				echo '<a class="typology-button" href="'.$pager->get_url('+1', '').'">Next Page</a>';
 			}
 			?>
+		<nav class="navigation load-more">
+
 	    
 			<div class="typology-loader">
 				  <div class="dot dot1"></div>
