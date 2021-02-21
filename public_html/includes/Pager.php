@@ -16,14 +16,20 @@ class Pager{
 	private $currentfile = NULL;
 	
 
-	function __construct($options=array(), $numperpage=30, $prefix=''){
+	function __construct($options=array(), $prefix=''){
 		
 		$url = $_SERVER[REQUEST_URI];
 		if($options[getvars]){
 			$url = $options[getvars];
 		}
 
-		$this->numperpage = $numperpage;
+		if($options[numperpage]){
+			$this->numperpage = $options[numperpage];
+		}
+		else{
+			$this->numperpage = 30;
+		}
+
 		$this->numrecords = $options[numrecords];
 		$this->prefix = $prefix;
 
@@ -59,8 +65,8 @@ class Pager{
 		}
 
 		$self = $_SERVER['PHP_SELF'];
-		
-		$this->numpagestotal = ceil($this->numrecords/$this->numperpage);
+
+		$this->numpagestotal = ceil($this->numrecords/$this->numperpage);	
 		$this->currentpage = floor($this->offset / $this->numperpage)+1;
 	}	
 
@@ -109,13 +115,16 @@ class Pager{
 			$page_number = $page_string;
 		}
 		
+
+		
 		if($page_number < 1){
 			return false;
 		}
-		
+
 		if($page_number > $this->numpagestotal){
 			return false;
 		}
+					
 		return $page_number;
 	}
 	
