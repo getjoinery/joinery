@@ -1,0 +1,73 @@
+<?php
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/questions_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/question_options_class.php');
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(5);
+	$session->set_return();
+
+	$question = new Question($_REQUEST['qst_question_id'], TRUE);
+
+
+
+	$page = new AdminPage();
+	$page->admin_header(	
+	array(
+		'menu-id'=> 26,
+		'breadcrumbs' => array(
+			'Questions'=>'/admin/admin_questions', 
+			'Question '.$question->key=>'',
+		),
+		'session' => $session,
+	)
+	);	
+	
+	$options['title'] = 'Question '.$question->key;
+	$options['altlinks'] = array('Edit Question' => '/admin/admin_question_edit?qst_question_id='.$question->key);
+	$options['altlinks'] += array('Delete Question' => '/admin/admin_question_permanent_delete?qst_question_id='.$question->key);
+	$page->begin_box($options);
+
+
+	if($question->get('qst_is_published')){
+		echo '<strong>Published:</strong> ' . LibraryFunctions::convert_time($question->get('qst_published_time'), 'UTC', $session->get_timezone()). '<br />';
+	}
+	else{
+		echo '<strong>UNPUBLISHED</strong><br />';
+	}
+		
+	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($question->get('qst_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+
+	
+	if($_POST){
+		$valid = $question->validate_answers($_REQUEST['question_'.$question->key]);
+		echo '<b>'.$valid.'</b>';
+	}
+	
+	$formwriter = new FormWriterMaster('form1');
+	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_question');
+	
+	$validation_rules = array();
+	$validation_rules = $question->output_js_validation($validation_rules);
+	echo $formwriter->set_validate($validation_rules);
+	echo $formwriter->hiddeninput('qst_question_id', $question->key);
+	
+	echo $question->output_question($formwriter);
+	echo $formwriter->start_buttons();
+	echo $formwriter->new_form_button('Test');
+	echo $formwriter->end_buttons();
+	echo $formwriter->end_form();
+
+
+	$page->end_box();		
+	
+	$page->admin_footer();
+?>
+
+
