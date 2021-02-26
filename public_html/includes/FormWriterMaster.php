@@ -511,7 +511,7 @@ class FormWriterMaster {
 	function checkboxinput($label, $id, $class, $align, $value, $truevalue, $hint){
 		
 		if($value == $truevalue){
-			$checked = 'checked="checked"';
+			$checked = 'checked="checked"'; 
 		}
 		else{
 			$checked = '';
@@ -541,6 +541,10 @@ class FormWriterMaster {
 	function checkboxList($label, $id, $class, $optionvals, $checkedvals=array(), $disabledvals=array(), $readonlyvals=array(), $hint='', $type='checkbox') {
 		$output = '';
 
+		if(empty($optionvals)){
+			return false;
+		}
+
 		if(!is_array($checkedvals)){
 			$checkedvals = array();
 		}
@@ -552,11 +556,11 @@ class FormWriterMaster {
 			$type='radio';
 			$class='uk-radio';
 			
-			if(count($checkedvals) > 1){
+			if(is_array($checkedvals) && count($checkedvals) > 1){
 				throw new SystemDisplayableError('A radio field cannot have more than one checked value.');
 			}
 			
-			if(count($readonlyvals) > 0){
+			if($readonlyvals){
 				throw new SystemDisplayableError('A radio field cannot have read only values.');
 			}			
 		}
