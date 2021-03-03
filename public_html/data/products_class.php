@@ -570,7 +570,7 @@ class ProductVersion {
 
 		$sql = 'INSERT INTO prv_product_versions ' .
 			'(prv_pro_product_id, prv_version_name, prv_version_price, prv_status, prv_is_deposit)
-				VALUES (?, ?, ?, ?)';
+				VALUES (?, ?, ?, ?, ?)';
 
 		try {
 			$q = $dblink->prepare($sql);
