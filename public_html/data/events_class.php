@@ -47,6 +47,11 @@ class Event extends SystemBase {
 	const VISIBILITY_PRIVATE = 0;
 	const VISIBILITY_PUBLIC = 1;
 	const VISIBILITY_PUBLIC_UNLISTED = 2;	
+	
+	const TYPE_LIVE_ONLINE = 1;
+	const TYPE_SELF_PACED_ONLINE = 2;
+	const TYPE_RETREAT = 3;
+	const TYPE_IN_PERSON = 4;
 
 	public static $fields = array(
 		'evt_event_id' => 'event ID',
@@ -73,7 +78,8 @@ class Event extends SystemBase {
 		'evt_visibility'=>'0=private, 1=public,2=public but unlisted',
 		'evt_fil_file_id' => 'File id of the picture attached',
 		'evt_link' => 'Link for the event',
-		'evt_show_add_to_calendar_link' => 'Whether to show the calendar link'
+		'evt_show_add_to_calendar_link' => 'Whether to show the calendar link',
+		'evt_type' => 'Type of event, see above'
 	); 
 
 	public static $generated_fields = array(
@@ -595,7 +601,8 @@ class Event extends SystemBase {
 			  "evt_session_display_type" int4 DEFAULT 1,
 			  "evt_visibility" int4,
 			  "evt_link" varchar(255) COLLATE "pg_catalog"."default",
-			  "evt_show_add_to_calendar_link" bool
+			  "evt_show_add_to_calendar_link" bool, 
+			  "evt_type" int4
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -666,6 +673,11 @@ class Multievent extends SystemMultiBase {
 		if (array_key_exists('status', $this->options)) {
 			$where_clauses[] = 'evt_status = ?';
 			$bind_params[] = array($this->options['status'], PDO::PARAM_INT);
+		}
+
+		if (array_key_exists('type', $this->options)) {
+			$where_clauses[] = 'evt_type = ?';
+			$bind_params[] = array($this->options['type'], PDO::PARAM_INT);
 		}
 
 		if (array_key_exists('status_not_cancelled', $this->options)) {

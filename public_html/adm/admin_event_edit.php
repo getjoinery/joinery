@@ -66,7 +66,7 @@
 			}
 		}
 		
-		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link');
+		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_type');
 
 		foreach($editable_fields as $field) {
 			$event->set($field, $_REQUEST[$field]);
@@ -192,6 +192,9 @@
 	
 	$optionvals = array("Active"=>1, "Completed"=>2, "Cancelled"=>3);
 	echo $formwriter->dropinput("Status", "evt_status", "ctrlHolder", $optionvals, $event->get('evt_status'), '', FALSE);	
+	
+	$optionvals = array("Live Online"=>1, "Self Paced Online"=>2, "Retreat"=>3, "In Person"=>4);
+	echo $formwriter->dropinput("Type of event", "evt_type", "ctrlHolder", $optionvals, $event->get('evt_type'), '', FALSE);	
 	 
 	$optionvals = array("Hidden"=>0, "Live"=>1, "Live but unlisted"=>2);
 	echo $formwriter->dropinput("Visibility", "evt_visibility", "ctrlHolder", $optionvals, $event->get('evt_visibility'), '', FALSE);

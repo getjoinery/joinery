@@ -15,16 +15,32 @@
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', NULL, 0, '');
 	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
 	
+	$tab = array();
 	$searches = array();
 	$searches['deleted'] = FALSE;
 	$searches['visibility'] = 1;
-	if($_REQUEST['past']){
+	if($_REQUEST['type'] == 'past'){
 		$searches['past'] = TRUE;
+		$tab['past'] = 'active';
+	}
+	else if($_REQUEST['type'] == 'selfpaced'){
+		$searches['type'] = Event::TYPE_SELF_PACED_ONLINE;
+		$searches['past'] = FALSE;
+		$searches['status'] = 1;
+		$tab['selfpaced'] = 'active';
+	}
+	else if($_REQUEST['type'] == 'retreats'){
+		$searches['type'] = Event::TYPE_RETREAT;
+		$searches['past'] = FALSE;
+		$searches['status'] = 1;
+		$tab['retreat'] = 'active';
 	}
 	else{
+		$searches['type'] = Event::TYPE_LIVE_ONLINE;
 		$searches['past'] = FALSE;
 		$searches['status'] = 1;
 		$swasdirection = 'DESC';
+		$tab['liveonline'] = 'active';
 	}
 	
 

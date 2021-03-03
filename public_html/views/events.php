@@ -9,46 +9,80 @@
 		'title' => 'Events'
 	));
 	echo PublicPage::BeginPage('Retreats and Events');
-	
-	echo '<a href="/events?past=1">Click here to see past events</a>';
+
+	?>
+		<div class="section">
+			<div class="container">
+		
+				<ul class="nav nav-tabs margin-bottom-20">
+				  <li class="nav-item">
+					<a class="nav-link <?php echo $tab['liveonline']; ?>" href="/events?type=live">Live Courses</a>
+				  </li>
+				  <li class="nav-item">
+					<a class="nav-link <?php echo $tab['selfpaced']; ?>" href="/events?type=selfpaced">Self Paced Courses</a>
+				  </li>
+				  <li class="nav-item">
+					<a class="nav-link <?php echo $tab['retreat']; ?>" href="/events?type=retreats">Retreats</a>
+				  </li>
+				  <li class="nav-item">
+					<a class="nav-link <?php echo $tab['past']; ?>" href="/events?type=past">Past Events</a>
+				  </li>
+				</ul>
+		
+		<?php
+
+
 
 	foreach ($events as $event){
-		if($event->get_picture_link('small')){
-			echo '<img style="float: left;" src="'.$event->get_picture_link('small'). '" alt="'.$event->get('evt_name').'" height="380">';
-		}	
-		else{
-			echo '<img style="float: left;" src="https://source.unsplash.com/gMsnXqILjp4/640x380" alt="">';
-		}
-
-		echo '<div>';
 		$now = LibraryFunctions::get_current_time_obj('UTC');
 		$event_time = LibraryFunctions::get_time_obj($event->get('evt_start_time'), 'UTC');
-		if($event->get('evt_start_time') && $event_time > $now){				
-			echo $event->get_event_start_time($tz, 'M'); 
-			echo $event->get_event_start_time($tz, 'd'); 				
-		}
-		else if($next_session = $event->get_next_session()){
-			echo $next_session->get_start_time($tz, 'M'); 
-			echo $next_session->get_start_time($tz, 'd'); 						
-		}
-		echo '</div>';
-	  
-		echo '<h3>'.$event->get('evt_name').'</h3>';
+		?>
+		<div class="row align-items-center col-spacing-50">
+					<div class="col-12 col-md-6">
+						<?php
+						if($pic = $event->get_picture_link('small')){
+							echo '<img class="border-radius box-shadow-with-hover" src="'.$pic.'" alt="">';
+						}
+						?>
+					</div>
+					<div class="col-12 col-md-6">
+						<h4 class=" font-weight-normal "><?php echo $event->get('evt_name'); ?></h4>
+						<h6 class="font-family-tertiary font-small font-weight-normal uppercase">
+						<?php
+						if($event->get('evt_usr_user_id_leader')){
+							$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
+							echo '<p>By '. $leader->display_name().'</p>';
+						}
+						else{
+							echo '<p>Various instructors</p>';
+						}
+		
+						if($event->get('evt_start_time') && $event_time > $now){				
+							echo $event->get_event_start_time($tz, 'M'). ' ' . $event->get_event_start_time($tz, 'd'); 				
+						}
+						else if($next_session = $event->get_next_session()){
+							echo $next_session->get_start_time($tz, 'M'). ' ' . $next_session->get_start_time($tz, 'd'); 
+						
+						}						
+						?>
+						</h6>
+						<p><?php echo $event->get('evt_short_description'); ?></p>
+					</div>
+				</div>
+				<?php
 
-		if($event->get('evt_usr_user_id_leader')){
-			$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
-			echo '<p>By '. $leader->display_name().'</p>';
-		}
-		else{
-			echo '<p>Various instructors</p>';
-		}
 
-		if($event->get('evt_short_description')){
-			echo '<p>'. $event->get('evt_short_description').'</p>';
-		}
+
+
 
 		echo '<p><a href="'.$event->get_url().'">Read More</a></p><hr>'; 
 	}	
+	
+	?>
+	
+			</div><!-- end container -->
+		</div>
+		<?php
   
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
