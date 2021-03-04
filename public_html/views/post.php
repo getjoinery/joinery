@@ -11,48 +11,120 @@
 	);
 	$page->public_header($hoptions); 
 	
-	echo PublicPage::BeginPage();	
-	
-	echo '<h2>'.$post->get('pst_title').'</h2>';
-	echo '<div>'.LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York').'</div>';    
-    echo '<div>'.$post->get('pst_body').'</div>';
+	$pageoptions['subtitle'] = LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'). ' - ' . 'Category' . ' - ' . 'By John Doe';
+	echo PublicPage::BeginPage($post->get('pst_title'), $pageoptions);	
 
-	if($settings->get_setting('show_comments')){
-		echo '<h3>Comments</h3>';		
-	}
+?>
+
+		<!-- Blog Post section -->
+		<div class="section">
+			<div class="container">
+				<div class="row">
+					<div class="col-12 col-sm-10 offset-sm-1 col-md-8 offset-md-2">
+						
+						<?php echo $post->get('pst_body'); ?>
+						
+						<!-- Post Tags / Share -->
+						<div class="row margin-top-50">
+							<div class="col-6">
+								<h6 class="font-family-tertiary font-small font-weight-normal uppercase">Tags</h6>
+								<ul class="list-inline-sm">
+									<li><a class="text-link-1" href="#">Clothing</a></li>
+									<li><a class="text-link-1" href="#">Lifestyle</a></li>
+									<li><a class="text-link-1" href="#">Travel</a></li>
+								</ul>
+							</div>
+							<div class="col-6 text-right">
+								<h6 class="font-family-tertiary font-small font-weight-normal uppercase">Share On</h6>
+								<ul class="list-inline">
+									<li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
+									<li><a href="#"><i class="fab fa-twitter"></i></a></li>
+									<li><a href="#"><i class="fab fa-google-plus-g"></i></a></li>
+								</ul>
+							</div>
+						</div>
+						<!-- end Post Tags / Share -->
+					</div>
+				</div><!-- end row -->
+			</div><!-- end container -->
+		</div>
+		<!-- end Blog Post section -->
+
+		<!-- Post Author section -->
+		<div class="section bg-grey-lighter">
+			<div class="container text-center">
+				<div class="row">
+					<div class="col-12 col-sm-10 offset-sm-1 col-md-8 offset-md-2 col-lg-6 offset-lg-3">
+						<img class="img-circle-lg margin-bottom-20" src="../assets/images/img-circle-large.jpg">
+						<h5 class="font-weight-normal">Johnny Doe</h5>
+						<p>Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. </p>
+						<!-- Social links -->
+						<ul class="list-inline margin-top-20">
+							<li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
+							<li><a href="#"><i class="fab fa-twitter"></i></a></li>
+							<li><a href="#"><i class="fab fa-pinterest"></i></a></li>
+							<li><a href="#"><i class="fab fa-instagram"></i></a></li>
+						</ul>
+					</div>
+				</div><!-- end row -->
+			</div><!-- end container -->
+		</div>
+		<!-- end Post Author section -->
+
+
+		<?php
+
+	
 	
 	if($settings->get_setting('comments_active')){
 		if($settings->get_setting('comments_unregistered_users') || $session->get_user_id()){
 		
-			$formwriter = new FormWriterPublic("form1", TRUE);
-			
-			$validation_rules = array();
-			$validation_rules['cmt']['required']['value'] = 'true';
-			$validation_rules['cmt']['minlength']['value'] = 20;
-			$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
-			$validation_rules['name']['required']['value'] = 'true';
-			$validation_rules['name']['minlength']['value'] = 2;
-			$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules, 'blog');
-			echo $formwriter->set_validate($validation_rules);			
-			
-			echo $formwriter->begin_form("uniForm", "post", $_SERVER['REQUEST_URI']);
+		?>
+		<!-- Write Comment section -->
+		<div class="section border-top">
+			<div class="container">
+				<div class="row">
+					<div class="col-12 col-sm-10 offset-sm-1 col-md-8 offset-md-2">
+						<h4 class="margin-bottom-50 text-center">Write a Comment</h4>
+						<div class="text-right">
+							
+								<?php
+								$formwriter = new FormWriterPublic("form1", TRUE);
+								$validation_rules = array();
+								$validation_rules['cmt']['required']['value'] = 'true';
+								$validation_rules['cmt']['minlength']['value'] = 20;
+								$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
+								$validation_rules['name']['required']['value'] = 'true';
+								$validation_rules['name']['minlength']['value'] = 2;
+								$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules, 'blog');
+								echo $formwriter->set_validate($validation_rules);			
+								
+								echo $formwriter->begin_form("uniForm", "post", $_SERVER['REQUEST_URI']);
 
-			echo $formwriter->textinput("Name", "name", "ctrlHolder", 20, NULL , "",255, "");	
-			//echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, @$form_fields->usr_last_name, "" , 255, "");
-			//echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, '', "" , 255, "");
-			echo $formwriter->textbox('Comment', 'cmt', 'ctrlHolder', 5, 80, NULL, '', '');
-			
-			if(!$session->get_user_id()){
-				echo $formwriter->antispam_question_input('blog');
-				echo $formwriter->honeypot_hidden_input();	
-				echo $formwriter->honeypot_hidden_input('Comment', 'comment');	
-				echo $formwriter->captcha_hidden_input('blog');
-			}
+								echo $formwriter->textinput("Name", "name", "ctrlHolder", 20, NULL , "",255, "");	
+								//echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, @$form_fields->usr_last_name, "" , 255, "");
+								//echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, '', "" , 255, "");
+								echo $formwriter->textbox('Comment', 'cmt', 'ctrlHolder', 5, 80, NULL, '', '');
+								
+								if(!$session->get_user_id()){
+									echo $formwriter->antispam_question_input('blog');
+									echo $formwriter->honeypot_hidden_input();	
+									echo $formwriter->honeypot_hidden_input('Comment', 'comment');	
+									echo $formwriter->captcha_hidden_input('blog');
+								}
 
-			echo $formwriter->start_buttons();
-			echo $formwriter->new_form_button('Comment');
-			echo $formwriter->end_buttons();
-			echo $formwriter->end_form();
+								echo $formwriter->start_buttons();
+								echo $formwriter->new_form_button('Comment');
+								echo $formwriter->end_buttons();
+								echo $formwriter->end_form();
+								?>
+							</div>
+						</div>
+					</div><!-- end row -->
+				</div><!-- end container -->
+			</div>
+			<!-- end Write Comment section -->
+			<?php 
 		
 		}
 
@@ -67,10 +139,33 @@
 			$comments->load();	
 
 			if($numcomments){
-				echo '<ul>';
-				foreach($comments as $comment){ 
-					echo '<li>'.htmlspecialchars($comment->get('cmt_author_name')).' says: '.$comment->get_sanitized_comment().' at '. LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York').'</li>';
-				} 
+				?>
+				<!-- Comments section -->
+				<div class="section">
+					<div class="container">
+						<div class="row">
+							<div class="col-12 col-sm-10 offset-sm-1 col-md-8 offset-md-2">
+								<h4 class="margin-bottom-50 text-center">Comments</h4>
+								<?php
+								foreach($comments as $comment){ 
+									echo '								<div class="comment-box">
+									<div class="comment-user-avatar">
+										<i class="fa fa-user"></i>
+									</div>
+									<div class="comment-content">
+										<span class="comment-time">'. LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York').'</span>
+										<h6 class="font-weight-normal">'.htmlspecialchars($comment->get('cmt_author_name')).'</h6>
+										<p>'.$comment->get_sanitized_comment().'</p>
+									</div>
+								</div>';
+								} 
+								?>
+							</div>
+						</div><!-- end row -->
+					</div><!-- end container -->
+				</div>
+				<!-- end Comments section -->
+<?php				
 			}
 		}
 	}
