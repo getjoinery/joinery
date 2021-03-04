@@ -49,39 +49,38 @@
 				<div class="row">
 					<div class="col-12">
 						<h3>Description</h3>
-						<?php echo $event->get('evt_description'); ?></p>
-						
-						<br>
-						<?php
-								
-						if($view_course_link){
-							echo '<p><a class="button button-md button-dark button-rounded" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a></p>';		
-						}
-						
-						if($registration_message){
-							echo '<p>'.$registration_message.'</p>';
-						}
-
-						if($register_link){
-							echo '<p><a class="button button-md button-dark button-rounded" href="'.$register_link.'">Register Now</a></p>';
-						}
-						
-						if($waiting_list_link){
-							echo '<p><a class="button button-md button-dark button-rounded" href="'.$waiting_list_link.'">Get on the waiting list</a></p>';
-						}
-						
-						if($if_registered_message){
-							echo '<p>'.$if_registered_message.'</p>';
-						}
-
-						?>
-						
+						<?php echo $event->get('evt_description'); ?></p>					
 					</div>
 				</div><!-- end row -->
 			</div><!-- end container -->
 		</div>	
 		
-		
+		<div class="margin-top-70 text-center">
+			<?php
+					
+			if($view_course_link){
+				echo '<a class="button button-lg button-rounded button-reveal-right-dark" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a>';		
+			}
+			
+			if($registration_message){
+				echo '<p>'.$registration_message.'</p>';
+			}
+
+			if($register_link){
+				echo '<a class="button button-lg button-rounded button-reveal-right-dark" href="'.$register_link.'">Register Now</a>';
+			}
+			
+			if($waiting_list_link){
+				echo '<a class="button button-lg button-rounded button-reveal-right-dark" href="'.$waiting_list_link.'">Get on the waiting list</a>';
+			}
+			
+			if($if_registered_message){
+				echo '<p>'.$if_registered_message.'</p>';
+			}
+
+			?>
+			<!--<a class="button button-lg button-rounded button-reveal-right-dark" href="#"><span>Get In Touch</span><i class="ti-arrow-right"></i></a>-->
+		</div>		
 		
 		
 		<div class="section">
