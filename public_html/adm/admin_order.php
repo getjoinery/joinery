@@ -8,7 +8,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/cart_logs_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -110,37 +109,6 @@
 
 
 	if($_SESSION['permission'] == 10){
-		$search_criteria = NULL;
-		$search_criteria['order_id'] = $order->key;
-		$cart_logs = new MultiCartLog(
-			$search_criteria
-			);
-		$numrecords = $cart_logs->count_all();
-		$cart_logs->load();		
-	
-
-	$headers = array('Cart', 'Os/Browser', 'Error');
-	$altlinks = array();
-	$table_options = array(
-	'title' => 'Cart Logs',
-
-	);
-	$page->tableheader($headers, $table_options);
-
-	
-	foreach($cart_logs as $cart_log) {
-		$rowvalues = array();
-
-		$printable_context = str_replace('(', '<br />(', $cart_log->get('cls_context'));
-		$printable_context = str_replace('[', '<br />&nbsp;&nbsp;&nbsp;[', $printable_context);
-		array_push($rowvalues, $printable_context);
-		array_push($rowvalues, $cart_log->get('cls_os'). '/'. $cart_log->get('cls_browser'));
-		array_push($rowvalues, $cart_log->get('cls_error'));
-
-		$page->disprow($rowvalues);
-	}
-	$page->endtable();	
-	
 		
 		echo "<h2>Raw Cart:</h2><br><pre>";
 		echo $order->get('ord_raw_cart'). '</pre>';		
