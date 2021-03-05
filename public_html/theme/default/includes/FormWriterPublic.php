@@ -7,19 +7,22 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
 
 class FormWriterPublic extends FormWriterMaster {
 
-	protected $validate_style_info = '	errorElement: "p",						
-							errorClass: "errorField",
+	protected $validate_style_info = 'errorElement: "p",
+							errorClass: "bg-danger-light",
 							highlight: function(element, errorClass) {
-								$("#"+element.name+"_container").addClass("error");
-
+								//REMOVE BRACKETS FOR CHECKBOX LISTS
+								var name = element.name.replace(/[\[\]]/gi, "");
+								$("#"+name+"_container").addClass("bg-danger-light");
 							  },
 							  unhighlight: function(element, errorClass) {
-								  $("#"+element.name+"_container").removeClass("error");
-
+								//REMOVE BRACKETS FOR CHECKBOX LISTS
+								var name = element.name.replace(/[\[\]]/gi, "");
+								  $("#"+name+"_container").removeClass("bg-danger-light");
 							  },
 							errorPlacement: function(error, element) {
-								error.prependTo(element.parents(".errorplacement").eq(0));
+								error.appendTo(element.parents(".errorplacement").eq(0));
 							}';
+
 
 	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
 		$output = '<form id="'. $this->formid.'" class="'.$class.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'">';
