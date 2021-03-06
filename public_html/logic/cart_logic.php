@@ -33,6 +33,11 @@
 		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');		
 	}
 	
+	if(!$api_key || !$api_secret_key){
+		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+		exit();			
+	}
+	
 	\Stripe\Stripe::setApiKey($api_key);
 	
 	if ($session->get_user_id()) {
