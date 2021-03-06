@@ -26,6 +26,7 @@ class FormWriterMaster {
 							errorPlacement: function(error, element) {
 								error.appendTo(element.parents(".errorplacement").eq(0));
 							}';
+							
 
 	function __construct($formid='form1', $secure=FALSE, $use_tabindex=FALSE){
 		$this->formid = $formid;

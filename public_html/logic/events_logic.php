@@ -36,7 +36,7 @@
 		$tab['retreat'] = 'active';
 	}
 	else{
-		$searches['type'] = Event::TYPE_LIVE_ONLINE;
+		//$searches['type'] = Event::TYPE_LIVE_ONLINE;
 		$searches['past'] = FALSE;
 		$searches['status'] = 1;
 		$swasdirection = 'DESC';

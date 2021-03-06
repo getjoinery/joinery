@@ -29,6 +29,7 @@
 	  background-color: #fefde5 !important;
 	}
 	
+	
 	/* OVERRIDE STYLES */
 	
 	body {
@@ -40,7 +41,7 @@
 		border: 1px solid #FF3B38;
 	}
 	
-	.errorplacement{
+	.errorplacement {
 		margin-top: 20px;
 		margin-bottom: 20px;
 	}

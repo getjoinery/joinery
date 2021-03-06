@@ -33,7 +33,11 @@ class PublicPage {
 				$options));
 		echo PublicPage::BeginPage($header);
 	
+		echo '			<div class="section">
+		<div class="container">';
 		echo '<p>'.$body.'</p>';
+		echo '		</div><!-- end container -->
+	</div>';
 		
 		echo PublicPage::EndPage();
 		$page->public_footer();
@@ -65,7 +69,7 @@ class PublicPage {
 	}	
 
 	public static function EndPage($options=array()) {
-		$output = '			'; 
+		$output = ''; 
 		return $output;
 	}	
 
@@ -118,11 +122,22 @@ class PublicPage {
 
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
-		
-		header("Content-Security-Policy-Report-Only: default-src 'self' 'unsafe-inline'");
-		header('X-Frame-Options "SAMEORIGIN"');
+
+		$settings = Globalvars::get_instance();
+		if($settings->get_setting('force_https')){
+			header('Strict-Transport-Security: max-age=3153600');
+			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
+			//header("Content-Security-Policy-Report-Only: default-src https:");
+		}
+		header('X-Frame-Options: SAMEORIGIN');
 		header('X-Content-Type-Options: nosniff');
-		header('Referrer-Policy: unsafe-url'); 
+		header('Referrer-Policy: unsafe-url');
+
+		$this->debug = $settings->get_setting('debug');
+		if ($this->debug == 1) {
+			$secure = FALSE;
+			$this->secure = FALSE;
+		}
 		
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
@@ -175,6 +190,7 @@ class PublicPage {
 		<!--<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/sal/sal.min.css" rel="stylesheet">-->
 	
 		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/css/theme.css" rel="stylesheet">
+		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/css/site_styles.css" rel="stylesheet">
 		<!-- Fonts/Icons -->
 		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
 		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
@@ -373,7 +389,6 @@ class PublicPage {
 		<!-- end Scroll to top button -->
 
 		<!-- ***** JAVASCRIPTS ***** -->
-		<!--<script src="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/jquery.min.js"></script>-->
 		<script src="<?php echo $this->cdn; ?>/theme/default/includes/assets/js/polyfill.min.js?features=IntersectionObserver"></script>
 		<script src="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/plugins.js"></script>
 		<script src="<?php echo $this->cdn; ?>/theme/default/includes/assets/js/functions.js"></script>
@@ -385,16 +400,14 @@ class PublicPage {
 
 
 
-	function tableheader($headers, $version="default"){
-		//version VARIABLE TOGGLES BETWEEN STYLESHEETS
-		echo "<table class='sortable admin_table' id='$version' cellspacing='0' summary=''>
-			<caption></caption>
-			<tr>";
+	function tableheader($headers, $class='table', $id='table1'){
+		echo '<table class="'.$class.'" id="'.$id.'" cellspacing="0">
+			<thead><tr>';
 
 		foreach ($headers as $value) {
-			printf('<th scope="col" abbr="%s" class="bg">%s</th>', $value, $value);
+			printf('<th scope="col" abbr="%s">%s</th>', $value, $value);
 		}
-		echo '</tr>';
+		echo '</tr></thead><tbody>';
 	}
 
 	function disprow($dataarray){
@@ -406,19 +419,16 @@ class PublicPage {
 				$value = "&nbsp";
 			}
 
-			if ($this->rowcount % 2 == 0) {
-				printf('<td class="light">%s</td>', $value);
-			} else {
-				printf('<td class="dark">%s</td>', $value);
-			}
+
+			printf('<td>%s</td>', $value);
+
 		}
 		echo "</tr>\n";
 		$this->rowcount++;
 	}
 
 	function endtable(){
-		$this->rowcount = 0;
-		echo '</table>';
+		echo '</tbody></table>';
 	}
 }
 
