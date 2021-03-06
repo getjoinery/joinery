@@ -29,6 +29,18 @@
 	  background-color: #fefde5 !important;
 	}
 	
+	/* OVERRIDE STYLES */
+	
+	body {
+		color: #303030;
+	}
+	
 	.bg-danger-light {
-		background-color: #FF9BAB !important;
+		background-color: #FFCCCB !important;
+		border: 1px solid #FF3B38;
+	}
+	
+	.errorplacement{
+		margin-top: 20px;
+		margin-bottom: 20px;
 	}

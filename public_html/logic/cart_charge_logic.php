@@ -219,7 +219,7 @@
 	  $error = "Sorry, we weren't able to authorize your card due to an invalid request. That's our fault. You have not been charged.";		
 	} 
 	catch (\Stripe\Error\Authentication $e) {
-	  $error = "Sorry, we weren't able to authorize your card because it did not authenticate. You have not been charged.";		
+	  $error = "Sorry, we weren't able to authorize your card because the expiration date, CVC, or post code was invalid. You have not been charged.";		
 	} 
 	catch (\Stripe\Error\ApiConnection $e) {
 	  $error = "Sorry, we weren't able to authorize your card because our connection to our credit card processor is not working. You have not been charged.";		
