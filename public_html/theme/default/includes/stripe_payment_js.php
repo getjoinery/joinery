@@ -1,5 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	$session = SessionControl::get_instance();
 	if(!$_SESSION['test_mode']){
 		$api_key = $settings->get_setting('stripe_api_key');
 		$api_secret_key = $settings->get_setting('stripe_api_pkey');

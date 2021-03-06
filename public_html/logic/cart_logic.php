@@ -9,6 +9,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
 
 	$session = SessionControl::get_instance();
+	$settings = Globalvars::get_instance();
 	//$session->check_permission(0);
 
 	$cart = $session->get_shopping_cart();
@@ -23,8 +24,6 @@
 		$cart->remove_item(intval($_REQUEST['r']));
 	}
 	
-	$settings = Globalvars::get_instance();
-	
 	if(!$_SESSION['test_mode']){
 		$api_key = $settings->get_setting('stripe_api_key');
 		$api_secret_key = $settings->get_setting('stripe_api_pkey');
@@ -35,7 +34,6 @@
 	}
 	
 	\Stripe\Stripe::setApiKey($api_key);
-	$session = SessionControl::get_instance();
 	
 	if ($session->get_user_id()) {
 		$user = new User($session->get_user_id(), TRUE);
