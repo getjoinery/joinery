@@ -20,8 +20,16 @@
 	$session = SessionControl::get_instance();
 	//$session->check_permission(0); 
 
+	if(!$_SESSION['test_mode']){
+		$api_key = $settings->get_setting('stripe_api_key');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey');
+	}
+	else{
+		$api_key = $settings->get_setting('stripe_api_key_test');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');		
+	}
 
-	\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
+	\Stripe\Stripe::setApiKey($api_key);
 
 	$cart = $session->get_shopping_cart();
 	$charge_total = $cart->get_total();
@@ -63,7 +71,7 @@
 	}	
 		
 	//HANDLE THE STRIPE USER
-	if($billing_user->get('usr_stripe_customer_id')){
+	if(!$_SESSION['test_mode'] && $billing_user->get('usr_stripe_customer_id')){
 		//IF WE STORED A CUSTOMER ID
 		$stripe_customer_id = $billing_user->get('usr_stripe_customer_id');
 	}
@@ -207,28 +215,35 @@
 
 	}
 	catch(\Stripe\Error\Card $e) {
-	  // Since it's a decline, \Stripe\Error\Card will be caught
-		$body = $e->getJsonBody();
-		$error  = $body['error']['message'];	
+		// Since it's a decline, \Stripe\Exception\Card will be caught
+		$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+		$order->set('ord_error', substr($error, 0, 250));
+		$order->save();	
+		PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
 	} 
-	// Probably want to log all of these for later or send yourself a notification
-	catch (\Stripe\Error\RateLimit $e) {
-	  $error = "Sorry, we weren't able to authorize your card due to too many requests. You have not been charged.";		
+	catch (\Stripe\Exception\RateLimitException $e) {
+	  // Too many requests made to the API too quickly
+		$error = "Sorry, we weren't able to authorize your card due to too many requests. You have not been charged.";
 	} 
-	catch (\Stripe\Error\InvalidRequest $e) {
-	  $error = "Sorry, we weren't able to authorize your card due to an invalid request. That's our fault. You have not been charged.";		
+	catch (\Stripe\Exception\InvalidRequestException $e) {
+		$error = "Sorry, we weren't able to authorize your card due to an invalid request. That's our fault. You have not been charged.";	
 	} 
-	catch (\Stripe\Error\Authentication $e) {
-	  $error = "Sorry, we weren't able to authorize your card because the expiration date, CVC, or post code was invalid. You have not been charged.";		
+	catch (\Stripe\Exception\AuthenticationException $e) {
+	  // Authentication with Stripe's API failed
+	  // (maybe you changed API keys recently)
+	  $error = "Sorry, our connection to our credit card processor is not currently working. That's our fault. You have not been charged.";
 	} 
-	catch (\Stripe\Error\ApiConnection $e) {
-	  $error = "Sorry, we weren't able to authorize your card because our connection to our credit card processor is not working. You have not been charged.";		
+	catch (\Stripe\Exception\ApiConnectionException $e) {
+	  // Network communication with Stripe failed
+	  $error = "Sorry, we were unable to reach the credit card processor. That's our fault. You have not been charged.";
 	} 
-	catch (\Stripe\Error\Base $e) {
-	  $error = "Sorry, we weren't able to authorize your card. You have not been charged.";
+	catch (\Stripe\Exception\ApiErrorException $e) {
+	  // Display a very generic error to the user, and maybe send
+	  // yourself an email
+	  $error = "Sorry, we weren't able to connect to the Stripe api.";
 	} 
 	catch (Exception $e) {
-		$error = "Sorry, we weren't able to authorize your card for some reason. You have not been charged.";
+		$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
 	}
 
 	if($error){
