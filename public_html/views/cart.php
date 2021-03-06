@@ -80,74 +80,39 @@
 							$('#nojavascript').hide();
 						});
 						</script>
+						
+						
 					<?php									
-					if(!$cart->billing_user){	
+					if($cart->billing_user){	
+						echo '<h5 class="font-weight-medium">Billing User</h5>';
+						echo '<p>'.$cart->billing_user['billing_first_name'] . ' ' . $cart->billing_user['billing_last_name'] . ' ('. $cart->billing_user['billing_email'].') <a href="/cart?newbilling=1">change billing user</a></p>';
+						$billing_user = User::GetByEmail(trim($cart->billing_user['billing_email']));
+						echo '<br><br>';
+					}
+					else{
 						?>
 						<script>
 						$(document).ready(function() {
-
 							$("#usr_first_name").focus();
 							$('#new_billing').hide();
-							
 							$('#existing_billing_email').change(function () {
 								if ($('#existing_billing_email option:selected').text() == 'A different person') {
 									$('#new_billing').show();
 								}
 								else $('#new_billing').hide(); // hide div if value is not "custom"
 							});
-
-							$("#form1").validate({
-									//debug: true,
-									 errorElement: "p",
-									rules: {
-										billing_email: {
-														required:  function(element) {
-															return $('#existing_billing_email option:selected').text() == 'A different person';
-														  },
-														email: true
-
-										},
-										billing_first_name: {
-														required:  function(element) {
-															return $('#existing_billing_email option:selected').text() == 'A different person';
-														  }
-
-										},													
-										billing_last_name: {
-														required:  function(element) {
-															return $('#existing_billing_email option:selected').text() == 'A different person';
-														  }
-
-										},
-									},
-									messages: {
-										billing_email: {
-											required: "Please enter your email address",
-										   email: "Please enter a valid email"
-										 },					 
-
-									},
-									errorClass: "errorField",
-									highlight: function(element, errorClass) {
-										$('#'+element.name+'_container').addClass("error");
-
-									  },
-									  unhighlight: function(element, errorClass) {
-										  $('#'+element.name+'_container').removeClass("error");
-
-									  },
-									errorPlacement: function(error, element) {
-										error.prependTo(element.parents(".errorplacement").eq(0));
-									}
-							});
-
 						});
 						</script>
-						<?php		
-						
+						<?php	
 						$formwriter = new FormWriterPublic("form1", TRUE);
+						$validation_rules = array();
+						$validation_rules['billing_email']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
+						$validation_rules['billing_email']['required']['value'] = 'true';
+						$validation_rules['billing_first_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
+						$validation_rules['billing_last_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";										  
+						echo $formwriter->set_validate($validation_rules);									
+
 						echo $formwriter->begin_form("uniForm", "post", "/cart");
-						echo '<fieldset class="inlineLabels">';
 						
 						$optionvals = array();
 						$selected = '';
@@ -167,17 +132,8 @@
 						echo $formwriter->textinput("Billing Email", "billing_email", "ctrlHolder", 30, '', "", 255, ""); 
 						//echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "checkbox", "left", NULL, 1, "");
 						echo '</div>';
-						echo $formwriter->start_buttons();
 						echo $formwriter->new_form_button('Submit Billing User', 'button button-dark');
-						echo $formwriter->end_buttons();
-						echo '</fieldset>';
 						echo $formwriter->end_form();
-						echo '<br><br>';
-					}
-					else{
-						echo '<h5 class="font-weight-medium">Billing User</h5>';
-						echo '<p>'.$cart->billing_user['billing_first_name'] . ' ' . $cart->billing_user['billing_last_name'] . ' ('. $cart->billing_user['billing_email'].') <a href="/cart?newbilling=1">change billing user</a></p>';
-						$billing_user = User::GetByEmail(trim($cart->billing_user['billing_email']));
 						echo '<br><br>';
 							
 					}
@@ -204,25 +160,17 @@
 						  <button class="button button-lg button-dark">Submit Payment</button>
 						</form>					
 						
-						<script language="javascript" src="<?php echo LibraryFunctions::get_theme_includes_path(); ?>/stripe_payment_js.php"></script>
+						<script language="javascript" src="<?php echo LibraryFunctions::get_theme_includes_path('web'); ?>/stripe_payment_js.php"></script>
 
 						<?php
-					}
-					
-					if($cart->billing_user){					
-					
-						if($cart->get_total() == 0){
-							
-							$formwriter = new FormWriterPublic("form1", TRUE);
-							echo $formwriter->begin_form("uniForm", "post", '/cart_charge');
+					}		
+					else if($cart->billing_user){					
+						$formwriter = new FormWriterPublic("form1", TRUE);
+						echo $formwriter->begin_form("uniForm", "post", '/cart_charge');
 
-							echo '<fieldset class="inlineLabels">';
-							echo $formwriter->hiddeninput('novalue', '');
-							echo $formwriter->start_buttons();
-							echo $formwriter->new_form_button('Submit', 'button button-lg button-outline-dark-2');
-							echo $formwriter->end_buttons();
-							echo $formwriter->end_form();						
-						}
+						echo $formwriter->hiddeninput('novalue', '');
+						echo $formwriter->new_form_button('Submit', 'button button-lg button-outline-dark-2');
+						echo $formwriter->end_form();						
 					}		
 					?>
 
