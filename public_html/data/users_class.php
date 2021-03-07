@@ -192,6 +192,7 @@ class User extends SystemBase {
 					'password_temporary' => false,
 					'password' => $password
 					);
+					$temp_password_hashed = User::GeneratePassword($password);
 			}
 			else{
 					$temp_password = substr(md5(time()), 0, 5);
