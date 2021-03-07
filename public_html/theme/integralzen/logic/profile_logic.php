@@ -36,13 +36,28 @@
 	$phone_numbers = new MultiPhoneNumber(
 		array('user_id' => $session->get_user_id(), 'deleted' => FALSE));
 	$phone_numbers->load();	
-	$phone_number = $phone_numbers->get(0);	
+	/*
+	$num_phone_numbers = $phone_numbers->count_all();
+	if($num_phone_numbers){
+		$phone_number = $phone_numbers->get(0);	
+	}
+	else{
+		$phone_number = new PhoneNumber(NULL);
+	}
+	*/
 
 	$addresses = new MultiAddress(
 		array('user_id' => $session->get_user_id(), 'deleted' => FALSE));
 	$addresses->load();
-	$address = $addresses->get(0);
-
+	/*
+	$num_addresses = $addresses->count_all();
+	if($num_addresses){
+		$address = $addresses->get(0);	
+	}
+	else{
+		$address = new Address(NULL);
+	}
+	*/
 	
 	
 	//MESSAGES

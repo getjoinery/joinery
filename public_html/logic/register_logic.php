@@ -68,11 +68,9 @@ if ($_POST) {
 		'usr_email' => 'Email Address',
 		'usr_first_name' => 'First Name',
 		'usr_last_name' => 'Last Name',
-		//'usa_zip_code_id' => 'Zip Code'
+		//'usa_zip_code_id' => 'Zip Code',
+		'usr_password' => 'Password'
 	);
-
-
-	$required_fields['usr_password'] = 'Password';
 	
 
 	$fixed_fields = array();
@@ -131,7 +129,6 @@ if ($_POST) {
 	}
 
 	try {
-		
 		$user = User::CreateNewUser($fixed_fields['usr_first_name'], $fixed_fields['usr_last_name'], $fixed_fields['usr_email'], $fixed_fields['usr_password'], TRUE);
 		
 		$user->set('usr_nickname', $_POST['usr_nickname']);
