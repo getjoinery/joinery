@@ -11,6 +11,14 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/content_versions_class.php');
 
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Link.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generator.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/Google.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/Ics.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/Yahoo.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/WebOutlook.php');
+use Spatie\CalendarLinks\Link;
+
 class EventException extends SystemClassException {}
 class DisplayableEventException extends EventException implements DisplayableErrorMessage {}
 class DisplayablePermanentEventException extends EventException implements DisplayablePermanentErrorMessage {}
@@ -162,6 +170,31 @@ class Event extends SystemBase {
 		else{
 			return false;
 		}
+	}
+	
+	function get_add_to_calendar_links(){
+		$session = SessionControl::get_instance();
+		$calendar_links = array();
+
+		//CALENDAR LINKS
+		//FROM https://github.com/spatie/calendar-links	
+		if($this->get('evt_start_time') && $this->get('evt_show_add_to_calendar_link')){
+			$start_time_obj = LibraryFunctions::get_time_obj($this->get_event_start_time($session->get_timezone()), $session->get_timezone());	
+			$end_time_obj = LibraryFunctions::get_time_obj($this->get_event_end_time($session->get_timezone()), $session->get_timezone());
+			$settings = Globalvars::get_instance();
+			$webDir = $settings->get_setting('webDir_SSL');	
+			$cal_link = $webDir.'/profile/event_sessions?evt_event_id='.$this->key;
+			$link = Link::create($this->get('evt_name'), $start_time_obj, $end_time_obj)
+				->description($this->get('evt_short_description'))
+				->address($cal_link);
+				//->address('Kruikstraat 22, 2018 Antwerpen');
+			$calendar_links['google'] =  $link->google();
+			$calendar_links['yahoo'] = $link->yahoo();
+			$calendar_links['outlook'] = $link->webOutlook();
+			$calendar_links['ics'] = $link->ics();	
+		}	
+		
+		return $calendar_links;
 	}
 	
 	function create_url() {

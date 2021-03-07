@@ -81,7 +81,6 @@
 	$event_sessions->load();	
 	$numsessions = $event_sessions->count_all();	
 	
-	
 
 	
 	if($event_session->get('evs_vid_video_id')){
