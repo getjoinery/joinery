@@ -13,10 +13,6 @@
 	$session = SessionControl::get_instance();	
 	$session->check_permission(0);
 	
-	if(!$settings->get_setting('products_active')){
-		exit;
-	}
-	
 	$user = new User($session->get_user_id(), TRUE);
 	
 	$page = new PublicPage();
@@ -42,13 +38,12 @@
 		$customer_ids = array();
 	}
 	
-	?>
-	<div class="sidebar-box">
-		<h6 class="font-small font-weight-normal uppercase">Recurring Donations</h6>
-		<ul class="list-category">
-	<?php
+		
+	echo '<h2>Recurring donations</h2>';
 
-	$active = 0;
+	$headers = array('Amount', 'Started on', 'Status');
+	$page->tableheader($headers, "admin_table");		
+		
 	foreach($customer_ids as $customer_id){	
 		try{
 			$subs = \Stripe\Subscription::all(['limit' => 5, 'customer' => $customer_id, 'status' => 'all']);
@@ -61,16 +56,10 @@
 		foreach($subs as $sub) {
 			$gmtime = gmdate("Y-m-d\TH:i:s\Z", $sub['created']);
 			
+			$cancelled = 'Active (<a href="/profile/orders_recurring_action?stripe_sid='. $sub['id']. '">Cancel subscription</a>)';
 			if($sub['ended_at']){
-				$status = 'Canceled at '. LibraryFunctions::convert_time(gmdate("Y-m-d\TH:i:s\Z", $sub['ended_at']), 'UTC', $session->get_timezone());
+				$cancelled = 'Canceled at '. LibraryFunctions::convert_time(gmdate("Y-m-d\TH:i:s\Z", $sub['ended_at']), 'UTC', $session->get_timezone());
 			}
-			else{
-				$status = '<a href="/profile/orders_recurring_action?stripe_sid='. $sub['id']. '">cancel</a>';
-				$active = 1;
-			}
-			?>
-			<li><?php echo '$'.$sub['plan']['amount']/100 .'/month'; ?><span><?php echo $status; ?></span></li>
-			<?php
 			/*
 			if($sub['status'] != 'canceled'){
 				$actions = '';
@@ -79,12 +68,15 @@
 				$actions = 'Canceled';
 			}
 			*/
+			
+			$rowvalues = array();
+			//array_push($rowvalues, $sub['id']);
+			array_push($rowvalues,  '$'.$sub['plan']['amount']/100 .'/month'); 
+			array_push($rowvalues, LibraryFunctions::convert_time($gmtime, 'UTC', $session->get_timezone()));
+			array_push($rowvalues, $cancelled);
+			array_push($rowvalues, $actions);
+			$page->disprow($rowvalues);
 		}
 	}
-
-	if(!$active){
-		echo '<a class="button button-dark" href="/product?product_id=3">Start a new recurring donation</a>';
-	}
+	$page->endtable();
 	?>
-			</ul>
-	</div>

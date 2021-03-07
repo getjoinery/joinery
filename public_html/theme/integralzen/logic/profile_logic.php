@@ -15,7 +15,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 
 	$session = SessionControl::get_instance();
-	$settings = Globalvars::get_instance();
 	
 	//CHECK FOR AN ACTIVATION CODE AND ACTIVATE
 	if($_GET['act_code']){
@@ -26,9 +25,6 @@
 			$activated_user = Activation::ActivateUser($_GET['act_code']);
 		}
 	}
-	
-	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
-	$event_registrants->load();
 
 	
 	$session->check_permission(0);
@@ -53,13 +49,13 @@
 	$messages = new MultiMessage(
 	array('user_id_recipient' => $user->key), //SEARCH CRITERIA
 	array('message_id'=>'DESC'),  // SORT, SORT DIRECTION
-	5, //NUMBER PER PAGE
+	10, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
 	$messages->load();	
 	
 	
-	
+	$settings = Globalvars::get_instance();
 	if($settings->get_setting('events_active')){
 		//REMOVE USER FROM ANY EVENTS THAT ARE EXPIRED
 		$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), NULL);

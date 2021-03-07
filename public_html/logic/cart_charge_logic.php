@@ -56,7 +56,7 @@
 	$order->set('ord_raw_cart', print_r($cart, true));
 	$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
 	$order->set('ord_status', 1);	
-	$order->prepare();
+	$order->prepare();	
 	$order->save();
 	$order->load();	
 	

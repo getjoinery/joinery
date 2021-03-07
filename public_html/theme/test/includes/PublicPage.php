@@ -400,7 +400,7 @@ class PublicPage {
 
 
 
-	function tableheader($headers, $class='table', $id='table1'){
+	function tableheader($headers, $class='table cart-table', $id='table1'){
 		echo '<table class="'.$class.'" id="'.$id.'" cellspacing="0">
 			<thead><tr>';
 
