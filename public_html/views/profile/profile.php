@@ -82,10 +82,7 @@
 
 								
 								$time = NULL;
-								
 								$tz = $event->get('evt_timezone');
-
-
 								if($next_session){
 									$time = '<b>Next session: ';
 									$time .= $next_session->get_time_string($tz);
@@ -93,7 +90,7 @@
 									if($event->get('evt_timezone') != $session->get_timezone()){
 										$time .= ' (Your local time: '. $next_session->get_time_string($session->get_timezone()). ')';
 									}
-									echo '</b>';
+									$time .= '</b>';
 								}
 								else if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
 
@@ -103,20 +100,30 @@
 									}				
 								}
 								
+								$calendar_text = '';
+								if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+									$calendar_links = $event->get_add_to_calendar_links();
+									if($calendar_links){
+										if($time){
+											$calendar_text .= '<br>';
+										}
+										$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
+										$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
+										$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
+										$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
+									}
+								}
+								
 								
 								$rowvalues = array();
 								if($event->get('evt_session_display_type')==2){
-									array_push($rowvalues, '<h6><a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$event->get('evt_name').'</a></h6>'. $time);
+									array_push($rowvalues, '<h6><a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$event->get('evt_name').'</a></h6>'. $time. $calendar_text);
 								}
 								else{
-									array_push($rowvalues, '<h6><a href="/profile/event_sessions?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a></h6>'. $time);
+									array_push($rowvalues, '<h6><a href="/profile/event_sessions?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a></h6>'. $time. $calendar_text);
 								}
 								
-							
-								
 
-								
-								
 								$actions = '';
 								if(!$event_registrant->get('evr_extra_info_completed') && $event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
 									$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
@@ -315,7 +322,6 @@
 				</div><!-- end row -->
 			</div><!-- end container -->
 		</div>
-		<!-- end Blog section -->
 		
 		<?php
 	echo PublicPage::EndPage();

@@ -12,10 +12,13 @@
 		);
 	$page->public_header($hoptions);
 
-	echo PublicPage::BeginPage('Withdraw from Event/Course');
+	$options=array();
+	$options['subtitle'] = '<a href="/profile/profile">Back to my profile</a>';
+	echo PublicPage::BeginPage('Withdraw from Event/Course', $options);
+	
 	echo '<div class="section">
 			<div class="container">';
-	echo '<a class="back-link" href="/profile/profile">My Profile</a> > Withdraw from Event/Course<br />';
+
 	if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
 		$formwriter = new FormWriterPublic("form1");
 		echo $formwriter->begin_form("form", "post", "/profile/event_withdraw");

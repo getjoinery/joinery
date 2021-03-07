@@ -62,6 +62,7 @@
 	}		
 		
 	if(!$event_registrations->count_all()){
+		
 		$error_message = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
 		
 		<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>

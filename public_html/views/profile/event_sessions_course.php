@@ -5,95 +5,121 @@
 	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
 	require_once(LibraryFunctions::get_logic_file_path('event_sessions_course_logic.php'));
 	
-
+	if($error_message){
+		PublicPage::OutputGenericPublicPage('Not Registered', 'Not Registered', $error_message);
+		exit();
+	}	
 
 	$page = new PublicPage();
 	$hoptions = array(
 		'title' => 'Sessions', 
 	);
 	$page->public_header($hoptions,NULL);
-	echo '<a class="back-link" href="/profile/profile">My Profile</a> > '.$event->get('evt_name').' sessions<br />';
-	echo PublicPage::BeginPage($event->get('evt_name'));
-	if($error_message){
-		echo $error_message;
-	}
-	else{
-		?>	
-		<div uk-grid>
-		<div class="uk-width-2-3@m"><div style="padding: 20px">
-					<?php
-					if($video->key){
-						echo '<div style="margin: 20px">'.$video->get_embed(784,441).'</div>';
-					}
-					else if($event->get('evt_picture_link')){
-						echo '<div class="post-thumbnail">
-					<img width="800" height="532" src="'.$event_session->get('evs_picture_link'). '" class="attachment-twentyseventeen-featured-image size-twentyseventeen-featured-image wp-post-image" alt="" /></div><!-- .post-thumbnail -->	';
-					} 
-					?>
+	$options['subtitle'] = '<a href="/profile/profile">Back to my profile</a>';
+	echo PublicPage::BeginPage($event->get('evt_name'), $options);
+	
 
-		<div><?php echo $event_session->get('evs_content'); ?></div>
-														
-		<?php
+	$session_name = 'Session ' . $event_session->get('evs_session_number') . ' - '.$event_session->get('evs_title');
 
-			$session_files = $event_session->get_files();
-			if($session_files){
-				echo '<h3>Files and Homework</h3>';
+	?>
+	<div class="section">
+		<div class="container">
+			<div class="row col-spacing-50">
+				<!-- Blog Posts -->
+				<div class="col-12 col-lg-8"> 
+
+	
+					<div class="padding-40 border-all border-radius hover-shadow margin-bottom-20">
+						<h4 class="font-weight-normal margin-0"><?php echo $session_name; ?></h4>
+						<!--<div class="margin-bottom-10 margin-lg-bottom-20 text-black-03">
+							<p><i class="fas fa-map-marker-alt margin-right-10"></i><span><?php echo $time_string; ?></span></p>
+						</div>-->
+						<?php 
+						if($video->key){
+							echo $video->get_embed(784,441);
+						}
+						else if($event->get('evt_picture_link')){
+							echo '<img width="800" height="532" src="'.$event_session->get('evs_picture_link'). '"  alt="" />';
+						}
+						?>
+						<p><?php echo $event_session->get('evs_content'); ?></p>
+						<?php
+						$session_files = $event_session->get_files();
+						$num_session_files = 0;
+						foreach($session_files as $session_file){
+							$num_session_files++;
+						}
 				
-				$rowcontent = '<ul>';
-				foreach($session_files as $session_file){
-					$rowcontent .= '<li><a href="'.$session_file->get_url().'">'.$session_file->get_name().'</a></li>';
-				}
-				$rowcontent .= '</ul>';
-				echo $rowcontent;
-			}
-			
-			$next_session = $session_number+1;
-			//CHECK IF SESSION EXISTS
-			$exists=0;
-			foreach($event_sessions as $check_session){
-				if($check_session->get('evs_session_number') == $next_session){
-					$exists=1;
-				}
-			}
-		
-			if($exists){
-				echo '<p style="float:right;"><a class="et_pb_button" href="/profile/event_sessions_course?event_id='.$event->key.'&session_number='. $next_session .'">Next Session</a></p>';
-			}
-		
-		
+						$session_files = $event_session->get_files();
+						if($session_files){
+						?>
+						<div class="margin-top-20">
+							<h6 class="font-family-tertiary font-small font-weight-medium uppercase">Materials:</h6>
+							<ul class="list-dash">
+								<?php
+								foreach($session_files as $session_file){
+									echo '<li><a href="'.$session_file->get_url().'">'.$session_file->get_name().'</a></li>';
+								}		
+								?>						
+							</ul>
+						</div>
+						<?php
+						}
+						?>
+						<!--<div class="text-right margin-top-10 margin-lg-top-20">
+							<a class="button-text-1" href="#">Apply Now</a>
+						</div>-->
+					</div>
+					<?php
 
-			?>
-					
-		</div>
-		</div>
-		<div class="uk-width-1-3@m"><div style="padding: 20px">
-		<?php
-		//CHECK FOR SESSIONS
-		
-			$searches = array();
-			$searches['event_id'] = $event->key;
+	
+				$next_session = $session_number+1;
+				//CHECK IF NEXT SESSION EXISTS
+				$exists=0;
+				foreach($event_sessions as $check_session){
+					if($check_session->get('evs_session_number') == $next_session){
+						$exists=1;
+					}
+				}
 			
-			$event_sessions = new MultiEventSessions($searches,
-				array('session_number'=>'ASC'));
-			$event_sessions->load();	
-			$numsessions = $event_sessions->count_all();
+				if($exists){
+					echo '<p style="float:right;"><a class="button button-lg button-dark" href="/profile/event_sessions_course?event_id='.$event->key.'&session_number='. $next_session .'">Next Session</a></p>';
+				}
+		
+			?>
+			</div>
+			<?php
 			
 			if($numsessions > 0){
-				echo '<h3>Sessions</h3>';
+			?>
+			<div class="col-12 col-lg-4 sidebar-wrapper">
+				<!-- Sidebar box 1 - About me -->
+				<div class="sidebar-box">
+					<div class="text-center">
+						<h6 class="font-small font-weight-normal uppercase">Sessions</h6>
+						</div>
+						<?php			
+						foreach($event_sessions as $aevent_session){			
+							echo '<a href="/profile/event_sessions_course?session_number='.$aevent_session->get('evs_session_number').'&event_id='. $event->key.'">Session ' . $aevent_session->get('evs_session_number') . ' - '.$aevent_session->get('evs_title').'</a><br />';
 
-				foreach($event_sessions as $aevent_session){			
-					echo 'Session ' . $aevent_session->get('evs_session_number') . ' - <a href="/profile/event_sessions_course?session_number='.$aevent_session->get('evs_session_number').'&event_id='. $event->key.'">'.$aevent_session->get('evs_title').'</a><br />';
+						}
+						$page->endtable();	
+						?>			
+						<!--<img class="img-circle-md margin-bottom-20" src="../assets/images/img-circle-medium.jpg" alt="">
+						<p>Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus.</p>-->
+					
+					<p><?php echo $event->get('evt_private_info'); ?></p>
+				</div>
+				<?php
+			}
+			?>
+				</div>
+				<!-- end Blog Sidebar -->
+			</div><!-- end row -->
+		</div><!-- end container -->
+	</div>
+	<?php	
 
-				}
-				$page->endtable();	
-
-			}	
-		?>
-		</div>
-		</div>
-		</div>	
-			<?php
-	}
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

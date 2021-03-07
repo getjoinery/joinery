@@ -23,7 +23,6 @@ class FormWriterPublic extends FormWriterMaster {
 								error.appendTo(element.parents(".errorplacement").eq(0));
 							}';
 
-
 	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
 		$output = '<form id="'. $this->formid.'" class="'.$class.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'">';
 		return $output;
@@ -32,6 +31,8 @@ class FormWriterPublic extends FormWriterMaster {
 	function end_form(){
 		return '</form>';
 	}
+
+
 
 }
 ?>
