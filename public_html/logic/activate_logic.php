@@ -33,10 +33,13 @@ if ($act_code) {
 		// IF LOGGED IN, REDIRECT
 		if ($user) {
 			if (!$activated_user->get('usr_password')) { 
-				LibraryFunctions::Redirect('/profile');
+				LibraryFunctions::Redirect('/password-set');
+				exit;
 			}
-			
-			LibraryFunctions::Redirect('/profile');
+			else{
+				LibraryFunctions::Redirect('/page/verify-email-confirm');
+				exit;
+			}
 				
 		} else {
 			// Does this user need to create a password? 
@@ -50,8 +53,11 @@ if ($act_code) {
 				}
 
 				LibraryFunctions::Redirect('/password-set');
-			} else {
+				exit;
+			} 
+			else {
 				LibraryFunctions::Redirect('/page/verify-email-confirm');
+				exit;
 			}
 		}
 	}
