@@ -15,6 +15,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 
 	$session = SessionControl::get_instance();
+	$settings = Globalvars::get_instance();
 	
 	//CHECK FOR AN ACTIVATION CODE AND ACTIVATE
 	if($_GET['act_code']){
@@ -25,6 +26,9 @@
 			$activated_user = Activation::ActivateUser($_GET['act_code']);
 		}
 	}
+	
+	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
+	$event_registrants->load();
 
 	
 	$session->check_permission(0);
@@ -33,36 +37,29 @@
 	
 	$user = new User($session->get_user_id(), TRUE);		
 	
-	$phone_numbers_verified = new MultiPhoneNumber(
-		array('user_id' => $session->get_user_id(), 'deleted' => FALSE, 'verified' => TRUE));
-	//$numphoneverified = $phone_numbers_verified->count_all();		
-	
 	$phone_numbers = new MultiPhoneNumber(
 		array('user_id' => $session->get_user_id(), 'deleted' => FALSE));
-	$phone_numbers->load();		
-	//$numphonerecords = $phone_numbers->count_all();	
+	$phone_numbers->load();	
+	$phone_number = $phone_numbers->get(0);	
 
 	$addresses = new MultiAddress(
 		array('user_id' => $session->get_user_id(), 'deleted' => FALSE));
 	$addresses->load();
-	//$numaddressrecords = $addresses->count_all();	
+	$address = $addresses->get(0);
 
-	//$addresses_verified = new MultiAddress(
-	//	array('user_id' => $session->get_user_id(), 'deleted' => FALSE, 'verified' => TRUE));
-	//$numaddressverified = $addresses_verified->count_all();	
 	
 	
 	//MESSAGES
 	$messages = new MultiMessage(
 	array('user_id_recipient' => $user->key), //SEARCH CRITERIA
 	array('message_id'=>'DESC'),  // SORT, SORT DIRECTION
-	10, //NUMBER PER PAGE
+	5, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
 	$messages->load();	
 	
 	
-	$settings = Globalvars::get_instance();
+	
 	if($settings->get_setting('events_active')){
 		//REMOVE USER FROM ANY EVENTS THAT ARE EXPIRED
 		$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), NULL);
