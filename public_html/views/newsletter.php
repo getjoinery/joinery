@@ -14,6 +14,10 @@
 
 	
 	echo PublicPage::BeginPage('Newsletters');
+			
+	echo '<div class="section">
+			<div class="container">';
+	
 	if($message){
 		echo '<p>'.$message.'</p>';
 	}
@@ -35,7 +39,7 @@
 	$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);		
 	
-	echo $formwriter->begin_form("uniForm", "post", "/newsletter");
+	echo $formwriter->begin_form("", "post", "/newsletter");
 	echo '<fieldset class="inlineLabels">';
 	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 30, '', "", 255, "");
 	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 30, '', "", 255, "");
@@ -43,15 +47,13 @@
 	echo $formwriter->antispam_question_input();
 	echo $formwriter->honeypot_hidden_input();
 
-	echo $formwriter->start_buttons();
 	echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "checkbox", "left", NULL, 1, "");
 	
 	echo $formwriter->captcha_hidden_input();
-	echo $formwriter->new_form_button('Sign up for the newsletter', '', 'submit1');
-	echo $formwriter->end_buttons();
-	echo '</fieldset>';
+	echo $formwriter->new_form_button('Sign up for the newsletter', 'button button-lg button-dark', 'submit1');
 	echo $formwriter->end_form();
 	
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer(array('track'=>TRUE));
 ?>

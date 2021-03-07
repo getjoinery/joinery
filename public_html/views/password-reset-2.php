@@ -9,9 +9,10 @@
 		'title'=>'Password Reset', 
 	);
 	$page->public_header($hoptions,NULL);
-
-	if($message){
 		echo PublicPage::BeginPage('Password Reset');
+			echo '<div class="section">
+			<div class="container">';
+	if($message){
 		echo $message;
 		echo PublicPage::EndPage();	
 	}
@@ -26,20 +27,18 @@
 		$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
 		echo $formwriter->set_validate($validation_rules);		
 
-		echo $formwriter->begin_form("uniForm", "post", "/password-reset-2");
-		echo '<fieldset class="inlineLabels">';
+		echo $formwriter->begin_form("", "post", "/password-reset-2");
 		echo $formwriter->passwordinput("New Password", "usr_password", "ctrlHolder", 20, NULL , 'Must be at least 5 characters.',255, "");
 		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", "ctrlHolder", 20, "" , "", 255,"");
 		echo $formwriter->hiddeninput('act_code',$act_code);
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit', '', 'submit1');
-		echo $formwriter->end_buttons(); 	
-		echo '</fieldset>';
+		echo $formwriter->new_form_button('Submit', 'button button-lg button-dark', 'submit1');
 		echo $formwriter->end_form();
 
-		echo PublicPage::EndPage();		
+	
 	}
 
+	echo '</div></div>';
+	echo PublicPage::EndPage();	
 	$page->public_footer(array('track'=>TRUE, 'formvalidate'=>TRUE));
 	
 ?>

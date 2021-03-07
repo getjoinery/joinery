@@ -372,13 +372,13 @@ class FormWriterMaster {
 
 	function passwordinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly="") {
 		
-		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, TRUE, FALSE, 'regular');
+		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, TRUE, FALSE, 'password');
 	}
 
-	function text($id, $label, $value, $class=NULL) {
+	function text($id, $label, $value, $class) {
 		
 		$output = '
-		<div id="'.$id.'_container" class="uk-margin errorplacement ">
+		<div id="'.$id.'_container" class="uk-margin errorplacement">
 		<label for="'.$id.'" class="">'.$label.'</label>
 		<div class="controls">
 		<span>'.$value.'</span>

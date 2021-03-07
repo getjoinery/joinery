@@ -16,7 +16,9 @@
 	);
 	$page->public_header($hoptions);
 	echo PublicPage::BeginPage('Sitemap');
-	
+		echo '<div class="section">
+			<div class="container">';
+			
 	$settings = Globalvars::get_instance();
 	if($settings->get_setting('page_contents_active')){
 		echo '<h2>Pages</h2>';
@@ -80,7 +82,7 @@
 		echo '</ul>';	
 	}
 
-
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer(array('track'=>TRUE, 'is_404'=> 1));
 ?>

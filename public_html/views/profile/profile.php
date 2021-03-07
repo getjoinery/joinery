@@ -36,7 +36,6 @@
 		} 
 		?>
 
-		<!-- Blog section  -->
 		<div class="section">
 			<div class="container">
 				<div class="row col-spacing-50">

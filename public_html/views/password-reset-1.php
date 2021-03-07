@@ -12,22 +12,21 @@
 	);	
 	$page->public_header($hoptions,NULL);
 	echo PublicPage::BeginPage('Reset Password - Step 1 of 2');
+		echo '<div class="section">
+			<div class="container">';
 
 	if($message){
 		echo $message;
 	}
 	else{
 		$formwriter = new FormWriterPublic("form1");
-		echo $formwriter->begin_form("uniForm", "post", "/password-reset-1"); 
-		echo '<fieldset class="inlineLabels">';
+		echo $formwriter->begin_form("", "post", "/password-reset-1"); 
 		echo $formwriter->textinput("Enter the Email Address you registered with", "email", "ctrlHolder", 20, htmlspecialchars($email), '', 64, NULL);
-		echo $formwriter->start_buttons();
 		echo $formwriter->new_form_button('Submit', '', 'submit1');
-		echo $formwriter->end_buttons();
-		echo '</fieldset>';
 		echo $formwriter->end_form();
 	}
 
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 

@@ -14,12 +14,16 @@
 	NULL);
 
 	echo PublicPage::BeginPage();
+		
+	echo '<div class="section">
+			<div class="container">';
 	?>
 	<h2>You are now logged out</h2>
 
 	<p>You can visit the <a href="/">home page</a> or <a href="/login">log in again</a>.</p>
 
 	<?php
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'fbconnect'=>TRUE));
 
