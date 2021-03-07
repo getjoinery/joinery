@@ -12,6 +12,8 @@
 	$page->public_header($hoptions);
 	
 	echo PublicPage::BeginPage('Waiting list for '.$event->get('evt_name'));
+		echo '<div class="section">
+			<div class="container">';
     echo '<h3>Add yourself to the waiting list, and we will notify you as soon as registration is available.</h3>';
 
 	if($display_message){
@@ -32,8 +34,7 @@
 		$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules);
 		echo $formwriter->set_validate($validation_rules);		
 		
-		echo $formwriter->begin_form("uniForm", "post", "/event_waiting_list");
-		echo '<fieldset class="inlineLabels">';
+		echo $formwriter->begin_form("", "post", "/event_waiting_list");
 		echo $formwriter->hiddeninput("event_id", $event->key);
 		echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 30, '', "", 255, "");
 		echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 30, '', "", 255, "");
@@ -42,19 +43,17 @@
 		echo $formwriter->honeypot_hidden_input();
 
 
-		
-		echo $formwriter->start_buttons();
 		echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "checkbox", "left", NULL, 1, "");
 		echo $formwriter->checkboxinput("Add me to the newsletter", "newsletter", "checkbox", "left", NULL, 1, "");
 		if(!$session->get_user_id()){
 			echo $formwriter->captcha_hidden_input();
 		}
 
-		echo $formwriter->new_form_button('Add me to the waiting list', '', 'submit1');
-		echo $formwriter->end_buttons();
-		echo '</fieldset>';
+		echo $formwriter->new_form_button('Add me to the waiting list', 'button button-lg button-dark', 'submit1');
 		echo $formwriter->end_form();
-	}	
+	}
+
+	echo '</div></div>';
 	echo PublicPage::EndPage();	
 	$page->public_footer(array('track'=>TRUE));
 ?>

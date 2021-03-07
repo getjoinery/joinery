@@ -10,12 +10,14 @@
 	);
 	$page->public_header($hoptions);
 	echo PublicPage::BeginPage('Page not found');
-
+	echo '<div class="section">
+			<div class="container">';
 	?>
 
 	<h2>This page may have moved or is no longer available</h2>
 
 	<?php
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 
 	$page->public_footer(array('track'=>TRUE, 'is_404'=> 1));

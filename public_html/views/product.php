@@ -21,21 +21,16 @@ $page->public_header(array(
 	if (!$display_empty_form) {
 		echo '<p>Is everything correct?</p>';
 		$formwriter = new FormWriterPublic("product_form", TRUE);
-		echo $formwriter->begin_form("uniForm", "POST", "/product"); 
+		echo $formwriter->begin_form("", "POST", "/product"); 
 
 		echo $formwriter->hiddeninput('product_id', $product_id);
 		echo $formwriter->hiddeninput('product_key', $form_key);
-		echo '<fieldset class="inlineLabels">';
 
 		foreach($display_data as $key => $value) {
 			echo $formwriter->text('<strong>' . $key . '</strong>', $value, 'ctrlHolder');
 		}
-			
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Next Step');
-		echo $formwriter->end_buttons();
 
-		echo '</fieldset>';
+		echo $formwriter->new_form_button('Next Step', 'button button-lg button-dark');
 		echo $formwriter->end_form();
 	} 
 	else {

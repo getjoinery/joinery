@@ -12,7 +12,9 @@
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('Register');
-
+		echo '<div class="section">
+			<div class="container">';
+			
 	if(isset($_GET['msgtext'])){
 		if (array_key_exists($_GET['msgtext'], $LOGIN_MESSAGES)) {
 			echo '<div class="status_warning">'.htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]).'</div>';
@@ -40,7 +42,7 @@
 	$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);
 
-	echo $formwriter->begin_form("uniForm", "post", "/register");
+	echo $formwriter->begin_form("", "post", "/register");
 	echo $formwriter->hiddeninput("prevformname", "register");
 	?>
 	<h2>Register</h2>
@@ -61,14 +63,12 @@
 	echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "ctrlHolder", "normal", 'yes', "yes", '');
 	echo $formwriter->honeypot_hidden_input();	
 
-
-	echo $formwriter->start_buttons();
 	echo $formwriter->captcha_hidden_input();
-	echo $formwriter->new_form_button('Submit', '', 'submit1');
-	echo $formwriter->end_buttons();
+	echo $formwriter->new_form_button('Submit', 'button button-lg button-dark', 'submit1');
 
 	echo $formwriter->end_form();
 
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'fbconnect'=>TRUE));
 

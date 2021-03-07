@@ -196,7 +196,7 @@ class PublicPage {
 				</style>
 			
 	
-		<link rel="stylesheet" type="text/css" href="/theme/integralzen/uikit-3.4.2/css/uikit.min.css">
+		<!--<link rel="stylesheet" type="text/css" href="/theme/integralzen/uikit-3.4.2/css/uikit.min.css">-->
 
 		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
 		

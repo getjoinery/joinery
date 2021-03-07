@@ -12,7 +12,7 @@
 		);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPage::BeginPage();
+	echo PublicPage::BeginPage('Log In');
 
 	?>
 	<script type="text/javascript">
@@ -26,9 +26,11 @@
 	});
 	</script>
 
-	<div uk-grid>
-		<div class="uk-width-2-3@m">
-			<div style="padding: 20px">
+		<div class="section">
+			<div class="container">
+				<div class="row col-spacing-50">
+					<!-- Blog Posts -->
+					<div class="col-12 col-lg-8">
 				<?php
 				if(isset($_GET['msgtext'])){
 					if (array_key_exists($_GET['msgtext'], $LOGIN_MESSAGES)) {
@@ -53,37 +55,44 @@
 				$validation_rules['password']['required']['value'] = 'true';
 				echo $formwriter->set_validate($validation_rules);							
 				
-				echo $formwriter->begin_form("uniForm", "post", "/login");
-				?>
-				<div class="body-title bottom-border">
-					<h2>Log In</h2>
-				</div>
-				<?php
-				echo '<fieldset class="inlineLabels">';
+				echo $formwriter->begin_form("", "post", "/login");
+
 				echo $formwriter->textinput("Email", "email", "ctrlHolder", 20, htmlspecialchars($email), '',255, '');
 
 				echo $formwriter->passwordinput("Password (<a href=\"$forgot_link\">forgot?</a>)", "password", "ctrlHolder", 20, '','', 255, '');
 				echo $formwriter->checkboxinput("Remember me", "setcookie", "ctrlHolder", "normal", 'yes', "yes", '');
-				echo $formwriter->start_buttons();
-				echo $formwriter->new_form_button('Log In', '');			
-				echo $formwriter->end_buttons();
-				echo '</fieldset>';
+				echo $formwriter->new_form_button('Log In', 'button button-lg button-dark');			
 				echo $formwriter->end_form();
 				?>
 
+					</div>
+					<!-- end Blog Posts -->
 
-			</div>
+					<!-- Blog Sidebar -->
+					<div class="col-12 col-lg-4 sidebar-wrapper">
+						<!-- Sidebar box 1 - About me -->
+						<div class="sidebar-box">
+							<div class="text-center">
+								<h6 class="font-small font-weight-normal uppercase">Help</h6>
+								
+								
+								<!--<img class="img-circle-md margin-bottom-20" src="../assets/images/img-circle-medium.jpg" alt="">
+								<p>Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus.</p>-->
+							</div>
+							<ul class="list-category">
+								<li><a href="/register<?php if(isset($_GET['m'])){ echo '?m='.htmlspecialchars($_GET['m']); } ?>">Register here</a></li>
+								<li><a href="<?php echo $forgot_link ?>">Set or change password here</a></li>
+								<li><a href="<?php echo $forgot_link ?>">Forgot password</a></li>
+							</ul>
+						</div>
+
+
+					</div>
+					<!-- end Blog Sidebar -->
+				</div><!-- end row -->
+			</div><!-- end container -->
 		</div>
-	</div>
-	<div class="uk-width-1-3@m">
-		<div style="padding: 20px">
-			<h2>Help</h2>	
-			<div><a href="/register<?php if(isset($_GET['m'])){ echo '?m='.htmlspecialchars($_GET['m']); } ?>">Register here</a></div>
-			<div><a href="<?php echo $forgot_link ?>">Set or change password here</a></div>
 		
-		</div>
-	</div>	
-
 	<?php
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));

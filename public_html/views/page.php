@@ -34,7 +34,11 @@
 		'title' => $page_content->get('pac_title')
 	));
 	echo PublicPage::BeginPage($page_content->get('pac_title'));
+	
+	echo '<div class="section">
+			<div class="container">';
 	echo '<div>'. $page_content->get_filled_content() . '</div>';
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
