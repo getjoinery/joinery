@@ -12,13 +12,34 @@
 		'title'=>'Edit Address'
 		);
 	$page->public_header($hoptions);
-	echo '<a class="back-link" href="/profile/profile">My Profile</a> > Address Edit<br />';
-	echo PublicPage::BeginPage('Edit Address');
-	/*
-	if ($address && $address->get('usa_is_bad')) {
-		echo '<div class="status_error"><p>We could not map the entered address.  Please double check you have entered it correctly.</p></div>';
-	}
-	*/
+
+	$options=array();
+	$options['subtitle'] = '<a href="/profile/profile">Back to my profile</a>';
+	echo PublicPage::BeginPage('Edit Address', $options);
+
+	echo '<div class="section">
+		<div class="container">';
+
+
+	?>
+	<ul class="nav nav-tabs margin-bottom-20">
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/account_edit">Edit Account</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/password_edit">Change Password</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link active" href="/profile/address_edit">Edit Address</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/phone_numbers_edit">Edit Phone Number</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/contact_preferences">Change Contact Preferences</a>
+	  </li>
+	</ul>
+	<?php
 	
 	$formwriter = new FormWriterPublic("form1");
 	
@@ -29,9 +50,7 @@
 	$validation_rules['usa_zip_code_id']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);					
 	
-	echo $formwriter->begin_form("uniForm", "post", "/profile/address_edit");
-
-	echo '<fieldset class="inlineLabels">';
+	echo $formwriter->begin_form("", "post", "/profile/address_edit");
 
 	/*
 	if ($address->key) {
@@ -44,16 +63,14 @@
 	Address::PlainForm($formwriter, $address);
 	echo '</div>';
 
-		echo $formwriter->start_buttons();
-		echo '<a href="/profile/account_edit">Cancel</a>';
-		echo $formwriter->new_form_button('Submit', '');
-		echo $formwriter->end_buttons();
-		echo '</fieldset>';
+	echo '<a href="/profile/account_edit">Cancel</a> ';
+	echo $formwriter->new_form_button('Submit', 'button button-lg button-dark');
 
 	echo $formwriter->end_form();
 
 	$page->endtable();
 
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 

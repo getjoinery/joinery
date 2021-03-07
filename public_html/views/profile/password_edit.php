@@ -15,9 +15,33 @@
 	$page->public_header(array(
 		'title' => $page_title
 	));
-	echo '<a class="back-link" href="/profile/profile">My Profile</a> > '.$page_title.'<br />';
-	echo PublicPage::BeginPage($page_title);
 
+	$options=array();
+	$options['subtitle'] = '<a href="/profile/profile">Back to my profile</a>';
+	echo PublicPage::BeginPage($page_title, $options);
+	echo '<div class="section">
+			<div class="container">';
+
+	?>
+	<ul class="nav nav-tabs margin-bottom-20">
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/account_edit">Edit Account</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link active" href="/profile/password_edit">Change Password</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link " href="/profile/address_edit">Edit Address</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link " href="/profile/phone_numbers_edit">Edit Phone Number</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/contact_preferences">Change Contact Preferences</a>
+	  </li>
+	</ul>
+	<?php
+	
 	if($message){
 		echo $message;
 	}
@@ -37,21 +61,19 @@
 		$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
 		echo $formwriter->set_validate($validation_rules);					
 					
-		echo $formwriter->begin_form("uniForm", "post", "/profile/password_edit");
-		echo '<fieldset class="inlineLabels">';
+		echo $formwriter->begin_form("", "post", "/profile/password_edit");
 
 		if ($has_old_password) {
 			echo $formwriter->passwordinput("Old Password", "usr_old_password", "ctrlHolder", 20, NULL , '',255, "");
 		}
 		echo $formwriter->passwordinput("New Password", "usr_password", "ctrlHolder", 20, NULL , 'Must be at least 5 characters.',255, "");
 		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", "ctrlHolder", 20, "" , "", 255,"");
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit', '');
-		echo $formwriter->end_buttons();
-		echo '</fieldset>';
+		echo '<a href="/profile/account_edit">Cancel</a> ';
+		echo $formwriter->new_form_button('Submit','button button-lg button-dark');
 
 		echo $formwriter->end_form();		
-	}		
+	}	
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 

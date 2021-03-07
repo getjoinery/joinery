@@ -15,8 +15,11 @@
 		'title'=>'Edit Account', 
 	);
 	$page->public_header($hoptions);
-	echo '<a class="back-link" href="/profile/profile">My Profile</a> > Account Edit<br />';
+
 	echo PublicPage::BeginPage('Account Edit');
+	
+	echo '<div class="section">
+			<div class="container">';
 
 	foreach($display_messages AS $display_message) {
 		if($display_message->identifier == 'userbox') {			
@@ -24,10 +27,29 @@
 		}
 	}			
 
+	?>
+	<ul class="nav nav-tabs margin-bottom-20">
+	  <li class="nav-item">
+		<a class="nav-link active" href="/profile/account_edit">Edit Account</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/password_edit">Change Password</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/address_edit">Edit Address</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/phone_numbers_edit">Edit Phone Number</a>
+	  </li>
+	  <li class="nav-item">
+		<a class="nav-link" href="/profile/contact_preferences">Change Contact Preferences</a>
+	  </li>
+	</ul>
+	<?php
 	
 	$formwriter = new FormWriterPublic("form1");
-	echo $formwriter->begin_form("uniForm", "post", "/logic/users_edit_logic");
-	echo '<fieldset class="inlineLabels">';
+	echo $formwriter->begin_form("", "post", "/logic/users_edit_logic");
+
 	//$optionvals = array(""=>'', "Male"=>0, "Female"=>1);
 	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, $user->get('usr_first_name'), "",255, "");
 	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, $user->get('usr_last_name'), "" , 255, "");
@@ -37,10 +59,9 @@
 	echo $formwriter->dropinput("Your Time Zone", "usr_timezone", "ctrlHolder", $optionvals, $user->get('usr_timezone'), '', FALSE);
 	//TODO ALLOW THE USER TO CHANGE EMAILS
 	//echo $formwriter->textinput("Email", "usr_email_new", "ctrlHolder", 20, $user->get('usr_email'), "" , 255, "");
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit', '');
-	echo $formwriter->end_buttons();
-	echo '</fieldset>';
+
+	echo $formwriter->new_form_button('Submit', 'button button-lg button-dark');
+
 
 	echo $formwriter->end_form();
 
@@ -78,6 +99,7 @@
 		echo '<a class="add-phonenumber" href="/profile/phone_numbers_edit" title="Add New Phone Number">Add New Phone Number</a>';
 	}
 		
+	echo '</div></div>';
 	echo PublicPage::EndPage();	
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
