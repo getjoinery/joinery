@@ -20,6 +20,8 @@
 	
 	
 	echo PublicPage::BeginPage('Dana: the priceless practice of giving generously');
+			echo '<div class="section padding-top-20">
+			<div class="container">';
 ?>
 
 	<p>Integral Zen is a registered nonprofit religious organization and donations are fully tax deductible in the United States.</p>
@@ -34,14 +36,14 @@
 	<div>
 	<h3>Monthly Donation</h3>	<a href="/product?product_id=3" style="float:left; margin:20px; margin-top: 0px;" ><img width="100" height="100" src="/uploads/small/Generosity-dana-buddhism-7x_j0t7xha.jpg" /></a>
 
-	<p>Monthly donations are very helpful because they allow us to manage our budget.  We accept credit or debit cards.<br /><a class="et_pb_button" href="/product?product_id=3" >Monthly donation</a> </p>
+	<p>Monthly donations are very helpful because they allow us to manage our budget.  We accept credit or debit cards.<br /><a class="button button-dark" href="/product?product_id=3" >Monthly donation</a> </p>
 	</div>
 	<br style="clear:both;">
 	<div>
 	<h3>One Time Donation (Credit or Debit card)</h3>
 		<a href="/product?product_id=2" style="float:left; margin:20px; margin-top: 0px;" ><img width="100" height="100" src="/uploads/small/DBZ-buddha_kzja6o64.jpg" /></a>
 
-	<p>To make a one time donation to Integral Zen by credit or debit card. (preferred)<br /><a class="et_pb_button" href="/product?product_id=2" >One time donation by credit/debit card</a> </p>
+	<p>To make a one time donation to Integral Zen by credit or debit card. (preferred)<br /><a class="button button-dark" href="/product?product_id=2" >One time donation by credit/debit card</a> </p>
 	</div>
 	
 	<br style="clear:both;">
@@ -49,7 +51,7 @@
 	<h3>One Time Donation (Paypal)</h3>
 		<a href="/product?product_id=2" style="float:left; margin:20px; margin-top: 0px;" ><img width="100" height="100" src="/uploads/small/DBZ-buddha2_2vlavbus.jpg" /></a>
 
-	<p>To make a one time donation to Integral Zen by paypal.<br /><a class="et_pb_button" href="https://paypal.me/integralzen" >One time donation by paypal</a> </p>
+	<p>To make a one time donation to Integral Zen by paypal.<br /><a class="button button-dark" href="https://paypal.me/integralzen" >One time donation by paypal</a> </p>
 	</div>	
 	<br /><br />
 	<p><strong>Note:  If you are unable to use a credit or a debit card or paypal, we have a transferwise account with foreign bank info (contact <a href="mailto:info@integralzen.org">info@integralzen.org</a> for details). </strong></p>
@@ -201,6 +203,7 @@ giving generously from the heart?” What a lovely question to deeply consider.<
 </div>	
 	
 <?php
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer(array('track'=>TRUE));
 ?>
