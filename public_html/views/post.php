@@ -17,7 +17,7 @@
 ?>
 
 		<!-- Blog Post section -->
-		<div class="section">
+		<div class="section padding-top-20">
 			<div class="container">
 				<div class="row">
 					<div class="col-12 col-sm-10 offset-sm-1 col-md-8 offset-md-2">

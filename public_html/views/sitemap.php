@@ -16,7 +16,7 @@
 	);
 	$page->public_header($hoptions);
 	echo PublicPage::BeginPage('Sitemap');
-		echo '<div class="section">
+		echo '<div class="section padding-top-20">
 			<div class="container">';
 			
 	$settings = Globalvars::get_instance();

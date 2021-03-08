@@ -16,7 +16,7 @@
 	$options['subtitle'] = '<a href="/profile/profile">Back to my profile</a>';
 	echo PublicPage::BeginPage('Withdraw from Event/Course', $options);
 	
-	echo '<div class="section">
+	echo '<div class="section padding-top-20">
 			<div class="container">';
 
 	if($event->get('evt_end_time') > date('Y-m-d H:i:s')){

@@ -35,7 +35,7 @@
 	));
 	echo PublicPage::BeginPage($page_content->get('pac_title'));
 	
-	echo '<div class="section">
+	echo '<div class="section padding-top-20">
 			<div class="container">';
 	echo '<div>'. $page_content->get_filled_content() . '</div>';
 	echo '</div></div>';

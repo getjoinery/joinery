@@ -13,7 +13,7 @@
 	echo PublicPage::BeginPage('Checkout');
 	?>
 
-	<div class="section-lg">
+	<div class="section-lg padding-top-20">
 		<div class="container">
 			<div class="row col-spacing-40">
 				<div class="col-12 col-xl-6">

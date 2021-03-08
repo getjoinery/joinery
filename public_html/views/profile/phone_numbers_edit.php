@@ -16,7 +16,7 @@
 	$options['subtitle'] = '<a href="/profile/profile">Back to my profile</a>';
 	echo PublicPage::BeginPage('Add/Edit Phone Number', $options);
 
-	echo '<div class="section">
+	echo '<div class="section padding-top-20">
 			<div class="container">';
 
 	?>

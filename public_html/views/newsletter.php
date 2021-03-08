@@ -15,7 +15,7 @@
 	
 	echo PublicPage::BeginPage('Newsletters');
 			
-	echo '<div class="section">
+	echo '<div class="section padding-top-20">
 			<div class="container">';
 	
 	if($message){
