@@ -29,7 +29,6 @@
 	  background-color: #fefde5 !important;
 	}
 	
-	
 	/* OVERRIDE STYLES */
 	
 	body {
@@ -41,7 +40,19 @@
 		border: 1px solid #FF3B38;
 	}
 	
-	.errorplacement {
+	.errorplacement{
 		margin-top: 20px;
 		margin-bottom: 20px;
 	}
+	
+	.button-dark, a.button-dark {
+		background: #1d2023;
+		border: 0;
+		color: #fff !important;
+		text-decoration: none !important;
+	}
+	
+	.padding-top-20 {
+		padding-top: 20px !important;
+	}
+	

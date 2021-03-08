@@ -437,8 +437,8 @@ class PublicPage {
 		
 		<footer id="colophon" class="site-footer izfooter" role="contentinfo">
 		
-		<script src="/theme/integralzen/uikit-3.4.2/js/uikit.min.js"></script>
-		<script src="/theme/integralzen/uikit-3.4.2/js/uikit-icons.min.js"></script> 
+		<!--<script src="/theme/integralzen/uikit-3.4.2/js/uikit.min.js"></script>
+		<script src="/theme/integralzen/uikit-3.4.2/js/uikit-icons.min.js"></script> -->
 		
 			<div class="wrap">
 				<aside class="widget-area" role="complementary" aria-label="Footer">
