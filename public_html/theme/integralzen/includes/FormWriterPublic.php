@@ -31,31 +31,6 @@ class FormWriterPublic extends FormWriterMaster {
 	}
 
 
-	function passwordinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly="") {
-		ob_start(); //Start output buffer
-		?>
-					<div id="<?php echo $id . '_container'; ?>" class="<?php echo $class; ?> errorplacement">
-						<!--<p id="error1" class="errorField"><strong>Description of your error</strong></p>-->
-					  <label for="<?php echo $id; ?>"><?php echo $label; ?></label>
-						<input name="<?php echo $id; ?>" id="<?php echo $id; ?>" value="<?php echo $value; ?>" size="<?php echo $size; ?>" type="password" class="textInput" maxlength="<?php echo $maxlength; ?>" <?php echo $this->_get_next_tab_index(); ?>/>
-						<?php if ($hint): ?>
-							<!--<p id="<?php echo $id . '_hint'; ?>" class="formHint"><?php echo $hint; ?></p>-->
-							<div class="form_callout">
-							  <div class="form_callout_top"></div>
-							  <div class="form_callout_content">
-								 <p id="<?php echo $id . '_callout'; ?>"><?php echo $hint; ?></p>
-							  </div>
-							  <div class="form_callout_bottom"></div>
-							</div>
-						<?php endif; ?>
-
-					</div>
-		<?php
-		$output = ob_get_contents(); //Grab output
-		ob_end_clean(); //Discard output buffer
-		return $output;
-
-	}
 
 	function text($label, $value, $class) {
 		ob_start(); //Start output buffer

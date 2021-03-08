@@ -196,9 +196,21 @@ class PublicPage {
 				</style>
 			
 	
-		<link rel="stylesheet" type="text/css" href="/theme/integralzen/uikit-3.4.2/css/uikit.min.css">
+		<!--<link rel="stylesheet" type="text/css" href="/theme/integralzen/uikit-3.4.2/css/uikit.min.css">-->
+
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
+		
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
 
 
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/css/theme.css" rel="stylesheet">	
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/css/site_styles.css" rel="stylesheet">
+		<!-- Fonts/Icons -->
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
 
 		<script src="<?php echo $this->cdn; ?>/theme/integralzen/scripts/df983.js"></script> 
 		
@@ -418,10 +430,15 @@ class PublicPage {
 
 				</div><!-- #content -->
 
+		<!-- ***** JAVASCRIPTS ***** -->
+		<script src="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/js/polyfill.min.js?features=IntersectionObserver"></script>
+		<script src="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/plugins.js"></script>
+		<script src="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/js/functions.js"></script>
+		
 		<footer id="colophon" class="site-footer izfooter" role="contentinfo">
 		
-		<script src="/theme/integralzen/uikit-3.4.2/js/uikit.min.js"></script>
-		<script src="/theme/integralzen/uikit-3.4.2/js/uikit-icons.min.js"></script> 
+		<!--<script src="/theme/integralzen/uikit-3.4.2/js/uikit.min.js"></script>
+		<script src="/theme/integralzen/uikit-3.4.2/js/uikit-icons.min.js"></script> -->
 		
 			<div class="wrap">
 				<aside class="widget-area" role="complementary" aria-label="Footer">
