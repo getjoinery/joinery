@@ -135,9 +135,9 @@
 								<div class="accordion-title">
 									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title') . ' -  ' . $event_session->get_time_string($tz); ?></h6>
 								</div>
-								<!--<div class="accordion-content">
-									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p>
-								</div>-->
+								<div class="accordion-content">
+									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p> 
+								</div>
 							</li>
 				<?php							
 			}	
@@ -154,7 +154,10 @@
 									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title') . ' -  ' . $event_session->get_time_string($tz); ?></h6>
 								</div>
 								<div class="accordion-content">
-									echo ' <a href="/profile/event_sessions?evt_event_id='. $event->key.'">View videos and materials</a>';
+									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p> 
+									<?php
+									echo '<a href="/profile/event_sessions?evt_event_id='. $event->key.'">View videos and materials</a>';
+									?>
 								</div>
 							</li>
 				<?php									
