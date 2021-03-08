@@ -34,7 +34,7 @@
 		<div class="section padding-top-20">
 			<div class="container">
 				<div class="row">
-					<div class="col-12">
+					<div class="col-12 text-center">
 						<?php
 							echo '<img src="'.$picture_link. '"  alt="" />';
 						?>
@@ -59,7 +59,7 @@
 			<?php
 					
 			if($view_course_link){
-				echo '<a class="button button-lg button-rounded button-reveal-right-dark" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a>';		
+				echo '<a class="button button-lg button-dark" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a>';		
 			}
 			
 			if($registration_message){
@@ -67,11 +67,11 @@
 			}
 
 			if($register_link){
-				echo '<a class="button button-lg button-rounded button-reveal-right-dark" href="'.$register_link.'">Register Now</a>';
+				echo '<a class="button button-lg button-dark" href="'.$register_link.'">Register Now</a>';
 			}
 			
 			if($waiting_list_link){
-				echo '<a class="button button-lg button-rounded button-reveal-right-dark" href="'.$waiting_list_link.'">Get on the waiting list</a>';
+				echo '<a class="button button-lg button-dark" href="'.$waiting_list_link.'">Get on the waiting list</a>';
 			}
 			
 			if($if_registered_message){
