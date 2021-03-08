@@ -68,7 +68,7 @@
 								$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
 								$next_session = $event->get_next_session();
 								
-								if(!$_REQUEST['events']){
+								if(!$_REQUEST['tab']){
 									if($event->get('evt_status') != 1){
 										continue;
 									}
