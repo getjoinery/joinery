@@ -62,7 +62,7 @@
 			$gmtime = gmdate("Y-m-d\TH:i:s\Z", $sub['created']);
 			
 			if($sub['ended_at']){
-				$status = 'Canceled at '. LibraryFunctions::convert_time(gmdate("Y-m-d\TH:i:s\Z", $sub['ended_at']), 'UTC', $session->get_timezone());
+				$status = ' canceled on '. LibraryFunctions::convert_time(gmdate("Y-m-d", $sub['ended_at']), 'UTC', $session->get_timezone());
 			}
 			else{
 				$status = '<a href="/profile/orders_recurring_action?stripe_sid='. $sub['id']. '">cancel</a>';
