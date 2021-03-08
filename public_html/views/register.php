@@ -12,7 +12,7 @@
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('Register');
-		echo '<div class="section">
+		echo '<div class="section padding-top-20">
 			<div class="container">';
 			
 	if(isset($_GET['msgtext'])){

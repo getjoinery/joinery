@@ -12,7 +12,7 @@ $page->public_header(array(
 	echo PublicPage::BeginPage('Add to Cart');
 
 	?>
-		<div class="section">
+		<div class="section padding-top-20">
 			<div class="container">
 				<div class="row col-spacing-50">
 					<div class="col-12 col-lg-7">

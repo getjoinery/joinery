@@ -26,7 +26,7 @@
 	});
 	</script>
 
-		<div class="section">
+		<div class="section padding-top-20">
 			<div class="container">
 				<div class="row col-spacing-50">
 					<!-- Blog Posts -->

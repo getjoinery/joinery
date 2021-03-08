@@ -31,7 +31,7 @@
 		
 		if($picture_link = $event->get_picture_link('medium')){
 		?>
-		<div class="section padding-top-0">
+		<div class="section padding-top-20">
 			<div class="container">
 				<div class="row">
 					<div class="col-12">

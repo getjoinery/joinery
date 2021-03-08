@@ -11,7 +11,7 @@
 	echo PublicPage::BeginPage('Retreats and Events');
 
 	?>
-		<div class="section">
+		<div class="section padding-top-20">
 			<div class="container">
 				<ul class="nav nav-tabs margin-bottom-20">
 				  <li class="nav-item">

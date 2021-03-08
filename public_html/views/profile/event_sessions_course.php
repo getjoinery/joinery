@@ -22,7 +22,7 @@
 	$session_name = 'Session ' . $event_session->get('evs_session_number') . ' - '.$event_session->get('evs_title');
 
 	?>
-	<div class="section">
+	<div class="section padding-top-20">
 		<div class="container">
 			<div class="row col-spacing-50">
 				<!-- Blog Posts -->

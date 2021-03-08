@@ -12,7 +12,7 @@
 	$page->public_header($hoptions);
 	
 	echo PublicPage::BeginPage('Waiting list for '.$event->get('evt_name'));
-		echo '<div class="section">
+		echo '<div class="section padding-top-20">
 			<div class="container">';
     echo '<h3>Add yourself to the waiting list, and we will notify you as soon as registration is available.</h3>';
 

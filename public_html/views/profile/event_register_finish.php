@@ -12,7 +12,9 @@
 	$page->public_header($hoptions);
 
 	echo PublicPage::BeginPage('Edit Registrant Info');
-		
+	echo '<div class="section padding-top-20">
+			<div class="container">';
+			
 	echo '<h3>Please fill out this extra info for your registration in the <strong>'. $event->get('evt_name') . '</strong> event.</h3>';
 
 	$formwriter = new FormWriterPublic("form1");
@@ -23,10 +25,8 @@
 	echo $formwriter->set_validate($validation_rules);			
 	
 	
-	echo $formwriter->begin_form("uniForm", "post", "/profile/event_register_finish");
+	echo $formwriter->begin_form("", "post", "/profile/event_register_finish");
 
-
-	echo '<fieldset class="inlineLabels">';
 
 	echo $formwriter->hiddeninput("eventregistrantid", $evr_event_registrant_id);
 	echo $formwriter->hiddeninput("userid", $user->key);
@@ -59,15 +59,13 @@
 	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy-policy/'>privacy policy</a>", "privacy_policy", "checkbox", "left", NULL, 1, "");
 
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit', '', 'submit1');
-	echo $formwriter->end_buttons();
-	echo '</fieldset>';
+	echo $formwriter->new_form_button('Submit', 'button button-lg button-dark', 'submit1');
 
 	echo $formwriter->end_form();
 
 	$page->endtable();
 
+	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 

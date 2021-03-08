@@ -10,7 +10,7 @@
 	);
 	$page->public_header($hoptions,NULL);
 		echo PublicPage::BeginPage('Password Reset');
-			echo '<div class="section">
+			echo '<div class="section padding-top-20">
 			<div class="container">';
 	if($message){
 		echo $message;
