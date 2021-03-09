@@ -353,7 +353,7 @@ class PublicPage {
 			<li id="menu-item-7353" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-7353"><a href="/events">Retreats and Courses<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
 
 			</li>
-			<li id="menu-item-4346" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-4346"><a href="/page/schedule-meeting">Schedule a Meeting<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
+			<li id="menu-item-4346" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-4346"><a href="/schedule-meeting">Schedule a Meeting<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
 
 			</li>
 			<li id="menu-item-7357" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-7357"><a href="/dana">Donations</a>
