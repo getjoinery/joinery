@@ -18,8 +18,23 @@
 	
 	if($_POST){
 
+		$url_incoming = trim($_POST['url_incoming']);
+		if(stristr($url_incoming, 'http') || stristr($url_incoming, 'www.')){
+		  $parsed_url = parse_url($url_incoming);
+		  $url_incoming = $parsed_url['path'];
+		}
+		if($url_incoming[0] == '/'){
+			$url_incoming = substr($url_incoming, 1);
+		}
+		$url->set('url_incoming', strtolower($url_incoming));
 
-		$editable_fields = array('url_incoming', 'url_redirect_url', 'url_redirect_file', 'url_type');
+		$url_redirect_url = $_POST['url_redirect_url'];
+		if($url_redirect_url[0] != '/'){
+			$url_redirect_url = '/'.$url_redirect_url;
+		}
+		$url->set('url_redirect_url', strtolower($url_redirect_url));		
+
+		$editable_fields = array('url_redirect_file', 'url_type');
 
 		foreach($editable_fields as $field) {
 			$url->set($field, $_REQUEST[$field]);
