@@ -23,234 +23,15 @@
 			echo '<div class="section padding-top-20">
 			<div class="container">';
 ?>
-		<!-- Blog section  -->
-		<div class="section">
-			<div class="container">
+
 				<div class="row col-spacing-50">
 					<!-- Blog Posts -->
 					<div class="col-12 col-lg-8 order-lg-2">
 						<!-- Blog Post box 1 -->
 						<div class="margin-bottom-50">
-							<div class="hoverbox-8">
-								<a href="#">
-									<img src="../assets/images/col-1.jpg" alt="">
-								</a>
-							</div>
 							<div class="margin-top-30">
-								<div class="d-flex justify-content-between margin-bottom-10">
-									<div class="d-inline-flex">
-										<a class="font-family-tertiary font-small font-weight-normal uppercase" href="#">Lifestyle</a>
-									</div>
-									<div class="d-inline-flex">
-										<span class="font-small">Jan 24, 2019</span>
-									</div>
-								</div>
-								<h5><a href="#">Benefits of Minimalism</a></h5>
-								<p>Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec quam felis, ultricies nec, pellentesque eu, pretium quis, sem.</p>
-								<div class="margin-top-20">
-									<a class="button-text-1" href="#">Read More</a>
-								</div>
-							</div>
-						</div>
-						<!-- Blog Post box 2 -->
-						<div class="margin-bottom-50">
-							<div class="hoverbox-8">
-								<a href="#">
-									<img src="../assets/images/col-1.jpg" alt="">
-								</a>
-							</div>
-							<div class="margin-top-30">
-								<div class="d-flex justify-content-between margin-bottom-10">
-									<div class="d-inline-flex">
-										<a class="font-family-tertiary font-small font-weight-normal uppercase" href="#">Knowledge</a>
-									</div>
-									<div class="d-inline-flex">
-										<span class="font-small">Jan 24, 2019</span>
-									</div>
-								</div>
-								<h5><a href="#">10 Books that I will recommend</a></h5>
-								<p>Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec quam felis, ultricies nec, pellentesque eu, pretium quis, sem.</p>
-								<div class="margin-top-20">
-									<a class="button-text-1" href="#">Read More</a>
-								</div>
-							</div>
-						</div>
-						<!-- Blog Post box 3 -->
-						<div class="margin-bottom-50">
-							<div class="hoverbox-8">
-								<a href="#">
-									<img src="../assets/images/col-1.jpg" alt="">
-								</a>
-							</div>
-							<div class="margin-top-30">
-								<div class="d-flex justify-content-between margin-bottom-10">
-									<div class="d-inline-flex">
-										<a class="font-family-tertiary font-small font-weight-normal uppercase" href="#">Health</a>
-									</div>
-									<div class="d-inline-flex">
-										<span class="font-small">Jan 24, 2019</span>
-									</div>
-								</div>
-								<h5><a href="#">Benefits of house plants</a></h5>
-								<p>Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec quam felis, ultricies nec, pellentesque eu, pretium quis, sem.</p>
-								<div class="margin-top-20">
-									<a class="button-text-1" href="#">Read More</a>
-								</div>
-							</div>
-						</div>
-						<!-- Pagination -->
-						<nav>
-							<ul class="pagination justify-content-center margin-top-70">
-								<li class="page-item"><a class="page-link" href="#">&laquo;</a></li>
-								<li class="page-item active"><a class="page-link" href="#">1</a></li>
-								<li class="page-item"><a class="page-link" href="#">2</a></li>
-								<li class="page-item"><a class="page-link" href="#">3</a></li>
-								<li class="page-item"><a class="page-link" href="#">&raquo;</a></li>
-							</ul>
-						</nav>
-					</div>
-					<!-- end Blog Posts -->
-
-					<!-- Blog Sidebar -->
-					<div class="col-12 col-lg-4 order-lg-1 sidebar-wrapper">
-						<!-- Sidebar box 1 - About me -->
-						<div class="sidebar-box text-center">
-							<h6 class="font-small font-weight-normal uppercase">Monthly Donation</h6>
-							<img class="img-circle-md margin-bottom-20" src="/product?product_id=3" alt="">
-							<p>Monthly donations are very helpful because they allow us to manage our budget.  We accept credit or debit cards.</p>
-							<a class="button button-dark" href="/product?product_id=3" >Monthly donation</a> 
-						</div>
-						<!-- Sidebar box 2 - Categories -->
-						<div class="sidebar-box">
-							<h6 class="font-small font-weight-normal uppercase">Categories</h6>
-							<ul class="list-category">
-								<li><a href="#">Art <span>11</span></a></li>
-								<li><a href="#">Fashion <span>4</span></a></li>
-								<li><a href="#">Lifestyle <span>12</span></a></li>
-								<li><a href="#">Nature <span>8</span></a></li>
-								<li><a href="#">Travel <span>15</span></a></li>
-							</ul>
-						</div>
-						<!-- Sidebar box 3 - Popular Posts -->
-						<div class="sidebar-box">
-							<h6 class="font-small font-weight-normal uppercase">Popular Posts</h6>
-							<!-- Popular post 1 -->
-							<div class="popular-post">
-								<a href="#">
-									<img src="../assets/images/img-circle-small.jpg" alt="">
-								</a>
-								<div>
-									<h6 class="font-weight-normal"><a href="#">Blog Post with Image</a></h6>
-									<span>January 07, 2018</span>
-								</div>
-							</div>
-							<!-- Popular post 2 -->
-							<div class="popular-post">
-								<a href="#">
-									<img src="../assets/images/img-circle-small.jpg" alt="">
-								</a>
-								<div>
-									<h6 class="font-weight-normal"><a href="#">Blog Post with Image</a></h6>
-									<span>January 07, 2018</span>
-								</div>
-							</div>
-							<!-- Popular post 3 -->
-							<div class="popular-post">
-								<a href="#">
-									<img src="../assets/images/img-circle-small.jpg" alt="">
-								</a>
-								<div>
-									<h6 class="font-weight-normal"><a href="#">Blog Post with Image</a></h6>
-									<span>January 07, 2018</span>
-								</div>
-							</div>
-						</div>
-						<!-- Sidebar box 4 - Banner Image -->
-						<div class="margin-bottom-20">
-							<a href="#">
-								<img src="../assets/images/col-3.jpg" alt="">
-							</a>
-						</div>
-						<!-- Sidebar box 5 - Tags -->
-						<div class="sidebar-box">
-							<h6 class="font-small font-weight-normal uppercase">Tags</h6>
-							<ul class="tags">
-								<li><a href="#">Art</a></li>
-								<li><a href="#">Design</a></li>
-								<li><a href="#">Event</a></li>
-								<li><a href="#">Fashion</a></li>
-								<li><a href="#">Food</a></li>
-								<li><a href="#">Inspiration</a></li>
-								<li><a href="#">Movie</a></li>
-								<li><a href="#">Music</a></li>
-								<li><a href="#">Nature</a></li>
-								<li><a href="#">Office</a></li>
-								<li><a href="#">Painting</a></li>
-								<li><a href="#">Photography</a></li>
-								<li><a href="#">People</a></li>
-								<li><a href="#">Work</a></li>
-							</ul>
-						</div>
-						<!-- Sidebar box 6 - Facebook Like box -->
-						<div class="sidebar-box text-center">
-							<h6 class="font-small font-weight-normal uppercase">Follow on</h6>
-							<ul class="list-inline">
-								<li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
-								<li><a href="#"><i class="fab fa-twitter"></i></a></li>
-								<li><a href="#"><i class="fab fa-pinterest"></i></a></li>
-								<li><a href="#"><i class="fab fa-behance"></i></a></li>
-								<li><a href="#"><i class="fab fa-instagram"></i></a></li>
-							</ul>
-						</div>
-					</div>
-					<!-- end Blog Sidebar -->
-				</div><!-- end row -->
-			</div><!-- end container -->
-		</div>
-		<!-- end Blog section -->
-
-
-
-
-
-
-	
-
-<div uk-grid>
-    <div class="uk-width-1-3@m"><div style="padding: 20px">
-
-
-			
-
-
-	<div>
-	<h3></h3>	<a href="/product?product_id=3" style="float:left; margin:20px; margin-top: 0px;" ><img width="100" height="100" src="/uploads/small/Generosity-dana-buddhism-7x_j0t7xha.jpg" /></a>
-
-	<p>Monthly donations are very helpful because they allow us to manage our budget.  We accept credit or debit cards.<br /><a class="button button-dark" href="/product?product_id=3" >Monthly donation</a> </p>
-	</div>
-	<br style="clear:both;">
-	<div>
-	<h3>One Time Donation (Credit or Debit card)</h3>
-		<a href="/product?product_id=2" style="float:left; margin:20px; margin-top: 0px;" ><img width="100" height="100" src="/uploads/small/DBZ-buddha_kzja6o64.jpg" /></a>
-
-	<p>To make a one time donation to Integral Zen by credit or debit card. (preferred)<br /><a class="button button-dark" href="/product?product_id=2" >One time donation by credit/debit card</a> </p>
-	</div>
-	
-	<br style="clear:both;">
-	<div>
-	<h3>One Time Donation (Paypal)</h3>
-		<a href="/product?product_id=2" style="float:left; margin:20px; margin-top: 0px;" ><img width="100" height="100" src="/uploads/small/DBZ-buddha2_2vlavbus.jpg" /></a>
-
-	<p>To make a one time donation to Integral Zen by paypal.<br /><a class="button button-dark" href="https://paypal.me/integralzen" >One time donation by paypal</a> </p>
-	</div>	
-	<br /><br />
-	<p><strong>Note:  If you are unable to use a credit or a debit card or paypal, we have a transferwise account with foreign bank info (contact <a href="mailto:info@integralzen.org">info@integralzen.org</a> for details). </strong></p>
-
-	</div>
-	</div>
-	<div class="uk-width-2-3@m"><div style="padding: 20px">
-	
-	<!--
+								<h5>Dana: the priceless practice of giving generously</h5>
+									<!--
 <b>Existing donors have agreed to provide $15,000 for a matching fundraiser this year.  Until Dec 31, 2020, all donations will be doubled. </b> 		
 
 				
@@ -329,7 +110,7 @@ would be wonderful to have resources in the bank in case an unusual opportunity 
 -->
 
 
-<h3>Dana: the priceless practice of giving generously</h3>
+
 <p>Traditionally in Buddhism the precious Lineage teachings are a gift of unconditional love -
 given freely, beyond price, with no expectation of receiving anything in return. Historically,
 Buddhist monks have no possessions, their lives an embodiment of the Teachings they have
@@ -385,12 +166,53 @@ giving generously from the heart?” What a lovely question to deeply consider.<
 <p><img src="/uploads/small/DOshin-9%20(1).jpg" style="float:left; margin-right: 20px;"><strong>Doshin Hannya Michael Nelson Roshi<br />
 <i>Founder and spiritual leader of Integral Zen.</i></strong></p>
 
+							</div>
+						</div>
+						
+					</div>
+					<!-- end Blog Posts -->
+
+					<!-- Blog Sidebar -->
+					<div class="col-12 col-lg-4 order-lg-1 sidebar-wrapper">
+						<!-- Sidebar box 1 - About me -->
+						<div class="sidebar-box text-center">
+							<h6 class="font-small font-weight-normal uppercase">Monthly Donation</h6>
+							<img class="img-circle-md margin-bottom-20" src="/uploads/small/Generosity-dana-buddhism-7x_j0t7xha.jpg" alt="">
+							<p>Monthly donations are very helpful because they allow us to manage our budget.  We accept credit or debit cards.</p>
+							<a class="button button-dark" href="/product?product_id=3" >Monthly donation</a> 
+						</div>
+						<!-- Sidebar box 2 - Categories -->
+						<div class="sidebar-box text-center">
+							<h6 class="font-small font-weight-normal uppercase">One Time Donation (Credit or Debit card)</h6>
+							<img class="img-circle-md margin-bottom-20" src="/uploads/small/DBZ-buddha_kzja6o64.jpg" alt="">
+							<p>To make a one time donation to Integral Zen by credit or debit card.</p>
+							<a class="button button-dark" href="/product?product_id=2" >One Time donation</a> 
+						</div>
+						<!-- Sidebar box 3 - Popular Posts -->
+						<div class="sidebar-box text-center">
+							<h6 class="font-small font-weight-normal uppercase">One Time Donation (Paypal)</h6>
+							<img class="img-circle-md margin-bottom-20" src="/uploads/small/DBZ-buddha2_2vlavbus.jpg" alt="">
+							<p>To make a one time donation to Integral Zen by paypal.</p>
+							<a class="button button-dark" href="https://paypal.me/integralzen" >Paypal donation</a> 
+						</div>
+						<!-- Sidebar box 4 - Banner Image -->
+												<div class="sidebar-box text-center">
+							<h6 class="font-small font-weight-normal uppercase">Alternate Options</h6>
+							<img class="img-circle-md margin-bottom-20" src="/uploads/small/Generosity-dana-buddhism-7x_j0t7xha.jpg" alt="">
+							<p>If you are unable to use a credit or a debit card or paypal, we have a transferwise account with foreign bank info (contact <a href="mailto:info@integralzen.org">info@integralzen.org</a> for details). </p>
+						</div>
+						
+
+					</div>
+					<!-- end Blog Sidebar -->
+				</div><!-- end row -->
 
 
-	
-		</div>
-	</div>
-</div>	
+
+
+
+
+
 	
 <?php
 	echo '</div></div>';

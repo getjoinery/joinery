@@ -165,7 +165,7 @@ make sense of what is happening in the world.</p>
 		<div style="border: 1px solid rgba(211,211,211,1); margin-bottom: 50px; padding: 20px;">
 		
 		<h2 class="cta-title">Sign up for updates</h2>	
-		<a class="et_pb_button" href="/community/newsletter/">Sign up for the newsletter</a>
+		<a class="button button-dark" href="/community/newsletter/">Sign up for the newsletter</a>
 
 	
 
