@@ -200,9 +200,9 @@ class PublicPage {
 
 		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
 		
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
+		<!--<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
 		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
+		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">-->
 
 
 		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/css/theme.css" rel="stylesheet">	
