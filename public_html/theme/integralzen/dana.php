@@ -109,7 +109,7 @@ would be wonderful to have resources in the bank in case an unusual opportunity 
 
 -->
 
-
+<p><strong>Integral Zen is a registered non-profit religious organization, and donations are tax deductible in the United States</strong></p>
 
 <p>Traditionally in Buddhism the precious Lineage teachings are a gift of unconditional love -
 given freely, beyond price, with no expectation of receiving anything in return. Historically,
