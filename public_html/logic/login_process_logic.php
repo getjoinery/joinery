@@ -1,4 +1,7 @@
 <?php
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+$settings = Globalvars::get_instance();
 
 // Check if the page was requested with jQuery, if so, we should process this page differently
 $ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
@@ -39,6 +42,14 @@ if (!$user || !$user->check_password($password)) {
 	}
 }
 
+if($settings->get_setting('activation_required_login')){
+	if(!$user->get('usr_is_activated')){
+		$message = 'This site requires email activation before you can log in.  An activation email has been sent to '.$user->get('usr_email').'. Please click on the link inside to activate';
+		PublicPage::OutputGenericPublicPage('Email verification required', 'Email verification required', $message);
+		Activation::email_activate_send($user);
+		exit();
+	}
+}
 
 // Here we know the user/password was good
 $session = SessionControl::get_instance();

@@ -71,6 +71,9 @@
 	echo $formwriter->dropinput("Registration active", "register_active", "ctrlHolder", $optionvals, $settings->get_setting('register_active'), '', FALSE);	
 
 	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Require email activation to log on", "activation_required_login", "ctrlHolder", $optionvals, $settings->get_setting('activation_required_login'), '', FALSE);	
+
+	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Newsletter active", "newsletter_active", "ctrlHolder", $optionvals, $settings->get_setting('newsletter_active'), '', FALSE);	
 	
 	if($settings->get_setting('tracking')){
