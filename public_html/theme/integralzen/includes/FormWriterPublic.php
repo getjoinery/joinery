@@ -30,7 +30,23 @@ class FormWriterPublic extends FormWriterMaster {
 		return '</form>';
 	}
 
+	function checkboxinput($label, $id, $class, $align, $value, $truevalue, $hint){
+		
+		if($value == $truevalue){
+			$checked = 'checked="checked"'; 
+		}
+		else{
+			$checked = '';
+		}
 
+		return '<div class="uk-margin errorplacement">
+                <div id="'.$id.'_container" class="uk-margin uk-grid-small uk-child-width-auto uk-grid">
+                    <input class="uk-checkbox" type="checkbox" id="'.$id.'" name="'.$id.'" value="'.$truevalue.'" '.$checked.' '.$this->_get_next_tab_index().' /><br>
+					<label for="'.$id.'">'.$label.'</label>                  
+				</div>
+               </div>';
+
+	}
 
 
 
