@@ -41,8 +41,9 @@ class FormWriterPublic extends FormWriterMaster {
 
 		return '<div class="uk-margin errorplacement">
                 <div id="'.$id.'_container" class="uk-margin uk-grid-small uk-child-width-auto uk-grid">
-                    <input class="uk-checkbox" type="checkbox" id="'.$id.'" name="'.$id.'" value="'.$truevalue.'" '.$checked.' '.$this->_get_next_tab_index().' /><br>
-					<label for="'.$id.'">'.$label.'</label>                  
+					<label for="'.$id.'">'.$label.'</label><br>
+                    <input class="uk-checkbox" type="checkbox" id="'.$id.'" name="'.$id.'" value="'.$truevalue.'" '.$checked.' '.$this->_get_next_tab_index().' />
+					       
 				</div>
                </div>';
 
