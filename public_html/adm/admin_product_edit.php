@@ -40,12 +40,15 @@
 				$product->set('pro_evt_event_id', intval($_REQUEST['pro_evt_event_id']));
 			}
 			
+			//EXPIRES TIME MUST BE INTEGER
+			$product->set('pro_expires', (int)$_REQUEST['pro_expires']);
+			
 			//PRICE MUST BE INTEGER
 			if($_REQUEST['pro_price']){
 				$_REQUEST['pro_price'] = (int)$_REQUEST['pro_price'];
 			}
 	
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_expires');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
