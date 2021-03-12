@@ -61,3 +61,7 @@
 		border: 1px solid #FF3B38;
 	}
 	
+	label {
+		display: inline-block !important;;
+	}
+	
