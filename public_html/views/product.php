@@ -45,7 +45,7 @@ $page->public_header(array(
 				</ul>-->
 				<h3 class="font-weight-normal margin-0"><?php echo $product->get('pro_name'); ?></h3>
 				<?php
-				if(!$product->num_versions() && !$product->get('pro_user_choose_price')){
+				if(!$product->num_versions()){
 					echo '<div class="product-price">
 					<h5 class="font-weight-light"><ins>'.$product->get('pro_price').'</ins></h5>
 					</div>';

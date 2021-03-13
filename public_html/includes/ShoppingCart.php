@@ -72,23 +72,7 @@ class ShoppingCart {
 				throw new ShoppingCartException($product_group->get('prg_error'));
 			}
 		}
-		
-		if ($product->get('pro_evt_event_id')) {
-			
-			//MAKE SURE NO DUPLICATE EVENT SIGNUPS
-			/*
-			$user = User::GetByEmail($form_data['email']);
-			
-			$event_registrants = new MultiEventRegistrant(array('event_id' => $product->get('pro_evt_event_id'), 'user_id' => $user->key), NULL);
-			$numreg = $event_registrants->count_all();			
-			
-			if($numreg){
-				throw new ShoppingCartException('Sorry, you can not register for an event twice with the same email. <a href="/profile/cart">
-					View your current shopping cart</a> for more details.');			
-			}
-			*/
-			
-		}
+
 
 		$this->items[] = array(1,	$product,	$form_data);
 	}
@@ -121,16 +105,12 @@ class ShoppingCart {
 			$product_version = $product->get_product_version($form_data);
 			if ($product_version !== NULL) {
 				$name = $product->get('pro_name') . ' - ' . $product_version->prv_version_name;
-				$price = $product_version->prv_version_price;
-			} else {
+			} 
+			else {
 				$name = $product->get('pro_name');
-				$price = $product->get('pro_price');
 			}
 			
-			//HANDLE USER OVERRIDDEN PRICES
-			if($product->get('pro_user_choose_price') && $form_data['user_price']){
-				$price = $form_data['user_price'];
-			}
+			$price = $product->get_price($product_version, $data['user_price']);
 
 			$detailed_items[] = array(
 				'id' => $key,

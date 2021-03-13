@@ -44,6 +44,16 @@ if ($_POST || isset($_GET['cart'])) {
 
 		try {
 			$session->get_shopping_cart()->add_item($product, $form_data);
+
+			//IF USER ENTERED AN EXTRA DONATION CREATE THAT ITEM
+				if($_REQUEST['user_price']){
+					$form_data['price'] = $_REQUEST['user_price'];
+					$extra_donation = new Product(2, TRUE);
+					$session->get_shopping_cart()->add_item($extra_donation, $form_data);
+					//REMOVE THE USER PRICE FROM THE REQUEST
+					unset($_REQUEST['user_price']);
+					unset($form_data['user_price']);
+				}
 			LibraryFunctions::redirect('/cart');
 			exit;
 		} catch (ShoppingCartException $e) {
@@ -53,9 +63,6 @@ if ($_POST || isset($_GET['cart'])) {
 	} else {
 		try {
 			list($form_data, $display_data) = $product->validate_form($_POST, $session);
-			
-
-			
 		}	catch (ProductRequirementException $e) {
 			$errorhandler = new ErrorHandler(TRUE);
 			$errorhandler->handle_general_error($e->getMessage());
@@ -64,7 +71,17 @@ if ($_POST || isset($_GET['cart'])) {
 		//if (!$display_data) {  //CONFIRM TURNED OFF, GO STRAIGHT TO CHECKOUT
 			// If there is nothing to confirm, go straight to checkout
 			try {
+				if($_REQUEST['user_price']){
+					$form_data['price'] = $_REQUEST['user_price'];
+					$extra_donation = new Product(2, TRUE);
+					$session->get_shopping_cart()->add_item($extra_donation, $form_data);
+					//REMOVE THE USER PRICE FROM THE REQUEST
+					unset($_REQUEST['user_price']);
+					unset($form_data['user_price']);
+				}	
 				$session->get_shopping_cart()->add_item($product, $form_data);
+				
+			
 				LibraryFunctions::redirect('/cart');
 				exit;
 			} catch (ShoppingCartException $e) {

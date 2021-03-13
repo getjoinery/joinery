@@ -22,8 +22,9 @@
 
 
 	if ($_POST || $_REQUEST['action']) {
-		if ($_REQUEST['action'] == 'edit') {
-			
+		
+		if ($_REQUEST['action'] == 'add' || $_REQUEST['action'] == 'edit') {
+		
 			if($_REQUEST['pro_requirements']){
 				$total_value = 0;
 				foreach ($_REQUEST['pro_requirements'] as $choice => $value){
@@ -47,47 +48,26 @@
 			if($_REQUEST['pro_price']){
 				$_REQUEST['pro_price'] = (int)$_REQUEST['pro_price'];
 			}
-	
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
-
-			foreach($editable_fields as $field) {
-				$product->set($field, $_REQUEST[$field]);
-			}
-
-			$product->save();
-			$product->load();
-		} 
-		else if ($_REQUEST['action'] == 'add') {
-
-			if($_REQUEST['pro_requirements']){
-				$total_value = 0;
-				foreach ($_REQUEST['pro_requirements'] as $choice => $value){
-					$total_value += $value;			
-				}
-				$product->set('pro_requirements', $total_value);
-			}
-
-			if($_REQUEST['pro_evt_event_id'] == '' || $_REQUEST['pro_evt_event_id'] == 0){
-				$_REQUEST['pro_evt_event_id'] = NULL;
+			
+			//SET RECURRING VALUE
+			if($_REQUEST['pro_recurring']){
+				$product->set('pro_recurring', 'month');
 			}
 			else{
-				$product->set('pro_evt_event_id', intval($_REQUEST['pro_evt_event_id']));
+				$product->set('pro_recurring', NULL);
 			}
 			
-			//PRICE MUST BE INTEGER
-			if($_REQUEST['pro_price']){
-				$_REQUEST['pro_price'] = (int)$_REQUEST['pro_price'];
-			}			
-			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_initial_odi_status', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
 			}
 
+			$product->prepare();
 			$product->save();
 			$product->load();
 			
+		
 		} 
 		else if ($_REQUEST['action'] == 'new_version') {
 			$product->add_product_version($_REQUEST['version_name'], $_REQUEST['version_price'], $_REQUEST['version_deposit']);
@@ -159,8 +139,11 @@
 	$optionvals = array("Active"=>1, "Disabled"=>0 );
 	echo $formwriter->dropinput("Active?", "pro_is_active", "ctrlHolder", $optionvals, $product_status, '', FALSE);
 	echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
+	echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
 
-
+	$optionvals = array("Yes, it is a recurring monthly charge"=>'1', 'No, it is a one time payment' => '0');
+	echo $formwriter->dropinput("Subscription?", "pro_recurring", "ctrlHolder", $optionvals, $settings->get_setting('pro_recurring'), '', FALSE);	
+	
 	$events = new MultiEvent(
 		array('deleted'=>false, 'past'=>false),
 		NULL,		//SORT BY => DIRECTION
@@ -170,10 +153,9 @@
 	$optionvals = $events->get_dropdown_array();
 	echo $formwriter->dropinput("Event registration?", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);	
 
-
-	echo $formwriter->textinput('Price (no cents)', 'pro_price', 'ctrlHolder', 100, $product->get('pro_price'), '', 5, '');
+	echo $formwriter->textinput('Price (no cents)', 'pro_price', 'ctrlHolder', 100, (int)$product->get('pro_price'), '', 5, '');
 	echo $formwriter->textinput('Max Number that can be added to cart:', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 3, '');
-	echo $formwriter->textinput('Purchase expires after (days)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
+	echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
 	
 
 	
@@ -212,7 +194,6 @@
 	echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 
 
-	echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
 
 	//echo $formwriter->textinput('After Purchase Message', 'pro_after_purchase_message', 'ctrlHolder', 100, $product->get('pro_after_purchase_message'), '', 255);
 

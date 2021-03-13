@@ -654,6 +654,7 @@ class EmailTemplate {
 	}
 
 	function send($check_session=TRUE, $other_host=NULL) {
+		$settings = Globalvars::get_instance();
 
 		// If the email has no content, don't send it
 		if (!$this->email_has_content) {
@@ -690,9 +691,9 @@ class EmailTemplate {
 				$this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR);
 			}				
 		}
-		else{
+		else if($settings->get_setting('mailgun_api_key') && $settings->get_setting('mailgun_domain')) {
 
-			$settings = Globalvars::get_instance();
+			
 			$mg = new Mailgun($settings->get_setting('mailgun_api_key'));
 			$domain = $settings->get_setting('mailgun_domain');			
 			
