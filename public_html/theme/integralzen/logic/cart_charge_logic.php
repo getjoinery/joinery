@@ -267,19 +267,7 @@
 			$status = $user->add_to_mailing_list();		
 		}
 		
-		//HANDLE PRICES
-		if($product->get('pro_user_choose_price') && isset($data['user_price'])){
-			//THIS IS A CUSTOM PRICE, USE THE USER FILLED IN PRICE
-			$price = $data['user_price'];
-		}
-		else if ($product_version) {
-			//THIS PRODUCT HAS A VERSION THAT WE SHOULD PULL TO GET THE PRICE
-			$price = $product_version->prv_version_price;
-		} 
-		else {
-			//GET THE PRICE OFF OF THE PRODUCT
-			$price = $product->get('pro_price');
-		}	 
+		$price = $product->get_price($product_version, $data['user_price']);
 
 		$email_info['is_deposit'] = $product_version->prv_is_deposit;
 		
@@ -320,7 +308,7 @@
 		}
 		else{
 			//IT IS A DONATION OF SOME SORT
-			if($product->get('pro_prg_product_group_id') == 3){
+			if($product->get('pro_recurring')){
 				//RECURRING DONATION
 				$email_info['is_event_registration'] = FALSE;
 				$email_info['is_single_donation'] = FALSE;
@@ -362,7 +350,6 @@
 		$order_item->set('odi_price', $price);
 		$email_fill['purchase_amount'] = $price;			
 		
-		//$order_item->set('odi_status', $product->get('pro_initial_odi_status') ?: OrderItem::STATUS_NEW);
 		$order_item->set('odi_status_change_time', 'NOW');
 		
 		$order_item->save();

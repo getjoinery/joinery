@@ -44,17 +44,7 @@
 						$product_version = $product->get_product_version($data);
 						//$product = new Product($product->get('pro_product_id'), TRUE); 	
 
-						//HANDLE PRICES
-						if($product->get('pro_user_choose_price') && $data['user_price']){
-							$price = $data['user_price'];
-						}
-						else{
-							if ($product_version !== NULL) {
-								$price = $product_version->prv_version_price;
-							} else {
-								$price = $product->get('pro_price');
-							}
-						}	
+						$price = $product->get_price($product_version, $data['user_price']);
 						
 						array_push($rowvalues, $key+1);
 						array_push($rowvalues, $product->get('pro_name').' '. $product_version->prv_version_name . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') ');

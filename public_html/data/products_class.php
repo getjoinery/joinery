@@ -443,7 +443,7 @@ class UserPriceRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Amount of donation $", "user_price", "ctrlHolder", 20, '', '', 255, '');
+		echo $formwriter->textinput("Optional additional donation (no cents)", "user_price", "ctrlHolder", 20, '', '', 255, '');
 		
 	}
 
@@ -467,7 +467,7 @@ class UserPriceRequirement extends ProductRequirement {
 		);
 
 		$display_array = array(
-			'Donation amount $' => $data['user_price']. '.00',
+			'Donation amount ($)' => $data['user_price']. '.00',
 		);
 
 		return array(
@@ -691,9 +691,7 @@ class Product extends SystemBase {
 		'pro_max_purchase_count' => 'Maximum number of this item that can be bought at one time',
 		'pro_prg_product_group_id' => 'Product group this product is part of',
 		'pro_after_purchase_message' => 'Message shown after purchase of the item',
-		'pro_initial_odi_status' => 'After this product is purchased, what should the initial order status be',
 		'pro_evt_event_id' => 'Event id if the order is for an event',
-		'pro_user_choose_price' => 'When TRUE, the user can choose what price to pay.',
 		'pro_recurring' => 'This charge is a recurring charge, valid values are "day", "week", "month", or "year"',
 		'pro_expires' => 'How much time until the purchase expires.',
 		'pro_is_active' => 'Active or disabled'
@@ -711,6 +709,24 @@ class Product extends SystemBase {
 		}	
 		return $requirements_out;
 	}	
+	
+	public function get_price($product_version, $user_entered_price){
+		//HANDLE PRICES
+		if ($product_version) {
+			//THIS PRODUCT HAS A VERSION THAT WE SHOULD PULL TO GET THE PRICE
+			$price = $product_version->prv_version_price;
+		} 
+		else {
+			//GET THE PRICE OFF OF THE PRODUCT
+			$price = $this->get('pro_price');
+		}	
+
+		if($user_entered_price){
+			$price += $user_entered_price;
+		}
+		
+		return $price;
+	}
 	
 
 	public function add_product_version($version_name, $version_price) {
@@ -1015,9 +1031,7 @@ class Product extends SystemBase {
 			  "pro_max_purchase_count" int4 DEFAULT 0,
 			  "pro_prg_product_group_id" int4,
 			  "pro_after_purchase_message" text COLLATE "pg_catalog"."default",
-			  "pro_initial_odi_status" int4,
 			  "pro_evt_event_id" int4,
-			  "pro_user_choose_price" bool NOT NULL DEFAULT false,
 			  "pro_recurring" varchar(10) COLLATE "pg_catalog"."default" NOT NULL,
 			  "pro_is_active" bool DEFAULT true, 
 			  "pro_expires" int4,
