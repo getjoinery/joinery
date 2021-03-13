@@ -1,5 +1,6 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 
@@ -7,7 +8,8 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
 class PublicPage {
 
-	private $rowcount;
+	private $rowcount; 
+	private $theme_url;
 
 	private static $header_defaults = array(
 		'title' => '',
@@ -73,6 +75,8 @@ class PublicPage {
 			$secure = FALSE;
 			$this->secure = FALSE;
 		}
+		
+		$this->theme_url = LibraryFunctions::get_theme_path('web');
 
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('force_https')){
@@ -112,6 +116,8 @@ class PublicPage {
 
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
+		
+		
 
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('force_https')){
@@ -152,12 +158,12 @@ class PublicPage {
 
 		<title><?php echo $site_title; ?></title>
 
-		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->cdn; ?>/theme/integralzen/styles/integral_style1.css' type='text/css' media='all' />
+		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->theme_url; ?>/styles/integral_style1.css' type='text/css' media='all' />
 		<!--<link rel="stylesheet" href="<?php echo $this->cdn; ?>/theme/styles/4f877.css" media="all" />-->
-		<link rel='stylesheet'  href='<?php echo $this->cdn; ?>/theme/integralzen/styles/widget-styles.css' type='text/css' media='all' />		
-		<link type="text/css" rel="stylesheet" media="screen" href="<?php echo $this->cdn; ?>/theme/integralzen/styles/uni-form-profile_4.css" />
+		<link rel='stylesheet'  href='<?php echo $this->theme_url; ?>/styles/widget-styles.css' type='text/css' media='all' />		
+		<link type="text/css" rel="stylesheet" media="screen" href="<?php echo $this->theme_url; ?>/styles/uni-form-profile_4.css" />
 		
-		<link type="text/css" href="<?php echo $this->cdn; ?>/theme/integralzen/styles/ui/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
+		<link type="text/css" href="<?php echo $this->theme_url; ?>/styles/ui/jquery-ui-1.7.custom_5.css" rel="stylesheet" /> 
 	
 
 					<style class="et_heading_font">
@@ -198,24 +204,24 @@ class PublicPage {
 	
 		<!--<link rel="stylesheet" type="text/css" href="/theme/integralzen/uikit-3.4.2/css/uikit.min.css">-->
 
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
 		
-		<!--<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">-->
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
 
 
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/css/theme.css" rel="stylesheet">	
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/css/site_styles.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/theme.css" rel="stylesheet">	
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/site_styles.css" rel="stylesheet">
 		<!-- Fonts/Icons -->
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
 
-		<script src="<?php echo $this->cdn; ?>/theme/integralzen/scripts/df983.js"></script> 
+		<script src="<?php echo $this->theme_url; ?>/scripts/df983.js"></script> 
 		
 		<!-- jQuery 3.2.1 <script src="/admin/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
-		<script src="<?php echo $this->cdn; ?>/theme/integralzen/includes/jquery-3.4.1.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
 		<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 		
 		<!-- jQuery validate -->
@@ -224,7 +230,7 @@ class PublicPage {
 
 		
 		<!--GDPR NOTICE  https://www.jqueryscript.net/other/GDPR-Cookie-Consent-Popup-Plugin.html-->
-		<script src="<?php echo $this->cdn; ?>/theme/integralzen/scripts/GDPR/jquery.ihavecookies.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/scripts/GDPR/jquery.ihavecookies.js"></script>
 		
 		
 		
@@ -353,7 +359,7 @@ class PublicPage {
 			<li id="menu-item-7353" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-7353"><a href="/events">Retreats and Courses<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
 
 			</li>
-			<li id="menu-item-4346" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-4346"><a href="/schedule-meeting">Schedule a Meeting<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
+			<li id="menu-item-4346" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-4346"><a href="/page/schedule-meeting">Schedule a Meeting<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
 
 			</li>
 			<li id="menu-item-7357" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-7357"><a href="/dana">Donations</a>
@@ -431,9 +437,9 @@ class PublicPage {
 				</div><!-- #content -->
 
 		<!-- ***** JAVASCRIPTS ***** -->
-		<script src="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/js/polyfill.min.js?features=IntersectionObserver"></script>
-		<script src="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/plugins/plugins.js"></script>
-		<script src="<?php echo $this->cdn; ?>/theme/integralzen/includes/assets/js/functions.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/js/polyfill.min.js?features=IntersectionObserver"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/plugins/plugins.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/js/functions.js"></script>
 		
 		<footer id="colophon" class="site-footer izfooter" role="contentinfo">
 		

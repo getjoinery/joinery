@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_includes_path().'/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_includes_path().'/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 	require_once (LibraryFunctions::get_logic_file_path('cart_logic.php'));
 	
 
@@ -160,7 +160,7 @@
 						  <button class="button button-lg button-dark">Submit Payment</button>
 						</form>					
 						
-						<script language="javascript" src="<?php echo LibraryFunctions::get_theme_includes_path('web'); ?>/stripe_payment_js.php"></script>
+						<script language="javascript" src="<?php echo LibraryFunctions::get_theme_path('web'); ?>/includes/stripe_payment_js.php"></script>
 
 						<?php
 					}		

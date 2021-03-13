@@ -73,19 +73,19 @@ class LibraryFunctions {
 
 	}		
 	
-	static function get_theme_includes_path($path_format='system'){
+	static function get_theme_path($path_format='system'){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
 		$site_template = $settings->get_setting('site_template');
 		
-		$theme_dir = $siteDir.'/theme/'.$site_template.'/includes';
+		$theme_dir = $siteDir.'/theme/'.$site_template;
 		if($path_format == 'system'){
 			//WE WANT A FILE PATH
 			return $theme_dir;
 		}
 		else{
 			//WE WANT A URL
-			return '/theme/'.$site_template.'/includes';
+			return '/theme/'.$site_template;
 		}
 		return $theme_dir;
 	}	
