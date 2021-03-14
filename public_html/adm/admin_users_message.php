@@ -341,7 +341,7 @@
 
 	echo $formwriter->begin_form("form1", "post", "/admin/admin_users_message");
 
-	$formwriter->text('to-field', 'To:', $to_field);
+	$formwriter->text('to-field', 'To:', $to_field, NULL);
 	
 	$placeholder = 'RE: ';
 	if($event){	
