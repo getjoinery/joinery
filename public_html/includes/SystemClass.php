@@ -607,13 +607,14 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 		$debug = Globalvars::get_instance()->get_setting('debug');
 
 		$errorhandler = new ErrorHandler($_SERVER["SERVER_PORT"] == 443);
-		if ($debug && !($e instanceof DisplayableErrorMessage || $e instanceof DisplayablePermanentErrorMessage)) {
-			//$errorhandler->handle_general_error('Debug Message: ' . $e->getMessage() . '<br>' . $e->getTraceAsString());
+		if ($debug) {
+			$debug_message = 'Debug Message: ' . $e->getMessage() . '<br>' . $e->getCode() . '<br>' .$e->getTraceAsString();
+			error_log($debug_message);
 			if($errorpage == 'admin'){
-				$errorhandler->handle_admin_error($e->getMessage(), ErrorHandler::INPUT_ERROR);
+				$errorhandler->handle_admin_error($debug_message, ErrorHandler::INPUT_ERROR);
 			}
 			else{
-				$errorhandler->handle_general_error($e->getMessage(), ErrorHandler::INPUT_ERROR);
+				$errorhandler->handle_general_error($debug_message, ErrorHandler::INPUT_ERROR);
 			}				
 		} 
 		else {
