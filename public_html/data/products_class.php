@@ -724,6 +724,7 @@ class Product extends SystemBase {
 	
 	public function get_price($product_version, $data){
 		//HANDLE PRICES
+		$settings = Globalvars::get_instance();
 		if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 			$requirements = $this->get_requirement_info('id');
 			if(in_array(128, $requirements) && $data['user_price']){
