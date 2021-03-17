@@ -104,9 +104,9 @@ class EventSession extends SystemBase {
 		
 	
 	function get_start_time($tz='event', $format='M j, Y g:i a T') {
-		
+		$event = new Event($this->get('evs_evt_event_id'), TRUE);
 		if($tz == 'event' || !$tz){
-			$event = new Event($this->get('evs_evt_event_id'), TRUE);
+			
 			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), $format);
 		}
 		else{
@@ -115,9 +115,9 @@ class EventSession extends SystemBase {
 	}
 
 	function get_end_time($tz='event', $format='M j, Y g:i a T') {
-		
+		$event = new Event($this->get('evs_evt_event_id'), TRUE);
 		if($tz == 'event' || !$tz){
-			$event = new Event($this->get('evs_evt_event_id'), TRUE);
+			
 			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), $format);
 		}
 		else{
