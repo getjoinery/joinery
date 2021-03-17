@@ -448,9 +448,9 @@ class UserPriceRequirement extends ProductRequirement {
 	}
 
 	public function validate_form($data, $session=NULL) {
-		if (empty($data['user_price'])) {
+		/*if (empty($data['user_price'])) {
 			throw new ProductRequirementException('Donation amount is required');
-		}
+		}*/
 
 		
 		//CLEAN IT UP
@@ -458,9 +458,15 @@ class UserPriceRequirement extends ProductRequirement {
 		//TODO NEED TO FIGURE OUT HOW TO HANDLE CENTS
 		$data['user_price'] = (int)preg_replace("/[^0-9\.]/", "", $data['user_price']);
 		
+		/*
 		if ($data['user_price'] == 0 || $data['user_price'] == '0.00') {
 			throw new ProductRequirementException('Donation amount must be greater than zero.');
 		}
+		*/
+		if ($data['user_price'] < 0) {
+			throw new ProductRequirementException('Donation amount must be zero or more.');
+		}
+
 
 		$return_array = array(
 			'user_price' => $data['user_price'],
@@ -476,7 +482,7 @@ class UserPriceRequirement extends ProductRequirement {
 
 	public function get_validation_info() {
 		return array(
-			'user_price' => array('required' => array('true', 'Donation amount is required')),
+			//'user_price' => array('required' => array('true', 'Donation amount is required')),
 		);
 	}
 }
@@ -681,6 +687,10 @@ class ProductVersion {
 
 class Product extends SystemBase {
 	public static $required_fields = array();
+	
+	const PRICE_TYPE_ONE = 1;
+	const PRICE_TYPE_MULTIPLE = 2;
+	const PRICE_TYPE_USER_CHOOSE = 3;
 
 	public static $fields = array(
 		'pro_product_id' => 'Product ID',
@@ -694,7 +704,8 @@ class Product extends SystemBase {
 		'pro_evt_event_id' => 'Event id if the order is for an event',
 		'pro_recurring' => 'This charge is a recurring charge, valid values are "day", "week", "month", or "year"',
 		'pro_expires' => 'How much time until the purchase expires.',
-		'pro_is_active' => 'Active or disabled'
+		'pro_is_active' => 'Active or disabled',
+		'pro_price_type' => 'The pricing type'
 	);
 	
 	public function get_requirement_info($output='text') {
@@ -710,22 +721,55 @@ class Product extends SystemBase {
 		return $requirements_out;
 	}	
 	
-	public function get_price($product_version, $user_entered_price){
+	
+	public function get_price($product_version, $data){
 		//HANDLE PRICES
-		if ($product_version) {
-			//THIS PRODUCT HAS A VERSION THAT WE SHOULD PULL TO GET THE PRICE
-			$price = $product_version->prv_version_price;
-		} 
-		else {
-			//GET THE PRICE OFF OF THE PRODUCT
-			$price = $this->get('pro_price');
+		if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+			$requirements = $this->get_requirement_info('id');
+			if(in_array(128, $requirements) && $data['user_price']){
+				return $data['user_price'];
+			}
+			else if($data['user_price_override']){
+				return $data['user_price_override'];
+			}
+			else{
+				$error = 'This product is missing the price override.';
+				throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+				exit;
+			}
+		}
+		else if($this->get('pro_price_type') == Product::PRICE_TYPE_MULTIPLE){
+			if ($product_version) {
+				//THIS PRODUCT HAS A VERSION THAT WE SHOULD PULL TO GET THE PRICE
+				return $product_version->prv_version_price;		
+			} 
+			else{
+				$error = 'This product is missing a version.';
+				throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+				exit;
+			}
+		}
+		else if($this->get('pro_price_type') == Product::PRICE_TYPE_ONE){
+			
+			$requirements = $this->get_requirement_info('id');
+			if(in_array(128, $requirements) && $data['user_price']){
+				return $data['user_price'];
+			}
+			else if($this->get('pro_price')){
+				return $this->get('pro_price'); 	
+			}
+			else{
+				$error = 'This product is missing a price.';
+				throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+				exit;
+			}
 		}	
-
-		if($user_entered_price){
-			$price += $user_entered_price;
+		else{
+			$error = 'This product has no price.';
+			throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+			exit;
 		}
 		
-		return $price;
 	}
 	
 
@@ -748,8 +792,7 @@ class Product extends SystemBase {
 	}
 
 	public function get_product_version($form_data) {
-		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
-
+		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE)); 
 		if ($versions) {
 			if (!array_key_exists('product_version', $form_data)) {
 				throw new ProductRequirementException(
@@ -1035,6 +1078,7 @@ class Product extends SystemBase {
 			  "pro_recurring" varchar(10) COLLATE "pg_catalog"."default" NOT NULL,
 			  "pro_is_active" bool DEFAULT true, 
 			  "pro_expires" int4,
+			  "pro_price_type" int4,
 			)
 			;';
 		$q = $dblink->prepare($sql);

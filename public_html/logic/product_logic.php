@@ -26,74 +26,51 @@ if (!isset($_REQUEST['product_id']) || !is_numeric($_REQUEST['product_id'])) {
 
 $product = Product::GetProductById($product_id);
 
-if (isset($_REQUEST['extra_data']) && is_numeric($_REQUEST['extra_data'])) {
-	$extra_data = array('url_param' => $_REQUEST['extra_data']);
-} else {
-	$extra_data = array();
-}
-
-
 
 $display_empty_form = TRUE;
 
 if ($_POST || isset($_GET['cart'])) {
-	if (isset($_POST['product_key'])) {
-		$form_data = $session->get_saved_item($_POST['product_key']);
-		// At this point we know the data is valid, lets store it in the cart
-		// and redirect to the payment page!
-
-		try {
-			$session->get_shopping_cart()->add_item($product, $form_data);
-
-			//IF USER ENTERED AN EXTRA DONATION CREATE THAT ITEM
-				if($_REQUEST['user_price']){
-					$form_data['price'] = $_REQUEST['user_price'];
-					$extra_donation = new Product(2, TRUE);
-					$session->get_shopping_cart()->add_item($extra_donation, $form_data);
-					//REMOVE THE USER PRICE FROM THE REQUEST
-					unset($_REQUEST['user_price']);
-					unset($form_data['user_price']);
-				}
-			LibraryFunctions::redirect('/cart');
-			exit;
-		} catch (ShoppingCartException $e) {
-			$errorhandler = new ErrorHandler(TRUE);
-			$errorhandler->handle_general_error($e->getMessage());
-		}
-	} else {
-		try {
-			list($form_data, $display_data) = $product->validate_form($_POST, $session);
-		}	catch (ProductRequirementException $e) {
-			$errorhandler = new ErrorHandler(TRUE);
-			$errorhandler->handle_general_error($e->getMessage());
-		}
-
-		//if (!$display_data) {  //CONFIRM TURNED OFF, GO STRAIGHT TO CHECKOUT
-			// If there is nothing to confirm, go straight to checkout
-			try {
-				if($_REQUEST['user_price']){
-					$form_data['price'] = $_REQUEST['user_price'];
-					$extra_donation = new Product(2, TRUE);
-					$session->get_shopping_cart()->add_item($extra_donation, $form_data);
-					//REMOVE THE USER PRICE FROM THE REQUEST
-					unset($_REQUEST['user_price']);
-					unset($form_data['user_price']);
-				}	
-				$session->get_shopping_cart()->add_item($product, $form_data);
-				
-			
-				LibraryFunctions::redirect('/cart');
-				exit;
-			} catch (ShoppingCartException $e) {
-				$errorhandler = new ErrorHandler(TRUE);
-				$errorhandler->handle_general_error($e->getMessage());
-			}
-		//}
-
-		$form_key = md5(serialize($form_data) . time());
-		$session->save_item($form_key, $form_data);
-		$display_empty_form = FALSE;  
+	try {
+		list($form_data, $display_data) = $product->validate_form($_POST, $session);
+		
+	}	
+	catch (ProductRequirementException $e) {
+		$errorhandler = new ErrorHandler(TRUE);
+		$errorhandler->handle_general_error($e->getMessage());
 	}
+
+
+	try {
+		$cart = $session->get_shopping_cart();
+		if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE && $_REQUEST['user_price_override']){
+			$form_data['user_price_override'] = $_REQUEST['user_price_override'];					
+			$cart->add_item($product, $form_data);
+			unset($form_data['user_price_override']);
+		}
+		else{ 
+			//IF USER ENTERED AN EXTRA DONATION CREATE THAT ITEM
+			if($_REQUEST['user_price']){
+				$form_data['user_price'] = $_REQUEST['user_price'];
+				$extra_donation = new Product(2, TRUE);
+				$cart->add_item($extra_donation, $form_data);
+			}	
+			unset($form_data['user_price']);
+			$cart->add_item($product, $form_data);
+		}
+
+		
+		LibraryFunctions::redirect('/cart');
+		exit;
+	} catch (ShoppingCartException $e) {
+		$errorhandler = new ErrorHandler(TRUE);
+		$errorhandler->handle_general_error($e->getMessage());
+	}
+
+
+	$form_key = md5(serialize($form_data) . time());
+	$session->save_item($form_key, $form_data);
+	$display_empty_form = FALSE;  
+	
 }
 
 if ($session->get_user_id()) {

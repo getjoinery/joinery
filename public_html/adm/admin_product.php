@@ -57,66 +57,81 @@
 			
 		
 		echo '<p>Product Link - <a href="' . $product->get_url() . '">' . $product->get_url() . '</a><br />';
-		echo 'Minimum price for full purchase: <b>$'. $product->get('pro_price').'</b><br>';
+		echo 'Product Description: <b>'. $product->get('pro_description').'</b><br>';
+
+		if($product->get('pro_price_type') == Product::PRICE_TYPE_ONE){
+			echo 'Price: <b>$'. $product->get('pro_price').'</b><br>';
+		}
+		else if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+			echo 'Price: <b>User chooses</b><br>';
+		}
+		
 		echo 'Max purchase: <b>'. $product->get('pro_max_purchase_count').'</b><br>';
 		if($product->get('pro_evt_event_id')){
 			$event = new Event($product->get('pro_evt_event_id'), TRUE);
-			echo 'Registration for: <b>'. '('.LibraryFunctions::convert_time($event->get('evt_start_time'), "UTC", "UTC", 'M j, Y'). ') <a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a>'.'</b><br>';
+			$event_date = '';
+			if($event->get('evt_start_time')){
+				$event_date = '('.LibraryFunctions::convert_time($event->get('evt_start_time'), "UTC", "UTC", 'M j, Y'). ')';
+			}
+			echo 'Registration for: <b>'.$event_date.'<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a>'.'</b><br>';
 		}
 		
-		$pg = new ProductGroup($product->get('pro_prg_product_group_id'), TRUE);
-		echo 'Product group: <b>'. $pg->get('prg_name').'</b><br>';
+		if($product->get('pro_prg_product_group_id')){
+			$pg = new ProductGroup($product->get('pro_prg_product_group_id'), TRUE);
+			echo 'Product group: <b>'. $pg->get('prg_name').'</b><br>';
+		}
 		
 
 		$requirements = implode(', ', $product->get_requirement_info());
 		echo 'Product info collected at purchase: <b>'. $requirements.'</b><br>';
-		echo 'Product Description: <b>'. $product->get('pro_description').'</b><br>';
+		
 		//echo 'After purchase message: <b>'. $product->get('pro_after_purchase_message').'</b><br>';
 
-		echo '<h3>Prices</h3>';
-		$versions = $product->get_product_versions();
-		if(!count($versions)){
-			echo 'None';
-		}
-		echo '<ul>';
-		foreach ($versions as $version) {
-			$deposit_text = '';
-			if($version->prv_is_deposit){
-				$deposit_text = ' (deposit)';
+		if($product->get('pro_price_type') == Product::PRICE_TYPE_MULTIPLE){
+			echo '<h3>Prices</h3>';
+			$versions = $product->get_product_versions();
+			if(!count($versions)){
+				echo 'None';
 			}
-			if ($version->prv_status == ProductVersion::ACTIVE) {
-				echo '<li>' . $version->prv_version_name . ' - $' . $version->prv_version_price . $deposit_text .
-					' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
-					'&action=remove_version">[Make Inactive]</a>' .
-					'</li>';
-			} else {
-				echo '<li style="text-decoration: line-through;">' . $version->prv_version_name . ' - $' . $version->prv_version_price . $deposit_text .
-					' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
-					'&action=activate_version">[Make Active]</a>' .
-					'</li>';
+			echo '<ul>';
+			foreach ($versions as $version) {
+				$deposit_text = '';
+				if($version->prv_is_deposit){
+					$deposit_text = ' (deposit)';
+				}
+				if ($version->prv_status == ProductVersion::ACTIVE) {
+					echo '<li>' . $version->prv_version_name . ' - $' . $version->prv_version_price . $deposit_text .
+						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
+						'&action=remove_version">[Make Inactive]</a>' .
+						'</li>';
+				} else {
+					echo '<li style="text-decoration: line-through;">' . $version->prv_version_name . ' - $' . $version->prv_version_price . $deposit_text .
+						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
+						'&action=activate_version">[Make Active]</a>' .
+						'</li>';
+				}
 			}
+			echo '</ul>';
+			echo '<h4>Add New Price</h4>';
+			$formwriter = new FormWriterMaster('form1');
+			
+			$validation_rules = array();
+			$validation_rules['version_name']['required']['value'] = 'true';
+			$validation_rules['version_price']['required']['value'] = 'true';
+			echo $formwriter->set_validate($validation_rules);				
+			
+			echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_edit');
+			echo $formwriter->hiddeninput('p', $product->key);
+			echo $formwriter->hiddeninput('action', 'new_version');
+			echo $formwriter->textinput('Label', 'version_name', NULL, 100, '', '', 255, '');
+			echo $formwriter->textinput('Price', 'version_price', 'ctrlHolder', 100, '', '', 255, '');
+			$optionvals = array("Yes"=>'1', 'No' => '0');
+			echo $formwriter->dropinput("Is it a deposit or installment payment?", "version_deposit", "ctrlHolder", $optionvals, 0, '', FALSE);	
+			echo $formwriter->start_buttons();
+			echo $formwriter->new_form_button('Submit');
+			echo $formwriter->end_buttons();
+			echo $formwriter->end_form();
 		}
-		echo '</ul>';
-		echo '<h4>Add New Price</h4>';
-		$formwriter = new FormWriterMaster('form1');
-		
-		$validation_rules = array();
-		$validation_rules['version_name']['required']['value'] = 'true';
-		$validation_rules['version_price']['required']['value'] = 'true';
-		echo $formwriter->set_validate($validation_rules);				
-		
-		echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_edit');
-		echo $formwriter->hiddeninput('p', $product->key);
-		echo $formwriter->hiddeninput('action', 'new_version');
-		echo $formwriter->textinput('Label', 'version_name', NULL, 100, '', '', 255, '');
-		echo $formwriter->textinput('Price', 'version_price', 'ctrlHolder', 100, '', '', 255, '');
-		$optionvals = array("Yes"=>'1', 'No' => '0');
-		echo $formwriter->dropinput("Is it a deposit or installment payment?", "version_deposit", "ctrlHolder", $optionvals, 0, '', FALSE);	
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
-		echo $formwriter->end_form();
-
 		$page->end_box();	
 	
 	$page->admin_footer();

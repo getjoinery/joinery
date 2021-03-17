@@ -3,13 +3,14 @@
 	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 	require_once (LibraryFunctions::get_logic_file_path('cart_logic.php'));
-	
+
+
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
 	'title' => 'Checkout'
 	));
-	
+
 	echo PublicPage::BeginPage('Checkout');
 	?>
 
@@ -33,19 +34,20 @@
 							exit();
 					} 
 					
-					
+	
 				
 					$headers = array('Item', 'Description', 'Price', '');
 					$page->tableheader($headers, 'table cart-table');
+					
+
 
 					foreach($cart->items as $key => $cart_item) {
 						$rowvalues = array();
 						list($quantity, $product, $data) = $cart_item;
 						$product_version = $product->get_product_version($data);
-						//$product = new Product($product->get('pro_product_id'), TRUE); 	
 
-						$price = $product->get_price($product_version, $data['user_price']);
-						
+						$price = $product->get_price($product_version, $data);
+
 						array_push($rowvalues, $key+1);
 						array_push($rowvalues, $product->get('pro_name').' '. $product_version->prv_version_name . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') ');
 						array_push($rowvalues, '$' . money_format('%i', $price));
@@ -130,7 +132,7 @@
 
 		
 	
-					if($cart->get_total() > 0){			
+					if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
 								
 						?>	
 					

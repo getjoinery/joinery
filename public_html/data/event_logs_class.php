@@ -14,32 +14,15 @@ class EventLog extends SystemBase {
 
 	const SHOW_PHONE = 1;
 	const ACCESS_SERVICE_FLYER = 2;
-	const WEBSITE_CLICK = 3;
-	const MESSAGE_LIMIT = 4;
-	const PUBLISH_TO_FB = 5;
-	const CL_POST_REDIRECT = 6;
-	const CL_POST_REDIRECT_FAIL = 7;
-	const SURVEY_COMPLETED = 8;
-	const WEB_LINK_ADDED_1 = 9;
-	const WEB_LINK_ADDED_2 = 10;
+
 
 	public static $valid_events = array(
 		self::SHOW_PHONE,
 		self::ACCESS_SERVICE_FLYER,
-		self::WEBSITE_CLICK,
-		self::MESSAGE_LIMIT,
-		self::PUBLISH_TO_FB,
-		self::CL_POST_REDIRECT,
-		self::CL_POST_REDIRECT_FAIL,
-		self::SURVEY_COMPLETED,
-		self::WEB_LINK_ADDED_1,
-		self::WEB_LINK_ADDED_2
 	);
 	
 	public static $event_descriptions = array(
 		self::SURVEY_COMPLETED => 'Survey completion',
-		self::WEB_LINK_ADDED_1 => 'Added incoming link (minor)',
-		self::WEB_LINK_ADDED_2 => 'Added incoming link (major)'
 	);	
 
 	public static $fields = array(

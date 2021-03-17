@@ -12,7 +12,7 @@
 	if (isset($_REQUEST['grp_group_id'])) {
 		$group = new Group($_REQUEST['grp_group_id'], TRUE);
 	} else {
-		$group = NULL;
+		$group = new Group(NULL);
 	}
 
 	if($_POST){
@@ -28,7 +28,7 @@
 			$group->add_member(NULL, $event_id, NULL);	
 		}
 
-		LibraryFunctions::redirect('/admin/admin_event_bundles');
+		LibraryFunctions::redirect('/admin/admin_event_bundle?grp_group_id='.$group->key);
 		exit;
 	}
 
@@ -39,6 +39,7 @@
 		'menu-id'=> 2,
 		'breadcrumbs' => array(
 			'Events'=>'/admin/admin_events', 
+			'Event Bundles'=>'/admin/admin_event_bundles',
 			'Edit Bundle' => '',
 		),
 		'session' => $session,

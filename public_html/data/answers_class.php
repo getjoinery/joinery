@@ -17,6 +17,7 @@ class Answer extends SystemBase {
 
 	public static $fields = array(
 		'ans_answer_id' => 'ID of the answer',
+		'ans_svy_survey_id' => 'Survey that the answer came from ',
 		'ans_qst_question_id' => 'Question id that was answered',
 		'ans_answer' => 'The answer',
 		'ans_usr_user_id' => 'User this answer is associated with',
@@ -193,6 +194,7 @@ class Answer extends SystemBase {
 		$sql = '
 			CREATE TABLE IF NOT EXISTS "public"."ans_answers" (
 			  "ans_answer_id" int4 NOT NULL DEFAULT nextval(\'ans_answers_ans_answer_id_seq\'::regclass),
+			  "ans_svy_survey_id" int4 NOT NULL,
 			  "ans_qst_question_id" int4 NOT NULL,
 			  "ans_usr_user_id" int4,
 			  "ans_answer" text COLLATE "pg_catalog"."default",

@@ -14,8 +14,21 @@
 	$session->check_permission(5);
 	
 	$settings = Globalvars::get_instance();
-	$api_key = $settings->get_setting('stripe_api_key');
-	$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+
+	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		$api_key = $settings->get_setting('stripe_api_key_test');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+	}
+	else{
+		$api_key = $settings->get_setting('stripe_api_key');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+	}
+	
+	if(!$api_key || !$api_secret_key){
+		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+		exit();			
+	}
+		
 	\Stripe\Stripe::setApiKey($api_key);
 	
 	$numperpage = 100;

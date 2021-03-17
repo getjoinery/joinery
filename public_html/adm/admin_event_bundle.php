@@ -47,6 +47,7 @@
 		'readable_title' => 'Event Bundle',
 		'breadcrumbs' => array(
 			'Events'=>'/admin/admin_events', 
+			'Event Bundles'=>'/admin/admin_event_bundles',
 			'Events in bundle: '. $group->get('grp_name') => '',
 		),
 		'session' => $session,

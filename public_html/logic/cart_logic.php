@@ -24,13 +24,13 @@
 		$cart->remove_item(intval($_REQUEST['r']));
 	}
 	
-	if(!$_SESSION['test_mode']){
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');
+	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		$api_key = $settings->get_setting('stripe_api_key_test');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
 	}
 	else{
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');		
+		$api_key = $settings->get_setting('stripe_api_key');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
 	}
 	
 	if(!$api_key || !$api_secret_key){
@@ -71,8 +71,8 @@
 		}
 		
 	}				
-	else if($cart->count_items() == 1 && !$cart->billing_user && !$newbilling){
-		//IF ONLY ONE ITEM IN CART, LOAD THAT AS BILLING USER
+	else if($cart->count_items() > 0 && !$cart->billing_user && !$newbilling){
+		//IF AT LEAST ONE ITEM IN CART, LOAD FIRST AS BILLING USER
 		foreach($cart->items as $key => $cart_item) {}  //SHORTCUT TO GET ONLY ONE
 		list($quantity, $product, $data) = $cart_item;
 		
