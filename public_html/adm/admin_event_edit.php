@@ -75,16 +75,17 @@
 		
 
 		if($_POST['evt_start_time_date'] && $_POST['evt_start_time_time']){
-			//$time_combined = $_POST['evt_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evt_start_time_time']);
 			$time_combined = $_POST['evt_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evt_start_time_time']);
 			$utc_time = LibraryFunctions::convert_time($time_combined, $event->get('evt_timezone'),  'UTC', 'c');
 			$event->set('evt_start_time', $utc_time);
+			$event->set('evt_start_time_local', $time_combined);
 		}
 		
 		if($_POST['evt_end_time_date'] && $_POST['evt_end_time_time']){
 			$time_combined = $_POST['evt_end_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evt_end_time_time']);
 			$utc_time = LibraryFunctions::convert_time($time_combined, $event->get('evt_timezone'),  'UTC', 'c');
-			$event->set('evt_end_time', $utc_time);		
+			$event->set('evt_end_time', $utc_time);	
+			$event->set('evt_end_time_local', $time_combined);			
 		}
 		
 		$event->prepare();

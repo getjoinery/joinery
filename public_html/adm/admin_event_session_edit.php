@@ -141,12 +141,14 @@
 			$time_combined = $_POST['evs_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evs_start_time_time']);
 			$utc_time = LibraryFunctions::convert_time($time_combined, $event->get('evt_timezone'),  'UTC', 'c');
 			$event_session->set('evs_start_time', $utc_time);
+			$event_session->set('evs_start_time_local', $time_combined);
 		}
 		
 		if($_POST['evs_end_time_date'] && $_POST['evs_end_time_time']){
 			$time_combined = $_POST['evs_end_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evs_end_time_time']);
 			$utc_time = LibraryFunctions::convert_time($time_combined, $event->get('evt_timezone'),  'UTC', 'c');
-			$event_session->set('evs_end_time', $utc_time);		
+			$event_session->set('evs_end_time', $utc_time);	
+			$event_session->set('evs_end_time_local', $time_combined);			
 		}
 
 
