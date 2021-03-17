@@ -110,7 +110,7 @@ class EventSession extends SystemBase {
 			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), $format);
 		}
 		else{
-			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, $format);
+			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $event->get('evt_timezone'), $tz, $format);
 		}
 	}
 
@@ -121,7 +121,7 @@ class EventSession extends SystemBase {
 			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), $format);
 		}
 		else{
-			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, $format);
+			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $event->get('evt_timezone'), $tz, $format);
 		}
 	}
 
