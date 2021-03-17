@@ -227,40 +227,6 @@ class Activation {
 		));
 		return $activation_email->send();
 	}
-	
-	// RECIEPTS FOR PURCHASED THINGS
-	static function purchase_reciept_send($user, $email_info, $email_fill) {
-		$settings = Globalvars::get_instance();	
-		//GENERATE SIGNUP CODE
-		$act_code = self::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));	
-		
-		$default_fill = array(
-			'act_code' => $act_code,
-			'user_id' => $user->key,
-		);
-		
-		if($email_info['is_single_donation']){
-			$template = 'single_donation_reciept';
-		}
-		else if($email_info['is_recurring_donation']){
-			$template = 'monthly_donation_reciept';
-		}
-		else if($email_info['is_event_registration']){
-			if($email_info['is_deposit']){
-				$template = 'event_deposit_reciept_content';
-			}
-			else{
-				$template = 'event_reciept_content';
-			}
-		}	
-		
-		$final_fill = array_merge($default_fill, $email_fill);
-		
-		$activation_email = new EmailTemplate($template, $user);
-		$activation_email->fill_template($final_fill);
-		$activation_email->send();
-
-	}	
 
 
 	// Password reset

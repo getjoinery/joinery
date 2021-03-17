@@ -267,7 +267,7 @@
 			$status = $user->add_to_mailing_list();		
 		}
 		
-		$price = $product->get_price($product_version, $data['user_price']);
+		$price = $product->get_price($product_version, $data);
 
 		$email_info['is_deposit'] = $product_version->prv_is_deposit;
 		

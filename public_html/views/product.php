@@ -45,9 +45,9 @@ $page->public_header(array(
 				</ul>-->
 				<h3 class="font-weight-normal margin-0"><?php echo $product->get('pro_name'); ?></h3>
 				<?php
-				if(!$product->num_versions()){
+				if(!$product->num_versions() && $product->get('pro_price_type') != Product::PRICE_TYPE_USER_CHOOSE){
 					echo '<div class="product-price">
-					<h5 class="font-weight-light"><ins>'.$product->get('pro_price').'</ins></h5>
+					<h5 class="font-weight-light"><ins>$'.$product->get('pro_price').'</ins></h5>
 					</div>';
 				} 
 				?>
@@ -72,6 +72,9 @@ $page->public_header(array(
 				$formwriter = new FormWriterPublic("product_form", TRUE);
 				echo $formwriter->begin_form("product-quantity margin-top-30", "POST", "/product"); 
 				echo $formwriter->hiddeninput('product_id', $product_id);
+				if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+					echo $formwriter->textinput('Amount to pay', 'user_price_override', 'ctrlHolder', 100, NULL, '', 5, '');
+				}
 				if ($product->output_product_form($formwriter, $user, $extra_data)) {
 					echo $formwriter->new_form_button('Add to Cart', 'button button-md button-dark');
 				}

@@ -46,7 +46,8 @@ class EventRegistrant extends SystemBase {
 		'evr_health_notes' => 'Are we taking signups',
 		'evr_extra_info_completed' => 'Whether the person has entered the needed questions for the event',
 		'evr_ord_order_id' => 'Order for the registration',
-		'evr_expires_time' => 'Time at which this registration expires.'
+		'evr_expires_time' => 'Time at which this registration expires.', 
+		'evr_odi_order_item_id' => 'Order Item ID for this registration',
 	);
 
 	public static $generated_fields = array(
@@ -243,7 +244,8 @@ class EventRegistrant extends SystemBase {
 			  "evr_usr_user_id" int4 NOT NULL,
 			  "evr_create_time" timestamp(6),
 			  "evr_extra_info_completed" bool NOT NULL DEFAULT false,
-			  "evr_ord_order_id" int4
+			  "evr_ord_order_id" int4,
+			  "evr_odi_order_item_id" int4,
 			)
 			;';
 		$q = $dblink->prepare($sql);

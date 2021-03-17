@@ -3,7 +3,6 @@
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/smtpmailer.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 	
 $settings = Globalvars::get_instance();
 $composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -13,6 +12,7 @@ use Mailgun\Mailgun;
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/queued_email_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/debug_email_logs_class.php');
 
 class EmailTemplateError extends Exception {}
 
@@ -665,6 +665,12 @@ class EmailTemplate {
 			$session = SessionControl::get_instance();
 
 			if(!$session->send_emails()) {
+				//STORE THE EMAIL IN A LOG
+				$debug_log = new DebugEmailLog(NULL);
+				$debug_log->set('del_subject', $this->email_subject);
+				$debug_log->set('del_body', $this->email_html);
+				$debug_log->save();				
+				
 				return FALSE;
 			}
 		}

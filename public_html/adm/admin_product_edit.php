@@ -41,8 +41,9 @@
 				$product->set('pro_evt_event_id', intval($_REQUEST['pro_evt_event_id']));
 			}
 			
-			//EXPIRES TIME MUST BE INTEGER
+			//MUST BE INTEGER
 			$product->set('pro_expires', (int)$_REQUEST['pro_expires']);
+			$product->set('pro_prg_product_group_id', (int)$_REQUEST['pro_prg_product_group_id']);
 			
 			//PRICE MUST BE INTEGER
 			if($_REQUEST['pro_price']){
@@ -57,7 +58,7 @@
 				$product->set('pro_recurring', NULL);
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message', 'pro_prg_product_group_id','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
@@ -114,14 +115,56 @@
 	
 	$validation_rules = array();
 	$validation_rules['pro_name']['required']['value'] = 'true';
-	$validation_rules['pro_price']['required']['value'] = 'true';
 	$validation_rules['pro_max_purchase_count']['required']['value'] = 'true';
-	$validation_rules['pro_prg_product_group_id']['required']['value'] = 'true';
 	$validation_rules['pro_requirements']['required']['value'] = 'true';
 	
 	echo $formwriter->set_validate($validation_rules);			
+
+	?>
+	<script type="text/javascript">
+	
+		function set_pricing_choices(){
+			var value = $("#pro_pricing_type").val();
+			if(value == 1){  //ONE PRICE	
+				$("#pro_price_container").show();
+			}	
+			else if(value == 2){  //MULTIPLE PRICES
+				$("#pro_price_container").hide();				
+			}
+			else if(value == 4){  //USER CHOOSES PRICE
+				$("#pro_price_container").hide();				
+			}			
+		}
+	
+		function set_expire_choices(){
+			var value = $("#pro_recurring").val(); 
+			if(value == 1){  //SUBSCRIPTION	
+				$("#pro_expires_container").hide();
+				$("#pro_expires").val(0)
+			}	
+			else if(value == 0){  //ONE TIME
+				$("#pro_expires_container").show();				
+			}			
+		}	
+	
+		$(document).ready(function() {
+			set_pricing_choices();
+			$("#pro_pricing_type").change(function() {	
+				set_pricing_choices();
+			});	
+			
+			set_expire_choices();
+			$("#pro_recurring").change(function() {	
+				set_expire_choices();
+			});	
+		});
+	
+		
+	</script>
+	<?php
 	
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_edit');
+
 
 	if($product->key){
 		$action = 'edit';
@@ -141,8 +184,8 @@
 	echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
 	echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
 
-	$optionvals = array("Yes, it is a recurring monthly charge"=>'1', 'No, it is a one time payment' => '0');
-	echo $formwriter->dropinput("Subscription?", "pro_recurring", "ctrlHolder", $optionvals, $settings->get_setting('pro_recurring'), '', FALSE);	
+	$optionvals = array("Yes, it is a recurring monthly charge"=>1, 'No, it is a one time payment' => 0);
+	echo $formwriter->dropinput("Subscription?", "pro_recurring", "ctrlHolder", $optionvals, $product->get('pro_recurring'), '', FALSE);	
 	
 	$events = new MultiEvent(
 		array('deleted'=>false, 'past'=>false),
@@ -152,6 +195,10 @@
 	$events->load();
 	$optionvals = $events->get_dropdown_array();
 	echo $formwriter->dropinput("Event registration?", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);	
+
+
+	$optionvals = array("One price"=>1, 'Multiple pricing levels' => 2, 'User chooses price'=>3);
+	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);
 
 	echo $formwriter->textinput('Price (no cents)', 'pro_price', 'ctrlHolder', 100, (int)$product->get('pro_price'), '', 5, '');
 	echo $formwriter->textinput('Max Number that can be added to cart:', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 3, '');
@@ -164,10 +211,12 @@
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
-	$pgs->load();
-	$optionvals = $pgs->get_dropdown_array();
-	echo $formwriter->dropinput("Product Group", "pro_prg_product_group_id", "ctrlHolder", $optionvals, $product->get('pro_prg_product_group_id'), '', TRUE);	
-
+	if($pgs->count_all()){
+		$pgs->load();
+		$optionvals = $pgs->get_dropdown_array();
+		echo $formwriter->dropinput("Product Group", "pro_prg_product_group_id", "ctrlHolder", $optionvals, $product->get('pro_prg_product_group_id'), '', TRUE);	
+	}
+	
 	$optionvals = array(
 		'Name' => 1, 
 		'Email' => 64,
@@ -176,13 +225,15 @@
 		//'Address' => 8,
 		//'GDPR Notice' => 16,
 		'Consent to record' => 32,
-		'User Chooses Price' => 128,
+		'Optional One-time Donation' => 128,
 		'Newsletter Signup' => 256,
 		'Comment' => 512
 	);
 	if ($product->key) {
 		//FILL THE CHECKED VALUES AND DECLARE EMAIL AND NAME READ ONLY
 		$checkedvals = $product->get_requirement_info('ids');
+		$checkedvals[] = 1;
+		$checkedvals[] = 64;
 		$readonlyvals = array(1, 64); //DEFAULT
 	}
 	else{

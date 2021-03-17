@@ -13,6 +13,10 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
 class OrderException extends SystemClassException {}
 
 class Order extends SystemBase {
+	
+	public const STATUS_UNPAID = 1;
+	public const STATUS_PAID = 2;
+	public const STATUS_ERROR = 3;
 
 	public static $fields = array(
 		'ord_order_id' => 'Order ID',

@@ -36,7 +36,8 @@
 		'page_title' => 'Event Bundles',
 		'readable_title' => 'Event Bundles',
 		'breadcrumbs' => array(
-			'Events'=>'/admin/admin_events'
+			'Events'=>'/admin/admin_events',
+			'Event Bundles' => ''
 		),
 		'session' => $session,
 	)

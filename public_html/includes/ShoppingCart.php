@@ -101,16 +101,15 @@ class ShoppingCart {
 	public function get_detailed_items() {
 		$detailed_items = array();
 		foreach ($this->items as $key => $cart_item) {
-			list($quantity, $product, $form_data) = $cart_item;
-			$product_version = $product->get_product_version($form_data);
+			list($quantity, $product, $data) = $cart_item; 
+			$product_version = $product->get_product_version($data);
 			if ($product_version !== NULL) {
 				$name = $product->get('pro_name') . ' - ' . $product_version->prv_version_name;
-			} 
-			else {
+			} else {
 				$name = $product->get('pro_name');
 			}
 			
-			$price = $product->get_price($product_version, $data['user_price']);
+			$price = $product->get_price($product_version, $data);
 
 			$detailed_items[] = array(
 				'id' => $key,

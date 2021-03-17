@@ -14,6 +14,9 @@ class OrderItemException extends SystemClassException {}
 
 class OrderItem extends SystemBase {
 
+	public const STATUS_UNPAID = 1;
+	public const STATUS_PAID = 2;
+	public const STATUS_ERROR = 3;
 
 	public static $fields = array(
 		'odi_order_item_id' => 'OrderItem ID',
@@ -26,7 +29,8 @@ class OrderItem extends SystemBase {
 		'odi_status_change_time' => 'Timestamp of last status change',
 		'odi_usr_user_id' => 'User who gets the product',
 		'odi_evr_event_registrant_id' => 'If is event registration, registrant id',
-		'odi_comment' => 'Optional comment'
+		'odi_comment' => 'Optional comment',
+		'odi_stripe_subscription_id' => 'Stripe subscription',
 	);
 
 
@@ -53,7 +57,8 @@ class OrderItem extends SystemBase {
 		}
 
 		if ($this->key) {
-			throw new OrderItemException('Cannot edit an existing order item.');
+			//throw new OrderItemException('Cannot edit an existing order item.');
+			$p_keys = array('odi_order_item_id' => $this->key);
 		} else {
 			$p_keys = NULL;
 			// Creating a new order item
@@ -177,7 +182,8 @@ class OrderItem extends SystemBase {
 			  "odi_usr_user_id" int4,
 			  "odi_evr_event_registrant_id" int4,
 			  "odi_comment" varchar(255) COLLATE "pg_catalog"."default",
-			  "odi_percent_tax_deductible" int4
+			  "odi_percent_tax_deductible" int4,
+			  "odi_stripe_subscription_id" varchar(255) COLLATE "pg_catalog"."default"
 			)
 			;';
 		$q = $dblink->prepare($sql);
