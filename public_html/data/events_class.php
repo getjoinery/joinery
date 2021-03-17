@@ -286,21 +286,41 @@ class Event extends SystemBase {
 	
 
 	function get_event_start_time($tz='event', $format='M j, Y g:i a T') {
+		/*
 		if($tz == 'event' || !$tz){
-			return LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $this->get('evt_timezone'), $format);
+			$utc_time = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $this->get('evt_timezone'), $format);
 		}
 		else{
-			return LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, $format);
+			$utc_time = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, $format);
 		}
+		*/
+		
+		//WE ARE NOW USING LOCAL TIME TO DISPLAY
+		if($tz == 'event' || !$tz){
+			return LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $this->get('evt_timezone'), $format);
+		}
+		else{
+			return LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $tz, $format);
+		}		
 	}
 
 	function get_event_end_time($tz='event', $format='M j, Y g:i a T') {
+		/*
 		if($tz == 'event' || !$tz){
 			return LibraryFunctions::convert_time($this->get('evt_end_time'), 'UTC', $this->get('evt_timezone'), $format);
 		}
 		else{
 			return LibraryFunctions::convert_time($this->get('evt_end_time'), 'UTC', $tz, $format);
 		}
+		*/
+		
+		if($tz == 'event' || !$tz){
+			return LibraryFunctions::convert_time($this->get('evt_end_time_local'), $this->get('evt_timezone'), $this->get('evt_timezone'), $format);
+		}
+		else{
+			return LibraryFunctions::convert_time($this->get('evt_end_time_local'), $this->get('evt_timezone'), $tz, $format);
+		}
+		
 	}	
 	
 	function get_time_string($tz='event', $dayformat = 'M j,', $timeformat = 'g:i a'){
@@ -311,22 +331,22 @@ class Event extends SystemBase {
 		
 
 		if($tz == 'event' || !$tz){
-			$start_day =  LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $this->get('evt_timezone'), $dayformat);
-			$start_time =  LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $this->get('evt_timezone'), $timeformat);
+			$start_day =  LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $this->get('evt_timezone'), $dayformat);
+			$start_time =  LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $this->get('evt_timezone'), $timeformat);
 			if($this->get('evt_end_time')){
-				$end_day =  LibraryFunctions::convert_time($this->get('evt_end_time'), 'UTC', $this->get('evt_timezone'), $dayformat);
-				$end_time =  LibraryFunctions::convert_time($this->get('evt_end_time'), 'UTC', $this->get('evt_timezone'), $timeformat);
+				$end_day =  LibraryFunctions::convert_time($this->get('evt_end_time_local'), $this->get('evt_timezone'), $this->get('evt_timezone'), $dayformat);
+				$end_time =  LibraryFunctions::convert_time($this->get('evt_end_time_local'), $this->get('evt_timezone'), $this->get('evt_timezone'), $timeformat);
 			}
-			$timezone = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $this->get('evt_timezone'), 'T');
+			$timezone = LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $this->get('evt_timezone'), 'T');
 		}
 		else{
-			$start_day =  LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, $dayformat);
-			$start_time =  LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, $timeformat);
+			$start_day =  LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $tz, $dayformat);
+			$start_time =  LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $tz, $timeformat);
 			if($this->get('evt_end_time')){
-				$end_day =  LibraryFunctions::convert_time($this->get('evt_end_time'), 'UTC', $tz, $dayformat);
-				$end_time =  LibraryFunctions::convert_time($this->get('evt_end_time'), 'UTC', $tz, $timeformat);
+				$end_day =  LibraryFunctions::convert_time($this->get('evt_end_time_local'), $this->get('evt_timezone'), $tz, $dayformat);
+				$end_time =  LibraryFunctions::convert_time($this->get('evt_end_time_local'), $this->get('evt_timezone'), $tz, $timeformat);
 			}
-			$timezone = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, 'T');
+			$timezone = LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $tz, 'T');
 		}
 		
 		if(!$this->get('evt_end_time')){

@@ -200,9 +200,9 @@
 	}	
 	echo $formwriter->textinput('Title', 'evs_title', NULL, 100, @$event_session->get('evs_title'), '', 255, '');
 	echo $formwriter->textinput('Session number (optional, number only)', 'evs_session_number', NULL, 100, @$event_session->get('evs_session_number'), '', 255, '');
-	echo $formwriter->datetimeinput('Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_start_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_start_time'), 'UTC', $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
+	echo $formwriter->datetimeinput('Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_start_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
-	echo $formwriter->datetimeinput('Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_end_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_end_time'), 'UTC', $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
+	echo $formwriter->datetimeinput('Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_end_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 	
 	 
 	//$optionvals = array("Hidden"=>0, "Live"=>1);
