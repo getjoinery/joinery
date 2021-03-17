@@ -107,10 +107,10 @@ class EventSession extends SystemBase {
 		
 		if($tz == 'event' || !$tz){
 			$event = new Event($this->get('evs_evt_event_id'), TRUE);
-			return LibraryFunctions::convert_time($this->get('evs_start_time'), 'UTC', $event->get('evt_timezone'), $format);
+			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $event->get('evt_timezone'), $format);
 		}
 		else{
-			return LibraryFunctions::convert_time($this->get('evs_start_time'), 'UTC', $tz, $format);
+			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, $format);
 		}
 	}
 
@@ -118,10 +118,10 @@ class EventSession extends SystemBase {
 		
 		if($tz == 'event' || !$tz){
 			$event = new Event($this->get('evs_evt_event_id'), TRUE);
-			return LibraryFunctions::convert_time($this->get('evs_end_time'), 'UTC', $event->get('evt_timezone'), $format);
+			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $event->get('evt_timezone'), $format);
 		}
 		else{
-			return LibraryFunctions::convert_time($this->get('evs_end_time'), 'UTC', $tz, $format);
+			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, $format);
 		}
 	}
 
@@ -129,22 +129,22 @@ class EventSession extends SystemBase {
 
 		if($tz == 'event' || !$tz){
 			$event = new Event($this->get('evs_evt_event_id'), TRUE);
-			$start_day =  LibraryFunctions::convert_time($this->get('evs_start_time'), 'UTC', $event->get('evt_timezone'), $dayformat);
-			$start_time =  LibraryFunctions::convert_time($this->get('evs_start_time'), 'UTC', $event->get('evt_timezone'), $timeformat);
+			$start_day =  LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $event->get('evt_timezone'), $dayformat);
+			$start_time =  LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $event->get('evt_timezone'), $timeformat);
 			if($this->get('evs_end_time')){
-				$end_day =  LibraryFunctions::convert_time($this->get('evs_end_time'), 'UTC', $event->get('evt_timezone'), $dayformat);
-				$end_time =  LibraryFunctions::convert_time($this->get('evs_end_time'), 'UTC', $event->get('evt_timezone'), $timeformat);
+				$end_day =  LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $event->get('evt_timezone'), $dayformat);
+				$end_time =  LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $event->get('evt_timezone'), $timeformat);
 			}
-			$timezone = LibraryFunctions::convert_time($this->get('evs_start_time'), 'UTC', $event->get('evt_timezone'), 'T');
+			$timezone = LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $event->get('evt_timezone'), 'T');
 		}
 		else{
-			$start_day =  LibraryFunctions::convert_time($this->get('evs_start_time'), 'UTC', $tz, $dayformat);
-			$start_time =  LibraryFunctions::convert_time($this->get('evs_start_time'), 'UTC', $tz, $timeformat);
+			$start_day =  LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, $dayformat);
+			$start_time =  LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, $timeformat);
 			if($this->get('evs_end_time')){
-				$end_day =  LibraryFunctions::convert_time($this->get('evs_end_time'), 'UTC', $tz, $dayformat);
-				$end_time =  LibraryFunctions::convert_time($this->get('evs_end_time'), 'UTC', $tz, $timeformat);
+				$end_day =  LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, $dayformat);
+				$end_time =  LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, $timeformat);
 			}
-			$timezone = LibraryFunctions::convert_time($this->get('evs_start_time'), 'UTC', $tz, 'T');
+			$timezone = LibraryFunctions::convert_time($this->get('evs_start_time_local'), $this->get('evt_timezone'), $tz, 'T');
 		}
 		
 		if(!$this->get('evs_end_time')){

@@ -116,7 +116,7 @@
 
 		//array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$event->get('evt_usr_user_id').'">user</a>');
 		//array_push($rowvalues, $event->get_event_start_time());
-		array_push($rowvalues, LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $session->get_timezone(), 'M j, Y'));
+		array_push($rowvalues, LibraryFunctions::convert_time($event->get('evt_start_time_local'), $session->get_timezone(), $session->get_timezone(), 'M j, Y'));
 		
 		if($event->get('evt_visibility') == 0) {
 			array_push($rowvalues, '<b>Private</b>');

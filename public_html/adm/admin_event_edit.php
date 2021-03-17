@@ -220,10 +220,10 @@
 	echo $formwriter->dropinput("Session display style", "evt_session_display_type", "ctrlHolder", $optionvals, $event->get('evt_session_display_type'), '', FALSE);
 		
 
-	echo $formwriter->datetimeinput('Event start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evt_start_time', 'ctrlHolder', LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
+	echo $formwriter->datetimeinput('Event start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evt_start_time', 'ctrlHolder', LibraryFunctions::convert_time($event->get('evt_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
 	 
-	echo $formwriter->datetimeinput('Event end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local'). ' timezone)', 'evt_end_time', 'ctrlHolder', LibraryFunctions::convert_time($event->get('evt_end_time'), 'UTC', $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
+	echo $formwriter->datetimeinput('Event end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local'). ' timezone)', 'evt_end_time', 'ctrlHolder', LibraryFunctions::convert_time($event->get('evt_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
 	//echo $formwriter->textinput('Max attendees:', 'evt_max_purchase_count', 'ctrlHolder', 100, $event->get('evt_max_purchase_count'), '', 255, '');
 
