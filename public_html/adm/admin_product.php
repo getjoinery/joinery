@@ -17,9 +17,13 @@
 	$session->set_return();
 
 	$product = new Product($_GET['pro_product_id'], TRUE);
+	$orders = new MultiOrderItem(array('product_id' => $product->key));
 
 		
 	if($_REQUEST['action'] == 'remove'){
+		if($orders->count_all()){
+			throw new SystemDisplayableError('You cannot delete a product with orders.');
+		}
 		$product->authenticate_write($session);
 		$product->permanent_delete();
 
@@ -46,7 +50,7 @@
 		if($_SESSION['permission'] > 7){
 			$options['altlinks'] += array('Edit Product'=> '/admin/admin_product_edit?p='.$product->key);
 		}
-		$orders = new MultiOrderItem(array('product_id' => $product->key));
+		
 		if(!$orders->count_all()){
 			if($_SESSION['permission'] == 10){
 				$options['altlinks'] += array('Delete Product'=> '/admin/admin_products?action=remove&p='.$product->key);
