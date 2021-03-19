@@ -7,7 +7,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/cart_logs_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');

@@ -791,17 +791,6 @@ class User extends SystemBase {
 			$dbhelper->handle_query_error($e);
 		}
 
-		$sql = 'DELETE FROM cls_cart_logs WHERE cls_usr_user_id_billing=:usr_user_id OR cls_usr_user_id_logged_in=:usr_user_id2';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-			$q->bindParam(':usr_user_id2', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
 
 		$sql = 'DELETE FROM evl_event_logs WHERE evl_usr_user_id=:usr_user_id';
 		try{
