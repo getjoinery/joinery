@@ -11,48 +11,65 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
 require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
 
 	
-class SurveyQuestionException extends SystemClassException {}
+class SurveyAnswerException extends SystemClassException {}
 
-class SurveyQuestion extends SystemBase {
+class SurveyAnswer extends SystemBase {
 
 	public static $fields = array(
-		'srq_survey_question_id' => 'ID of the survey question',
-		'srq_svy_survey_id' => 'Survey id',
-		'srq_qst_question_id' => 'Question id',
-		'srq_order' => 'Order of the questions'
+		'sva_survey_answer_id' => 'ID of the survey question',
+		'sva_svy_survey_id' => 'Survey id',
+		'sva_qst_question_id' => 'Question id',
+		'sva_usr_user_id' => 'User who is answering',
+		'sva_answer' => 'Text answer of the question',
+		'sva_create_time' => 'Time of answer'
 	);
 	
 	public static $constants = array();
 
-	public static $required = array('srq_svy_survey_id', 'srq_qst_question_id');
+	public static $required = array('sva_svy_survey_id', 'sva_qst_question_id');
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();	
 
-	public static $default_values = array(
-		);		
+	public static $default_values = array('sva_create_time'=>'now()');		
 		
 	
-	private function _check_for_duplicates() {
+	function check_for_duplicates() {
 		
-		$count = new MultiSurveyQuestion(array(
-			'survey_id' => $this->get('srq_svy_survey_id'),
-			'question_id' => $this->get('srq_qst_question_id')
+		$count = new MultiSurveyAnswer(array(
+			'survey_id' => $this->get('sva_svy_survey_id'),
+			'question_id' => $this->get('sva_qst_question_id'),
+			'user_id' => $this->get('sva_usr_user_id'),
 		));
 		 
 		if ($count->count_all() > 0) {
 			$count->load();
 			return $count->get(0);
 		}
-		return NULL;
+		return false;
+	}	
+	
+	static function get_answer($survey_id, $question_id, $user_id) {
+		
+		$answer = new MultiSurveyAnswer(array(
+			'survey_id' => $survey_id,
+			'question_id' => $question_id,
+			'user_id' => $user_id,
+		));
+		 
+		if ($answer->count_all() > 0) {
+			$answer->load();
+			return $answer->get(0);
+		}
+		return false;
 	}	
 	
 	function remove(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
-		$q = $dblink->prepare('DELETE FROM srq_survey_questions WHERE srq_survey_question_id=?');
+		$q = $dblink->prepare('DELETE FROM sva_survey_answers WHERE sva_survey_answer_id=?');
 		$q->bindValue(1, $this->key, PDO::PARAM_INT);
 		
 		$success = $q->execute();
@@ -63,13 +80,13 @@ class SurveyQuestion extends SystemBase {
 
 	function prepare() {	
 		if ($this->data === NULL) {
-			throw new SurveyQuestionException('This has no data.');
+			throw new SurveyAnswerException('This has no data.');
 		}
 
 		
 		if(!$this->key){
-			if($this->_check_for_duplicates()){
-				throw new SurveyQuestionException('This is a duplicate.');
+			if($this->check_for_duplicates()){
+				throw new SurveyAnswerException('This is a duplicate.');
 			}
 		}
 		
@@ -114,11 +131,11 @@ class SurveyQuestion extends SystemBase {
 
 	function load() {
 		parent::load();
-		$this->data = SingleRowFetch('srq_survey_questions', 'srq_survey_question_id',
+		$this->data = SingleRowFetch('sva_survey_answers', 'sva_survey_answer_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
 		if ($this->data === NULL) {
 			throw new VideoException(
-				'This survey_question does not exist');
+				'This survey_answer does not exist');
 		}
 	}
 	
@@ -129,7 +146,7 @@ class SurveyQuestion extends SystemBase {
 		// sure they have admin access, otherwise denied.
 		if ($session->get_permission() < 5) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this survey_question.');
+				'Current user does not have permission to edit this survey_answer.');
 		}
 	}
 
@@ -140,15 +157,15 @@ class SurveyQuestion extends SystemBase {
 		}
 
 		if ($this->key) {
-			$p_keys = array('srq_survey_question_id' => $this->key);
+			$p_keys = array('sva_survey_answer_id' => $this->key);
 			// Editing an existing record
 		} else {
 			$p_keys = NULL;
 			// Creating a new record
-			unset($rowdata['srq_survey_question_id']);
-			//$rowdata['srq_create_time'] = 'now()';
+			unset($rowdata['sva_survey_answer_id']);
+			//$rowdata['sva_create_time'] = 'now()';
 			
-			if($this->_check_for_duplicates()){
+			if($this->check_for_duplicates()){
 				return FALSE;
 			}
 		}
@@ -156,16 +173,16 @@ class SurveyQuestion extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'srq_survey_questions', $p_keys, $rowdata, FALSE, 0);
+			$dbhelper, $dblink, 'sva_survey_answers', $p_keys, $rowdata, FALSE, 0);
 
-		$this->key = $p_keys_return['srq_survey_question_id'];
+		$this->key = $p_keys_return['sva_survey_answer_id'];
 	}
 	
 	static function InitDB($mode='structure'){
 	
 		try{
 			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS srq_survey_questions_srq_survey_question_id_seq
+				CREATE SEQUENCE IF NOT EXISTS sva_survey_answers_sva_survey_answer_id_seq
 				INCREMENT BY 1
 				NO MAXVALUE
 				NO MINVALUE
@@ -178,18 +195,20 @@ class SurveyQuestion extends SystemBase {
 		}			
 
 		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."srq_survey_questions" (
-			  "srq_survey_question_id" int4 NOT NULL DEFAULT nextval(\'srq_survey_questions_srq_survey_question_id_seq\'::regclass),
-			  "srq_svy_survey_id" int4 NOT NULL,
-			  "srq_qst_question_id" int4 NOT NULL,
-			  "srq_order" int4;
+			CREATE TABLE IF NOT EXISTS "public"."sva_survey_answers" (
+			  "sva_survey_answer_id" int4 NOT NULL DEFAULT nextval(\'sva_survey_answers_sva_survey_answer_id_seq\'::regclass),
+			  "sva_svy_survey_id" int4 NOT NULL,
+			  "sva_qst_question_id" int4 NOT NULL,
+			  "sva_usr_user_id" int4,
+			  "sva_answer" text,
+			  "sva_create_time" timestamp(6);
 			)
 			;';
 		$q = $dblink->prepare($sql);
 		$success = $q->execute();
 		
 		try{		
-			$sql = 'ALTER TABLE "public"."srq_survey_questions" ADD CONSTRAINT "srq_survey_questions_pkey" PRIMARY KEY ("srq_survey_question_id");';
+			$sql = 'ALTER TABLE "public"."sva_survey_answers" ADD CONSTRAINT "sva_survey_answers_pkey" PRIMARY KEY ("sva_survey_answer_id");';
 			$q = $dblink->prepare($sql);
 			$success = $q->execute();
 		}
@@ -203,11 +222,11 @@ class SurveyQuestion extends SystemBase {
 	
 }
 
-class MultiSurveyQuestion extends SystemMultiBase {
+class MultiSurveyAnswer extends SystemMultiBase {
 	function get_user_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$user = new User($item->get('srq_usr_user_id'), TRUE);
+			$user = new User($item->get('sva_usr_user_id'), TRUE);
 			$items[$user->display_name()] = $user->key;
 		}
 		if ($include_new) {
@@ -221,15 +240,19 @@ class MultiSurveyQuestion extends SystemMultiBase {
 		$bind_params = array();
 
 		if (array_key_exists('survey_id', $this->options)) {
-			$where_clauses[] = 'srq_svy_survey_id = ?';
+			$where_clauses[] = 'sva_svy_survey_id = ?';
 			$bind_params[] = array($this->options['survey_id'], PDO::PARAM_INT);
 		}
 
 		if (array_key_exists('question_id', $this->options)) {
-			$where_clauses[] = 'srq_qst_question_id = ?';
+			$where_clauses[] = 'sva_qst_question_id = ?';
 			$bind_params[] = array($this->options['question_id'], PDO::PARAM_INT);
 		}	
 
+		if (array_key_exists('user_id', $this->options)) {
+			$where_clauses[] = 'sva_usr_user_id = ?';
+			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
+		}
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
@@ -238,18 +261,18 @@ class MultiSurveyQuestion extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM srq_survey_questions ' . $where_clause;
+			$sql = 'SELECT COUNT(1) FROM sva_survey_answers ' . $where_clause;
 		} else {
-			$sql = 'SELECT * FROM srq_survey_questions
+			$sql = 'SELECT * FROM sva_survey_answers
 				' . $where_clause . '
 				ORDER BY ';
 				
 			if (!$this->order_by) {
-				$sql .= " srq_survey_question_id ASC ";
+				$sql .= " sva_survey_answer_id ASC ";
 			}
 			else {
-				if (array_key_exists('survey_question_id', $this->order_by)) {
-					$sql .= ' srq_survey_question_id ' . $this->order_by['survey_question_id'];
+				if (array_key_exists('survey_answer_id', $this->order_by)) {
+					$sql .= ' sva_survey_answer_id ' . $this->order_by['survey_answer_id'];
 				}		
 			}				
 
@@ -273,8 +296,8 @@ class MultiSurveyQuestion extends SystemMultiBase {
 	function load() {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
-			$child = new SurveyQuestion($row->srq_survey_question_id);
-			$child->load_from_data($row, array_keys(SurveyQuestion::$fields));
+			$child = new SurveyAnswer($row->sva_survey_answer_id);
+			$child->load_from_data($row, array_keys(SurveyAnswer::$fields));
 			$this->add($child);
 		}
 	}
