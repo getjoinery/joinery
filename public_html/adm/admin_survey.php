@@ -15,13 +15,13 @@
 	
 	if($_POST['action'] == 'add'){
 		$survey_question = new SurveyQuestion(NULL);
-		$survey_question->set('srq_srv_survey_id', $_REQUEST['srv_survey_id']);
+		$survey_question->set('srq_svy_survey_id', $_REQUEST['svy_survey_id']);
 		$survey_question->set('srq_qst_question_id', $_REQUEST['qst_question_id']); 
 		$survey_question->prepare();
 		$survey_question->save();
 	}
-	
-	$svy_survey_id = LibraryFunctions::fetch_variable('srv_survey_id', 0, 0, '');
+
+	$svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, '');
 	$survey = new Survey($svy_survey_id, TRUE);
 
 	$numperpage = 30;
@@ -99,7 +99,7 @@
 	//$validation_rules = array();
 	//$validation_rules['evt_event_id']['required']['value'] = 'true';
 	//echo $formwriter->set_validate($validation_rules);
-	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_survey?srv_survey_id='. $survey->key);
+	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_survey?svy_survey_id='. $survey->key);
 	
 	$questions = new MultiQuestion(
 		array('deleted'=>false),

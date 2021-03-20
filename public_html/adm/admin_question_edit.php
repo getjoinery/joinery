@@ -92,7 +92,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 26,
+		'menu-id'=> 35,
 		'breadcrumbs' => array(
 			'Questions'=>'/admin/admin_questions', 
 			'Edit Question' => '',

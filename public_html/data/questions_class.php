@@ -158,7 +158,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->dropinput($this->get('qst_question'), $field_name, "ctrlHolder", $optionvals, NULL, '', TRUE);
+			echo $formwriter->dropinput($this->get('qst_question'), $field_name, "ctrlHolder", $optionvals, $value, '', TRUE);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_RADIO){
 			$options = new MultiQuestionOption(
@@ -170,7 +170,7 @@ class Question extends SystemBase {
 
 			$checkedval = NULL;
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->radioinput($this->get('qst_question'), $field_name, "radioinput", $optionvals, $checkedval, NULL, "", NULL);		
+			echo $formwriter->radioinput($this->get('qst_question'), $field_name, "radioinput", $optionvals, $value, NULL, "", NULL);		
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX){
 			$options = new MultiQuestionOption(
@@ -180,7 +180,7 @@ class Question extends SystemBase {
 				NULL);  //OFFSET
 			$options->load();
 			$truevalue = $options->get(0)->get('qop_question_option_value');
-			//TODO ERROR CHECKING HERE
+			//TODO ERROR CHECKING HERE 
 			echo $formwriter->checkboxinput($this->get('qst_question'), $field_name, "ctrlHolder", NULL, $value, $truevalue, '');			
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
@@ -192,7 +192,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->checkboxlist($this->get('qst_question'), $field_name, "ctrlHolder", $optionvals, NULL, '', TRUE);			
+			echo $formwriter->checkboxlist($this->get('qst_question'), $field_name, "ctrlHolder", $optionvals, $value, '', TRUE);			
 		}
 	}
 	
