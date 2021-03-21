@@ -159,9 +159,9 @@ class PublicPage {
 		<title><?php echo $site_title; ?></title>
 
 		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->theme_url; ?>/styles/integral_style1.css' type='text/css' media='all' />
-		<!--<link rel="stylesheet" href="<?php echo $this->cdn; ?>/theme/styles/4f877.css" media="all" />-->
-		<link rel='stylesheet'  href='<?php echo $this->theme_url; ?>/styles/widget-styles.css' type='text/css' media='all' />		
-		<link type="text/css" rel="stylesheet" media="screen" href="<?php echo $this->theme_url; ?>/styles/uni-form-profile_4.css" />
+
+		<!--<link rel='stylesheet'  href='<?php echo $this->theme_url; ?>/styles/widget-styles.css' type='text/css' media='all' />
+		<link type="text/css" rel="stylesheet" media="screen" href="<?php echo $this->theme_url; ?>/styles/uni-form-profile_4.css" />-->
 		
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/styles/ui/jquery-ui-1.7.custom_5.css" rel="stylesheet" /> 
 	
@@ -206,8 +206,8 @@ class PublicPage {
 
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
 		
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
+		<!--<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">-->
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
 
 
@@ -218,7 +218,7 @@ class PublicPage {
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
 
-		<script src="<?php echo $this->theme_url; ?>/scripts/df983.js"></script> 
+		<!--<script src="<?php echo $this->theme_url; ?>/scripts/df983.js"></script> -->
 		
 		<!-- jQuery 3.2.1 <script src="/admin/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
 		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
