@@ -180,33 +180,33 @@ class PublicPage {
 		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
 		-->
 		<!-- CSS -->
-		<link type="text/css" href="<?php echo $this->cdn; ?>/theme/default/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
+		<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
 		<!--<link rel="stylesheet" type="text/css" href="/theme/default/includes/uikit-3.4.2/css/uikit.min.css">-->
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
 		
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
-		<!--<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/sal/sal.min.css" rel="stylesheet">-->
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
+		<!--<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/sal/sal.min.css" rel="stylesheet">-->
 	
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/css/theme.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/css/site_styles.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/theme.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/site_styles.css" rel="stylesheet">
 		<!-- Fonts/Icons -->
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
-		<link href="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
 		
 
-		<script src="<?php echo $this->cdn; ?>/theme/default/includes/jquery-3.4.1.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
 		<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 		
 		<!-- jQuery validate -->
-		<script type="text/javascript" src="<?php echo $this->cdn; ?>/theme/default/includes/jquery.validate-1.9.1.js"></script>				
+		<script type="text/javascript" src="<?php echo $this->theme_url; ?>/includes/jquery.validate-1.9.1.js"></script>				
 		
 
 		
 		<!--GDPR NOTICE  https://www.jqueryscript.net/other/GDPR-Cookie-Consent-Popup-Plugin.html-->
-		<!--<script src="<?php echo $this->cdn; ?>/theme/default/scripts/GDPR/jquery.ihavecookies.js"></script>-->
+		<!--<script src="<?php echo $this->theme_url; ?>/scripts/GDPR/jquery.ihavecookies.js"></script>-->
 	</head>
 	<?php	
 	if(empty($options['noheader'])){
@@ -389,9 +389,9 @@ class PublicPage {
 		<!-- end Scroll to top button -->
 
 		<!-- ***** JAVASCRIPTS ***** -->
-		<script src="<?php echo $this->cdn; ?>/theme/default/includes/assets/js/polyfill.min.js?features=IntersectionObserver"></script>
-		<script src="<?php echo $this->cdn; ?>/theme/default/includes/assets/plugins/plugins.js"></script>
-		<script src="<?php echo $this->cdn; ?>/theme/default/includes/assets/js/functions.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/js/polyfill.min.js?features=IntersectionObserver"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/plugins/plugins.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/js/functions.js"></script>
 	</body>
 </html>
 		<?php
