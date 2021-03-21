@@ -26,7 +26,36 @@ class FormWriterMaster {
 							errorPlacement: function(error, element) {
 								error.appendTo(element.parents(".errorplacement").eq(0));
 							}';
-							
+	
+	//FORM STYLING
+	protected $fileinput_container_class = '';
+	protected $fileinput_input_class = '';
+	
+	protected $text_container_class = 'uk-margin';
+	protected $text_label_class = '';
+	
+	protected $textintput_container_class_horizontal = 'row';
+	protected $textintput_label_class_horizontal = 'uk-margin col-sm-2 col-form-label';
+	protected $textintput_container_class = 'uk-margin';
+	protected $textintput_label_class = '';
+	protected $textintput_input_class = 'uk-input';
+	
+	protected $textbox_container_class = 'uk-margin';
+	protected $textbox_textarea_class = 'uk-textarea';
+
+	protected $checkboxinput_container_class = 'ctrlHolder uk-margin uk-grid-small uk-child-width-auto uk-grid';
+	protected $checkboxinput_input_class = 'uk-checkbox';
+	
+	protected $checkboxList_container_class = 'uk-margin';
+	protected $checkboxList_wrapper_class = 'uk-margin uk-grid-small uk-child-width-auto uk-grid';
+	protected $checkboxList_input_class_checkbox = 'uk-checkbox';	
+	protected $checkboxList_input_class_radio = 'uk-radio';	
+	
+	protected $timeinput_container_class = 'uk-margin';
+	protected $timeinput_input_class = 'uk-input timepicker';
+	
+	protected $dropinput_container_class = 'uk-margin';
+	protected $dropinput_select_class = 'uk-select';
 
 	function __construct($formid='form1', $secure=FALSE, $use_tabindex=FALSE){
 		$this->formid = $formid;
@@ -257,7 +286,7 @@ class FormWriterMaster {
 	}	
 
 	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
-		$output = '<form id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"><fieldset class="uk-fieldset">';
+		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"><fieldset class="uk-fieldset">';
 		return $output;
 	}
 
@@ -341,31 +370,14 @@ class FormWriterMaster {
 	
 	}
 	
-	
-	
 
 
 	function fileinput($label, $id, $class, $size, $hint) {
-		ob_start(); //Start output buffer
-		?>
-					<div id="<?php echo $id . '_container'; ?>" class="<?php echo $class; ?> errorplacement">
-						<!--<p id="error1" class="errorField"><strong>Description of your error</strong></p>-->
-					  <label for="<?php echo $id; ?>"><?php echo $label; ?></label>
-					  <input name="<?php echo $id; ?>" id="<?php echo $id; ?>"  size="<?php echo $size; ?>" type="file" class="textInput" />
-						<?php if ($hint): ?>
-							<!--<p id="<?php echo $id . '_hint'; ?>" class="formHint"><?php echo $hint; ?></p>-->
-							<div class="form_callout">
-							  <div class="form_callout_top"></div>
-							  <div class="form_callout_content">
-								 <p id="<?php echo $id . '_callout'; ?>"><?php echo $hint; ?></p>
-							  </div>
-							  <div class="form_callout_bottom"></div>
-							</div>
-						<?php endif; ?>
-					</div>
-		<?php
-		$output = ob_get_contents(); //Grab output
-		ob_end_clean(); //Discard output buffer
+		$output = '
+		<div id="'.$id.'_container" class="'.$this->fileinput_container_class.' errorplacement">
+		<label for="'.$id.'">'.$label.'</label>
+		<input name="'.$id.'" id="'.$id.'"  size="'.$size.'" type="file" class="'.$this->fileinput_input_class.'" />
+		</div>';
 		return $output;
 	}
 
@@ -376,38 +388,29 @@ class FormWriterMaster {
 	}
 
 	function text($id, $label, $value, $class) {
-		
 		$output = '
-		<div id="'.$id.'_container" class="uk-margin errorplacement">
-		<label for="'.$id.'" class="">'.$label.'</label>
-		<div class="controls">
+		<div id="'.$id.'_container" class="'.$this->text_container_class.' errorplacement">
+		<label for="'.$id.'" class="'.$this->text_label_class.'">'.$label.'</label>
 		<span>'.$value.'</span>
-		</div>
 		</div>';
 		return $output;
 	}
 
-	//type = 'text', 'password', 'date', 'datetime-local'
+
+
+
 	function textinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='text') {
 
 		//FORMS ARE EITHER HORIZONTAL OR REGULAR
 		$layout = '';
 		if($layout == 'horizontal'){
-			$labelclass = 'col-sm-2 col-form-label';
-			$containerclass = 'row';
+			$labelclass = $this->textintput_label_class_horizontal;
+			$containerclass = $this->textintput_container_class_horizontal;
 		}
 		else{
-			$labelclass = '';
-			$containerclass = '';
+			$labelclass = $this->textintput_label_class;
+			$containerclass = $this->textintput_container_class;
 		}
-		
-		/*
-		$datetext='';
-		if($type==''){
-			$datetext='data-uk-datepicker="{format:\'DD.MM.YYYY\'}"';
-		}
-		*/
-		
 		
 		if($value){
 			$value = str_replace('"', '&quot;', $value );
@@ -419,7 +422,7 @@ class FormWriterMaster {
 		}	
 		*/
 		
-		$output = '<div id="'.$id . '_container" class="uk-margin errorplacement '.$containerclass.'">';
+		$output = '<div id="'.$id . '_container" class="errorplacement '.$containerclass.'">';
 		
 		if($label){
 			$output .= '<label for="'.$id.'" class="'.$labelclass.'">'.$label.'</label>';
@@ -432,17 +435,19 @@ class FormWriterMaster {
 			$autocomplete = '';
 		}
 
-		$output .= '<div class="controls"><input name="'.$id.'" id="'.$id.'"'.$autocomplete.' value="'.$value.'" size="'.$size.'" type="'.$type.'" class="uk-input '.$class.'" '.$hint_text.' maxlength="'.$maxlength.'" '.$readonly.$this->_get_next_tab_index().'/>';
+		$output .= '<input name="'.$id.'" id="'.$id.'"'.$autocomplete.' value="'.$value.'" size="'.$size.'" type="'.$type.'" class="uk-input '.$class.'" '.$hint_text.' maxlength="'.$maxlength.'" '.$readonly.$this->_get_next_tab_index().'/>';
 		
 		if($formhint){
-			$output .= '<div id="'.$id.'_hint" class=""><small>'.$formhint.'</small></div>';
+			$output .= '<div id="'.$id.'_hint" class="'.$this->textinput_input_class.'"><small>'.$formhint.'</small></div>';
 		}
 
-		$output .= '</div></div>';
+		$output .= '</div>';
 		
 		return $output;
 
 	}
+	
+
 
 
 	function textbox($label, $id, $class, $rows, $cols, $value, $hint, $htmlmode="no") {
@@ -483,22 +488,22 @@ class FormWriterMaster {
 				});
 			</script>
 			";
-			$htmlmode_text = 'class="uk-textarea html_editable"';
+			$htmlmode_text = 'html_editable';
 		}
 		else{
-			$htmlmode_text = 'class="uk-textarea"';
+			$htmlmode_text = '';
 		}
 
-		$output .= '<div id="'.$id.'_container" class="uk-margin errorplacement">
-			<h5>'.$label.'</h5>
-			<div class="controls">
-				<textarea name="'.$id.'" id="'.$id.'" '.$htmlmode_text.' rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea>';
+		$output .= '<div id="'.$id.'_container" class="'.$this->textbox_container_class.' errorplacement">
+			<label for="'.$id.'">'.$label.'</label>
+			
+				<textarea name="'.$id.'" id="'.$id.'" class="'.$this->textbox_textarea_class.' '.$htmlmode_text.'" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea>';
 				
 		if($formhint){
-			$output .= '<div id="'.$id.'_hint" class=""><small>'.$formhint.'</small></div>';
+			$output .= '<div id="'.$id.'_hint"><small>'.$formhint.'</small></div>';
 		}
 
-		$output .= '</div>
+		$output .= '
 		</div>';
 		
 		return $output;
@@ -507,6 +512,7 @@ class FormWriterMaster {
 	function hiddeninput($id, $value) {
 		return '<input type="hidden" class="hidden" name="'.$id.'" id="'.$id.'" value="'.$value.'" />';
 	}
+	
 
 	
 	function checkboxinput($label, $id, $class, $align, $value, $truevalue, $hint){
@@ -518,9 +524,9 @@ class FormWriterMaster {
 			$checked = '';
 		}
 
-		return '<div class="uk-margin errorplacement">
-                <div id="'.$id.'_container" class="uk-margin uk-grid-small uk-child-width-auto uk-grid">
-                    <input class="uk-checkbox" type="checkbox" id="'.$id.'" name="'.$id.'" value="'.$truevalue.'" '.$checked.' '.$this->_get_next_tab_index().' />
+		return '<div class=" errorplacement">
+                <div id="'.$id.'_container" class="'.$this->checkboxinput_container_class.'">
+                    <input class="'.$this->checkboxinput_input_class.'" type="checkbox" id="'.$id.'" name="'.$id.'" value="'.$truevalue.'" '.$checked.' '.$this->_get_next_tab_index().' />
 					<label for="'.$id.'">'.$label.'</label>                  
 				</div>
                </div>';
@@ -537,6 +543,8 @@ class FormWriterMaster {
 			checkedvals(single dimensional array)
 			readonlyvals(single dimensional array)
 	********************************/
+
+
 	
 	//IF TYPE IS 'RADIO' THIS BECOMES A RADIO INPUT
 	function checkboxList($label, $id, $class, $optionvals, $checkedvals=array(), $disabledvals=array(), $readonlyvals=array(), $hint='', $type='checkbox') {
@@ -551,11 +559,11 @@ class FormWriterMaster {
 		}
 
 		if($type=='checkbox'){
-			$class='uk-checkbox';
+			$class= $this->checkboxList_input_class_checkbox;
 		}
 		else if($type=='radio'){
 			$type='radio';
-			$class='uk-radio';
+			$class= $this->checkboxList_input_class_radio;
 			
 			if(is_array($checkedvals) && count($checkedvals) > 1){
 				throw new SystemDisplayableError('A radio field cannot have more than one checked value.');
@@ -569,7 +577,7 @@ class FormWriterMaster {
 			throw new SystemDisplayableError('Invalid checkbox type.');
 		}
 
-		$output .= '<div id="'.$id.'_container" class="uk-margin errorplacement">';
+		$output .= '<div id="'.$id.'_container" class="'.$this->checkboxList_container_class.' errorplacement">';
 		$output .= '<label for="'.$id.'">'.$label.'</label>';
 		$output .=  '<fieldset style="padding:30px; margin:0px;">';
 		foreach ($optionvals as $key => $value) {
@@ -602,12 +610,12 @@ class FormWriterMaster {
 			}
 			else{
 
-				$output .= '<div class="uk-margin">
-						<div class="uk-margin uk-grid-small uk-child-width-auto uk-grid">
+				$output .= '
+						<div class="'.$this->checkboxList_wrapper_class.'">
 							<input class="'.$class.'" type="'.$type.'" id="'.$uniqid.'" name="'.$id.'[]" value="'.$value.'" '.$checked.' '.$disabled.' />
 							<label for="'.$uniqid.'">'.$key.'</label>                  
 						</div>
-					   </div>';
+					   ';
 			}
 		}
 		$output .=  '</fieldset></div>';
@@ -649,7 +657,7 @@ class FormWriterMaster {
 		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, $autocomplete, $formhint, $type);
 		
 	}	
-
+	
 	//FORMAT 'HH:MM PM'
 	function timeinput($label, $id, $class, $value, $hint) {
 
@@ -672,9 +680,9 @@ class FormWriterMaster {
 		});
 		</script>
 		<!-- time Picker -->
-			<div id="'.$id.'_container" class="uk-margin errorplacement">
+			<div id="'.$id.'_container" class="'.$this->timeinput_container_class.' errorplacement">
 			  <label for="'.$id.'">'.$label.'</label>
-				<input class="uk-input timepicker"  type="text" id="'.$id.'" name="'.$id.'" value="'.$value.'">
+				<input class="'.$this->timeinput_input_class.'"  type="text" id="'.$id.'" name="'.$id.'" value="'.$value.'">
 			</div>';
 	
 	}
@@ -702,7 +710,6 @@ class FormWriterMaster {
 			return $output;
 
 	}
-
 
 	function dropinput($label, $id, $class, &$optionvals, $input, $hint,$showdefault=TRUE, $forcestrict=TRUE, $ajaxendpoint=FALSE, $imagedropdown=FALSE) {
 		
@@ -733,10 +740,10 @@ class FormWriterMaster {
 		}
 		
 	
-			$output .= '<div id="'.$id.'_container" class="uk-margin errorplacement">
-						<h5>'.$label.'</h5>
-						<div class="controls">
-							<select name="'.$id.'" id="'.$id.'" class="uk-select">';
+			$output .= '<div id="'.$id.'_container" class="'.$this->dropinput_container_class.' errorplacement">
+						<label for="'.$id.'">'.$label.'</label>
+						
+							<select name="'.$id.'" id="'.$id.'" class="'.$this->dropinput_select_class.'">';
 								
 
 
@@ -751,23 +758,6 @@ class FormWriterMaster {
 
 
 			foreach ($optionvals as $key => $value) {
-				//$session = SessionControl::get_instance();
-				//if($_SESSION['permission'] == 10){
-				//	echo $input.gettype($input).' '.$value.gettype($value).'<br />';
-				//}
-				
-				//DEBUG
-				/*
-				echo '<br>' . $input . ' - ' . $value;
-				if($input == $value){
-					echo "MATCH\n";
-				}
-				else{
-					echo "--\n";
-				}
-				*/
-				
-
 				if($forcestrict && $input === $value){
 					$output .= '<option value="'. $value .'" selected="selected">' . $key . '</option>';
 				} elseif ($input == $value) { 
@@ -778,7 +768,7 @@ class FormWriterMaster {
 				}
 			}
 			$output .= '</select>				
-						</div>
+						
 					</div>';	
 		
 
