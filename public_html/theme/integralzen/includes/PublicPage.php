@@ -160,8 +160,8 @@ class PublicPage {
 
 		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->theme_url; ?>/styles/integral_style1.css' type='text/css' media='all' />
 
-		<!--<link rel='stylesheet'  href='<?php echo $this->theme_url; ?>/styles/widget-styles.css' type='text/css' media='all' />
-		<link type="text/css" rel="stylesheet" media="screen" href="<?php echo $this->theme_url; ?>/styles/uni-form-profile_4.css" />-->
+		<link rel='stylesheet'  href='<?php echo $this->theme_url; ?>/styles/widget-styles.css' type='text/css' media='all' />
+		<!--<link type="text/css" rel="stylesheet" media="screen" href="<?php echo $this->theme_url; ?>/styles/uni-form-profile_4.css" />-->
 		
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/styles/ui/jquery-ui-1.7.custom_5.css" rel="stylesheet" /> 
 	
