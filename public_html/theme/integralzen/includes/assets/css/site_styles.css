@@ -65,3 +65,6 @@
 		display: block !important;;
 	}
 	
+	input[type=checkbox] {
+		float:left !important;
+	}
