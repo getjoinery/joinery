@@ -6862,7 +6862,7 @@ div[class^='bg-black'] .timeline-wrapper .timeline .timeline-date:after, div[cla
 
 @media (max-width: 991.98px) {
   .sidebar-wrapper {
-    display: none;
+   /*display: none;*/
   }
 }
 
