@@ -36,6 +36,7 @@ class User extends SystemBase {
 	const SIGNUP_TYPE_SEND_TO_FRIEND_DIFFERENT_EMAIL = 6;
 	const SIGNUP_TYPE_DIRECT_TRAFFIC = 9;
 
+	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;
 
@@ -709,7 +710,12 @@ class User extends SystemBase {
 	}
 	
 	function permanent_delete(){
-		
+	
+		if($this->key == User::USER_SYSTEM || $this->key == User::USER_DELETED){
+			throw new SystemAuthenticationError(
+					'You cannot delete this user.');
+		}
+	
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 

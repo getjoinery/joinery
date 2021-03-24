@@ -232,7 +232,9 @@ class Event extends SystemBase {
 			return '/product?product_id=' . $product->key;	
 		}
 		else{
-			return false;
+			throw new SystemDisplayablePermanentError(
+				'The event ' . $this->get('evt_name') . ' is missing a register link or a product.');
+				exit();	;
 		}
 	}		
 	

@@ -60,7 +60,9 @@
 		else if($event->get('evt_status') == Event::STATUS_CANCELLED){
 			$registration_message = 'This event has been cancelled.';
 		}						
-		else if($event->get('evt_is_accepting_signups') && $event->get_register_url()){		
+		else if($event->get('evt_is_accepting_signups') && $event->get_register_url()){	
+echo 'here';
+exit;
 			if($event->get('evt_allow_waiting_list') && ($event->get('evt_max_signups') && $numregistrants >= $event->get('evt_max_signups'))){
 				$registration_message = 'Registration is full, but you may add yourself to the waiting list.';
 				$waiting_list_link = '/event_waiting_list?event_id='.$event->key;
