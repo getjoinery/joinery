@@ -152,6 +152,31 @@ class Survey extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/survey_answers_class.php');
+		$survey_answers = new SurveyAnswer(
+		array('survey_id'=>$this->key),
+		NULL,
+		NULL,
+		NULL);
+		$survey_answers->load();
+		
+		foreach ($survey_answers as $survey_answer){
+			$survey_answer->permanent_delete();
+		}
+
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/survey_questions_class.php');
+		$survey_questions = new SurveyAnswer(
+		array('survey_id'=>$this->key),
+		NULL,
+		NULL,
+		NULL);
+		$survey_questions->load();
+		
+		foreach ($survey_questions as $survey_question){
+			$survey_question->permanent_delete();
+		}
+
+
 		$sql = 'DELETE FROM svy_surveys WHERE svy_survey_id=:svy_survey_id';
 		try{
 			$q = $dblink->prepare($sql);
