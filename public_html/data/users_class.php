@@ -39,24 +39,6 @@ class User extends SystemBase {
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;
 
-	
-
-	public static $member_level_information = array(
-		self::BRONZE_MEMBER => array(
-			'image' => '/media/member_bronze_2.png',
-			'name' => 'Bronze',
-			'span' => 'bronze'
-		),
-		self::SILVER_MEMBER => array(
-			'image' => '/media/member_silver_2.png',
-			'name' => 'Silver',
-			'span' => 'silver'
-		),
-		self::GOLD_MEMBER => array(
-			'image' => '/media/member_gold_2.png',
-			'name' => 'Gold',
-			'span' => 'gold',
-	));
 
 	public static $fields = array(
 		'usr_user_id' => 'User id',
