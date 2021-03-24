@@ -104,7 +104,7 @@
 	<li><b>Event timezone</b> If this event happens in person, we will display the local time next to the user's time on the website so that people don't get confused.  We will also use this time to calculate other people's times in their own time zone.</li>
 	<li><b>Status</b> Active means not cancelled and not completed.  Cancelled means cancelled.  Completed means this event will show up as completed on the website (not just in the past).</li>
 	<li><b>Visibility</b> Live is live, Live but unlisted means that you can send people the link but it won't appear anywhere on the website, hidden means nobody will be able to reach it.</li>
-	<li><b>Show calendar link</b> Do you want to show calendar links on the my profile page.  You would not want to do this if this is a weekly or long term series of events (we don't want someone's calendar blocked off for 6 months).</li>	
+	<li><b>Show calendar link</b> Do you want to show calendar links on the my profile page?  You would not want to do this if this is a weekly or long term series of events (we don't want someone's calendar blocked off for 6 months).</li>	
 	<li><b>Registration</b> Registration cannot be turned on unless the event has been connected with a product or an external register link is provided.</li>
 	<li><b>Waiting list</b> If this is "allowed", after the event reaches the max sign-ups, new  registrations will go on a waiting list.  You can find that list in the "groups" section under "users".</li>
 	<li><b>Session display style</b> Condensed means that when someone visits the event page in the my profile section, all of the sessions will be listed in order. Separate means that all sessions will be on their own page (use separate for online courses)</li>
@@ -117,11 +117,14 @@
 	<ul>
 	<li><b>Active</b> If a product is disabled, it cannot be purchased.</li>
 	<li><b>Product name</b> However you want it described on the website</li>
-	<li><b>Event registration?</b> If this product is an event/course registration, choose the event here.</li>
-	<li><b>Price</b> This is the amount that will be considered a full purchase. Anything less will become a deposit.  Whole dollar amounts only.</li>
+	<li><b>Product name</b> This appears on the product page to tell people what they're getting.</li>
+	<li><b>Event registration?</b> If this product is an event/course registration, choose the event here.</li> 
+	<li><b>Subscription?</b> Choose whether this product will be billed once or as a subscription monthly.</li>
+	<li><b>Pricing</b> Choose whether the product has one price, multiple prices, or whether the user chooses.</li>
+	<li><b>Price</b> This is the amount the product costs to fully purchase it.  Whole dollar amounts only.</li>
 	<li><b>Max number that can be added to the cart</b> How many can one person purchase at the same time?</li>
 	<li><b>Purchase expires after (days)</b> How many days until whatever was purchased expires (usually, an event registration)?</li>
-	<li><b>Product group</b> Choose the group that most closely matches.</li>
+	<li><b>Product group</b> Choose the group that most closely matches.  This doesn't do anything...it is just for display purposes.</li>
 	<li><b>Info to collect</b> What information do you want to collect when the user purchases this product.  For example, if the event will be recorded, then recording consent should be chosen here. Choose the right combination from the checkboxes.</li>
 	<li><b>Product description</b> One or two sentences describing what the person is buying.</li>
 	</ul>
