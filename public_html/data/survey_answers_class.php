@@ -65,7 +65,7 @@ class SurveyAnswer extends SystemBase {
 		return false;
 	}	
 	
-	function remove(){
+	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
