@@ -139,6 +139,7 @@
 	
 	$validation_rules = array();
 	$validation_rules['evt_name']['required']['value'] = 'true';
+	$validation_rules['evt_external_register_link']['minlength']['value'] = '5';
 	echo $formwriter->set_validate($validation_rules);		
 	
 	
