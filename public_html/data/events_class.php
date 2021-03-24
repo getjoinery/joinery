@@ -222,12 +222,13 @@ class Event extends SystemBase {
 		$products = new MultiProduct(
 		array('event_id' => $this->get('evt_event_id')));
 		$numproducts = $products->count_all();
-		foreach($products as $product){}
+
 		if($this->get('evt_external_register_link')){
 			return $this->get('evt_external_register_link');	
 		}
 		else if($numproducts){
 			$products->load();
+			$product = $products->get(0);
 			return '/product?product_id=' . $product->key;	
 		}
 		else{
