@@ -13,14 +13,24 @@
 	$session->check_permission(5);
 	$session->set_return();
 	
-	if($_POST['action'] == 'add'){
+	if($_POST['action'] == 'addquestion'){
 		$survey_question = new SurveyQuestion(NULL);
 		$survey_question->set('srq_svy_survey_id', $_REQUEST['svy_survey_id']);
 		$survey_question->set('srq_qst_question_id', $_REQUEST['qst_question_id']); 
 		$survey_question->prepare();
 		$survey_question->save();
 	}
-
+	else if($_POST['action'] == 'removequestion'){
+		$survey_question = new SurveyQuestion($_REQUEST['srq_survey_question_id'], TRUE);
+		$survey_question->authenticate_write();
+		$survey_question->permanent_delete();
+	}
+	else if($_POST['action'] == 'removesurvey'){
+		$survey = new Survey($_REQUEST['svy_survey_id'], TRUE);
+		$survey->authenticate_write();
+		$survey->permanent_delete();
+	}
+	
 	$svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, '');
 	$survey = new Survey($svy_survey_id, TRUE);
 
@@ -84,8 +94,8 @@
 
 
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove" />
-		<input type="hidden" class="hidden" name="grm_survey_member_id" value="'.$survey_member->key.'" />
+		<input type="hidden" class="hidden" name="action" id="action" value="removequestion" />
+		<input type="hidden" class="hidden" name="srq_survey_question_id" value="'.$survey_question->key.'" />
 		<button type="submit">Remove</button>
 		</form>';
 
@@ -109,7 +119,7 @@
 	$questions->load();
 	
 	$optionvals = $questions->get_dropdown_array();
-	echo $formwriter->hiddeninput('action', 'add');
+	echo $formwriter->hiddeninput('action', 'addquestion');
 	echo $formwriter->dropinput("Add a question", "qst_question_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
 	echo $formwriter->new_form_button('Add');
 	echo $formwriter->end_form();	
