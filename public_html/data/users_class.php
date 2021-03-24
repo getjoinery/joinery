@@ -29,12 +29,6 @@ class User extends SystemBase {
 	// This needs to be updated if you add any new email types
 	const EMAIL_ALL_PREFERENCES = 15;
 
-	// Flags for usr_extended_verifications
-	const VERIFICATION_ADDRESS = 1;
-	const VERIFICATION_SSN = 2;
-	const VERIFICATION_BACKGROUND = 4;
-	const VERIFICATION_ENHANCED_BACKGROUND = 8;
-
 	// Flags for usr_signup_source
 	const SIGNUP_TYPE_NON_SEARCH_WEB = 2;
 	const SIGNUP_TYPE_SEND_TO_FRIEND = 3;
@@ -42,14 +36,10 @@ class User extends SystemBase {
 	const SIGNUP_TYPE_SEND_TO_FRIEND_DIFFERENT_EMAIL = 6;
 	const SIGNUP_TYPE_DIRECT_TRAFFIC = 9;
 
-	//For member level
-	const INITIAL_MEMBER = 0;
-	const BRONZE_MEMBER = 1;
-	const SILVER_MEMBER = 2;
-	const GOLD_MEMBER = 3;
+	const USER_SYSTEM = 2;
+	const USER_DELETED = 3;
 
-	//columns for proofreader locks
-	const LOCK_DOJ = 'usr_user_id_doj_lock';
+	
 
 	public static $member_level_information = array(
 		self::BRONZE_MEMBER => array(
@@ -836,7 +826,7 @@ class User extends SystemBase {
 		$emails->load();
 		
 		foreach ($emails as $email){
-			$email->set('eml_usr_user_id', 40);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
+			$email->set('eml_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
 			$email->save();
 		}	
 
@@ -861,7 +851,7 @@ class User extends SystemBase {
 		$events->load();
 		
 		foreach ($events as $event){
-			$event->set('evt_usr_user_id', 40);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
+			$event->set('evt_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
 			$event->save();
 		}	
 
@@ -887,7 +877,7 @@ class User extends SystemBase {
 		$posts->load();
 		
 		foreach ($posts as $post){
-			$post->set('pst_usr_user_id', 40);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
+			$post->set('pst_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
 			$post->save();
 		}
 
@@ -924,7 +914,7 @@ class User extends SystemBase {
 		$videos->load();
 		
 		foreach ($videos as $video){
-			$video->set('vid_usr_user_id', 40);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
+			$video->set('vid_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
 			$video->save();
 		}	
 		
@@ -937,7 +927,7 @@ class User extends SystemBase {
 		$files->load();
 		
 		foreach ($files as $file){
-			$file->set('fil_usr_user_id', 40);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
+			$file->set('fil_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
 			$file->save();
 		}	
 	
@@ -961,7 +951,7 @@ class User extends SystemBase {
 		$messages->load();
 		
 		foreach ($messages as $message){
-			$message->set('user_id_sender', 40);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
+			$message->set('user_id_sender', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
 			$message->save();
 		}		
 
@@ -997,7 +987,7 @@ class User extends SystemBase {
 		$groups->load();
 		
 		foreach ($groups as $group){
-			$group->set('grp_usr_user_id_created', 40); //40 is the system deleted user
+			$group->set('grp_usr_user_id_created', User::USER_DELETED); //40 is the system deleted user
 			$group->save();
 		}
 		
