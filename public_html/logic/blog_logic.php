@@ -21,7 +21,7 @@
 	$page_direction = LibraryFunctions::fetch_variable('page_direction', 'DESC', 0, '');
 	
 	
-	$search_criteria = array('published'=>TRUE);
+	$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE);
 
 	$posts = new MultiPost(
 		$search_criteria,

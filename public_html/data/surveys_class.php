@@ -14,9 +14,9 @@ class Survey extends SystemBase {
 	public static $fields = array(
 		'svy_survey_id' => 'ID of the survey',
 		'svy_name' => 'The survey',
-		'svy_is_deleted' => 'Is this survey deleted?',
 		'svy_edited_time' => 'Last edit',
 		'svy_create_time' => 'Time Created',
+		'svy_delete_time' => 'Time of deletion',
 	);
 
 	public static $constants = array();
@@ -30,8 +30,7 @@ class Survey extends SystemBase {
 	
 	public static $default_values = array(
 	'svy_create_time' => 'now()', 
-	'svy_edited_time' => 'now()', 
-	'svy_is_deleted' => false
+	'svy_edited_time' => 'now()'
 	);	
 
 	static function check_if_exists($key) {
@@ -137,13 +136,13 @@ class Survey extends SystemBase {
 	}
 
 	function soft_delete(){
-		$this->set('svy_is_deleted', TRUE);
+		$this->set('svy_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('svy_is_deleted', FALSE);
+		$this->set('svy_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -214,8 +213,8 @@ class Survey extends SystemBase {
 			  "svy_survey_id" int4 NOT NULL DEFAULT nextval(\'svy_surveys_svy_survey_id_seq\'::regclass),
 			  "svy_name" varchar(255) COLLATE "pg_catalog"."default",
 			  "svy_edited_time" timestamp(6),
-			  "svy_is_deleted" bool DEFAULT false,
 			  "svy_create_time" timestamp(6),
+			  "svy_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -267,8 +266,8 @@ class MultiSurvey extends SystemMultiBase {
 
 		
 		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'svy_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 
+			$where_clauses[] = 'svy_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 				
 		
 		if ($where_clauses) {

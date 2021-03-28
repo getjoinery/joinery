@@ -29,6 +29,7 @@ class ContentVersion extends SystemBase {
 		'cnv_previous_version_id' => 'Key of the previous version',
 		'cnv_content' => 'Body of the content_version',
 		'cnv_create_time' => 'Time Created',
+		'cnv_delete_time' => 'Time Deleted'
 	);
 
 	public static $constants = array();
@@ -41,8 +42,7 @@ class ContentVersion extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $default_values = array(
-	'cnv_create_time' => 'now()', 
-	'cnv_is_deleted' => false
+	'cnv_create_time' => 'now()'
 	);	
 
 	static function check_if_exists($key) {
@@ -341,10 +341,6 @@ class MultiContentVersion extends SystemMultiBase {
 		 	$where_clauses[] = 'cnv_foreign_key_id = ?';
 		 	$bind_params[] = array($this->options['foreign_key_id'], PDO::PARAM_INT);
 		} 		
-
-		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'cnv_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 
 				
 		
 		if ($where_clauses) {

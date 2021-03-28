@@ -18,7 +18,7 @@ class Message extends SystemBase {
 		'msg_evt_event_id' => 'Event id if sent to event recipients',
 		'msg_body' => 'The message',
 		'msg_sent_time' => 'Time_sent',
-		'msg_is_deleted' => 'Is it deleted',
+		'msg_delete_time' => 'Time of deletion',
 	);
 	
 	function display_title(){
@@ -84,13 +84,13 @@ class Message extends SystemBase {
 	}
 
 	function soft_delete(){
-		$this->set('msg_is_deleted', TRUE);
+		$this->set('msg_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('msg_is_deleted', FALSE);
+		$this->set('msg_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -155,7 +155,7 @@ class Message extends SystemBase {
 			  "msg_evt_event_id" int4,
 			  "msg_body" text COLLATE "pg_catalog"."default" NOT NULL,
 			  "msg_sent_time" timestamp(6) NOT NULL DEFAULT now(),
-			  "msg_is_deleted" bool NOT NULL DEFAULT false
+			  "msg_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -207,8 +207,8 @@ class MultiMessage extends SystemMultiBase {
 		}	
 		
 		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'msg_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 		
+			$where_clauses[] = 'msg_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	 		
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';

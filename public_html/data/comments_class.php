@@ -20,7 +20,7 @@ class Comment extends SystemBase {
 		'cmt_body' => 'The comment',
 		'cmt_created_time' => 'Time_sent',
 		'cmt_is_approved' => 'Is it deleted',
-		'cmt_is_deleted' => 'Is it deleted',
+		'cmt_delete_time' => 'Time of deletion',
 	);
 
 	public static $timestamp_fields = array(
@@ -42,7 +42,6 @@ class Comment extends SystemBase {
 	public static $default_values = array(
 		'cmt_created_time'=> 'now()',
 		'cmt_is_approved' => TRUE,
-		'cmt_is_deleted' => FALSE,
 	);
 	
 	function display_title(){
@@ -137,13 +136,13 @@ class Comment extends SystemBase {
 	}
 
 	function soft_delete(){
-		$this->set('cmt_is_deleted', TRUE);
+		$this->set('cmt_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('cmt_is_deleted', FALSE);
+		$this->set('cmt_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -251,9 +250,9 @@ class Comment extends SystemBase {
 			  "cmt_pst_post_id" int4 NOT NULL,
 			  "cmt_body" text COLLATE "pg_catalog"."default",
 			  "cmt_created_time" timestamp(6),
-			  "cmt_is_deleted" bool DEFAULT false,
 			  "cmt_is_approved" bool DEFAULT false,
-			  "cmt_author_name" varchar(255) COLLATE "pg_catalog"."default"
+			  "cmt_author_name" varchar(255) COLLATE "pg_catalog"."default",
+			  "cmt_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -293,7 +292,7 @@ class MultiComment extends SystemMultiBase {
 		}	
 
 		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'cmt_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
+			$where_clauses[] = 'cmt_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
 		}	
 		
 		if (array_key_exists('post_id', $this->options)) {

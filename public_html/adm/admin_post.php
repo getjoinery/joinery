@@ -14,6 +14,22 @@
 
 	$post = new Post($_GET['pst_post_id'], TRUE);
 
+
+	if($_REQUEST['action'] == 'delete'){
+		$post->authenticate_write($session);
+		$post->soft_delete();
+
+		header("Location: /admin/admin_posts");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$post->authenticate_write($session);
+		$post->soft_delete();
+
+		header("Location: /admin/admin_posts");
+		exit();				
+	}
+	
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -30,10 +46,16 @@
 	$options['title'] = $post->get('pst_title');
 	$options['altlinks'] = array('Edit Post' => '/admin/admin_post_edit?pst_post_id='.$post->key);
 	$options['altlinks'] += array('Delete Post' => '/admin/admin_post_permanent_delete?pst_post_id='.$post->key);
+	if(!$post->get('pst_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Soft Delete'] = '/admin/admin_post?action=delete&pst_post_id='.$post->key;
+	}
+
 	$page->begin_box($options);
 
-
-	if($post->get('pst_is_published')){
+	if($post->get('pst_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($post->get('pst_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+	}
+	else if($post->get('pst_is_published')){
 		echo '<strong>Published:</strong> ' . LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', $session->get_timezone()). '<br />';
 	}
 	else{

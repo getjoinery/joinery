@@ -14,6 +14,21 @@
 
 	$page_content = new PageContent($_GET['pac_page_content_id'], TRUE);
 
+	if($_REQUEST['action'] == 'delete'){
+		$page_content->authenticate_write($session);
+		$page_content->soft_delete();
+
+		header("Location: /admin/admin_page_contents");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$page_content->authenticate_write($session);
+		$page_content->soft_delete();
+
+		header("Location: /admin/admin_page_contents");
+		exit();				
+	}
+
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -30,10 +45,16 @@
 	$options['title'] = $page_content->get('pac_location_name');
 	$options['altlinks'] = array('Edit Content' => '/admin/admin_page_content_edit?pac_page_content_id='.$page_content->key);
 	$options['altlinks'] += array('Delete Content' => '/admin/admin_page_content_permanent_delete?pac_page_content_id='.$page_content->key);
+	if(!$page_content->get('pac_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Soft Delete'] = '/admin/admin_page_content?action=delete&pac_page_content_id='.$page_content->key;
+	}
+
 	$page->begin_box($options);
 
-
-	if($page_content->get('pac_is_published')){
+	if($page_content->get('pac_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($page_content->get('pac_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+	}
+	else if($page_content->get('pac_is_published')){
 		echo '<strong>Published:</strong> ' . LibraryFunctions::convert_time($page_content->get('pac_published_time'), 'UTC', $session->get_timezone()). '<br />';
 	}
 	else{

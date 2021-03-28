@@ -45,7 +45,7 @@
 	echo '<strong>Name:</strong> '.$file->get('fil_name') .'<br />';	
 	echo '<strong>Title:</strong> '.$file->get('fil_title') .'<br />';	
 	
-	if($file->get('fil_is_deleted')) {
+	if($file->get('fil_delete_time')) {
 		echo 'Deleted';
 	} else {
 		echo '<br /><br /><div>';

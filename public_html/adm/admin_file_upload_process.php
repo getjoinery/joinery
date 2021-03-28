@@ -180,7 +180,7 @@
 		
 		if($existing_id = File::get_by_name($thisfile->name)){
 			$file =	new File($existing_id, TRUE);
-			$file->set('fil_is_deleted', false);			
+			$file->set('fil_delete_time', NULL);			
 		}
 		else{
 			//RENAME THE FILE

@@ -20,7 +20,6 @@ class QuestionOption extends SystemBase {
 		'qop_qst_question_id' => 'Question id for the options',
 		'qop_question_option_label' => 'The question_option',
 		'qop_question_option_value' => 'The coded value',
-		'qop_is_deleted' => 'Is this question_option deleted?',
 		'qop_edited_time' => 'Last edit',
 		'qop_create_time' => 'Time Created',
 	);
@@ -36,8 +35,7 @@ class QuestionOption extends SystemBase {
 	
 	public static $default_values = array(
 	'qop_create_time' => 'now()', 
-	'qop_edited_time' => 'now()', 
-	'qop_is_deleted' => false
+	'qop_edited_time' => 'now()'
 	);	
 
 	static function check_if_exists($key) {
@@ -139,17 +137,6 @@ class QuestionOption extends SystemBase {
 		$this->key = $p_keys_return['qop_question_option_id'];
 	}
 
-	function soft_delete(){
-		$this->set('qop_is_deleted', TRUE);
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('qop_is_deleted', FALSE);
-		$this->save();	
-		return true;
-	}
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
@@ -194,7 +181,6 @@ class QuestionOption extends SystemBase {
 			  "qop_question_option_label" varchar(255) COLLATE "pg_catalog"."default",
 			  "qop_question_option_value" varchar(255) COLLATE "pg_catalog"."default",
 			  "qop_edited_time" timestamp(6),
-			  "qop_is_deleted" bool DEFAULT false,
 			  "qop_create_time" timestamp(6),
 			)
 			;';
@@ -258,10 +244,7 @@ class MultiQuestionOption extends SystemMultiBase {
 		if (array_key_exists('published', $this->options)) {
 		 	$where_clauses[] = 'qop_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');
 		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'qop_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 
+
 				
 		
 		if ($where_clauses) {

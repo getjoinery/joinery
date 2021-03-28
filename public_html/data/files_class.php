@@ -22,7 +22,7 @@ class File extends SystemBase {
 		'fil_type' => 'Type',
 		'fil_usr_user_id' => 'User who uploaded',
 		'fil_create_time' => 'Created',
-		'fil_is_deleted' => 'Is this file deleted?',
+		'fil_delete_time' => 'Time of file deletion',
 	);
 	
 	public static function get_by_name($name) {
@@ -321,7 +321,7 @@ class File extends SystemBase {
 			  "fil_type" varchar(128) COLLATE "pg_catalog"."default",
 			  "fil_usr_user_id" int4,
 			  "fil_create_time" timestamp(6) DEFAULT now(),
-			  "fil_is_deleted" bool NOT NULL DEFAULT false,
+			  "fil_delete_time" timestamp(6),
 			  "fil_title" varchar(255) COLLATE "pg_catalog"."default",
 			  "fil_description" text COLLATE "pg_catalog"."default"
 			)
@@ -376,8 +376,8 @@ class MultiFile extends SystemMultiBase {
 		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		} 
 		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'fil_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 
+			$where_clauses[] = 'fil_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 
 		if (array_key_exists('source', $this->options)) {
 		 	$where_clauses[] = 'fil_source = ?';

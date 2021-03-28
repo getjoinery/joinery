@@ -64,8 +64,6 @@
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_file_edit');
 	echo $formwriter->hiddeninput('fil_file_id', $file->key);
 	 
-	//$optionvals = array("No"=>0, "Yes"=>1);
-	//echo $formwriter->dropinput("Deleted", "fil_is_deleted", "ctrlHolder", $optionvals, $file->get('fil_is_deleted'), '', FALSE);
 
 	echo $formwriter->textinput('File title', 'fil_title', NULL, 100, $file->get('fil_title'), '', 255, '');
 

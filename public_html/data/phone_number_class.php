@@ -18,7 +18,6 @@ class PhoneNumber extends SystemBase {
 		'phn_phone_number' => 'Phone number',
 		'phn_is_private' => 'Is this phone number private?',
 		'phn_is_verified' => 'Is this phone number verified?',
-		'phn_is_deleted' => 'Is this phone number deleted?',
 		'phn_usr_user_id' => 'User who owns this phone #',
 		'phn_phone_carrier' => 'Carrier of this phone number',
 		'phn_is_default' => 'Is this the users default phone #?',
@@ -62,13 +61,12 @@ class PhoneNumber extends SystemBase {
 	);	
 	
 	public static function CreateFromForm($form_data, $owner, $phone_number = NULL, $use_transaction=TRUE) {
-		
+			
 		$new_phone_number = FALSE;
 		if(!$phone_number){
 			$new_phone_number = TRUE;
 			$phone_number = new PhoneNumber(NULL);		
 			$phone_number->set('phn_is_verified', FALSE);
-			$phone_number->set('phn_is_deleted', FALSE);
 			$phone_number->set('phn_usr_user_id', $owner);
 		}
 		
@@ -381,19 +379,6 @@ class PhoneNumber extends SystemBase {
 		$this->key = $p_keys_return['phn_phone_number_id'];
 	}	
 
-	/*
-	function soft_delete(){
-		$this->set('phn_is_deleted', TRUE);
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('phn_is_deleted', FALSE);
-		$this->save();	
-		return true;
-	}
-	*/
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
@@ -479,7 +464,6 @@ class PhoneNumber extends SystemBase {
 			  "phn_phone_number" varchar(30) COLLATE "pg_catalog"."default" NOT NULL,
 			  "phn_is_private" bool NOT NULL DEFAULT true,
 			  "phn_is_verified" bool NOT NULL DEFAULT false,
-			  "phn_is_deleted" bool NOT NULL DEFAULT false,
 			  "phn_usr_user_id" int4 NOT NULL,
 			  "phn_phone_carrier" varchar(64) COLLATE "pg_catalog"."default",
 			  "phn_is_default" bool NOT NULL DEFAULT false,
@@ -547,10 +531,6 @@ class MultiPhoneNumber extends SystemMultiBase {
 			$where_clauses[] = 'phn_cco_country_code_id = ?';
 			$bind_params[] = array($this->options['country_code'], PDO::PARAM_INT);
 		}		
-
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'phn_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		}
 
 		if (array_key_exists('verified', $this->options)) {
 			$where_clauses[] = 'phn_is_verified = ' . ($this->options['verified'] ? 'TRUE' : 'FALSE');
@@ -621,10 +601,6 @@ class MultiPhoneNumber extends SystemMultiBase {
 			$where_clauses[] = 'phn_cco_country_code_id = ?';
 			$bind_params[] = array($this->options['country_code'], PDO::PARAM_INT);
 		}			
-
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'phn_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		}
 
 		if (array_key_exists('verified', $this->options)) {
 			$where_clauses[] = 'phn_is_verified = ' . ($this->options['verified'] ? 'TRUE' : 'FALSE');

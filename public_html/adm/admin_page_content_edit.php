@@ -15,6 +15,7 @@
 		$page_content = new PageContent(NULL);
 	}
 
+	
 	if($_POST){
 		
 		$_POST['pac_link'] = trim(strtolower($_POST['pac_link']));

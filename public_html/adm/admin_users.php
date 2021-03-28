@@ -115,7 +115,10 @@
 		array_push($rowvalues, $user->get('usr_email'));
 		array_push($rowvalues, LibraryFunctions::convert_time($user->get('usr_signup_date'), "UTC", $session->get_timezone(), 'M j, Y')); 
 
-		if($user->get('usr_email_is_verified')) {
+		if($user->get('usr_delete_time')) {
+			$status = 'Deleted';
+		}
+		else if($user->get('usr_email_is_verified')) {
 			$status = 'Verified';
 		} 
 		else {

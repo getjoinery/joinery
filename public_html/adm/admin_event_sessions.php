@@ -59,7 +59,7 @@
 		
 		$options['title'] = $event->get('evt_name');
 			$options['altlinks'] = array();
-			if(!$event->get('evt_is_deleted')) {
+			if(!$event->get('evt_delete_time')) {
 				if($_SESSION['permission'] > 7){
 					$options['altlinks'] += array('Edit Event' => '/admin/admin_event_edit?evt_event_id='.$event->key);
 				}

@@ -130,7 +130,7 @@
 		
 
 	
-		$editable_fields = array('evs_evt_event_id', 'evs_content', 'evs_links', 'evs_picture_link', 'evs_is_public', 'evs_is_deleted', 'evs_title');
+		$editable_fields = array('evs_evt_event_id', 'evs_content', 'evs_links', 'evs_picture_link', 'evs_is_public', 'evs_title');
 
 		foreach($editable_fields as $field) {
 			$event_session->set($field, $_REQUEST[$field]);
@@ -209,8 +209,7 @@
 	//echo $formwriter->dropinput("Published", "evs_is_public", "ctrlHolder", $optionvals, $event_session->get('evs_is_public'), '', FALSE);
 
 
-	//$optionvals = array("Active"=>0, "Deleted"=>1);
-	//echo $formwriter->dropinput("Status", "evs_is_deleted", "ctrlHolder", $optionvals, $event_session->get('evs_is_deleted'), '', FALSE);
+
 	
 	//echo $formwriter->textinput('Order', 'evs_order', NULL, 100, $event_session->get('evs_order'), '', 255, '');
 	

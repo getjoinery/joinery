@@ -19,7 +19,8 @@ class SurveyQuestion extends SystemBase {
 		'srq_survey_question_id' => 'ID of the survey question',
 		'srq_svy_survey_id' => 'Survey id',
 		'srq_qst_question_id' => 'Question id',
-		'srq_order' => 'Order of the questions'
+		'srq_order' => 'Order of the questions',
+		'srq_delete_time' => 'Time of deletion',
 	);
 	
 	public static $constants = array();
@@ -47,6 +48,18 @@ class SurveyQuestion extends SystemBase {
 		}
 		return NULL;
 	}	
+	
+	function soft_delete(){
+		$this->set('srq_delete_time', 'now()');
+		$this->save();
+		return true;
+	}
+	
+	function undelete(){
+		$this->set('srq_delete_time', NULL);
+		$this->save();	
+		return true;
+	}
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
@@ -196,7 +209,8 @@ class SurveyQuestion extends SystemBase {
 			  "srq_survey_question_id" int4 NOT NULL DEFAULT nextval(\'srq_survey_questions_srq_survey_question_id_seq\'::regclass),
 			  "srq_svy_survey_id" int4 NOT NULL,
 			  "srq_qst_question_id" int4 NOT NULL,
-			  "srq_order" int4;
+			  "srq_order" int4,
+			  "srq_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -242,6 +256,10 @@ class MultiSurveyQuestion extends SystemMultiBase {
 		if (array_key_exists('question_id', $this->options)) {
 			$where_clauses[] = 'srq_qst_question_id = ?';
 			$bind_params[] = array($this->options['question_id'], PDO::PARAM_INT);
+		}	
+		
+		if (array_key_exists('deleted', $this->options)) {
+			$where_clauses[] = 'srq_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
 		}	
 
 		

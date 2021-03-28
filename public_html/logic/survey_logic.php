@@ -24,7 +24,7 @@
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 	
 	$survey_questions = new MultiSurveyQuestion(
-		array('survey_id' => $survey->key),  //SEARCH CRITERIA
+		array('survey_id' => $survey->key, 'deleted'=>FALSE),  //SEARCH CRITERIA
 		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 		$numperpage,  //NUM PER PAGE
 		$offset,  //OFFSET

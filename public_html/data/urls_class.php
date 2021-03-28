@@ -18,7 +18,6 @@ class Url extends SystemBase {
 		'url_redirect_url' => 'Url to redirect to',
 		'url_redirect_file' => 'File to load',
 		'url_type' => 'Type of redirect - 301, 302, etc',
-		'url_is_deleted' => 'Is this url deleted?',
 		'url_create_time' => 'Time added'
 	);
 
@@ -78,17 +77,6 @@ class Url extends SystemBase {
 		$this->key = $p_keys_return['url_url_id'];
 	}
 		
-	function soft_delete(){
-		$this->set('url_is_deleted', TRUE);
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('url_is_deleted', FALSE);
-		$this->save();	
-		return true;
-	}
 	
 
 	function permanent_delete() {
@@ -140,7 +128,6 @@ class Url extends SystemBase {
 			  "url_redirect_url" varchar(255) COLLATE "pg_catalog"."default",
 			  "url_redirect_file" varchar(255) COLLATE "pg_catalog"."default",
 			  "url_type" int2,
-			  "url_is_deleted" bool NOT NULL DEFAULT false,
 			  "url_create_time" timestamp(6) DEFAULT now()
 			)
 			;';
@@ -180,10 +167,7 @@ class MultiUrl extends SystemMultiBase {
 			$where_clauses[] = 'url_incoming = ?';
 			$bind_params[] = array($this->options['incoming'], PDO::PARAM_INT);
 		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'url_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 		
+	
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';

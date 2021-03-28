@@ -56,10 +56,10 @@ class EventSession extends SystemBase {
 		'evs_links' => 'html box for a list of links',
 		'evs_picture_link' => 'link to a picture',
 		'evs_is_public' => 'Is this request public?',
-		'evs_is_deleted' => 'Is it deleted?',
 		'evs_order' => 'sort order',
 		'evs_vid_video_id' => 'Video attached to session',
 		'evs_session_number' => 'Optional number for ordering the sessions',
+		'evs_delete_time' => 'Time of deletion',
 		); 
 
 	public static $generated_fields = array(
@@ -75,7 +75,7 @@ class EventSession extends SystemBase {
 	);
 	
 	public static $initial_default_values = array(
-		'evs_is_public' => FALSE, 'evs_is_deleted' => FALSE
+		'evs_is_public' => FALSE
 	);	
 
 	public static $field_constraints = array(
@@ -413,13 +413,13 @@ class EventSession extends SystemBase {
 	}	
 
 	function soft_delete(){
-		$this->set('evs_is_deleted', TRUE);
+		$this->set('evs_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('evs_is_deleted', FALSE);
+		$this->set('evs_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -485,11 +485,11 @@ class EventSession extends SystemBase {
 			  "evs_links" text COLLATE "pg_catalog"."default",
 			  "evs_picture_link" varchar(255) COLLATE "pg_catalog"."default",
 			  "evs_is_public" bool,
-			  "evs_is_deleted" bool,
 			  "evs_order" int2,
 			  "evs_vid_video_id" int4,
 			  "evs_title" varchar(255) COLLATE "pg_catalog"."default",
-			  "evs_session_number" int2
+			  "evs_session_number" int2,
+			  "evs_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -620,12 +620,8 @@ class MultiEventSessions extends SystemMultiBase {
 		}		
 
 		if (array_key_exists('deleted', $this->options)) {
-			if ($this->options['deleted']) {
-				$where_clauses[] = '(evs_is_deleted = FALSE OR evs_is_deleted is null)' ;
-			} else {
-				$where_clauses[] = 'evs_is_deleted = TRUE';
-			}
-		}
+			$where_clauses[] = 'evs_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 		
 		if (array_key_exists('future', $this->options)) {
 			$where_clauses[] = 'evs_end_time > ?';

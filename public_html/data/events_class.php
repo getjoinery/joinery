@@ -76,7 +76,6 @@ class Event extends SystemBase {
 		'evt_external_register_link' => 'Link to register if the event is not being registered here',
 		'evt_timezone' => 'Timezone where the event is happening',
 		'evt_is_accepting_signups' => 'Are we taking signups',
-		'evt_is_deleted' => 'Is it deleted?',
 		'evt_picture_link' => 'If present, is the promo picture for the event', //DEPRECATED
 		'evt_collect_extra_info' => 'extra info',
 		'evt_grp_group_id' => 'Group for the event registrants',
@@ -89,7 +88,8 @@ class Event extends SystemBase {
 		'evt_fil_file_id' => 'File id of the picture attached',
 		'evt_link' => 'Link for the event',
 		'evt_show_add_to_calendar_link' => 'Whether to show the calendar link',
-		'evt_type' => 'Type of event, see above'
+		'evt_type' => 'Type of event, see above',
+		'evt_delete_time' => 'Time of deletion',
 	); 
 
 	public static $generated_fields = array(
@@ -105,7 +105,7 @@ class Event extends SystemBase {
 	);
 	
 	public static $initial_default_values = array(
-		'evt_create_time' => NOW, 'evt_visibility' => 0, 'evt_is_deleted' => FALSE, 'evt_status' => 1, 'evt_show_add_to_calendar_link' => true
+		'evt_create_time' => NOW, 'evt_visibility' => 0, 'evt_status' => 1, 'evt_show_add_to_calendar_link' => true
 	);	
 
 	public static $field_constraints = array(
@@ -368,38 +368,7 @@ class Event extends SystemBase {
 	public static $json_vars = array(
 		'evt_event_id', 'evt_name', 'evt_description');
 
-	// This function should be always run within a transaction
-	// preferably one before where the request is loaded
-	
-	/*
-	public static function GenerateFromForm($form, $session, $event) {
-		$event->set('evt_description', LibraryFunctions::Sanitize($form['evt_description']));
-		$event->set('evt_title', LibraryFunctions::Sanitize($form['evt_title']));
 
-		// If a new phone number is entered, store it
-		
-		if (!empty($form['phn_phone_number_id'])) {
-			if ($form['phn_phone_number_id'] == '-') {
-				$event->set('evt_phn_phone_number_id', NULL);
-			} else if ($form['phn_phone_number_id'] == 'new') {
-				if ($form['phn_phone_number_id']) {
-					$event->set(
-						'evt_phn_phone_number_id',
-						PhoneNumber::CreateFromForm($form, $event->get('evt_usr_user_id'), FALSE));
-				}
-			} else {
-				// Make sure the phone number entered is valid and belongs to them
-				$phone_number = new PhoneNumber($form['phn_phone_number_id'], TRUE);
-				if ($phone_number->get('phn_usr_user_id') == $event->get('evt_usr_user_id')) {
-					$event->set('evt_phn_phone_number_id', $phone_number->key);
-				}
-			}
-		}
-		
-
-		return $event;
-	}
-	*/
 
 
 	
@@ -549,13 +518,13 @@ class Event extends SystemBase {
 	}
 	
 	function soft_delete(){
-		$this->set('evt_is_deleted', TRUE);
+		$this->set('evt_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('evt_is_deleted', FALSE);
+		$this->set('evt_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -638,7 +607,6 @@ class Event extends SystemBase {
 			  "evt_event_id" int4 NOT NULL DEFAULT nextval(\'evt_events_evt_event_id_seq\'::regclass),
 			  "evt_name" varchar(128) COLLATE "pg_catalog"."default",
 			  "evt_description" text COLLATE "pg_catalog"."default",
-			  "evt_is_deleted" bool NOT NULL DEFAULT false,
 			  "evt_create_time" timestamp(6) DEFAULT now(),
 			  "evt_start_time" timestamp(6),
 			  "evt_start_time_local" timestamp(6),
@@ -661,7 +629,8 @@ class Event extends SystemBase {
 			  "evt_visibility" int4,
 			  "evt_link" varchar(255) COLLATE "pg_catalog"."default",
 			  "evt_show_add_to_calendar_link" bool, 
-			  "evt_type" int4
+			  "evt_type" int4,
+			  "evt_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -744,12 +713,8 @@ class Multievent extends SystemMultiBase {
 		}
 
 		if (array_key_exists('deleted', $this->options)) {
-			if ($this->options['deleted']) {
-				$where_clauses[] = 'evt_is_deleted is TRUE' ;
-			} else {
-				$where_clauses[] = 'evt_is_deleted is FALSE';
-			}
-		}
+			$where_clauses[] = 'evt_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 		/*
 		if (array_key_exists('expired', $this->options)) {
 			$where_clauses[] = 'evt_expires_time ' . ($this->options['expired'] ? '<' : '>') . ' now()';
