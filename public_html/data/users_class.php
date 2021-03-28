@@ -65,7 +65,8 @@ class User extends SystemBase {
 		'usr_mailchimp_user_id' => 'User id for the mailchimp service',
 		'usr_signup_ip' => 'ip of the user when they signed up',
 		'usr_contact_preference_last_changed' => 'last time contact preferences was changed',
-		'usr_organization_name' => 'Organization instead of person'
+		'usr_organization_name' => 'Organization instead of person',
+		'usr_delete_time' => 'Time of deletion',
 	);
 
 	public static $timestamp_fields = array(
@@ -708,6 +709,18 @@ class User extends SystemBase {
 			return FALSE;
 		}
 	}
+
+	function soft_delete(){
+		$this->set('usr_delete_time', 'now()');
+		$this->save();
+		return true;
+	}
+	
+	function undelete(){
+		$this->set('usr_delete_time', NULL);
+		$this->save();	
+		return true;
+	}
 	
 	function permanent_delete(){
 	
@@ -1053,7 +1066,8 @@ class User extends SystemBase {
 			  "usr_authhash" varchar(32) COLLATE "pg_catalog"."default",
 			  "usr_mailchimp_user_id" varchar(64) COLLATE "pg_catalog"."default",
 			  "usr_signup_ip" varchar(64) COLLATE "pg_catalog"."default",
-			  "usr_contact_preference_last_changed" timestamp(6)
+			  "usr_contact_preference_last_changed" timestamp(6),
+			  "usr_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -1259,6 +1273,10 @@ class MultiUser extends SystemMultiBase {
 		if (array_key_exists('disabled', $this->options)) {
 			$where_clauses[] = 'usr_is_disabled = ' . ($this->options['disabled'] ? 'TRUE' : 'FALSE');
 		}
+		
+		if (array_key_exists('deleted', $this->options)) {
+			$where_clauses[] = 'usr_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 
 		if (array_key_exists('permission_range', $this->options)) {
 			$where_clauses[] = 'usr_permission >= ? AND usr_permission <= ?';

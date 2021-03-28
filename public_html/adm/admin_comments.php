@@ -69,9 +69,10 @@
 		array_push($rowvalues, LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', $session->get_timezone()));
 		//array_push($rowvalues, '('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
-		if($comment->get('cmt_is_deleted')) {
+		if($comment->get('cmt_delete_time')) {
 			$status = 'Deleted';
-		} else {
+		} 
+		else {
 			if($comment->get('cmt_is_approved')) {
 				$status = 'Approved';
 			}
@@ -81,7 +82,7 @@
 		}		
 		array_push($rowvalues, $status);
 
-		if($comment->get('cmt_is_deleted')){
+		if($comment->get('cmt_delete_time')){
 			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_comment?cmt_comment_id='. $comment->key.'">
 			<input type="hidden" class="hidden" name="action" id="action" value="undelete" />
 			<input type="hidden" class="hidden" name="cmt_comment_id" id="cmt_comment_id" value="'.$comment->key.'" />

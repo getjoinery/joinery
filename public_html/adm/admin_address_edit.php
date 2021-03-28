@@ -13,30 +13,27 @@
 	$session->check_permission(8);
 
 
-
+	
 
 	$address_id = $_REQUEST['usa_address_id'];
-
-	if ($address_id == FALSE) {
-		throw new SystemInvalidFormError('The form is invalid.');
+	$address = NULL;
+	if($address_id){
+		$address = new Address($address_id, TRUE);
+		$user_id=$address->get('usa_usr_user_id');
 	}
-
-	$address = new Address($address_id, TRUE);
-
-
-
+	else{
+		$user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must pass a user id');
+	}
 
 	if($_POST){
 
-		$user_id=$address->get('usa_usr_user_id');
+		
 
 		$address = Address::CreateAddressFromForm($_POST, $user_id, $address);
 		
 		
 		LibraryFunctions::redirect('/admin/admin_user?usr_user_id='. $user_id );
 		exit;
-
-
 
 	} 
 
@@ -75,6 +72,7 @@
 					
 			
 				echo '<div id="newaddressblock">';
+				echo $formwriter->hiddeninput('usr_user_id', $user_id);
 				Address::PlainForm($formwriter, $address);
 				echo '</div>';
 			

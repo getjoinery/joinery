@@ -33,6 +33,21 @@
 
 	$user = new User($_GET['usr_user_id'], TRUE);
 
+	if($_REQUEST['action'] == 'delete'){
+		$user->authenticate_write($session);
+		$user->soft_delete();
+
+		header("Location: /admin/admin_users");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$user->authenticate_write($session);
+		$user->soft_delete();
+
+		header("Location: /admin/admin_users");
+		exit();				
+	}
+
 	if($_POST){ 
 
 		if($_POST['action'] == 'add_to_group'){
@@ -65,10 +80,11 @@
 			$returnurl = $session->get_return();
 			header("Location: $returnurl");
 			exit();					
-		}		
+		}	
+
+	
 	}
 
-	$session->set_return();
 
 	$phone_numbers = new MultiPhoneNumber(
 		array('user_id'=>$user->key),
@@ -78,18 +94,12 @@
 	$phone_numbers->load();
 	$numphonerecords = $phone_numbers->count_all();
 
-	$phone_numbers_ver = new MultiPhoneNumber(
-		array('user_id'=>$user->key, 'verified'=>TRUE),
-		NULL,
-		30,
-		0);
-	$numphoneverified = $phone_numbers_ver->count_all();
-
 	$addresses = new MultiAddress(
 		array('user_id'=>$user->key),
 		NULL,
 		30,
 		0);
+	$numaddressrecords = $addresses->count_all();
 	$addresses->load();
 
 	/*
@@ -213,30 +223,29 @@
 
 		$options['title'] = $user->display_name() . ' (' . $user->key . ')';
 		
-		if(!$user->get('usr_is_disabled') && !$user->get('usr_is_admin_disabled')) {
+		if(!$user->get('usr_delete_time')) {
 			if($_SESSION['permission'] > 7){
 				$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
 				$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
 
 				$options['altlinks']['Change password'] = '/admin/admin_users_password_edit?usr_user_id='.$user->key;
-				//$options['altlinks']['Soft Delete'] = '/admin/admin_softdelete?usr_user_id='.$user->key;
+				$options['altlinks']['Soft Delete'] = '/admin/admin_user?action=delete&usr_user_id='.$user->key;
 
 
 				if(!$user->get('usr_is_activated')) {
 					$options['altlinks']['Activate User'] = '/admin/admin_activate?usr_user_id='.$user->key;
 				}
 				if ($_SESSION['permission'] == 10) {
-					//$options['altlinks']['Admin Delete'] = '/admin/admin_users_admin_delete?usr_user_id='.$user->key;
-					$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
 					$options['altlinks']['Log in as user'] = '/admin/admin_user_login_as?usr_user_id='.$user->key;
 				}
 
 			}
-		} else if(!$user->get('usr_is_admin_disabled')) {
-			$options['altlinks']['Undelete'] = '/admin/admin_users_undelete?usr_user_id='.$user->key;
-		}
+		} 
 		else {
 			$options['altlinks']['Undelete'] = '/admin/admin_users_undelete?usr_user_id='.$user->key;
+		}	
+		if ($_SESSION['permission'] == 10) {
+			$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
 		}		
 
 		$page->begin_box($options);
@@ -259,6 +268,9 @@
 			  
 			  <p class="text-center">
 			  <?php
+				if($user->get('usr_delete_time')){
+					echo 'Status: Deleted at '.LibraryFunctions::convert_time($user->get('usr_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+				}
 				if($user->get('usr_is_admin_disabled')) {
 					echo 'Admin Disabled (' . $user->get('usr_admin_disabled_comment') .')';
 				} else if($user->get('usr_is_disabled')) {
@@ -380,21 +392,32 @@
 
 						<p class="text-center">
 						<?php
-						foreach($phone_numbers as $phone_number)	 {
-							echo 'Phone: '.$phone_number->get_phone_string() . ' [<a class="sortlink" href="/admin/admin_phone_edit.php?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]<br />';
+						if($numphonerecords){
+							foreach($phone_numbers as $phone_number)	 {
+								echo 'Phone: '.$phone_number->get_phone_string() . ' [<a class="sortlink" href="/admin/admin_phone_edit.php?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]<br />';
+							}
+						}
+						else{
+							echo ' [<a class="sortlink" href="/admin/admin_phone_edit.php?usr_user_id='. $user->key . '">Add Phone Number</a>]<br />';
 						}
 						?>
 						</p> 
 
 						<p class="text-center">
 						<?php
-						foreach($addresses as $address) {
+						if($numaddressrecords){
+							foreach($addresses as $address) {
 
-							echo 'Address:  ('.$address->key.') '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit.php?usa_address_id='. $address->key .'">edit</a>]<br />' ;
+								echo 'Address:  ('.$address->key.') '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit.php?usa_address_id='. $address->key .'">edit</a>]<br />' ;
 
 
-							$page->disprow($rowvalues);
-						}	
+								$page->disprow($rowvalues);
+							}
+						}
+						else{
+							echo ' [<a class="sortlink" href="/admin/admin_phone_edit.php?usr_user_id='. $user->key . '">Add address</a>]<br />';
+						}
+						
 						echo '<br />Timezone: '.$user->get('usr_timezone'). ' [<a href="/admin/admin_users_edit?usr_user_id='.$user->key.'">edit</a>]';
 						?>
 						</p>

@@ -44,6 +44,7 @@ class Email extends SystemBase {
 		'eml_status' => 'Status see above',
 		'eml_scheduled_time' => 'Scheduled time to send',
 		'eml_type' => 'Type of email for opt out purposes',
+		'eml_delete_time' => 'Time of deletion',
 		
 	);
 	
@@ -209,6 +210,19 @@ class Email extends SystemBase {
 		return true;		
 	}		
 	
+	
+	function soft_delete(){
+		$this->set('eml_delete_time', 'now()');
+		$this->save();
+		return true;
+	}
+	
+	function undelete(){
+		$this->set('eml_delete_time', NULL);
+		$this->save();	
+		return true;
+	}
+	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -335,7 +349,8 @@ class Email extends SystemBase {
 			  "eml_message_template_plain" text COLLATE "pg_catalog"."default",
 			  "eml_description" varchar(255) COLLATE "pg_catalog"."default",
 			  "eml_type" int2,
-			  "eml_preview_text" varchar(255) COLLATE "pg_catalog"."default"
+			  "eml_preview_text" varchar(255) COLLATE "pg_catalog"."default",
+			  "eml_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -373,6 +388,10 @@ class MultiEmail extends SystemMultiBase {
 			$where_clauses[] = 'eml_status = ?';
 			$bind_params[] = array($this->options['status'], PDO::PARAM_INT);
 		}
+		
+		if (array_key_exists('deleted', $this->options)) {
+			$where_clauses[] = 'eml_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 		
 		if (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_PAST) {
 			$where_clauses[] = 'eml_scheduled_time < NOW()';

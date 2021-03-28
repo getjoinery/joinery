@@ -45,12 +45,7 @@
 	
 	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($url->get('url_create_time'), 'UTC', $session->get_timezone()) .'<br />';
-	echo '<strong>Status:</strong> ';
-	if($url->get('url_is_deleted')) {
-		echo 'Deleted';
-	} else {
-		echo 'Active';
-	}
+
 	echo '<br /><strong>Incoming:</strong> '.$url->get('url_incoming') .'<br />';	
 	echo '<strong>Redirect:</strong> ';
 	

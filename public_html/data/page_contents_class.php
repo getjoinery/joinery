@@ -19,11 +19,11 @@ class PageContent extends SystemBase {
 		'pac_link' => 'Link of the page_content, if it is a standalone page',
 		'pac_usr_user_id' => 'User this page_content is associated with',
 		'pac_body' => 'Body of the page_content',
-		'pac_is_deleted' => 'Is this page_content deleted?',
 		'pac_is_published' => 'Is this page_content published?',
 		'pac_published_time' => 'Time published',
 		'pac_create_time' => 'Time Created',
 		'pac_script_filename' => 'Filename to look for if we want to run a script before rendering',
+		'pac_delete_time' => 'Time of deletion',
 	);
 
 	public static $constants = array();
@@ -36,7 +36,7 @@ class PageContent extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $default_values = array(
-	'pac_create_time' => 'now()', 'pac_is_deleted' => FALSE, 'pac_is_published' => FALSE
+	'pac_create_time' => 'now()', 'pac_is_published' => FALSE
 	);	
 	
 	static function get_by_link($link){
@@ -208,13 +208,13 @@ class PageContent extends SystemBase {
 	}
 
 	function soft_delete(){
-		$this->set('pac_is_deleted', TRUE);
+		$this->set('pac_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('pac_is_deleted', FALSE);
+		$this->set('pac_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -269,9 +269,9 @@ class PageContent extends SystemBase {
 			  "pac_body" text COLLATE "pg_catalog"."default",
 			  "pac_published_time" timestamp(6),
 			  "pac_create_time" timestamp(6),
-			  "pac_is_deleted" bool,
 			  "pac_is_published" bool,
-			  "pac_script_filename" varchar COLLATE "pg_catalog"."default"
+			  "pac_script_filename" varchar COLLATE "pg_catalog"."default",
+			  "pac_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -331,11 +331,11 @@ class MultiPageContent extends SystemMultiBase {
 
 		if (array_key_exists('has_link', $this->options)) {
 			$where_clauses[] = 'LENGTH(pac_link) > 0';
-		}			
-
+		}
+		
 		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'pac_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 
+			$where_clauses[] = 'pac_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 		
 		if (array_key_exists('published', $this->options)) {
 		 	$where_clauses[] = 'pac_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');

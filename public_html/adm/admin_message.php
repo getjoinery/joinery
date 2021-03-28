@@ -21,7 +21,23 @@
 	if($message->get('msg_evt_event_id')){
 		$event = new Event($message->get('msg_evt_event_id'), TRUE);
 	}
-	
+
+
+	if($_REQUEST['action'] == 'delete'){
+		$message->authenticate_write($session);
+		$message->soft_delete();
+
+		header("Location: /admin/admin_posts");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$message->authenticate_write($session);
+		$message->soft_delete();
+
+		header("Location: /admin/admin_posts");
+		exit();				
+	}
+
 	
 	
 	$page = new AdminPage();
@@ -36,6 +52,10 @@
 	);
 	
 	$options['title'] = 'Message';
+	
+	if(!$message->get('msg_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Soft Delete'] = '/admin/admin_message?action=delete&msg_message_id='.$message->key;
+	}
 	$page->begin_box($options);
 
 	$formwriter = new FormWriterMaster("form1");
@@ -58,7 +78,9 @@
 	}
 	echo '<strong>Sent:</strong> '.LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $session->get_timezone()) .'<br />';
 	echo '<strong>Message:</strong><br /> '.$message->get('msg_body').'<br />';	
-
+	if($message->get('msg_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($message->get('msg_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+	}
 	$page->end_box();
 	
 	$page->admin_footer();

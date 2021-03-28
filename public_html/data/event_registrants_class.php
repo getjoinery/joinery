@@ -48,6 +48,7 @@ class EventRegistrant extends SystemBase {
 		'evr_ord_order_id' => 'Order for the registration',
 		'evr_expires_time' => 'Time at which this registration expires.', 
 		'evr_odi_order_item_id' => 'Order Item ID for this registration',
+		'evr_delete_time' => 'Time of deletion',
 	);
 
 	public static $generated_fields = array(
@@ -212,6 +213,17 @@ class EventRegistrant extends SystemBase {
 		$this->key = $p_keys_return['evr_event_registrant_id'];
 	}	
 	
+	function soft_delete(){
+		$this->set('evr_delete_time', 'now()');
+		$this->save();
+		return true;
+	}
+	
+	function undelete(){
+		$this->set('evr_delete_time', NULL);
+		$this->save();	
+		return true;
+	}
 
 	static public function GetPublicActions() { 
 		return self::$public_actions;
@@ -246,6 +258,7 @@ class EventRegistrant extends SystemBase {
 			  "evr_extra_info_completed" bool NOT NULL DEFAULT false,
 			  "evr_ord_order_id" int4,
 			  "evr_odi_order_item_id" int4,
+			  "evr_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -286,6 +299,10 @@ class MultiEventRegistrant extends SystemMultiBase {
 			$where_clauses[] = 'evr_usr_user_id = ?';
 			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		}
+		
+		if (array_key_exists('deleted', $this->options)) {
+			$where_clauses[] = 'evr_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 				
 		
 		if ($where_clauses) {

@@ -23,6 +23,23 @@
 		header("Location: /admin/admin_videos");
 		exit();		
 	}	
+
+
+	if($_REQUEST['action'] == 'delete'){
+		$video->authenticate_write($session);
+		$video->soft_delete();
+
+		header("Location: /admin/admin_videos");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$video->authenticate_write($session);
+		$video->soft_delete();
+
+		header("Location: /admin/admin_videos");
+		exit();				
+	}
+
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -41,6 +58,10 @@
 	$options['title'] = 'Video: ' . $video->get('vid_title');
 	$options['altlinks'] = array('Edit Video'=>'/admin/admin_video_edit?vid_video_id='.$video->key);
 	$options['altlinks'] += array('Delete Video' => '/admin/admin_video?action=remove&v='.$video->key);
+	if(!$video->get('vid_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Soft Delete'] = '/admin/admin_video?action=delete&vid_video_id='.$video->key;
+	}
+
 	$page->begin_box($options);
 
 	$formwriter = new FormWriterMaster("form1");
@@ -49,11 +70,8 @@
 	
 	echo '<strong>User:</strong> ('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a><br />';	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($video->get('vid_create_time'), 'UTC', $session->get_timezone()) .'<br />';
-	echo '<strong>Status:</strong> ';
-	if($video->get('vid_is_deleted')) {
-		echo 'Deleted';
-	} else {
-		echo 'Active';
+	if($video->get('vid_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($video->get('vid_delete_time'), 'UTC', $session->get_timezone()).'<br />';
 	}
 	echo '<br /><strong>Title:</strong> '.$video->get('vid_title') .'<br />';	
 	echo '<strong>Description:</strong> '.$video->get('vid_description') .'<br />';

@@ -19,10 +19,10 @@ class Video extends SystemBase {
 		'vid_usr_user_id' => 'User this video is associated with',
 		'vid_source' => 'Website of video',
 		'vid_video_number' => 'Website video identifier',
-		'vid_is_deleted' => 'Is this video deleted?',
 		'vid_create_time' => 'Time added',
 		'vid_video_text'=>'Original code',
-		'vid_version' => 'Code version for turnhere videos'
+		'vid_version' => 'Code version for turnhere videos',
+		'vid_delete_time' => 'Time of deletion',
 	);
 
 
@@ -226,13 +226,13 @@ class Video extends SystemBase {
 	}
 		
 	function soft_delete(){
-		$this->set('vid_is_deleted', TRUE);
+		$this->set('vid_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('vid_is_deleted', FALSE);
+		$this->set('vid_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -294,13 +294,13 @@ class Video extends SystemBase {
 			  "vid_video_id" int4 NOT NULL DEFAULT nextval(\'vid_videos_vid_video_id_seq\'::regclass),
 			  "vid_source" int2,
 			  "vid_video_number" varchar(255) COLLATE "pg_catalog"."default",
-			  "vid_is_deleted" bool NOT NULL DEFAULT false,
 			  "vid_create_time" timestamp(6) DEFAULT now(),
 			  "vid_usr_user_id" int4,
 			  "vid_video_text" text COLLATE "pg_catalog"."default",
 			  "vid_version" int2,
 			  "vid_title" varchar(255) COLLATE "pg_catalog"."default",
-			  "vid_description" text COLLATE "pg_catalog"."default"
+			  "vid_description" text COLLATE "pg_catalog"."default",
+			  "vid_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -358,8 +358,8 @@ private function _get_results($only_count=FALSE) {
 		} 
 
 		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'vid_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 
+			$where_clauses[] = 'vid_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 
 		if (array_key_exists('source', $this->options)) {
 		 	$where_clauses[] = 'vid_source = ?';

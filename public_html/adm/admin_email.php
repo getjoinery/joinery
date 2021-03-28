@@ -16,24 +16,39 @@
 	$session->set_return();
 	
 	$email = new Email($_REQUEST['eml_email_id'], TRUE);
+	
 	$recipient_groups = $email->get_recipient_groups();
 	
-	if($_POST){ 
 
-		if($_POST['action'] == 'add'){
-			//ADD GROUP TO EMAIL
-			$email->add_recipient_group(NULL, $_POST['grp_group_id']);
-			$returnurl = $session->get_return();
-			header("Location: $returnurl");
-			exit();			
-		}
-		else if($_POST['action'] == 'remove'){
-			$email->remove_recipient_group($_POST['erg_email_recipient_group_id']);
-			$returnurl = $session->get_return();		
-			header("Location: $returnurl");
-			exit();				
-		}
-	}	
+	if($_REQUEST['action'] == 'delete'){
+		$email->authenticate_write($session);
+		$email->soft_delete();
+
+		header("Location: /admin/admin_emails");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$email->authenticate_write($session);
+		$email->soft_delete();
+
+		header("Location: /admin/admin_emails");
+		exit();				
+	}
+ 
+	if($_REQUEST['action'] == 'add'){
+		//ADD GROUP TO EMAIL
+		$email->add_recipient_group(NULL, $_POST['grp_group_id']);
+		$returnurl = $session->get_return();
+		header("Location: $returnurl");
+		exit();			
+	}
+	else if($_REQUEST['action'] == 'remove'){
+		$email->remove_recipient_group($_POST['erg_email_recipient_group_id']);
+		$returnurl = $session->get_return();		
+		header("Location: $returnurl");
+		exit();				
+	}
+	
 	
 
 	$page = new AdminPage();
@@ -56,8 +71,13 @@
 		$altlinks = array('View'=>'/admin/admin_emails_test?eml_email_id='.$email->key,
 		'Edit'=>'/admin/admin_email_edit?eml_email_id='.$email->key,		
 		'Send test'=> '/admin/admin_emails_test?sendtest=1&eml_email_id='.$email->key);
+		
 		if($email->get('eml_status') >= 3){
 			$altlinks['Add to Send Queue'] = '/admin/admin_emails_queue?eml_email_id='.$email->key;
+		}
+		
+		if(!$email->get('eml_delete_time') && $_SESSION['permission'] >= 8) {
+			$altlinks['Soft Delete'] = '/admin/admin_email?action=delete&eml_email_id='.$email->key;
 		}
 		$pageoptions['altlinks'] = $altlinks;
 		$page->begin_box($pageoptions);
@@ -164,6 +184,9 @@
 		$pageoptions['title'] = 'Email: '.$email->get('eml_subject');
 		$page->begin_box($pageoptions);
 		$time= '';
+		if($email->get('eml_delete_time')){
+			echo 'Status: Deleted at '.LibraryFunctions::convert_time($email->get('eml_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+		}
 		if($email->get('eml_status') == 10){
 			$time = 'Sent: '. LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone());
 		}

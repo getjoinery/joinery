@@ -67,7 +67,7 @@
 		array_push($rowvalues, LibraryFunctions::convert_time($page_content->get('pac_published_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
-		if($page_content->get('pac_is_deleted')) {
+		if($page_content->get('pac_delete_time')) {
 			$status = 'Deleted';
 		} else {
 			$status = 'Active';

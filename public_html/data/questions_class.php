@@ -31,10 +31,10 @@ class Question extends SystemBase {
 		'qst_options' => 'Array of options',
 		'qst_validate' => 'Array of validation options',
 		'qst_type' => 'see types above',
-		'qst_is_deleted' => 'Is this question deleted?',
 		'qst_is_published' => 'Is this question published?',
 		'qst_published_time' => 'Time published',
-		'qst_create_time' => 'Time Created'
+		'qst_create_time' => 'Time Created',
+		'qst_delete_time' => 'Time deleted'
 	);
 
 	public static $constants = array();
@@ -47,8 +47,7 @@ class Question extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $default_values = array(
-	'qst_create_time' => 'now()', 
-	'qst_is_deleted' => false
+	'qst_create_time' => 'now()'
 	);	
 
 	static function check_if_exists($key) {
@@ -337,13 +336,13 @@ class Question extends SystemBase {
 	}
 
 	function soft_delete(){
-		$this->set('qst_is_deleted', TRUE);
+		$this->set('qst_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('qst_is_deleted', FALSE);
+		$this->set('qst_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -404,11 +403,11 @@ class Question extends SystemBase {
 			  "qst_options" text COLLATE "pg_catalog"."default",
 			  "qst_validate" varchar(255) COLLATE "pg_catalog"."default",
 			  "qst_type" int4,
-			  "qst_is_deleted" bool DEFAULT false,
 			  "qst_is_published" bool DEFAULT true,
 			  "qst_is_on_homepage" bool DEFAULT true,
 			  "qst_create_time" timestamp(6),
 			  "qst_published_time" timestamp(6),
+			  "qst_delete_time" timestamp(6),
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -474,7 +473,7 @@ class MultiQuestion extends SystemMultiBase {
 		}
 		
 		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'qst_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
+		 	$where_clauses[] = 'qst_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
 		} 
 				
 		

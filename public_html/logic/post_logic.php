@@ -12,7 +12,7 @@
 	}
 
 
-	if(!$post || !$post->get('pst_is_published')){
+	if(!$post || !$post->get('pst_is_published') || $post->get('pst_delete_time')){
 		require_once(LibraryFunctions::display_404_page());		
 	}
 

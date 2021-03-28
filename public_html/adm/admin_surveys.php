@@ -72,13 +72,19 @@
 
 		array_push($rowvalues, LibraryFunctions::convert_time($survey->get('svy_update_time'), "UTC", $session->get_timezone(), 'M j, Y')); */
 
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_survey_permanent_delete?svy_survey_id='. $survey->key.'">
-		<input type="hidden" class="hidden" name="action" value="removesurvey" />
-		<input type="hidden" class="hidden" name="svy_survey_id" value="'.$survey->key.'" />
-		<button type="submit">Delete</button>
-		</form>';
+		if($survey->get('svy_delete_time')){
+			array_push($rowvalues, '<b>Deleted</b>');
+		}
+		else{
+			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_survey_permanent_delete?svy_survey_id='. $survey->key.'">
+			<input type="hidden" class="hidden" name="action" value="removesurvey" />
+			<input type="hidden" class="hidden" name="svy_survey_id" value="'.$survey->key.'" />
+			<button type="submit">Delete</button>
+			</form>';
+			array_push($rowvalues, $delform);
+		}
 
-		array_push($rowvalues, $delform);
+
 		
 		$page->disprow($rowvalues);
 	}

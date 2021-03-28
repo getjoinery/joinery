@@ -34,6 +34,24 @@
 	$svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, '');
 	$survey = new Survey($svy_survey_id, TRUE);
 
+
+	if($_REQUEST['action'] == 'delete'){
+		$survey->authenticate_write($session);
+		$survey->soft_delete();
+
+		header("Location: /admin/admin_surveys");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$survey->authenticate_write($session);
+		$survey->soft_delete();
+
+		header("Location: /admin/admin_surveys");
+		exit();				
+	}
+
+
+
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'survey_question_id', 0, '');
@@ -71,10 +89,15 @@
 	);
 
 
+	if($survey->get('svy_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($survey->get('svy_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+	}
 
 	$headers = array('User', 'Action');
 	$altlinks = array();
-
+	if(!$survey->get('svy_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Soft Delete'] = '/admin/admin_survey?action=delete&svy_survey_id='.$survey->key;
+	}
 	//$altlinks +=  array('Email survey' => '/admin/admin_users_message?svy_survey_id='.$survey->key);
 
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));

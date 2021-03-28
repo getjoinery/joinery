@@ -13,49 +13,37 @@
 	$session->check_permission(8);
 
 
-	$comment = new Comment($_GET['cmt_comment_id'], TRUE);
+	$comment = new Comment($_REQUEST['cmt_comment_id'], TRUE);
 	$post = new Post($comment->get('cmt_pst_post_id'), TRUE);
 
-	if($_POST['action'] == 'approve'){
 
-		$comment = new Comment($_POST['cmt_comment_id'], TRUE);
+	if($_REQUEST['action'] == 'approve'){
 		$comment->set('cmt_is_approved', true);
-		$comment->prepare();
 		$comment->authenticate_write($session);
 		$comment->save();
 
 		header("Location: /admin/admin_comments");
 		exit();				
 	}
-	else if($_POST['action'] == 'unapprove'){
+	else if($_REQUEST['action'] == 'unapprove'){
 
-		$comment = new Comment($_POST['cmt_comment_id'], TRUE);
 		$comment->set('cmt_is_approved', false);
-		$comment->prepare();
 		$comment->authenticate_write($session);		
 		$comment->save();
 
 		header("Location: /admin/admin_comments");
 		exit();				
 	}
-	else if($_POST['action'] == 'delete'){
-
-		$comment = new Comment($_POST['cmt_comment_id'], TRUE);
-		$comment->set('cmt_is_deleted', true);
-		$comment->prepare();
-		$comment->authenticate_write($session);
-		$comment->save();
+	else if($_REQUEST['action'] == 'delete'){
+		$comment->authenticate_write($session);		
+		$comment->soft_delete();
 
 		header("Location: /admin/admin_comments");
 		exit();				
 	}
-	else if($_POST['action'] == 'undelete'){
-
-		$comment = new Comment($_POST['cmt_comment_id'], TRUE);
-		$comment->set('cmt_is_deleted', false);
-		$comment->prepare();
-		$comment->authenticate_write($session);
-		$comment->save();
+	else if($_REQUEST['action'] == 'undelete'){
+		$comment->authenticate_write($session);		
+		$comment->undelete();
 
 		header("Location: /admin/admin_comments");
 		exit();				
@@ -87,17 +75,20 @@
 
 	$options['title'] = substr($comment->get('cmt_body'), 0, 40). '...';
 	$options['altlinks'] = array();
-	if(!$comment->get('cmt_is_deleted')) {
+	if(!$comment->get('cmt_delete_time')) {
 		$options['altlinks'] += array('Edit Comment' => '/admin/admin_comment_edit?cmt_comment_id='.$comment->key);
 	}
-
+	
+	if(!$comment->get('cmt_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Soft Delete'] = '/admin/admin_comment?action=delete&cmt_comment_id='.$comment->key;
+	}
 		
 	$page->begin_box($options);
 	
 	echo '<p>By: '.$comment->get('cmt_author_name').' at '.LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', $session->get_timezone()).'<br>';
 	echo 'On: <a href="'.$post->get_url().'">'.$post->get('pst_title').'</a><br>';
-	if($comment->get('cmt_is_deleted')){
-		echo 'Status: Deleted';
+	if($comment->get('cmt_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($comment->get('cmt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
 	}
 	else if($comment->get('cmt_is_approved')){
 		echo 'Status: Approved';

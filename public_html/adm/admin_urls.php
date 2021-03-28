@@ -44,7 +44,7 @@
 	);
 
 
-	$headers = array("Url",  "Redirect",  "Status");
+	$headers = array("Url",  "Redirect");
 	$altlinks = array('Add Url'=>'/admin/admin_url_edit');
 
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
@@ -67,12 +67,6 @@
 			array_push($rowvalues, $url->get('url_redirect_file'));
 		}
 
-		if($url->get('url_is_deleted')) {
-			$status = 'Deleted';
-		} else {
-			$status = 'Active';
-		}		
-		array_push($rowvalues, $status);
 
 		$page->disprow($rowvalues);
 	}

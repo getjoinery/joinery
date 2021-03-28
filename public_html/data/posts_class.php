@@ -21,12 +21,12 @@ class Post extends SystemBase {
 		'pst_link' => 'Link of the post',
 		'pst_usr_user_id' => 'User this post is associated with',
 		'pst_body' => 'Body of the post',
-		'pst_is_deleted' => 'Is this post deleted?',
 		'pst_is_published' => 'Is this post published?',
 		'pst_published_time' => 'Time published',
 		'pst_is_on_homepage' => 'On homepage',
 		'pst_create_time' => 'Time Created',
-		'pst_short_description' => 'Short description, no html, max 255 chars'
+		'pst_short_description' => 'Short description, no html, max 255 chars',
+		'pst_delete_time' => 'Time of deletion',
 	);
 
 	public static $constants = array();
@@ -40,8 +40,7 @@ class Post extends SystemBase {
 	
 	public static $default_values = array(
 	'pst_create_time' => 'now()', 
-	'pst_is_on_homepage' => true, 
-	'pst_is_deleted' => false
+	'pst_is_on_homepage' => true
 	);	
 
 	static function check_if_exists($key) {
@@ -260,15 +259,15 @@ class Post extends SystemBase {
 
 		$this->key = $p_keys_return['pst_post_id'];
 	}
-
+	
 	function soft_delete(){
-		$this->set('pst_is_deleted', TRUE);
+		$this->set('pst_delete_time', 'now()');
 		$this->save();
 		return true;
 	}
 	
 	function undelete(){
-		$this->set('pst_is_deleted', FALSE);
+		$this->set('pst_delete_time', NULL);
 		$this->save();	
 		return true;
 	}
@@ -329,11 +328,11 @@ class Post extends SystemBase {
 			  "pst_title" varchar(255) COLLATE "pg_catalog"."default",
 			  "pst_body" text COLLATE "pg_catalog"."default",
 			  "pst_published_time" timestamp(6),
-			  "pst_is_deleted" bool DEFAULT false,
 			  "pst_is_published" bool DEFAULT true,
 			  "pst_is_on_homepage" bool DEFAULT true,
 			  "pst_create_time" timestamp(6),
 			  "pst_short_description" varchar(255) COLLATE "pg_catalog"."default",
+			  "pst_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -398,8 +397,8 @@ class MultiPost extends SystemMultiBase {
 		}
 		
 		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'pst_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
-		} 
+			$where_clauses[] = 'pst_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	
 				
 		
 		if ($where_clauses) {

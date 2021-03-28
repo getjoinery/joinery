@@ -82,7 +82,14 @@
 		array_push($rowvalues, '<a href="/admin/admin_email?eml_email_id='.$email->key.'">Email '.$email->key.' - '.$email->get('eml_subject').'</a>');
 		array_push($rowvalues, $email->get('eml_subject'));
 		array_push($rowvalues, $user->display_name());
-		array_push($rowvalues, $email->get_status_text());
+		
+		if($email->get('eml_delete_time')) {
+			$status = 'Deleted';
+		} 
+		else{
+			$status = $email->get_status_text();
+		}
+		array_push($rowvalues, $status);
 		
 		$time= '';
 		if($email->get('eml_status') == 10){

@@ -119,19 +119,6 @@ class OrderItem extends SystemBase {
 		
 	}
 
-	/*
-	function soft_delete(){
-		$this->set('usa_is_deleted', TRUE);
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('usa_is_deleted', FALSE);
-		$this->save();	
-		return true;
-	}
-	*/
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();

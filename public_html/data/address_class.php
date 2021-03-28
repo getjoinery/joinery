@@ -104,7 +104,6 @@ class Address extends SystemBase {
 		'usa_usr_user_id' => 'User Id this address belongs to',
 		'usa_is_default' => 'Is this the default address?',
 		'usa_timezone' => 'Timezone this address is in',
-		'usa_is_deleted' => 'Is this address deleted?',
 		'usa_create_time' => 'time created', 
 		'usa_cco_country_code_id' => 'Country code id',
 	);
@@ -177,7 +176,6 @@ class Address extends SystemBase {
 			$address->set('usa_is_default', FALSE);
 			$address->set('usa_usr_user_id', $user_id);
 			$address->set('usa_is_bad', FALSE);
-			$address->set('usa_is_deleted', FALSE);
 		}
 
 
@@ -239,13 +237,6 @@ class Address extends SystemBase {
 					// Kill the default one!
 					$user->set_default_address($address->key, $use_transaction);
 
-					if ($default_address && !$default_address->get('usa_address1')) {
-						// If the default address is one without an address, IE their initial one
-						// also delete it!
-						$default_address->load();
-						$default_address->set('usa_is_deleted', TRUE);
-						$default_address->save();
-					}
 				}
 			}
 		}
@@ -672,18 +663,6 @@ class Address extends SystemBase {
 		}
 	}
 	
-	function soft_delete(){
-		$this->set('usa_is_deleted', TRUE);
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('usa_is_deleted', FALSE);
-		$this->save();	
-		return true;
-	}
-	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -821,7 +800,6 @@ class Address extends SystemBase {
 			  "usa_is_default" bool,
 			  "usa_is_private" bool,
 			  "usa_timezone" varchar(64) COLLATE "pg_catalog"."default",
-			  "usa_is_deleted" bool DEFAULT false,
 			  "usa_create_time" timestamp(6),
 			  "usa_cco_country_code_id" int4
 			)
@@ -893,10 +871,6 @@ class MultiAddress extends SystemMultiBase {
 		if (array_key_exists('user_id', $this->options)) {
 			$where_clauses[] = 'usa_usr_user_id = ?';
 			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
-
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'usa_is_deleted = ' . ($this->options['deleted'] ? 'TRUE' : 'FALSE');
 		}
 
 		if (array_key_exists('address1', $this->options)) {

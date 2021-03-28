@@ -15,6 +15,10 @@
 	$eml_email_id = LibraryFunctions::fetch_variable('eml_email_id', 0, TRUE, 'Email id is required');
 	
 	$email = new Email($eml_email_id, TRUE);
+	if($email->get('eml_delete_time')){
+		throw new SystemDisplayableError('This email is deleted.');
+		exit();		
+	}
 	
 	$page = new AdminPage();
 	$page->admin_header(	

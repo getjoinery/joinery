@@ -63,7 +63,7 @@
 		array_push($rowvalues, LibraryFunctions::convert_time($question->get('qst_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($question->get('qst_published_time'), 'UTC', $session->get_timezone()));
 
-		if($question->get('qst_is_deleted')) {
+		if($question->get('qst_delete_time')) {
 			$status = 'Deleted';
 		} else {
 			$status = 'Active';

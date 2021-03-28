@@ -11,13 +11,20 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-if($_POST){
-
 	$phn_phone_number_id = LibraryFunctions::fetch_variable('phn_phone_number_id', NULL, 0, '');
 	
+	$phone_number = NULL;
+	if($phn_phone_number_id){
+		$phone_number = new PhoneNumber($phn_phone_number_id, TRUE);
+		$user_id = $phone_number->get('phn_usr_user_id');
+	}
+	else{
+		$user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must pass a user id');
+	}
 
-	$phone_number = new PhoneNumber($phn_phone_number_id, TRUE);
-	$user_id = $phone_number->get('phn_usr_user_id');
+
+if($_POST){
+
 	$phone_number = PhoneNumber::CreateFromForm($_POST, $user_id, $phone_number, FALSE);
 
 
@@ -29,13 +36,6 @@ if($_POST){
 
 }
 else{
-	$phn_phone_number_id = LibraryFunctions::fetch_variable('phn_phone_number_id', NULL, 0, '');
-
-	$phone_number = new PhoneNumber($phn_phone_number_id);
-	
-	if($phn_phone_number_id) {
-		$phone_number->load();
-	}
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -63,9 +63,9 @@ else{
 
 	$formwriter = new FormWriterMaster("form1");
 	echo $formwriter->begin_form("", "post", "/admin/admin_phone_edit");
-
+ 
 	PhoneNumber::PlainForm($formwriter, $phone_number);
-
+	echo $formwriter->hiddeninput('usr_user_id', $user_id);
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();

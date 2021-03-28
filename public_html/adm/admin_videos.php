@@ -65,7 +65,7 @@
 		array_push($rowvalues, LibraryFunctions::convert_time($video->get('vid_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
-		if($video->get('vid_is_deleted')) {
+		if($video->get('vid_delete_time')) {
 			$status = 'Deleted';
 		} else {
 			$status = 'Active';

@@ -21,7 +21,22 @@
 	$session->check_permission(8);
 	$session->set_return();
 
-	$event = new Event($_GET['evt_event_id'], TRUE);
+	$event = new Event($_REQUEST['evt_event_id'], TRUE);
+
+	if($_REQUEST['action'] == 'delete'){
+		$event->authenticate_write($session);
+		$event->soft_delete();
+
+		header("Location: /admin/admin_emails");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$event->authenticate_write($session);
+		$event->soft_delete();
+
+		header("Location: /admin/admin_emails");
+		exit();				
+	}
 
 	if($_POST['action'] == 'remove'){
 
@@ -83,7 +98,7 @@
 
 		$options['title'] = $event->get('evt_name');
 			$options['altlinks'] = array();
-			if(!$event->get('evt_is_deleted')) {
+			if(!$event->get('evt_delete_time')) {
 				if($_SESSION['permission'] > 7){
 					$options['altlinks'] += array('Edit Event' => '/admin/admin_event_edit?evt_event_id='.$event->key);
 				}
@@ -92,6 +107,9 @@
 				//echo '<a class="dropdown-item" href="/admin/admin_events_undelete?evt_event_id='.$event->key.'">Undelete</a>';
 			}
 
+		if(!$event->get('evt_delete_time') && $_SESSION['permission'] >= 8) {
+			$options['altlinks']['Soft Delete'] = '/admin/admin_event?action=delete&evt_event_id='.$event->key;
+		}
 			
 		$page->begin_box($options);
 	?>
@@ -101,7 +119,10 @@
 			  
 			  <p class="text-center">
 			  <?php
-				if($event->get('evt_visibility') == 0) {
+				if($event->get('evt_delete_time')){
+					echo 'Status: Deleted at '.LibraryFunctions::convert_time($event->get('evt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+				}
+				else if($event->get('evt_visibility') == 0) {
 					echo '<b>Private</b><br />';
 				} 
 				else if($event->get('evt_visibility') == 1){
@@ -144,7 +165,7 @@
 
 	$headers = array("Registrant", "Registered on", "Order", "Email Verified", "Extra Info", "Action");
 	$altlinks = array();
-	if(!$event->get('evt_is_deleted')) {
+	if(!$event->get('evt_delete_time')) {
 		if($_SESSION['permission'] >= 8){
 			$altlinks +=  array('Email registrants' => '/admin/admin_users_message?evt_event_id='.$event->key);
 			//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';
@@ -225,16 +246,7 @@
 		<button class="uk-button" type="submit">Remove</button>
 		</form>';
 		array_push($rowvalues, $delform);			
-		/*
 
-        if($registrant->get('evr_is_deleted')) {
-        	array_push($rowvalues, 'Deleted');
-
-        }
-        else {
-        	array_push($rowvalues, '[<a class="sortlink" href="/profile/registrants_delete.php?evr_registrant_id=' . $registrant->key . '&evt_event_id=' . $event->key . '">Softdelete</a>]');
-        }
-		*/
         $page->disprow($rowvalues);
 	}
 
@@ -246,7 +258,7 @@
 	
 	$headers = array("Sender", "Message", "Time");
 	$altlinks = array();
-	if(!$event->get('evt_is_deleted')) {
+	if(!$event->get('evt_delete_time')) {
 		if($_SESSION['permission'] >= 8){
 			$altlinks +=  array('Email registrants' => '/admin/admin_users_message?evt_event_id='.$event->key);
 			//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';

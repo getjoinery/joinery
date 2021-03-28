@@ -16,7 +16,7 @@
 
 	if($_POST){
 		
-		$editable_fields = array('cmt_body', 'cmt_author_name', 'cmt_is_approved', 'cmt_is_deleted');
+		$editable_fields = array('cmt_body', 'cmt_author_name', 'cmt_is_approved');
 
 		foreach($editable_fields as $field) {
 			$comment->set($field, $_REQUEST[$field]);
@@ -72,8 +72,6 @@
 	$optionvals = array("No"=>0, "Yes"=>1);
 	echo $formwriter->dropinput("Approved", "cmt_is_approved", "ctrlHolder", $optionvals, $comment->get('cmt_is_approved'), '', FALSE);
 	
-	$optionvals = array("No"=>0, "Yes"=>1);
-	echo $formwriter->dropinput("Deleted", "cmt_is_deleted", "ctrlHolder", $optionvals, $comment->get('cmt_is_deleted'), '', FALSE);
 	
 	echo $formwriter->textbox('Comment', 'cmt_body', 'ctrlHolder', 5, 80, $comment->get('cmt_body'), '', 'no');
 
