@@ -44,7 +44,7 @@
 		$user->authenticate_write($session);
 		$user->soft_delete();
 
-		header("Location: /admin/admin_users");
+		header("Location: /admin/admin_user?usr_user_id=".$user->key);
 		exit();				
 	}
 
@@ -54,31 +54,26 @@
 			//ADD THE USER TO A GROUP
 			$group = new Group($_POST['grp_group_id'], TRUE);
 			$group->add_member($user->key);
-			$returnurl = $session->get_return();
-			header("Location: $returnurl");
+			header("Location: /admin/admin_user?usr_user_id=".$user->key);
 			exit();			
 		}
 		else if($_POST['action'] == 'remove_from_group'){
 			$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
 			$groupmember->remove();
-
-			$returnurl = $session->get_return();
-			header("Location: $returnurl");
+			header("Location: /admin/admin_user?usr_user_id=".$user->key);
 			exit();				
 		}
 		else if($_POST['action'] == 'add_to_event'){
 			//ADD THE USER TO AN EVENT
 			$event = new Event($_POST['evt_event_id'], TRUE);
 			$event->add_registrant($user->key);
-			$returnurl = $session->get_return();
-			header("Location: $returnurl");
+			header("Location: /admin/admin_user?usr_user_id=".$user->key);
 			exit();			
 		}
 		else if($_POST['action'] == 'remove_from_event'){
 			$event = new Event($_POST['evt_event_id'], TRUE);
 			$event->remove_registrant($user->key);
-			$returnurl = $session->get_return();
-			header("Location: $returnurl");
+			header("Location: /admin/admin_user?usr_user_id=".$user->key);
 			exit();					
 		}	
 
