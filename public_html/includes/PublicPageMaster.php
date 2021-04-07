@@ -147,7 +147,7 @@ class PublicPageMaster {
 
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
-
+		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('force_https')){
 			header('Strict-Transport-Security: max-age=3153600');
