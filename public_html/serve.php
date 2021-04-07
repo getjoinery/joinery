@@ -65,6 +65,30 @@ if($settings->get_setting('urls_active')){
 	}
 }
 
+//CHECK STATIC FILES DIRECTORY (/VAR/WWW/HTML/$SITE/STATIC_FILES)
+if($params[0] == 'static_files'){
+	$static_files_dir = $settings->get_setting('static_files_dir');
+	if($params[2]){
+		//RESIZED FILE
+		$file = $static_files_dir.'/'.$params[1].'/'.$params[2];
+	}
+	else{
+		$file = $static_files_dir.'/'.$params[1];
+	}
+	//ORIGINAL FILE
+	if(file_exists($file)){
+		$seconds_to_cache = 43200;
+		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+		header("Expires: $ts");
+		header("Pragma: cache");
+		header("Cache-Control: max-age=$seconds_to_cache");
+		$the_content_type = 'Content-type: '.mime_content_type($file);
+		header($the_content_type);
+		readfile($file);
+		exit();
+	}
+}
+
 //FILES
 if($settings->get_setting('files_active')){
 	if($params[0] == 'uploads'){
