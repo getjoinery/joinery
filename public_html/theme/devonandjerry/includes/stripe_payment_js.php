@@ -1,6 +1,6 @@
 <?php
 	header('Content-Type: text/javascript');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
 	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
@@ -11,12 +11,11 @@
 		$api_key = $settings->get_setting('stripe_api_key');
 		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
 	}
-
+	
 	if(!$api_key || !$api_secret_key){
 		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
 		exit();			
 	}
-	
 ?>
 							
 							var stripe = Stripe('<?php echo $api_secret_key; ?>');
