@@ -1,27 +1,10 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
-class PublicPage {
+class PublicPage extends PublicPageMaster {
 
-	private $rowcount;
-	private $theme_url;
 
-	private static $header_defaults = array(
-		//'title' => '',
-		'showheader' => TRUE,
-		'currentmain' => NULL,
-		'currentsub' => NULL,
-		'noindex' => FALSE,
-		'nofollow' => FALSE,
-	);
-
-	private static $footer_defaults = array(
-		'track' => TRUE,
-	);
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
@@ -74,95 +57,13 @@ class PublicPage {
 		return $output;
 	}	
 
-	public function __construct($secure=FALSE) {
-		$this->rowcount = 0;
-		$this->secure = $secure;
-		$this->server = $_SERVER['PHP_SELF'];
-		$this->remote_addr = $_SERVER['REMOTE_ADDR'];
-
-		$settings = Globalvars::get_instance();
-
-		$this->debug = $settings->get_setting('debug');
-		if ($this->debug == 1) {
-			$secure = FALSE;
-			$this->secure = FALSE;
-		}
-
-		// If secure is on, they are not HTTPS and on port 80, forward them to SSL
-		/*
-		if ($secure && $_SERVER["SERVER_PORT"] == 80) {
-			header("HTTP/1.1 301 Moved Permanently");
-			header("Location: https://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-			exit;
-		} else if (!$secure && $_SERVER["SERVER_PORT"] == 443) {
-			// Likewise if they aren't secure and reading an SSLed page, redirect them to non-SSL
-			header("HTTP/1.1 301 Moved Permanently");
-			header("Location: http://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-			exit;
-		}
-		*/
-
-		$this->cdn = $settings->get_setting($this->secure ? 'CDN_SSL' : 'CDN');
-		$this->protocol = $this->secure ? 'https://' : 'http://';
-		$this->secure_prefix = ($this->debug == 0) ? $settings->get_setting('webDir_SSL') : $settings->get_setting('webDir');
-
-		$session = SessionControl::get_instance();
-		$this->location_data = $session->get_location_data();
-
-		// This is for apache specific logging, so we have to check to make sure we are
-		// serving off apache before we can set the userid.
-		if (function_exists('apache_note') && $session->get_user_id(TRUE)) {
-			apache_note('user_id', $session->get_user_id(TRUE));
-		}
-
-		if ($session->get_user_id()) {
-			$this->user = new User($session->get_user_id(), TRUE);
-		}
-		
-	}
 
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
-
 		$settings = Globalvars::get_instance();
-		if($settings->get_setting('force_https')){
-			header('Strict-Transport-Security: max-age=3153600');
-			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
-			//header("Content-Security-Policy-Report-Only: default-src https:");
-		}
-		header('X-Frame-Options: SAMEORIGIN');
-		header('X-Content-Type-Options: nosniff');
-		header('Referrer-Policy: unsafe-url');
-
-		$this->debug = $settings->get_setting('debug');
-		if ($this->debug == 1) {
-			$secure = FALSE;
-			$this->secure = FALSE;
-		}
-		
-		$this->theme_url = LibraryFunctions::get_theme_path('web');
-		
 		$session = SessionControl::get_instance();
-		$settings = Globalvars::get_instance();
+		parent::public_header();
 
-		if(!isset($options['title']) || !$options['title']){
-			$options['title'] = $settings->get_setting('site_name');
-		}
-		
-		if(!isset($options['description']) || !$options['description']){
-			$options['description'] = $settings->get_setting('site_description');
-		}
-		if(empty($options['noheader'])){
-			//TRACKING
-			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
-				if(!isset($options['is_404'])){
-					$options['is_404'] = 0;
-				}
-
-				$session->save_visitor_event(1, $options['is_404']);
-			}
-		}
-	
 		?>
 		
 <!DOCTYPE html>
@@ -182,6 +83,7 @@ class PublicPage {
 		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />
 		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
 		-->
+		<?php $this->global_includes_top(); ?>
 		<!-- CSS -->
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
 		<!--<link rel="stylesheet" type="text/css" href="/theme/default/includes/uikit-3.4.2/css/uikit.min.css">-->
@@ -224,49 +126,26 @@ class PublicPage {
 			<div class="container">
 				<!-- Logo -->
 				<div class="header-logo">
-					<h3><a href="#">Test Site</a></h3>
-					<!-- 
-					<img class="logo-dark" src="../assets/images/your-logo-dark.png" alt="">
-					<img class="logo-light" src="../assets/images/your-logo-light.png" alt=""> 
-					-->
+					<!-- <h3><a href="#">Test Site</a></h3>-->
+					<a href="/">
+					<img class="logo-dark" src="/static_files/logos/logo-trans-resized.png" alt="DevonAndJerry.com">
+					<img class="logo-light" src="/static_files/logos/logo-trans-resized.png" alt="DevonAndJerry.com"> 
+					</a>
 				</div>
 				<!-- Menu -->
 				<div class="header-menu">
 					<ul class="nav">
 						<li class="nav-item">
-							<a class="nav-link" href="#">Link Only</a>
+							<a class="nav-link" href="/about">About</a>
 						</li>
 						<li class="nav-item">
-							<a class="nav-link" href="#">Dropdown</a>
-							<ul class="nav-dropdown">
-								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
-								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
-								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
-								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
-							</ul>
+							<a class="nav-link" href="/blog">Blog</a>
 						</li>
 						<li class="nav-item">
-							<a class="nav-link" href="#">Subdropdown</a>
-							<ul class="nav-dropdown">
-								<li class="nav-dropdown-item">
-									<a class="nav-dropdown-link" href="#">Dropdown Item</a>
-									<ul class="nav-subdropdown">
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-									</ul>
-								</li>
-								<li class="nav-dropdown-item">
-									<a class="nav-dropdown-link" href="#">Dropdown Item</a>
-									<ul class="nav-subdropdown">
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-									</ul>
-								</li>
-							</ul>
+							<a class="nav-link" href="/events">Courses</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="/contact">Contact</a>
 						</li>
 					</ul>
 				</div>
@@ -335,18 +214,18 @@ class PublicPage {
 			<div class="section-sm bg-dark">
 				<div class="container">
 					<div class="row col-spacing-20">
-						<div class="col-6 col-sm-6 col-lg-3">
-							<h3>mono</h3>
-						</div>
+						<!--<div class="col-6 col-sm-6 col-lg-3">
+							<h3>Devon and Jerry</h3>
+						</div>-->
 						<div class="col-6 col-sm-6 col-lg-3">
 							<h6 class="font-small font-weight-normal uppercase">Useful Links</h6>
 							<ul class="list-dash">
-								<li><a href="#">About us</a></li>
-								<li><a href="#">Team</a></li>
-								<li><a href="#">Prices</a></li>
-								<li><a href="#">Contact</a></li>
+								<li><a href="/about">About us</a></li>
+								<li><a href="/blog">Blog</a></li>
+								<li><a href="/events">Courses</a></li>
+								<li><a href="/contact">Contact</a></li>
 							</ul>
-						</div>
+						</div><!--
 						<div class="col-6 col-sm-6 col-lg-3">
 							<h6 class="font-small font-weight-normal uppercase">Additional Links</h6>
 							<ul class="list-dash">
@@ -355,13 +234,12 @@ class PublicPage {
 								<li><a href="#">FAQ</a></li>
 								<li><a href="#">Careers</a></li>
 							</ul>
-						</div>
+						</div>-->
 						<div class="col-6 col-sm-6 col-lg-3">
 							<h6 class="font-small font-weight-normal uppercase">Contact Info</h6>
 							<ul class="list-unstyled">
-								<li>121 King St, Melbourne VIC 3000</li>
-								<li>contact@example.com</li>
-								<li>+(123) 456 789 01</li>
+								<li>devonandjerry@gmail.com</li>
+								<li></li>
 							</ul>
 						</div>
 					</div><!-- end row(1) -->
@@ -370,14 +248,14 @@ class PublicPage {
 
 					<div class="row col-spacing-10">
 						<div class="col-12 col-md-6 text-center text-md-left">
-							<p>&copy; 2021 FlaTheme, All Rights Reserved.</p>
+							<p>&copy; 2021 Devon and Jerry</p>
 						</div>
 						<div class="col-12 col-md-6 text-center text-md-right">
 							<ul class="list-inline">
-								<li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
-								<li><a href="#"><i class="fab fa-twitter"></i></a></li>
-								<li><a href="#"><i class="fab fa-pinterest"></i></a></li>
-								<li><a href="#"><i class="fab fa-instagram"></i></a></li>
+								<li><a href="https://www.facebook.com/devonandjerry"><i class="fab fa-facebook-f"></i></a></li>
+								<!--<li><a href="#"><i class="fab fa-twitter"></i></a></li>
+								<li><a href="#"><i class="fab fa-pinterest"></i></a></li>-->
+								<li><a href="https://www.instagram.com/devonandjerry"><i class="fab fa-instagram"></i></a></li>
 							</ul>
 						</div>
 					</div><!-- end row(2) -->
@@ -402,37 +280,6 @@ class PublicPage {
 
 
 
-
-	function tableheader($headers, $class='table cart-table', $id='table1'){
-		echo '<table class="'.$class.'" id="'.$id.'" cellspacing="0">
-			<thead><tr>';
-
-		foreach ($headers as $value) {
-			printf('<th scope="col" abbr="%s">%s</th>', $value, $value);
-		}
-		echo '</tr></thead><tbody>';
-	}
-
-	function disprow($dataarray){
-
-		echo '<tr>';
-
-		foreach ($dataarray as $value) {
-			if ($value == "") {
-				$value = "&nbsp";
-			}
-
-
-			printf('<td>%s</td>', $value);
-
-		}
-		echo "</tr>\n";
-		$this->rowcount++;
-	}
-
-	function endtable(){
-		echo '</tbody></table>';
-	}
 }
 
 ?>
