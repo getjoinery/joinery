@@ -40,7 +40,7 @@
 			<div class="col-12 col-md-6">
 				<?php
 				if($pic = $event->get_picture_link('small')){
-					echo '<img class="border-radius box-shadow-with-hover" src="'.$pic.'" alt="">';
+					echo '<img src="'.$pic.'" alt="">';
 				}
 				?>
 			</div>

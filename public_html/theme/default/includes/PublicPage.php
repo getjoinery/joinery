@@ -8,7 +8,6 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 class PublicPage {
 
 	private $rowcount;
-	private $theme_url;
 
 	private static $header_defaults = array(
 		//'title' => '',
@@ -87,8 +86,6 @@ class PublicPage {
 			$secure = FALSE;
 			$this->secure = FALSE;
 		}
-		
-		$this->theme_url = LibraryFunctions::get_theme_path('web');
 
 		// If secure is on, they are not HTTPS and on port 80, forward them to SSL
 		/*
