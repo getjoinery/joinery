@@ -68,13 +68,23 @@ if($settings->get_setting('urls_active')){
 //CHECK STATIC FILES DIRECTORY (/VAR/WWW/HTML/$SITE/STATIC_FILES)
 if($params[0] == 'static_files'){
 	$static_files_dir = $settings->get_setting('static_files_dir');
-	if($params[2]){
-		//RESIZED FILE
+	if(!static_files_dir){
+		throw new SystemDisplayableError('static_files_dir is missing.');
+		exit();
+	}
+	if($params[4]){
+		$file = $static_files_dir.'/'.$params[1].'/'.$params[2].'/'.$params[3].'/'.$params[4];
+	}
+	else if($params[3]){
+		$file = $static_files_dir.'/'.$params[1].'/'.$params[2].'/'.$params[3];
+	}
+	else if($params[2]){
 		$file = $static_files_dir.'/'.$params[1].'/'.$params[2];
 	}
 	else{
-		$file = $static_files_dir.'/'.$params[1];
+		$file = $static_files_dir.'/'.$params[1]; 
 	}
+
 	//ORIGINAL FILE
 	if(file_exists($file)){
 		$seconds_to_cache = 43200;
