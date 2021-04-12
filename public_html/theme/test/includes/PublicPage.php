@@ -1,26 +1,9 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
-class PublicPage {
+class PublicPage extends PublicPageMaster {
 
-	private $rowcount; 
-	private $theme_url;
-
-	private static $header_defaults = array(
-		'title' => '',
-		'showheader' => TRUE,
-		'noindex' => FALSE,
-		'nofollow' => FALSE,
-	);
-
-	private static $footer_defaults = array(
-		'track' => TRUE,
-	);
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
@@ -32,362 +15,167 @@ class PublicPage {
 				),
 				$options));
 		echo PublicPage::BeginPage($header);
+	
 
-		?>
-		<p><?php echo $body; ?></p>
-		<?php
+		echo '<div class="container"><div class="vertical-space-20"></div><p>'.$body.'</p><div class="vertical-space-20"></div></div>';
+
+		
 		echo PublicPage::EndPage();
 		$page->public_footer();
 		exit;
 	}
 	
 	public static function BeginPage($title='', $options=array()) {
-		$output = '<div class="wrap"><article id="post-7249" class="post-7249 page type-page status-publish has-post-thumbnail hentry category-dana pmpro-has-access">';
+		$output = '';
 		if($title){
-			$output .= '<h1 class="entry-title">'.$title.'</h1>'; 
+			$output .= '
+
+							<div class="container"><div class="vertical-space-20"></div><h2 class="main-title text-center">'.$title.'</h2>';
+							if($options['subtitle']){
+								$output .= '<h6 class="sub-title after-title text-center">'.$options['subtitle'].'</h6>';
+							}
+							$output .= '</div><div class="vertical-space-70"></div>';
 		}
 		return $output;
 	}	
 
 	public static function EndPage($options=array()) {
-		$output = '</article></div>'; 
+		$output = '<div class="vertical-space-40"></div>'; 
 		return $output;
 	}	
 
-	public function __construct($secure=FALSE) {
-		$this->rowcount = 0;
-		$this->secure = $secure;
-		$this->server = $_SERVER['PHP_SELF'];
-		$this->remote_addr = $_SERVER['REMOTE_ADDR'];
-
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('force_https')){
-			header('Strict-Transport-Security: max-age=3153600');
-			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
-			//header("Content-Security-Policy-Report-Only: default-src https:");
-		}
-		header('X-Frame-Options: SAMEORIGIN');
-		header('X-Content-Type-Options: nosniff');
-		header('Referrer-Policy: unsafe-url');
-
-		$this->debug = $settings->get_setting('debug');
-		if ($this->debug == 1) {
-			$secure = FALSE;
-			$this->secure = FALSE;
-		}
-		
-		$this->theme_url = LibraryFunctions::get_theme_path('web');
-
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('force_https')){
-			// If secure is on, they are not HTTPS and on port 80, forward them to SSL
-			/*
-			if ($secure && $_SERVER["SERVER_PORT"] == 80) {
-				header("HTTP/1.1 301 Moved Permanently");
-				header("Location: https://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-				exit;
-			} else if (!$secure && $_SERVER["SERVER_PORT"] == 443) {
-				// Likewise if they aren't secure and reading an SSLed page, redirect them to non-SSL
-				header("HTTP/1.1 301 Moved Permanently");
-				header("Location: http://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-				exit;
-			}
-			*/
-		}
-
-		$this->cdn = $settings->get_setting($this->secure ? 'CDN_SSL' : 'CDN');
-		$this->protocol = $this->secure ? 'https://' : 'http://';
-		$this->secure_prefix = ($this->debug == 0) ? $settings->get_setting('webDir_SSL') : $settings->get_setting('webDir');
-
-		$session = SessionControl::get_instance();
-		$this->location_data = $session->get_location_data();
-
-		// This is for apache specific logging, so we have to check to make sure we are
-		// serving off apache before we can set the userid.
-		if (function_exists('apache_note') && $session->get_user_id(TRUE)) {
-			apache_note('user_id', $session->get_user_id(TRUE));
-		}
-
-		if ($session->get_user_id()) {
-			$this->user = new User($session->get_user_id(), TRUE);
-		}
-
-	}
-
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
-		
-		
-
 		$settings = Globalvars::get_instance();
-		if($settings->get_setting('force_https')){
-			header('Strict-Transport-Security: max-age=3153600');
-		}
-		
 		$session = SessionControl::get_instance();
+		parent::public_header();
 
-		$site_title = $settings->get_setting('site_name');
-		if(isset($options['title']) && $options['title']){
-			$site_title = $options['title'] . ' - ' . $settings->get_setting('site_name');
-		}
-		
-		$site_description = $settings->get_setting('site_description');
-		if(isset($options['description']) & $options['description']){
-			$site_description = $options['description'];
-		}
-		
-		if(empty($options['noheader'])){
-			//TRACKING
-			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
-				if(!isset($options['is_404'])){
-					$options['is_404'] = 0;
-				}
-
-				$session->save_visitor_event(1, $options['is_404']);
-			}
-		}
-	
-		?>
-		<!DOCTYPE html>
-		<html lang="en-US" class="no-js no-svg">
-		<head>
+?>
+<!DOCTYPE html>
+<html lang="en">
+	<head>
 		<meta charset="utf-8">
-		<base href="/">
-		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<meta name="description" content="<?php echo $site_description; ?>">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width">
+		<meta name="description" content="<?php echo $settings->get_setting('site_description') ?>">
+        <meta name="keywords" content="">
 
-		<title><?php echo $site_title; ?></title>
-
-		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->theme_url; ?>/styles/integral_style1.css' type='text/css' media='all' />
-	
-		
-		
-		<link type="text/css" href="<?php echo $this->theme_url; ?>/styles/ui/jquery-ui-1.7.custom_5.css" rel="stylesheet" /> 
-	
-
-					<style class="et_heading_font">
-				h1, h2, h3, h4, h5, h6 {
-					font-family: 'Lora', Georgia, "Times New Roman", serif;				}
-				</style>
-							<style class="et_body_font">
-				body, input, textarea, select {
-					font-family: 'Lato', Helvetica, Arial, Lucida, sans-serif;				}
-				</style>
-							<style class="et_all_buttons_font">
-				.et_pb_button {
-					font-family: 'Lora', Georgia, "Times New Roman", serif;				}
-				</style>
-							<style class="et_primary_nav_font">
-				#main-header,
-				#et-top-navigation {
-					font-family: 'Lato', Helvetica, Arial, Lucida, sans-serif;				}
-					
-				.et_pb_button {
-					font-family: 'Lora', Georgia, "Times New Roman", serif;
-					font-size: 16px;
-					font-weight: bold;
-					font-style: italic;
-					text-transform: none;
-					text-decoration: none !important;	
-					padding: 0.3em 1em !important;					
-					border: 2px solid;
-					border-radius: 3px;
-					background: transparent;
-					line-height: 1.7em !important;
-					transition: all 0.2s;
-					display: inline-block;
-					color: #b62027 !important;
-				}
-				</style>
-			
-	
-
-
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
-		
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
-
-
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/theme.css" rel="stylesheet">	
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/site_styles.css" rel="stylesheet">
-		<!-- Fonts/Icons -->
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
-
-		<!--<script src="<?php echo $this->theme_url; ?>/scripts/df983.js"></script> -->
-		
-		<!-- jQuery 3.2.1 <script src="/admin/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
-		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
-		<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
-		
-		<!-- jQuery validate -->
-		<script type="text/javascript" src="/theme/integralzen/scripts/js/jquery.validate-1.9.1.js"></script>				
-		
-
-		
-		<!--GDPR NOTICE  https://www.jqueryscript.net/other/GDPR-Cookie-Consent-Popup-Plugin.html-->
-		<script src="<?php echo $this->theme_url; ?>/scripts/GDPR/jquery.ihavecookies.js"></script>
-		
-		
-		
-		<script type="text/javascript">
-			//<![CDATA[
-
-			$(document).ready(function() {
-				
-					
-				$('#menu-hamburger-click').click(function(){
-					$('#menu-main-container').toggle('slow');
-				});
-
-				});
-			//]]>
-				</script>
-
-			<noscript><style>.woocommerce-product-gallery{ opacity: 1 !important; }</style></noscript>
-					<style id="twentyseventeen-custom-header-styles" type="text/css">
-						.site-title,
-				.site-description {
-					position: absolute;
-					clip: rect(1px, 1px, 1px, 1px);
-				}
-						</style>
-				<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-32x32.png" sizes="32x32" />
+		<title><?php echo $settings->get_setting('site_name') ?></title>
+		<!-- Favicon -->
+		<!--
+        <link href="../assets/images/favicon.png" rel="shortcut icon">
+		<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-32x32.png" sizes="32x32" />
 		<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-192x192.png" sizes="192x192" />
 		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />
-		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />
-
-
-		</head>	
-	<?php	
+		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
+		-->
+		<?php $this->global_includes_top(); ?>
+					
+	
+		<!--THIS TEMPLATE STYLES -->
+		<link rel="stylesheet" href="<?php echo $this->theme_url; ?>/css/font-awesome.min.css">
+		<link href="<?php echo $this->theme_url; ?>/css/bootstrap.min.css" rel="stylesheet" />
+		<link href="<?php echo $this->theme_url; ?>/css/owl.carousel.min.css" rel="stylesheet" />
+		<link href="<?php echo $this->theme_url; ?>/css/settings.css" rel="stylesheet" />
+		<link href="<?php echo $this->theme_url; ?>/css/jquery.fancybox.min.css" rel="stylesheet" />
+		<link href="<?php echo $this->theme_url; ?>/css/animate.css" rel="stylesheet" />
+		<!-- Default css -->
+		<link href="<?php echo $this->theme_url; ?>/css/style.css" rel="stylesheet" />
+		<!-- Theme css -->
+		<link href="https://fonts.googleapis.com/css?family=Karla:400,400i,700,700i" rel="stylesheet">
+		<link href="https://fonts.googleapis.com/css?family=Lusitana:400,700" rel="stylesheet">
+	
+		<?php	
 	if(empty($options['noheader'])){
 		if($_SESSION['permission'] == 10){
 			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/admin_debug.php');
 		}
-		?>		
-			
-			
-			<body class="home page-template page-template-front-page page-template-front-page-php page page-id-50 logged-in wp-custom-logo wp-embed-responsive twentyseventeen cookies-not-set pmpro-body-has-access woocommerce-no-js group-blog twentyseventeen-front-page page-one-column title-tagline-hidden colors-light">
-			<div id="page" class="site">
-				<a class="skip-link screen-reader-text" href="#content">Skip to content</a>
+		?>	
+	</head>
+	<body>
+		<!-- Start header - Second variation -->
+		<header class="v2">
+			<div class="top-bar">
+				<div class="container">
+					<!--<img src="images/logo.png" alt="Logo">-->
+					<h3 style="display:inline;">Xandy Liberato</h3>
 
-				<header id="masthead" class="site-header" role="banner">
-					<div class="wrap">
-						<div class="menu-login-container"><ul id="login-menu" class="menu"><li id="menu-item-1007809" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-1007809">
-						
-						<?php 
+					<div class="contact-info">
+					<!--
+						<div class="media">
+							<div class="media-left">
+								<i class="fa fa-phone" aria-hidden="true"></i>
+							</div>
+							<div class="media-body">
+								<h5>Call Us</h5>
+								<a href="#"> 1800-153-259 </a>
+							</div>
+						</div>
+						-->
+     <?php 
 						if ($session->get_user_id()){
-							echo '<a href="/profile/profile">My Profile</a> '; 
+							echo '<a href="/profile/profile">My Profile </a>&nbsp;'; 
 							if($_SESSION['permission'] >= 5){
-								echo '| <a href="/admin/admin_users">Admin</a> ';
+								echo '| <a href="/admin/admin_users">Admin </a> ';
 							}
 
 							$cart = $session->get_shopping_cart();
 							if($numitems = $cart->count_items()){
-								echo '| <a href="/cart">Cart ('. $numitems . ')</a> ';
+								echo '| <a href="/cart">Cart ('. $numitems . ') </a> ';
 							}
 							else{
 								//echo '<span class="cartcontents">Cart</span> ';
 							}
 
-							echo '| <a href="/logout">Log out</a>';
+							echo '| <a href="/logout">Log out </a>';
 
 						}
 						else{
-							echo '<a href="/login">Log in</a> | <a href="/register">Register</a>';
+							echo '<a href="/login">Log in </a> | <a href="/register">Register </a>';
 						}
 						
 						if($_SESSION['permission'] == 10){
-							echo ' | <a id="admintoggle" href="#">Debug</a>';				
+							echo ' | <a id="admintoggle" href="#">Debug </a>';				
 						}
-						echo '<br />Timezone: '.$session->get_timezone().' (<a href="/profile/account_edit">change</a>)';
+						if($session->get_timezone()){
+							echo '<br /><a href="/profile/account_edit">Timezone: '.$session->get_timezone().' (change)</a>';
+						}
 						?>
-						</li>
-			</ul></div>		</div>
-					<div class="header-wrap">
+					</div>
 
-					<div class="custom-header">
+				</div>
+			</div>
+			<nav class="navbar navbar-default menu-style-3">
+				<div class="container">
+					<!-- Brand and toggle get grouped for better mobile display -->
+					<div class="navbar-header">
+						<button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1" aria-expanded="false">
+							<span class="sr-only">Toggle navigation</span>
+							<span class="icon-bar"></span>
+							<span class="icon-bar"></span>
+							<span class="icon-bar"></span>
+						</button>
+					</div>
 
-					<div class="custom-header-media">
-								</div>
-
-				<div class="site-branding">
-				<div class="wrap">
-
-					<a href="/" class="custom-logo-link" rel="home"><img width="863" height="250" src="/theme/integralzen/images/cropped-IZ-Logo-4small.png" class="custom-logo" alt="Integral Zen" srcset="/theme/integralzen/images/cropped-IZ-Logo-4small.png 863w, /theme/integralzen/images/cropped-IZ-Logo-4small-300x87.png 300w, /theme/integralzen/images/cropped-IZ-Logo-4small-768x222.png 768w, /theme/integralzen/images/cropped-IZ-Logo-4small-610x177.png 610w, /theme/integralzen/images/cropped-IZ-Logo-4small-350x101.png 350w" sizes="100vw" /></a>
-					<div class="site-branding-text">
-										<h1 class="site-title"><a href="/" rel="home">Integral Zen</a></h1>
-						
-								</div><!-- .site-branding-text -->
-
-					
-				</div><!-- .wrap -->
-			</div><!-- .site-branding -->
-
-			</div><!-- .custom-header -->
-			
+					<!-- Collect the nav links, forms, and other content for toggling -->
+					<div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+						<ul class="nav navbar-nav">
+							<li><a href="/page/about">About Us</a></li>
+							<li>
+								<a href="/events">Classes</a>
+							</li>
+						</ul>
+					</div><!-- /.navbar-collapse -->
+				</div><!-- /.container-fluid -->
+			</nav>
+		</header>
+		<!-- End header section -->
 
 
-								<div class="navigation-top">
-							<div class="wrap">
-								<nav id="site-navigation" class="main-navigation" role="navigation" aria-label="Top Menu">
-										<div id="menu-hamburger" class="menu-hamburger" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-7351"><a id="menu-hamburger-click" href="#"><img src="/theme/integralzen/images/menu-64.png"></a></div>
-
-				<div class="menu-main-container" id="menu-main-container"><ul id="top-menu" class="menu"><li id="menu-item-7351" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-7351"><a href="/page/about-integral-zen">What is Integral Zen?<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
-			<ul class="sub-menu">
-				<!--<li id="menu-item-507620" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-507620"><a href="/what-is-integral-zen/about-integral-zen/">About Integral Zen</a></li>-->
-				<li id="menu-item-98" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-98"><a href="/page/about-integral-zen">About Integral Zen</a></li>
-				<!--<li id="menu-item-7375" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-7375"><a href="/what-is-integral-zen/mission/">Mission</a></li>-->
-				<li id="menu-item-124" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-124"><a href="/page/integral-zen-lineage">Lineage and Mission</a></li>
-				<li id="menu-item-123" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-123"><a href="/page/teachers-priests">Roshi, Teachers, and Priests</a></li>
-				<li id="menu-item-1008108" class="menu-item menu-item-type-post_type_archive menu-item-object-sanghas menu-item-1008108"><a href="/page/dharma-community">Dharma Community</a></li>
-			</ul>
-			</li>
-			<li id="menu-item-7366" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-7366"><a href="/page/recommended-reading">Resources<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
-			<ul class="sub-menu">
-			<li id="menu-item-5486" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-5486"><a href="/page/recommended-reading">Recommended Reading</a></li>
-				<li id="menu-item-7048" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-7048"><a href="/page/downloads">Publications</a></li>
-				<li id="menu-item-4639" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-4639"><a href="/page/media-library">Videos</a></li>
-				<li id="menu-item-7162" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-7162"><a href="/newsletter">Newsletter</a></li>
-				
-			</ul>
-			</li>
-			<li id="menu-item-7353" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-7353"><a href="/events">Retreats and Courses<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
-
-			</li>
-			<li id="menu-item-4346" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-4346"><a href="/page/schedule-meeting">Schedule a Meeting<svg class="icon icon-angle-down" aria-hidden="true" role="img"> <use href="#icon-angle-down" xlink:href="#icon-angle-down"></use> </svg></a>
-
-			</li>
-			<li id="menu-item-7357" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-7357"><a href="/dana">Donations</a>
-			<!--
-			<ul class="sub-menu">
-				<li id="menu-item-7254" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-7254"><a href="/contribute/dana/">Donations (Dana)</a></li>
-				<li id="menu-item-370" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-370"><a href="/volunteer_form">Volunteer</a></li>
-			</ul>
-			-->
-			</li>
-			</ul></div>
-				</nav><!-- #site-navigation -->
-							</div><!-- .wrap -->
-						</div><!-- .navigation-top -->
-						
-							</div><!-- .header-wrap -->
-				</header><!-- #masthead -->
+		
 	<?php } //end if noheader ?>
 
-					
-			
-			<div class="site-content-contain">
-				<div id="content" class="site-content">
-						
-		 
-		<div class="wrap">
-			<div id="primary" class="content-area">
-				<main id="main" class="site-main" role="main">
-
+		
 	
 		<?php
 	}
@@ -396,118 +184,167 @@ class PublicPage {
 		$session = SessionControl::get_instance();
 		$session->clear_clearable_messages();
 	
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('force_https')){
 		?>
-			<!--Make sure https-->
-			<script type="text/javascript">
-			if (location.protocol !== 'https:') {
-				location.replace(`https:${location.href.substring(location.protocol.length)}`);
-			}
-			</script>
-		<?php
-		} 
-		?>
-		<script type="text/javascript">
-			$('body').ihavecookies({
-			  title: "Cookies & Privacy",
-			  message: "This website uses cookies.",
-			  link: "/privacy-policy",
-			  delay: 2000,
-			  expires: 180, // days
-			  fixedCookieTypeLabel: 'These are cookies that are essential for the website to work correctly.',
-			  cookieTypesTitle: 'Cookie types',
-			  advancedBtnLabel: 'More info',
-			  cookieTypes: [
-
-			],
-			});
-
-			</script>			
-		
-		
-		
-		
-				</main><!-- #main -->
-			</div><!-- #primary -->
-		</div><!-- .wrap -->
-
-
-				</div><!-- #content -->
-
-		<!-- ***** JAVASCRIPTS ***** -->
-		<script src="<?php echo $this->theme_url; ?>/includes/assets/js/polyfill.min.js?features=IntersectionObserver"></script>
-		<script src="<?php echo $this->theme_url; ?>/includes/assets/plugins/plugins.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/includes/assets/js/functions.js"></script>
-		
-		<footer id="colophon" class="site-footer izfooter" role="contentinfo">
-		
-		<!--<script src="/theme/integralzen/uikit-3.4.2/js/uikit.min.js"></script>
-		<script src="/theme/integralzen/uikit-3.4.2/js/uikit-icons.min.js"></script> -->
-		
-			<div class="wrap">
-				<aside class="widget-area" role="complementary" aria-label="Footer">
-
-		
-						<div class="textwidget">
-						<p>
-						<a class="izfooter" href="mailto:info@integralzen.org">Contact: info@integralzen.org</a>&nbsp;&nbsp;
-						<a href="/privacy-policy/">Privacy Policy</a>&nbsp;&nbsp;
-						<a href="/sitemap">Sitemap</a>&nbsp;&nbsp;
-						<a href="https://www.facebook.com/IntegralZen">Facebook</a>&nbsp;&nbsp;
-						<a href="https://www.instagram.com/integralzen/">Instagram</a>&nbsp;&nbsp;
-						<a href="https://twitter.com/integralzen">Twitter</a></p>
+		<!-- start footer -->
+		<footer class="footer-copyright v2"> <!-- Footer variation-2 -->
+			<div class="background-footer-v2"><!-- First footer -->
+				<div class="container">
+					<div class="vertical-space-50"></div>
+					<div class="row">
+						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
+							<!--<img src="images/logo.png" alt="Logo">-->
+							<div class="vertical-space-20"></div>
 						</div>
+						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
+							<ul class="social-icons">
+								<li>
+									<a href="https://www.facebook.com/xandy.liberato">
+										<i class="fa fa-facebook" aria-hidden="true"></i>
+									</a>
+								</li>
+								<li>
+									<a href="https://www.instagram.com/xandyliberato/">
+										<i class="fa fa-instagram" aria-hidden="true"></i>
+									</a>
+								</li>
+								<li>
+									<a href="https://www.youtube.com/user/xliberato">
+										<i class="fa fa-youtube-play" aria-hidden="true"></i>
+									</a>
+								</li>
+							</ul> <!-- social-icons -->
+						</div>
+						<!--
+						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
+							<div class="vertical-space-10"></div>
+							<ul class="qucik-links">
+								<li><a href="/page/about">About</a></li>
+								<li><a href="/events">Classes</a></li>
+							</ul>
+							<div class="vertical-space-20"></div>
+						</div>
+						-->
+					</div>
+				</div>
+			</div>
+			<div class="container"> <!-- Second footer -->
+				<div class="vertical-space-50"></div>
+				<div class="row">
+				<!--
+					<div class="col-xs-12 col-sm-6 col-md-3">
+						<h4>Our Timing</h4>
+						<div class="vertical-space-40"></div>
+						<div class="vertical-space-10"></div>
+						<p><strong>Monday</strong> 9:00 am to 6:00 pm</p>
+						<p><strong>Tuesday</strong> 9:00 am to 6:00 pm</p>
+						<p><strong>Wensday</strong> 9:00 am to 6:00 pm</p>
+						<p><strong>Thursday</strong> 9:00 am to 6:00 pm</p>
+						<p><strong>Friday</strong> 9:00 am to 6:00 pm</p>
+						<p><strong>Saturday</strong> 9:00 am to 2:00 pm</p>
+						<p><strong>Sunday</strong> Off </p>
+					</div>-->
+					<div class="col-xs-12 col-sm-6 col-md-3">
+						<h4>Contact Us</h4>
+						<!--<div class="vertical-space-40"></div>-->
+						<div class="vertical-space-10"></div>
+						<ul class="footer-addres">
+							<li>
+								<i class="fa fa-map-marker" aria-hidden="true"></i>
+								Valencia, Spain
+							</li>
+							<li>
+								<i class="fa fa-envelope-o" aria-hidden="true"></i>
+								<a href="mailto:info@xandyliberato.com">info@xandyliberato.com</a>
+							</li>
+						</ul>
+					</div><!-- 
+					<div class="col-xs-12 col-sm-6 col-md-3">
+						<h4>Instagram</h4>
+						<div class="vertical-space-40"></div>
+						<div class="vertical-space-10"></div>
+
+						<ul class="instagram-list">
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>							
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
+							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>				
+						</ul>
+					</div>-->
+					<!--
+					<div class="col-xs-12 col-sm-6 col-md-3">
+						<h4>Send Inquiry</h4>
+						<div class="vertical-space-40"></div>
+						<div class="vertical-space-10"></div>
+						<form name="contact_form_2" method="post" action="functions.php">
+							<input type="text" id="home2_fname" name="home2_fname" placeholder="Full Name" required>
+							<input type="text" id="home2_email" name="home2_email" placeholder="Email" required>
+							<input type="text" id="home2_contact" name="home2_contact" placeholder="Contact Number" required>
+							<textarea id="home2_message" name="home2_message" required>Message*</textarea>
+							<input type="submit" name="Submit" value="Send Inquiry">
+						</form>
+						<div class="vertical-space-20"></div>
+					</div>
+					-->
+				</div>
+			</div>
+		</footer>
+		<!-- end footer -->
+		<!-- Modal box data -->
+		<div class="modal fade" id="videoModal" tabindex="-1" role="dialog">
+			<div class="modal-dialog modal-lg" role="document">
+				<div class="modal-content">
+					<div class="modal-body">
+						<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+						<video width="320" height="240" controls class="full-width">
+							<source src="video/357014656.mp4" type="video/mp4">
+							<source src="video/357014656.ogg" type="video/ogg">
+							Your browser does not support the video tag.
+						</video> 
+					</div>
+				</div>
+			</div>
+		</div>
+		<!-- End Modal box data -->
+		<!--<script src="js/jquery-2.1.4.min.js"></script>		-->
+		<script src="<?php echo $this->theme_url; ?>/js/wow.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/bootstrap.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/jquery.themepunch.tools.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/jquery.themepunch.revolution.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/owl.carousel.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/jquery.fancybox.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/isotope.pkgd.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/jquery.countdown.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/moment.min.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/jquery.touchSwipe.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/jquery.cookie.js"></script>
+		<script type="text/javascript" src="<?php echo $this->theme_url; ?>/js/jquery.rollingslider.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/js/custom.js"></script>
+		<!-- Default JS -->
+		<script> /* Start to Add data in Sechdule Section and table with Date and time wise */
+			jQuery(document).ready(function($) {
+
+				$('#demo').RollingSlider({
+					showArea:"#example",
+					prev:"#jprev",
+					next:"#jnext",
+					moveSpeed:300,
+					autoPlay:false
+				});
+			});
+		</script>
+	</body>
+</html>	
 		
 
-				</aside>
-			</div><!-- .wrap -->
-		</footer><!-- #colophon -->
-		</div><!-- .site-content-contain -->
-		</div><!-- #page -->
-		</body>
-		</html>
 		<?php
 	}
 
 
-
-
-	function tableheader($headers, $version="default"){
-		//version VARIABLE TOGGLES BETWEEN STYLESHEETS
-		echo "<table class='sortable admin_table' id='$version' cellspacing='0' summary=''>
-			<caption></caption>
-			<tr>";
-
-		foreach ($headers as $value) {
-			printf('<th scope="col" abbr="%s" class="bg">%s</th>', $value, $value);
-		}
-		echo '</tr>';
-	}
-
-	function disprow($dataarray){
-
-		echo '<tr>';
-
-		foreach ($dataarray as $value) {
-			if ($value == "") {
-				$value = "&nbsp";
-			}
-
-			if ($this->rowcount % 2 == 0) {
-				printf('<td class="light">%s</td>', $value);
-			} else {
-				printf('<td class="dark">%s</td>', $value);
-			}
-		}
-		echo "</tr>\n";
-		$this->rowcount++;
-	}
-
-	function endtable(){
-		$this->rowcount = 0;
-		echo '</table>';
-	}
 }
 
 ?>
