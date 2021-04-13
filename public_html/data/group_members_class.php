@@ -240,7 +240,7 @@ class MultiGroupMember extends SystemMultiBase {
 	private function _get_results($only_count=FALSE) { 
 		$where_clauses = array();
 		$bind_params = array();
-
+		
 		if (array_key_exists('group_id', $this->options)) {
 			$where_clauses[] = 'grm_grp_group_id = ?';
 			$bind_params[] = array($this->options['group_id'], PDO::PARAM_INT);
@@ -259,6 +259,10 @@ class MultiGroupMember extends SystemMultiBase {
 		if (array_key_exists('post_id', $this->options)) {
 			$where_clauses[] = 'grm_pst_post_id = ?';
 			$bind_params[] = array($this->options['post_id'], PDO::PARAM_INT);
+		}
+
+		if (array_key_exists('has_post_id', $this->options)) {
+			$where_clauses[] = 'grm_pst_post_id IS NOT NULL';
 		}		
 		
 		if ($where_clauses) {

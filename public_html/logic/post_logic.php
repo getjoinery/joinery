@@ -15,9 +15,24 @@
 	if(!$post || !$post->get('pst_is_published') || $post->get('pst_delete_time')){
 		require_once(LibraryFunctions::display_404_page());		
 	}
+	
+	//GET OTHER POSTS
+	/*
+	$numperpage = 3;
+	$page_offset = LibraryFunctions::fetch_variable('page_offset', 0, 0, '');
+	$page_sort = LibraryFunctions::fetch_variable('page_sort', 'post_id', 0, '');	
+	$page_direction = LibraryFunctions::fetch_variable('page_direction', 'DESC', 0, '');
+	$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE);
+	$posts = new MultiPost(
+		$search_criteria,
+		array($page_sort=>$page_direction),
+		$numperpage,
+		$page_offset);	
+	$numrecords = $posts->count_all();	
+	$posts->load();	
+	*/
 
 	$session = SessionControl::get_instance();
-	$session->set_return();
 	
 	if($_POST){
 		
