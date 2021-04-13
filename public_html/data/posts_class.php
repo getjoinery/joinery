@@ -99,7 +99,7 @@ class Post extends SystemBase {
 			return $this->get('pst_link');
 		}
 		
-	}	
+	}		
 	
 	function get_tags($return_type = 'name'){ 
 		$tags = array();
@@ -127,6 +127,7 @@ class Post extends SystemBase {
 		}
 		
 		$session = SessionControl::get_instance();
+
 		//OLD TAGS
 		$post_tag_ids = $this->get_tags('id');
 		foreach ($post_tag_ids as $post_tag_id){
@@ -378,6 +379,48 @@ class MultiPost extends SystemMultiBase {
 
 	}
 
+	static function get_all_tags($return_type = 'name'){ 
+		$tags = array();
+		$group_members = new MultiGroupMember(
+			array('has_post_id' => TRUE),  //SEARCH CRITERIA
+		);
+		$group_members->load();
+
+		foreach ($group_members as $group_member){
+			$group = new Group($group_member->get('grm_grp_group_id'), TRUE);
+			if($return_type == 'name'){
+				$tags[] = $group->get('grp_name');
+			}
+			else{
+				$tags[] = $group->key;
+			}
+		}	
+		return $tags;
+	}
+	
+	static function get_posts_for_tag($tag, $numperpage=NULL, $page_offset=NULL){ 
+		$group = Group::get_by_name($tag);
+		if(!$group){
+			return false;
+		}
+		
+		$group_members = new MultiGroupMember(
+			array('group_id' => $group->key),  //SEARCH CRITERIA
+			NULL,
+			$numperpage,
+			$page_offset
+		);
+		$group_members->load();
+
+		$posts = new MultiPost;
+		foreach ($group_members as $group_member){
+			$post = new Post($group_member->get('grm_pst_post_id'), TRUE);
+			$posts->add($post);
+		}	
+
+		return $posts;
+	}	
+
 	private function _get_results($only_count=FALSE) { 
 		$where_clauses = array();
 		$bind_params = array();
@@ -398,8 +441,7 @@ class MultiPost extends SystemMultiBase {
 		
 		if (array_key_exists('deleted', $this->options)) {
 			$where_clauses[] = 'pst_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-				
+		}		
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';

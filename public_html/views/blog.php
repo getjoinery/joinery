@@ -12,7 +12,7 @@
 	);
 	$page->public_header($hoptions); 
 	
-	echo PublicPage::BeginPage('Blog');		
+	echo PublicPage::BeginPage($title);		
 ?>
 
 
@@ -93,7 +93,8 @@
 
 					<!-- Blog Sidebar -->
 					<div class="col-12 col-lg-4 sidebar-wrapper">
-						<!-- Sidebar box 1 - About me -->
+						<!-- Sidebar box 1 - About me --> 
+						<!--
 						<div class="sidebar-box text-center">
 							<h6 class="font-small font-weight-normal uppercase">About Me</h6>
 							<img class="img-circle-md margin-bottom-20" src="../assets/images/img-circle-medium.jpg" alt="">
@@ -105,7 +106,9 @@
 								<li><a href="#"><i class="fab fa-instagram"></i></a></li>
 							</ul>
 						</div>
+						-->
 						<!-- Sidebar box 2 - Categories -->
+						<!--
 						<div class="sidebar-box">
 							<h6 class="font-small font-weight-normal uppercase">Categories</h6>
 							<ul class="list-category">
@@ -116,10 +119,11 @@
 								<li><a href="#">Travel <span>15</span></a></li>
 							</ul>
 						</div>
+						-->
 						<!-- Sidebar box 3 - Popular Posts -->
+						<!--
 						<div class="sidebar-box">
 							<h6 class="font-small font-weight-normal uppercase">Popular Posts</h6>
-							<!-- Popular post 1 -->
 							<div class="popular-post">
 								<a href="#">
 									<img src="../assets/images/img-circle-small.jpg" alt="">
@@ -129,7 +133,6 @@
 									<span>January 07, 2018</span>
 								</div>
 							</div>
-							<!-- Popular post 2 -->
 							<div class="popular-post">
 								<a href="#">
 									<img src="../assets/images/img-circle-small.jpg" alt="">
@@ -139,7 +142,6 @@
 									<span>January 07, 2018</span>
 								</div>
 							</div>
-							<!-- Popular post 3 -->
 							<div class="popular-post">
 								<a href="#">
 									<img src="../assets/images/img-circle-small.jpg" alt="">
@@ -150,33 +152,29 @@
 								</div>
 							</div>
 						</div>
+						-->
 						<!-- Sidebar box 4 - Banner Image -->
+						<!--
 						<div class="margin-bottom-20">
 							<a href="#">
 								<img src="../assets/images/col-3.jpg" alt="">
 							</a>
 						</div>
+						-->
 						<!-- Sidebar box 5 - Tags -->
 						<div class="sidebar-box">
 							<h6 class="font-small font-weight-normal uppercase">Tags</h6>
 							<ul class="tags">
-								<li><a href="#">Art</a></li>
-								<li><a href="#">Design</a></li>
-								<li><a href="#">Event</a></li>
-								<li><a href="#">Fashion</a></li>
-								<li><a href="#">Food</a></li>
-								<li><a href="#">Inspiration</a></li>
-								<li><a href="#">Movie</a></li>
-								<li><a href="#">Music</a></li>
-								<li><a href="#">Nature</a></li>
-								<li><a href="#">Office</a></li>
-								<li><a href="#">Painting</a></li>
-								<li><a href="#">Photography</a></li>
-								<li><a href="#">People</a></li>
-								<li><a href="#">Work</a></li>
+								<?php
+								$post_tags = MultiPost::get_all_tags();
+								foreach ($post_tags as $tag){
+									echo '<li><a href="/blog/tag/'.urlencode($tag).'">'.$tag.'</a></li>';
+								} 
+								?>
 							</ul>
 						</div>
 						<!-- Sidebar box 6 - Facebook Like box -->
+						<!--
 						<div class="sidebar-box text-center">
 							<h6 class="font-small font-weight-normal uppercase">Follow on</h6>
 							<ul class="list-inline">
@@ -187,6 +185,7 @@
 								<li><a href="#"><i class="fab fa-instagram"></i></a></li>
 							</ul>
 						</div>
+						-->
 					</div>
 					<!-- end Blog Sidebar -->
 				</div><!-- end row -->
