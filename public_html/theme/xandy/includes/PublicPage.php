@@ -17,7 +17,7 @@ class PublicPage extends PublicPageMaster {
 		echo PublicPage::BeginPage($header);
 	
 
-		echo '<p>'.$body.'</p>';
+		echo '<div class="container"><div class="vertical-space-20"></div><p>'.$body.'</p><div class="vertical-space-20"></div></div>';
 
 		
 		echo PublicPage::EndPage();
@@ -30,19 +30,17 @@ class PublicPage extends PublicPageMaster {
 		if($title){
 			$output .= '
 
-							<h2>'.$title.'</h2>';
+							<div class="container"><div class="vertical-space-20"></div><h2 class="main-title text-center">'.$title.'</h2>';
 							if($options['subtitle']){
-								$output .= '<p>'.$options['subtitle'].'</p>';
+								$output .= '<h6 class="sub-title after-title text-center">'.$options['subtitle'].'</h6>';
 							}
-							$output .= '
-
-		';
+							$output .= '</div><div class="vertical-space-70"></div>';
 		}
 		return $output;
 	}	
 
 	public static function EndPage($options=array()) {
-		$output = ''; 
+		$output = '<div class="vertical-space-40"></div>'; 
 		return $output;
 	}	
 
@@ -99,7 +97,8 @@ class PublicPage extends PublicPageMaster {
 		<header class="v2">
 			<div class="top-bar">
 				<div class="container">
-					<img src="images/logo.png" alt="Logo">
+					<!--<img src="images/logo.png" alt="Logo">-->
+					<h3 style="display:inline;">Xandy Liberato</h3>
 
 					<div class="contact-info">
 					<!--
@@ -115,30 +114,32 @@ class PublicPage extends PublicPageMaster {
 						-->
      <?php 
 						if ($session->get_user_id()){
-							echo '<a href="/profile/profile">My Profile</a> '; 
+							echo '<a href="/profile/profile">My Profile </a>&nbsp;'; 
 							if($_SESSION['permission'] >= 5){
-								echo '| <a href="/admin/admin_users">Admin</a> ';
+								echo '| <a href="/admin/admin_users">Admin </a> ';
 							}
 
 							$cart = $session->get_shopping_cart();
 							if($numitems = $cart->count_items()){
-								echo '| <a href="/cart">Cart ('. $numitems . ')</a> ';
+								echo '| <a href="/cart">Cart ('. $numitems . ') </a> ';
 							}
 							else{
 								//echo '<span class="cartcontents">Cart</span> ';
 							}
 
-							echo '| <a href="/logout">Log out</a>';
+							echo '| <a href="/logout">Log out </a>';
 
 						}
 						else{
-							echo '<a href="/login">Log in</a> | <a href="/register">Register</a>';
+							echo '<a href="/login">Log in </a> | <a href="/register">Register </a>';
 						}
 						
 						if($_SESSION['permission'] == 10){
-							echo ' | <a id="admintoggle" href="#">Debug</a>';				
+							echo ' | <a id="admintoggle" href="#">Debug </a>';				
 						}
-						echo '<br />Timezone: '.$session->get_timezone().' (<a href="/profile/account_edit">change</a>)';
+						if($session->get_timezone()){
+							echo '<br /><a href="/profile/account_edit">Timezone: '.$session->get_timezone().' (change)</a>';
+						}
 						?>
 					</div>
 
@@ -159,14 +160,10 @@ class PublicPage extends PublicPageMaster {
 					<!-- Collect the nav links, forms, and other content for toggling -->
 					<div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
 						<ul class="nav navbar-nav">
-							<li><a href="/about">About Us</a></li>
+							<li><a href="/page/about">About Us</a></li>
 							<li>
 								<a href="/events">Classes</a>
 							</li>
-							<li>
-								<a href="/blog">Blog</a>
-							</li>
-							<li><a href="/contact">Contact Us</a></li>
 						</ul>
 					</div><!-- /.navbar-collapse -->
 				</div><!-- /.container-fluid -->
@@ -195,57 +192,45 @@ class PublicPage extends PublicPageMaster {
 					<div class="vertical-space-50"></div>
 					<div class="row">
 						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
-							<img src="images/logo.png" alt="Logo">
+							<!--<img src="images/logo.png" alt="Logo">-->
 							<div class="vertical-space-20"></div>
 						</div>
 						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
 							<ul class="social-icons">
 								<li>
-									<a href="#">
+									<a href="https://www.facebook.com/xandy.liberato">
 										<i class="fa fa-facebook" aria-hidden="true"></i>
 									</a>
 								</li>
 								<li>
-									<a href="#">
-										<i class="fa fa-twitter" aria-hidden="true"></i>
+									<a href="https://www.instagram.com/xandyliberato/">
+										<i class="fa fa-instagram" aria-hidden="true"></i>
 									</a>
 								</li>
 								<li>
-									<a href="#">
-										<i class="fa fa-linkedin" aria-hidden="true"></i>
-									</a>
-								</li>
-								<li>
-									<a href="#">
-										<i class="fa fa-google-plus" aria-hidden="true"></i>
-									</a>
-								</li>
-								<li>
-									<a href="#">
+									<a href="https://www.youtube.com/user/xliberato">
 										<i class="fa fa-youtube-play" aria-hidden="true"></i>
 									</a>
 								</li>
 							</ul> <!-- social-icons -->
 						</div>
+						<!--
 						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
 							<div class="vertical-space-10"></div>
 							<ul class="qucik-links">
-								<li><a href="index.html">Home</a></li>
-								<li><a href="about-us.html">About</a></li>
-								<li><a href="class.html">Class</a></li>
-								<li><a href="event.html">Event</a></li>
-								<li><a href="trainer.html">Agent</a></li>
-								<li><a href="blog.html">Blog</a></li>
-								<li><a href="contact-us.html">Contact Us</a></li>
+								<li><a href="/page/about">About</a></li>
+								<li><a href="/events">Classes</a></li>
 							</ul>
 							<div class="vertical-space-20"></div>
 						</div>
+						-->
 					</div>
 				</div>
 			</div>
 			<div class="container"> <!-- Second footer -->
 				<div class="vertical-space-50"></div>
 				<div class="row">
+				<!--
 					<div class="col-xs-12 col-sm-6 col-md-3">
 						<h4>Our Timing</h4>
 						<div class="vertical-space-40"></div>
@@ -257,32 +242,22 @@ class PublicPage extends PublicPageMaster {
 						<p><strong>Friday</strong> 9:00 am to 6:00 pm</p>
 						<p><strong>Saturday</strong> 9:00 am to 2:00 pm</p>
 						<p><strong>Sunday</strong> Off </p>
-					</div><!-- One -->
+					</div>-->
 					<div class="col-xs-12 col-sm-6 col-md-3">
-						<h4>Our Contact</h4>
-						<div class="vertical-space-40"></div>
+						<h4>Contact Us</h4>
+						<!--<div class="vertical-space-40"></div>-->
 						<div class="vertical-space-10"></div>
 						<ul class="footer-addres">
 							<li>
 								<i class="fa fa-map-marker" aria-hidden="true"></i>
-								Address Section Here,<br/>
-								123, Near Shammer Lake,<br/>
-								NY - 10001.
-							</li>
-							<li>	
-								<i class="fa fa-phone" aria-hidden="true"></i>
-								1800-153-259
+								Valencia, Spain
 							</li>
 							<li>
 								<i class="fa fa-envelope-o" aria-hidden="true"></i>
-								<a href="#">john@DreamHealth.com</a>
-							</li>
-							<li>
-								<i class="fa fa-skype" aria-hidden="true"></i>
-								<a href="#">john.DreamHealth</a>
+								<a href="mailto:info@xandyliberato.com">info@xandyliberato.com</a>
 							</li>
 						</ul>
-					</div><!-- Two -->
+					</div><!-- 
 					<div class="col-xs-12 col-sm-6 col-md-3">
 						<h4>Instagram</h4>
 						<div class="vertical-space-40"></div>
@@ -299,7 +274,8 @@ class PublicPage extends PublicPageMaster {
 							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
 							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>				
 						</ul>
-					</div><!-- Three -->
+					</div>-->
+					<!--
 					<div class="col-xs-12 col-sm-6 col-md-3">
 						<h4>Send Inquiry</h4>
 						<div class="vertical-space-40"></div>
@@ -312,7 +288,8 @@ class PublicPage extends PublicPageMaster {
 							<input type="submit" name="Submit" value="Send Inquiry">
 						</form>
 						<div class="vertical-space-20"></div>
-					</div><!-- Four -->
+					</div>
+					-->
 				</div>
 			</div>
 		</footer>

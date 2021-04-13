@@ -5,10 +5,8 @@
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
+	require_once (LibraryFunctions::get_logic_file_path('events_logic.php'));
 
-	//$settings = Globalvars::get_instance();
-	//$site_template = $settings->get_setting('site_template');
-	//include_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/logic/fundraising_thermometer.php');
 
 	$session = SessionControl::get_instance();
 
@@ -24,21 +22,11 @@
 ?>
 
 
-
-
-		
-		<!-- Start Banner / Slider section -->
 		<section id="nexa-banner-style-7" class="nexa-banner-travel">
 	      <div id="carousel-testmonial-travel-banner" class="carousel slide" data-ride="carousel">
-	         <!-- Indicators -->
-	         <ol class="carousel-indicators">
-	            <li data-target="#carousel-testmonial-travel-banner" data-slide-to="0" class="active"></li>
-	            <li data-target="#carousel-testmonial-travel-banner" data-slide-to="1"></li>
-	            <li data-target="#carousel-testmonial-travel-banner" data-slide-to="2"></li>
-	         </ol>
-	         <!-- Wrapper for slides -->
+	         
 	         <div class="carousel-inner" role="listbox">
-	            <div class="item active"><!-- Item-1-Starting -->
+	            <div class="item active">
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
@@ -50,8 +38,39 @@
 	                     </div>
 	                  </div>
 	               </div>
-	            </div><!-- item-ended -->
-	            <div class="item"><!-- Item-1-Starting -->
+	            </div>
+	          
+	         </div>
+	      </div>
+	   </section>
+
+		
+		<!-- Start Banner / Slider section -->
+		<!--
+		<section id="nexa-banner-style-7" class="nexa-banner-travel">
+	      <div id="carousel-testmonial-travel-banner" class="carousel slide" data-ride="carousel">
+	       
+	         <ol class="carousel-indicators">
+	            <li data-target="#carousel-testmonial-travel-banner" data-slide-to="0" class="active"></li>
+	            <li data-target="#carousel-testmonial-travel-banner" data-slide-to="1"></li>
+	            <li data-target="#carousel-testmonial-travel-banner" data-slide-to="2"></li>
+	         </ol>
+	         
+	         <div class="carousel-inner" role="listbox">
+	            <div class="item active">
+	               <div class="row">
+	                  <div class="banner-box">
+	                     <div class="banner-photo">
+	                        <img src="images/new/home-var3/banner.png" alt="reviewer-img" class="img-responsive">
+	                     </div>
+	                     <div class="banner-info">
+	                        <h1>Meditation</h1>
+	                        <h2>Prepare for your best yoga Meditation</h2>
+	                     </div>
+	                  </div>
+	               </div>
+	            </div>
+	            <div class="item">
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
@@ -63,8 +82,8 @@
 	                     </div>
 	                  </div>
 	               </div>
-	            </div><!-- item-ended -->
-	            <div class="item"><!-- Item-1-Starting -->
+	            </div>
+	            <div class="item">
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
@@ -76,25 +95,27 @@
 	                     </div>
 	                  </div>
 	               </div>
-	            </div><!-- item-ended -->
-	         </div><!-- end-of-carousel-inner -->
-	      </div><!-- end-of-carousel -->
+	            </div>
+	         </div>
+	      </div>
 	      <div class="scroll-btn-banner">
 	         <a href="#"><i class="fa fa-angle-down" aria-hidden="true"></i></a>
 	       </div>
 	   </section>
+	   -->
 	   <!-- end-banner-section -->
 	   <!-- Start about section -->
 		<section class="about-section">
 			<div class="about-section-inner">
 				<div class="vertical-space-80"></div>
 				<div class="container">
-					<h2 class="main-title text-center">About DreamHealth</h2>
-					<h6 class="sub-title after-title text-center">What Is DreamHealth?</h6>
+					<h2 class="main-title text-center">About Xandy Liberato</h2>
+					<h6 class="sub-title after-title text-center">Test</h6>
 					<div class="vertical-space-70"></div>
 					<p class="text-center">
 						Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla. Maecenas volutpat fermentum ante. Sed nibh metus, mollis a dolor ut, feugiat fringilla nunc. Donec consequat pretium nunc, vel feugiat purus cursus a. Fusce eleifend luctus volutpat. Praesent mi massa, commodo at neque in, ultricies tempor quam. Donec vel magna in nibh sollicitudin eleifend a in erat. Vivamus elementum libero ac mattis condimentum. 
 					</p>
+					<!--
 					<div class="vertical-space-80"></div>
 					<div class="row yoga-about-benifits v2">
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
@@ -119,6 +140,7 @@
 							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
 						</div>
 					</div>
+					-->
 				</div>
 				<div class="vertical-space-80"></div>
 			</div>
@@ -132,71 +154,59 @@
 				<h6 class="sub-title after-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0.3s">May Help You?</h6>
 				<div class="vertical-space-80"></div>
 				<div class="row">
+					<?php
+					$numdisplayed = 0;
+					foreach ($events as $event){
+						$now = LibraryFunctions::get_current_time_obj('UTC');
+						$event_time = LibraryFunctions::get_time_obj($event->get('evt_start_time'), 'UTC');
+						$numdisplayed++;
+						if($numdisplayed == 3){
+							break;
+						}
+						?>
 					<div class="col-xs-12 col-sm-4 col-md-4">
 						<div class="class-container">
-							<div class="class-image-container">
-								<img src="images/new/home-var3/classes.png" class="full-width" alt="full-width">	
+							<div class="class-image-container">	
 								<div class="image-overlay"></div>
-								<img src="images/new/home-var3/classes-inner.png" alt="trainer" class="trainer-image s3">
-								<div class="trainer-name">
-									<span>Trainer,</span>
-									<p>Kim Doe</p>
-								</div>
+										<?php
+										if($pic = $event->get_picture_link('small')){
+											echo '<img class="full-width" src="'.$pic.'" alt="">';
+										}
+										?>
+
 							</div>
 							<div class="class-detail background-white">
-								<a href="class-detail.html"><h2 class="font-blue class-title">Pranayama Class</h2></a>
-								<span>19, Mar 2017</span>
-								<span class="pull-right">10.00 AM TO 11.00 AM</span>
+								<a href="class-detail.html"><h2 class="font-blue class-title"><?php echo $event->get('evt_name'); ?></h2></a>
+											<?php
+											if($event->get('evt_start_time') && $event_time > $now){				
+												echo '<span>'.$event->get_event_start_time($tz, 'M'). ' ' . $event->get_event_start_time($tz, 'd').'</span>'; 				
+											}
+											else if($next_session = $event->get_next_session()){
+												echo '<span>'.$next_session->get_start_time($tz, 'M'). ' ' . $next_session->get_start_time($tz, 'd').'</span>'; 
+											
+											}					
+											?>								
+								<!--<span>19, Mar 2017</span>
+								<span class="pull-right">10.00 AM TO 11.00 AM</span>-->
 							</div>
 						</div>
 					</div>
-					<div class="col-xs-12 col-sm-4 col-md-4">
-						<div class="class-container">
-							<div class="class-image-container">
-								<img src="images/new/home-var3/classes.png" class="full-width" alt="full-width">	
-								<div class="image-overlay"></div>
-								<img src="images/new/home-var3/classes-inner.png" alt="trainer" class="trainer-image s3">
-								<div class="trainer-name">
-									<span>Trainer,</span>
-									<p>Sunny Franko</p>
-								</div>
-							</div>
-							<div class="class-detail background-white">
-								<a href="class-detail.html"><h2 class="font-blue class-title">Yoga Rahasya Class</h2></a>
-								<span>20, Oct 2017</span>
-								<span class="pull-right">09.00 AM TO 10.00 AM</span>
-							</div>
-						</div>
-					</div>
-					<div class="col-xs-12 col-sm-4 col-md-4">
-						<div class="class-container">
-							<div class="class-image-container">
-								<img src="images/new/home-var3/classes.png" class="full-width" alt="full-width">	
-								<div class="image-overlay"></div>
-								<img src="images/new/home-var3/classes-inner.png" alt="trainer" class="trainer-image s3">
-								<div class="trainer-name">
-									<span>Trainer,</span>
-									<p>Mark Ketty</p>
-								</div>
-							</div>
-							<div class="class-detail background-white">
-								<a href="class-detail.html"><h2 class="font-blue class-title">Vinyasa Flow Class</h2></a>
-								<span>10, Dec 2017</span>
-								<span class="pull-right">12.00 AM TO 02.00 AM</span>
-							</div>
-						</div>
-					</div>
+					<?php
+					}
+					?>
 				</div>
 				<div class="vertical-space-40"></div>
 				<div class="text-center">
-					<a href="class.html" class="view-more">View More <i class="fa fa-fighter-jet" aria-hidden="true"></i>
+					<a href="/events" class="view-more">View More <i class="fa fa-fighter-jet" aria-hidden="true"></i>
 					</a>
 				</div>
 			</div>
 			<div class="vertical-space-60"></div>
 		</section>
 		<!-- End classes section -->
+		
 		<!-- start Register section with parallex effects -->
+		<!--
 		<section class="yoga-section">
 			<div class="background-transperant-black-medium">
 				<div class="vertical-space-50"></div>
@@ -220,9 +230,11 @@
 				<div class="vertical-space-80"></div>
 			</div>
 		</section>
+		-->
 		<!-- End register section -->
 
 		<!-- Start photo gallery section -->
+		<!--
 		<section class="background-light-grey">
 			<div class="vertical-space-80"></div>
 			<div class="container">
@@ -282,8 +294,10 @@
 			</div>
 			<div class="vertical-space-80"></div>
 		</section>
+		-->
 		<!-- End photo gallery section -->
 		<!-- Start review section -->
+		<!--
 		<section class="review-section">
 			<div class="background-transperant-black-medium">
 				<div class="vertical-space-60"></div>
@@ -395,7 +409,7 @@
 										</div>
 									</div>
 								</div>
-								<!-- end -->
+								
 							</div>
 						</div>
 					</div>
@@ -404,8 +418,10 @@
 				<div class="background-transperant-black-medium"></div>
 			</div>
 		</section>
+		-->
 		<!-- End reviews section -->
 		<!-- Start team section -->
+		<!--
 		<section class="background-white">
 			<div class="vertical-space-60"></div>
 			<div class="container">
@@ -452,7 +468,7 @@
 												<i class="fa fa-youtube-play" aria-hidden="true"></i>
 											</a>
 										</li>
-									</ul> <!-- social-icons -->
+									</ul> 
 								</div>
 							</div>
 						</div>
@@ -496,7 +512,7 @@
 												<i class="fa fa-youtube-play" aria-hidden="true"></i>
 											</a>
 										</li>
-									</ul> <!-- social-icons -->
+									</ul> 
 								</div>
 							</div>
 						</div>
@@ -540,7 +556,7 @@
 												<i class="fa fa-youtube-play" aria-hidden="true"></i>
 											</a>
 										</li>
-									</ul> <!-- social-icons -->
+									</ul> 
 								</div>
 							</div>
 						</div>						
@@ -549,8 +565,10 @@
 				<div class="vertical-space-80"></div>
 			</div>
 		</section>
+		<!--
 		<!-- End Team section -->
 		<!-- Start blog section -->
+		<!--
 		<section class="background-light-grey">
 			<div class="vertical-space-60"></div>
 			<div class="container">
@@ -601,102 +619,8 @@
 			</div>
 			<div class="vertical-space-60"></div>
 		</section>
+		-->
 		<!-- End blog section -->
-
-
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	<div class="entry-content">
-		
-
-
-		
-		<div style="border: 1px solid rgba(211,211,211,1); margin-bottom: 20px; padding: 20px;">
-		<?php 
-		
-		$page_content = new PageContent(1, TRUE);
-		if($page_content->get('pac_is_published')){
-			echo $page_content->get_filled_content(); 
-		}
-		?>
-		<!--
-		<h1 class="cta-title">The Whole Spectrum of Shadows Self-paced Course</h1>		
-<img style="float:left; margin-right:20px;" src="/uploads/small/INTEGRAL_ZEN_Shadow_Webinar_Self_Paced-2_skwsetni.png">				
-
-
-<p>A self-paced version of our live "Whole Spectrum of Shadows - Level 1" course. Topics covered include Integral Theory fundamentals: levels, states, quadrants, lines, and types...and how they interact with shadows and trauma.</p>
-
-<p>This online course is offered on a free/donation basis.</p>
-							
-								<br /><a class="et_pb_button" href="/event/37/The-Whole-Spectrum-of-Shadows-Self-paced-Course-Level-1">Read more</a>
-				 -->					
-	<div style="clear:both;">&nbsp;</div>
-	</div><!-- .entry-content -->
-
-	
-
-	
- 
-
-
-
-
-
-
-									<ul class="home-ctas">
-
-
-
-												<li class="single-cta">
-														<?php 
-		$page_content = new PageContent(2, TRUE);
-		if($page_content->get('pac_is_published')){
-			echo $page_content->get_filled_content(); 
-		}
-		?>
-
-							
-						</li>
-						
-					
-						
-						
-											<li class="single-cta">
-											<?php
-													$page_content = new PageContent(3, TRUE);
-		if($page_content->get('pac_is_published')){
-			echo $page_content->get_filled_content(); 
-		}
-		?>
-
-						</li>	
-
-
-
-												
-	
-						
-						
-						
-					
-						
-											</ul><!-- home-ctas -->	
-					
-
-		<div style="border: 1px solid rgba(211,211,211,1); margin-bottom: 50px; padding: 20px;">
-		
-		<h2 class="cta-title">Sign up for updates</h2>	
-		<a class="button button-dark" href="/community/newsletter/">Sign up for the newsletter</a>
-
 	
 
 <?php
