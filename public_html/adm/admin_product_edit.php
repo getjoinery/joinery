@@ -124,14 +124,14 @@
 	<script type="text/javascript">
 	
 		function set_pricing_choices(){
-			var value = $("#pro_pricing_type").val();
+			var value = $("#pro_price_type").val();
 			if(value == 1){  //ONE PRICE	
 				$("#pro_price_container").show();
 			}	
 			else if(value == 2){  //MULTIPLE PRICES
 				$("#pro_price_container").hide();				
 			}
-			else if(value == 4){  //USER CHOOSES PRICE
+			else if(value == 3){  //USER CHOOSES PRICE
 				$("#pro_price_container").hide();				
 			}			
 		}
@@ -149,7 +149,7 @@
 	
 		$(document).ready(function() {
 			set_pricing_choices();
-			$("#pro_pricing_type").change(function() {	
+			$("#pro_price_type").change(function() {	
 				set_pricing_choices();
 			});	
 			
@@ -194,8 +194,17 @@
 		NULL);  //OFFSET
 	$events->load();
 	$optionvals = $events->get_dropdown_array();
-	echo $formwriter->dropinput("Event registration?", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);	
+	echo $formwriter->dropinput("Event registration", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);	
 
+	$groups = new MultiGroup(
+		array('type' => Group::GROUP_TYPE_EVENT),  //SEARCH CRITERIA
+		NULL,  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
+		NULL,  //NUM PER PAGE
+		NULL,  //OFFSET
+	);
+	$groups->load();
+	$optionvals = $groups->get_dropdown_array();
+	echo $formwriter->dropinput("Event Bundle", "pro_grp_group_id", "ctrlHolder", $optionvals, $product->get('pro_grp_group_id'), '', TRUE);
 
 	$optionvals = array("One price"=>1, 'Multiple pricing levels' => 2, 'User chooses price'=>3);
 	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);

@@ -705,7 +705,8 @@ class Product extends SystemBase {
 		'pro_recurring' => 'This charge is a recurring charge, valid values are "day", "week", "month", or "year"',
 		'pro_expires' => 'How much time until the purchase expires.',
 		'pro_is_active' => 'Active or disabled',
-		'pro_price_type' => 'The pricing type'
+		'pro_price_type' => 'The pricing type',
+		'pro_grp_group_id' => 'The group id of the bundle if the product is for a bundle'
 	);
 	
 	public function get_requirement_info($output='text') {
@@ -1080,6 +1081,7 @@ class Product extends SystemBase {
 			  "pro_is_active" bool DEFAULT true, 
 			  "pro_expires" int4,
 			  "pro_price_type" int4,
+			  "pro_grp_group_id" int4
 			)
 			;';
 		$q = $dblink->prepare($sql);

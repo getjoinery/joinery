@@ -236,6 +236,18 @@ class MultiGroupMember extends SystemMultiBase {
 		}
 		return $items;
 	}
+
+	function get_event_dropdown_array($include_new=FALSE) {
+		$items = array();
+		foreach($this as $item) {
+			$event = new Event($item->get('grm_evt_event_id'), TRUE);
+			$items[$event->get('evt_name')] = $event->key;
+		}
+		if ($include_new) {
+			$items['new'] = 'Enter New Below';
+		}
+		return $items;
+	}
 	
 	private function _get_results($only_count=FALSE) { 
 		$where_clauses = array();
@@ -264,6 +276,14 @@ class MultiGroupMember extends SystemMultiBase {
 		if (array_key_exists('has_post_id', $this->options)) {
 			$where_clauses[] = 'grm_pst_post_id IS NOT NULL';
 		}		
+
+		if (array_key_exists('has_event_id', $this->options)) {
+			$where_clauses[] = 'grm_evt_event_id IS NOT NULL';
+		}	
+
+		if (array_key_exists('has_user_id', $this->options)) {
+			$where_clauses[] = 'grm_usr_user_id IS NOT NULL';
+		}	
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
