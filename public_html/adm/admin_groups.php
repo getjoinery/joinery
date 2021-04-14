@@ -21,7 +21,7 @@
 
 
 	$groups = new MultiGroup(
-		NULL,  //SEARCH CRITERIA
+		array('type'=>Group::GROUP_TYPE_USER),  //SEARCH CRITERIA
 		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 		$numperpage,  //NUM PER PAGE
 		$offset,  //OFFSET

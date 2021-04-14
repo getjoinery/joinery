@@ -514,7 +514,7 @@
 	echo $formwriter->begin_form('form5', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
 	
 	$groups = new MultiGroup(
-		NULL,  //SEARCH 
+		array('type'=>Group::GROUP_TYPE_USER),  //SEARCH 
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
