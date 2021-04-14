@@ -145,7 +145,7 @@
 
 		
 		$groups = new MultiGroup(
-			array('deleted'=>false),
+			array('type'=>Group::GROUP_TYPE_USER, 'deleted'=>false),
 			NULL,		//SORT BY => DIRECTION
 			NULL,  //NUM PER PAGE
 			NULL);  //OFFSET
