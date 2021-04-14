@@ -25,7 +25,7 @@
 	$params = explode("/", $_REQUEST['path']);
 	if($params[1] && $params[2]){
 		$posts = MultiPost::get_posts_for_tag($params[2], $numperpage, $page_offset);
-		$title = 'Blog Posts with tag "'.htmlspecialchars($params[2]).'"';
+		$title = 'Blog Posts with tag '.$params[2];
 	}
 	else{
 		$posts = new MultiPost(
@@ -35,7 +35,6 @@
 			$page_offset);	
 		$numrecords = $posts->count_all();	
 		$posts->load();	
-		$title = 'Blog';
 	}
 
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
