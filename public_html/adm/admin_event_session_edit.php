@@ -24,8 +24,6 @@
 		exit();
 	}
 	
-	
-	
 	if($_REQUEST['action'] == 'delete'){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -66,21 +64,25 @@
 		exit();		
 	}	
 	else if($_REQUEST['action'] == 'newsession-days'){	
+
 		//PULL LATEST Session
 		$searches = array();
 		$searches['event_id'] = $event->key;
 		$event_sessions = new MultiEventSessions(
-		$searches,
-		array('time_then_session_number'=>'DESC')); 
+			$searches,
+			array('time_then_session_number'=>'DESC')
+		); 
 		$event_sessions->load();	
 		$latest_session = $event_sessions->get(0);
 		
 		if(!$latest_session){
-			header("Location: /admin/admin_event_sessions?evt_event_id=".$event->key);
+			throw new SystemDisplayableError('There is no previous session with a date and time.');
 			exit();			
 		}
 		else{
+
 			$new_session_number = NULL;
+			$event_session = new EventSession(NULL);
 			$event_session->set('evs_evt_event_id', $event->key);		
 			if($latest_session->get('evs_session_number')){
 				$new_session_number = $latest_session->get('evs_session_number') + 1;
@@ -97,10 +99,23 @@
 				$event_session->set('evs_title', 'New Session');
 			}
 			
-			$start_time = LibraryFunctions::time_shift($latest_session->get('evs_start_time'), 7);
-			$end_time = LibraryFunctions::time_shift($latest_session->get('evs_end_time'), 7);
-			$event_session->set('evs_start_time', $start_time);
-			$event_session->set('evs_end_time', $end_time);
+			$start_time = LibraryFunctions::time_shift($latest_session->get('evs_start_time'), $_POST['num_days'], 'c');
+			$end_time = LibraryFunctions::time_shift($latest_session->get('evs_end_time'), $_POST['num_days'], 'c');
+			$start_time_local = LibraryFunctions::time_shift($latest_session->get('evs_start_time_local'), $_POST['num_days'], 'c');
+			$end_time_local = LibraryFunctions::time_shift($latest_session->get('evs_end_time_local'), $_POST['num_days'], 'c');
+			if($start_time){
+				$event_session->set('evs_start_time', $start_time);
+				$event_session->set('evs_start_time_local', $start_time_local);
+			}
+			if($end_time){
+				$event_session->set('evs_end_time', $end_time);
+				$event_session->set('evs_end_time_local', $end_time_local);
+			}
+			if(!$start_time && !$end_time){
+				throw new SystemDisplayableError('There is no previous session with a date and time.');
+				exit();						
+			} 
+
 			$event_session->save();
 			
 			header("Location: /admin/admin_event_sessions?evt_event_id=".$event->key);
