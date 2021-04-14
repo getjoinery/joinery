@@ -79,6 +79,7 @@ class Group extends SystemBase {
 			exit();	
 		}
 		else{
+
 			$group = new Group(NULL);
 			$group->set('grp_name', $name);
 			$group->set('grp_usr_user_id_created', $user_id);
