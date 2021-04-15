@@ -1,0 +1,342 @@
+<?php
+
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FieldConstraints.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
+
+
+class PublicMenuException extends SystemClassException {}
+
+class PublicMenu extends SystemBase {
+
+
+	public static $fields = array(
+		'pmu_public_menu_id' => 'ID of the public_menu',
+		'pmu_name' => 'Display Name', 
+		'pmu_link' => 'link to the page, starting with a slash',
+		'pmu_is_active' => 'Is this public_menu active?',
+		'pmu_parent_menu_id' => 'pmu_public_menu_id of parent if a subitem',
+		'pmu_order' => 'Order of appearance'
+	);
+	
+	public static $constants = array();
+
+	public static $required = array(
+		'pmu_name', 'pmu_link');
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();	
+
+	public static $default_values = array(
+		'pmu_is_active' => 1, 
+		);		
+
+	function prepare() {
+		if ($this->data === NULL) {
+			throw new PublicMenuException('This has no data.');
+		}
+		
+
+		if ($this->key === NULL) {
+			foreach (static::$zero_variables as $variable) {
+				if ($this->key === NULL && $this->get($variable) === NULL) {
+					echo $variable;
+					$this->set($variable, 0);
+				}
+			}
+
+		}
+		
+		if ($this->key === NULL) {
+			foreach (static::$default_values as $variable=>$value) {
+				if ($this->key === NULL && $this->get($variable) === NULL) { 
+					$this->set($variable, $value);
+				}
+			}
+		}		
+
+		CheckRequiredFields($this, self::$required, self::$fields);
+
+		foreach (self::$field_constraints as $field => $constraints) {
+			foreach($constraints as $constraint) {
+				if (gettype($constraint) == 'array') {
+					$params = array();
+					$params[] = self::$fields[$field];
+					$params[] = $this->get($field);
+					for($i=1;$i<count($constraint);$i++) {
+						$params[] = $constraint[$i];
+					}
+					call_user_func_array($constraint[0], $params);
+				} else {
+					call_user_func($constraint, self::$fields[$field], $this->get($field));
+				}
+			}
+		}
+
+	}
+
+	function load() {
+		parent::load();
+		$this->data = SingleRowFetch('pmu_public_menus', 'pmu_public_menu_id',
+			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
+		if ($this->data === NULL) {
+			throw new PublicMenuException(
+				'This public_menu does not exist');
+		}
+	}
+	
+	
+	function authenticate_write($session, $other_data=NULL) {
+		$current_user = $session->get_user_id();
+
+		if ($session->get_permission() < 10) {
+			throw new SystemAuthenticationError(
+				'Current user does not have permission to edit this public_menu.');
+		}
+
+	}
+
+	function save() {
+		$rowdata = array();
+		foreach(array_keys(self::$fields) as $field) {
+			$rowdata[$field] = $this->get($field);
+		}
+
+		if ($this->key) {
+			$p_keys = array('pmu_public_menu_id' => $this->key);
+			// Editing an existing record
+		} else {
+			$p_keys = NULL;
+			// Creating a new record
+			unset($rowdata['pmu_public_menu_id']);
+			//$rowdata['pmu_create_time'] = 'now()';
+		}
+
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+		$p_keys_return = LibraryFunctions::edit_table(
+			$dbhelper, $dblink, 'pmu_public_menus', $p_keys, $rowdata, FALSE, 0);
+
+		$this->key = $p_keys_return['pmu_public_menu_id'];
+	}
+
+
+	
+	function permanent_delete(){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+		$this_transaction = false;
+		if(!$dblink->inTransaction()){
+			$dblink->beginTransaction();
+			$this_transaction = true;
+		}	
+
+		$sql = 'DELETE FROM pmu_public_menus WHERE pmu_public_menu_id=:pmu_public_menu_id OR pmu_parent_menu_id=:pmu_public_menu_id';
+		try{
+			$q = $dblink->prepare($sql);
+			$q->bindParam(':pmu_public_menu_id', $this->key, PDO::PARAM_INT);
+			$count = $q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		}
+		catch(PDOException $e){
+			$dbhelper->handle_query_error($e);
+		}
+		
+		if($this_transaction){
+			$dblink->commit();
+		}
+		
+		$this->key = NULL;
+		
+		return true;		
+	}
+	
+
+	static function InitDB($mode='structure'){
+	
+		try{
+			$sql = '
+				CREATE SEQUENCE IF NOT EXISTS pmu_public_menus_pmu_public_menu_id_seq
+				INCREMENT BY 1
+				NO MAXVALUE
+				NO MINVALUE
+				CACHE 1;';
+			$q = $dblink->prepare($sql);
+			$success = $q->execute();
+		}
+		catch  (Exception $e){
+			//SKIP
+		}			
+
+		$sql = '
+			CREATE TABLE IF NOT EXISTS "public"."pmu_public_menus" (
+			  "pmu_public_menu_id" int4 NOT NULL DEFAULT nextval(\'pmu_public_menus_pmu_public_menu_id_seq\'::regclass),
+			  "pmu_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
+			  "pmu_link" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
+			  "pmu_is_active" bool,
+			  "pmu_parent_menu_id" int4,
+			  "pmu_order" int2
+			)
+			;';
+		$q = $dblink->prepare($sql);
+		$success = $q->execute();
+		
+		try{		
+			$sql = 'ALTER TABLE "public"."pmu_public_menus" ADD CONSTRAINT "pmu_public_menus_pkey" PRIMARY KEY ("pmu_public_menu_id");';
+			$q = $dblink->prepare($sql);
+			$success = $q->execute();
+		}
+		catch  (Exception $e){
+			//SKIP
+		}
+
+		//FOR FUTURE
+		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
+	}	
+}
+
+class MultiPublicMenu extends SystemMultiBase {
+
+	function get_dropdown_array($include_new=FALSE) {
+		$items = array();
+		foreach($this as $entry) {
+			$option_display = $entry->get('pmu_name'); 
+			$items[$option_display] = $entry->key;
+		}
+		if ($include_new) {
+			$items['new'] = 'Enter New Below';
+		}
+		return $items;
+
+	}
+	
+	static function get_sorted_array(){
+
+		$menus = new MultiPublicMenu(
+			NULL,  //SEARCH CRITERIA
+			array('order'=>'ASC'),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
+			100,  //NUM PER PAGE
+			0,  //OFFSET
+			'OR');
+		$menus->load();	
+		$menus2 = $menus;
+
+		$sorted_menu = array();
+		foreach ($menus as $menu){
+			if($menu->get('pmu_is_active')){
+				if(!$menu->get('pmu_parent_menu_id')){
+					$sorted_menu[$menu->key]['parent'] = true;
+				}
+				else{
+					continue;
+				}
+				$sorted_menu[$menu->key]['id'] = $menu->key;
+				$sorted_menu[$menu->key]['name'] = $menu->get('pmu_name');
+				$sorted_menu[$menu->key]['order'] = $menu->get('pmu_order');
+				$sorted_menu[$menu->key]['link'] = $menu->get('pmu_link');
+
+				$submenu = array();
+				foreach ($menus2 as $menu2){
+					if($menu->key == $menu2->get('pmu_parent_menu_id')){
+						$submenu[$menu2->key]['id'] = $menu2->key;
+						$submenu[$menu2->key]['name'] = $menu2->get('pmu_name');
+						$submenu[$menu2->key]['order'] = $menu2->get('pmu_order');
+						$submenu[$menu2->key]['link'] = $menu2->get('pmu_link');
+						$sorted_menu[$menu2->key]['parent'] = false;
+					}
+				}
+				$sorted_menu[$menu->key]['submenu'] = $submenu;
+			}
+		}
+
+		return $sorted_menu;
+	}
+
+	private function _get_results($only_count=FALSE) { 
+		$where_clauses = array();
+		$bind_params = array();
+		
+		if (array_key_exists('public_menu_id', $this->options)) {
+			$where_clauses[] = 'pmu_public_menu_id = ?';
+			$bind_params[] = array($this->options['public_menu_id'], PDO::PARAM_INT);
+		}		
+
+		if (array_key_exists('parent_menu_id', $this->options)) {
+			$where_clauses[] = 'pmu_parent_menu_id = ?';
+			$bind_params[] = array($this->options['parent_menu_id'], PDO::PARAM_INT);
+		}	
+
+		if (array_key_exists('has_parent_menu_id', $this->options)) {
+			$where_clauses[] = '(pmu_parent_menu_id IS NOT NULL OR pmu_parent_menu_id != 0)';
+		}
+		
+		if (array_key_exists('has_no_parent_menu_id', $this->options)) {
+			$where_clauses[] = '(pmu_parent_menu_id IS NULL OR pmu_parent_menu_id = 0)';
+		}
+		
+		if ($where_clauses) {
+			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
+		} else {
+			$where_clause = '';
+		}
+
+		if ($only_count) {
+			$sql = 'SELECT COUNT(1) FROM pmu_public_menus ' . $where_clause;
+		} else {
+			$sql = 'SELECT * FROM pmu_public_menus
+				' . $where_clause . '
+				ORDER BY ';
+				
+			if (!$this->order_by) {
+				$sql .= " pmu_public_menu_id ASC ";
+			}
+			else {
+				if (array_key_exists('public_menu_id', $this->order_by)) {
+					$sql .= ' pmu_public_menu_id ' . $this->order_by['public_menu_id'];
+				}		
+				if (array_key_exists('order', $this->order_by)) {
+					$sql .= ' pmu_order ' . $this->order_by['order'];
+				}	
+			}				
+
+			$sql .= ' '.$this->generate_limit_and_offset();				
+		}
+		
+
+		$q = DbConnector::GetPreparedStatement($sql);
+
+		$total_params = count($bind_params);
+		for ($i=0; $i<$total_params; $i++) {
+			list($param, $type) = $bind_params[$i];
+			$q->bindValue($i+1, $param, $type);
+		}
+		$q->execute();
+		$q->setFetchMode(PDO::FETCH_OBJ);
+
+		return $q;
+	}
+
+	function load() {
+		$q = $this->_get_results();
+		foreach($q->fetchAll() as $row) {
+			$child = new PublicMenu($row->pmu_public_menu_id);
+			$child->load_from_data($row, array_keys(PublicMenu::$fields));
+			$this->add($child);
+		}
+	}
+
+	function count_all() {
+		$q = $this->_get_results(TRUE);
+		$counter = $q->fetch();
+		return $counter->count;
+	}
+}
+
+
+?>

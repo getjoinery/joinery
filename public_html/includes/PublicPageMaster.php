@@ -4,6 +4,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/public_menus_class.php');
 
 class PublicPageMaster {
 
@@ -97,6 +98,10 @@ class PublicPageMaster {
 			}
 		}
 		
+	}
+	
+	public static function get_public_menu(){
+		return MultiPublicMenu::get_sorted_array();
 	}
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
