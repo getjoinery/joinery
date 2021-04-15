@@ -13,6 +13,12 @@
 	$session->check_permission(5);
 	$session->set_return();
 
+	if($_POST['action'] == 'remove'){
+		$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
+		$groupmember->remove();
+		header("Location: /admin/admin_event_bundle?grp_group_id=".$_REQUEST['grp_group_id']);
+		exit();				
+	}
 	
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, 0, '');
 	$group = new Group($grp_group_id, TRUE);
@@ -76,6 +82,12 @@
 
 		$rowvalues = array();
 		array_push($rowvalues, $event->get('evt_name'));
+		
+		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event_bundle?grp_group_id='. $group->key.'">
+		<input type="hidden" class="hidden" name="action" id="action" value="remove" />
+		<input type="hidden" class="hidden" name="grm_group_member_id" value="'.$group_member->key.'" />
+		<button type="submit">Remove</button>
+		</form>';
 		array_push($rowvalues, $delform);
 
 		$page->disprow($rowvalues);

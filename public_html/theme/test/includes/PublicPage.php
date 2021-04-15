@@ -5,6 +5,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
 class PublicPage extends PublicPageMaster {
 
 
+
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
 		$page->public_header(
@@ -16,9 +17,11 @@ class PublicPage extends PublicPageMaster {
 				$options));
 		echo PublicPage::BeginPage($header);
 	
-
-		echo '<div class="container"><div class="vertical-space-20"></div><p>'.$body.'</p><div class="vertical-space-20"></div></div>';
-
+		echo '			<div class="section">
+		<div class="container">';
+		echo '<p>'.$body.'</p>';
+		echo '		</div><!-- end container -->
+	</div>';
 		
 		echo PublicPage::EndPage();
 		$page->public_footer();
@@ -29,20 +32,31 @@ class PublicPage extends PublicPageMaster {
 		$output = '';
 		if($title){
 			$output .= '
-
-							<div class="container"><div class="vertical-space-20"></div><h2 class="main-title text-center">'.$title.'</h2>';
+		<div class="section padding-bottom-0">
+			<div class="container">
+				<div class="margin-bottom-70">
+					<div class="row text-center">
+						<div class="col-12 col-md-10 offset-md-1 col-lg-8 offset-lg-2">
+							<h2>'.$title.'</h2>';
 							if($options['subtitle']){
-								$output .= '<h6 class="sub-title after-title text-center">'.$options['subtitle'].'</h6>';
+								$output .= '<p>'.$options['subtitle'].'</p>';
 							}
-							$output .= '</div><div class="vertical-space-70"></div>';
+							$output .= '
+						</div>
+					</div>
+				</div> 
+			</div>
+		</div>
+		';
 		}
 		return $output;
 	}	
 
 	public static function EndPage($options=array()) {
-		$output = '<div class="vertical-space-40"></div>'; 
+		$output = ''; 
 		return $output;
 	}	
+
 
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
@@ -50,13 +64,13 @@ class PublicPage extends PublicPageMaster {
 		$session = SessionControl::get_instance();
 		parent::public_header();
 
-?>
+		?>
+		
 <!DOCTYPE html>
 <html lang="en">
 	<head>
 		<meta charset="utf-8">
-		<meta http-equiv="X-UA-Compatible" content="IE=edge">
-		<meta name="viewport" content="width=device-width">
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 		<meta name="description" content="<?php echo $settings->get_setting('site_description') ?>">
         <meta name="keywords" content="">
 
@@ -70,108 +84,146 @@ class PublicPage extends PublicPageMaster {
 		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
 		-->
 		<?php $this->global_includes_top(); ?>
-					
+		<!-- CSS -->
+		<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
+		<!--<link rel="stylesheet" type="text/css" href="/theme/default/includes/uikit-3.4.2/css/uikit.min.css">-->
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
+		
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
+		<!--<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/sal/sal.min.css" rel="stylesheet">-->
 	
-		<!--THIS TEMPLATE STYLES -->
-		<link rel="stylesheet" href="<?php echo $this->theme_url; ?>/css/font-awesome.min.css">
-		<link href="<?php echo $this->theme_url; ?>/css/bootstrap.min.css" rel="stylesheet" />
-		<link href="<?php echo $this->theme_url; ?>/css/owl.carousel.min.css" rel="stylesheet" />
-		<link href="<?php echo $this->theme_url; ?>/css/settings.css" rel="stylesheet" />
-		<link href="<?php echo $this->theme_url; ?>/css/jquery.fancybox.min.css" rel="stylesheet" />
-		<link href="<?php echo $this->theme_url; ?>/css/animate.css" rel="stylesheet" />
-		<!-- Default css -->
-		<link href="<?php echo $this->theme_url; ?>/css/style.css" rel="stylesheet" />
-		<!-- Theme css -->
-		<link href="https://fonts.googleapis.com/css?family=Karla:400,400i,700,700i" rel="stylesheet">
-		<link href="https://fonts.googleapis.com/css?family=Lusitana:400,700" rel="stylesheet">
-	
-		<?php	
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/theme.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/site_styles.css" rel="stylesheet">
+		<!-- Fonts/Icons -->
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
+		
+
+		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
+		<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
+		
+		<!-- jQuery validate -->
+		<script type="text/javascript" src="<?php echo $this->theme_url; ?>/includes/jquery.validate-1.9.1.js"></script>				
+		
+
+		
+		<!--GDPR NOTICE  https://www.jqueryscript.net/other/GDPR-Cookie-Consent-Popup-Plugin.html-->
+		<!--<script src="<?php echo $this->theme_url; ?>/scripts/GDPR/jquery.ihavecookies.js"></script>-->
+	</head>
+	<?php	
 	if(empty($options['noheader'])){
 		if($_SESSION['permission'] == 10){
 			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/admin_debug.php');
 		}
 		?>	
-	</head>
-	<body>
-		<!-- Start header - Second variation -->
-		<header class="v2">
-			<div class="top-bar">
-				<div class="container">
-					<!--<img src="images/logo.png" alt="Logo">-->
-					<h3 style="display:inline;">Xandy Liberato</h3>
-
-					<div class="contact-info">
-					<!--
-						<div class="media">
-							<div class="media-left">
-								<i class="fa fa-phone" aria-hidden="true"></i>
-							</div>
-							<div class="media-body">
-								<h5>Call Us</h5>
-								<a href="#"> 1800-153-259 </a>
-							</div>
-						</div>
+	<body data-preloader="1">
+		
+		<!-- Header -->
+		<div class="header center sticky-autohide">
+			<div class="container">
+				<!-- Logo -->
+				<div class="header-logo">
+					<!-- <h3><a href="#">Test Site</a></h3>-->
+					<a href="/">
+					<img class="logo-dark" src="/static_files/logos/logo-trans-resized.png" alt="DevonAndJerry.com">
+					<img class="logo-light" src="/static_files/logos/logo-trans-resized.png" alt="DevonAndJerry.com"> 
+					</a>
+				</div>
+				<!-- Menu -->
+				<div class="header-menu">
+					<ul class="nav">
+					<?php
+						$menus = PublicPage::get_public_menu();
+						$menus2 = $menus; 
+						foreach ($menus as $menu){
+							if($menu[parent]){
+								$submenus = $menu['submenu'];
+								echo '<li class="nav-item">';
+								echo '<a class="nav-link" href="'.$menu['link'].'">'.$menu['name'].'</a>';
+								
+								if(!empty($submenus)){	
+									echo '<ul class="nav-dropdown">';
+									foreach ($submenus as $submenu){
+										echo '<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="'.$submenu['link'].'">'.$submenu['name'].'</a></li>';				
+									}
+									echo '</ul>';
+								}
+								echo '</li>';
+							}
+						}
+						?>
+						<!--
+						<li class="nav-item">
+							<a class="nav-link" href="/about">About</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="/blog">Blog</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="/events">Courses</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="/contact">Contact</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="#">Dropdown</a>
+							<ul class="nav-dropdown">
+								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
+								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
+								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
+								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
+							</ul>
+						</li>
 						-->
-     <?php 
+					</ul>
+				</div>
+				<!-- Menu Extra -->
+				<div class="header-menu-extra">
+					<ul class="list-inline">
+						<?php 
 						if ($session->get_user_id()){
-							echo '<a href="/profile/profile">My Profile </a>&nbsp;'; 
+							echo '<a href="/profile/profile">My Profile</a> '; 
 							if($_SESSION['permission'] >= 5){
-								echo '| <a href="/admin/admin_users">Admin </a> ';
+								echo '| <a href="/admin/admin_users">Admin</a> ';
 							}
 
 							$cart = $session->get_shopping_cart();
 							if($numitems = $cart->count_items()){
-								echo '| <a href="/cart">Cart ('. $numitems . ') </a> ';
+								echo '| <a href="/cart">Cart ('. $numitems . ')</a> ';
 							}
 							else{
 								//echo '<span class="cartcontents">Cart</span> ';
 							}
 
-							echo '| <a href="/logout">Log out </a>';
+							echo '| <a href="/logout">Log out</a>';
 
 						}
 						else{
-							echo '<a href="/login">Log in </a> | <a href="/register">Register </a>';
+							echo '<a href="/login">Log in</a> | <a href="/register">Register</a>';
 						}
 						
 						if($_SESSION['permission'] == 10){
-							echo ' | <a id="admintoggle" href="#">Debug </a>';				
+							echo ' | <a id="admintoggle" href="#">Debug</a>';				
 						}
-						if($session->get_timezone()){
-							echo '<br /><a href="/profile/account_edit">Timezone: '.$session->get_timezone().' (change)</a>';
-						}
+						echo '<br />Timezone: '.$session->get_timezone().' (<a href="/profile/account_edit">change</a>)';
 						?>
-					</div>
-
+						<!--
+						<li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
+						<li><a href="#"><i class="fab fa-twitter"></i></a></li>
+						<li><a href="#"><i class="fab fa-linkedin-in"></i></a></li>
+						-->
+					</ul>
 				</div>
-			</div>
-			<nav class="navbar navbar-default menu-style-3">
-				<div class="container">
-					<!-- Brand and toggle get grouped for better mobile display -->
-					<div class="navbar-header">
-						<button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1" aria-expanded="false">
-							<span class="sr-only">Toggle navigation</span>
-							<span class="icon-bar"></span>
-							<span class="icon-bar"></span>
-							<span class="icon-bar"></span>
-						</button>
-					</div>
-
-					<!-- Collect the nav links, forms, and other content for toggling -->
-					<div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
-						<ul class="nav navbar-nav">
-							<li><a href="/page/about">About Us</a></li>
-							<li>
-								<a href="/events">Classes</a>
-							</li>
-						</ul>
-					</div><!-- /.navbar-collapse -->
-				</div><!-- /.container-fluid -->
-			</nav>
-		</header>
-		<!-- End header section -->
-
-
+				<!-- Menu Toggle -->
+				<button class="header-toggle">
+					<span></span>
+				</button>
+			</div><!-- end container -->
+		</div>
+		<!-- end Header -->		
 		
 	<?php } //end if noheader ?>
 
@@ -185,164 +237,78 @@ class PublicPage extends PublicPageMaster {
 		$session->clear_clearable_messages();
 	
 		?>
-		<!-- start footer -->
-		<footer class="footer-copyright v2"> <!-- Footer variation-2 -->
-			<div class="background-footer-v2"><!-- First footer -->
+		
+		
+	
+		
+		<footer>
+			<div class="section-sm bg-dark">
 				<div class="container">
-					<div class="vertical-space-50"></div>
-					<div class="row">
-						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
-							<!--<img src="images/logo.png" alt="Logo">-->
-							<div class="vertical-space-20"></div>
-						</div>
-						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
-							<ul class="social-icons">
-								<li>
-									<a href="https://www.facebook.com/xandy.liberato">
-										<i class="fa fa-facebook" aria-hidden="true"></i>
-									</a>
-								</li>
-								<li>
-									<a href="https://www.instagram.com/xandyliberato/">
-										<i class="fa fa-instagram" aria-hidden="true"></i>
-									</a>
-								</li>
-								<li>
-									<a href="https://www.youtube.com/user/xliberato">
-										<i class="fa fa-youtube-play" aria-hidden="true"></i>
-									</a>
-								</li>
-							</ul> <!-- social-icons -->
-						</div>
-						<!--
-						<div class="col-xs-12 col-sm-12 col-md-12 text-center">
-							<div class="vertical-space-10"></div>
-							<ul class="qucik-links">
-								<li><a href="/page/about">About</a></li>
-								<li><a href="/events">Classes</a></li>
+					<div class="row col-spacing-20">
+						<!--<div class="col-6 col-sm-6 col-lg-3">
+							<h3>Devon and Jerry</h3>
+						</div>-->
+						<div class="col-6 col-sm-6 col-lg-3">
+							<h6 class="font-small font-weight-normal uppercase">Useful Links</h6>
+							<ul class="list-dash">
+								<li><a href="/about">About us</a></li>
+								<li><a href="/blog">Blog</a></li>
+								<li><a href="/events">Courses</a></li>
+								<li><a href="/contact">Contact</a></li>
 							</ul>
-							<div class="vertical-space-20"></div>
+						</div><!--
+						<div class="col-6 col-sm-6 col-lg-3">
+							<h6 class="font-small font-weight-normal uppercase">Additional Links</h6>
+							<ul class="list-dash">
+								<li><a href="#">Services</a></li>
+								<li><a href="#">Process</a></li>
+								<li><a href="#">FAQ</a></li>
+								<li><a href="#">Careers</a></li>
+							</ul>
+						</div>-->
+						<div class="col-6 col-sm-6 col-lg-3">
+							<h6 class="font-small font-weight-normal uppercase">Contact Info</h6>
+							<ul class="list-unstyled">
+								<li>devonandjerry@gmail.com</li>
+								<li></li>
+							</ul>
 						</div>
-						-->
-					</div>
-				</div>
-			</div>
-			<div class="container"> <!-- Second footer -->
-				<div class="vertical-space-50"></div>
-				<div class="row">
-				<!--
-					<div class="col-xs-12 col-sm-6 col-md-3">
-						<h4>Our Timing</h4>
-						<div class="vertical-space-40"></div>
-						<div class="vertical-space-10"></div>
-						<p><strong>Monday</strong> 9:00 am to 6:00 pm</p>
-						<p><strong>Tuesday</strong> 9:00 am to 6:00 pm</p>
-						<p><strong>Wensday</strong> 9:00 am to 6:00 pm</p>
-						<p><strong>Thursday</strong> 9:00 am to 6:00 pm</p>
-						<p><strong>Friday</strong> 9:00 am to 6:00 pm</p>
-						<p><strong>Saturday</strong> 9:00 am to 2:00 pm</p>
-						<p><strong>Sunday</strong> Off </p>
-					</div>-->
-					<div class="col-xs-12 col-sm-6 col-md-3">
-						<h4>Contact Us</h4>
-						<!--<div class="vertical-space-40"></div>-->
-						<div class="vertical-space-10"></div>
-						<ul class="footer-addres">
-							<li>
-								<i class="fa fa-map-marker" aria-hidden="true"></i>
-								Valencia, Spain
-							</li>
-							<li>
-								<i class="fa fa-envelope-o" aria-hidden="true"></i>
-								<a href="mailto:info@xandyliberato.com">info@xandyliberato.com</a>
-							</li>
-						</ul>
-					</div><!-- 
-					<div class="col-xs-12 col-sm-6 col-md-3">
-						<h4>Instagram</h4>
-						<div class="vertical-space-40"></div>
-						<div class="vertical-space-10"></div>
+					</div><!-- end row(1) -->
 
-						<ul class="instagram-list">
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>							
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>
-							<li><a href="#"><img src="images/new/home-var3/footer.png" alt="..."></a></li>				
-						</ul>
-					</div>-->
-					<!--
-					<div class="col-xs-12 col-sm-6 col-md-3">
-						<h4>Send Inquiry</h4>
-						<div class="vertical-space-40"></div>
-						<div class="vertical-space-10"></div>
-						<form name="contact_form_2" method="post" action="functions.php">
-							<input type="text" id="home2_fname" name="home2_fname" placeholder="Full Name" required>
-							<input type="text" id="home2_email" name="home2_email" placeholder="Email" required>
-							<input type="text" id="home2_contact" name="home2_contact" placeholder="Contact Number" required>
-							<textarea id="home2_message" name="home2_message" required>Message*</textarea>
-							<input type="submit" name="Submit" value="Send Inquiry">
-						</form>
-						<div class="vertical-space-20"></div>
-					</div>
-					-->
-				</div>
+					<hr class="margin-top-30 margin-bottom-30">
+
+					<div class="row col-spacing-10">
+						<div class="col-12 col-md-6 text-center text-md-left">
+							<p>&copy; 2021 Devon and Jerry</p>
+						</div>
+						<div class="col-12 col-md-6 text-center text-md-right">
+							<ul class="list-inline">
+								<li><a href="https://www.facebook.com/devonandjerry"><i class="fab fa-facebook-f"></i></a></li>
+								<!--<li><a href="#"><i class="fab fa-twitter"></i></a></li>
+								<li><a href="#"><i class="fab fa-pinterest"></i></a></li>-->
+								<li><a href="https://www.instagram.com/devonandjerry"><i class="fab fa-instagram"></i></a></li>
+							</ul>
+						</div>
+					</div><!-- end row(2) -->
+				</div><!-- end container -->
 			</div>
 		</footer>
-		<!-- end footer -->
-		<!-- Modal box data -->
-		<div class="modal fade" id="videoModal" tabindex="-1" role="dialog">
-			<div class="modal-dialog modal-lg" role="document">
-				<div class="modal-content">
-					<div class="modal-body">
-						<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
-						<video width="320" height="240" controls class="full-width">
-							<source src="video/357014656.mp4" type="video/mp4">
-							<source src="video/357014656.ogg" type="video/ogg">
-							Your browser does not support the video tag.
-						</video> 
-					</div>
-				</div>
-			</div>
+
+		<!-- Scroll to top button -->
+		<div class="scrolltotop">
+			<a class="button-circle button-circle-sm button-circle-dark" href="#"><i class="ti-arrow-up"></i></a>
 		</div>
-		<!-- End Modal box data -->
-		<!--<script src="js/jquery-2.1.4.min.js"></script>		-->
-		<script src="<?php echo $this->theme_url; ?>/js/wow.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/bootstrap.min.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/jquery.themepunch.tools.min.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/jquery.themepunch.revolution.min.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/owl.carousel.min.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/jquery.fancybox.min.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/isotope.pkgd.min.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/jquery.countdown.min.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/moment.min.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/jquery.touchSwipe.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/jquery.cookie.js"></script>
-		<script type="text/javascript" src="<?php echo $this->theme_url; ?>/js/jquery.rollingslider.js"></script>
-		<script src="<?php echo $this->theme_url; ?>/js/custom.js"></script>
-		<!-- Default JS -->
-		<script> /* Start to Add data in Sechdule Section and table with Date and time wise */
-			jQuery(document).ready(function($) {
+		<!-- end Scroll to top button -->
 
-				$('#demo').RollingSlider({
-					showArea:"#example",
-					prev:"#jprev",
-					next:"#jnext",
-					moveSpeed:300,
-					autoPlay:false
-				});
-			});
-		</script>
+		<!-- ***** JAVASCRIPTS ***** -->
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/js/polyfill.min.js?features=IntersectionObserver"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/plugins/plugins.js"></script>
+		<script src="<?php echo $this->theme_url; ?>/includes/assets/js/functions.js"></script>
 	</body>
-</html>	
-		
-
+</html>
 		<?php
 	}
+
 
 
 }
