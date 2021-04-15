@@ -35,7 +35,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> NULL,
 		'breadcrumbs' => array(
 			'PublicMenus'=>'/admin/admin_public_menus', 
 			'New PublicMenu' => '',
