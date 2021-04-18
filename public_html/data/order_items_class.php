@@ -31,6 +31,9 @@ class OrderItem extends SystemBase {
 		'odi_evr_event_registrant_id' => 'If is event registration, registrant id',
 		'odi_comment' => 'Optional comment',
 		'odi_stripe_subscription_id' => 'Stripe subscription',
+		'odi_is_subscription' => 'True if this order item is a subscription',
+		'odi_subscription_cancelled_time' => 'If subscription, when it was cancelled',
+		'odi_refunded' => 'Amount from this order item that has been refunded'
 	);
 
 
@@ -170,7 +173,10 @@ class OrderItem extends SystemBase {
 			  "odi_evr_event_registrant_id" int4,
 			  "odi_comment" varchar(255) COLLATE "pg_catalog"."default",
 			  "odi_percent_tax_deductible" int4,
-			  "odi_stripe_subscription_id" varchar(255) COLLATE "pg_catalog"."default"
+			  "odi_stripe_subscription_id" varchar(255) COLLATE "pg_catalog"."default",
+			  "odi_is_subscription" bool,
+			  "odi_subscription_cancelled_time" timestamp(6),
+			  "odi_refunded" int4
 			)
 			;';
 		$q = $dblink->prepare($sql);

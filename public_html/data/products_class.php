@@ -443,7 +443,7 @@ class UserPriceRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Optional donation amount", "user_price", "ctrlHolder", 20, '', '', 255, '');
+		echo $formwriter->textinput("Optional donation amount ($)", "user_price", "ctrlHolder", 20, '', '', 255, '');
 		
 	}
 
@@ -456,7 +456,7 @@ class UserPriceRequirement extends ProductRequirement {
 		//CLEAN IT UP
 		//REMOVE ANYTHING BUT NUMBERS AND A DOT AND CAST TO INTEGER, DROPPING THE CENTS
 		//TODO NEED TO FIGURE OUT HOW TO HANDLE CENTS
-		$data['user_price'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price']));
+		$data['user_price'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price'])); 
 		
 		/*
 		if ($data['user_price'] == 0 || $data['user_price'] == '0.00') {
@@ -691,6 +691,8 @@ class Product extends SystemBase {
 	const PRICE_TYPE_ONE = 1;
 	const PRICE_TYPE_MULTIPLE = 2;
 	const PRICE_TYPE_USER_CHOOSE = 3;
+	
+	const PRODUCT_ID_OPTIONAL_DONATION=4;
 
 	public static $fields = array(
 		'pro_product_id' => 'Product ID',
@@ -724,8 +726,9 @@ class Product extends SystemBase {
 	
 	
 	public function get_price($product_version, $data){
+
 		//HANDLE PRICES
-		$settings = Globalvars::get_instance();
+		$settings = Globalvars::get_instance(); 
 		if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 			$requirements = $this->get_requirement_info('id');
 			if(in_array(128, $requirements) && $data['user_price']){

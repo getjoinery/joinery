@@ -226,6 +226,7 @@
 			}
 			else{
 				//OTHERWISE PROCESS THE ORDER ITEM
+				$order_item->set('odi_is_subscription', true);
 				$order_item->set('odi_stripe_subscription_id', $subscription_result[id]);
 				$order_item->set('odi_status', OrderItem::STATUS_PAID);
 				$order_item->set('odi_status_change_time', 'NOW');
@@ -233,29 +234,28 @@
 				
 		
 				//ATTACH USERS TO THE RIGHT EVENTS/COURSES
-				if($product->get('pro_evt_event_id')){
-									
+				if($product->get('pro_evt_event_id')){					
 					$event = new Event($product->get('pro_evt_event_id'), TRUE);
+					
+					//ADD THE USER TO THE EVENT, SUBSCRIPTIONS CANNOT BE TIME LIMITED
+					$event_registrant = $event->add_registrant($user->key, $order_item, NULL, NULL);
+
+					//THE RECORDING CONSENT BOX
+					if(isset($data['record_terms'])){ 
+						$event_registrant->set('evr_recording_consent', TRUE);	
+						$event_registrant->save();	
+					}
+					
+					//LINK THE ORDER ITEM AND THE EVENT REGISTRATION
+					$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
+					$order_item->save();								
+					
+					//SEND THE EMAIL
 					$email_fill['event_name'] = $event->get('evt_name');			
 					$email_fill['more_info_required'] = false;
 					if($event->get('evt_collect_extra_info')){
 						$email_fill['more_info_required'] = true;	
 					}
-					
-
-					//ADD THE USER TO THE EVENT
-					$event_registrant = $event->add_registrant($user->key, $order->key, NULL);
-
-					//USER MUST HAVE CLICKED THE RECORDING CONSENT BOX
-					if(isset($data['record_terms'])){  //IF IT IS AN ONLINE COURSE
-						$event_registrant->set('evr_recording_consent', TRUE);	
-					}
-					//LINK THE ORDER ITEM AND THE EVENT REGISTRATION
-					$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
-					$order_item->save();
-					$event_registrant->set('evr_odi_order_item_id', $order_item->key);
-					$event_registrant->save();					
-					
 					$email_fill['event_registrant_id'] = $event_registrant->key;
 					$is_deposit = FALSE;
 					if($product_version){
@@ -275,6 +275,7 @@
 
 				}
 				else if($product->get('pro_grp_group_id')){
+					
 					//IT IS AN EVENT BUNDLE
 					$group = new Group($product->get('pro_grp_group_id'), TRUE);
 					$group_members = $group->get_member_list();
@@ -282,12 +283,19 @@
 					foreach ($group_members as $group_member){
 						$event = new Event($group_member->get('grm_evt_event_id'), TRUE);
 						$event_list[] = $event->get('evt_name');
-						//ADD THE USER TO THE EVENT
-						$event_registrant = $event->add_registrant($user->key, $order->key, NULL);
-						$event_registrant->set('evr_odi_order_item_id', $order_item->key);
-						$event_registrant->save();	
+						//ADD THE USER TO THE EVENT, SUBSCRIPTIONS CANNOT BE TIME LIMITED
+						$event_registrant = $event->add_registrant($user->key, $order_item, $product->get('pro_grp_group_id'), NULL);
+						
+						//THE RECORDING CONSENT BOX
+						if(isset($data['record_terms'])){ 
+							$event_registrant->set('evr_recording_consent', TRUE);	
+						}
 
+						$event_registrant->save();	
+						
 					}
+					
+					//SEND THE EMAIL
 					$email_fill['event_list'] = implode('<br>', $event_list);
 					$final_fill = array_merge($default_fill, $email_fill);
 					$activation_email = new EmailTemplate('event_bundle_content', $user);
@@ -421,7 +429,8 @@
 			$order_item->set('odi_pro_product_id', $product->key);
 			$order_item->set('odi_usr_user_id', $user->key);
 			$order_item->set('odi_product_info', base64_encode(serialize($data)));
-			$order_item->set('odi_price', $price);	
+			$order_item->set('odi_price', $price);
+			$order_item->set('odi_is_subscription', false);			
 			if ($product_version) {
 				$order_item->set('odi_prv_product_version_id', $product_version->prv_product_version_id);
 			}
@@ -441,25 +450,24 @@
 			if($product->get('pro_evt_event_id')){
 								
 				$event = new Event($product->get('pro_evt_event_id'), TRUE);
-				$email_fill['event_name'] = $event->get('evt_name');
-				
-				$email_fill['more_info_required'] = false;
-				if($event->get('evt_collect_extra_info')){
-					$email_fill['more_info_required'] = true;	
-				}
-				
+				$email_fill['event_name'] = $event->get('evt_name');	
 
 				//ADD THE USER TO THE EVENT
-				$event_registrant = $event->add_registrant($user->key, $order->key, $product->get('pro_expires'));
+				$event_registrant = $event->add_registrant($user->key, $order_item, NULL, $product->get('pro_expires'));
 				$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
 				$order_item->save();
 
-				//USER MUST HAVE CLICKED THE RECORDING CONSENT BOX
-				if(isset($data['record_terms'])){  //IF IT IS AN ONLINE COURSE
+				//THE RECORDING CONSENT BOX
+				if(isset($data['record_terms'])){ 
 					$event_registrant->set('evr_recording_consent', TRUE);
 					$event_registrant->save();		
 				} 				
 				
+				//SEND THE EMAIL
+				$email_fill['more_info_required'] = false;
+				if($event->get('evt_collect_extra_info')){
+					$email_fill['more_info_required'] = true;	
+				}
 				$email_fill['event_registrant_id'] = $event_registrant->key;
 				$is_deposit = FALSE;
 				if($product_version){
@@ -484,10 +492,13 @@
 				$group_members = $group->get_member_list();
 				foreach ($group_members as $group_member){
 					$event = new Event($group_member->get('grm_evt_event_id'), TRUE);
-					//ADD THE USER TO THE EVENT AND ATTACH THE SUBSCRIPTION
-					//TODO
-					$event_registrant = $event->add_registrant($user->key, $order->key, $product->get('pro_expires'));
+					$event_registrant = $event->add_registrant($user->key, $order_item, NULL, $product->get('pro_expires'));
 
+					//THE RECORDING CONSENT BOX
+					if(isset($data['record_terms'])){ 
+						$event_registrant->set('evr_recording_consent', TRUE);	
+					}
+					$event_registrant->save();
 				}
 			}
 			else{

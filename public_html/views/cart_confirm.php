@@ -20,7 +20,13 @@
 	'title' => "Checkout confirmation"
 	));
 	echo PublicPage::BeginPage('Checkout confirmation');	
-	
+	?>
+
+	<div class="section-lg padding-top-20">
+		<div class="container">
+			<div class="row col-spacing-40">
+
+					<?php	
 	if($receipts){
 		
 		?>
@@ -44,8 +50,8 @@
 			
 		?><p class="cart-total">$<?php echo  money_format('%i', $total); ?></p> 
 		<?php
-		echo '<br><br><p>All of your courses, and events can be found in the <a href="/profile">My Profile</a> section of the website.';
-		echo '<p><a class="et_pb_button" href="/profile" >See all of your courses and events</a></p>';		
+		echo '<div><br><br>All of your courses, and events can be found in the <a href="/profile">My Profile</a> section of the website.';
+		echo '<p><a class="et_pb_button" href="/profile" >See all of your courses and events</a></p></div>';		
 	}
 	else{
 		$settings = Globalvars::get_instance();
@@ -58,6 +64,13 @@
 		<?php
 		
 	}
+	?>
+					
+
+			</div><!-- end row -->
+		</div><!-- end container -->
+	</div>
+	<?php
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));

@@ -32,6 +32,8 @@
 
 
 	$user = new User($_GET['usr_user_id'], TRUE);
+	include($_SERVER['DOCUMENT_ROOT'] . '/utils/registrant_maintenance.php'); 
+	include($_SERVER['DOCUMENT_ROOT'] . '/utils/order_maintenance.php');
 
 	if($_REQUEST['action'] == 'delete'){
 		$user->authenticate_write($session);
@@ -616,22 +618,10 @@
 			
 			
 			$this_out = $title . ' ($'. $order_item->get('odi_price') .')';
-			
 
-			if($_SESSION['permission'] == 10){
-				$this_out .= ' <a href="/admin/admin_item_details?oi=' . $order_item->key . '">[details]</a>';
-				/*
-				if($order_item->get('odi_pro_product_id') != 18){
-					if($order_item->get('odi_refunded')){
-						$this_out .= ' REFUNDED ';
-					}
-					else{
-						$this_out .= '| <a href="/admin/admin_order_refund?oi=' . $order_item->key . '">[refund]</a>';
-					}
-				}
-				*/
-
-			}
+			if($order_item->get('odi_subscription_cancelled_time')){
+				$this_out .= ' CANCELLED AT '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());	
+			}		
 			
 			$order_items_out[] = $this_out;
 
