@@ -443,7 +443,7 @@ class UserPriceRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Optional additional donation (no cents)", "user_price", "ctrlHolder", 20, '', '', 255, '');
+		echo $formwriter->textinput("Optional donation amount", "user_price", "ctrlHolder", 20, '', '', 255, '');
 		
 	}
 
@@ -456,7 +456,7 @@ class UserPriceRequirement extends ProductRequirement {
 		//CLEAN IT UP
 		//REMOVE ANYTHING BUT NUMBERS AND A DOT AND CAST TO INTEGER, DROPPING THE CENTS
 		//TODO NEED TO FIGURE OUT HOW TO HANDLE CENTS
-		$data['user_price'] = (int)preg_replace("/[^0-9\.]/", "", $data['user_price']);
+		$data['user_price'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price']));
 		
 		/*
 		if ($data['user_price'] == 0 || $data['user_price'] == '0.00') {
