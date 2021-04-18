@@ -58,7 +58,7 @@
 				$product->set('pro_recurring', NULL);
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
@@ -185,7 +185,13 @@
 	echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
 
 	$optionvals = array("Yes, it is a recurring monthly charge"=>1, 'No, it is a one time payment' => 0);
-	echo $formwriter->dropinput("Subscription?", "pro_recurring", "ctrlHolder", $optionvals, $product->get('pro_recurring'), '', FALSE);	
+	if($product->get('pro_recurring')){
+		$recurring=1;
+	}
+	else{
+		$recurring=0;
+	}
+	echo $formwriter->dropinput("Subscription?", "pro_recurring", "ctrlHolder", $optionvals, $recurring, '', FALSE);	
 	
 	$events = new MultiEvent(
 		array('deleted'=>false, 'past'=>false),

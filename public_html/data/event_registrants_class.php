@@ -49,6 +49,7 @@ class EventRegistrant extends SystemBase {
 		'evr_expires_time' => 'Time at which this registration expires.', 
 		'evr_odi_order_item_id' => 'Order Item ID for this registration',
 		'evr_delete_time' => 'Time of deletion',
+		'evr_grp_group_id' => 'Event bundle that created this registration, if applicable'
 	);
 
 	public static $generated_fields = array(
@@ -258,7 +259,8 @@ class EventRegistrant extends SystemBase {
 			  "evr_extra_info_completed" bool NOT NULL DEFAULT false,
 			  "evr_ord_order_id" int4,
 			  "evr_odi_order_item_id" int4,
-			  "evr_delete_time" timestamp(6)
+			  "evr_delete_time" timestamp(6),
+			  "evr_grp_group_id" int4
 			)
 			;';
 		$q = $dblink->prepare($sql);

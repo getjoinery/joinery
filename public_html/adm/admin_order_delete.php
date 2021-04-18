@@ -54,15 +54,16 @@ else{
 		'session' => $session,
 	)
 	);	
-
-	echo '<h1>Delete Order</h1>';
+	$options['title'] = 'Delete Order';
+	//$options['altlinks'] = array('Edit Url'=>'/admin/admin_url_edit?url_url_id='.$url->key);
+	$page->begin_box($options);
 
 	$formwriter = new FormWriterMaster("form1");
 	echo $formwriter->begin_form("form", "post", "/admin/admin_order_delete");
 
 	echo '<fieldset><h4>Confirm Delete</h4>';
 		echo '<div class="fields full">';
-		echo '<p>WARNING:  This will administratively delete this order ('.$order->key . ').</p>';
+		echo '<p>WARNING:  This will administratively delete this order ('.$order->key . ').  It will NOT refund any charges.</p>';
 
 	echo $formwriter->hiddeninput("confirm", 1);
 	echo $formwriter->hiddeninput("ord_order_id", $ord_order_id);
@@ -75,6 +76,7 @@ else{
 	echo '</fieldset>';
 	echo $formwriter->end_form();
 
+	$page->end_box();
 	$page->admin_footer();
 
 

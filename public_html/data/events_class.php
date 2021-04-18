@@ -255,15 +255,34 @@ class Event extends SystemBase {
 		}
 	}
 	
-	function add_registrant($usr_user_id, $ord_order_id = NULL, $days_until_expire=NULL){
+	function add_registrant($usr_user_id, $order_item=NULL, $bundle_id=NULL, $days_until_expire=NULL){
+		$order = NULL;
+		if($order_item){
+			$order = $order_item->get_order();
+		}
+		
 		if($event_registrant = EventRegistrant::check_if_registrant_exists($usr_user_id, $this->get('evt_event_id'))){
+			//PLAIN PERMANENT PURCHASES GET PRIORITY, THEN BUNDLES AND SUBSCRIPTIONS
+			if($order_item && !$order_item->get('odi_is_subscription') && !$bundle_id){
+				//STRAIGHT PURCHASE...REPLACE OLD ORDER WITH NEW INFO
+				$event_registrant->set('evr_ord_order_id', $order->key);
+				$event_registrant->set('evr_odi_order_item_id', $order_item->key);
+				$event_registrant->set('evr_grp_group_id', NULL);
+				$event_registrant->save();
+			}
 			return $event_registrant;
 		}
 		else{
 			$event_registrant = new EventRegistrant(NULL);
 			$event_registrant->set('evr_usr_user_id', $usr_user_id);
-			if($ord_order_id){
-				$event_registrant->set('evr_ord_order_id', $ord_order_id);
+			
+			if($bundle_id){
+				$event_registrant->set('evr_grp_group_id', $bundle_id);
+			}
+			
+			if($order){
+				$event_registrant->set('evr_ord_order_id', $order->key);
+				$event_registrant->set('evr_odi_order_item_id', $order_item->key);
 			}
 			$event_registrant->set('evr_evt_event_id', $this->get('evt_event_id'));		
 

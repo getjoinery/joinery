@@ -54,10 +54,6 @@
 	echo 'User - '.'('. $order_user->key .') <a href="/admin/admin_user?usr_user_id='. $order_user->key .'">' . $order_user->display_name() . '</a> '. '<br />';
 
 	if($_SESSION['permission'] == 10){
-		echo 'Stripe session id - '. $order->get('ord_stripe_session_id'). '<br />';
-		echo 'Stripe customer id - '. $order->get('ord_stripe_customer_id'). '<br />';
-		echo 'Payment intent - '. $order->get('ord_stripe_payment_intent_id'). '<br />';
-		echo 'Subscription - '. $order->get('ord_stripe_subscription_id'). '<br />';
 		if($order->get('ord_status') == 1){
 			echo 'Status - INCOMPLETE';
 		}
@@ -69,7 +65,7 @@
 		}
 	}
 
-	echo '<h2>Details</h2>';
+	echo '<h2>Items in Order</h2>';
 	$order_items = $order->get_order_items();
 	$order_items_out = array();
 	foreach($order_items as $order_item) {
@@ -98,10 +94,20 @@
 			$this_out .= ' (Note: '.$product_data['comment'].')';
 		}
 
-		if($_SESSION['permission'] == 10){
-			$this_out .= ' <a href="/admin/admin_item_details?oi=' . $order_item->key . '">[details]</a>'; 
+		if($order_item->get('odi_refunded')){
+			$this_out .= ' REFUNDED $'.$order_item->get('odi_refunded');
 		}
 		
+		if($order_item->get('odi_subscription_cancelled_time')){
+			$this_out .= ' CANCELLED AT '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());	
+		}
+			
+		if($_SESSION['permission'] >= 8){
+			if(!$order_item->get('odi_refunded')){
+				//$this_out .= ' | <a href="/admin/admin_order_refund?oi=' . $order_item->key . '">[refund]</a>';
+			}
+		}
+	
 		$order_items_out[] = $this_out;
 
 	}

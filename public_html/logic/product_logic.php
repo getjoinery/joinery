@@ -43,15 +43,17 @@ if ($_POST || isset($_GET['cart'])) {
 	try {
 		$cart = $session->get_shopping_cart();
 		if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE && $_REQUEST['user_price_override']){
-			$form_data['user_price_override'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $_REQUEST['user_price_override']));					
+			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
+			$form_data['user_price_override'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $_REQUEST['user_price_override'])); 					
 			$cart->add_item($product, $form_data);
 			unset($form_data['user_price_override']);
 		}
 		else{ 
 			//IF USER ENTERED AN EXTRA DONATION CREATE THAT ITEM
 			if($_REQUEST['user_price']){
+				//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
 				$form_data['user_price'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $_REQUEST['user_price']));
-				$extra_donation = new Product(2, TRUE);
+				$extra_donation = new Product(Product::PRODUCT_ID_OPTIONAL_DONATION, TRUE);
 				$cart->add_item($extra_donation, $form_data);
 			}	
 			unset($form_data['user_price']);
