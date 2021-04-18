@@ -60,7 +60,7 @@
 		}
 
 	}
-
+	$search_criteria['not_system_users'] = true;
 
 	$users = new MultiUser(
 		$search_criteria,

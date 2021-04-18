@@ -1277,6 +1277,10 @@ class MultiUser extends SystemMultiBase {
 		if (array_key_exists('deleted', $this->options)) {
 			$where_clauses[] = 'usr_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
 		}	
+		
+		if (array_key_exists('not_system_users', $this->options)) {
+			$where_clauses[] = '(usr_user_id != '.User::USER_SYSTEM.' AND usr_user_id != '.User::USER_DELETED.')';
+		}
 
 		if (array_key_exists('permission_range', $this->options)) {
 			$where_clauses[] = 'usr_permission >= ? AND usr_permission <= ?';

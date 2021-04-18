@@ -59,81 +59,170 @@
 						  </li>
 						</ul>
 						<?php
-						
-						if(!$_REQUEST['tab'] || $_REQUEST['tab'] == 'past'){
 							$headers = array('Event', 'Actions');
 							$page->tableheader($headers, "table cart-table");
 							
-							foreach($event_registrants as $event_registrant){
-								$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-								$next_session = $event->get_next_session();
-								
-								if(!$_REQUEST['tab']){
-									if($event->get('evt_status') != 1){
-										continue;
-									}
-								}
-								else{
-									if($event->get('evt_status') == 1){
-										continue;
-									}								
-								}
-
-								
-								$time = NULL;
-								$tz = $event->get('evt_timezone');
-								if($next_session){
-									$time = '<b>Next session: ';
-									$time .= $next_session->get_time_string($tz);
+						if(!$_REQUEST['tab']){
+							if(!$num_future_events){
+									$rowvalues = array();
+									array_push($rowvalues, 'You have no upcoming events.'); 
+									array_push($rowvalues, '');
+									$page->disprow($rowvalues);								
+							}
+							else{
+								foreach($event_registrants_future as $event_registrant){
+									$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
+									$next_session = $event->get_next_session();
 									
-									if($event->get('evt_timezone') != $session->get_timezone()){
-										$time .= ' (Your local time: '. $next_session->get_time_string($session->get_timezone()). ')';
-									}
-									$time .= '</b>';
-								}
-								else if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-
-									$time = $event->get_time_string($tz);		
-									if($event->get('evt_timezone') != $session->get_timezone()){
-										$time .= ' (Your local time: '. $event->get_time_string($session->get_timezone()). ')';			
-									}				
-								}
-								
-								$calendar_text = '';
-								if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-									$calendar_links = $event->get_add_to_calendar_links();
-									if($calendar_links){
-										if($time){
-											$calendar_text .= '<br>';
+									if(!$_REQUEST['tab']){
+										if($event->get('evt_status') != 1){
+											continue;
 										}
-										$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
-										$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
-										$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
-										$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
 									}
-								}
-								
-								
-								$rowvalues = array();
-								if($event->get('evt_session_display_type')==2){
-									array_push($rowvalues, '<h6><a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$event->get('evt_name').'</a></h6>'. $time. $calendar_text);
-								}
-								else{
-									array_push($rowvalues, '<h6><a href="/profile/event_sessions?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a></h6>'. $time. $calendar_text);
-								}
-								
+									else{
+										if($event->get('evt_status') == 1){
+											continue;
+										}								
+									}
 
-								$actions = '';
-								if(!$event_registrant->get('evr_extra_info_completed') && $event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
-									$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-									$actions .= '<a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">Additional information needed</a>';
-								}
+									
+									$time = NULL;
+									$tz = $event->get('evt_timezone');
+									if($next_session){
+										$time = '<b>Next session: ';
+										$time .= $next_session->get_time_string($tz);
+										
+										if($event->get('evt_timezone') != $session->get_timezone()){
+											$time .= ' (Your local time: '. $next_session->get_time_string($session->get_timezone()). ')';
+										}
+										$time .= '</b>';
+									}
+									else if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
 
-								if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
-									$actions .= '<a class="button-circle button-circle-md button-circle-grey" href="/profile/event_withdraw?evr_event_registrant_id='.$event_registrant->key.'" alt="Withdraw from course"><i class="ti-close"></i>';
+										$time = $event->get_time_string($tz);		
+										if($event->get('evt_timezone') != $session->get_timezone()){
+											$time .= ' (Your local time: '. $event->get_time_string($session->get_timezone()). ')';			
+										}				
+									}
+									
+									$calendar_text = '';
+									if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+										$calendar_links = $event->get_add_to_calendar_links();
+										if($calendar_links){
+											if($time){
+												$calendar_text .= '<br>';
+											}
+											$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
+										}
+									}
+									
+									
+									$rowvalues = array();
+									if($event->get('evt_session_display_type')==2){
+										array_push($rowvalues, '<h3><a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$event->get('evt_name').'</a></h3>'. $time. $calendar_text);
+									}
+									else{
+										array_push($rowvalues, '<h3><a href="/profile/event_sessions?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a></h3>'. $time. $calendar_text);
+									}
+									
+
+									$actions = '';
+									if(!$event_registrant->get('evr_extra_info_completed') && $event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
+										$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
+										$actions .= '<a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">Additional information needed</a>';
+									}
+
+									if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
+										$actions .= '<a class="button-circle button-circle-md button-circle-grey" href="/profile/event_withdraw?evr_event_registrant_id='.$event_registrant->key.'" alt="Withdraw from course"><i class="ti-close"></i>';
+									}
+									array_push($rowvalues, $actions); 
+									$page->disprow($rowvalues);
 								}
-								array_push($rowvalues, $actions); 
-								$page->disprow($rowvalues);
+							}
+							$page->endtable();
+						}
+						else if($_REQUEST['tab'] == 'past'){
+							if(!$num_past_events){
+									$rowvalues = array();
+									array_push($rowvalues, 'You have no past events.'); 
+									array_push($rowvalues, ''); 
+									$page->disprow($rowvalues);								
+							}
+							else{
+								foreach($event_registrants_past as $event_registrant){
+									$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
+									$next_session = $event->get_next_session();
+									
+									if(!$_REQUEST['tab']){
+										if($event->get('evt_status') != 1){
+											continue;
+										}
+									}
+									else{
+										if($event->get('evt_status') == 1){
+											continue;
+										}								
+									}
+
+									
+									$time = NULL;
+									$tz = $event->get('evt_timezone');
+									if($next_session){
+										$time = '<b>Next session: ';
+										$time .= $next_session->get_time_string($tz);
+										
+										if($event->get('evt_timezone') != $session->get_timezone()){
+											$time .= ' (Your local time: '. $next_session->get_time_string($session->get_timezone()). ')';
+										}
+										$time .= '</b>';
+									}
+									else if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+
+										$time = $event->get_time_string($tz);		
+										if($event->get('evt_timezone') != $session->get_timezone()){
+											$time .= ' (Your local time: '. $event->get_time_string($session->get_timezone()). ')';			
+										}				
+									}
+									
+									$calendar_text = '';
+									if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+										$calendar_links = $event->get_add_to_calendar_links();
+										if($calendar_links){
+											if($time){
+												$calendar_text .= '<br>';
+											}
+											$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
+										}
+									}
+									
+									
+									$rowvalues = array();
+									if($event->get('evt_session_display_type')==2){
+										array_push($rowvalues, '<h3><a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$event->get('evt_name').'</a></h3>'. $time. $calendar_text);
+									}
+									else{
+										array_push($rowvalues, '<h3><a href="/profile/event_sessions?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a></h3>'. $time. $calendar_text);
+									}
+									
+
+									$actions = '';
+									if(!$event_registrant->get('evr_extra_info_completed') && $event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
+										$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
+										$actions .= '<a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">Additional information needed</a>';
+									}
+
+									if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
+										$actions .= '<a class="button-circle button-circle-md button-circle-grey" href="/profile/event_withdraw?evr_event_registrant_id='.$event_registrant->key.'" alt="Withdraw from course"><i class="ti-close"></i>';
+									}
+									array_push($rowvalues, $actions); 
+									$page->disprow($rowvalues);
+								}
 							}
 							$page->endtable();	
 						}
@@ -270,20 +359,50 @@
 						</div>
 						
 						<?php
-						if($settings->get_setting('products_active')){
-							$logic_path = LibraryFunctions::get_logic_file_path('get_subscriptions_logic.php', 'url');
-							echo '
-							<script>
-							$(document).ready(function() {
-								$("#subscriptions").load("'.$logic_path.'");
-							});
-							</script>
-							<div style="margin-bottom: 20px;" id="subscriptions"></div>';
-						}
-						?>
+						if($settings->get_setting('products_active') && $settings->get_setting('subscriptions_active')){
+							
+							?>
+							<div class="sidebar-box">
+								<h6 class="font-small font-weight-normal uppercase">Your Subscriptions</h6>
+								<ul class="list-category">
+								<?php
+								foreach($subscriptions as $subscription){	
+										
+									if($subscription->get('odi_subscription_cancelled_time')){
+										$status = ' canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
+									}
+									else{
+										$status = '<a href="/profile/orders_recurring_action?stripe_sid='. $subscription->get('odi_stripe_subscription_id'). '">cancel</a>';
+									}
+									?>
+									<li><?php echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span></li>
+									<?php
+									/*
+									if($sub['status'] != 'canceled'){
+										$actions = '';
+									}
+									else{
+										$actions = 'Canceled';
+									}
+									*/
+									
+								}
 
+								if(!$active){
+									echo '<a class="button button-dark" href="/product?product_id=3">Start a new subscription</a>';
+								}
+								?>
+									</ul>
+							</div>	
 						<?php
-						if($settings->get_setting('products_active')){
+						}
+
+						//if($settings->get_setting('acuity_api_key')){
+							?>
+							<div class="sidebar-box">
+								<h6 class="font-small font-weight-normal uppercase">Your Appointments</h6>
+
+								<?php							
 							$logic_path = LibraryFunctions::get_logic_file_path('get_appointments_logic.php', 'url');
 							echo '
 							<script>
@@ -292,11 +411,15 @@
 							});
 							</script>
 							<div style="margin-bottom: 20px;" id="appointments"></div>';
-						}
-						?>
+						//}
+							?>
+							</div>						
+
 
 						
-						<!-- Sidebar box 3 - Popular Posts -->
+						<?php
+						if($settings->get_setting('messages_active')){
+						?>
 						<div class="sidebar-box">
 							<h6 class="font-small font-weight-normal uppercase">Your Messages</h6>
 														
@@ -314,7 +437,9 @@
 							?>	
 										
 						</div>
-
+						<?php
+						}
+						?>
 						
 					</div>
 					<!-- end Blog Sidebar -->

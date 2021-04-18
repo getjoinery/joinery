@@ -33,10 +33,13 @@
 	$user = new User($session->get_user_id(), TRUE);	
 	include($_SERVER['DOCUMENT_ROOT'] . '/utils/registrant_maintenance.php');
 	
-	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
-	$event_registrants->load();
+	$event_registrants_future = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => false), array('event_id'=> 'DESC'));
+	$num_future_events = $event_registrants_future->count_all();
+	$event_registrants_future->load();
 
-	
+	$event_registrants_past = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => true), array('event_id'=> 'DESC'));
+	$num_past_events = $event_registrants_future->count_all();
+	$event_registrants_past->load();
 	
 	$phone_numbers = new MultiPhoneNumber(
 		array('user_id' => $session->get_user_id(), 'deleted' => FALSE));
@@ -74,6 +77,15 @@
 	);
 	$messages->load();	
 	
+	//SUBSCRIPTIONS
+	
+	$subscriptions = new MultiOrderItem(
+	array('user_id' => $user->key), //SEARCH CRITERIA
+	NULL,  // SORT, SORT DIRECTION
+	5, //NUMBER PER PAGE
+	NULL //OFFSET
+	);
+	$subscriptions->load();	
 
 	
 ?>

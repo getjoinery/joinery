@@ -18,7 +18,6 @@
 	
 	$page = new PublicPage();
 
-
 	try{
 		$settings = Globalvars::get_instance();
 		$acuity = new AcuityScheduling(array(
@@ -29,19 +28,12 @@
 		
 		$endpoint = '/appointments?email='. $user->get('usr_email').'&minDate='.$dt_now->format('Y-m-d');
 		$appointments = $acuity->request($endpoint);
-		
-		if($appointments){
-			
-			if($appointments['status_code'] != '401'){
-				echo '<h2>Appointments</h2>';
-				$headers = array("Appointment", "Time");
-				$page->tableheader($headers, "admin_table");
 
-				
+		if($appointments['status_code']){
+			if($appointments['status_code'] != '401'){
 				foreach($appointments as $appointment){
 					$dt = new DateTime($appointment['datetime']);
-					if($dt > $dt_now){
-						
+					if($dt > $dt_now){	
 						$rowvalues=array();
 						$appt_link = '<a href="'.$appointment['confirmationPage'].'">'.$appointment['calendar'] . ' (' . $appointment['type'] . ') </a>';
 						if($appointment['location']){
@@ -52,13 +44,19 @@
 						array_push($rowvalues, LibraryFunctions::convert_time($dt->format('M j, Y g:i a'), $dt->format('T'), $session->get_timezone()));
 						$page->disprow($rowvalues);
 					}
-				}
+				}	
 				$page->endtable();	
 			}
-		}		
+			else{
+				echo 'No appointments found.';
+			}
+		}	
+		else{
+			echo 'No appointments found.';
+		}
 	}
 	catch(Exception $e){
-		echo '';
+		echo 'No appointments found.'; 
 	}	
 	
 	?>
