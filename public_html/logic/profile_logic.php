@@ -80,7 +80,7 @@
 	//SUBSCRIPTIONS
 	$subscriptions = new MultiOrderItem(
 	array('user_id' => $user->key, 'is_subscription' => true), //SEARCH CRITERIA
-	NULL,  // SORT, SORT DIRECTION
+	array('order_item' => 'DESC'),  // SORT, SORT DIRECTION
 	5, //NUMBER PER PAGE
 	NULL //OFFSET
 	);

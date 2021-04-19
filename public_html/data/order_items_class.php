@@ -255,15 +255,26 @@ class MultiOrderItem extends SystemMultiBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
+		if ($this->order_by) {
+			if (array_key_exists('order_item_id', $this->order_by)) {
+				$order_by_string = ' odi_order_item_id '. $this->order_by['order_item_id'];
+			}	
+				
+		}
+		else {
+			$order_by_string = ' odi_order_item_id '. $this->order_by['order_item_id'];
+		}
+		
 		if ($only_count) {
 			$sql = 'SELECT COUNT(1) as count_all FROM odi_order_items
 				' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM odi_order_items
 				' . $where_clause . '
-				ORDER BY odi_order_item_id ASC' . $this->generate_limit_and_offset();
+				ORDER BY ' . $order_by_string . ' ' .$this->generate_limit_and_offset();
 		}
 
+		
 		try {
 			$q = $dblink->prepare($sql);
 
