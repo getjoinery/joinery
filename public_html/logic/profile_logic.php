@@ -78,9 +78,8 @@
 	$messages->load();	
 	
 	//SUBSCRIPTIONS
-	
 	$subscriptions = new MultiOrderItem(
-	array('user_id' => $user->key), //SEARCH CRITERIA
+	array('user_id' => $user->key, 'is_subscription' => true), //SEARCH CRITERIA
 	NULL,  // SORT, SORT DIRECTION
 	5, //NUMBER PER PAGE
 	NULL //OFFSET
