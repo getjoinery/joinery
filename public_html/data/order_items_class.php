@@ -242,6 +242,10 @@ class MultiOrderItem extends SystemMultiBase {
 			$bind_params[] = array($this->options['order_date_after'], PDO::PARAM_STR);
 		}
 
+		if (array_key_exists('is_subscription', $this->options)) {
+			$where_clauses[] = 'odi_is_subscription = TRUE';
+		}
+
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
 		} else {
