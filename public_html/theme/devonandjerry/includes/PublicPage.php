@@ -135,6 +135,27 @@ class PublicPage extends PublicPageMaster {
 				<!-- Menu -->
 				<div class="header-menu">
 					<ul class="nav">
+					<?php
+						$menus = PublicPage::get_public_menu();
+						$menus2 = $menus; 
+						foreach ($menus as $menu){
+							if($menu[parent]){
+								$submenus = $menu['submenu'];
+								echo '<li class="nav-item">';
+								echo '<a class="nav-link" href="'.$menu['link'].'">'.$menu['name'].'</a>';
+								
+								if(!empty($submenus)){	
+									echo '<ul class="nav-dropdown">';
+									foreach ($submenus as $submenu){
+										echo '<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="'.$submenu['link'].'">'.$submenu['name'].'</a></li>';				
+									}
+									echo '</ul>';
+								}
+								echo '</li>';
+							}
+						}
+						?>
+						<!--
 						<li class="nav-item">
 							<a class="nav-link" href="/about">About</a>
 						</li>
@@ -147,6 +168,16 @@ class PublicPage extends PublicPageMaster {
 						<li class="nav-item">
 							<a class="nav-link" href="/contact">Contact</a>
 						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="#">Dropdown</a>
+							<ul class="nav-dropdown">
+								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
+								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
+								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
+								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
+							</ul>
+						</li>
+						-->
 					</ul>
 				</div>
 				<!-- Menu Extra -->
