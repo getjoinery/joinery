@@ -7,6 +7,7 @@
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
+	$settings = Globalvars::get_instance();
 	$user = new User($_REQUEST['usr_user_id'], TRUE);
 
 	$session = SessionControl::get_instance();
@@ -16,7 +17,9 @@ if ($_POST){
 
 	$user->set('usr_first_name', trim($_POST['usr_first_name']));
 	$user->set('usr_last_name', trim($_POST['usr_last_name']));
-	$user->set('usr_nickname', trim($_POST['usr_nickname']));
+	if($_POST['usr_nickname']){
+		$user->set('usr_nickname', trim($_POST['usr_nickname']));
+	}
 
 	if(isset($_POST['usr_email_new']) && $_POST['usr_email_new'] != $user->get('usr_email')) {
 
@@ -99,7 +102,11 @@ else{
 
 	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, $user->get('usr_first_name') , "",255, "");
 	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, $user->get('usr_last_name'), "" , 255, "");
-	echo $formwriter->textinput("Dharma Name", "usr_nickname", "ctrlHolder", 20, $user->get('usr_nickname'), "" , 255, "");
+	
+	$nickname_display = $settings->get_setting('nickname_display_as');
+	if($nickname_display){
+		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, $user->get('usr_nickname'), "" , 255, "");
+	}
 	
 	$optionvals = array("Subscribed"=>1, "Unsubscribed"=>0);
 	echo $formwriter->dropinput("Newsletter subscription", "usr_contact_preferences", "ctrlHolder", $optionvals, $user->get('usr_contact_preferences'), '', FALSE);

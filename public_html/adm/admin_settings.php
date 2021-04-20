@@ -72,6 +72,10 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Registration active", "register_active", "ctrlHolder", $optionvals, $settings->get_setting('register_active'), '', FALSE);	
 
+
+	echo $formwriter->textinput("Nickname display as (blank for no nicknames)", "nickname_display_as", "ctrlHolder", 20, $settings->get_setting('nickname_display_as'), "" , 255, "");	
+
+
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Require email activation to log on", "activation_required_login", "ctrlHolder", $optionvals, $settings->get_setting('activation_required_login'), '', FALSE);	
 
