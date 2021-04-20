@@ -21,6 +21,10 @@ if ($_POST){
 		$user->set('usr_nickname', trim($_POST['usr_nickname']));
 	}
 
+	if($_POST['usr_organization_name']){
+		$user->set('usr_organization_name', trim($_POST['usr_organization_name']));
+	}
+	
 	if(isset($_POST['usr_email_new']) && $_POST['usr_email_new'] != $user->get('usr_email')) {
 
 		if (User::GetByEmail(trim($_POST['usr_email_new']))) {
@@ -84,8 +88,6 @@ else{
 	$formwriter = new FormWriterMaster("form1");
 	
 	$validation_rules = array();
-	$validation_rules['usr_first_name']['required']['value'] = 'true';
-	$validation_rules['usr_last_name']['required']['value'] = 'true';
 	$validation_rules['usr_email_new']['required']['value'] = 'true';
 	$validation_rules['usr_timezone']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
@@ -102,6 +104,8 @@ else{
 
 	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, $user->get('usr_first_name') , "",255, "");
 	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, $user->get('usr_last_name'), "" , 255, "");
+	
+	echo $formwriter->textinput("Organization Name", "usr_organization_name", "ctrlHolder", 20, $user->get('usr_organization_name'), "" , 255, "");
 	
 	$nickname_display = $settings->get_setting('nickname_display_as');
 	if($nickname_display){
