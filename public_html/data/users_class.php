@@ -578,16 +578,22 @@ class User extends SystemBase {
 	}
 
 	function display_name() {
-		if($this->get('usr_organization_name')){
-			$returnval = $this->get('usr_organization_name');
-		}
-		else{
+
+		if($this->get('usr_first_name') || $this->get('usr_last_name')){		
 			$returnval = $this->get('usr_first_name') . ' ' . $this->get('usr_last_name');
 			if($this->get('usr_nickname')){
 				$returnval .= ' ('. $this->get('usr_nickname').')';
 			}
 		}
-		
+		else if($this->get('usr_nickname')){
+			$returnval = ' ('. $this->get('usr_nickname').')';	
+		}
+		else if($this->get('usr_organization_name')){
+			$returnval = $this->get('usr_organization_name');
+		}
+		else{
+			$returnval = 'Unnamed User';
+		}
 
 		return $returnval;
 		
