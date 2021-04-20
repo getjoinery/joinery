@@ -25,15 +25,6 @@
 			$setting->set($field, $_REQUEST[$field]);
 		}
 		
-		if($_REQUEST['stg_is_published']){
-			if(!$setting->get('stg_published_time')){
-				$setting->set('stg_published_time', 'NOW()');
-			}
-		}	
-		else {
-			$setting->set('stg_published_time', NULL);
-		}
-		
 		if(!$setting->key){
 			$setting->set('stg_usr_user_id',$session->get_user_id());
 		}	

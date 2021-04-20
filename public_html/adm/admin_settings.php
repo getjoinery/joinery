@@ -24,11 +24,13 @@
 		$user_settings->load();		 
 
 		foreach($user_settings as $user_setting) {
-			$user_setting->set('stg_value', $_POST[$user_setting->get('stg_name')]);
-			$user_setting->set('stg_update_time', 'NOW()'); 
-			$user_setting->set('stg_usr_user_id', $session->get_user_id());
-			$user_setting->prepare();
-			$user_setting->save();
+			if($_POST[$user_setting->get('stg_name')]){
+				$user_setting->set('stg_value', $_POST[$user_setting->get('stg_name')]);
+				$user_setting->set('stg_update_time', 'NOW()'); 
+				$user_setting->set('stg_usr_user_id', $session->get_user_id());
+				$user_setting->prepare();
+				$user_setting->save();
+			}
 		}				
 		
 	}
