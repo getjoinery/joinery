@@ -131,7 +131,9 @@ if ($_POST) {
 	try {
 		$user = User::CreateNewUser($fixed_fields['usr_first_name'], $fixed_fields['usr_last_name'], $fixed_fields['usr_email'], $fixed_fields['usr_password'], TRUE);
 		
-		$user->set('usr_nickname', $_POST['usr_nickname']);
+		if($_POST['usr_nickname']){
+			$user->set('usr_nickname', $_POST['usr_nickname']);
+		}
 		
 		//$user->set('usr_timezone', $zip_data->zip_timezone);
 		$user->prepare();

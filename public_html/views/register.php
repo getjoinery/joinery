@@ -5,6 +5,7 @@
 	require_once (LibraryFunctions::get_logic_file_path('register_logic.php'));
 
 
+	$settings = Globalvars::get_instance();
 	$page = new PublicPage(TRUE);
 	$hoptions=array(
 		'title'=>'Register',
@@ -51,7 +52,10 @@
 
 	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, @$form_fields->usr_first_name , "",255, "");	
 	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, @$form_fields->usr_last_name, "" , 255, "");
-	echo $formwriter->textinput("Nickname (if you have one)", "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 255, "");
+	$nickname_display = $settings->get_setting('nickname_display_as');
+	if($nickname_display){
+		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 255, "");
+	}
 	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, '', "" , 255, "");
 
 	echo $formwriter->passwordinput("Create Password", "usr_password", "ctrlHolder", 20, "" , "", 255,"");
