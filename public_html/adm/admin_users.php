@@ -49,7 +49,8 @@
 		$search_criteria['user_id_list'] = $user_id_list;
 		if(strstr($searchterm, ' ')) {
 			$search_criteria['name_like'] = $fsearch;
-		} else {
+		} 
+		else {
 			$search_criteria['first_name_like'] = $fsearch;
 			$search_criteria['last_name_like'] = $fsearch;
 			$search_criteria['nickname_like'] = $fsearch;
@@ -60,7 +61,9 @@
 		}
 
 	}
-	$search_criteria['not_system_users'] = true;
+	else{
+		$search_criteria['not_system_users'] = true;
+	}
 
 	$users = new MultiUser(
 		$search_criteria,

@@ -17,6 +17,9 @@
 	
 	$session->check_permission(0);
 	$session->set_return();
+	
+	echo 'turned off';
+	exit;
 
 		$settings = Globalvars::get_instance();
 		\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
