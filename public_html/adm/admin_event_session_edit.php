@@ -79,6 +79,10 @@
 			throw new SystemDisplayableError('There is no previous session with a date and time.');
 			exit();			
 		}
+		else if(!$latest_session->get('evs_start_time')){
+			throw new SystemDisplayableError('The previous session has no date and time.  Cannot auto generate a new session.  Please enter the new session manually.');
+			exit();					
+		}
 		else{
 
 			$new_session_number = NULL;
@@ -99,22 +103,19 @@
 				$event_session->set('evs_title', 'New Session');
 			}
 			
-			$start_time = LibraryFunctions::time_shift($latest_session->get('evs_start_time'), $_POST['num_days'], 'c');
-			$end_time = LibraryFunctions::time_shift($latest_session->get('evs_end_time'), $_POST['num_days'], 'c');
-			$start_time_local = LibraryFunctions::time_shift($latest_session->get('evs_start_time_local'), $_POST['num_days'], 'c');
-			$end_time_local = LibraryFunctions::time_shift($latest_session->get('evs_end_time_local'), $_POST['num_days'], 'c');
-			if($start_time){
+			if($latest_session->get('evs_start_time')){
+				$start_time = LibraryFunctions::time_shift($latest_session->get('evs_start_time'), $_POST['num_days'], 'c');
+				$start_time_local = LibraryFunctions::time_shift($latest_session->get('evs_start_time_local'), $_POST['num_days'], 'c');
 				$event_session->set('evs_start_time', $start_time);
 				$event_session->set('evs_start_time_local', $start_time_local);
 			}
-			if($end_time){
+			
+			if($latest_session->get('evs_end_time')){
+				$end_time = LibraryFunctions::time_shift($latest_session->get('evs_end_time'), $_POST['num_days'], 'c');
+				$end_time_local = LibraryFunctions::time_shift($latest_session->get('evs_end_time_local'), $_POST['num_days'], 'c');
 				$event_session->set('evs_end_time', $end_time);
 				$event_session->set('evs_end_time_local', $end_time_local);
 			}
-			if(!$start_time && !$end_time){
-				throw new SystemDisplayableError('There is no previous session with a date and time.');
-				exit();						
-			} 
 
 			$event_session->save();
 			
