@@ -28,7 +28,7 @@ class Setting extends SystemBase {
 	public static $constants = array();
 
 	public static $required = array(
-		'stg_name', 'stg_value');
+		'stg_name');
 
 	public static $field_constraints = array();	
 	
