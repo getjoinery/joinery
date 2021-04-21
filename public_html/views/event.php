@@ -130,10 +130,13 @@
 			echo '<h3>Upcoming Sessions</h3>';
 
 			foreach($future_event_sessions as $event_session){	
+				if($time_string = $event_session->get_time_string($tz)){
+					$time_string = ' -  ' . $time_string;
+				}
 				?>
 							<li>
 								<div class="accordion-title">
-									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title') . ' -  ' . $event_session->get_time_string($tz); ?></h6>
+									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title') . $time_string; ?></h6>
 								</div>
 								<div class="accordion-content">
 									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p> 
@@ -148,10 +151,13 @@
 			echo '<h3>Past Sessions</h3>';
 
 			foreach($past_event_sessions as $event_session){
+				if($time_string = $event_session->get_time_string($tz)){
+					$time_string = ' -  ' . $time_string;
+				}
 				?>
 							<li>
 								<div class="accordion-title">
-									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title') . ' -  ' . $event_session->get_time_string($tz); ?></h6>
+									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title') . $time_string; ?></h6>
 								</div>
 								<div class="accordion-content">
 									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p> 
