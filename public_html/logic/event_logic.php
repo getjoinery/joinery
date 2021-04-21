@@ -102,6 +102,7 @@
 
 	}
 	else{
+
 		$searches = array();
 		$searches['event_id'] = $event->key;
 		$searches['future'] = 'now()';
@@ -117,7 +118,8 @@
 			array('time_then_session_number'=>'DESC'));
 		$past_numsessions = $past_event_sessions->count_all();
 		$past_event_sessions->load();	
-		
+		print_r($future_event_sessions);	
+		print_r($future_numsesssions);
 	}
 
 ?>
