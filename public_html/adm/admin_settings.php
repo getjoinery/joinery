@@ -69,6 +69,13 @@
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings');
 	
 	echo '<h3>General Settings</h3>';
+	
+	echo $formwriter->textbox('Custom CSS', 'custom_css', 'ctrlHolder', 10, 80, $settings->get_setting('custom_css'), '', 'no');
+
+	if($settings->get_setting('tracking')){
+		echo $formwriter->textinput("Tracking code", "tracking_code", "ctrlHolder", 20, $settings->get_setting('tracking_code'), "" , 255, "");	
+	}
+	
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Registration active", "register_active", "ctrlHolder", $optionvals, $settings->get_setting('register_active'), '', FALSE);	
 
@@ -82,9 +89,7 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Newsletter active", "newsletter_active", "ctrlHolder", $optionvals, $settings->get_setting('newsletter_active'), '', FALSE);	
 	
-	if($settings->get_setting('tracking')){
-		echo $formwriter->textinput("Tracking code", "tracking_code", "ctrlHolder", 20, $settings->get_setting('tracking_code'), "" , 255, "");	
-	}
+
 	
 	$blog_active = $settings->get_setting('blog_active');
 	if($blog_active){
