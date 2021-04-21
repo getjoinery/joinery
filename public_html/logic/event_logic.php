@@ -107,7 +107,7 @@
 		$searches['event_id'] = $event->key;
 		$searches['future_or_none'] = true;
 		$future_event_sessions = new MultiEventSessions($searches,
-			array('time_then_session_number'=>'DESC')); 
+			array('time_then_session_number'=>'ASC')); 
 		$future_event_sessions->load();	
 		$future_numsessions = $future_event_sessions->count_all();
 	
