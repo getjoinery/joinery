@@ -105,7 +105,7 @@
 
 		$searches = array();
 		$searches['event_id'] = $event->key;
-		$searches['future'] = 'now()';
+		$searches['future_or_none'] = true;
 		$future_event_sessions = new MultiEventSessions($searches,
 			array('time_then_session_number'=>'DESC')); 
 		$future_event_sessions->load();	
@@ -113,13 +113,11 @@
 	
 		$searches = array();
 		$searches['event_id'] = $event->key;
-		$searches['past'] = 'now()';
+		$searches['past_or_none'] = true;
 		$past_event_sessions = new MultiEventSessions($searches,
 			array('time_then_session_number'=>'DESC'));
 		$past_numsessions = $past_event_sessions->count_all();
 		$past_event_sessions->load();	
-		print_r($future_event_sessions);	
-		print_r($future_numsesssions);
 	}
 
 ?>

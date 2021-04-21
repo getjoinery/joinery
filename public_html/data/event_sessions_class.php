@@ -628,11 +628,18 @@ class MultiEventSessions extends SystemMultiBase {
 			$bind_params[] = array($this->options['future'], PDO::PARAM_STR);
 		}
 
+		if (array_key_exists('future_or_none', $this->options)) {
+			$where_clauses[] = '(evs_end_time > now() OR evs_start_time IS NULL)';
+		}
+
 		if (array_key_exists('past', $this->options)) {
 			$where_clauses[] = 'evs_end_time < ?';
 			$bind_params[] = array($this->options['past'], PDO::PARAM_STR);
 		}		
-		
+	
+		if (array_key_exists('past_or_none', $this->options)) {
+			$where_clauses[] = '(evs_end_time < now() OR evs_start_time IS NULL)';
+		}	
 		/*
 		if (array_key_exists('expired', $this->options)) {
 			$where_clauses[] = 'evs_expires_time ' . ($this->options['expired'] ? '<' : '>') . ' now()';
