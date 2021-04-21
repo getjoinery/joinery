@@ -113,7 +113,7 @@
 	
 		$searches = array();
 		$searches['event_id'] = $event->key;
-		$searches['past'] = true;
+		$searches['past'] = 'now()';
 		$past_event_sessions = new MultiEventSessions($searches,
 			array('time_then_session_number'=>'DESC'));
 		$past_numsessions = $past_event_sessions->count_all();
