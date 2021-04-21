@@ -30,8 +30,6 @@
 	echo PublicPage::BeginPage($event->get('evt_name'), $pageoptions);
 		
 		if($picture_link = $event->get_picture_link('medium')){
-			print_r($picture_link);
-			exit;
 		?>
 		<div class="section padding-top-20">
 			<div class="container">
