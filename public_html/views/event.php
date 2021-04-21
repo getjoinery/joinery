@@ -92,7 +92,7 @@
 
 <?php
 	//CHECK FOR SESSIONS
-	if($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $numsessions > 0){
+	if($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $future_numsessions > 0){
 		echo '<h2>Course Details</h2>';
 
 		foreach($event_sessions as $event_session){	
