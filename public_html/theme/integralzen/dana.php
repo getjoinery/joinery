@@ -200,6 +200,11 @@ giving generously from the heart?” What a lovely question to deeply consider.<
 							<h6 class="font-small font-weight-normal uppercase">Alternate Options</h6>
 							<img class="img-circle-md margin-bottom-20" src="/uploads/small/Generosity-dana-buddhism-7x_j0t7xha.jpg" alt="">
 							<p>If you are unable to use a credit or a debit card or paypal, we have a transferwise account with foreign bank info (contact <a href="mailto:info@integralzen.org">info@integralzen.org</a> for details). </p>
+							<p>You can also mail a check to:<br />
+							Attn: Michael Nelson<br />
+							Integral Zen<br />
+							12430 E Cornell Ave Apt 202<br />
+							Aurora, CO 80014<br />
 						</div>
 						
 
