@@ -10,25 +10,28 @@
 	));
 	echo PublicPage::BeginPage('Retreats and Events');
 
+
+	
 	?>
-		<div class="section padding-top-20">
-			<div class="container">
-				<ul class="nav nav-tabs margin-bottom-20">
-				  <li class="nav-item">
-					<a class="nav-link <?php echo $tab['liveonline']; ?>" href="/events?type=live">Live Courses</a>
-				  </li>
-				  <li class="nav-item">
-					<a class="nav-link <?php echo $tab['selfpaced']; ?>" href="/events?type=selfpaced">Self Paced Courses</a>
-				  </li>
-				  <li class="nav-item">
-					<a class="nav-link <?php echo $tab['retreat']; ?>" href="/events?type=retreats">Retreats</a>
-				  </li>
-				  <li class="nav-item">
-					<a class="nav-link <?php echo $tab['past']; ?>" href="/events?type=past">Past Events</a>
-				  </li>
-				</ul>
-		
-		<?php
+	<div class="section padding-top-20">
+		<div class="container">
+			<ul class="nav nav-tabs margin-bottom-20">
+			<?php
+			foreach($tab_menus as $id => $name){
+				if($id == $_REQUEST['type']){
+				  echo '<li class="nav-item">
+					<a class="nav-link active" href="/events?type='.$id.'">'.$name.'</a>
+				  </li>';					
+				}
+				else{
+				  echo '<li class="nav-item">
+					<a class="nav-link" href="/events?type='.$id.'">'.$name.'</a>
+				  </li>';						
+				}
+			}
+			?>
+			</ul>
+			<?php
 
 
 

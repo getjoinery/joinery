@@ -5,6 +5,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_types_class.php');
 
 	$session = SessionControl::get_instance();
 
@@ -15,34 +16,25 @@
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', NULL, 0, '');
 	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
 	
-	$tab = array();
 	$searches = array();
 	$searches['deleted'] = FALSE;
 	$searches['visibility'] = 1;
-	if($_REQUEST['type'] == 'past'){
-		$searches['past'] = TRUE;
-		$tab['past'] = 'active';
-	}
-	else if($_REQUEST['type'] == 'selfpaced'){
-		$searches['type'] = Event::TYPE_SELF_PACED_ONLINE;
+	$swasdirection = 'DESC';	
+	
+	//SEE IF WE ARE ON A TAB
+	if(!isset($_REQUEST['type']) || $_REQUEST['type'] == 'future'){
+		//ASSUME WE'RE JUST LISTING FUTURE EVENTS
 		$searches['past'] = FALSE;
-		$searches['status'] = 1;
-		$tab['selfpaced'] = 'active';
-	}
-	else if($_REQUEST['type'] == 'retreats'){
-		$searches['type'] = Event::TYPE_RETREAT;
-		$searches['past'] = FALSE;
-		$searches['status'] = 1;
-		$tab['retreat'] = 'active';
+		$searches['status'] = Event::STATUS_ACTIVE;
+	}	
+	else if($_REQUEST['type'] == 'past'){
+		$searches['past'] = TRUE;		
 	}
 	else{
-		$searches['type'] = Event::TYPE_LIVE_ONLINE;
 		$searches['past'] = FALSE;
-		$searches['status'] = 1;
-		$swasdirection = 'DESC';
-		$tab['liveonline'] = 'active';
+		$searches['type'] = $_REQUEST['type'];
+		$searches['status'] = Event::STATUS_ACTIVE;
 	}
-	
 
 	$events = new MultiEvent(
 		$searches,
@@ -51,7 +43,18 @@
 		$swaoffset,
 		'AND');
 	$events->load();	
-	$numeventsrecords = $events->count_all();	
+	$numeventsrecords = $events->count_all();		
+	
+	
+	//GET ALL OF THE TYPES
+	$event_types = new MultiEventType();
+	$event_types->load();	
+	//BUILD THE TAB MENU
+	$tab_menus = array ('future' => 'Future Events');
+	foreach ($event_types as $event_type){
+		$tab_menus[$event_type->key] = $event_type->get('ety_name');
+	}
+	$tab_menus['past'] = 'Past Events';
 
   
 ?>
