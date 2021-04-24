@@ -35,7 +35,7 @@
 		$searches['type'] = $_REQUEST['type'];
 		$searches['status'] = Event::STATUS_ACTIVE;
 	}
-print_r($searches);
+
 	$events = new MultiEvent(
 		$searches,
 		array($swasort=>$swasdirection),
