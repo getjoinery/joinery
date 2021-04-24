@@ -55,11 +55,6 @@ class Event extends SystemBase {
 	const VISIBILITY_PRIVATE = 0;
 	const VISIBILITY_PUBLIC = 1;
 	const VISIBILITY_PUBLIC_UNLISTED = 2;	
-	
-	const TYPE_LIVE_ONLINE = 1;
-	const TYPE_SELF_PACED_ONLINE = 2;
-	const TYPE_RETREAT = 3;
-	const TYPE_IN_PERSON = 4;
 
 	public static $fields = array(
 		'evt_event_id' => 'event ID',
@@ -88,7 +83,7 @@ class Event extends SystemBase {
 		'evt_fil_file_id' => 'File id of the picture attached',
 		'evt_link' => 'Link for the event',
 		'evt_show_add_to_calendar_link' => 'Whether to show the calendar link',
-		'evt_type' => 'Type of event, see above',
+		'evt_ety_event_type_id' => 'Type of event',
 		'evt_delete_time' => 'Time of deletion',
 	); 
 
@@ -648,7 +643,7 @@ class Event extends SystemBase {
 			  "evt_visibility" int4,
 			  "evt_link" varchar(255) COLLATE "pg_catalog"."default",
 			  "evt_show_add_to_calendar_link" bool, 
-			  "evt_type" int4,
+			  "evt_ety_event_type_id" int4,
 			  "evt_delete_time" timestamp(6)
 			)
 			;';
@@ -723,7 +718,7 @@ class Multievent extends SystemMultiBase {
 		}
 
 		if (array_key_exists('type', $this->options)) {
-			$where_clauses[] = 'evt_type = ?';
+			$where_clauses[] = 'evt_ety_event_type_id = ?';
 			$bind_params[] = array($this->options['type'], PDO::PARAM_INT);
 		}
 

@@ -8,7 +8,7 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(7);
 	
-	if (isset($_REQUEST['pst_post_id'])) {
+	if (isset($_REQUEST['prg_product_group_id'])) {
 		$product_group = new ProductGroup($_REQUEST['prg_product_group_id'], TRUE);
 	} else {
 		$product_group = new ProductGroup(NULL);
