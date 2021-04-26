@@ -213,7 +213,7 @@ class PublicPage extends PublicPageMaster {
 						if($_SESSION['permission'] == 10){
 							echo ' | <a id="admintoggle" href="#">Debug</a>';				
 						}
-						echo '<br /><span class="timezonesection" Timezone: '.$session->get_timezone().' (<a href="/profile/account_edit">change</a>)</span>';
+						echo '<br /><span class="timezonesection"> Timezone: '.$session->get_timezone().' (<a href="/profile/account_edit">change</a>)</span>';
 						?>
 						<!--
 						<li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
