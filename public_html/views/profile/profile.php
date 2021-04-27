@@ -372,7 +372,7 @@
 										$status = ' canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
 									}
 									else{
-										$status = '<a href="/profile/orders_recurring_action?stripe_sid='. $subscription->get('odi_stripe_subscription_id'). '">cancel</a>';
+										$status = '<a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
 									}
 									?>
 									<li><?php echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span></li>
