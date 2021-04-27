@@ -289,96 +289,10 @@
 						else{
 							$status = '<a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
 						}
-						?>
-						<?php echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span><br />
+						echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span><br />
 						<?php
-						
 					}
-
-					/*
-					$settings = Globalvars::get_instance();
-					if($settings->get_setting('stripe_api_key')){					
-						\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
-
-						$customer_ids = array();
-						if($user->get('usr_stripe_customer_id')){
-							$customer_ids[] = $user->get('usr_stripe_customer_id');
-						}
-
-						$stripe_customers = \Stripe\Customer::all(["email" => $user->get('usr_email')]);	
-
-						foreach($stripe_customers[data] as $stripe_customer){
-							if(!in_array($stripe_customer[id], $customer_ids)){
-								$customer_ids[] = $stripe_customer[id];
-							}
-						}
-
-
-						foreach($customer_ids as $customer_id){	
-							$subs = \Stripe\Subscription::all(['limit' => 5, 'customer' => $customer_id, 'status' => 'all']);
-
-							foreach($subs as $sub) {
-								$gmtime = gmdate("Y-m-d\TH:i:s\Z", $sub['created']);
-								
-								$cancelled = '';
-								if($sub['ended_at']){
-									$cancelled = LibraryFunctions::convert_time(gmdate("Y-m-d\TH:i:s\Z", $sub['ended_at']), 'UTC', $session->get_timezone());
-								}
-								
-								if($sub['status'] != 'canceled'){
-									$actions = '<a href="/profile/orders_recurring_action?stripe_sid='. $sub['id']. '">Cancel subscription</a>';
-								}
-								else{
-									$actions = 'canceled';
-								}
-								
-								if(!$cancelled){
-									echo '<p><strong>Active recurring donation:  $'.$sub['plan']['amount']/100 .'/month</strong> starting '.LibraryFunctions::convert_time($gmtime, 'UTC', $session->get_timezone()). ' (Sub id: ' . $sub['id'].') '. $actions .'</p>';
-								}
-								
-								/*
-								$rowvalues = array();
-								array_push($rowvalues, $sub['id']);
-								array_push($rowvalues,  '$'.$sub['plan']['amount']/100 .'/month'); 
-								array_push($rowvalues, LibraryFunctions::convert_time($gmtime, 'UTC', $session->get_timezone()));
-								array_push($rowvalues, $cancelled);
-								array_push($rowvalues, $actions);
-								$page->disprow($rowvalues);
-								*/
-							}
-						}
-						//$page->endtable();	
-
-
-
-
-						/*
-						if($user->get('usr_stripe_customer_id')){
-							$settings = Globalvars::get_instance();
-							\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));	
-							$subs = \Stripe\Subscription::all(['limit' => 3, 'customer' => $user->get('usr_stripe_customer_id'), 'status' => 'all']);
-
-							if($subs){	
-								foreach($subs as $sub) {
-									$gmtime = gmdate("Y-m-d\TH:i:s\Z", $sub['plan']['created']);
-									
-									if($sub['status'] != 'canceled'){
-										//$actions = '<a href="/profile/orders_recurring_action?stripe_sid='. $sub['id']. '">Cancel subscription</a>';
-										$actions = '';
-									}
-									else{
-										$actions = 'canceled';
-									}
-										
-									echo '<li><strong>Active - $'.$sub['plan']['amount']/100 .'/month</strong> beginning '.LibraryFunctions::convert_time($gmtime, 'UTC', $session->get_timezone(), 'M j, Y'). ' ' .$actions.'</li>';
-							
-								}
-								echo ' ';	
-							}
-						}	
-								
-					}	
-*/					
+				
 				}		
 				?>
 				</p>
