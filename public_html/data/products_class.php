@@ -981,6 +981,15 @@ class Product extends SystemBase {
 				}
 			}
 
+			//ADD IN EXTRA DATA 
+			if(count($extra_data)){
+				foreach($extra_data as $field=>$valuearray){
+						$value = $valuearray[required];
+						$rules[$field] = array(key($valuearray)=>$value['value']);
+					
+				}
+			}
+
 			echo "
 				$(document).ready(function() {
 

@@ -73,6 +73,8 @@ $page->public_header(array(
 				echo $formwriter->begin_form("product-quantity margin-top-30", "POST", "/product"); 
 				echo $formwriter->hiddeninput('product_id', $product_id);
 				if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+					$validation_rules = array();
+					$validation_rules['user_price_override']['required']['value'] = 'true';
 					echo $formwriter->textinput('Amount to pay ($)', 'user_price_override', 'ctrlHolder', 100, NULL, '', 5, '');
 				}
 				if ($product->output_product_form($formwriter, $user, $extra_data)) {
@@ -82,7 +84,7 @@ $page->public_header(array(
 				?>
 			</div>
 			<?php 
-			$product->output_javascript($extra_data);
+			$product->output_javascript($validation_rules);
 		}
 	}
 	?>
