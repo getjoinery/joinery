@@ -44,7 +44,11 @@ if ($_POST || isset($_GET['cart'])) {
 		$cart = $session->get_shopping_cart();
 		if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE && $_REQUEST['user_price_override']){
 			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
-			$form_data['user_price_override'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $_REQUEST['user_price_override'])); 					
+			$form_data['user_price_override'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $_REQUEST['user_price_override'])); 	
+			if(!$form_data['user_price_override']){
+				throw new ProductRequirementException(
+					'You must enter an amount in the "Price to pay" field.');
+			}
 			$cart->add_item($product, $form_data);
 			unset($form_data['user_price_override']);
 		}
