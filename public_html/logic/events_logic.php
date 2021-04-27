@@ -32,7 +32,12 @@
 	}
 	else{
 		$searches['past'] = FALSE;
-		$searches['type'] = $_REQUEST['type'];
+		if(is_int($searches['type'])){
+			$searches['type'] = $_REQUEST['type'];
+		}
+		else{
+			$searches['past'] = FALSE;
+		}
 		$searches['status'] = Event::STATUS_ACTIVE;
 	}
 
