@@ -134,7 +134,14 @@
 	$event_registrations->load();	
 	$numeventsregistrations = $event_registrations->count_all();	
 	
-	
+	//SUBSCRIPTIONS
+	$subscriptions = new MultiOrderItem(
+	array('user_id' => $user->key, 'is_subscription' => true), //SEARCH CRITERIA
+	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+	5, //NUMBER PER PAGE
+	NULL //OFFSET
+	);
+	$subscriptions->load();	
 
 	/*
 	$search_criteria = NULL;
@@ -274,9 +281,21 @@
 					echo 'Disabled';
 				}
 				else {	
+					foreach($subscriptions as $subscription){	
+							
+						if($subscription->get('odi_subscription_cancelled_time')){
+							$status = ' canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
+						}
+						else{
+							$status = '<a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
+						}
+						?>
+						<?php echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span><br />
+						<?php
+						
+					}
 
-
-
+					/*
 					$settings = Globalvars::get_instance();
 					if($settings->get_setting('stripe_api_key')){					
 						\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
@@ -357,8 +376,9 @@
 								echo ' ';	
 							}
 						}	
-						*/		
-					}						
+								
+					}	
+*/					
 				}		
 				?>
 				</p>

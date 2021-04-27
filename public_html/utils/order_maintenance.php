@@ -13,7 +13,21 @@
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
 	
-	
+	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		$api_key = $settings->get_setting('stripe_api_key_test');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+	}
+	else{
+		$api_key = $settings->get_setting('stripe_api_key');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+	}
+
+	if(!$api_key || !$api_secret_key){
+		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+		exit();			
+	}
+	\Stripe\Stripe::setApiKey($api_key);
+					
 	$orders = new MultiOrder(array('user_id' => $user->key));
 	$orders->load();	
 
@@ -24,24 +38,7 @@
 		foreach($order_items as $order_item){
 			if($order_item->get('odi_is_subscription') && !$order_item->get('odi_subscription_cancelled_time')){
 				//CHECK SUBSCRIPTION STATUS
-				require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
-				$settings = Globalvars::get_instance();
-				try{
-					if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-						$api_key = $settings->get_setting('stripe_api_key_test');
-						$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-					}
-					else{
-						$api_key = $settings->get_setting('stripe_api_key');
-						$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-					}
-
-					if(!$api_key || !$api_secret_key){
-						throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-						exit();			
-					}
-
-					\Stripe\Stripe::setApiKey($api_key);
+				try{		
 					$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
 					if($stripe_subscription[status] == 'canceled'){
 						$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
