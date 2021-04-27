@@ -49,7 +49,16 @@
 			if($_REQUEST['pro_price']){
 				$_REQUEST['pro_price'] = (int)$_REQUEST['pro_price'];
 			}
-			
+	
+			//PRICE MUST BE INTEGER
+			if($_REQUEST['pro_grp_group_id']){
+				$_REQUEST['pro_grp_group_id'] = (int)$_REQUEST['pro_grp_group_id'];
+			}
+			else{
+				$_REQUEST['pro_grp_group_id'] = NULL;
+			}
+
+	
 			//SET RECURRING VALUE
 			if($_REQUEST['pro_recurring']){
 				$product->set('pro_recurring', 'month');
