@@ -62,7 +62,7 @@
 			$products = new MultiProduct(array('event_id'=> $event->key));
 			$numproducts = $products->count_all();
 			if(!$numproducts){
-				throw new SystemDisplayableError('You cannot turn on registration for an event without attaching a product or an external register link.');
+				throw new SystemDisplayableError('You cannot turn on registration for an event without having an external register link or creating a product and choosing this event in the "event registration" field.');
 				exit();
 			}
 		}
