@@ -195,10 +195,13 @@
 	echo $formwriter->dropinput("Status", "evt_status", "ctrlHolder", $optionvals, $event->get('evt_status'), '', FALSE);	
 	
 	$event_types = new MultiEventType();
-	$event_types->load();
-	$optionvals = $event_types->get_dropdown_array();
-	echo $formwriter->dropinput("Type of event", "evt_ety_event_type_id", "ctrlHolder", $optionvals, $event->get('evt_ety_event_type_id'), '', FALSE);	
-	 
+	$num_event_types = $event_types->count_all();
+	if($num_event_types){
+		$event_types->load();
+		$optionvals = $event_types->get_dropdown_array();
+		echo $formwriter->dropinput("Type of event", "evt_ety_event_type_id", "ctrlHolder", $optionvals, $event->get('evt_ety_event_type_id'), '', FALSE);	
+	} 
+	
 	$optionvals = array("Hidden"=>0, "Live"=>1, "Live but unlisted"=>2);
 	echo $formwriter->dropinput("Visibility", "evt_visibility", "ctrlHolder", $optionvals, $event->get('evt_visibility'), '', FALSE);
 
