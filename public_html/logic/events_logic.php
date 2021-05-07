@@ -32,8 +32,8 @@
 	}
 	else{
 		$searches['past'] = FALSE;
-		if(is_int($searches['type'])){
-			$searches['type'] = $_REQUEST['type'];
+		if($searches['type']){
+			$searches['type'] = (int)$_REQUEST['type'];
 		}
 		else{
 			$searches['past'] = FALSE;
