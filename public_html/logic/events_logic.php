@@ -32,13 +32,11 @@
 	}
 	else{
 		$searches['past'] = FALSE;
-		if($searches['type']){
+		$searches['status'] = Event::STATUS_ACTIVE;
+		if($_REQUEST['type']){
 			$searches['type'] = (int)$_REQUEST['type'];
 		}
-		else{
-			$searches['past'] = FALSE;
-		}
-		$searches['status'] = Event::STATUS_ACTIVE;
+		
 	}
 
 	$events = new MultiEvent(
