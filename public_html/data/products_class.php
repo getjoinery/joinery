@@ -664,7 +664,7 @@ class ProductVersion {
 		$dblink = $dbhelper->get_db_link();
 
 		$sql = 'SELECT * FROM prv_product_versions
-			WHERE prv_pro_product_id = ? ORDER BY prv_version_price DESC';
+			WHERE prv_pro_product_id = ? ORDER BY prv_product_version_id ASC';
 
 		try{
 			$q = $dblink->prepare($sql);
