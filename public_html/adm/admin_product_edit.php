@@ -191,8 +191,9 @@
 	$optionvals = array("Active"=>1, "Disabled"=>0 );
 	echo $formwriter->dropinput("Active?", "pro_is_active", "ctrlHolder", $optionvals, $product_status, '', FALSE);
 	echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
-	echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
-
+	//echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
+	echo $formwriter->textbox('Product Description', 'pro_description', 'ctrlHolder', 5, 80, $product->get('pro_description'), '', 'no');
+	
 	$optionvals = array("Yes, it is a recurring monthly charge"=>1, 'No, it is a one time payment' => 0);
 	if($product->get('pro_recurring')){
 		$recurring=1;
