@@ -176,7 +176,7 @@
 					<footer class="comment-meta">
 						<div class="comment-author vcard">
 							<?php
-							if($session->get_user_id() == 1){
+							if($comment->get('cmt_usr_user_id') == 1){
 								echo '<img alt="" src="/theme/jeremytunnell/images/jeremy.jpg" class="avatar avatar-80 photo" height="80" width="80">';
 							}
 							else{
