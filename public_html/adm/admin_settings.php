@@ -89,7 +89,9 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Newsletter active", "newsletter_active", "ctrlHolder", $optionvals, $settings->get_setting('newsletter_active'), '', FALSE);	
 	
+	echo $formwriter->textinput("Emails to receive subscription notifications (separate with comma)", "subscription_notification_emails", "ctrlHolder", 20, $settings->get_setting('subscription_notification_emails'), "" , 255, "");	
 
+	echo $formwriter->textinput("Emails to receive subscription notifications (separate with comma)", "single_purchase_notification_emails", "ctrlHolder", 20, $settings->get_setting('single_purchase_notification_emails'), "" , 255, "");	
 	
 	$blog_active = $settings->get_setting('blog_active');
 	if($blog_active){
@@ -105,7 +107,9 @@
 		echo $formwriter->dropinput("Allow comments from unregistered users", "comments_unregistered_users", "ctrlHolder", $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
 
 		$optionvals = array("Approved"=>'approved', 'Unapproved' => 'unapproved');
-		echo $formwriter->dropinput("Default comment status", "default_comment_status", "ctrlHolder", $optionvals, $settings->get_setting('default_comment_status'), '', FALSE);	
+		echo $formwriter->dropinput("Default comment status", "default_comment_status", "ctrlHolder", $optionvals, $settings->get_setting('default_comment_status'), '', FALSE);
+
+		echo $formwriter->textinput("Emails to receive comment notifications (separate with comma)", "comment_notification_emails", "ctrlHolder", 20, $settings->get_setting('comment_notification_emails'), "" , 255, "");		
 
 		echo $formwriter->textinput("Comment anti spam word (blank for none)", "anti_spam_answer_comments", "ctrlHolder", 20, $settings->get_setting('anti_spam_answer'), "" , 255, "");
 
