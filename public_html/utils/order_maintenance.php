@@ -22,42 +22,40 @@
 		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
 	}
 
-	if(!$api_key || !$api_secret_key){
-		//throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-	\Stripe\Stripe::setApiKey($api_key);
-					
-	$orders = new MultiOrder(array('user_id' => $user->key));
-	$orders->load();	
+	if($api_key && $api_secret_key){
+		
+		\Stripe\Stripe::setApiKey($api_key);
+						
+		$orders = new MultiOrder(array('user_id' => $user->key));
+		$orders->load();	
 
-	
-	//PERFORM MAINTENANCE ON THE ORDERS	
-	foreach($orders as $order){
-		$order_items = $order->get_order_items();
-		foreach($order_items as $order_item){
-			if($order_item->get('odi_is_subscription') && !$order_item->get('odi_subscription_cancelled_time')){
-				//CHECK SUBSCRIPTION STATUS
-				try{		
-					$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
-					if($stripe_subscription[status] == 'canceled'){
-						$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
-						//IF SUBSCRIPTION ENDED, REMOVE 
+		
+		//PERFORM MAINTENANCE ON THE ORDERS	
+		foreach($orders as $order){
+			$order_items = $order->get_order_items();
+			foreach($order_items as $order_item){
+				if($order_item->get('odi_is_subscription') && !$order_item->get('odi_subscription_cancelled_time')){
+					//CHECK SUBSCRIPTION STATUS
+					try{		
+						$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
+						if($stripe_subscription[status] == 'canceled'){
+							$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
+							//IF SUBSCRIPTION ENDED, REMOVE 
 
-						$order_item->set('odi_subscription_cancelled_time', $canceled_at);
-						$order_item->save();
+							$order_item->set('odi_subscription_cancelled_time', $canceled_at);
+							$order_item->save();
 
+						}
+					}
+					catch(Exception $e){
+						//DO NOTHING IF THE API CALL FAILS
+						continue;
 					}
 				}
-				catch(Exception $e){
-					//DO NOTHING IF THE API CALL FAILS
-					continue;
-				}
 			}
+		
 		}
-	
 	}
-
 	
 
 ?>
