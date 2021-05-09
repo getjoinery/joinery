@@ -7,7 +7,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
-
+$settings = Globalvars::get_instance();
 $session = SessionControl::get_instance();
 $session->check_permission(8);
 
@@ -68,7 +68,10 @@ else{
 
 	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, NULL, "",255, "");
 	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, NULL, "" , 255, "");
-	echo $formwriter->textinput("Dharma Name", "usr_nickname", "ctrlHolder", 20, NULL, "" , 255, "");
+	$nickname_display = $settings->get_setting('nickname_display_as');
+	if($nickname_display){
+		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 255, "");
+	}
 	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, NULL, "" , 255, "");
 	echo $formwriter->textinput("Password ", "usr_password", "ctrlHolder", 20, NULL, "" , 255, "");
 	$optionvals = Address::get_timezone_drop_array();

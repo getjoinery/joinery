@@ -5,6 +5,7 @@
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 	require_once(LibraryFunctions::get_logic_file_path('event_register_finish_logic.php'));
 
+	$settings = Globalvars::get_instance();
 	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Edit Event Info'
@@ -49,8 +50,10 @@
 		echo '<hr><br><br>';
 		*/
 	}	
-	
-	echo $formwriter->textinput("Dharma name (leave blank if no)", "usr_nickname", "ctrlHolder", 20, ($event_registrant ? $user->get('usr_nickname') : ''), "", 255,"");
+	$nickname_display = $settings->get_setting('nickname_display_as');
+	if($nickname_display){
+		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 255, "");
+	}
 	$optionvals = array("Yes"=>"1", "No"=>"0");
 	echo $formwriter->dropinput("Is this your first event with us?*", "evr_first_event", "ctrlHolder", $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
 
