@@ -158,7 +158,7 @@
 				
 				$comments = new MultiComment(
 					array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false),
-					array('comment_id'=>'DESC'),
+					array('comment_id'=>'ASC'),
 					NULL,
 					NULL);	
 				$numcomments = $comments->count_all();	
