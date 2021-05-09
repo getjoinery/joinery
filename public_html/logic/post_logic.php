@@ -38,6 +38,28 @@
 		
 		Comment::add_comment($post->key, $session, $_POST);
 
+		//SEND NOTIFICATION
+		if($settings->get_setting('comment_notification_emails')){
+			$notify_emails = split(',', $settings->get_setting('comment_notification_emails'));
+			foreach($notify_emails as $notify_email){
+				try {
+					$notify_user = User::GetByEmail($notify_email);
+					$body = 'Comment '.$comment->key.' was added.';
+					$email_inner_template = $settings->get_setting('individual_email_inner_template');
+					$email = new EmailTemplate($email_inner_template, $notify_user);
+					$email->fill_template(array(
+						'subject' => 'New Comment',
+						'body' => $body,
+					));	
+					$result = $email->send();
+				}					
+				catch (Exception $e) {
+					//DO NOTHING
+					$error = "";
+				}
+			}
+		}
+
 		header('Location: '.$_SERVER['REQUEST_URI']);
 		exit();
 	}
