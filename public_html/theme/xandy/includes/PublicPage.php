@@ -161,9 +161,9 @@ class PublicPage extends PublicPageMaster {
 					<div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
 						<ul class="nav navbar-nav">
 							<li><a href="/page/about">About Us</a></li>
-							<li>
-								<a href="/events">Classes</a>
-							</li>
+							<li><a href="/events">Classes</a></li>
+							<li><a href="/page/liberato-method">The Liberato Method</a></li>
+							<li><a href="/page/contact">Contact Us</a></li>
 						</ul>
 					</div><!-- /.navbar-collapse -->
 				</div><!-- /.container-fluid -->
