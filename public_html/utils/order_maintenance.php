@@ -23,7 +23,7 @@
 	}
 
 	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+		//throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
 		exit();			
 	}
 	\Stripe\Stripe::setApiKey($api_key);
