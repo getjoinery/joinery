@@ -175,7 +175,14 @@
 				<article id="div-comment-7" class="comment-body">
 					<footer class="comment-meta">
 						<div class="comment-author vcard">
-							<img alt="" src="/theme/jeremytunnell/images/jeremy.jpg" class="avatar avatar-80 photo" height="80" width="80">						
+							<?php
+							if($session->get_user_id() == 1){
+								echo '<img alt="" src="/theme/jeremytunnell/images/jeremy.jpg" class="avatar avatar-80 photo" height="80" width="80">';
+							}
+							else{
+								echo '<img alt="" src="/theme/jeremytunnell/images/blank-avatar.png" class="avatar avatar-80 photo" height="80" width="80">';
+							}
+							?>
 							<b class="fn"><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></b> <span class="says">says:</span>					</div>
 
 						<div class="comment-metadata">
