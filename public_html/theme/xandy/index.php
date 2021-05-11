@@ -109,43 +109,85 @@
 			<div class="about-section-inner">
 				<div class="vertical-space-80"></div>
 				<div class="container">
-					<h2 class="main-title text-center">About Xandy Liberato</h2>
-					<h6 class="sub-title after-title text-center">Test</h6>
-					<div class="vertical-space-70"></div>
-					<p class="text-center">
-						Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla. Maecenas volutpat fermentum ante. Sed nibh metus, mollis a dolor ut, feugiat fringilla nunc. Donec consequat pretium nunc, vel feugiat purus cursus a. Fusce eleifend luctus volutpat. Praesent mi massa, commodo at neque in, ultricies tempor quam. Donec vel magna in nibh sollicitudin eleifend a in erat. Vivamus elementum libero ac mattis condimentum. 
-					</p>
-					<!--
+					<h2 class="main-title text-center">Welcome to the Liberato Portal</h2>
+					<h6 class="sub-title after-title text-center">Here you can find information about dance as a source of wellbeing through online courses, workshops, private classes, retreats, books and articles.</h6>
+
+					
 					<div class="vertical-space-80"></div>
 					<div class="row yoga-about-benifits v2">
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
 							<i class="fa fa-heart" aria-hidden="true"></i>
-							<h3 class="font-blue">Healthy Daily Life</h3>
+							<h3 class="font-blue">Liberato Method</h3>
 							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
-							<i class="fa fa-coffee" aria-hidden="true"></i>
-							<h3 class="font-blue">Balance Body, Mind </h3>
+							<i class="fa fa-circle-o" aria-hidden="true"></i>
+							<h3 class="font-blue">Connection in 2 </h3>
 							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
 							<i class="fa fa-leaf" aria-hidden="true"></i>
 						
-							<h3 class="font-blue">Improve Your Style</h3>
+							<h3 class="font-blue">Zouk Training</h3>
 							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
 							<i class="fa fa-pagelines" aria-hidden="true"></i>
-							<h3 class="font-blue">Living Skilfully</h3>
+							<h3 class="font-blue">Mentorship</h3>
 							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
 						</div>
 					</div>
-					-->
+					<h6 class="sub-title after-title text-center">Effects of the Liberato Method</h6>
+					<div class="vertical-space-70"></div>
+					<p class="text-center">
+					<ul>
+					<li>increased body awareness </li>
+					<li>increased connection with oneself and the others </li>
+					<li>increased self-confidence and confidence towards others </li>
+					<li>more empathetic communication </li>
+					<li>more conscious relationships </li>
+					<li>listening development </li>
+					<li>sensitivity development </li>
+					<li>increased enjoyment ability </li>
+					<li>experiences of freedom </li>
+					<li>changes in the way of dancing and living </li>
+					<li>increased social abilities </li>
+					<li>change of mindset </li>
+					</ul>					
+					</p>					
 				</div>
 				<div class="vertical-space-80"></div>
 			</div>
 		</section>
 		<!-- End about section -->
+		
+		<!-- Start video parallex section -->
+		<section class="video-section">
+			<div class="background-transperant-black-medium">
+				<div class="vertical-space-80"></div>
+				<div class="text-center">
+					<div class="container">
+						<div class="row">
+							<div class="col-xs-12 col-sm-8 col-md-8 col-sm-offset-2">
+								<h2 class="font-white">Our Retreat</h2>
+								<div class="vertical-space-20"></div>
+								<!--<p class="font-white">
+									Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla. Maecenas volutpat fermentum ante. Sed nibh metus, mollis a dolor ut, feugiat fringilla nunc. Donec consequat pretium nunc, vel feugiat purus cursus a.
+								</p>-->
+								<div class="vertical-space-20"></div>
+								<iframe width="560" height="315" src="https://www.youtube.com/embed/BBYizZLqYkM" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+								<!--<a href="#" data-toggle="modal" data-target="#videoModal">
+									<i class="fa fa-play font-white" aria-hidden="true"></i>-->
+								</a>
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="vertical-space-80"></div>
+			</div>
+		</section>
+		<!-- End video parallex section -->		
+		
 		<!-- Start classes section -->
 		<section class="background-light-grey">
 			<div class="vertical-space-80"></div>
@@ -297,13 +339,13 @@
 		-->
 		<!-- End photo gallery section -->
 		<!-- Start review section -->
-		<!--
+		
 		<section class="review-section">
 			<div class="background-transperant-black-medium">
 				<div class="vertical-space-60"></div>
 				<div class="container">
-					<h2 class="main-title text-center wow fadeIn font-white" data-wow-duration="0.3s" data-wow-delay="0s">Good Reviews</h2>
-					<h6 class="sub-title after-title text-center wow fadeIn font-white" data-wow-duration="0.3s" data-wow-delay="0.3s">Real Reviews From Real Customer</h6>
+					<h2 class="main-title text-center wow fadeIn font-white" data-wow-duration="0.3s" data-wow-delay="0s">Testimonials</h2>
+					<h6 class="sub-title after-title text-center wow fadeIn font-white" data-wow-duration="0.3s" data-wow-delay="0.3s">From our current and former students</h6>
 					<div class="vertical-space-50"></div>
 					<div class="row">
 						<div class="col-xs-12 col-sm-12 col-md-12">
@@ -312,7 +354,7 @@
 									<div class="vertical-space-40"></div>
 									<div class="students-reviews v2 background-white">
 										<p class="text-center">
-											Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla.Donec consequat pretium nunc, vel feugiat purus cursus a. 
+											The retreat completely changed my life and my vision of the world. Now I feel so much silence and love. And I feel free in dance. My creativity and flow woke up. Thank you all! 
 										</p>
 									</div>
 									<div class="media">
@@ -320,8 +362,8 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>
 										<div class="media-body">
-											<h3 class="font-white">- Kim Doe</h3>
-											<h5 class="bold font-white">Customer</h5>
+											<h3 class="font-white">- Daniel</h3>
+											<h5 class="bold font-white">Retreat Participant</h5>
 										</div>
 									</div>
 								</div>
@@ -329,7 +371,7 @@
 									<div class="vertical-space-40"></div>
 									<div class="students-reviews v2 background-white">
 										<p class="text-center">
-											Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla.Donec consequat pretium nunc, vel feugiat purus cursus a. 
+											Me siento muy conmovida por las personas increíbles que forman parte del personal, todo el mundo. Me sentí SEGURA y eso significa mucho para mí.
 										</p>
 									</div>
 									<div class="media">
@@ -337,8 +379,8 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>
 										<div class="media-body">
-											<h3 class="font-white">- Johne Doe</h3>
-											<h5 class="bold font-white">Customer</h5>
+											<h3 class="font-white">- Angelique</h3>
+											<h5 class="bold font-white">Student</h5>
 										</div>
 									</div>
 								</div>
@@ -346,7 +388,7 @@
 									<div class="vertical-space-40"></div>
 									<div class="students-reviews v2 background-white">
 										<p class="text-center">
-											Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla.Donec consequat pretium nunc, vel feugiat purus cursus a. 
+											Sinto-me como se as portas que não sabia que existiam tivessem se aberto. Ainda não sei bem o que isso significa, mas sinto que a minha vida mudou para melhor. Este foi um evento que mudou a minha vida, e não tenho palavras para dizer o quanto sou grato por ter feito parte disso. Obrigado!
 										</p>
 									</div>
 									<div class="media">
@@ -354,8 +396,8 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>
 										<div class="media-body">
-											<h3 class="font-white">- Mark Vally</h3>
-											<h5 class="bold font-white">Customer</h5>
+											<h3 class="font-white">- Christoffer</h3>
+											<h5 class="bold font-white">Student</h5>
 										</div>
 									</div>
 								</div>
@@ -363,7 +405,7 @@
 									<div class="vertical-space-40"></div>
 									<div class="students-reviews v2 background-white">
 										<p class="text-center">
-											Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla.Donec consequat pretium nunc, vel feugiat purus cursus a. 
+											I used to go to many congresses and workshops to learn the dance techniques without thinking of myself and the others, without thinking about my feelings and taking time to discover what it can bring into my dance and into my life. I don’t know about the last retreat, but this one, which was the first for me, opened a door to a whole world of possibilities where my creativity can be expressed. Thank you. 
 										</p>
 									</div>
 									<div class="media">
@@ -371,8 +413,8 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>
 										<div class="media-body">
-											<h3 class="font-white">- Ricky Matt</h3>
-											<h5 class="bold font-white">Customer</h5>
+											<h3 class="font-white">- Farid</h3>
+											<h5 class="bold font-white">Retreat Participant</h5>
 										</div>
 									</div>
 								</div>
@@ -380,7 +422,7 @@
 									<div class="vertical-space-40"></div>
 									<div class="students-reviews v2 background-white">
 										<p class="text-center">
-											Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla.Donec consequat pretium nunc, vel feugiat purus cursus a. 
+											Solo tengo palabras de agradecimiento y apoyo a este método, que para mí después de estos días maravillosos pienso tenerlo como estilo de vida, conectar como nunca antes con los demás y conmigo mismo. No puedo imaginar mi vida sin la danza y ahora mucho menos que he vivido todo estos. Estos días espero que sean los primeros de muchos. Se quedarán en mi mente y en mi corazón hasta que me vaya de este mundo.
 										</p>
 									</div>
 									<div class="media">
@@ -388,15 +430,15 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>
 										<div class="media-body">
-											<h3 class="font-white">- Sammy Dan</h3>
-											<h5 class="bold font-white">Customer</h5>
+											<h3 class="font-white">- Javi</h3>
+											<h5 class="bold font-white">Student</h5>
 										</div>
 									</div>
 								</div><div>
 									<div class="vertical-space-40"></div>
 									<div class="students-reviews v2 background-white">
 										<p class="text-center">
-											Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla.Donec consequat pretium nunc, vel feugiat purus cursus a. 
+											The retreat was a transformation point in my life. I feel like I am awake, refreshed, inspired, and filled with emotion. Thank you for the beautiful experience. 
 										</p>
 									</div>
 									<div class="media">
@@ -404,8 +446,8 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>
 										<div class="media-body">
-											<h3 class="font-white">- Sunny Franko</h3>
-											<h5 class="bold font-white">Customer</h5>
+											<h3 class="font-white">- Lubna</h3>
+											<h5 class="bold font-white">Retreat Participant</h5>
 										</div>
 									</div>
 								</div>
@@ -418,7 +460,7 @@
 				<div class="background-transperant-black-medium"></div>
 			</div>
 		</section>
-		-->
+		
 		<!-- End reviews section -->
 		<!-- Start team section -->
 		<!--
