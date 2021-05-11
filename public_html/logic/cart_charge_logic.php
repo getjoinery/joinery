@@ -426,7 +426,9 @@
 		$email_fill['purchase_amount'] = $price;
 
 		//ONLY NON RECURRING
+		$one_time_purchase_exists = 0;
 		if(!$product->get('pro_recurring')){
+			$one_time_purchase_exists = 1;
 			//DEAL WITH CREATING USERS FOR EACH PRODUCT ITEM
 			$user = User::GetByEmail($data['email']);
 			if(!$user){
@@ -537,6 +539,30 @@
 			$receipts[$key+1][price] = $price;				
 			
 			
+		}
+		
+		if($one_time_purchase_exists){
+			//SEND NOTIFICATION
+			if($settings->get_setting('single_purchase_notification_emails')){
+				$notify_emails = explode(',', $settings->get_setting('single_purchase_notification_emails'));
+				foreach($notify_emails as $notify_email){
+					try {
+						$notify_user = User::GetByEmail($notify_email);
+						$body = 'Order '. $order->key .' was charged - user: '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
+						$email_inner_template = $settings->get_setting('individual_email_inner_template');
+						$email = new EmailTemplate($email_inner_template, $notify_user);
+						$email->fill_template(array(
+							'subject' => 'New Order',
+							'body' => $body,
+						));	
+						$result = $email->send();
+					}					
+					catch (Exception $e) {
+						//DO NOTHING
+						$error = "";
+					}
+				}
+			}
 		}
 	}			
 	
