@@ -225,6 +225,28 @@
 				$order_item->save();		
 			}
 			else{
+				//SEND NOTIFICATION
+				if($settings->get_setting('subscription_notification_emails')){
+					$notify_emails = split(',', $settings->get_setting('subscription_notification_emails'));
+					foreach($notify_emails as $notify_email){
+						try {
+							$notify_user = User::GetByEmail($notify_email);
+							$body = 'Subscription '.$subscription_result[id].' (Order '. $order->key .') was started by '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
+							$email_inner_template = $settings->get_setting('individual_email_inner_template');
+							$email = new EmailTemplate($email_inner_template, $notify_user);
+							$email->fill_template(array(
+								'subject' => 'New Subscription',
+								'body' => $body,
+							));	
+							$result = $email->send();
+						}					
+						catch (Exception $e) {
+							//DO NOTHING
+							$error = "";
+						}
+					}
+				}
+				
 				//OTHERWISE PROCESS THE ORDER ITEM
 				$order_item->set('odi_is_subscription', true);
 				$order_item->set('odi_stripe_subscription_id', $subscription_result[id]);

@@ -18,13 +18,11 @@
 	
 	$order_item_id = LibraryFunctions::fetch_variable('order_item_id', NULL,1,'order_item_id');
 	$order_item = new OrderItem($order_item_id, TRUE);	
+	$order = $order_item->get_order();
 	$order_item->authenticate_write($session);
 	
 	$settings = Globalvars::get_instance();
 	\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));	
-
-
-	//TODO SECURITY CHECK THE USER HERE
 
 	$sub = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));
 	$sub->cancel();
@@ -36,6 +34,28 @@
 
 		$order_item->set('odi_subscription_cancelled_time', $canceled_at);
 		$order_item->save();
+		
+		//SEND NOTIFICATION
+		if($settings->get_setting('subscription_notification_emails')){
+			$notify_emails = split(',', $settings->get_setting('subscription_notification_emails'));
+			foreach($notify_emails as $notify_email){
+				try {
+					$notify_user = User::GetByEmail($notify_email);
+					$body = 'Subscription '.$order_item->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled.';
+					$email_inner_template = $settings->get_setting('individual_email_inner_template');
+					$email = new EmailTemplate($email_inner_template, $notify_user);
+					$email->fill_template(array(
+						'subject' => 'Cancelled Subscription',
+						'body' => $body,
+					));	
+					$result = $email->send();
+				}					
+				catch (Exception $e) {
+					//DO NOTHING
+					$error = "";
+				}
+			}
+		}
 
 	}
 
