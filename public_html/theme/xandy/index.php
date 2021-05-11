@@ -33,8 +33,8 @@
 	                        <img src="images/new/home-var3/banner.png" alt="reviewer-img" class="img-responsive">
 	                     </div>
 	                     <div class="banner-info">
-	                        <h1>Meditation</h1>
-	                        <h2>Prepare for your best yoga Meditation</h2>
+	                        <h1>The Liberato Method</h1>
+	                        <h2>Dance training for all styles</h2>
 	                     </div>
 	                  </div>
 	               </div>
@@ -110,7 +110,7 @@
 				<div class="vertical-space-80"></div>
 				<div class="container">
 					<h2 class="main-title text-center">Welcome to the Liberato Portal</h2>
-					<h6 class="sub-title after-title text-center">Here you can find information about dance as a source of wellbeing through online courses, workshops, private classes, retreats, books and articles.</h6>
+					<h6 class="sub-title after-title text-center">Dance as a source of wellbeing through online courses, workshops, private classes, retreats, books and articles.</h6>
 
 					
 					<div class="vertical-space-80"></div>
@@ -118,25 +118,26 @@
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
 							<i class="fa fa-heart" aria-hidden="true"></i>
 							<h3 class="font-blue">Liberato Method</h3>
-							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
+							<p class="icon-text">Experience Xandy Liberato's dance training method.</p>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
 							<i class="fa fa-circle-o" aria-hidden="true"></i>
 							<h3 class="font-blue">Connection in 2 </h3>
-							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
+							<p class="icon-text">Become a better lead or follow.</p>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
 							<i class="fa fa-leaf" aria-hidden="true"></i>
 						
 							<h3 class="font-blue">Zouk Training</h3>
-							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
+							<p class="icon-text">Classes tailored just for Zouk.</p>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
-							<i class="fa fa-pagelines" aria-hidden="true"></i>
+							<i class="fa fa-user-o" aria-hidden="true"></i>
 							<h3 class="font-blue">Mentorship</h3>
-							<p class="icon-text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. feugiat fringilla nunc.</p>
+							<p class="icon-text">Improve all aspects of yourself, not just dance.</p>
 						</div>
 					</div>
+					<div class="vertical-space-20"></div>
 					<h6 class="sub-title after-title text-center">Effects of the Liberato Method</h6>
 					<div class="vertical-space-70"></div>
 					<p class="text-center">
@@ -358,9 +359,9 @@
 										</p>
 									</div>
 									<div class="media">
-										<div class="media-left">
+										<!--<div class="media-left">
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
-										</div>
+										</div>-->
 										<div class="media-body">
 											<h3 class="font-white">- Daniel</h3>
 											<h5 class="bold font-white">Retreat Participant</h5>
@@ -375,9 +376,9 @@
 										</p>
 									</div>
 									<div class="media">
-										<div class="media-left">
+										<!--<div class="media-left">
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
-										</div>
+										</div>-->
 										<div class="media-body">
 											<h3 class="font-white">- Angelique</h3>
 											<h5 class="bold font-white">Student</h5>
@@ -392,9 +393,9 @@
 										</p>
 									</div>
 									<div class="media">
-										<div class="media-left">
+										<!--<div class="media-left">
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
-										</div>
+										</div>-->
 										<div class="media-body">
 											<h3 class="font-white">- Christoffer</h3>
 											<h5 class="bold font-white">Student</h5>
@@ -409,9 +410,9 @@
 										</p>
 									</div>
 									<div class="media">
-										<div class="media-left">
+										<!--<div class="media-left">
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
-										</div>
+										</div>-->
 										<div class="media-body">
 											<h3 class="font-white">- Farid</h3>
 											<h5 class="bold font-white">Retreat Participant</h5>
@@ -426,9 +427,9 @@
 										</p>
 									</div>
 									<div class="media">
-										<div class="media-left">
+										<!--<div class="media-left">
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
-										</div>
+										</div>-->
 										<div class="media-body">
 											<h3 class="font-white">- Javi</h3>
 											<h5 class="bold font-white">Student</h5>
@@ -442,9 +443,9 @@
 										</p>
 									</div>
 									<div class="media">
-										<div class="media-left">
+										<!--<div class="media-left">
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
-										</div>
+										</div>-->
 										<div class="media-body">
 											<h3 class="font-white">- Lubna</h3>
 											<h5 class="bold font-white">Retreat Participant</h5>
