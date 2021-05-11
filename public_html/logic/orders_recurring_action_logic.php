@@ -37,7 +37,7 @@
 		
 		//SEND NOTIFICATION
 		if($settings->get_setting('subscription_notification_emails')){
-			$notify_emails = split(',', $settings->get_setting('subscription_notification_emails'));
+			$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
 			foreach($notify_emails as $notify_email){
 				try {
 					$notify_user = User::GetByEmail($notify_email);
