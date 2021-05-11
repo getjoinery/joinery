@@ -19,6 +19,7 @@
 	
 	$order_item_id = LibraryFunctions::fetch_variable('order_item_id', NULL,1,'order_item_id');
 	$order_item = new OrderItem($order_item_id, TRUE);	
+	$order_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 	$order = $order_item->get_order();
 	$order_item->authenticate_write($session);
 	
@@ -42,7 +43,7 @@
 			foreach($notify_emails as $notify_email){
 				try {
 					$notify_user = User::GetByEmail($notify_email);
-					$body = 'Subscription '.$order_item->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled.';
+					$body = 'Subscription '.$order_item->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
 					$email_inner_template = $settings->get_setting('individual_email_inner_template');
 					$email = new EmailTemplate($email_inner_template, $notify_user);
 					$email->fill_template(array(
