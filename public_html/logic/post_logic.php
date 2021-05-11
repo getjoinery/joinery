@@ -1,5 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/comments_class.php');
 

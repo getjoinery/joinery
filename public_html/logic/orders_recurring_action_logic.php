@@ -1,5 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
