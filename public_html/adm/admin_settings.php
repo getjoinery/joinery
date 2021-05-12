@@ -92,6 +92,10 @@
 	echo $formwriter->textinput("Emails to receive subscription notifications (separate with comma)", "subscription_notification_emails", "ctrlHolder", 20, $settings->get_setting('subscription_notification_emails'), "" , 255, "");	
 
 	echo $formwriter->textinput("Emails to receive one time purchase notifications (separate with comma)", "single_purchase_notification_emails", "ctrlHolder", 20, $settings->get_setting('single_purchase_notification_emails'), "" , 255, "");	
+
+	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur'); 
+	echo $formwriter->dropinput("Site Currency", "site_currency", "ctrlHolder", $optionvals, $settings->get_setting('site_currency'), '', FALSE);	
+
 	
 	$blog_active = $settings->get_setting('blog_active');
 	if($blog_active){

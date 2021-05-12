@@ -26,6 +26,8 @@ if (!isset($_REQUEST['product_id']) || !is_numeric($_REQUEST['product_id'])) {
 
 $product = Product::GetProductById($product_id);
 
+$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')]; 
+
 
 $display_empty_form = TRUE;
 

@@ -10,9 +10,11 @@
 
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
-	//$session->check_permission(0);
+	//$session->check_permission(0); 
 
 	$cart = $session->get_shopping_cart();
+	
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 	$newbilling = 0;
 	if($_GET['newbilling'] == 1){
@@ -46,6 +48,8 @@
 	else{
 		$user = NULL;
 	}	
+	
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 
 	if($_POST['existing_billing_email']){

@@ -17,6 +17,9 @@
 		echo 'This feature is turned off';
 		exit();
 	}
+	
+	$currency_code = $settings->get_setting('site_currency');
+	$currency_symbol = Product::$currency_symbols[$currency_code];
 
 	$session = SessionControl::get_instance();
 	//$session->check_permission(0); 
@@ -188,9 +191,9 @@
 				  "amount" => (int)$price * 100,
 				  "interval" => 'month',
 				  "product" => [
-					"name" => 'Subscription $' . (int)$price,
+					"name" => 'Subscription '.$currency_symbol . (int)$price,
 				  ],
-				  "currency" => "usd",
+				  "currency" => $currency_code,
 				  "id" => 'subscription-' . (int)$price,
 				]); 							
 			}
@@ -359,7 +362,7 @@
 			$charge_result = \Stripe\Charge::create([
 			  'source' => $source_result[id],
 			  'amount' => (int)$charge_total*100,
-			  'currency' => 'usd',
+			  'currency' => $currency_code,
 			  'customer' => $stripe_customer_id,
 			  'description' => implode(",", $stripe_item_list), 
 			  //'billing_details' => ['email' => $billing_user->get('usr_email'), 'name' => $billing_name, ],

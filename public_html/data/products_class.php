@@ -687,6 +687,12 @@ class ProductVersion {
 
 class Product extends SystemBase {
 	public static $required_fields = array();
+
+
+	public static $currency_symbols = array(
+	 'usd' => '$',
+	 'eur' => '&euro;'
+	 ); 
 	
 	const PRICE_TYPE_ONE = 1;
 	const PRICE_TYPE_MULTIPLE = 2;
@@ -1027,11 +1033,14 @@ class Product extends SystemBase {
 	
 
 	function output_product_form($formwriter, $user, $extra_data=array()) {
+		$settings = Globalvars::get_instance(); 
+		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+		
 		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
 		if ($versions) {
 			$version_dropdown = array();
 			foreach ($versions as $version) {
-				$output_string = $version->prv_version_name . ' - $' . $version->prv_version_price;
+				$output_string = $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price;
 				$version_dropdown[$output_string] = $version->prv_product_version_id;
 			}
 			echo $formwriter->dropinput(

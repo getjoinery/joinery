@@ -15,6 +15,9 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
+	
+	$settings = Globalvars::get_instance(); 
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 	$product = new Product($_GET['pro_product_id'], TRUE);
 	$orders = new MultiOrderItem(array('product_id' => $product->key));
@@ -64,7 +67,7 @@
 		echo 'Product Description: <b>'. $product->get('pro_description').'</b><br>';
 
 		if($product->get('pro_price_type') == Product::PRICE_TYPE_ONE){
-			echo 'Price: <b>$'. $product->get('pro_price').'</b><br>';
+			echo 'Price: <b>'.$currency_symbol. $product->get('pro_price').'</b><br>';
 		}
 		else if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 			echo 'Price: <b>User chooses</b><br>';
@@ -104,12 +107,12 @@
 					$deposit_text = ' (deposit)';
 				}
 				if ($version->prv_status == ProductVersion::ACTIVE) {
-					echo '<li>' . $version->prv_version_name . ' - $' . $version->prv_version_price . $deposit_text .
+					echo '<li>' . $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price . $deposit_text .
 						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
 						'&action=remove_version">[Make Inactive]</a>' .
 						'</li>';
 				} else {
-					echo '<li style="text-decoration: line-through;">' . $version->prv_version_name . ' - $' . $version->prv_version_price . $deposit_text .
+					echo '<li style="text-decoration: line-through;">' . $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price . $deposit_text .
 						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
 						'&action=activate_version">[Make Active]</a>' .
 						'</li>';
@@ -128,7 +131,7 @@
 			echo $formwriter->hiddeninput('p', $product->key);
 			echo $formwriter->hiddeninput('action', 'new_version');
 			echo $formwriter->textinput('Label', 'version_name', NULL, 100, '', '', 255, '');
-			echo $formwriter->textinput('Price', 'version_price', 'ctrlHolder', 100, '', '', 255, '');
+			echo $formwriter->textinput('Price ('.$currency_symbol.')', 'version_price', 'ctrlHolder', 100, '', '', 255, '');
 			$optionvals = array("Yes"=>'1', 'No' => '0');
 			echo $formwriter->dropinput("Is it a deposit or installment payment?", "version_deposit", "ctrlHolder", $optionvals, 0, '', FALSE);	
 			echo $formwriter->start_buttons();

@@ -47,7 +47,7 @@ $page->public_header(array(
 				<?php
 				if(!$product->num_versions() && $product->get('pro_price_type') != Product::PRICE_TYPE_USER_CHOOSE){
 					echo '<div class="product-price">
-					<h5 class="font-weight-light"><ins>$'.$product->get('pro_price').'</ins></h5>
+					<h5 class="font-weight-light"><ins>'.$currency_symbol.$product->get('pro_price').'</ins></h5>
 					</div>';
 				} 
 				?>
@@ -75,7 +75,7 @@ $page->public_header(array(
 				if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 					$validation_rules = array();
 					$validation_rules['user_price_override']['required']['value'] = 'true';
-					echo $formwriter->textinput('Amount to pay ($)', 'user_price_override', 'ctrlHolder', 100, NULL, '', 5, '');
+					echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', 'ctrlHolder', 100, NULL, '', 5, ''); 
 				}
 				if ($product->output_product_form($formwriter, $user, $extra_data)) {
 					echo $formwriter->new_form_button('Add to Cart', 'button button-md button-dark');

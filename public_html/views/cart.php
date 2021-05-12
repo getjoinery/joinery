@@ -50,7 +50,7 @@
 
 						array_push($rowvalues, $key+1);
 						array_push($rowvalues, $product->get('pro_name').' '. $product_version->prv_version_name . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') ');
-						array_push($rowvalues, '$' . money_format('%i', $price));
+						array_push($rowvalues, $currency_symbol . money_format('%i', $price));
 						array_push($rowvalues, '<span class="icon-remove"><a href="/cart?r=' . $key	. '">Remove</a></span>');
 						$page->disprow($rowvalues);
 				
@@ -58,7 +58,7 @@
 					}	
 					$page->endtable();		
 					?>
-					<p class="cart-total">Total: $<?php echo  money_format('%i', $cart->get_total()); ?>			
+					<p class="cart-total">Total: <?php echo $currency_symbol; ?><?php echo  money_format('%i', $cart->get_total()); ?>			
 					<span style="float:right;">(<a href="/cart_clear">clear cart</a>)</span>
 					</p> 				
 					</div>
