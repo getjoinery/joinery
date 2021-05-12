@@ -22,6 +22,7 @@
 	if($vid_source){
 		$search_criteria['source'] = $source;
 	}
+	$search_criteria['deleted'] = false;
 
 	$videos = new MultiVideo(
 		$search_criteria,

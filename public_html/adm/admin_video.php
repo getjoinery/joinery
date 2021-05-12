@@ -57,9 +57,10 @@
 	
 	$options['title'] = 'Video: ' . $video->get('vid_title');
 	$options['altlinks'] = array('Edit Video'=>'/admin/admin_video_edit?vid_video_id='.$video->key);
-	$options['altlinks'] += array('Delete Video' => '/admin/admin_video?action=remove&v='.$video->key);
-	if(!$video->get('vid_delete_time') && $_SESSION['permission'] >= 8) {
-		$options['altlinks']['Soft Delete'] = '/admin/admin_video?action=delete&vid_video_id='.$video->key;
+	
+	$options['altlinks']['Delete'] = '/admin/admin_video?action=delete&vid_video_id='.$video->key;
+	if(!$video->get('vid_delete_time') && $_SESSION['permission'] == 10) {
+		//$options['altlinks'] += array('Permanently Delete Video' => '/admin/admin_video?action=remove&v='.$video->key);
 	}
 
 	$page->begin_box($options);

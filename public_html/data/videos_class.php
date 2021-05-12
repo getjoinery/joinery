@@ -38,6 +38,10 @@ class Video extends SystemBase {
 	
 
 	function get_embed($vidwidth = 560, $vidheight = 315) {
+		if($this->get('vid_delete_time')){
+			return FALSE;
+		}
+		
 		if($this->get('vid_source') == 1) {
 			$elink = 'http://www.youtube.com/v/';
 			$link = '<iframe width="560" height="315" src="https://www.youtube.com/embed/'.$this->get('vid_video_number').'" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>';
