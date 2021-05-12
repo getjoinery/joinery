@@ -35,7 +35,7 @@
 							<p><i class="fas fa-map-marker-alt margin-right-10"></i><span><?php echo $time_string; ?></span></p>
 						</div>-->
 						<?php 
-						if($video->key){
+						if($video->key && !$video->get('vid_delete_time')){
 							echo $video->get_embed(784,441);
 						}
 						else if($event->get('evt_picture_link')){
