@@ -11,7 +11,11 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
-	$session->set_return();
+	$session->set_return(); 
+	
+	$settings = Globalvars::get_instance();
+	$currency_code = $settings->get_setting('site_currency');
+	$currency_symbol = Product::$currency_symbols[$currency_code];
 
 	if (isset($_REQUEST['p'])) {
 		$product = new Product($_REQUEST['p'], TRUE);
@@ -225,7 +229,7 @@
 	$optionvals = array("One price"=>1, 'Multiple pricing levels' => 2, 'User chooses price'=>3);
 	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);
 
-	echo $formwriter->textinput('Price (no cents)', 'pro_price', 'ctrlHolder', 100, (int)$product->get('pro_price'), '', 5, '');
+	echo $formwriter->textinput('Price ('.$currency_symbol.'no cents)', 'pro_price', 'ctrlHolder', 100, (int)$product->get('pro_price'), '', 5, '');
 	echo $formwriter->textinput('Max Number that can be added to cart:', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 3, '');
 	echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
 	
