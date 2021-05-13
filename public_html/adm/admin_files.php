@@ -19,7 +19,9 @@
 	if($searchterm){
 		$search_criteria['filename_like'] = $searchterm;
 	}	
-	$search_criteria['deleted'] = false;
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
 	$files = new MultiFile(
 		$search_criteria,
 		array($sort=>$sdirection),
@@ -56,6 +58,10 @@
 	
 
 	foreach($files as $file) {
+		$deleted = '';
+		if($file->get('fil_delete_time')){
+			$deleted = 'DELETED';
+		}
 		$user = new User($file->get('fil_usr_user_id'), TRUE);
 		
 		$rowvalues = array();
@@ -74,9 +80,11 @@
 		else{
 			array_push($rowvalues, '');
 		}
-		array_push($rowvalues, '<a href="/admin/admin_file?fil_file_id='.$file->key.'">'.$file->get('fil_title').'</a>');
+		array_push($rowvalues, '<a href="/admin/admin_file?fil_file_id='.$file->key.'">'.$file->get('fil_title').'</a> '. $deleted);
 		array_push($rowvalues, $file->get('fil_type'));
+
 		array_push($rowvalues,  LibraryFunctions::convert_time($file->get('fil_create_time'), "UTC", $session->get_timezone()));
+		
 		array_push($rowvalues, $user->display_name());
 		$page->disprow($rowvalues);
 	}

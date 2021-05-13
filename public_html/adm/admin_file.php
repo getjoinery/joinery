@@ -43,7 +43,20 @@
 		header("Location: /admin/admin_file?fil_file_id=".$file->key);
 		exit();		
 	}	
+	else if($_REQUEST['action'] == 'delete'){
+		$file->authenticate_write($session);
+		$file->soft_delete();
 
+		header("Location: /admin/admin_files");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$file->authenticate_write($session);
+		$file->undelete();
+
+		header("Location: /admin/admin_files");
+		exit();				
+	}
 	
 	
 	$page = new AdminPage();
@@ -64,8 +77,14 @@
 	$options['altlinks'] = array();
 
 	$options['altlinks'] += array('Edit file' => '/admin/admin_file_edit?fil_file_id='.$file->key);
+	if($file->get('fil_delete_time')){
+		$options['altlinks'] += array('Undelete' => '/admin/admin_file?action=undelete&fil_file_id='.$file->key);
+	}	
+	else{
+		$options['altlinks'] += array('Delete' => '/admin/admin_file?action=delete&fil_file_id='.$file->key);
+	}
 	if($_SESSION['permission'] == 10){
-		$options['altlinks'] += array('Delete file' => '/admin/admin_file_delete?fil_file_id='.$file->key);
+		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_file_delete?fil_file_id='.$file->key);
 	}
 		
 	
@@ -96,6 +115,7 @@
 		echo '<strong>Direct link:</strong> <a href="/uploads/'.$file->get('fil_name').'"/>/uploads/'.$file->get('fil_name').'</a>';
 	}
 	
+	/*
 	$event_sessions = $file->get_event_sessions();
 	
 	$headers = array("Event Session",  "Action");
@@ -153,11 +173,12 @@
 		
 	echo '</td></tr>';
 	$page->endtable();
-	
+	*/
 
 	
 
 	$page->end_box();
+	
 	
 	$page->admin_footer();
 ?>

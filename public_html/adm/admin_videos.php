@@ -22,7 +22,9 @@
 	if($vid_source){
 		$search_criteria['source'] = $source;
 	}
-	$search_criteria['deleted'] = false;
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
 
 	$videos = new MultiVideo(
 		$search_criteria,
@@ -46,7 +48,7 @@
 	);
 		
 
-	$headers = array("Video",  "Source", "Uploaded", "By", "Video Status");
+	$headers = array("Video",  "Source", "Uploaded", "By");
 	$altlinks = array('Add Video'=>'/admin/admin_video_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
@@ -59,19 +61,22 @@
 
 	foreach ($videos as $video){
 		$user = new User($video->get('vid_usr_user_id'), TRUE);
+		$deleted = '';
+		if($video->get('vid_delete_time')){
+			$deleted = 'DELETED';
+		}
 		
 		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_video?v=$video->key'>".$video->get('vid_title')."</a>");	
+		array_push($rowvalues, "<a href='/admin/admin_video?v=$video->key'>".$video->get('vid_title')."</a> ".$deleted);	
 		array_push($rowvalues, $video->get_source());
-		array_push($rowvalues, LibraryFunctions::convert_time($video->get('vid_create_time'), 'UTC', $session->get_timezone()));
+		
+			array_push($rowvalues, 'DELETED');
+		}
+		else{
+			array_push($rowvalues, LibraryFunctions::convert_time($video->get('vid_create_time'), 'UTC', $session->get_timezone()));
+		}
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
-		if($video->get('vid_delete_time')) {
-			$status = 'Deleted';
-		} else {
-			$status = 'Active';
-		}		
-		array_push($rowvalues, $status);
 
 		$page->disprow($rowvalues);
 	}
