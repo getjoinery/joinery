@@ -72,6 +72,11 @@ class File extends SystemBase {
 	}
 	
 	function get_url($size='standard') {
+		if($this->get('fil_delete_time')){
+			return FALSE;
+		}
+		
+		
 		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
 		
@@ -92,6 +97,18 @@ class File extends SystemBase {
 		}		
 		return $file_path;
 	}	
+
+	function soft_delete(){
+		$this->set('fil_delete_time', 'now()');
+		$this->save();
+		return true;
+	}
+	
+	function undelete(){
+		$this->set('fil_delete_time', NULL);
+		$this->save();	
+		return true;
+	}
 
 	function permanent_delete(){
 		$settings = Globalvars::get_instance();
