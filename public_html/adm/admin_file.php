@@ -83,7 +83,7 @@
 	else{
 		$options['altlinks'] += array('Delete' => '/admin/admin_file?action=delete&fil_file_id='.$file->key);
 	}
-	if($_SESSION['permission'] == 10){
+	if($session->get_user_id() == 1){
 		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_file_delete?fil_file_id='.$file->key);
 	}
 		
