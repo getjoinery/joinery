@@ -116,25 +116,25 @@
 					<div class="vertical-space-80"></div>
 					<div class="row yoga-about-benifits v2">
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
-							<i class="fa fa-heart" aria-hidden="true"></i>
+							<a href="/events"><i class="fa fa-heart" aria-hidden="true"></i>
 							<h3 class="font-blue">Liberato Method</h3>
-							<p class="icon-text">Experience Xandy Liberato's dance training method.</p>
+							<p class="icon-text">Experience Xandy Liberato's dance training method.</p></a>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
-							<i class="fa fa-circle-o" aria-hidden="true"></i>
-							<h3 class="font-blue">Connection in 2 </h3>
-							<p class="icon-text">Become a better lead or follow.</p>
+							<a href="/events"><i class="fa fa-circle-o" aria-hidden="true"></i>
+							<h3 class="font-blue">Retreats </h3>
+							<p class="icon-text">Concentrated study.</p></a>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
-							<i class="fa fa-leaf" aria-hidden="true"></i>
+							<a href="/events"><i class="fa fa-leaf" aria-hidden="true"></i>
 						
 							<h3 class="font-blue">Zouk Training</h3>
-							<p class="icon-text">Classes tailored just for Zouk.</p>
+							<p class="icon-text">Classes tailored just for Zouk.</p></a>
 						</div>
 						<div class="col-xs-12 col-sm-3 col-md-3 text-center benifit">
-							<i class="fa fa-user-o" aria-hidden="true"></i>
+							<a href="/events"><i class="fa fa-user-o" aria-hidden="true"></i>
 							<h3 class="font-blue">Mentorship</h3>
-							<p class="icon-text">Improve all aspects of yourself, not just dance.</p>
+							<p class="icon-text">Improve all aspects of yourself, not just dance.</p></a>
 						</div>
 					</div>
 					<div class="vertical-space-20"></div>
@@ -176,7 +176,7 @@
 									Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla. Maecenas volutpat fermentum ante. Sed nibh metus, mollis a dolor ut, feugiat fringilla nunc. Donec consequat pretium nunc, vel feugiat purus cursus a.
 								</p>-->
 								<div class="vertical-space-20"></div>
-								<iframe width="560" height="315" src="https://www.youtube.com/embed/BBYizZLqYkM" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+								<iframe width="700" height="400" src="https://www.youtube.com/embed/BBYizZLqYkM" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 								<!--<a href="#" data-toggle="modal" data-target="#videoModal">
 									<i class="fa fa-play font-white" aria-hidden="true"></i>-->
 								</a>
@@ -194,7 +194,7 @@
 			<div class="vertical-space-80"></div>
 			<div class="container">
 				<h2 class="main-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0s"><span class="normald">Our</span> Classes</h2>
-				<h6 class="sub-title after-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0.3s">May Help You?</h6>
+				<h6 class="sub-title after-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0.3s"></h6>
 				<div class="vertical-space-80"></div>
 				<div class="row">
 					<?php
@@ -363,7 +363,7 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>-->
 										<div class="media-body">
-											<h3 class="font-white">- Daniel</h3>
+											<h3 class="font-white">Daniel</h3>
 											<h5 class="bold font-white">Retreat Participant</h5>
 										</div>
 									</div>
@@ -380,8 +380,25 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>-->
 										<div class="media-body">
-											<h3 class="font-white">- Angelique</h3>
+											<h3 class="font-white">Angelique</h3>
 											<h5 class="bold font-white">Student</h5>
+										</div>
+									</div>
+								</div>
+								<div>
+									<div class="vertical-space-40"></div>
+									<div class="students-reviews v2 background-white">
+										<p class="text-center">
+											The retreat was a transformation point in my life. I feel like I am awake, refreshed, inspired, and filled with emotion. Thank you for the beautiful experience. 
+										</p>
+									</div>
+									<div class="media">
+										<!--<div class="media-left">
+											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
+										</div>-->
+										<div class="media-body">
+											<h3 class="font-white">Lubna</h3>
+											<h5 class="bold font-white">Retreat Participant</h5>
 										</div>
 									</div>
 								</div>
@@ -397,7 +414,7 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>-->
 										<div class="media-body">
-											<h3 class="font-white">- Christoffer</h3>
+											<h3 class="font-white">Christoffer</h3>
 											<h5 class="bold font-white">Student</h5>
 										</div>
 									</div>
@@ -414,7 +431,7 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>-->
 										<div class="media-body">
-											<h3 class="font-white">- Farid</h3>
+											<h3 class="font-white">Farid</h3>
 											<h5 class="bold font-white">Retreat Participant</h5>
 										</div>
 									</div>
@@ -431,7 +448,7 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>-->
 										<div class="media-body">
-											<h3 class="font-white">- Javi</h3>
+											<h3 class="font-white">Javi</h3>
 											<h5 class="bold font-white">Student</h5>
 										</div>
 									</div>
@@ -447,7 +464,7 @@
 											<img src="images/new/home-var3/testimonial.png" alt="trainer" class="testimonial-imgs">		
 										</div>-->
 										<div class="media-body">
-											<h3 class="font-white">- Lubna</h3>
+											<h3 class="font-white">Lubna</h3>
 											<h5 class="bold font-white">Retreat Participant</h5>
 										</div>
 									</div>
