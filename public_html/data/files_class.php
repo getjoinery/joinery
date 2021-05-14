@@ -72,10 +72,6 @@ class File extends SystemBase {
 	}
 	
 	function get_url($size='standard') {
-		if($this->get('fil_delete_time')){
-			return FALSE;
-		}
-		
 		
 		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
