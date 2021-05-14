@@ -25,7 +25,7 @@
 			
 
 		
-		$editable_fields = array('fil_description', 'fil_title');
+		$editable_fields = array('fil_description', 'fil_title','fil_gal_gallery_id');
 
 		foreach($editable_fields as $field) {
 			$file->set($field, $_REQUEST[$field]);
@@ -69,7 +69,11 @@
 
 
 	echo $formwriter->textbox('File Description', 'fil_description', 'ctrlHolder', 10, 80, $file->get('fil_description'), '', 'no');
-
+	
+	if($file->is_image()){
+		echo $formwriter->checkboxinput("Include this image in the gallery", "fil_gal_gallery_id", "checkbox", "left", $file->get('fil_gal_gallery_id'), 1, "");
+	}
+	
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
