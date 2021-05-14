@@ -111,7 +111,7 @@ if($settings->get_setting('files_active')){
 			$file = $upload_dir.'/'.$params[1];
 		}
 		//ORIGINAL FILE
-		if(file_exists($file)){
+		if(file_exists($file) && !$file->get('fil_delete_time')){
 			$seconds_to_cache = 43200;
 			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
 			header("Expires: $ts");
