@@ -306,6 +306,7 @@ class PublicPage extends PublicPageMaster {
 		</footer>
 		<!-- end footer -->
 		<!-- Modal box data -->
+		<!--
 		<div class="modal fade" id="videoModal" tabindex="-1" role="dialog">
 			<div class="modal-dialog modal-lg" role="document">
 				<div class="modal-content">
@@ -320,6 +321,7 @@ class PublicPage extends PublicPageMaster {
 				</div>
 			</div>
 		</div>
+		-->
 		<!-- End Modal box data -->
 		<!--<script src="js/jquery-2.1.4.min.js"></script>		-->
 		<script src="<?php echo $this->theme_url; ?>/js/wow.js"></script>

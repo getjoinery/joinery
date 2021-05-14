@@ -981,7 +981,7 @@ h3.yogfeat{
 2.4 Classes Section
 --------------------------------------------*/
 .yoga-section {
-	background-image: url("../images/gallery/parallax/34.jpg");
+	/*background-image: url("../images/gallery/parallax/34.jpg");*/
 	background-size: cover;
 	background-repeat: no-repeat;
 	background-attachment: fixed;
@@ -1221,7 +1221,7 @@ h2.class-title{
 2.5 Video Section
 --------------------------------------------*/
 .video-section {
-	background-image: url("../images/gallery/parallax/bg3.jpg");
+	/*background-image: url("../images/gallery/parallax/bg3.jpg");*/
 	background-size: cover;
 	background-repeat: no-repeat;
 	background-attachment: fixed;
@@ -1307,13 +1307,13 @@ h2.class-title{
 2.6 Reviews Section
 --------------------------------------------*/
 .review-section {
-	background-image: url("../images/gallery/parallax/bg2.jpg");
+	/*background-image: url("../images/gallery/parallax/bg2.jpg");*/
 	background-size: cover;
 	background-repeat: no-repeat;
 	background-attachment: fixed;
 }
 .review-section2 {
-	background-image: url("../images/gallery/parallax/bg3.jpg");
+	/*background-image: url("../images/gallery/parallax/bg3.jpg");*/
 	background-size: cover;
 	background-repeat: no-repeat;
 	background-attachment: fixed;
@@ -2293,7 +2293,7 @@ span.newsletter-icon {
 	display: inline-block;
 	width: 100%;
 	height: auto;
-	background-image: url("../images/gallery/parallax/bg3.jpg");
+	/*background-image: url("../images/gallery/parallax/bg3.jpg");*/
 	background-repeat: no-repeat;
 	background-size: cover;
 	background-attachment: fixed;
