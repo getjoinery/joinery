@@ -407,7 +407,10 @@ class MultiFile extends SystemMultiBase {
 			$where_clauses[] = 'fil_name ILIKE ?';
 			$bind_params[] = array('%'.$this->options['filename_like'].'%', PDO::PARAM_STR);
 		}		 
-				
+
+		if (array_key_exists('in_gallery', $this->options)) {
+			$where_clauses[] = 'fil_gal_gallery_id IS ' . ($this->options['deleted'] ? 'NULL' : 'NOT NULL');
+		}				
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';

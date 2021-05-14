@@ -277,67 +277,44 @@
 		<!-- End register section -->
 
 		<!-- Start photo gallery section -->
-		<!--
+		<?php
+		$gallery_pictures = new MultiFile(
+			array('deleted'=>false, 'picture'=>true, 'in_gallery'=>true),
+			array('file_id' => 'DESC'),		//SORT BY => DIRECTION
+			8,  //NUM PER PAGE
+			NULL);  //OFFSET
+		$gallery_pictures->load();		
+		?>
 		<section class="background-light-grey">
 			<div class="vertical-space-80"></div>
 			<div class="container">
-				<h2 class="main-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0s"><span class="normald">Our</span> Photo Gallery</h2>
-				<h6 class="sub-title after-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0.3s">Visit our gallery.</h6>
-				<div class="vertical-space-60"></div>
+				<h2 class="main-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0s"><span class="normald">Our</span> Photos</h2>
+				<!--<h6 class="sub-title after-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0.3s">Visit our gallery.</h6>-->
+				<!--<div class="vertical-space-60"></div>
 				<div class="button-group filter-button-group">
 				  <button data-filter="*" class="active gallery-btn">show all</button>
 				  <button data-filter=".Meditation" class="gallery-btn">Meditation</button>
 				  <button data-filter=".pranayam" class="gallery-btn">pranayam</button>
 				  <button data-filter=".vinyasa" class="gallery-btn">vinyasa</button>
-				</div>
+				</div>-->
 				<div class="vertical-space-40"></div>
 				<div class="grid">
-				
-					<div class="grid-item Meditation vinyasa">
-						<a data-fancybox="gallery" href="images/gallery/small/g1.jpeg">
-							<img src="images/new/home-var3/gallery.png" class="full-width"  alt="Classes">
-						</a>
-					</div>
-					<div class="grid-item Meditation">
-						<a data-fancybox="gallery" href="images/gallery/small/g2.jpeg">
-							<img src="images/new/home-var3/gallery.png"  class="full-width" alt="Classes">
-						</a>
-					</div>
-					<div class="grid-item pranayam">
-						<a data-fancybox="gallery" href="images/gallery/small/g3.jpg">
-							<img src="images/new/home-var3/gallery.png" class="full-width"  alt="Classes">
-						</a>
-					</div>
-					<div class="grid-item vinyasa">
-						<a data-fancybox="gallery" href="images/gallery/small/g4.jpg">
-							<img src="images/new/home-var3/gallery.png" class="full-width"  alt="Classes">
-						</a>
-					</div>
-					<div class="grid-item Meditation pranayam vinyasa">
-						<a data-fancybox="gallery" href="images/gallery/small/g5.jpg">
-							<img src="images/new/home-var3/gallery.png"  class="full-width" alt="Classes">
-						</a>
-					</div>
-					<div class="grid-item Meditation pranayam">
-						<a data-fancybox="gallery" href="images/gallery/small/g6.jpg">
-							<img src="images/new/home-var3/gallery.png" class="full-width"  alt="Classes">
-						</a>
-					</div>
-					<div class="grid-item Meditation vinyasa">
-						<a data-fancybox="gallery" href="images/gallery/small/g7.jpg">
-							<img src="images/new/home-var3/gallery.png" class="full-width"  alt="Classes">
-						</a>
-					</div>
-					<div class="grid-item Meditation vinyasa">
-						<a data-fancybox="gallery" href="images/gallery/small/g8.jpg">
-							<img src="images/new/home-var3/gallery.png" class="full-width"  alt="Classes">
-						</a>
-					</div>
+					<?php
+					foreach($gallery_pictures as $gallery_picture){
+					
+						echo '<div class="grid-item Meditation vinyasa">
+							<a data-fancybox="gallery" href="'.$gallery_picture->get_url().'">
+								<img src="'.$gallery_picture->get_url('small').'" class="full-width">
+							</a>
+						</div>';
+					}
+					?>
+					
 				</div>
 			</div>
 			<div class="vertical-space-80"></div>
 		</section>
-		-->
+		
 		<!-- End photo gallery section -->
 		<!-- Start review section -->
 		
