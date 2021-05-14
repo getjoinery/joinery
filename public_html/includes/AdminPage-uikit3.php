@@ -292,7 +292,7 @@ $("#admin_panel").toggle();
 					echo '<a class="uk-logo" href="/"><img class="custom-logo" src="'. $settings->get_setting('logo_link') .'" alt="'.$settings->get_setting('site_name').'"></a>';
 				}
 				else{
-					echo '<span>'.$settings->get_setting('site_name').'</span>';
+					echo '<a class="uk-logo" href="/"><span>'.$settings->get_setting('site_name').'</span></a>';
 				}
 				?>
 			</div>
