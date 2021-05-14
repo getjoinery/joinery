@@ -208,6 +208,11 @@ class PublicPage extends PublicPageMaster {
 									</a>
 								</li>
 								<li>
+									<a href="https://open.spotify.com/user/gvc9zna585o9hek1s12q487gm?si=b390d9d271c1423f">
+										<i class="fa fa-spotify" aria-hidden="true"></i>
+									</a>
+								</li>
+								<li>
 									<a href="https://www.youtube.com/user/xliberato">
 										<i class="fa fa-youtube-play" aria-hidden="true"></i>
 									</a>
