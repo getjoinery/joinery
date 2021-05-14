@@ -203,7 +203,7 @@
 						$now = LibraryFunctions::get_current_time_obj('UTC');
 						$event_time = LibraryFunctions::get_time_obj($event->get('evt_start_time'), 'UTC');
 						$numdisplayed++;
-						if($numdisplayed == 3){
+						if($numdisplayed == 4){
 							break;
 						}
 						?>
