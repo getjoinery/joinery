@@ -111,7 +111,15 @@ if($settings->get_setting('files_active')){
 			$file = $upload_dir.'/'.$params[1];
 		}
 		//ORIGINAL FILE
-		if(file_exists($file) && !$file->get('fil_delete_time')){
+		if(file_exists($file)){
+			require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
+			$file_obj = File:get_by_name($file);
+			if($file_obj){
+				if($file->get('fil_delete_time')){
+					require_once(LibraryFunctions::display_404_page());	
+				}
+			}
+			
 			$seconds_to_cache = 43200;
 			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
 			header("Expires: $ts");
