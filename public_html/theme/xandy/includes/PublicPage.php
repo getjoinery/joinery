@@ -114,31 +114,31 @@ class PublicPage extends PublicPageMaster {
 						-->
      <?php 
 						if ($session->get_user_id()){
-							echo '<a href="/profile/profile">My Profile </a>&nbsp;'; 
+							echo '<a style="margin-right:5px;" href="/profile/profile">My Profile</a>'; 
 							if($_SESSION['permission'] >= 5){
-								echo '| <a href="/admin/admin_users">Admin </a> ';
+								echo '<a  style="margin-right:5px;" href="/admin/admin_users">Admin</a>';
 							}
 
 							$cart = $session->get_shopping_cart();
 							if($numitems = $cart->count_items()){
-								echo '| <a href="/cart">Cart ('. $numitems . ') </a> ';
+								echo '<a style="margin-right:5px;" href="/cart">Cart ('. $numitems . ') </a> &nbsp;';
 							}
 							else{
 								//echo '<span class="cartcontents">Cart</span> ';
 							}
 
-							echo '| <a href="/logout">Log out </a>';
+							echo '<a style="margin-right:5px;" href="/logout">Log out </a>';
 
 						}
 						else{
-							echo '<a href="/login">Log in </a> | <a href="/register">Register </a>';
+							echo '<a style="margin-right:5px;" href="/login">Log in </a><a style="text-decoration:underline;margin-right:5px;" href="/register">Register </a>';
 						}
 						
 						if($_SESSION['permission'] == 10){
-							echo ' | <a id="admintoggle" href="#">Debug </a>';				
+							echo '<a style="margin-right:5px;" id="admintoggle" href="#">Debug </a>';				
 						}
 						if($session->get_timezone()){
-							echo '<br /><a href="/profile/account_edit">Timezone: '.$session->get_timezone().' (change)</a>';
+							echo '<br /><a style="margin-right:5px;" href="/profile/account_edit">Timezone: '.$session->get_timezone().' (change)</a>';
 						}
 						?>
 					</div>

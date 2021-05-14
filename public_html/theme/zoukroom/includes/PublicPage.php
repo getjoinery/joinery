@@ -136,7 +136,12 @@ class PublicPage {
   <link rel="stylesheet" href="/theme/zoukroom/css/main.css" />
   <script src="/theme/zoukroom/js/uikit.js"></script>
   <script src="<?php echo $this->cdn; ?>/theme/zoukroom/includes/jquery-3.4.1.min.js"></script>
-  
+ 
+		<?php
+		if($settings->get_setting('custom_css')){
+			echo '<style>'.$settings->get_setting('custom_css').'</style>';
+		}
+		?> 
  		<!--
 <link rel="icon" href="/favicon.ico" />
 <link rel="icon" href="/wp-content/themes/typology/assets/img/favicon-32x32.png" sizes="32x32" />

@@ -218,6 +218,12 @@ class PublicPage {
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
 
+		<?php
+		if($settings->get_setting('custom_css')){
+			echo '<style>'.$settings->get_setting('custom_css').'</style>';
+		}
+		?>
+		
 		<!--<script src="<?php echo $this->theme_url; ?>/scripts/df983.js"></script> -->
 		
 		<!-- jQuery 3.2.1 <script src="/admin/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->

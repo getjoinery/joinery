@@ -198,7 +198,12 @@ class PublicPage {
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
-		
+
+		<?php
+		if($settings->get_setting('custom_css')){
+			echo '<style>'.$settings->get_setting('custom_css').'</style>';
+		}
+		?>		
 
 		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
 		<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
