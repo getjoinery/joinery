@@ -97,8 +97,8 @@ class PublicPage extends PublicPageMaster {
 		<header class="v2">
 			<div class="top-bar">
 				<div class="container">
-					<!--<img src="images/logo.png" alt="Logo">-->
-					<h3 style="display:inline;">Xandy Liberato</h3>
+					<img src="/static_files/liberato-method-logo-300.png" alt="Xandy Liberato Logo">
+					<!--<h3 style="display:inline;">Xandy Liberato</h3>-->
 
 					<div class="contact-info">
 					<!--
