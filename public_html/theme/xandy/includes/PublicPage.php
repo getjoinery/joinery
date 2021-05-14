@@ -84,7 +84,13 @@ class PublicPage extends PublicPageMaster {
 		<!-- Theme css -->
 		<link href="https://fonts.googleapis.com/css?family=Karla:400,400i,700,700i" rel="stylesheet">
 		<link href="https://fonts.googleapis.com/css?family=Lusitana:400,700" rel="stylesheet">
-	
+
+		<?php
+		if($settings->get_setting('custom_css')){
+			echo '<style>'.$settings->get_setting('custom_css').'</style>';
+		}
+		?>
+		
 		<?php	
 	if(empty($options['noheader'])){
 		if($_SESSION['permission'] == 10){
