@@ -63,7 +63,7 @@
 		
 			
 		
-		echo '<p>Product Link - <a href="' . $product->get_url() . '">' . $product->get_url() . '</a><br />';
+		echo '<p>Product Link - <a href="'.$product->get_url() . '">' . $settings->get_setting('webDir_SSL').$product->get_url() . '</a><br />';
 		echo 'Product Description: <b>'. $product->get('pro_description').'</b><br>';
 
 		if($product->get('pro_price_type') == Product::PRICE_TYPE_ONE){

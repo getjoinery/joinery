@@ -63,7 +63,7 @@
 	
 	echo '<strong>Label:</strong> '.$page_content->get('pac_location_name').'<br />';	
 
-	echo '<strong>Link:</strong> <a href="/page/'.$page_content->get('pac_link').'">/page/'.$page_content->get('pac_link').'</a><br />';	
+	echo '<strong>Link:</strong> <a href="/page/'.$page_content->get('pac_link').'">'.$settings->get_setting('webDir_SSL').'/page/'.$page_content->get('pac_link').'</a><br />';	
 
 	//echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($page_content->get('pac_create_time'), 'UTC', $session->get_timezone()) .'<br />';
