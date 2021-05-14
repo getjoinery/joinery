@@ -23,6 +23,7 @@ class File extends SystemBase {
 		'fil_usr_user_id' => 'User who uploaded',
 		'fil_create_time' => 'Created',
 		'fil_delete_time' => 'Time of file deletion',
+		'fil_gal_gallery_id' => 'Gallery this file is part of TODO'
 	);
 	
 	public static function get_by_name($name) {
@@ -50,7 +51,7 @@ class File extends SystemBase {
 
 		$r = $q->fetch();
 
-		return $r->fil_file_id;
+		return new File($r->fil_file_id, TRUE);
 	}	
 	
 	function get_name() {
@@ -336,7 +337,8 @@ class File extends SystemBase {
 			  "fil_create_time" timestamp(6) DEFAULT now(),
 			  "fil_delete_time" timestamp(6),
 			  "fil_title" varchar(255) COLLATE "pg_catalog"."default",
-			  "fil_description" text COLLATE "pg_catalog"."default"
+			  "fil_description" text COLLATE "pg_catalog"."default",
+			  "fil_gal_gallery_id" int4
 			)
 			;';
 		$q = $dblink->prepare($sql);
