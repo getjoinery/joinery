@@ -755,16 +755,12 @@ class EmailTemplate {
 					}
 				}
 				catch (Exception $e) {
-
 					// Oops, email didn't send.  Save it and move on.
 					$this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR);
-					return false;
 				}
 				
-				if($result->http_response_code != '200'){
-					return false;
-				}
 			}
+			//TODO: ERROR CHECKING ON RETURN RESULT
 			return true;
 						
 		}
