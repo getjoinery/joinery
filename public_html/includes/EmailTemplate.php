@@ -699,9 +699,24 @@ class EmailTemplate {
 		}
 		else if($settings->get_setting('mailgun_api_key') && $settings->get_setting('mailgun_domain')) {
 
-			
-			$mg = new Mailgun($settings->get_setting('mailgun_api_key'));
-			$domain = $settings->get_setting('mailgun_domain');			
+			if($settings->get_setting('mailgun_version') == 1){
+				if($settings->get_setting('mailgun_eu_api_link')){
+					$mg = new Mailgun($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
+				}
+				else{
+					$mg = new Mailgun($settings->get_setting('mailgun_api_key'));
+				}
+			}
+			else{
+				if($settings->get_setting('mailgun_eu_api_link')){
+					$mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
+				}
+				else{
+					$mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
+				}
+								
+			}
+			$domain = $settings->get_setting('mailgun_domain');	
 			
 			$email_to_send = array(
 				'from'=>$this->email_from_name .'<'. $this->email_from . '>',
@@ -732,7 +747,12 @@ class EmailTemplate {
 				
 
 				try{
-					$result = $mg->sendMessage($domain, $email_to_send);
+					if($settings->get_setting('mailgun_version') == 1){
+						$result = $mg->sendMessage($domain, $email_to_send);
+					}
+					else{
+						$result = $mg->messages()->send($domain, $email_to_send);
+					}
 				}
 				catch (Exception $e) {
 
