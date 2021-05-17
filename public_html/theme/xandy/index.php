@@ -394,7 +394,9 @@
 			array('file_id' => 'DESC'),		//SORT BY => DIRECTION
 			8,  //NUM PER PAGE
 			NULL);  //OFFSET
-		$gallery_pictures->load();		
+		$numpics = $gallery_pictures->count_all();
+		$gallery_pictures->load();	
+		if($numpics){
 		?>
 		<section class="background-light-grey">
 			<div class="vertical-space-80"></div>
@@ -425,7 +427,9 @@
 			</div>
 			<div class="vertical-space-80"></div>
 		</section>
-		
+		<?php
+		}
+		?>
 		<!-- End photo gallery section -->
 		<!-- Start review section -->
 		
