@@ -21,7 +21,7 @@
 	echo PublicPage::BeginPage('');
 ?>
 
-
+<!--
 		<section id="nexa-banner-style-7" class="nexa-banner-travel">
 	      <div id="carousel-testmonial-travel-banner" class="carousel slide" data-ride="carousel">
 	         
@@ -30,11 +30,11 @@
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
-	                        <img src="images/new/home-var3/banner.png" alt="reviewer-img" class="img-responsive">
+	                        <img src="/static_files/Home1.png" alt="The Liberato Method Picture" class="img-responsive">
 	                     </div>
 	                     <div class="banner-info">
-	                        <h1>The Liberato Method</h1>
-	                        <h2>Dance training for all styles</h2>
+	                        <h1></h1>
+	                        <h2></h2>
 	                     </div>
 	                  </div>
 	               </div>
@@ -43,10 +43,10 @@
 	         </div>
 	      </div>
 	   </section>
-
+-->
 		
 		<!-- Start Banner / Slider section -->
-		<!--
+		
 		<section id="nexa-banner-style-7" class="nexa-banner-travel">
 	      <div id="carousel-testmonial-travel-banner" class="carousel slide" data-ride="carousel">
 	       
@@ -61,11 +61,11 @@
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
-	                        <img src="images/new/home-var3/banner.png" alt="reviewer-img" class="img-responsive">
+	                        <img src="/static_files/Home1.png" alt="The Liberato Method Picture 1" class="img-responsive">
 	                     </div>
 	                     <div class="banner-info">
-	                        <h1>Meditation</h1>
-	                        <h2>Prepare for your best yoga Meditation</h2>
+	                        <h1></h1>
+	                        <h2></h2>
 	                     </div>
 	                  </div>
 	               </div>
@@ -74,11 +74,11 @@
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
-	                        <img src="images/new/home-var3/banner.png" alt="reviewer-img" class="img-responsive">
+	                        <img src="/static_files/Home2.png" alt="The Liberato Method Picture 2" class="img-responsive">
 	                     </div>
 	                     <div class="banner-info">
-	                        <h1>Pranayam</h1>
-	                        <h2>Prepare for your best yoga pranayam</h2>
+	                        <h1></h1>
+	                        <h2></h2>
 	                     </div>
 	                  </div>
 	               </div>
@@ -87,11 +87,11 @@
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
-	                        <img src="images/new/home-var3/banner.png" alt="reviewer-img" class="img-responsive">
+	                        <img src="/static_files/Home3.png" alt="The Liberato Method Picture 3" class="img-responsive">
 	                     </div>
 	                     <div class="banner-info">
-	                        <h1>Yoga Power</h1>
-	                        <h2>Get Best Yoga Power Using Meditation</h2>
+	                        <h1></h1>
+	                        <h2></h2>
 	                     </div>
 	                  </div>
 	               </div>
@@ -102,7 +102,7 @@
 	         <a href="#"><i class="fa fa-angle-down" aria-hidden="true"></i></a>
 	       </div>
 	   </section>
-	   -->
+	   
 	   <!-- end-banner-section -->
 	   <!-- Start about section -->
 		<section class="about-section">
@@ -137,30 +137,141 @@
 							<p class="icon-text">Improve all aspects of yourself, not just dance.</p></a>
 						</div>
 					</div>
-					<div class="vertical-space-20"></div>
-					<h6 class="sub-title after-title text-center">Effects of the Liberato Method</h6>
-					<div class="vertical-space-70"></div>
-					<p class="text-center">
-					<ul>
-					<li>increased body awareness </li>
-					<li>increased connection with oneself and the others </li>
-					<li>increased self-confidence and confidence towards others </li>
-					<li>more empathetic communication </li>
-					<li>more conscious relationships </li>
-					<li>listening development </li>
-					<li>sensitivity development </li>
-					<li>increased enjoyment ability </li>
-					<li>experiences of freedom </li>
-					<li>changes in the way of dancing and living </li>
-					<li>increased social abilities </li>
-					<li>change of mindset </li>
-					</ul>					
-					</p>					
+					
 				</div>
 				<div class="vertical-space-80"></div>
 			</div>
 		</section>
 		<!-- End about section -->
+
+
+<!-- Start features section -->
+		<section class="background-light-blue">
+			<div class="vertical-space-80"></div>
+			<div class="container">
+				<h2 class="main-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0s"><span class="normald">Benefits</span> of The Liberato Method</h2>
+				<h6 class="sub-title after-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0.3s"></h6>
+				<div class="vertical-space-80"></div>
+				<div class="row">
+					<div class="col-xs-12 col-sm-12 col-md-4 high-zindex">
+						<div class="media wow" data-wow-delay="0.9s">
+							<div class="media-body">
+								<h3 class="media-heading font-blue text-left"><span class="normald">Increased body awareness</span></h3>
+								<p class="text-right"></p>
+							</div>							
+							<div class="media-right">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+						</div>
+
+						<div class="media wow" data-wow-delay="0.8s">
+							<div class="media-body">
+								<h3 class="media-heading font-blue text-left"><span class="normald">Increased self-confidence and confidence towards others</span></h3>
+								<p class="text-right"></p>
+							</div>
+							<div class="media-right">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+						</div>
+
+						<div class="media wow " data-wow-delay="0.8s">
+							<div class="media-body">
+								<h3 class="media-heading font-blue text-left"><span class="normald">More empathetic communication</span></h3>
+								<p class="text-right"></p>
+							</div>
+							<div class="media-right">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+						</div>
+						<div class="media wow " data-wow-delay="0.8s">
+							<div class="media-body">
+								<h3 class="media-heading font-blue text-left"><span class="normald">More conscious relationships</span></h3>
+								<p class="text-right"></p>
+							</div>
+							<div class="media-right">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+						</div>
+						<div class="media wow " data-wow-delay="0.8s">
+							<div class="media-body">
+								<h3 class="media-heading font-blue text-left"><span class="normald">Listening development</span></h3>
+								<p class="text-right"></p>
+							</div>
+							<div class="media-right">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+						</div>
+
+					</div>
+					<div class="col-xs-12 col-sm-12 col-md-4 text-center">
+						<img src="/static_files/effects-of-liberato-700.png" alt="The Liberato Method" class="full-width benifites-imgs">
+					</div>
+					<div class="col-xs-12 col-sm-12 col-md-4">
+
+						
+						<div class="media wow " data-wow-delay="0.7s">
+							<div class="media-left">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+							<div class="media-body">
+								<h3 class="media-heading font-blue"><span class="normald">Sensitivity development</span></h3>
+								<p></p>
+							</div>
+						</div>
+						
+						<div class="media wow " data-wow-delay="0.8s">
+							<div class="media-left">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+							<div class="media-body">
+								<h3 class="media-heading font-blue"><span class="normald">Increased enjoyment ability</span></h3>
+								<p></p>
+							</div>
+						</div>
+						
+						<div class="media wow " data-wow-delay="0.9s">
+							<div class="media-left">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+							<div class="media-body">
+								<h3 class="media-heading font-blue"><span class="normald">Experiences of freedom</span></h3>
+								<p></p>
+							</div>
+						</div>
+						<div class="media wow " data-wow-delay="0.9s">
+							<div class="media-left">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+							<div class="media-body">
+								<h3 class="media-heading font-blue"><span class="normald">Changes in the way of dancing and living</span></h3>
+								<p></p>
+							</div>
+						</div>
+						<div class="media wow " data-wow-delay="0.9s">
+							<div class="media-left">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+							<div class="media-body">
+								<h3 class="media-heading font-blue"><span class="normald">Increased social abilities</span></h3>
+								<p></p>
+							</div>
+						</div>
+						<div class="media wow " data-wow-delay="0.9s">
+							<div class="media-left">
+								<!--<img class="media-object benifiets-icons" src="images/c1.png" alt="Chakra 1">-->
+							</div>
+							<div class="media-body">
+								<h3 class="media-heading font-blue"><span class="normald">Change of mindset</span></h3>
+								<p></p>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+			<div class="vertical-space-80"></div>
+		</section>
+		<!-- End features section -->
+
 		
 		<!-- Start video parallex section -->
 		<section class="video-section">
