@@ -152,7 +152,7 @@
 	if(count($optionvals)){
 
 		$formwriter = new FormWriterMaster('form_load_version');
-		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_post_edit');
+		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_page_content_edit');
 		echo $formwriter->hiddeninput('pac_page_content_id', $page_content->key);
 		echo $formwriter->dropinput("Load another version", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
 		echo $formwriter->new_form_button('Load');	
