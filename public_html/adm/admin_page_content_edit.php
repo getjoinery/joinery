@@ -127,7 +127,7 @@
 	echo $formwriter->dropinput("Published", "pac_is_published", "ctrlHolder", $optionvals, $page_content->get('pac_is_published'), '', FALSE);
 	
 	
-	echo $formwriter->textbox('Content', 'pac_body', 'ctrlHolder', 5, 80, $page_content->get('pac_body'), '', 'yes');
+	echo $formwriter->textbox('Content', 'pac_body', 'ctrlHolder', 5, 80, $content, '', 'yes');
 
 
 	echo $formwriter->start_buttons();
