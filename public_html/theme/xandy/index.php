@@ -304,7 +304,7 @@
 		<section class="background-light-grey">
 			<div class="vertical-space-80"></div>
 			<div class="container">
-				<h2 class="main-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0s"><span class="normald">Our</span> Classes</h2>
+				<h2 class="main-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0s"><span class="normald">Our</span> Next Events</h2>
 				<h6 class="sub-title after-title text-center wow fadeIn" data-wow-duration="0.3s" data-wow-delay="0.3s"></h6>
 				<div class="vertical-space-80"></div>
 				<div class="row">
