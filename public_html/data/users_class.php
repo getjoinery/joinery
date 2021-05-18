@@ -442,40 +442,43 @@ class User extends SystemBase {
 		}
 		
 		//NOW ADD THE USER TO MAILCHIMP
+		try {
 		$settings = Globalvars::get_instance();
-		if($settings->get_setting('mailchimp_api_key')){
-			$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
+			if($settings->get_setting('mailchimp_api_key')){
+				$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
 
-			$merge_values = [
-				"FNAME" => $this->get('usr_first_name'),
-				"LNAME" => $this->get('usr_last_name'),
-				"MMERGE3" => 'Yes',
-			];
+				$merge_values = [
+					"FNAME" => $this->get('usr_first_name'),
+					"LNAME" => $this->get('usr_last_name'),
+					"MMERGE3" => 'Yes',
+				];
 
-			$post_params = [
-				"email_address" => $this->get('usr_email'),
-				"status" => "subscribed", 
-				"email_type" => "html", 
-				"merge_fields" => $merge_values,
-			];
+				$post_params = [
+					"email_address" => $this->get('usr_email'),
+					"status" => "subscribed", 
+					"email_type" => "html", 
+					"merge_fields" => $merge_values,
+				];
 
-			try {
+				
 				$return = $mailchimp 
 					->lists($settings->get_setting('mailchimp_list_id'))
 					->members()
 					->post($post_params);
-			} catch (Exception $e) {
+
+						
+				$status = $return->deserialize();
+				
+				$mailchimp_user_id = $status->id;
+				$this->set('usr_mailchimp_user_id', $mailchimp_user_id);
 				$this->save();
-				return FALSE;
+				
+				return $status;
 			}
-					
-			$status = $return->deserialize();
-			
-			$mailchimp_user_id = $status->id;
-			$this->set('usr_mailchimp_user_id', $mailchimp_user_id);
+		} 
+		catch (Exception $e) {
 			$this->save();
-			
-			return $status;
+			return FALSE;
 		}
 		return TRUE;
 
