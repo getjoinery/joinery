@@ -99,7 +99,7 @@
 	         </div>
 	      </div>
 	      <div class="scroll-btn-banner">
-	         <a href="#"><i class="fa fa-angle-down" aria-hidden="true"></i></a>
+	         <a href="/events"><i class="fa fa-angle-down" aria-hidden="true"></i></a>
 	       </div>
 	   </section>
 	   
@@ -330,7 +330,7 @@
 
 							</div>
 							<div class="class-detail background-white">
-								<a href="class-detail.html"><h2 class="font-blue class-title"><?php echo $event->get('evt_name'); ?></h2></a>
+								<a href="<?php echo $event->get_url(); ?>"><h2 class="font-blue class-title"><?php echo $event->get('evt_name'); ?></h2></a>
 											<?php
 											if($event->get('evt_start_time') && $event_time > $now){				
 												echo '<span>'.$event->get_event_start_time($tz, 'M'). ' ' . $event->get_event_start_time($tz, 'd').'</span>'; 				
