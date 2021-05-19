@@ -61,7 +61,7 @@
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
-	                        <img src="/static_files/Home1a.png" alt="The Liberato Method Picture 1" class="img-responsive">
+	                        <img src="/static_files/Home1.png" alt="The Liberato Method Picture 1" class="img-responsive">
 	                     </div>
 	                     <div class="banner-info">
 	                        <h1></h1>
@@ -74,7 +74,7 @@
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
-	                        <img src="/static_files/Home2a.png" alt="The Liberato Method Picture 2" class="img-responsive">
+	                        <img src="/static_files/Home2.png" alt="The Liberato Method Picture 2" class="img-responsive">
 	                     </div>
 	                     <div class="banner-info">
 	                        <h1></h1>
@@ -87,7 +87,7 @@
 	               <div class="row">
 	                  <div class="banner-box">
 	                     <div class="banner-photo">
-	                        <img src="/static_files/Home3a.png" alt="The Liberato Method Picture 3" class="img-responsive">
+	                        <img src="/static_files/Home3.png" alt="The Liberato Method Picture 3" class="img-responsive">
 	                     </div>
 	                     <div class="banner-info">
 	                        <h1></h1>
