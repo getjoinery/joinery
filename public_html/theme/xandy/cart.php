@@ -22,6 +22,7 @@
 	
 	$settings = Globalvars::get_instance();
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+	$currency_code = $settings->get_setting('site_currency');
 	
 	if(!$_SESSION['test_mode']){
 		$api_key = $settings->get_setting('stripe_api_key');
@@ -130,7 +131,7 @@
 							  "product" => [
 								"name" => 'Recurring donation $' . (int)$cart_item['price'],
 							  ],
-							  "currency" => "usd",
+							  "currency" => $currency_code,
 							  "id" => 'recurring_donation-' . (int)$cart_item['price'],
 							]); 							
 						}
@@ -153,7 +154,7 @@
 							'name' => $cart_item['name'],
 							'description' => $cart_item['name'].' ',			
 							'amount' => (int)$cart_item['price'] * 100,
-							'currency' => 'usd',
+							'currency' => $currency_code,
 							'quantity' => $cart_item['quantity'],
 						);
 						
