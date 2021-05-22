@@ -277,8 +277,8 @@
 				$create_list = array(
 					'billing_address_collection' => 'auto',
 					'payment_method_types' => ['card'],
-					'success_url' => 'https://jeremytunnell.net/cart_finish-checkout?session_id={CHECKOUT_SESSION_ID}',
-					'cancel_url' => 'https://jeremytunnell.net/cart',
+					'success_url' => $settings->get_setting('webDir_SSL'). '/cart_finish-checkout?session_id={CHECKOUT_SESSION_ID}',
+					'cancel_url' => $settings->get_setting('webDir_SSL'). '/cart',
 				);
 				
 				if($stripe_item_list){
