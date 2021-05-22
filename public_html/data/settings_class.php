@@ -208,7 +208,7 @@ class Setting extends SystemBase {
 			CREATE TABLE IF NOT EXISTS "public"."stg_settings" (
 			  "stg_setting_id" int4 NOT NULL DEFAULT nextval(\'stg_settings_stg_setting_id_seq\'::regclass),
 			  "stg_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "stg_value" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
+			  "stg_value" text COLLATE "pg_catalog"."default" NOT NULL,
 			  "stg_group_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
 			  "stg_usr_user_id" int4,
 			  "stg_create_time" timestamp(6) NOT NULL,
