@@ -21,6 +21,7 @@
 	}
 	
 	$settings = Globalvars::get_instance();
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 	
 	if(!$_SESSION['test_mode']){
 		$api_key = $settings->get_setting('stripe_api_key');
