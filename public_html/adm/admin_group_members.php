@@ -12,6 +12,7 @@
 	$session->check_permission(5);
 	$session->set_return();
 	
+	/*
 	if($_POST['action'] == 'add'){
 		$group_member = new GroupMember(NULL);
 		$group_member->set('grm_name', $_POST['grm_name']);
@@ -24,6 +25,21 @@
 			throw new GroupMemberException('There is already a group_member with that name.');
 		}
 	}
+	*/
+	
+	if($_POST['action'] == 'add_to_group'){
+		//ADD THE USER TO A GROUP
+		$group = new Group($_POST['grp_group_id'], TRUE);
+		$group->add_member($user->key);
+		header("Location: /admin/admin_group_members?grp_group_id=".$group->key);
+		exit();			
+	}
+	else if($_POST['action'] == 'remove_from_group'){
+		$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
+		$groupmember->remove();
+		header("Location: /admin/admin_group_members?grp_group_id=".$groupmember->get('grm_grp_group_id'));
+		exit();				
+	}	
 	
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, 0, '');
 	$group = new Group($grp_group_id, TRUE);
@@ -99,7 +115,7 @@
 
 
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove" />
+		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_group" />
 		<input type="hidden" class="hidden" name="grm_group_member_id" value="'.$group_member->key.'" />
 		<button type="submit">Remove</button>
 		</form>';
