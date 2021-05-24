@@ -287,7 +287,7 @@
 									Lorem ipsum dolor sit amet, consectetur adipiscing elit. In sit amet purus id nunc porta fringilla. Maecenas volutpat fermentum ante. Sed nibh metus, mollis a dolor ut, feugiat fringilla nunc. Donec consequat pretium nunc, vel feugiat purus cursus a.
 								</p>-->
 								<div class="vertical-space-20"></div>
-								<iframe src="https://www.youtube.com/embed/BBYizZLqYkM" title="Xandy Liberato Retreats" height="400px" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+								<iframe src="https://www.youtube.com/embed/BBYizZLqYkM" class="frontvideo" title="Xandy Liberato Retreats" height="400px" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 								<!--<a href="#" data-toggle="modal" data-target="#videoModal">
 									<i class="fa fa-play font-white" aria-hidden="true"></i>-->
 								</a>
