@@ -68,7 +68,7 @@ class PublicPageMaster {
 			$this->user = new User($session->get_user_id(), TRUE);
 		}
 		
-
+		//https://blog.vnaik.com/posts/web-attacks.html
 		if($settings->get_setting('force_https')){
 			header('Strict-Transport-Security: max-age=3153600');
 			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
