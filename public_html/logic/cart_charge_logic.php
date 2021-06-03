@@ -349,7 +349,7 @@
 		}
 		else{
 			//ASSEMBLE THE STRIPE CHARGE DESCRIPTION
-			$stripe_current_item = $product_name .' ('.$quantity.') - $'. $price. ' ';
+			$stripe_current_item = substr($product_name, 0, 40) .' ('.$quantity.') - $'. $price. ' ';
 			array_push($stripe_item_list, $stripe_current_item);		
 		}
 	}		
