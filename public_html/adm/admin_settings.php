@@ -9,12 +9,34 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
-	
+	$settings = Globalvars::get_instance();
 
 	if($_POST){
+		if($settings->get_setting('preview_image') != $_POST['preview_image']){
+			//AUTO INCREMENT THE PREVIEW IMAGE INDEX IF IT HAS CHANGED
+			$search_criteria = array();
+			$search_criteria['setting_name'] = 'preview_image_increment';
+			$user_settings = new MultiSetting(
+				$search_criteria,
+				NULL,
+				NULL,
+				NULL,
+				NULL
+			);
+			$user_settings->load();	
+			foreach($user_settings as $user_setting) {
+				if($user_setting->get('stg_name') == 'preview_image_increment'){
+					$user_setting->set('stg_value', $settings->get_setting('preview_image_increment') + 1);
+					$user_setting->set('stg_update_time', 'NOW()'); 
+					$user_setting->set('stg_usr_user_id', $session->get_user_id());
+					$user_setting->prepare();
+					$user_setting->save();					
+				}
+			}			
+		}
+
 		$search_criteria = array();
 		//$search_criteria['setting_like'] = $searchterm;
-
 		$user_settings = new MultiSetting(
 			$search_criteria,
 			NULL,
@@ -35,7 +57,7 @@
 		
 	}
 	
-	$settings = Globalvars::get_instance();
+	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -71,6 +93,8 @@
 	echo '<h3>General Settings</h3>';
 	
 	echo $formwriter->textbox('Custom CSS', 'custom_css', 'ctrlHolder', 10, 80, $settings->get_setting('custom_css'), '', 'no');
+	
+	echo $formwriter->textinput("Preview image (for facebook, google, etc)", 'preview_image', "ctrlHolder", 20, $settings->get_setting('preview_image'), "" , 255, "");
 
 	if($settings->get_setting('tracking')){
 		echo $formwriter->textinput("Tracking code", "tracking_code", "ctrlHolder", 20, $settings->get_setting('tracking_code'), "" , 255, "");	
