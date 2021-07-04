@@ -3,6 +3,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
