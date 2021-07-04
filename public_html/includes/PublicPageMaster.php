@@ -156,7 +156,7 @@ class PublicPageMaster {
 		}
 	}
 
-	public function public_header($options=array()) {
+	public function public_header_common($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
@@ -188,6 +188,8 @@ class PublicPageMaster {
 				$session->save_visitor_event(1, $options['is_404']);
 			}
 		}
+		
+		return $options;
 	}
 
 	public function public_footer($options=array()) {
