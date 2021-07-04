@@ -16,7 +16,7 @@
 		exit();
 	}
 	
-	$event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.');
+	$event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.', TRUE, 'int');
 	$event = new Event($event_id, TRUE);
 
 	$session = SessionControl::get_instance();
@@ -56,6 +56,7 @@
 		//ADD TO WAITING LIST
 		$waiting_list_name = $event->get('evt_name'). ' ' . LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $event->get('evt_timezone'),'M j, Y') . ' waiting list';
 		if(!$group = Group::get_by_name($waiting_list_name)){
+			$waiting_list_name = substr($waiting_list_name,0,75);
 			$group = Group::add_group($waiting_list_name, NULL, Group::GROUP_TYPE_USER);
 		}
 		$group->add_member($user->key);
