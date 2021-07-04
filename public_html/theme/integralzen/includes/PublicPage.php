@@ -149,7 +149,7 @@ class PublicPage {
 	
 		?>
 		<!DOCTYPE html>
-		<html lang="en-US" class="no-js no-svg">
+		<html lang="en-US" class="no-js no-svg" xmlns="http://www.w3.org/1999/xhtml" xmlns:fb="http://ogp.me/ns/fb#">
 		<head>
 		<meta charset="utf-8">
 		<base href="/">

@@ -133,7 +133,7 @@ class PublicPage {
 		
 		?>
 <!DOCTYPE html>
-<html lang="en-US" class="no-js no-svg">
+<html lang="en-US" class="no-js no-svg" xmlns="http://www.w3.org/1999/xhtml" xmlns:fb="http://ogp.me/ns/fb#">
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">

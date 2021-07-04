@@ -124,7 +124,7 @@ class PublicPage {
 		?>
 		
 	<!DOCTYPE html>
-<html lang="en-gb" dir="ltr">
+<html lang="en-gb" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:fb="http://ogp.me/ns/fb#">
 
 <head>
   <meta charset="utf-8">

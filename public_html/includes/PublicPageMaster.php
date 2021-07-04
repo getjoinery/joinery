@@ -140,6 +140,7 @@ class PublicPageMaster {
 	}	
 	
 	public function global_includes_top(){
+		$settings = Globalvars::get_instance();
 		?>
 		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
 		<script type="text/javascript" src="<?php echo $this->theme_url; ?>/includes/jquery.validate-1.9.1.js"></script>	
@@ -147,7 +148,12 @@ class PublicPageMaster {
 		
 		<!--<link type="text/css" href="<?php echo $this->theme_url; ?>/css/default_theme.css" rel="stylesheet" />
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/css/site_styles.css" rel="stylesheet" />-->
+		
 		<?php
+		$preview_image_url = $settings->get_setting('preview_image');
+		if($preview_image_url){
+			echo '<meta property="og:image" content="'.$settings->get_setting('preview_image').'?'.$settings->get_setting('preview_image_increment').'" />';
+		}
 	}
 
 	public function public_header($options=array()) {
