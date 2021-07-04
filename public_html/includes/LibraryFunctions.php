@@ -970,7 +970,7 @@ class LibraryFunctions {
 
 		if(isset($_REQUEST[$varname])){
 			if($require_type == 'int'){
-				if(!is_int($GLOBALS[$varname]){
+				if(!is_int($_REQUEST[$varname])){
 					header("HTTP/1.0 404 Not Found");
 					throw new SystemDisplayablePermanentErrorNoLog('The variable '..' is the wrong type.');
 				}
