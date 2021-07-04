@@ -86,10 +86,10 @@ class PublicPage extends PublicPageMaster {
 		<meta charset="utf-8">
 		<base href="/">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<meta name="description" content="<?php echo $site_description; ?>">
+		<meta name="description" content="<?php echo $options['description'] ?>">
 
 		<?php $this->global_includes_top(); ?>
-		<title><?php echo $site_title; ?></title>
+		<title><?php echo $options['title'] ?></title>
 
 		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->theme_url; ?>/styles/integral_style1.css' type='text/css' media='all' />
 
