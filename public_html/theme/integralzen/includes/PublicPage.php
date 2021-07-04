@@ -9,9 +9,6 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
 class PublicPage extends PublicPageMaster {
 
-	private $rowcount; 
-	private $theme_url;
-
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
 		$page->public_header(
