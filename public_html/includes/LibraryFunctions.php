@@ -957,13 +957,13 @@ class LibraryFunctions {
 				$var = $GLOBALS[$varname];	
 				if(!is_numeric($var)){
 					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$var.' is not an integer.');
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 
 				$var = $var + 0;
 				if(!is_int($var)){
 					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$var.' is not an integer.');
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 			}
 			
@@ -980,13 +980,13 @@ class LibraryFunctions {
 				$var = $_REQUEST[$varname];	
 				if(!is_numeric($var)){
 					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$var.' is not an integer.');
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 
 				$var = $var + 0;
 				if(!is_int($var)){
 					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$var.' is not an integer.');
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 			}
 
