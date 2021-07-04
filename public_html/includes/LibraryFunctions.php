@@ -956,7 +956,7 @@ class LibraryFunctions {
 			if($require_type == 'int'){
 				if(!is_int($GLOBALS[$varname])){
 					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '..' is the wrong type.');
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$GLOBALS[$varname].' is the wrong type.');
 				}
 			}
 			
@@ -972,7 +972,7 @@ class LibraryFunctions {
 			if($require_type == 'int'){
 				if(!is_int($_REQUEST[$varname])){
 					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '..' is the wrong type.');
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$_REQUEST[$varname].' is the wrong type.');
 				}
 			}
 
