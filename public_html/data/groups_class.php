@@ -73,6 +73,11 @@ class Group extends SystemBase {
 			throw new GroupException('You cannot create a group without a name.');
 			exit();			
 		}
+		
+		if(strlen($name) > 100){
+			throw new GroupException('The group name "'.$name.'" is too long.');
+			exit();	
+		}
 
 		if($group = Group::get_by_name($name)){
 			throw new GroupException('A group named "'.$name.'" already exists.');
