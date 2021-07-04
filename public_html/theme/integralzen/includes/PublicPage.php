@@ -59,6 +59,8 @@ class PublicPage extends PublicPageMaster {
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
+		
+		<?php $this->global_includes_top(); ?>
 
 		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->theme_url; ?>/styles/integral_style1.css' type='text/css' media='all' />
 
