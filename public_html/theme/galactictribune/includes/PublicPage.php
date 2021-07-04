@@ -1,27 +1,7 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-
-class PublicPage {
-
-	private $rowcount;
-	private $theme_url;
-
-	private static $header_defaults = array(
-		//'title' => '',
-		'showheader' => TRUE,
-		'currentmain' => NULL,
-		'currentsub' => NULL,
-		'noindex' => FALSE,
-		'nofollow' => FALSE,
-	);
-
-	private static $footer_defaults = array(
-		'track' => TRUE,
-	);
+class PublicPage extends PublicPageMaster {
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
@@ -123,46 +103,9 @@ class PublicPage {
 
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
-
 		$settings = Globalvars::get_instance();
-		if($settings->get_setting('force_https')){
-			header('Strict-Transport-Security: max-age=3153600');
-			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
-			//header("Content-Security-Policy-Report-Only: default-src https:");
-		}
-		header('X-Frame-Options: SAMEORIGIN');
-		header('X-Content-Type-Options: nosniff');
-		header('Referrer-Policy: unsafe-url');
-
-		$this->debug = $settings->get_setting('debug');
-		if ($this->debug == 1) {
-			$secure = FALSE;
-			$this->secure = FALSE;
-		}
-		
-		$this->theme_url = LibraryFunctions::get_theme_path('web');
-		
 		$session = SessionControl::get_instance();
-		$settings = Globalvars::get_instance();
-
-		if(!isset($options['title']) || !$options['title']){
-			$options['title'] = $settings->get_setting('site_name');
-		}
-		
-		if(!isset($options['description']) || !$options['description']){
-			$options['description'] = $settings->get_setting('site_description');
-		}
-		if(empty($options['noheader'])){
-			//TRACKING
-			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
-				if(!isset($options['is_404'])){
-					$options['is_404'] = 0;
-				}
-
-				$session->save_visitor_event(1, $options['is_404']);
-			}
-		}
-	
+		$options = parent::public_header_common($options);
 		?>
 		
 <!DOCTYPE html>
@@ -170,10 +113,10 @@ class PublicPage {
 	<head>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-		<meta name="description" content="<?php echo $settings->get_setting('site_description') ?>">
+		<meta name="description" content="<?php echo $options['description']; ?>">
         <meta name="keywords" content="">
 
-		<title><?php echo $settings->get_setting('site_name') ?></title>
+		<title><?php echo $options['title']; ?></title>
 		<!-- Favicon -->
 		<!--
         <link href="../assets/images/favicon.png" rel="shortcut icon">
@@ -182,6 +125,8 @@ class PublicPage {
 		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />
 		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
 		-->
+		<?php $this->global_includes_top(); ?>
+
 		<!-- CSS -->
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
 		<!--<link rel="stylesheet" type="text/css" href="/theme/default/includes/uikit-3.4.2/css/uikit.min.css">-->
