@@ -6,7 +6,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
-class PublicPage {
+class PublicPage extends PublicPageMaster {
 
 	private $rowcount; 
 	private $theme_url;
