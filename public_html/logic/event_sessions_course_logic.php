@@ -18,8 +18,8 @@
 		exit();
 	}
 	
-	$event_id = LibraryFunctions::fetch_variable('event_id', '', TRUE);
-	$session_number = (int)LibraryFunctions::fetch_variable('session_number', 0, False, '');
+	$event_id = LibraryFunctions::fetch_variable('event_id', '', TRUE, '', TRUE, 'int');
+	$session_number = LibraryFunctions::fetch_variable('session_number', 0, False, '', TRUE, 'int');
 	
 	$event = new Event($event_id, TRUE);
 

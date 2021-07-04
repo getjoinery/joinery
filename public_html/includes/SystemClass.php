@@ -9,9 +9,11 @@ interface CustomErrorPage {
 
 // An error message that is displayable and can be fixed by the user
 interface DisplayableErrorMessage {}
+interface DisplayableErrorMessageNoLog {}
 
 // A displayable error message that cannot be fixed by the user
 interface DisplayablePermanentErrorMessage {}
+interface DisplayablePermanentErrorMessageNoLog {}
 
 class SystemClassException extends Exception {}
 
@@ -24,6 +26,10 @@ class SystemAuthenticationError extends SystemClassException {}
 class SystemDisplayableError extends SystemClassException implements DisplayableErrorMessage {}
 
 class SystemDisplayablePermanentError extends SystemClassException implements DisplayablePermanentErrorMessage {}
+
+class SystemDisplayableErrorNoLog extends SystemClassException implements DisplayableErrorMessageNoLog {}
+
+class SystemDisplayablePermanentErrorNoLog extends SystemClassException implements DisplayablePermanentErrorMessageNoLog {}
 
 abstract class SystemBase {
 	
@@ -637,8 +643,27 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 					$errorhandler->handle_general_error($e->getMessage(), ErrorHandler::INPUT_ERROR);
 				}				
 			} 
+			else if ($e instanceof DisplayablePermanentErrorMessageNoLog) {
+				//error_log('EXCEPTION: (DISPLAYABLE PERMANENT ERROR) ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
+				//GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
+				if($errorpage == 'admin'){
+					$errorhandler->handle_admin_error($e->getMessage(), ErrorHandler::PERMANENT_ERROR);
+				}
+				else{
+					$errorhandler->handle_general_error($e->getMessage(), ErrorHandler::PERMANENT_ERROR);
+				}	
+			} 
+			else if ($e instanceof DisplayableErrorMessageNoLog) {
+				//error_log('EXCEPTION: (DISPLAYABLE ERROR) ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
+				if($errorpage == 'admin'){
+					$errorhandler->handle_admin_error($e->getMessage(), ErrorHandler::INPUT_ERROR);
+				}
+				else{
+					$errorhandler->handle_general_error($e->getMessage(), ErrorHandler::INPUT_ERROR);
+				}				
+			} 
 			else if ($e instanceof DisplayablePermanentErrorMessage) {
-				error_log('EXCEPTION: (DISPLAYABLE ERROR) ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
+				error_log('EXCEPTION: (DISPLAYABLE PERMANENT ERROR) ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
 				GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
 				if($errorpage == 'admin'){
 					$errorhandler->handle_admin_error($e->getMessage(), ErrorHandler::PERMANENT_ERROR);

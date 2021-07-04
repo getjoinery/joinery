@@ -943,11 +943,23 @@ class LibraryFunctions {
 	$defaultvalue - If not found, will be returned as variable value.
 	$required - 1 or 0.  If 1, error will be thrown if variable not found.
 	$errortext - Text of error if $required.
+	$require_type - Require that the input be a certain type.  Error if not.
 
 	*********************************************************************/
-	static function fetch_variable($varname, $defaultvalue, $required=FALSE, $errortext='Some information needed for this page is not present.', $safemode=TRUE){
+	static function fetch_variable($varname, $defaultvalue, $required=FALSE, $errortext='Some information needed for this page is not present.', $safemode=TRUE, $require_type=FALSE){
+		
+		if(!$errortext){
+			$errortext='Some information needed for this page is not present.';
+		}
 
 		if(isset($GLOBALS[$varname])){
+			if($require_type == 'int'){
+				if(!is_int($GLOBALS[$varname]){
+					header("HTTP/1.0 404 Not Found");
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '..' is the wrong type.');
+				}
+			}
+			
 			if($safemode){
 				return strip_tags($GLOBALS[$varname]);
 			}
@@ -967,12 +979,13 @@ class LibraryFunctions {
 		}
 
 		if ($required==1){
-			throw new SystemDisplayablePermanentError($errortext);
+			throw new SystemDisplayablePermanentErrorNoLog($errortext);
 		}
 
 		return $defaultvalue;
 
 	}
+
 
 	/*********************************************************************
 	//FETCH A VARIABLE FROM ARRAY PASSED INTO A FUNCTION

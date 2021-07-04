@@ -20,8 +20,9 @@ $session = SessionControl::get_instance();
 	
 if (!isset($_REQUEST['product_id']) || !is_numeric($_REQUEST['product_id'])) {
 	$product_id = 3;
-} else {
-	$product_id = $_REQUEST['product_id'];
+} 
+else {
+	$product_id = LibraryFunctions::fetch_variable('product_id', '', TRUE, '', TRUE, 'int');
 }
 
 $product = Product::GetProductById($product_id);
