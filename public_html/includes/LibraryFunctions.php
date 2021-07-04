@@ -973,8 +973,7 @@ class LibraryFunctions {
 				return $GLOBALS[$varname];
 			}
 		}
-
-		if(isset($_REQUEST[$varname])){
+		else if(isset($_REQUEST[$varname])){
 			if($require_type == 'int'){
 				if(!is_numeric($_REQUEST[$varname])){
 					header("HTTP/1.0 404 Not Found");
@@ -996,8 +995,7 @@ class LibraryFunctions {
 			}
 			
 		}
-
-		if ($required==1){
+		else if ($required==1){
 			throw new SystemDisplayablePermanentErrorNoLog($errortext);
 		}
 
