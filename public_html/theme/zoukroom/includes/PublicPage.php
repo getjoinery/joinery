@@ -1,28 +1,8 @@
 <?php
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
+class PublicPage extends PublicPageMaster {
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-
-class PublicPage {
-
-	private $rowcount;
-
-	private static $header_defaults = array(
-		'title' => '',
-		'showheader' => TRUE,
-		'currentmain' => NULL,
-		'currentsub' => NULL,
-		'noindex' => FALSE,
-		'nofollow' => FALSE,
-		'ui_wrapper' => TRUE,
-	);
-
-	private static $footer_defaults = array(
-		'track' => TRUE,
-	);
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
@@ -62,65 +42,12 @@ class PublicPage {
 		return $output;
 	}	
 
-	public function __construct($secure=FALSE) {
-		$this->rowcount = 0;
-		$this->secure = $secure;
-		$this->server = $_SERVER['PHP_SELF'];
-		$this->remote_addr = $_SERVER['REMOTE_ADDR'];
-
-		$settings = Globalvars::get_instance();
-
-		$this->debug = $settings->get_setting('debug');
-		if ($this->debug == 1) {
-			$secure = FALSE;
-			$this->secure = FALSE;
-		}
-
-		// If secure is on, they are not HTTPS and on port 80, forward them to SSL
-		/*
-		if ($secure && $_SERVER["SERVER_PORT"] == 80) {
-			header("HTTP/1.1 301 Moved Permanently");
-			header("Location: https://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-			exit;
-		} else if (!$secure && $_SERVER["SERVER_PORT"] == 443) {
-			// Likewise if they aren't secure and reading an SSLed page, redirect them to non-SSL
-			header("HTTP/1.1 301 Moved Permanently");
-			header("Location: http://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-			exit;
-		}
-		*/
-
-		//$this->cdn = $settings->get_setting($this->secure ? 'CDN_SSL' : 'CDN');
-		//$this->protocol = $this->secure ? 'https://' : 'http://';
-		//$this->secure_prefix = ($this->debug == 0) ? $settings->get_setting('webDir_SSL') : $settings->get_setting('webDir');
-
-		$session = SessionControl::get_instance();
-		//$this->location_data = $session->get_location_data();
-
-		// This is for apache specific logging, so we have to check to make sure we are
-		// serving off apache before we can set the userid.
-		/*
-		if (function_exists('apache_note') && $session->get_user_id(TRUE)) {
-			apache_note('user_id', $session->get_user_id(TRUE));
-		}
-		*/
-
-		if ($session->get_user_id()) {
-			$this->user = new User($session->get_user_id(), TRUE);
-		}
-
-	}
 
 	public function public_header($options=array()) {
+		$_GLOBALS['page_header_loaded'] = true;
+		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
-		if($settings->get_setting('force_https')){
-			header('Strict-Transport-Security: max-age=3153600');
-			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
-			//header("Content-Security-Policy-Report-Only: default-src https:");
-		}
-		header('X-Frame-Options: SAMEORIGIN');
-		header('X-Content-Type-Options: nosniff');
-		header('Referrer-Policy: unsafe-url');		
+		$options = parent::public_header_common($options);
 		?>
 		
 	<!DOCTYPE html>
@@ -129,7 +56,12 @@ class PublicPage {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>The Zouk Room - Courses and Community</title>
+		<meta name="description" content="<?php echo $options['description']; ?>">
+        <meta name="keywords" content="">
+
+		<title><?php echo $options['title']; ?></title>
+
+		<?php $this->global_includes_top(); ?>
   <base href="/">
   <link rel="shortcut icon" type="image/png" href="img/favicon.png" >
   <link href="https://fonts.googleapis.com/css?family=Nunito+Sans:400,600,700&display=swap" rel="stylesheet">
