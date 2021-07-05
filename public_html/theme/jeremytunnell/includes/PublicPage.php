@@ -63,14 +63,7 @@ class PublicPage extends PublicPageMaster {
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
-		<!-- Favicon -->
-		<!--
-        <link href="../assets/images/favicon.png" rel="shortcut icon">
-		<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-32x32.png" sizes="32x32" />
-		<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-192x192.png" sizes="192x192" />
-		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />
-		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
-		-->
+
 		<?php $this->global_includes_top(); ?>
 		
 		<link rel="dns-prefetch" href="//fonts.googleapis.com">
