@@ -1,7 +1,6 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
 
-
 class PublicPage extends PublicPageMaster {
 
 
@@ -48,7 +47,7 @@ class PublicPage extends PublicPageMaster {
 		$_GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
-		parent::public_header();
+		$options = parent::public_header_common($options);
 
 ?>
 <!DOCTYPE html>
@@ -57,10 +56,10 @@ class PublicPage extends PublicPageMaster {
 		<meta charset="utf-8">
 		<meta http-equiv="X-UA-Compatible" content="IE=edge">
 		<meta name="viewport" content="width=device-width">
-		<meta name="description" content="<?php echo $settings->get_setting('site_description') ?>">
+		<meta name="description" content="<?php echo $options['description']; ?>">
         <meta name="keywords" content="">
 
-		<title><?php echo $settings->get_setting('site_name') ?></title>
+		<title><?php echo $options['title']; ?></title>
 		<!-- Favicon -->
 		<!--
         <link href="../assets/images/favicon.png" rel="shortcut icon">

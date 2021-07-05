@@ -154,6 +154,10 @@ class PublicPageMaster {
 		if($preview_image_url){
 			echo '<meta property="og:image" content="'.$settings->get_setting('preview_image').'?'.$settings->get_setting('preview_image_increment').'" />';
 		}
+		
+		if($settings->get_setting('custom_css')){
+			echo '<style>'.$settings->get_setting('custom_css').'</style>';
+		}
 	}
 
 	public function public_header_common($options=array()) {
