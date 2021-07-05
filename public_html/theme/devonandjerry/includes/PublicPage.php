@@ -1,10 +1,7 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
 
-
 class PublicPage extends PublicPageMaster {
-
-
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
@@ -62,7 +59,7 @@ class PublicPage extends PublicPageMaster {
 		$_GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
-		parent::public_header();
+		$options = parent::public_header_common($options);
 
 		?>
 		
@@ -71,18 +68,11 @@ class PublicPage extends PublicPageMaster {
 	<head>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-		<meta name="description" content="<?php echo $settings->get_setting('site_description') ?>">
+		<meta name="description" content="<?php echo $options['description']; ?>">
         <meta name="keywords" content="">
 
-		<title><?php echo $settings->get_setting('site_name') ?></title>
-		<!-- Favicon -->
-		<!--
-        <link href="../assets/images/favicon.png" rel="shortcut icon">
-		<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-32x32.png" sizes="32x32" />
-		<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-192x192.png" sizes="192x192" />
-		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />
-		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
-		-->
+		<title><?php echo $options['title']; ?></title>
+		
 		<?php $this->global_includes_top(); ?>
 		<!-- CSS -->
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
