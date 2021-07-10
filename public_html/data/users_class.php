@@ -67,6 +67,7 @@ class User extends SystemBase {
 		'usr_contact_preference_last_changed' => 'last time contact preferences was changed',
 		'usr_organization_name' => 'Organization instead of person',
 		'usr_delete_time' => 'Time of deletion',
+		'usr_password_recovery_disabled' => 'When TRUE, password recovery is disabled.'
 	);
 
 	public static $timestamp_fields = array(
@@ -1076,7 +1077,8 @@ class User extends SystemBase {
 			  "usr_mailchimp_user_id" varchar(64) COLLATE "pg_catalog"."default",
 			  "usr_signup_ip" varchar(64) COLLATE "pg_catalog"."default",
 			  "usr_contact_preference_last_changed" timestamp(6),
-			  "usr_delete_time" timestamp(6)
+			  "usr_delete_time" timestamp(6),
+			  "usr_password_recovery_disabled" boolean
 			)
 			;';
 		$q = $dblink->prepare($sql);

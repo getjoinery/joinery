@@ -40,6 +40,12 @@ if ($_POST) {
 		throw new SystemDisplayableError(
 			'Sorry, this form has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');
 	}
+	
+	if($user->get('usr_password_recovery_disabled')){
+			header("HTTP/1.0 404 Not Found");
+			echo 'This feature is turned off for this user.  Please email us to recover your password.';
+			exit();
+	}
 
 	$user->set('usr_password', User::GeneratePassword($_POST['usr_password']));
 	$user->save();
