@@ -120,6 +120,8 @@
 	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur'); 
 	echo $formwriter->dropinput("Site Currency", "site_currency", "ctrlHolder", $optionvals, $settings->get_setting('site_currency'), '', FALSE);	
 
+	$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout'); 
+	echo $formwriter->dropinput("Checkout Type", "checkout_type", "ctrlHolder", $optionvals, $settings->get_setting('checkout_type'), '', FALSE);	
 	
 	$blog_active = $settings->get_setting('blog_active');
 	if($blog_active){
