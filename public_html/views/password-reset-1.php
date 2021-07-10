@@ -22,7 +22,7 @@
 		$formwriter = new FormWriterPublic("form1");
 		echo $formwriter->begin_form("", "post", "/password-reset-1"); 
 		echo $formwriter->textinput("Enter the Email Address you registered with", "email", "ctrlHolder", 20, htmlspecialchars($email), '', 64, NULL);
-		echo $formwriter->new_form_button('Submit', '', 'submit1');
+		echo $formwriter->new_form_button('Submit', 'button button-lg button-dark');
 		echo $formwriter->end_form();
 	}
 
