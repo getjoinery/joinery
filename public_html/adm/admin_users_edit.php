@@ -17,6 +17,8 @@ if ($_POST){
 
 	$user->set('usr_first_name', trim($_POST['usr_first_name']));
 	$user->set('usr_last_name', trim($_POST['usr_last_name']));
+	$user->set('usr_password_recovery_disabled', (bool)$_POST['usr_password_recovery_disabled']);
+
 	if($_POST['usr_nickname']){
 		$user->set('usr_nickname', trim($_POST['usr_nickname']));
 	}
@@ -114,6 +116,9 @@ else{
 	
 	$optionvals = array("Subscribed"=>1, "Unsubscribed"=>0);
 	echo $formwriter->dropinput("Newsletter subscription", "usr_contact_preferences", "ctrlHolder", $optionvals, $user->get('usr_contact_preferences'), '', FALSE);
+
+	$optionvals = array("On"=>0, "Off"=>1);
+	echo $formwriter->dropinput("Password recovery", "usr_password_recovery_disabled", "ctrlHolder", $optionvals, $user->get('usr_password_recovery_disabled'), '', FALSE);
 
 	if(Activation::CheckForActiveCode($user->key, Activation::EMAIL_CHANGE)) {
 		echo '<b>*Email change pending*</b><br />';
