@@ -60,7 +60,21 @@ else{
 	$formwriter = new FormWriterMaster("form1");
 	
 	$validation_rules = array();
+	$validation_rules['usr_first_name']['required']['value'] = 'true';
+	$validation_rules['usr_first_name']['minlength']['value'] = 1;
+	$validation_rules['usr_first_name']['maxlength']['value'] = 32;
+	$validation_rules['usr_first_name']['required']['message'] = "'Please enter your first name.'";
+	$validation_rules['usr_last_name']['required']['value'] = 'true';
+	$validation_rules['usr_last_name']['minlength']['value'] = 2;
+	$validation_rules['usr_last_name']['maxlength']['value'] = 32;
 	$validation_rules['usr_email']['required']['value'] = 'true';
+	$validation_rules['usr_email']['email']['value'] = 'true';
+	$validation_rules['usr_email']['maxlength']['value'] = 64;
+	$validation_rules['usr_email']['remote']['value'] = "'/ajax/email_check_ajax'";	
+	$validation_rules['usr_email']['remote']['message'] = "'This email already exists.'";
+	if($nickname_display){
+		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
+	}
 	echo $formwriter->set_validate($validation_rules);		
 	
 	echo $formwriter->begin_form("form1", "post", "/admin/admin_user_add");
