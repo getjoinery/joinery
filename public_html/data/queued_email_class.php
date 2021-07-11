@@ -165,10 +165,10 @@ class QueuedEmail extends SystemBase {
 		$sql = '
 			CREATE TABLE IF NOT EXISTS "public"."equ_queued_emails" (
 			  "equ_queued_email_id" int4 NOT NULL DEFAULT nextval(\'equ_queued_emails_equ_queued_email_id_seq\'::regclass),
-			  "equ_from_name" varchar(32) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_from" varchar(32) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_to" varchar(32) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_to_name" varchar(32) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
+			  "equ_from_name" varchar(70) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
+			  "equ_from" varchar(64) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
+			  "equ_to" varchar(64) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
+			  "equ_to_name" varchar(70) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
 			  "equ_body" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
 			  "equ_subject" varchar(32) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
 			  "equ_timestamp" timestamp(6) NOT NULL DEFAULT now(),

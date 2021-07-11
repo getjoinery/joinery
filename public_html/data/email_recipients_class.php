@@ -298,9 +298,9 @@ class EmailRecipient extends SystemBase {
 			CREATE TABLE IF NOT EXISTS "public"."erc_email_recipients" (
 			  "erc_email_recipient_id" int4 NOT NULL DEFAULT nextval(\'erc_email_recipients_erc_email_recipient_id_seq\'::regclass),
 			  "erc_usr_user_id" int4,
-			  "erc_email" varchar(128) COLLATE "pg_catalog"."default",
+			  "erc_email" varchar(64),
 			  "erc_eml_email_id" int4,
-			  "erc_name" varchar COLLATE "pg_catalog"."default",
+			  "erc_name" varchar(70),
 			  "erc_sent_time" timestamp(6) DEFAULT now(),
 			  "erc_status" int2
 			)

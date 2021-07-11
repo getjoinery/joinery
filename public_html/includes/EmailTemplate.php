@@ -150,7 +150,7 @@ class EmailTemplate {
 
 		if ($recipient_user) {
 			$this->template_values['recipient'] = $recipient_user->export_as_array();
-			$this->add_recipient($recipient_user->get('usr_email'), $recipient_user->display_name());
+			$this->add_recipient($recipient_user->get('usr_email'), $recipient_user->get('usr_first_name') . ' ' . $recipient_user->get('usr_last_name'));
 		} else {
 			$this->template_values['recipient'] = NULL;
 		}
@@ -247,7 +247,7 @@ class EmailTemplate {
 		if ($user !== NULL) {
 			$this->template_values['recipient'] = $user->export_as_array();
 			
-			$this->add_recipient($recipient_user->get('usr_email'), $recipient_user->display_name());
+			$this->add_recipient($recipient_user->get('usr_email'), $recipient_user->get('usr_first_name') . ' ' . $recipient_user->get('usr_last_name'));
 		} else {
 			unset($this->template_values['recipient']);
 		}

@@ -1055,9 +1055,9 @@ class User extends SystemBase {
 		$sql = '
 			CREATE TABLE IF NOT EXISTS "public"."usr_users" (
 			  "usr_user_id" int8 NOT NULL DEFAULT nextval(\'usr_users_usr_user_id_seq\'::regclass),
-			  "usr_first_name" varchar(64) COLLATE "pg_catalog"."default",
-			  "usr_last_name" varchar(64) COLLATE "pg_catalog"."default",
-			  "usr_email" varchar(128) COLLATE "pg_catalog"."default",
+			  "usr_first_name" varchar(32) COLLATE "pg_catalog"."default",
+			  "usr_last_name" varchar(32) COLLATE "pg_catalog"."default",
+			  "usr_email" varchar(64) COLLATE "pg_catalog"."default",
 			  "usr_signup_date" date,
 			  "usr_password" char(34) COLLATE "pg_catalog"."default",
 			  "usr_permission" int4,
@@ -1078,7 +1078,8 @@ class User extends SystemBase {
 			  "usr_signup_ip" varchar(64) COLLATE "pg_catalog"."default",
 			  "usr_contact_preference_last_changed" timestamp(6),
 			  "usr_delete_time" timestamp(6),
-			  "usr_password_recovery_disabled" boolean
+			  "usr_password_recovery_disabled" boolean,
+			  "usr_organization_name" varchar(32)
 			)
 			;';
 		$q = $dblink->prepare($sql);
