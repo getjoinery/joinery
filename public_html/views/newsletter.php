@@ -32,18 +32,26 @@
 	$validation_rules['usr_first_name']['required']['value'] = 'true';
 	$validation_rules['usr_first_name']['minlength']['value'] = 1;
 	$validation_rules['usr_first_name']['required']['message'] = "'Please enter your first name.'";
+	$validation_rules['usr_first_name']['maxlength']['value'] = 32;
 	$validation_rules['usr_last_name']['required']['value'] = 'true';
+	$validation_rules['usr_last_name']['maxlength']['value'] = 32;
 	$validation_rules['privacy']['required']['value'] = 'true';
 	$validation_rules['usr_email']['required']['value'] = 'true';
 	$validation_rules['usr_email']['email']['value'] = 'true';
+	$validation_rules['usr_email']['maxlength']['value'] = 64;
 	$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);		
 	
 	echo $formwriter->begin_form("", "post", "/newsletter");
 	echo '<fieldset class="inlineLabels">';
-	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 30, '', "", 255, "");
-	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 30, '', "", 255, "");
-	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 30, '', "", 255, "");
+	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 30, '', "", 32, "");
+	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 30, '', "", 32, "");
+	$settings = Globalvars::get_instance();
+	$nickname_display = $settings->get_setting('nickname_display_as');
+	if($nickname_display){
+		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, NULL, "" , 32, "");
+	}
+	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 30, '', "", 64, "");
 	echo $formwriter->antispam_question_input();
 	echo $formwriter->honeypot_hidden_input();
 

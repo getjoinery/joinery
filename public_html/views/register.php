@@ -56,13 +56,13 @@
 	<div><a href="/login<?php if(isset($_GET['m'])){ echo '?m='.htmlspecialchars($_GET['m']); } ?>">Already a member? Log in</a></div>
 	<?php
 
-	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, @$form_fields->usr_first_name , "",255, "");	
-	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, @$form_fields->usr_last_name, "" , 255, "");
+	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, @$form_fields->usr_first_name , "",32, "");	
+	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, @$form_fields->usr_last_name, "" , 32, "");
 	$nickname_display = $settings->get_setting('nickname_display_as');
 	if($nickname_display){
-		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 255, "");
+		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 32, "");
 	}
-	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, '', "" , 255, "");
+	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, '', "" , 64, "");
 
 	echo $formwriter->passwordinput("Create Password", "usr_password", "ctrlHolder", 20, "" , "", 255,"");
 	echo $formwriter->antispam_question_input();
