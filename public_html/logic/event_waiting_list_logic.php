@@ -50,6 +50,10 @@
 			
 			if(!$user = User::GetByEmail($_POST['usr_email'])){
 				$user = User::CreateNewUser($_POST['usr_first_name'], $_POST['usr_last_name'], $_POST['usr_email'], NULL, TRUE);
+				
+				if($_POST['usr_nickname']){
+					$user->set('usr_nickname', $_POST['usr_nickname']);
+				}
 			}			
 		}			
 
