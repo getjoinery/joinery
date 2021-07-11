@@ -19,9 +19,7 @@ if ($_POST){
 	$user->set('usr_last_name', trim($_POST['usr_last_name']));
 	$user->set('usr_password_recovery_disabled', (bool)$_POST['usr_password_recovery_disabled']);
 
-	if($_POST['usr_nickname']){
-		$user->set('usr_nickname', trim($_POST['usr_nickname']));
-	}
+	$user->set('usr_nickname', trim($_POST['usr_nickname']));
 
 	if($_POST['usr_organization_name']){
 		$user->set('usr_organization_name', trim($_POST['usr_organization_name']));
