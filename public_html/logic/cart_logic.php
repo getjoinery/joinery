@@ -49,6 +49,7 @@
 		$user = NULL;
 	}	
 	
+	$currency_code = $settings->get_setting('site_currency');
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 
@@ -85,8 +86,9 @@
 		$billing_user['billing_email'] = strtolower(trim($data['email']));
 		$cart->billing_user = $billing_user;
 	}	
+
 	
-	
+	/*
 	$create_list = array(
 		'billing_address_collection' => 'auto',
 		'payment_method_types' => ['card'],
@@ -107,4 +109,5 @@
 			$create_list['customer_email'] = $billing_user['billing_email'];
 		}
 	}
+	*/
 ?>
