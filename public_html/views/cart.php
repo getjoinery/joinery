@@ -4,8 +4,6 @@
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 	require_once (LibraryFunctions::get_logic_file_path('cart_logic.php'));
 
-
-
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
 	'title' => 'Checkout'
@@ -130,31 +128,155 @@
 							
 					}
 
-		
+
 	
 					if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
+
+						if($settings->get_setting('checkout_type') == 'stripe_checkout'){
+
+							$stripe_item_list = array();
+							foreach($cart->get_detailed_items() as $cart_item) {
+
+								if($cart_item['recurring']){
+									
+									//CHECK FOR EXISTING PLAN
+									try{
+										$plan_name = 'recurring_donation-' . (int)$cart_item['price'];
+										$plan = \Stripe\Plan::retrieve($plan_name);
+									}
+									catch (Exception $e) {
+										//CREATE NEW PLAN
+										$plan = \Stripe\Plan::create([
+										  "amount" => (int)$cart_item['price'] * 100,
+										  "interval" => "month",
+										  "product" => [
+											"name" => 'Recurring donation $' . (int)$cart_item['price'],
+										  ],
+										  "currency" => $currency_code,
+										  "id" => 'recurring_donation-' . (int)$cart_item['price'],
+										]); 							
+									}
+
+									$plan_items = array(
+										'plan' => $plan['id'],
+									);
+									
+									$plan_items_wrap = array($plan_items);
+									
+									$stripe_subscription_item = array(
+										'items' => $plan_items_wrap,
+									);
+									
+								}
+								else{
+									//ASSEMBLE THE STRIPE PRODUCT ARRAY
+									//'images' => ['https://example.com/t-shirt.png'],
+									$stripe_current_item = array(
+										'name' => $cart_item['name'],
+										'description' => $cart_item['name'].' ',			
+										'amount' => (int)$cart_item['price'] * 100,
+										'currency' => $currency_code,
+										'quantity' => $cart_item['quantity'],
+									);
+									
+									//TODO add description "metadata" => ["order_id" => "6735"],
+									if($cart_item['price'] > 0){
+										array_push($stripe_item_list, $stripe_current_item);		
+									}							
+								}
+							}
+
+							$create_list = array(
+								'billing_address_collection' => 'auto',
+								'payment_method_types' => ['card'],
+								'success_url' => $settings->get_setting('webDir_SSL'). '/cart_charge-checkout?session_id={CHECKOUT_SESSION_ID}',
+								'cancel_url' => $settings->get_setting('webDir_SSL'). '/cart',
+							);
+							
+							if($stripe_item_list){
+								$create_list['line_items'] = $stripe_item_list;
+							}
+							
+							if($stripe_subscription_item){
+								$create_list['subscription_data'] = $stripe_subscription_item;
+							}
+							
+							if(!$_SESSION['test_mode']){
+								if($billing_user){
+									$create_list['client_reference_id'] = $billing_user->key;
 								
-						?>	
+									if($billing_user->get('usr_stripe_customer_id')){
+										if(!$_SESSION['test_mode']){
+											$create_list['customer'] = $billing_user->get('usr_stripe_customer_id');
+										}
+									}
+									elseif($billing_user->get('usr_email')){
+										$create_list['customer_email'] = $billing_user->get('usr_email');		
+									}				
+								}
+								else{
+									$create_list['customer_email'] = $billing_user['billing_email'];
+								}
+							}							
+
+							$stripe_session = \Stripe\Checkout\Session::create($create_list);					
 					
-						<div id="nojavascript" style="border: 3px solid red; padding: 10px; margin: 10px;">Our payment form requires javascript to be turned on.  Please set your browser to allow javascript, turn off ad blockers, or try another browser.</div>
-						<script src="https://js.stripe.com/v3/"></script>
-						<h5 class="font-weight-medium">Credit or Debit Card</h5>
-						<form action="/cart_charge" method="post" id="payment-form">
-						  <div>
-							<div id="card-element">
-							  <!-- A Stripe Element will be inserted here. -->
-							</div>
+							?>
+							<script src="https://js.stripe.com/v3/"></script>
+							<script language="javascript">
+							var stripe = Stripe('<?php echo $api_secret_key; ?>');
 
-							<!-- Used to display form errors. -->
-							<div id="card-errors" role="alert"></div>
-						  </div>
-						<br />
-						  <button class="button button-lg button-dark">Submit Payment</button>
-						</form>					
-						
-						<script language="javascript" src="<?php echo LibraryFunctions::get_theme_path('web'); ?>/includes/stripe_payment_js.php"></script>
+							function ToCheckout() {
+								stripe.redirectToCheckout({
+								  sessionId: '<?php echo $stripe_session->id; ?>'
+								}).then(function (result) {
+								  // If `redirectToCheckout` fails due to a browser or network
+								  // error, display the localized error message to your customer
+								  // using `result.error.message`.
+								});
+							}
+							</script>
+							<?php	
 
-						<?php
+							$formwriter = new FormWriterPublic("form1", TRUE);
+							$formwriter->begin_form("uniForm", "post", '/profile/payment_finalize');
+
+							echo '<div id="errorMsg" style="display:none;"></div>';
+							echo '<fieldset class="inlineLabels">';
+
+							$formwriter->hiddeninput('cc_type', '');
+							$formwriter->hiddeninput('cart_cs', $cart->get_hash());
+							
+							$formwriter->start_buttons();
+							echo '<input type="button" value="Pay" onclick="ToCheckout();" style="width:100px;">';
+							//$formwriter->new_form_button('Checkout');
+							$formwriter->end_buttons();
+
+							$formwriter->end_form();							
+							
+						}
+						else{	
+							?>	
+							<div id="nojavascript" style="border: 3px solid red; padding: 10px; margin: 10px;">Our payment form requires javascript to be turned on.  Please set your browser to allow javascript, turn off ad blockers, or try another browser.</div>
+							<script src="https://js.stripe.com/v3/"></script>
+							<h5 class="font-weight-medium">Credit or Debit Card</h5>
+							<form action="/cart_charge" method="post" id="payment-form">
+							  <div>
+								<div id="card-element">
+								  <!-- A Stripe Element will be inserted here. -->
+								</div>
+
+								<!-- Used to display form errors. -->
+								<div id="card-errors" role="alert"></div>
+							  </div>
+							<br />
+							  <button class="button button-lg button-dark">Submit Payment</button>
+							</form>					
+							
+							<script language="javascript" src="<?php echo LibraryFunctions::get_theme_path('web'); ?>/includes/stripe_payment_js.php"></script>
+
+							<?php
+						}
 					}		
 					else if($cart->billing_user){					
 						$formwriter = new FormWriterPublic("form1", TRUE);

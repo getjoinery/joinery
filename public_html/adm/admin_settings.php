@@ -103,6 +103,8 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Registration active", "register_active", "ctrlHolder", $optionvals, $settings->get_setting('register_active'), '', FALSE);	
 
+	$optionvals = Address::get_timezone_drop_array();
+	echo $formwriter->dropinput("Default timezone", "default_timezone", "ctrlHolder", $optionvals, $settings->get_setting('default_timezone'), '', FALSE); 
 
 	echo $formwriter->textinput("Nickname display as (blank for no nicknames)", "nickname_display_as", "ctrlHolder", 20, $settings->get_setting('nickname_display_as'), "" , 255, "");	
 
