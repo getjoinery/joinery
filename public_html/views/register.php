@@ -65,6 +65,11 @@
 	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, '', "" , 64, "");
 
 	echo $formwriter->passwordinput("Create Password", "usr_password", "ctrlHolder", 20, "" , "", 255,"");
+
+	$optionvals = Address::get_timezone_drop_array();
+	$default_timezone = $settings->get_setting('default_timezone');
+	echo $formwriter->dropinput("Timezone", "usr_timezone", "ctrlHolder", $optionvals, $default_timezone, '', FALSE);	
+	
 	echo $formwriter->antispam_question_input();
 	//echo $formwriter->textinput("Zip Code", "usa_zip_code_id", "ctrlHolder", 20, @$form_fields->usa_zip_code_id, "", 255,"");
 

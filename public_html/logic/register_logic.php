@@ -135,7 +135,7 @@ if ($_POST) {
 			$user->set('usr_nickname', $_POST['usr_nickname']);
 		}
 		
-		//$user->set('usr_timezone', $zip_data->zip_timezone);
+		$user->set('usr_timezone', $_POST['usr_timezone']);
 		$user->prepare();
 		$user->save();
 		

@@ -89,7 +89,8 @@ else{
 	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, NULL, "" , 64, "");
 	echo $formwriter->textinput("Password ", "usr_password", "ctrlHolder", 20, NULL, "" , 255, "");
 	$optionvals = Address::get_timezone_drop_array();
-	echo $formwriter->dropinput("Time Zone", "usr_timezone", "ctrlHolder", $optionvals, NULL, '', FALSE);	
+	$default_timezone = $settings->get_setting('default_timezone');
+	echo $formwriter->dropinput("Time Zone", "usr_timezone", "ctrlHolder", $optionvals, $default_timezone, '', FALSE);	
 	
 	echo $formwriter->checkboxinput("Add to the mailing list", "mailing_list", "ctrlHolder", "normal", NULL, "yes", '');	
 	echo $formwriter->checkboxinput("Send an activation email", "send_activation_email", "ctrlHolder", "normal", "yes", "yes", '');

@@ -48,6 +48,11 @@
 			echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, NULL, "" , 32, "");
 		}
 		echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 30, '', "", 64, "");
+		
+		$optionvals = Address::get_timezone_drop_array();
+		$default_timezone = $settings->get_setting('default_timezone');
+		echo $formwriter->dropinput("Your timezone", "usr_timezone", "ctrlHolder", $optionvals, $default_timezone, '', FALSE);			
+		
 		echo $formwriter->antispam_question_input();
 		echo $formwriter->honeypot_hidden_input();
 

@@ -40,11 +40,15 @@
 		}
 		else if(!$user = User::GetByEmail($_POST['usr_email'])){
 			$user = User::CreateNewUser($_POST['usr_first_name'], $_POST['usr_last_name'], $_POST['usr_email'], NULL, FALSE);	//DO NOT SEND WELCOME EMAIL	
-			if($_POST['usr_nickname']){
-				$user->set('usr_nickname', $_POST['usr_nickname']);
-			}
 		}
-		
+
+		if($_POST['usr_nickname']){
+			$user->set('usr_nickname', $_POST['usr_nickname']);
+		}
+		$user->set('usr_timezone', $_POST['usr_timezone']);
+		$user->prepare();
+		$user->save();
+			
 		if($user->get('usr_contact_preferences')){
 			$message = '<p>You are already subscribed to our newsletter.  If you would like to unsubscribe, visit <a href="/profile">the My Profile page</a></p>';
 		}
