@@ -71,6 +71,12 @@
 	}
 	*/
 
+
+	//HANDLE THE BILLING USER
+	$billing_user = $cart->get_or_create_billing_user();  //NOTE IF WE ARE IN TEST MODE THIS BILLING USER WILL CONTAIN THE TEST STRIPE ID, BUT THE DATABASE MIGHT CONTAIN THE REAL ONE
+	$stripe_customer_id = $billing_user->get('usr_stripe_customer_id'); 
+	
+	/*
 	//HANDLE THE BILLING USER
 	$billing_user = User::GetByEmail(trim($cart->billing_user['billing_email'])); 
 	if(!$billing_user){
@@ -79,13 +85,15 @@
 		$billing_user = User::CreateNewUser($cart_billing_user['billing_first_name'], $cart_billing_user['billing_last_name'], $cart_billing_user['billing_email'], NULL, TRUE); 
 		$billing_name = $billing_user->get('usr_first_name') . ' ' . $billing_user->get('usr_last_name');
 	}
+	*/
 	
+	$order->set('ord_stripe_customer_id', $stripe_customer_id);
 	$order->set('ord_usr_user_id', $billing_user->key);
 	$order->prepare();	
 	$order->save();
 	$order->load();		
 		
-
+	/*
 	//HANDLE THE STRIPE USER
 	if(!$_SESSION['test_mode'] && !$settings->get_setting('debug') && $billing_user->get('usr_stripe_customer_id')){
 		//IF WE STORED A CUSTOMER ID
@@ -108,7 +116,9 @@
 			$stripe_customer_id = $stripe_customer[id];
 		}
 	}
-
+	*/
+	
+	/*
 	//FILL IN THE ORDER WITH THE CUSTOMER ID
 	$order->set('ord_stripe_customer_id', $stripe_customer_id); 
 	$order->save();		
@@ -118,6 +128,7 @@
 		$billing_user->set('usr_stripe_customer_id', $stripe_customer_id);
 		$billing_user->save();
 	}
+	*/
 
 	
 	$stripe_item_list = array();

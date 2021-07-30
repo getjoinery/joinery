@@ -122,6 +122,60 @@ class ShoppingCart {
 		}
 		return $detailed_items;
 	}
+	
+	public function get_or_create_billing_user(){
+		$settings = Globalvars::get_instance();
+		$session = SessionControl::get_instance();
+		$charge_total = $this->get_total();
+
+
+		//HANDLE THE BILLING USER
+		$billing_user = User::GetByEmail(trim($this->billing_user['billing_email'])); 
+		if(!$billing_user){
+			$cart_billing_user = $this->billing_user;
+			//CREATE THE USER	
+			$billing_user = User::CreateNewUser($cart_billing_user['billing_first_name'], $cart_billing_user['billing_last_name'], $cart_billing_user['billing_email'], NULL, TRUE); 
+			$billing_name = $billing_user->get('usr_first_name') . ' ' . $billing_user->get('usr_last_name');
+		}	
+
+		if($charge_total > 0){
+			//IN TEST MODE JUST GET THE CUSTOMER ID FROM STRIPE OR CREATE ONE
+			$stripe_customer_id = NULL;
+			if(!$_SESSION['test_mode'] && $billing_user->get('usr_stripe_customer_id')){
+				//IF WE STORED A CUSTOMER ID
+				$stripe_customer_id = $billing_user->get('usr_stripe_customer_id');
+			}			
+			
+			//HANDLE THE STRIPE USER
+			if(!$stripe_customer_id){
+				//CHECK ON STRIPE 
+				$stripe_customer = \Stripe\Customer::all(["email" => $billing_user->get('usr_email')]);
+				if($stripe_customer[data][0][id]){
+					//IF THERE IS A CUSTOMER ID AT STRIPE
+					$stripe_customer_id = $stripe_customer[data][0][id];
+				}
+				else{		
+					//IF THERE IS NO CUSTOMER ID
+					$stripe_customer = \Stripe\Customer::create([
+						'name' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'),
+						'email' => $billing_user->get('usr_email'),
+						'description' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'). ' ('.$billing_user->get('usr_email').')',
+					]);
+					$stripe_customer_id = $stripe_customer[id];
+				}
+			}	
+		
+			//SAVE THE CUSTOMER ID
+			$billing_user->set('usr_stripe_customer_id', $stripe_customer_id);
+			//ONLY SAVE THE STRIPE CUSTOMER ID IF WE ARE NOT IN TEST MODE
+			if(!$_SESSION['test_mode']){
+				$billing_user->save();
+			}
+			
+		}	
+
+		return $billing_user;
+	}
 
 	public function get_total() {
 		$total_price = 0;
