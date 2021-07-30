@@ -59,16 +59,13 @@
 	*/
 
 	//HANDLE THE BILLING USER
-	$billing_user = User::GetByEmail(trim($cart->billing_user['billing_email'])); 
-	if(!$billing_user){
-		$cart_billing_user = $cart->billing_user;
-		//CREATE THE USER	
-		$billing_user = User::CreateNewUser($cart_billing_user['billing_first_name'], $cart_billing_user['billing_last_name'], $cart_billing_user['billing_email'], NULL, TRUE); 
-		$billing_name = $billing_user->get('usr_first_name') . ' ' . $billing_user->get('usr_last_name');
-	}
-	
+	$billing_user = $cart->get_or_create_billing_user();  //NOTE IF WE ARE IN TEST MODE THIS BILLING USER WILL CONTAIN THE TEST STRIPE ID, BUT THE DATABASE MIGHT CONTAIN THE REAL ONE
+	$stripe_customer_id = $billing_user->get('usr_stripe_customer_id'); 
+
+	//CREATE THE ORDER
 	$order = new Order(NULL);
 	$order->set('ord_usr_user_id', $billing_user->key);
+	$order->set('ord_stripe_customer_id', $billing_user->get('usr_stripe_customer_id')); 
 	$order->set('ord_total_cost', $cart->get_total());
 	$order->set('ord_timestamp', 'now');	
 	$order->set('ord_raw_cart', print_r($cart, true));
@@ -76,51 +73,19 @@
 	$order->set('ord_status', 1);	
 	$order->prepare();	
 	$order->save();
-	$order->load();	
-	
-	//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
-	if(!isset($_REQUEST['stripeToken']) && $charge_total > 0){
-		$log_error = "The credit card information was not submitted because your browser is not using https.  Go back to the previous page and make sure that you are accessing this page securely (look for https in the address bar or a lock icon).  For help, contact us at ".$settings->get_setting('defaultemail')." .";
-		$order->set('ord_error', $log_error);
-		$order->save();
+	$order->load();	 
 
-		throw new SystemDisplayableError($log_error);
-		exit();					
-	}	
-		
-	if($charge_total > 0){
-		//HANDLE THE STRIPE USER
-		if(!$_SESSION['test_mode'] && !$settings->get_setting('debug') && $billing_user->get('usr_stripe_customer_id')){
-			//IF WE STORED A CUSTOMER ID
-			$stripe_customer_id = $billing_user->get('usr_stripe_customer_id');
-		}
-		else{
-			//CHECK ON STRIPE 
-			$stripe_customer = \Stripe\Customer::all(["email" => $billing_user->get('usr_email')]);
-			if($stripe_customer[data][0][id]){
-				//IF THERE IS A CUSTOMER ID AT STRIPE
-				$stripe_customer_id = $stripe_customer[data][0][id];
-			}
-			else{		
-				//IF THERE IS NO CUSTOMER ID
-				$stripe_customer = \Stripe\Customer::create([
-					'name' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'),
-					'email' => $billing_user->get('usr_email'),
-					'description' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'). ' ('.$billing_user->get('usr_email').')',
-				]);
-				$stripe_customer_id = $stripe_customer[id];
-			}
-		}
+	//CHECK CREDIT CARD INFO AND STORE IF PRESENT
+	if($charge_total > 0){	
+		//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
+		if(!isset($_REQUEST['stripeToken'])){
+			$log_error = "The credit card information was not submitted because your browser is not using https.  Go back to the previous page and make sure that you are accessing this page securely (look for https in the address bar or a lock icon).  For help, contact us at ".$settings->get_setting('defaultemail')." .";
+			$order->set('ord_error', $log_error);
+			$order->save();
 
-		//FILL IN THE ORDER WITH THE CUSTOMER ID
-		$order->set('ord_stripe_customer_id', $stripe_customer_id); 
-		$order->save();		
-	
-		//SAVE THE CUSTOMER ID
-		if(!$billing_user->get('usr_stripe_customer_id')){
-			$billing_user->set('usr_stripe_customer_id', $stripe_customer_id);
-			$billing_user->save();
-		}
+			throw new SystemDisplayableError($log_error);
+			exit();					
+		}	
 
 		//STORE PAYMENT METHOD 
 		$source_result = \Stripe\Customer::createSource( 
@@ -129,7 +94,6 @@
 	}
 
 	//PROCESS RECURRING ITEMS
-
 	$stripe_item_list = array();
 	foreach($cart->items as $key => $cart_item) {
 		$email_fill = array();
