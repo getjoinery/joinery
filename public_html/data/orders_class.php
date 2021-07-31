@@ -32,7 +32,11 @@ class Order extends SystemBase {
 		'ord_raw_cart' => 'Raw cart output before processing',
 		'ord_serialized_cart' => 'Saved cart for display later',
 		'ord_status' => '1=unpaid, 2=paid, 3=error',
-		'ord_error' => 'Error if the order does not go through.'
+		'ord_error' => 'Error if the order does not go through.',
+		'ord_refund_amount' => 'Amount refunded',
+		'ord_refund_time' => 'Time of last refund',
+		'ord_refund_note' => 'Note for the refund',
+		'ord_stripe_charge_id' => 'Charge ID from stripe'
 	);
 
 	function load() {
@@ -227,6 +231,10 @@ class Order extends SystemBase {
 			  "ord_serialized_cart" text COLLATE "pg_catalog"."default",
 			  "ord_status" int4, 
 			  "ord_error" varchar(255) COLLATE "pg_catalog"."default",
+			  "ord_refund_amount" => int4,
+			  "ord_refund_time" => timestamp(6),
+			  "ord_refund_note" varchar(255),
+			  "ord_stripe_charge_id" varchar(64)
 			)
 			;';
 		$q = $dblink->prepare($sql);

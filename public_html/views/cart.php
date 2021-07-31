@@ -199,25 +199,23 @@
 							
 							if($stripe_subscription_item){
 								$create_list['subscription_data'] = $stripe_subscription_item;
-							}
+							}			
+
+							if($billing_user){
+								$create_list['client_reference_id'] = $billing_user->key;
 							
-							if(!$_SESSION['test_mode']){
-								if($billing_user){
-									$create_list['client_reference_id'] = $billing_user->key;
+								if($billing_user->get('usr_stripe_customer_id') && !$_SESSION['test_mode']){
+									$create_list['customer'] = $billing_user->get('usr_stripe_customer_id');
+								}
 								
-									if($billing_user->get('usr_stripe_customer_id')){
-										if(!$_SESSION['test_mode']){
-											$create_list['customer'] = $billing_user->get('usr_stripe_customer_id');
-										}
-									}
-									elseif($billing_user->get('usr_email')){
-										$create_list['customer_email'] = $billing_user->get('usr_email');		
-									}				
-								}
-								else{
-									$create_list['customer_email'] = $billing_user['billing_email'];
-								}
-							}							
+								if($billing_user->get('usr_email')){
+									$create_list['customer_email'] = $billing_user->get('usr_email');		
+								}				
+							}
+							else{
+								$create_list['customer_email'] = $billing_user['billing_email'];
+							}
+														
 
 							$stripe_session = \Stripe\Checkout\Session::create($create_list);					
 					

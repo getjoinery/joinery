@@ -11,6 +11,9 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
+	
+	$settings = Globalvars::get_instance();
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 	$numperpage = 60;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
@@ -91,10 +94,10 @@
 			}
 			
 			if($order_item->get('odi_usr_user_id')){
-				$this_out = $title . ' - <a href="/admin/admin_user?usr_user_id=' . $order_item_user->key . '">' . $order_item_user->display_name() . '</a>' . ' ($'. $order_item->get('odi_price') .')';
+				$this_out = $title . ' - <a href="/admin/admin_user?usr_user_id=' . $order_item_user->key . '">' . $order_item_user->display_name() . '</a>' . ' ('.$currency_symbol. $order_item->get('odi_price') .')';
 			}
 			else{
-				$this_out = $title . ' ($'. $order_item->get('odi_price') .')';
+				$this_out = $title . ' ('.$currency_symbol. $order_item->get('odi_price') .')';
 			}
 			
 			if($product_data['comment']){
@@ -113,11 +116,17 @@
 
 		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone(), 'M j, Y'));
 		array_push($rowvalues, implode($order_items_out, '<br>'));
+		
+		$refund_text = '';
+		if($order->get('ord_refund_amount')){
+			$refund_text = ' *'.$currency_symbol.$order->get('ord_refund_amount') .' refunded*';
+		}
+		
 		if($order->get('ord_status') == 1){
 			array_push($rowvalues, 'NOT BILLED');
 		}
 		else{
-			array_push($rowvalues, '$'.$order->get('ord_total_cost'));
+			array_push($rowvalues, $currency_symbol.$order->get('ord_total_cost') .$refund_text);
 		}
 		
 		$page->disprow($rowvalues);

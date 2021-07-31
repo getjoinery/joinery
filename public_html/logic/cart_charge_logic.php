@@ -353,6 +353,7 @@
 					 "customer_name" => $billing_name,
 					 "customer_email" => $billing_user->get('usr_email')],
 				]);
+				
 			}
 
 
@@ -397,6 +398,9 @@
 			exit();		 
 		}
 
+		//STORE THE CHARGE ID
+		$order->set('ord_stripe_charge_id', $charge_result->id);
+		
 		//MARK THE ORDER PAID
 		$order->set('ord_status', 2);
 		$order->save();	

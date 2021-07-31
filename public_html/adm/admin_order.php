@@ -12,6 +12,9 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
+	
+	$settings = Globalvars::get_instance();
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 	$order_id = LibraryFunctions::fetch_variable('ord_order_id', 0, 0, TRUE);
 	$order = new Order($order_id, TRUE);
@@ -49,7 +52,11 @@
 	echo '<h2>Order Info</h2>';
 
 	echo 'Order ID - '.  $order->key. '<br />';
-	echo 'Amount - '. $order->get('ord_total_cost'). '<br />';
+	echo 'Amount - '. $currency_symbol.$order->get('ord_total_cost'). '<br />';
+	if($order->get('ord_refund_amount')){
+		echo '<b>'.$currency_symbol.$order->get('ord_refund_amount') . ' refunded.  <br />Last refund: '.LibraryFunctions::convert_time($order->get('ord_refund_time'), "UTC", $session->get_timezone()).'<br />Refund note: '.$order->get('ord_refund_note').'</b>';
+	}
+	echo '<br />';
 	echo 'Order Time - ' . LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone(), 'M j, Y'). '<br />';
 	echo 'User - '.'('. $order_user->key .') <a href="/admin/admin_user?usr_user_id='. $order_user->key .'">' . $order_user->display_name() . '</a> '. '<br />';
 
@@ -64,6 +71,7 @@
 			echo 'Status - Unknown';
 		}
 	}
+
 
 	echo '<h2>Items in Order</h2>';
 	$order_items = $order->get_order_items();
@@ -103,8 +111,8 @@
 		}
 			
 		if($_SESSION['permission'] >= 8){
-			if(!$order_item->get('odi_refunded')){
-				//$this_out .= ' | <a href="/admin/admin_order_refund?oi=' . $order_item->key . '">[refund]</a>';
+			if(($order->get('ord_stripe_payment_intent_id') || $order->get('ord_stripe_charge_id')) && ($order->get('ord_refund_amount') < $order->get('ord_total_cost'))){
+				$this_out .= ' | <a href="/admin/admin_order_refund?oi=' . $order_item->key . '">[refund]</a>';
 			}
 		}
 	
