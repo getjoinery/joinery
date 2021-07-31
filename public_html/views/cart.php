@@ -189,7 +189,7 @@
 							$create_list = array(
 								'billing_address_collection' => 'auto',
 								'payment_method_types' => ['card'],
-								'success_url' => $settings->get_setting('webDir_SSL'). '/cart_charge-checkout?session_id={CHECKOUT_SESSION_ID}',
+								'success_url' => $settings->get_setting('webDir_SSL'). '/cart_charge?session_id={CHECKOUT_SESSION_ID}',
 								'cancel_url' => $settings->get_setting('webDir_SSL'). '/cart',
 							);
 							
