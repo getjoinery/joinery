@@ -44,6 +44,9 @@
 
 	
 	if ($_POST['confirm']){
+		
+		print_r($_POST['refund_amount']);
+		exit;
 			
 		//HOW TO REFUND PART OF A CHARGE https://stripe.com/docs/refunds#issuing
 
@@ -138,6 +141,13 @@ else{
 	$page->begin_box($pageoptions);
 
 	$formwriter = new FormWriterMaster("form1");
+	
+
+	$validation_rules = array();
+	$validation_rules['refund_amount']['required']['value'] = 'true';
+	$validation_rules['refund_amount']['max']['value'] = $amount_left;
+	echo $formwriter->set_validate($validation_rules);	
+	
 	echo $formwriter->begin_form("form", "post", "/admin/admin_order_refund");
 
 	echo '<fieldset><h4>Confirm Refund</h4>';
@@ -145,8 +155,8 @@ else{
 		echo 'Total charge: ', $currency_symbol.$charge->amount/100 .'. '.$currency_symbol.$amount_refunded. ' refunded so far.';
 	
 	if($amount_left != 0){
-		echo $formwriter->textinput("Amount to refund (".$currency_symbol.$amount_left. " maximum)", 'refund_amount',"ctrlHolder", 20, $amount_left , 255, '');	
-		echo $formwriter->textinput("Refund description or reason", 'ord_refund_note',"ctrlHolder", 20, $order->get('ord_refund_note')  , 255, '');	
+		echo $formwriter->textinput("Amount to refund (".$currency_symbol.$amount_left. " maximum)", 'refund_amount',"ctrlHolder", 20, $amount_left , '', 255, NULL);	
+		echo $formwriter->textinput("Refund description or reason", 'ord_refund_note',"ctrlHolder", 20, $order->get('ord_refund_note'), '', 255, '');	
 		echo $formwriter->hiddeninput("confirm", 1);
 		echo $formwriter->hiddeninput("charge_id", $charge_id);
 		echo $formwriter->hiddeninput("order_item_id", $order_item->key);
