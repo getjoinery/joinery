@@ -92,7 +92,14 @@ class File extends SystemBase {
 		if($size == 'standard'){
 			$file_path = $upload_web_dir.'/'.$this->get('fil_name');
 		}		
-		return $file_path;
+		//IF NO LEADING SLASH, ADD A SLASH
+		if($file_path[0] == '/'){
+			return $file_path;
+		}
+		else{
+			return '/'.$file_path;
+		}
+		
 	}	
 
 	function soft_delete(){
