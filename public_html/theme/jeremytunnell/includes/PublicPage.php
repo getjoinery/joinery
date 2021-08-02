@@ -64,7 +64,7 @@ class PublicPage extends PublicPageMaster {
 
 		<title><?php echo $options['title']; ?></title>
 
-		<?php $this->global_includes_top(); ?>
+		<?php $this->global_includes_top($options); ?>
 		
 		<link rel="dns-prefetch" href="//fonts.googleapis.com">
  

@@ -4,10 +4,18 @@
 	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 	
+	
 	$page = new PublicPage(TRUE);
-	$page->public_header(array(
+	$page_options = array(
 		'title' => $event->get('evt_name')
-	));
+	);
+	if($event->get('evt_short_description')){
+		$page_options['meta_description'] = $event->get('evt_short_description');
+	}
+	if($event->get_picture_link('large')){
+		$page_options['preview_image_url'] = $event->get_picture_link('large');
+	}
+	$page->public_header($page_options);
 	
 	
 	if($time){

@@ -139,7 +139,7 @@ class PublicPageMaster {
 		return $output;
 	}	
 	
-	public function global_includes_top(){
+	public function global_includes_top($options=array()){
 		$settings = Globalvars::get_instance();
 		?>
 		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
@@ -150,9 +150,20 @@ class PublicPageMaster {
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/css/site_styles.css" rel="stylesheet" />-->
 		
 		<?php
-		$preview_image_url = $settings->get_setting('preview_image');
-		if($preview_image_url){
-			echo '<meta property="og:image" content="'.$settings->get_setting('preview_image').'?'.$settings->get_setting('preview_image_increment').'" />';
+		//CHECK TO SEE IF WE PASSED IN A PREVIEW IMAGE
+		if(isset($options['preview_image_url']) && $options['preview_image_url']){
+			//IF NO INCREMENT IS PROVIDED, USE 1
+			if(!isset($options['preview_image_increment'])){
+				!$options['preview_image_increment'] = 1;
+			}
+			echo '<meta property="og:image" content="'.$options['preview_image_url'].'?'.$options['preview_image_increment'].'" />';			
+		}
+		else{
+			//IF NOT, USE THE DEFAULT ONE
+			$preview_image_url = $settings->get_setting('preview_image');
+			if($preview_image_url){
+				echo '<meta property="og:image" content="'.$settings->get_setting('preview_image').'?'.$settings->get_setting('preview_image_increment').'" />';
+			}
 		}
 		
 		if($settings->get_setting('custom_css')){
@@ -178,8 +189,8 @@ class PublicPageMaster {
 			$options['title'] = $settings->get_setting('site_name');
 		}
 		
-		if(!isset($options['description']) || !$options['description']){
-			$options['description'] = $settings->get_setting('site_description');
+		if(!isset($options['meta_description']) || !$options['meta_description']){
+			$options['meta_description'] = $settings->get_setting('site_description');
 		}
 		
 		if(empty($options['noheader'])){

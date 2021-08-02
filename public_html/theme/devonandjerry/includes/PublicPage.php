@@ -73,7 +73,7 @@ class PublicPage extends PublicPageMaster {
 
 		<title><?php echo $options['title']; ?></title>
 		
-		<?php $this->global_includes_top(); ?>
+		<?php $this->global_includes_top($options); ?>
 		<!-- CSS -->
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
 		<!--<link rel="stylesheet" type="text/css" href="/theme/default/includes/uikit-3.4.2/css/uikit.min.css">-->

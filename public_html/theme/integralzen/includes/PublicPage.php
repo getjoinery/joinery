@@ -60,7 +60,7 @@ class PublicPage extends PublicPageMaster {
 
 		<title><?php echo $options['title']; ?></title>
 		
-		<?php $this->global_includes_top(); ?>
+		<?php $this->global_includes_top($options); ?>
 
 		<link rel='stylesheet' id='integral_zen_main'  href='<?php echo $this->theme_url; ?>/styles/integral_style1.css' type='text/css' media='all' />
 

@@ -78,7 +78,7 @@ class PublicPage extends PublicPageMaster {
 		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />
 		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
 		-->
-		<?php $this->global_includes_top(); ?>
+		<?php $this->global_includes_top($options); ?>
 
 		<!-- CSS -->
 		<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />

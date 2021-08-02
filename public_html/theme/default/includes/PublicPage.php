@@ -71,7 +71,7 @@ class PublicPage extends PublicPageMaster {
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
-				<?php $this->global_includes_top(); ?>
+				<?php $this->global_includes_top($options); ?>
 				
 		<!-- Favicon -->
 		<!--

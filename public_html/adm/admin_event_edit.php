@@ -162,15 +162,13 @@
 	$optionvals = $files->get_image_dropdown_array();
 	echo $formwriter->imageinput("Main image", "evt_fil_file_id", "ctrlHolder", $optionvals, $event->get('evt_fil_file_id'), '', TRUE, TRUE, FALSE, TRUE);	
 	
-	
 	//echo $formwriter->textinput('Picture link', 'evt_picture_link', NULL, 100, $event->get('evt_picture_link'), '', 255, '');
 	
 	echo $formwriter->textinput('Event location', 'evt_location', NULL, 100, $event->get('evt_location'), '', 255, '');
 
 	echo $formwriter->textinput('Max signups (number)', 'evt_max_signups', NULL, 100, $event->get('evt_max_signups'), '', 255, '');
 
-
-	echo $formwriter->textbox('Event short description (no html)', 'evt_short_description', 'ctrlHolder', 5, 80, $event->get('evt_short_description'), '', 'no');
+	echo $formwriter->textinput('Event short description (no html)', 'evt_short_description', NULL, 100, $event->get('evt_short_description'), '', 255, '');
 	echo $formwriter->textinput('External register link (if needed)', 'evt_external_register_link', NULL, 100, $event->get('evt_external_register_link'), '', 255, '');
 
 		

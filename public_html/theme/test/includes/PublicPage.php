@@ -56,7 +56,7 @@ class PublicPage extends PublicPageMaster {
 		<meta charset="utf-8">
 		<meta http-equiv="X-UA-Compatible" content="IE=edge">
 		<meta name="viewport" content="width=device-width">
-		<meta name="description" content="<?php echo $options['description']; ?>">
+		<meta name="description" content="<?php echo $options['meta_description']; ?>">
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
@@ -68,7 +68,7 @@ class PublicPage extends PublicPageMaster {
 		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />
 		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
 		-->
-		<?php $this->global_includes_top(); ?>
+		<?php $this->global_includes_top($options); ?>
 					
 	
 		<!--THIS TEMPLATE STYLES -->
