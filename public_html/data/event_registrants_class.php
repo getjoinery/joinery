@@ -7,6 +7,9 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+
 
 class EventRegistrantException extends SystemClassException {}
 class DisplayableEventRegistrantException extends EventRegistrantException implements DisplayableErrorMessage {}
@@ -282,6 +285,21 @@ class EventRegistrant extends SystemBase {
 }
 
 class MultiEventRegistrant extends SystemMultiBase {
+
+	function get_dropdown_array($include_new=FALSE) {
+		$items = array();
+		foreach($this as $entry) {
+			$user = new User($entry->get('evr_usr_user_id'), TRUE);
+			$event = new Event($entry->get('evr_evt_event_id'), TRUE);
+			$option_display = $user->display_name() . ' - ' . $event->get('evt_name'); 
+			$items[$option_display] = $entry->key;
+		}
+		if ($include_new) {
+			$items['new'] = 'Enter New Below';
+		}
+		return $items;
+
+	}
 
 	private function _get_results($only_count=FALSE) { 
 		$where_clauses = array();
