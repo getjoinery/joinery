@@ -109,12 +109,15 @@
 		if($order_item->get('odi_subscription_cancelled_time')){
 			$this_out .= ' CANCELLED AT '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());	
 		}
+		
 			
 		if($_SESSION['permission'] >= 8){
 			if(($order->get('ord_stripe_payment_intent_id') || $order->get('ord_stripe_charge_id')) && ($order->get('ord_refund_amount') < $order->get('ord_total_cost'))){
 				$this_out .= ' | <a href="/admin/admin_order_refund?oi=' . $order_item->key . '">[refund]</a>';
 			}
 		}
+		
+		$this_out .= ' | <a href="/admin/admin_order_item_edit?odi_order_item_id=' . $order_item->key . '">[change event registration]</a>';
 	
 		$order_items_out[] = $this_out;
 
