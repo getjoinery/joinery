@@ -199,8 +199,14 @@
 		
 		$row = '';
 		$total_paid = 0;
-		foreach ($order_items as $order_item){
-			$row .= '<a href="/admin/admin_order?ord_order_id=' . $order_item->get('odi_ord_order_id') . '">Order# '.$order_item->get('odi_ord_order_id').'</a> ($'. $order_item->get('odi_price'). ')<br>';	
+		foreach ($order_items as $order_item){	
+			$row .= '<a href="/admin/admin_order?ord_order_id=' . $order_item->get('odi_ord_order_id') . '">Order# '.$order_item->get('odi_ord_order_id').'</a> ($'. $order_item->get('odi_price'). ')';
+			//ADD AN ASTERISK IF THE ORDER HAS A REFUND
+			$order = $order_item->get_order();
+			if($order->get('ord_refund_amount')){
+				$row .= '*'; 
+			}
+			$row .= '<br>';
 		}
 		array_push($rowvalues, $row);
 		
