@@ -7,7 +7,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
-		'title' => 'Blog'
+		'title' => $post->get('pst_title')
 	);
 	$page->public_header($hoptions); 
 	
