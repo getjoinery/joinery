@@ -128,11 +128,14 @@ class PublicPage extends PublicPageMaster {
 			<div class="container">
 				<!-- Logo -->
 				<div class="header-logo">
-					<h3><a href="#">Test Site</a></h3>
-					<!-- 
-					<img class="logo-dark" src="../assets/images/your-logo-dark.png" alt="">
-					<img class="logo-light" src="../assets/images/your-logo-light.png" alt=""> 
-					-->
+					<?php 
+					if($settings->get_setting('logo_link')){
+						echo '<a href="/"><img class="logo-light" src="'.$settings->get_setting('logo_link').'" alt=""></a>';
+					}
+					else{
+						echo '<h3><a href="/">'.$settings->get_setting('site_name').'</a></h3>';
+					}
+					?>
 				</div>
 				<!-- Menu -->
 				<div class="header-menu">
