@@ -8,8 +8,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
-		'title' => 'Galactic Tribune News', 
-		'description' => 'News about the Urbit project'
+		'title' => 'Galactic Tribune - An urbit news site'
 	);
 	$page->public_header($hoptions); 
 	
@@ -40,7 +39,7 @@
 							<div class="margin-top-30">
 								<div class="d-flex justify-content-between margin-bottom-10">
 									<div class="d-inline-flex">
-										<a class="font-family-tertiary font-small font-weight-normal uppercase" href="#">Lifestyle</a>
+										<a class="font-family-tertiary font-small font-weight-normal uppercase" href="#">Post</a>
 									</div>
 									<div class="d-inline-flex">
 										<span class="font-small"><?php echo $author->display_name().' at '.LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'); ?></span>
