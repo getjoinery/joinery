@@ -84,6 +84,7 @@
 		
 		} 
 		else if ($_REQUEST['action'] == 'new_version') {
+			
 			$product->add_product_version($_REQUEST['version_name'], $_REQUEST['version_price'], $_REQUEST['version_deposit']);
 		} 
 		else if ($_REQUEST['action'] == 'remove_version') {

@@ -784,9 +784,9 @@ class Product extends SystemBase {
 	}
 	
 
-	public function add_product_version($version_name, $version_price) {
+	public function add_product_version($version_name, $version_price, $version_deposit=false) {
 		ProductVersion::StoreProductVersion(
-			$this->key, $version_name, $version_price, ProductVersion::ACTIVE);
+			$this->key, $version_name, $version_price, ProductVersion::ACTIVE, $version_deposit);
 	}
 
 	public function change_product_version_status($version_id, $status) {
