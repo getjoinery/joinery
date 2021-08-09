@@ -122,7 +122,7 @@ class PublicPage extends PublicPageMaster {
 			<div class="container">
 				<!-- Logo -->
 				<div class="header-logo">
-					<h3><a href="#">Test Site</a></h3>
+					<h3><a href="#">The Galactic Tribune</a></h3>
 					<!-- 
 					<img class="logo-dark" src="../assets/images/your-logo-dark.png" alt="">
 					<img class="logo-light" src="../assets/images/your-logo-light.png" alt=""> 
@@ -130,9 +130,39 @@ class PublicPage extends PublicPageMaster {
 				</div>
 				<!-- Menu -->
 				<div class="header-menu">
-					<ul class="nav">
+										<ul class="nav">
+					<?php
+						$menus = PublicPage::get_public_menu();
+						$menus2 = $menus; 
+						foreach ($menus as $menu){
+							if($menu[parent]){
+								$submenus = $menu['submenu'];
+								echo '<li class="nav-item">';
+								echo '<a class="nav-link" href="'.$menu['link'].'">'.$menu['name'].'</a>';
+								
+								if(!empty($submenus)){	
+									echo '<ul class="nav-dropdown">';
+									foreach ($submenus as $submenu){
+										echo '<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="'.$submenu['link'].'">'.$submenu['name'].'</a></li>';				
+									}
+									echo '</ul>';
+								}
+								echo '</li>';
+							}
+						}
+						?>
+						<!--
 						<li class="nav-item">
-							<a class="nav-link" href="#">Link Only</a>
+							<a class="nav-link" href="/about">About</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="/blog">Blog</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="/events">Courses</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link" href="/contact">Contact</a>
 						</li>
 						<li class="nav-item">
 							<a class="nav-link" href="#">Dropdown</a>
@@ -143,29 +173,7 @@ class PublicPage extends PublicPageMaster {
 								<li class="nav-dropdown-item"><a class="nav-dropdown-link" href="#">Dropdown Item</a></li>
 							</ul>
 						</li>
-						<li class="nav-item">
-							<a class="nav-link" href="#">Subdropdown</a>
-							<ul class="nav-dropdown">
-								<li class="nav-dropdown-item">
-									<a class="nav-dropdown-link" href="#">Dropdown Item</a>
-									<ul class="nav-subdropdown">
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-									</ul>
-								</li>
-								<li class="nav-dropdown-item">
-									<a class="nav-dropdown-link" href="#">Dropdown Item</a>
-									<ul class="nav-subdropdown">
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-										<li class="nav-subdropdown-item"><a class="nav-subdropdown-link" href="#">Subdropdown Item</a></li>
-									</ul>
-								</li>
-							</ul>
-						</li>
+						-->
 					</ul>
 				</div>
 				<!-- Menu Extra -->
