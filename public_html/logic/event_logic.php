@@ -52,6 +52,8 @@
 					
 	if($is_registered){
 		$view_course_link = '/profile/event_sessions_course?event_id='.$event->key;
+
+		$additional_payment_message = '<p>If you are registered, you can make additional payments here: <a href="'.$event->get_register_url().'">Make a payment</a>.</p>';
 	}
 	else{
 		if($event->get('evt_status') == Event::STATUS_COMPLETED){
@@ -82,10 +84,10 @@
 	
 		if($numregistrants){
 			if($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE){
-				$if_registered_message = 'If you are registered, you can access the course link, info, videos, and materials <a href="/profile/event_sessions_course?event_id='.$event->key.'">in the my profile section of the website</a>.';
+				$if_registered_message .= 'If you are registered, you can access the course link, info, videos, and materials <a href="/profile/event_sessions_course?event_id='.$event->key.'">in the my profile section of the website</a>.';
 			}
 			else{
-				$if_registered_message = 'If you are registered, you can access the course link, info, videos, and materials <a href="/profile/event_sessions?evt_event_id='.$event->key.'">in the my profile section of the website</a>.';							
+				$if_registered_message .= 'If you are registered, you can access the course link, info, videos, and materials <a href="/profile/event_sessions?evt_event_id='.$event->key.'">in the my profile section of the website</a>.';							
 			}
 		}
 	}

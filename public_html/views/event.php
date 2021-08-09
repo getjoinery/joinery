@@ -81,6 +81,10 @@
 			if($waiting_list_link){
 				echo '<a class="button button-lg button-dark" href="'.$waiting_list_link.'">Get on the waiting list</a>';
 			}
+
+			if($additional_payment_message){
+				echo '<p>'.$additional_payment_message.'</p>';
+			}
 			
 			if($if_registered_message){
 				echo '<p>'.$if_registered_message.'</p>';
