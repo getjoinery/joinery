@@ -17,6 +17,10 @@
 		require_once(LibraryFunctions::display_404_page());		
 	}
 	
+	//GET AUTHOR
+	$author = new User($post->get('pst_usr_user_id'), TRUE);
+	$tags = $post->get_tags();
+	
 	//GET OTHER POSTS
 	/*
 	$numperpage = 3;

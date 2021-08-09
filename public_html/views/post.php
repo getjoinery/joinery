@@ -11,7 +11,7 @@
 	);
 	$page->public_header($hoptions); 
 	
-	$pageoptions['subtitle'] = LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'). ' - ' . 'Category' . ' - ' . 'By John Doe';
+	$pageoptions['subtitle'] = LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'). ' - '  . 'By '.$author->display_name();
 	echo PublicPage::BeginPage($post->get('pst_title'), $pageoptions);	
 
 ?>
@@ -29,11 +29,15 @@
 							<div class="col-6">
 								<h6 class="font-family-tertiary font-small font-weight-normal uppercase">Tags</h6>
 								<ul class="list-inline-sm">
-									<li><a class="text-link-1" href="#">Clothing</a></li>
-									<li><a class="text-link-1" href="#">Lifestyle</a></li>
-									<li><a class="text-link-1" href="#">Travel</a></li>
+									<?php
+									foreach ($tags as $tag){
+										echo '<li><a class="text-link-1" href="/blog/tag/'.urlencode($tag).'">'.$tag.'</a></li>';
+									} 
+									?>
+
 								</ul>
 							</div>
+							<!--
 							<div class="col-6 text-right">
 								<h6 class="font-family-tertiary font-small font-weight-normal uppercase">Share On</h6>
 								<ul class="list-inline">
@@ -42,6 +46,7 @@
 									<li><a href="#"><i class="fab fa-google-plus-g"></i></a></li>
 								</ul>
 							</div>
+							-->
 						</div>
 						<!-- end Post Tags / Share -->
 					</div>
@@ -55,16 +60,17 @@
 			<div class="container text-center">
 				<div class="row">
 					<div class="col-12 col-sm-10 offset-sm-1 col-md-8 offset-md-2 col-lg-6 offset-lg-3">
-						<img class="img-circle-lg margin-bottom-20" src="../assets/images/img-circle-large.jpg">
-						<h5 class="font-weight-normal">Johnny Doe</h5>
-						<p>Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. </p>
+						<!--<img class="img-circle-lg margin-bottom-20" src="../assets/images/img-circle-large.jpg">-->
+						<h5 class="font-weight-normal"><?php echo $author->display_name(); ?></h5>
+						<!--<p>Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Aenean commodo ligula eget dolor. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. </p>-->
 						<!-- Social links -->
+						<!--
 						<ul class="list-inline margin-top-20">
 							<li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
 							<li><a href="#"><i class="fab fa-twitter"></i></a></li>
 							<li><a href="#"><i class="fab fa-pinterest"></i></a></li>
 							<li><a href="#"><i class="fab fa-instagram"></i></a></li>
-						</ul>
+						</ul>-->
 					</div>
 				</div><!-- end row -->
 			</div><!-- end container -->
