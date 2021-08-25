@@ -12,7 +12,7 @@
 	$session->check_permission(8);
 	$session->set_return();
 
-	$video = new Video($_GET['v'], TRUE);
+	$video = new Video($_GET['vid_video_id'], TRUE);
 	$user = new User($video->get('vid_usr_user_id'), TRUE);
 	
 	if($_REQUEST['action'] == 'remove'){
@@ -64,7 +64,7 @@
 		$options['altlinks']['Delete'] = '/admin/admin_video?action=delete&vid_video_id='.$video->key;
 	}
 	if($session->get_user_id() == 1){
-		$options['altlinks'] += array('Permanently Delete Video' => '/admin/admin_video?action=remove&v='.$video->key);
+		$options['altlinks'] += array('Permanently Delete Video' => '/admin/admin_video?action=remove&vid_video_id='.$video->key);
 	}
 
 	$page->begin_box($options);
