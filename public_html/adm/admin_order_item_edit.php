@@ -26,6 +26,8 @@
 			$order_item->set('odi_evr_event_registrant_id', $_POST['odi_evr_event_registrant_id']);
 		}
 		
+		$order_item->set('odi_usr_user_id', $_POST['odi_usr_user_id']);
+		
 		$order_item->prepare();
 		$order_item->save();
 		$order = $order_item->get_order();
@@ -34,8 +36,8 @@
 		exit;
 	}
 
-	$breadcrumbs = array('Order Items'=>'/admin/admin_order_items');
-	$breadcrumbs += array('OrderItem Edit'=>'');
+	$breadcrumbs = array('Orders'=>'/admin/admin_orders');
+	$breadcrumbs += array('Order Item Edit'=>'');
 
 
 	$page = new AdminPage();
@@ -70,6 +72,7 @@
 	if($order_item->get('odi_usr_user_id')){
 		$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 	}
+	
 	if($order_item->get('odi_evr_event_registrant_id')){
 		$event_registrant = new EventRegistrant($order_item->get('odi_evr_event_registrant_id'), TRUE);
 		$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
@@ -77,12 +80,16 @@
 		echo 'Current event registration:<br>  '. $order_item_user->display_name(). ' - ' . $event->get('evt_name').'<br>';
 	}
 	
-	
+
+	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => ASC));
+	$users->load();
+	$optionvals = $users->get_dropdown_array();
+echo $formwriter->dropinput("User", "odi_usr_user_id", "ctrlHolder", $optionvals, $order_item->get('odi_usr_user_id'), '', TRUE, FALSE, '/ajax/user_search_ajax');	 	
 
 	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
 	$event_registrants->load();
 	$optionvals = $event_registrants->get_dropdown_array();
-	echo $formwriter->dropinput("New event registration", "odi_evr_event_registrant_id", "ctrlHolder", $optionvals, $order_item->get('odi_evr_event_registrant_id'), '', TRUE);	
+	echo $formwriter->dropinput("Event registration", "odi_evr_event_registrant_id", "ctrlHolder", $optionvals, $order_item->get('odi_evr_event_registrant_id'), '', TRUE);	
 	
 
  
