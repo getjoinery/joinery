@@ -103,7 +103,7 @@
 	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => ASC));
 	$users->load();
 	$optionvals = $users->get_dropdown_array();
-echo $formwriter->dropinput("User", "ord_usr_user_id", "ctrlHolder", $optionvals, $order_user->key, '', TRUE, FALSE, '/ajax/user_search_ajax');	 
+echo $formwriter->dropinput("User", "ord_usr_user_id", "ctrlHolder", $optionvals, $order_user->key, '', TRUE, FALSE, '');	 
 	
 
  

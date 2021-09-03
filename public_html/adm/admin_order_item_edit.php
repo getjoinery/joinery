@@ -84,7 +84,7 @@
 	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => ASC));
 	$users->load();
 	$optionvals = $users->get_dropdown_array();
-echo $formwriter->dropinput("User", "odi_usr_user_id", "ctrlHolder", $optionvals, $order_item->get('odi_usr_user_id'), '', TRUE, FALSE, '/ajax/user_search_ajax');	 	
+echo $formwriter->dropinput("User", "odi_usr_user_id", "ctrlHolder", $optionvals, $order_item->get('odi_usr_user_id'), '', TRUE, FALSE, '');	 	
 
 	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
 	$event_registrants->load();
