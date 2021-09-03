@@ -46,6 +46,7 @@
 		$options['title'] = 'Order (' . $order->key . ')';
 		if ($_SESSION['permission'] == 10) {
 			$options['altlinks']['Delete'] = '/admin/admin_order_delete?ord_order_id=' . $order->key;
+			$options['altlinks']['Edit'] = '/admin/admin_order_edit?ord_order_id=' . $order->key;
 		}
 		$page->begin_box($options);
 
@@ -117,7 +118,7 @@
 			}
 		}
 		
-		$this_out .= ' | <a href="/admin/admin_order_item_edit?odi_order_item_id=' . $order_item->key . '">[change event registration]</a>';
+		$this_out .= ' | <a href="/admin/admin_order_item_edit?odi_order_item_id=' . $order_item->key . '">[edit]</a>';
 	
 		$order_items_out[] = $this_out;
 
