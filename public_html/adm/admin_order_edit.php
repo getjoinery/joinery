@@ -66,44 +66,15 @@
 	if($order->get('ord_usr_user_id')){
 		$order_user = new User($order->get('ord_usr_user_id'), TRUE);
 	}
-/*
-?>
-<link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.3/css/select2.min.css" rel="stylesheet" />
-<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.3/js/select2.min.js"></script>
- <div style="width:520px;margin:0px auto;margin-top:30px;height:500px;">
-  <select class="itemName form-control" style="width:500px" name="itemName"></select>
-</div>
-
-
-<script type="text/javascript">
-      $('.itemName').select2({
-        placeholder: 'Select an user',
-        ajax: {
-          url: "/ajax/user_search_ajax",
-          dataType: 'json',
-          delay: 250,
-          processResults: function (data) {
-            return {
-              results: data
-            };
-          },
-		  minimumInputLength: 3,
-          cache: true
-        }
-      });
-	  
-	  $('.itemName').select2("val", "1");
-</script>
- <div style="width:520px;margin:0px auto;margin-top:30px;height:500px;">
-  <select class="itemName form-control" style="width:500px" name="ord_usr_user_id"></select>
-</div>
-<?php
-	*/
 
 	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => ASC));
 	$users->load();
 	$optionvals = $users->get_dropdown_array();
-echo $formwriter->dropinput("User", "ord_usr_user_id", "ctrlHolder", $optionvals, $order_user->key, '', TRUE, FALSE, '');	 
+	
+	echo $formwriter->dropinput("User1", "ord_usr_user_id", "ctrlHolder", $optionvals, $order_user->key, '', TRUE, FALSE, '/ajax/user_search_ajax');	 
+
+
+ 
 	
 
  

@@ -719,10 +719,11 @@ class FormWriterMaster {
 		$output = '';
 		
 		if($ajaxendpoint){
-			$output .= '<link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.3/css/select2.min.css" rel="stylesheet" />
-			<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.3/js/select2.min.js"></script>';
+			$output .= '<link href="/includes/select2.min.css" rel="stylesheet" />
+			<script src="/includes/select2.full.min.js"></script>';
 		
 			$output .= '<script type="text/javascript">
+			$(document).ready(function() {
 			  $("#'.$id.'").select2({
 				placeholder: "Select an item",
 				ajax: {
@@ -738,9 +739,11 @@ class FormWriterMaster {
 				  cache: true
 				}
 			  });
+			});
 				</script>';
 		
 		}
+		
 		
 	
 			$output .= '<div id="'.$id.'_container" class="'.$this->dropinput_container_class.' errorplacement">
