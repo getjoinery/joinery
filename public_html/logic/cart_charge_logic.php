@@ -70,7 +70,7 @@
 			exit();				  
 		}
 
-		$order->set('ord_stripe_customer_id', $stripe_customer_id);
+		//$order->set('ord_stripe_customer_id', $stripe_customer_id);
 		$order->set('ord_usr_user_id', $billing_user->key);
 		$order->prepare();	
 		$order->save();
@@ -79,7 +79,7 @@
 	else{
 		$order = new Order(NULL);
 		$order->set('ord_usr_user_id', $billing_user->key);
-		$order->set('ord_stripe_customer_id', $stripe_customer_id); 
+		//$order->set('ord_stripe_customer_id', $stripe_customer_id); 
 		$order->set('ord_total_cost', $cart->get_total());
 		$order->set('ord_timestamp', 'now');	
 		$order->set('ord_raw_cart', print_r($cart, true));
