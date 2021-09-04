@@ -18,7 +18,9 @@
 	require $composer_dir.'autoload.php';
 use MailchimpAPI\Mailchimp;
 
-
+echo 'turned off';
+exit;
+/*
 error_reporting(0);
 function sub()
 {
@@ -179,9 +181,9 @@ exit();
 		}
 	}
 	exit();
+	*/
 	
-	
-	$user= new User(3030, TRUE);
+	$user= new User(1, TRUE);
 	
 	$billing_users = new MultiUser(
 	array(),
@@ -198,50 +200,9 @@ exit();
 			echo 'updated '.$billing_user->key. '<br />';
 		}
 	}
-	exit();
-	
-	?>
-<!DOCTYPE html>
-<html>
-<head>
- <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.3/css/select2.min.css" rel="stylesheet" />
-</head>
-<body>
-
- <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
- <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.3/js/select2.min.js"></script>
-
- 
- <div style="width:520px;margin:0px auto;margin-top:30px;height:500px;">
-  <select class="itemName form-control" style="width:500px" name="itemName"></select>
-</div>
-
-
-<script type="text/javascript">
-      $('.itemName').select2({
-        placeholder: 'Select an item',
-        ajax: {
-          url: "/ajax/user_search_ajax",
-          dataType: 'json',
-          delay: 250,
-          processResults: function (data) {
-            return {
-              results: data
-            };
-          },
-		  minimumInputLength: 3,
-          cache: true
-        }
-      });
-</script>
-
-
-</body>
-</html>
- 
 	
 	
-	<?php 
+
 	exit();
 	?>
 	
