@@ -53,7 +53,7 @@ if ($event->type == 'checkout.session.completed') {
 		$order->set('ord_usr_user_id', $sessionobject->client_reference_id);
 	}
 	$order->set('ord_stripe_session_id', $sessionobject->id);
-	$order->set('ord_stripe_customer_id', $sessionobject->customer); 
+	//$order->set('ord_stripe_customer_id', $sessionobject->customer); 
 	$order->set('ord_raw_response', $sessionobject);
 	$order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
 	$order->set('ord_stripe_subscription_id', $sessionobject->subscription);
