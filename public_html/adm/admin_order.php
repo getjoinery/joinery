@@ -14,23 +14,6 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
-
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
-
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-
-	\Stripe\Stripe::setApiKey($api_key);
-	
 	
 	$settings = Globalvars::get_instance();
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
@@ -38,45 +21,51 @@
 	$order_id = LibraryFunctions::fetch_variable('ord_order_id', 0, 0, TRUE);
 	$order = new Order($order_id, TRUE);
 
-	//CHECK STATUS WITH STRIPE
-	if ($order->get('ord_stripe_charge_id')){
-		$charge_id = $order->get('ord_stripe_charge_id');
-		try{
-			$charge = \Stripe\Charge::retrieve($charge_id);	
+	if(!($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+		$api_key = $settings->get_setting('stripe_api_key');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
 
-			if($charge->amount_refunded){
-				//print_r($charge->refunds);
-				//$order->set('ord_refund_time', 'now()');
-				$order->set('ord_refund_amount', $charge->amount_refunded/100);
-				//$order->set('ord_refund_note', $_POST['ord_refund_note']);
-				$order->save();
+		\Stripe\Stripe::setApiKey($api_key);
+
+		//CHECK STATUS WITH STRIPE
+		if ($order->get('ord_stripe_charge_id')){
+			$charge_id = $order->get('ord_stripe_charge_id');
+			try{
+				$charge = \Stripe\Charge::retrieve($charge_id);	
+
+				if($charge->amount_refunded){
+					//print_r($charge->refunds);
+					//$order->set('ord_refund_time', 'now()');
+					$order->set('ord_refund_amount', $charge->amount_refunded/100);
+					//$order->set('ord_refund_note', $_POST['ord_refund_note']);
+					$order->save();
+				}
 			}
-		}
-		catch(\Stripe\Exception $e) {
-			  //Do nothing
-		}		
+			catch(\Stripe\Exception $e) {
+				  //Do nothing
+			}		
 
 
-	}	
-	else if ($order->get('ord_stripe_payment_intent_id')) {
-		try{
-			$intent = \Stripe\PaymentIntent::retrieve($order->get('ord_stripe_payment_intent_id'));
-			$charge_id = $intent->charges->data[0]->id;
-			$charge = \Stripe\Charge::retrieve($charge_id);
+		}	
+		else if ($order->get('ord_stripe_payment_intent_id')) {
+			try{
+				$intent = \Stripe\PaymentIntent::retrieve($order->get('ord_stripe_payment_intent_id'));
+				$charge_id = $intent->charges->data[0]->id;
+				$charge = \Stripe\Charge::retrieve($charge_id);
 
-			if($charge->amount_refunded){
-				//print_r($charge->refunds);
-				//$order->set('ord_refund_time', 'now()');
-				$order->set('ord_refund_amount', $charge->amount_refunded/100);
-				//$order->set('ord_refund_note', $_POST['ord_refund_note']);
-				$order->save();
+				if($charge->amount_refunded){
+					//print_r($charge->refunds);
+					//$order->set('ord_refund_time', 'now()');
+					$order->set('ord_refund_amount', $charge->amount_refunded/100);
+					//$order->set('ord_refund_note', $_POST['ord_refund_note']);
+					$order->save();
+				}
 			}
-		}
-		catch(\Stripe\Exception $e) {
-			  //Do nothing
+			catch(\Stripe\Exception $e) {
+				  //Do nothing
+			}
 		}
 	}
-
 
 
 	if($order->get('ord_usr_user_id')){
