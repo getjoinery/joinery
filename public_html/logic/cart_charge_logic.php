@@ -94,9 +94,10 @@
 	if($settings->get_setting('checkout_type') == 'stripe_regular' && $charge_total > 0){	
 		//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
 		if(!isset($_REQUEST['stripeToken'])){
-			$log_error = "The credit card information was not submitted because your browser is not using https.  Go back to the previous page and make sure that you are accessing this page securely (look for https in the address bar or a lock icon).  For help, contact us at ".$settings->get_setting('defaultemail')." .";
-			$order->set('ord_error', $log_error);
+			$order->set('ord_error', 'The credit card was not submitted because the browser is not using https.');
 			$order->save();
+			
+			$log_error = "The credit card information was not submitted because your browser is not using https.  Go back to the previous page and make sure that you are accessing this page from https (look for the lock icon).  For help, contact us at ".$settings->get_setting('defaultemail')." .";
 
 			throw new SystemDisplayableError($log_error);
 			exit();					
