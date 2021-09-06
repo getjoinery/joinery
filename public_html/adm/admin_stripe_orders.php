@@ -114,8 +114,8 @@
 	
 	$formwriter = new FormWriterMaster("form1");
 	echo $formwriter->begin_form("", "get", "/admin/admin_stripe_orders");
-	$formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
-	$formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
+	echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
+	echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
 	echo $formwriter->hiddeninput('source', 'form');
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
