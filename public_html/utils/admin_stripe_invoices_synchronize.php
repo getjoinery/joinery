@@ -1,0 +1,201 @@
+<?php
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/stripe_invoices_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(5);
+	
+	$settings = Globalvars::get_instance();
+
+	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		$api_key = $settings->get_setting('stripe_api_key_test');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+	}
+	else{
+		$api_key = $settings->get_setting('stripe_api_key');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+	}
+	
+	if(!$api_key || !$api_secret_key){
+		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+		exit();			
+	}
+		
+	\Stripe\Stripe::setApiKey($api_key);
+	
+	$numperpage = 100;
+	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
+	$nextpage = $currpage + 1;
+	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
+	$startdate = LibraryFunctions::fetch_variable('startdate', NULL, 0, '');	
+	$enddate = LibraryFunctions::fetch_variable('enddate', NULL, 0, '');	
+	
+	if($startdate){
+		$display_startdate = $startdate;	
+		$startdate = strtotime($startdate . '00:00:01');
+	}
+	else{
+		//DEFAULT
+		$startdate = strtotime('-1 month',time());
+		$display_startdate = gmdate("Y-m-d", $startdate);
+	}
+
+	
+	if($enddate){
+		$display_enddate = $enddate;
+		$enddate = strtotime($enddate . '23:59:59');	
+	}	
+	else{
+		//DEFAULT
+		$enddate = time();
+		$display_enddate = gmdate("Y-m-d", $enddate);
+	}
+
+	
+
+
+
+	
+	$created = array();
+	$created[gte] = $startdate;
+	$created[lte] = $enddate;
+	
+	if($offset){
+		$stripe_invoices = \Stripe\Invoice::all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created, 'status' => 'paid']);
+	}
+	else{
+		$stripe_invoices = \Stripe\Invoice::all(['limit' => $numperpage, 'created' => $created, 'status' => 'paid']);
+	}
+
+
+	
+	if(!$_GET['print-format']){
+		$page = new AdminPage();
+		$page->admin_header(
+		array(
+			'menu-id'=> 4,
+			'page_title' => 'Stripe invoices',
+			'readable_title' => 'Stripe invoices',
+		'breadcrumbs' => array(
+			'Orders'=>'/admin/admin_orders', 
+			'Stripe Invoices' => '',
+		),
+			'session' => $session,
+		)
+		);	
+				
+		
+	}
+	
+	$formwriter = new FormWriterMaster("form1");
+	echo $formwriter->begin_form("", "get", "/admin/admin_stripe_invoices");
+	echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
+	echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
+	echo $formwriter->hiddeninput('source', 'form');
+	echo $formwriter->start_buttons();
+	echo $formwriter->new_form_button('Submit');
+	echo $formwriter->end_buttons();
+	echo $formwriter->end_form();	
+	
+	//PAGINATION
+	echo '<br /><br />';
+	if($offset){
+		echo '<a href="/admin/admin_stripe_orders?startdate='.$display_startdate.'&enddate='.$display_enddate.'"><< Back to page 1</a>';
+		echo ' <strong>Page '.$currpage.'</strong> ';
+	}
+	
+	if(count($stripe_invoices[data]) == $numperpage){
+		$last_charge_number = $numperpage - 1;
+		$last_charge = $stripe_invoices[data][$last_charge_number];
+		echo 'Multiple pages of results:  <a href="/admin/admin_stripe_orders?offset='.$last_charge->id.'&startdate='.$display_startdate.'&enddate='.$display_enddate.'&currpage='.$nextpage .'">Next page >></a> ';
+	}
+
+	
+	$headers = array('ID', 'Customer', 'Amount', 'Subscription', 'Time', 'Description', 'Sync');
+	//$altlinks = array('Print format' => '/admin/admin_stripe_orders?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
+	$altlinks = array();
+	$box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => "Stripe invoices"
+	);
+	$page->tableheader($headers, $box_vars);
+
+	$stripe_invoicenum = 0;
+	foreach($stripe_invoices as $stripe_invoice) {
+		$stripe_invoicenum++;
+		$rowvalues = array();
+		array_push($rowvalues, '('.$stripe_invoicenum . ') '.$stripe_invoice->id);
+		array_push($rowvalues, $stripe_invoice->customer_email);	
+		array_push($rowvalues, $stripe_invoice->amount_paid/100);
+		array_push($rowvalues, $stripe_invoice->subscription);
+		array_push($rowvalues, gmdate("c", $stripe_invoice->created));  //or "Y-m-d"
+		array_push($rowvalues, $stripe_invoice->description);
+
+
+		
+		$existing_invoice = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $stripe_invoice->id));
+		if(!$existing_invoice->count_all()){
+				
+			$invoice = new StripeInvoice(NULL);
+			$invoice->set('siv_stripe_foreign_invoice_id', $stripe_invoice->id);
+			$invoice->set('siv_amount_paid', $stripe_invoice->amount_paid/100);
+			$invoice->set('siv_stripe_subscription_id', $stripe_invoice->subscription);
+			$invoice->set('siv_timestamp', gmdate("c", $stripe_invoice->created));
+			$invoice->set('siv_description', $stripe_invoice->description);
+			$invoice->set('siv_stripe_charge_id', $stripe_invoice->charge);
+			$invoice->set('siv_stripe_payment_intent_id', $stripe_invoice->payment_intent);
+			
+			//TODO Check if the invoice has been refunded
+			
+			
+			//FIND THE USER.  TRY SUBSCRIPTION ID FIRST, THEN TRY EMAIL
+			$found=0;
+			if($stripe_invoice->subscription){
+				$order_items = new MultiOrderItem(array('stripe_subscription_id' => $stripe_invoice->subscription));
+				$order_items->load();
+				$count = $order_items->count_all();
+				if($count){
+					$order_item = $order_items->get(0);
+					$found=1;
+					$invoice->set('siv_usr_user_id', $order_item->get('odi_usr_user_id'));
+				}
+				
+			}
+			
+			if($found == 0){
+				$user = User::GetByEmail($stripe_invoice->customer_email);
+				if($user){
+					$found = 1;
+					$invoice->set('siv_usr_user_id', $user->key);
+				}
+			}
+			
+			if($found == 0){
+				//COULD NOT FIND THE USER FOR THE INVOICE.  JUST STORE IT WITHOUT A USER
+			}
+			
+			$invoice->prepare();
+			$invoice->save();
+			array_push($rowvalues, 'saved');
+		}
+		else{
+			array_push($rowvalues, 'skipped');
+		}
+		$page->disprow($rowvalues);
+	}
+	$page->endtable();	
+	
+	//echo '<a style="text-align:center" href="/admin/admin_stripe_orders?offset='.$offset .'">Next 100 >></a>';
+
+
+	if(!$_GET['print-format']){
+		$page->admin_footer();
+	}
+?>

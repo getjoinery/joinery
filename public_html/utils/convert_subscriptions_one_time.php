@@ -32,13 +32,13 @@
 		$order = $order_item->get_order();
 		$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
 		
-		if($order->get('ord_stripe_subscription_id')){
+		if($order_item->get('odi_stripe_subscription_id')){
 			if($order->get('ord_total_cost') == $order_item->get('odi_price')){
-				echo $order->key.' -> '.$order_item->key.' - '.$order->get('ord_stripe_subscription_id');
+				echo $order->key.' -> '.$order_item->key.' - '.$order_item->get('odi_stripe_subscription_id');
 				$order_item->set('odi_is_subscription', true);
-				$order_item->set('odi_stripe_subscription_id', $order->get('ord_stripe_subscription_id'));
+				$order_item->set('odi_stripe_subscription_id', $order_item->get('odi_stripe_subscription_id'));
 				$order_item->save();
-				$stripe_subscription = \Stripe\Subscription::retrieve($order->get('ord_stripe_subscription_id'));	
+				$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
 				if($stripe_subscription[status] == 'canceled'){
 					$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
 					
