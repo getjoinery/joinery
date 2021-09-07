@@ -239,6 +239,11 @@ class MultiOrderItem extends SystemMultiBase {
 			$bind_params[] = array($this->options['product_id'], PDO::PARAM_INT);
 		}
 
+		if (array_key_exists('stripe_subscription_id', $this->options)) {
+			$where_clauses[] = 'odi_stripe_subscription_id = ?';
+			$bind_params[] = array($this->options['stripe_subscription_id'], PDO::PARAM_INT);
+		}
+
 		if (array_key_exists('status', $this->options)) {
 			$where_clauses[] = 'odi_status = ?';
 			$bind_params[] = array($this->options['status'], PDO::PARAM_INT);
