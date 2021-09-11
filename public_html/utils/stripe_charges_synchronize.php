@@ -139,6 +139,7 @@
 					try{
 						$order = new Order($charge->metadata['ord_order_id'], TRUE);
 						$found_order = TRUE;
+						echo 'Found order from metadata<br>';
 					}
 					catch (exception $e){
 						$found_order = FALSE;
@@ -148,6 +149,7 @@
 				if(!$found_order && $charge->payment_intent){
 					$order = Order::GetByStripePaymentIntent($charge->payment_intent);
 					if($order->key){
+						echo 'Found order from payment intent<br>';
 						$found_order = TRUE;
 					}
 				}
@@ -155,6 +157,7 @@
 				if(!$found_order && $charge->id){
 					$order = Order::GetByStripeCharge($charge->id);
 					if($order->key){
+						echo 'Found order from charge id<br>';
 						$found_order = TRUE;
 					}
 				}			
@@ -163,12 +166,13 @@
 				if(!$found_order){
 					$order = new Order(NULL);
 					$order->set('ord_timestamp', gmdate("c", $charge->created));
+					$order->set('ord_status', Order::STATUS_PAID);
 					echo 'Time: '.$order->get('ord_timestamp').'<br>';
 					echo 'NEW ORDER<br>'; 
 				}
 				
-				if(!$order->get('ord_amount_paid')){
-					$order->set('ord_amount_paid', $charge->amount/100);
+				if(!$order->get('ord_total_cost')){
+					$order->set('ord_total_cost', $charge->amount/100);
 				}
 				echo 'Amount: '.$order->get('ord_amount_paid').'<br>';
 				
@@ -307,7 +311,7 @@
 				$order->save();
 			}
 			else{
-				echo 'NOT PAID: '.$charge->id.'<br>';
+				echo 'NOT PAID: '.$charge->id.'<br><br>';
 			}
 		}
 		
