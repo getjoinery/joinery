@@ -250,16 +250,17 @@
 					$address_id = $order_user->get_default_address();
 					if($address_id){
 						$address = new Address($address_id, TRUE);
-						echo 'Default address: '.$address->get_address_string().'<br>';
+
 						if(!$address->get('usa_zip_code_id')){
 							$address->set('usa_zip_code_id', $charge->billing_details->address->postal_code);
 							$address->save();
 						}
 						
-						if(!$address->get('usa_zip_code_id')){
+						if(!$address->get('usa_city')){
 							$address->set('usa_city', $charge->billing_details->address->city);
 							$address->save();
-						}					
+						}		
+						echo 'Default address: '.$address->get_address_string().'<br>';						
 					}
 					else{
 						$address = new Address(NULL);
