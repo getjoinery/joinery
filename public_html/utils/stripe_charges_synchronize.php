@@ -160,8 +160,27 @@
 						echo 'Found order from charge id<br>';
 						$found_order = TRUE;
 					}
-				}			
-				
+					else{
+						//CHECK TO SEE IF THE CHARGE IS IN THE INVOICES TABLE
+						$existing_invoices = new MultiStripeInvoice(array('stripe_charge_id' => $charge->id));
+						$existing_invoices->load();
+						foreach ($existing_invoices as $existing_invoice){
+							//GET THE SUBSCRIPTION AND CHECK THE ORDER ITEMS FOR THE SUBSCRIPTION
+							if($existing_invoice->get('siv_stripe_subscription_id')){
+								$order_items = new MultiOrderItem(array('stripe_subscription_id' => $existing_invoice->get('siv_stripe_subscription_id')));
+								$found_order_items = $order_items->count_all();
+								if($found_order_items){
+									$order_items->load();
+									$order_item = $order_items->get(0);
+									$order = new Order($order_item->get('odi_ord_order_id'), TRUE);
+									$found_order = TRUE;
+									echo 'Found order from charge id by using subscription<br>';
+								}
+							} 
+						}
+					}
+				}		
+			
 				
 				if(!$found_order){
 					$order = new Order(NULL);
@@ -229,6 +248,7 @@
 
 				if(!$found_user && $order->get('ord_stripe_invoice_id')){
 					$existing_invoices = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $order->get('ord_stripe_invoice_id')));
+					$existing_invoices->load();
 					foreach ($existing_invoices as $existing_invoice){
 						if(!$found_user){
 							if($existing_invoice->get('siv_usr_user_id')){
@@ -280,7 +300,7 @@
 						$address->set('usa_is_default', TRUE);
 						$address->set('usa_privacy', 2);
 						print_r($address);
-						$address->save();
+						//$address->save();
 						//$address->update_coordinates();
 								
 					}
@@ -289,12 +309,12 @@
 					$user_name = LibraryFunctions::doSplitName($charge->billing_details->name);
 					if($charge['metadata']['customer_email']){
 						echo '<b>NEW USER: '.$charge['metadata']['customer_email'].'</b><br>';
-						$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge['metadata']['customer_email'], NULL, FALSE);
+						//$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge['metadata']['customer_email'], NULL, FALSE);
 						//echo '<b>'.$print_r($order_user).'</b><br>'; 					
 					}
 					else if($charge->billing_details->email){
 						echo '<b>NEW USER: '.$charge->billing_details->email.'</b><br>';
-						$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
+						//$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
 						//echo '<b>'.$print_r($order_user).'</b><br>'; 					
 					}
 					else{
@@ -308,7 +328,7 @@
 				$page->disprow($rowvalues);
 				echo '<br><br>';
 				$offset = $charge->id;
-				$order->save();
+				//$order->save();
 			}
 			else{
 				echo 'NOT PAID: '.$charge->id.'<br><br>';

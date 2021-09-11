@@ -33,7 +33,8 @@ class OrderItem extends SystemBase {
 		'odi_stripe_subscription_id' => 'Stripe subscription',
 		'odi_is_subscription' => 'True if this order item is a subscription',
 		'odi_subscription_cancelled_time' => 'If subscription, when it was cancelled',
-		'odi_refunded' => 'Amount from this order item that has been refunded'
+		'odi_refunded' => 'Amount from this order item that has been refunded',
+		'odi_stripe_foreign_invoice_id' => 'Stripe invoice id if it is the first of a subscription'
 	);
 
 
@@ -183,7 +184,8 @@ class OrderItem extends SystemBase {
 			  "odi_stripe_subscription_id" varchar(255) COLLATE "pg_catalog"."default",
 			  "odi_is_subscription" bool,
 			  "odi_subscription_cancelled_time" timestamp(6),
-			  "odi_refunded" int4
+			  "odi_refunded" int4,
+			  "odi_stripe_foreign_invoice_id" varchar(64)
 			)
 			;';
 		$q = $dblink->prepare($sql);
