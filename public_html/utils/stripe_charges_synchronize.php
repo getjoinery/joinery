@@ -8,6 +8,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/stripe_invoices_class.php');
 
 
 	$session = SessionControl::get_instance();
