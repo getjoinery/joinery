@@ -247,9 +247,10 @@
 					echo 'User: '.$order_user->display_name().'<br>';
 
 					//HANDLE Address
-					if($address_id = $order_user->get_default_address()){
-						//$address = new Address($address_id, TRUE);
-						//echo $address->get_address_string().'<br>';
+					$address_id = $order_user->get_default_address()
+					if($address_id){
+						$address = new Address($address_id, TRUE);
+						echo 'Default address: '.$address->get_address_string().'<br>';
 					}
 					else{
 						$address = new Address(NULL);
