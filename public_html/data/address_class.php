@@ -129,6 +129,7 @@ class Address extends SystemBase {
 	}
 
 
+
 	public static function PlainForm($formwriter, $address=NULL, $options=NULL) {
 
 		if($address){
@@ -165,6 +166,25 @@ class Address extends SystemBase {
 		}
 
 		return $q->fetch();
+	}
+	
+	public static function GetCountryCodeFromCountryAbbr($abbr){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+
+		$sql = "SELECT cco_code FROM cco_country_codes WHERE cco_iso_code_2=?";
+		try {
+			$q = $dblink->prepare($sql);
+			$q->bindValue(1, $abbr, PDO::PARAM_STR);
+			$success = $q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		} catch(PDOException $e) {
+			$dbhelper->handle_query_error($e);
+		}
+
+		$country_code = $q->fetch();
+		return $country_code->cco_code;			
 	}
 
 	public static function CreateAddressFromForm($form, $user_id, $address = NULL, $and_save=TRUE, $use_transaction=TRUE, $strict_checks=TRUE) {
