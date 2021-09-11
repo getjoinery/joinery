@@ -262,7 +262,6 @@
 						$address->set('usa_zip_code_id', $charge->billing_details->address->postal_code);
 						//print_r( $charge->billing_details->address->country).'<br>';
 						$address->set('usa_cco_country_code_id', Address::GetCountryCodeFromCountryAbbr($charge->billing_details->address->country));
-						$address->set('usa_type', 'HM');
 						$address->set('usa_usr_user_id', $order_user->key);
 						$address->set('usa_is_default', TRUE);
 						$address->set('usa_privacy', 2);
