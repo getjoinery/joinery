@@ -207,7 +207,12 @@
 				$order->set('ord_stripe_payment_intent_id', $charge->payment_intent);					
 			}
 			echo 'PI:'.$order->get('ord_stripe_payment_intent_id').'<br>';
-			
+	
+			if(!$order->get('ord_stripe_invoice_id')){
+				$order->set('ord_stripe_invoice_id', $charge->invoice);					
+			}
+			echo 'Invoice:'.$order->get('ord_stripe_invoice_id').'<br>';
+	
 			
 			//HANDLE THE ORDER USER
 			$found_user = FALSE;

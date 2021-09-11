@@ -34,7 +34,8 @@ class Order extends SystemBase {
 		'ord_refund_amount' => 'Amount refunded',
 		'ord_refund_time' => 'Time of last refund',
 		'ord_refund_note' => 'Note for the refund',
-		'ord_stripe_charge_id' => 'Charge ID from stripe'
+		'ord_stripe_charge_id' => 'Charge ID from stripe',
+		'ord_stripe_invoice_id' => 'Stripe invoice for subscriptions'
 	);
 
 	function load() {
@@ -243,7 +244,8 @@ class Order extends SystemBase {
 			  "ord_refund_amount" => int4,
 			  "ord_refund_time" => timestamp(6),
 			  "ord_refund_note" varchar(255),
-			  "ord_stripe_charge_id" varchar(64)
+			  "ord_stripe_charge_id" varchar(64),
+			  "ord_stripe_invoice_id" varchar(64)
 			)
 			;';
 		$q = $dblink->prepare($sql);
