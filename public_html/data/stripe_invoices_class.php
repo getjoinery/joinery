@@ -180,7 +180,12 @@ class MultiStripeInvoice extends SystemMultiBase {
 
 		if (array_key_exists('stripe_foreign_invoice_id', $this->options)) {
 			$where_clauses[] = 'siv_stripe_foreign_invoice_id = ?';
-			$bind_params[] = array($this->options['stripe_foreign_invoice_id'], PDO::PARAM_INT);
+			$bind_params[] = array($this->options['stripe_foreign_invoice_id'], PDO::PARAM_STR);
+		}
+		
+		if (array_key_exists('stripe_charge_id', $this->options)) {
+			$where_clauses[] = 'siv_stripe_charge_id = ?';
+			$bind_params[] = array($this->options['stripe_charge_id'], PDO::PARAM_STR);
 		}
 
 		if (array_key_exists('user_id', $this->options)) {
