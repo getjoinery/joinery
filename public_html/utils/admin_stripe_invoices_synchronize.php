@@ -10,7 +10,7 @@
 
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
+	$session->check_permission(8);
 	
 	$settings = Globalvars::get_instance();
 
@@ -104,19 +104,6 @@
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();	
 	
-	//PAGINATION
-	echo '<br /><br />';
-	if($offset){
-		echo '<a href="/admin/admin_stripe_orders?startdate='.$display_startdate.'&enddate='.$display_enddate.'"><< Back to page 1</a>';
-		echo ' <strong>Page '.$currpage.'</strong> ';
-	}
-	
-	if(count($stripe_invoices[data]) == $numperpage){
-		$last_charge_number = $numperpage - 1;
-		$last_charge = $stripe_invoices[data][$last_charge_number];
-		echo 'Multiple pages of results:  <a href="/admin/admin_stripe_orders?offset='.$last_charge->id.'&startdate='.$display_startdate.'&enddate='.$display_enddate.'&currpage='.$nextpage .'">Next page >></a> ';
-	}
-
 	
 	$headers = array('ID', 'Customer', 'Amount', 'Subscription', 'Time', 'Description', 'Sync');
 	//$altlinks = array('Print format' => '/admin/admin_stripe_orders?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
@@ -127,72 +114,88 @@
 	);
 	$page->tableheader($headers, $box_vars);
 
+	$pagenum = 1;
 	$stripe_invoicenum = 0;
-	foreach($stripe_invoices as $stripe_invoice) {
-		$stripe_invoicenum++;
-		$rowvalues = array();
-		array_push($rowvalues, '('.$stripe_invoicenum . ') '.$stripe_invoice->id);
-		array_push($rowvalues, $stripe_invoice->customer_email);	
-		array_push($rowvalues, $stripe_invoice->amount_paid/100);
-		array_push($rowvalues, $stripe_invoice->subscription);
-		array_push($rowvalues, gmdate("c", $stripe_invoice->created));  //or "Y-m-d"
-		array_push($rowvalues, $stripe_invoice->description);
+	//SAFEGUARD, ONLY RUN 50 PAGES
+	while($pagenum <= 50){
+		echo '<b>Page '.$pagenum.', Count: '.count($stripe_invoices[data]).'</b><br>';
+		$pagenum++;
+			
+		foreach($stripe_invoices as $stripe_invoice) {
+			$stripe_invoicenum++;
+			$rowvalues = array();
+			array_push($rowvalues, '('.$stripe_invoicenum . ') '.$stripe_invoice->id);
+			array_push($rowvalues, $stripe_invoice->customer_email);	
+			array_push($rowvalues, $stripe_invoice->amount_paid/100);
+			array_push($rowvalues, $stripe_invoice->subscription);
+			array_push($rowvalues, gmdate("c", $stripe_invoice->created));  //or "Y-m-d"
+			array_push($rowvalues, $stripe_invoice->description);
 
 
+			
+			$existing_invoice = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $stripe_invoice->id));
+			if(!$existing_invoice->count_all()){
+					
+				$invoice = new StripeInvoice(NULL);
+				$invoice->set('siv_stripe_foreign_invoice_id', $stripe_invoice->id);
+				$invoice->set('siv_amount_paid', $stripe_invoice->amount_paid/100);
+				$invoice->set('siv_stripe_subscription_id', $stripe_invoice->subscription);
+				$invoice->set('siv_timestamp', gmdate("c", $stripe_invoice->created));
+				$invoice->set('siv_description', $stripe_invoice->description);
+				$invoice->set('siv_stripe_charge_id', $stripe_invoice->charge);
+				$invoice->set('siv_stripe_payment_intent_id', $stripe_invoice->payment_intent);
+				
+				//TODO Check if the invoice has been refunded
+				
+				
+				//FIND THE USER.  TRY SUBSCRIPTION ID FIRST, THEN TRY EMAIL
+				$found=0;
+				if($stripe_invoice->subscription){
+					$order_items = new MultiOrderItem(array('stripe_subscription_id' => $stripe_invoice->subscription));
+					$order_items->load();
+					$count = $order_items->count_all();
+					if($count){
+						$order_item = $order_items->get(0);
+						$found=1;
+						$invoice->set('siv_usr_user_id', $order_item->get('odi_usr_user_id'));
+					}
+					
+				}
+				
+				if($found == 0){
+					$user = User::GetByEmail($stripe_invoice->customer_email);
+					if($user){
+						$found = 1;
+						$invoice->set('siv_usr_user_id', $user->key);
+					}
+				}
+				
+				if($found == 0){
+					//COULD NOT FIND THE USER FOR THE INVOICE.  JUST STORE IT WITHOUT A USER
+				}
+				
+				$invoice->prepare();
+				$invoice->save();
+				array_push($rowvalues, 'saved');
+			}
+			else{
+				array_push($rowvalues, 'skipped');
+			}
+			$page->disprow($rowvalues);
+			$offset = $stripe_invoice->id;
+		}
 		
-		$existing_invoice = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $stripe_invoice->id));
-		if(!$existing_invoice->count_all()){
-				
-			$invoice = new StripeInvoice(NULL);
-			$invoice->set('siv_stripe_foreign_invoice_id', $stripe_invoice->id);
-			$invoice->set('siv_amount_paid', $stripe_invoice->amount_paid/100);
-			$invoice->set('siv_stripe_subscription_id', $stripe_invoice->subscription);
-			$invoice->set('siv_timestamp', gmdate("c", $stripe_invoice->created));
-			$invoice->set('siv_description', $stripe_invoice->description);
-			$invoice->set('siv_stripe_charge_id', $stripe_invoice->charge);
-			$invoice->set('siv_stripe_payment_intent_id', $stripe_invoice->payment_intent);
-			
-			//TODO Check if the invoice has been refunded
-			
-			
-			//FIND THE USER.  TRY SUBSCRIPTION ID FIRST, THEN TRY EMAIL
-			$found=0;
-			if($stripe_invoice->subscription){
-				$order_items = new MultiOrderItem(array('stripe_subscription_id' => $stripe_invoice->subscription));
-				$order_items->load();
-				$count = $order_items->count_all();
-				if($count){
-					$order_item = $order_items->get(0);
-					$found=1;
-					$invoice->set('siv_usr_user_id', $order_item->get('odi_usr_user_id'));
-				}
-				
-			}
-			
-			if($found == 0){
-				$user = User::GetByEmail($stripe_invoice->customer_email);
-				if($user){
-					$found = 1;
-					$invoice->set('siv_usr_user_id', $user->key);
-				}
-			}
-			
-			if($found == 0){
-				//COULD NOT FIND THE USER FOR THE INVOICE.  JUST STORE IT WITHOUT A USER
-			}
-			
-			$invoice->prepare();
-			$invoice->save();
-			array_push($rowvalues, 'saved');
+		if($stripe_invoices->has_more){
+			$created = array();
+			$created[gte] = $startdate;
+			$created[lte] = $enddate;
+			$stripe_invoices = \Stripe\Invoice::all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 		}
 		else{
-			array_push($rowvalues, 'skipped');
+			break;
 		}
-		$page->disprow($rowvalues);
 	}
 	$page->endtable();	
-	
-	//echo '<a style="text-align:center" href="/admin/admin_stripe_orders?offset='.$offset .'">Next 100 >></a>';
 
 
 	if(!$_GET['print-format']){
