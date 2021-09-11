@@ -375,7 +375,19 @@ class User extends SystemBase {
 		return $user;
 	}
 
+	public static function GetByStripeCustomerId($id) {
+		$data = SingleRowFetch('usr_users', 'usr_stripe_customer_id',
+			$id, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
 
+		if ($data === NULL) {
+			return NULL;
+		}
+
+		$user = new User($data->usr_user_id);
+		$user->load_from_data($data, array_keys(User::$fields));
+		return $user;
+	}
+	
 	public static function GeneratePassword($password) {
 		if (strlen($password) < 5) {
 			throw new DisplayableUserException('Your password must be at least 5 characters');

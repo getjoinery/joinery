@@ -177,6 +177,19 @@ class Order extends SystemBase {
 		return $order;
 	}	
 
+	public static function GetByStripeCharge($charge) {
+		$data = SingleRowFetch('ord_orders', 'ord_stripe_charge_id',
+			$charge, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
+
+		if ($data === NULL) {
+			return NULL;
+		}
+
+		$order = new Order($data->ord_order_id);
+		$order->load_from_data($data, array_keys(Order::$fields));
+		return $order;
+	}	
+
 	function authenticate_read($session) {
 		if ($session->get_permission() < 5 && $session->get_user_id() != $this->get('ord_usr_user_id')) {
 			throw new SystemAuthenticationError(
