@@ -165,8 +165,6 @@
 					$order->set('ord_timestamp', gmdate("c", $charge->created));
 					echo 'Time: '.$order->get('ord_timestamp').'<br>';
 					echo 'NEW ORDER<br>'; 
-					$order->save();
-					$order->load();
 				}
 				
 				if(!$order->get('ord_amount_paid')){
@@ -239,11 +237,12 @@
 					}
 				}
 				
-				if($found_user && !$order->get('ord_usr_user_id')){
-					$order->set('ord_usr_user_id', $order_user->key);			
-				}
+
 				
 				if($order_user->key){
+					if(!$order->get('ord_usr_user_id')){
+						$order->set('ord_usr_user_id', $order_user->key);			
+					}
 					echo 'User: '.$order_user->display_name().'<br>';
 
 					//HANDLE Address
@@ -286,13 +285,13 @@
 					$user_name = LibraryFunctions::doSplitName($charge->billing_details->name);
 					if($charge['metadata']['customer_email']){
 						echo '<b>NEW USER: '.$charge['metadata']['customer_email'].'</b><br>';
-						$user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge['metadata']['customer_email'], NULL, FALSE);
-						//echo '<b>'.$print_r($user).'</b><br>'; 					
+						$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge['metadata']['customer_email'], NULL, FALSE);
+						//echo '<b>'.$print_r($order_user).'</b><br>'; 					
 					}
 					else if($charge->billing_details->email){
 						echo '<b>NEW USER: '.$charge->billing_details->email.'</b><br>';
-						$user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
-						//echo '<b>'.$print_r($user).'</b><br>'; 					
+						$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
+						//echo '<b>'.$print_r($order_user).'</b><br>'; 					
 					}
 					else{
 						echo '<b>UNKNOWN USER, NO EMAIL</b><br>';
