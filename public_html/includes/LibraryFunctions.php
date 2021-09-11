@@ -4,6 +4,54 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 
 class LibraryFunctions {
 
+	/**
+	 * splits single name string into salutation, first, last, suffix
+	 * 
+	 * @param string $name
+	 * @return array
+	 */
+	public static function doSplitName($name)
+	{
+		$results = array();
+
+		$r = explode(' ', $name);
+		$size = count($r);
+
+		//check first for period, assume salutation if so
+		if (mb_strpos($r[0], '.') === false)
+		{
+			$results['salutation'] = '';
+			$results['first'] = $r[0];
+		}
+		else
+		{
+			$results['salutation'] = $r[0];
+			$results['first'] = $r[1];
+		}
+
+		//check last for period, assume suffix if so
+		if (mb_strpos($r[$size - 1], '.') === false)
+		{
+			$results['suffix'] = '';
+		}
+		else
+		{
+			$results['suffix'] = $r[$size - 1];
+		}
+
+		//combine remains into last
+		$start = ($results['salutation']) ? 2 : 1;
+		$end = ($results['suffix']) ? $size - 2 : $size - 1;
+
+		$last = '';
+		for ($i = $start; $i <= $end; $i++)
+		{
+			$last .= ' '.$r[$i];
+		}
+		$results['last'] = trim($last);
+
+		return $results;
+	}
 
 	static function SentenceCase($string) { 
 		$sentences = preg_split('/([.?!]+)/', $string, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE); 
