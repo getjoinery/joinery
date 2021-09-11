@@ -248,7 +248,8 @@
 
 					//HANDLE Address
 					if($address_id = $order_user->get_default_address()){
-						echo $address->get_address_string().'<br>';
+						//$address = new Address($address_id, TRUE);
+						//echo $address->get_address_string().'<br>';
 					}
 					else{
 						$address = new Address(NULL);
