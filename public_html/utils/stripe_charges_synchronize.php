@@ -294,6 +294,9 @@
 				echo '<br><br>';
 				$offset = $charge->id;
 			}
+			else{
+				echo 'NOT PAID: '.$charge->id.'<br>';
+			}
 		}
 		
 
