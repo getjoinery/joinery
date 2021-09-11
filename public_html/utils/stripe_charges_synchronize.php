@@ -165,6 +165,8 @@
 					$order->set('ord_timestamp', gmdate("c", $charge->created));
 					echo 'Time: '.$order->get('ord_timestamp').'<br>';
 					echo 'NEW ORDER<br>'; 
+					$order->save();
+					$order->load();
 				}
 				
 				if(!$order->get('ord_amount_paid')){
