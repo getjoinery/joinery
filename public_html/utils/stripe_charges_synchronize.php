@@ -181,10 +181,10 @@
 			
 			
 			if(!$found_order){
-				$error = 'No local order found matching remote charge.';
 				$order = new Order(NULL);
 				$order->set('ord_timestamp', gmdate("c", $charge->created));
 				echo 'Time:'.$order->get('ord_timestamp').'<br>';
+				echo '<b>NO ORDER</b>'; 
 			}
 			
 			if(!$order->get('ord_amount_paid')){
@@ -225,14 +225,23 @@
 			}
 			
 			if(!$found_user && $charge['metadata']['customer_email']){
-				$order_user = User::GetByEmail($email);
+				$order_user = User::GetByEmail($charge['metadata']['customer_email']);
 				if($order_user->key){
 					$found_user = TRUE;
 				}
 			}
 			
+			if(!$found_user && $charge->billing_details->email){
+				$order_user = User::GetByEmail($charge->billing_details->email);
+				if($order_user->key){
+					$found_user = TRUE;
+				}
+			}			
+			
+			
 			if(!$found_user){
 				$order_user = new User(NULL);
+				echo '<b>NO USER</b>'; 
 			}
 			
 			if($found_user && !$order->get('ord_usr_user_id')){
@@ -259,7 +268,7 @@
 					//print_r( $charge->billing_details->address->country).'<br>';
 					$address->set('usa_cco_country_code_id', Address::GetCountryCodeFromCountryAbbr($charge->billing_details->address->country));
 					$address->set('usa_type', 'HM');
-					$address->set('usa_usr_user_id', $user->key);
+					$address->set('usa_usr_user_id', $order_user->key);
 					$address->set('usa_is_default', TRUE);
 					$address->set('usa_privacy', 2);
 					print_r($address);
