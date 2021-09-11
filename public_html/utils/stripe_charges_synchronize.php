@@ -183,35 +183,34 @@
 			if(!$found_order){
 				$order = new Order(NULL);
 				$order->set('ord_timestamp', gmdate("c", $charge->created));
-				echo 'Time:'.$order->get('ord_timestamp').'<br>';
-				echo '<b>NO ORDER</b><br>'; 
-				echo '<b>Invoice: '.$charge->invoice.'</b><br>';
+				echo 'Time: '.$order->get('ord_timestamp').'<br>';
+				echo 'NO ORDER<br>'; 
 			}
 			
 			if(!$order->get('ord_amount_paid')){
 				$order->set('ord_amount_paid', $charge->amount/100);
 			}
-			echo 'Amount:'.$order->get('ord_amount_paid').'<br>';
+			echo 'Amount: '.$order->get('ord_amount_paid').'<br>';
 			
 			if(!$order->get('ord_refund_amount')){
 				$order->set('ord_refund_amount', $charge->amount_refunded/100);
 			}
-			echo 'Refund:'.$order->get('ord_refund_amount').'<br>';		
+			echo 'Refund: '.$order->get('ord_refund_amount').'<br>';		
 			
 			if(!$order->get('ord_stripe_charge_id')){
 				$order->set('ord_stripe_charge_id', $charge->id);			
 			}
-			echo 'Charge:'.$order->get('ord_stripe_charge_id').'<br>';	
+			echo 'Charge: '.$order->get('ord_stripe_charge_id').'<br>';	
 			
 			if(!$order->get('ord_stripe_payment_intent_id')){
 				$order->set('ord_stripe_payment_intent_id', $charge->payment_intent);					
 			}
-			echo 'PI:'.$order->get('ord_stripe_payment_intent_id').'<br>';
+			echo 'PI: '.$order->get('ord_stripe_payment_intent_id').'<br>';
 	
 			if(!$order->get('ord_stripe_invoice_id')){
 				$order->set('ord_stripe_invoice_id', $charge->invoice);					
 			}
-			echo 'Invoice:'.$order->get('ord_stripe_invoice_id').'<br>';
+			echo 'Invoice: '.$order->get('ord_stripe_invoice_id').'<br>';
 	
 			
 			//HANDLE THE ORDER USER
@@ -243,11 +242,19 @@
 					$found_user = TRUE;
 				}
 			}			
-			
-			
-			if(!$found_user){
-				$order_user = new User(NULL);
-				echo '<b>NO USER</b><br>'; 
+
+			if(!$found_user && $order->get('ord_stripe_invoice_id')){
+				$existing_invoices = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $order->get('ord_stripe_invoice_id')));
+				foreach ($existing_invoices as $existing_invoice){
+					if(!$found_user){
+						if($existing_invoice->get('siv_usr_user_id')){
+							$order_user = new User($existing_invoice->get('siv_usr_user_id'), TRUE);
+							if($order_user->key){
+								$found_user = TRUE; 
+							}
+						}
+					}
+				}
 			}
 			
 			if($found_user && !$order->get('ord_usr_user_id')){
@@ -284,7 +291,21 @@
 				}
 			}
 			else{
-				echo 'No user<br>';
+				$user_name = LibraryFunctions::doSplitName($charge->billing_details->name);
+				if($charge['metadata']['customer_email']){
+					echo '<b>NEW USER: '.$charge['metadata']['customer_email'].'</b><br>';
+					//$user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
+					//echo '<b>'.$print_r($user).'</b><br>'; 					
+				}
+				else if($charge->billing_details->email){
+					echo '<b>NEW USER: '.$charge->billing_details->email.'</b><br>';
+					//$user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
+					//echo '<b>'.$print_r($user).'</b><br>'; 					
+				}
+				else{
+					echo '<b>UNKNOWN USER, NO EMAIL</b><br>';
+				}
+
 			}
 					
 
