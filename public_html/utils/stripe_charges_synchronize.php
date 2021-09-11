@@ -239,7 +239,6 @@
 				
 				if($found_user && !$order->get('ord_usr_user_id')){
 					$order->set('ord_usr_user_id', $order_user->key);			
-					//$order->save();
 				}
 				
 				if($order_user->key){
@@ -247,7 +246,7 @@
 
 					//HANDLE Address
 					if($address_id = $order_user->get_default_address()){
-						//echo $address->get_address_string().'<br>';
+						echo $address->get_address_string().'<br>';
 					}
 					else{
 						$address = new Address(NULL);
@@ -265,7 +264,7 @@
 						$address->set('usa_is_default', TRUE);
 						$address->set('usa_privacy', 2);
 						print_r($address);
-						//$address->save();
+						$address->save();
 						//$address->update_coordinates();
 								
 					}
@@ -274,12 +273,12 @@
 					$user_name = LibraryFunctions::doSplitName($charge->billing_details->name);
 					if($charge['metadata']['customer_email']){
 						echo '<b>NEW USER: '.$charge['metadata']['customer_email'].'</b><br>';
-						//$user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
+						$user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge['metadata']['customer_email'], NULL, FALSE);
 						//echo '<b>'.$print_r($user).'</b><br>'; 					
 					}
 					else if($charge->billing_details->email){
 						echo '<b>NEW USER: '.$charge->billing_details->email.'</b><br>';
-						//$user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
+						$user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
 						//echo '<b>'.$print_r($user).'</b><br>'; 					
 					}
 					else{
@@ -293,6 +292,7 @@
 				$page->disprow($rowvalues);
 				echo '<br><br>';
 				$offset = $charge->id;
+				$order->save();
 			}
 			else{
 				echo 'NOT PAID: '.$charge->id.'<br>';
