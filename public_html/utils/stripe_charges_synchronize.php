@@ -184,7 +184,8 @@
 				$order = new Order(NULL);
 				$order->set('ord_timestamp', gmdate("c", $charge->created));
 				echo 'Time:'.$order->get('ord_timestamp').'<br>';
-				echo '<b>NO ORDER</b>'; 
+				echo '<b>NO ORDER</b><br>'; 
+				echo '<b>Invoice: '.$charge->invoice.'</b><br>';
 			}
 			
 			if(!$order->get('ord_amount_paid')){
@@ -241,7 +242,7 @@
 			
 			if(!$found_user){
 				$order_user = new User(NULL);
-				echo '<b>NO USER</b>'; 
+				echo '<b>NO USER</b><br>'; 
 			}
 			
 			if($found_user && !$order->get('ord_usr_user_id')){
