@@ -251,6 +251,15 @@
 					if($address_id){
 						$address = new Address($address_id, TRUE);
 						echo 'Default address: '.$address->get_address_string().'<br>';
+						if(!$address->get('usa_zip_code_id')){
+							$address->set('usa_zip_code_id', $charge->billing_details->address->postal_code);
+							$address->save();
+						}
+						
+						if(!$address->get('usa_zip_code_id')){
+							$address->set('usa_city', $charge->billing_details->address->city);
+							$address->save();
+						}					
 					}
 					else{
 						$address = new Address(NULL);
