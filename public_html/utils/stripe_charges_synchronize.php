@@ -183,6 +183,17 @@
 					}
 				}		
 
+				if(!$found_order){
+					$order = new Order(NULL);
+					$order->set('ord_timestamp', gmdate("c", $charge->created));
+					$order->set('ord_status', Order::STATUS_PAID);
+					echo '<b>NEW ORDER</b><br>';
+					echo 'Time: '.$order->get('ord_timestamp').'<br>';
+					$order->save();
+					$order->load();
+				}
+
+
 				//HANDLE THE ORDER USER
 				$found_user = FALSE;
 				if($order->get('ord_usr_user_id')){
@@ -230,14 +241,6 @@
 		
 				
 				if(!$found_order){
-					$order = new Order(NULL);
-					$order->set('ord_timestamp', gmdate("c", $charge->created));
-					$order->set('ord_status', Order::STATUS_PAID);
-					echo '<b>NEW ORDER</b><br>';
-					echo 'Time: '.$order->get('ord_timestamp').'<br>';
-					$order->save();
-					$order->load();
-					
 					$order_item = new OrderItem(NULL);
 					$order_item->set('odi_ord_order_id', $order->key);
 					$order_item->set('odi_pro_product_id', 5); //THIS IS THE PRODUCT ID FOR SUBSCRIPTION PAYMENTS
