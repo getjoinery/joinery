@@ -182,7 +182,52 @@
 						}
 					}
 				}		
-			
+
+				//HANDLE THE ORDER USER
+				$found_user = FALSE;
+				if($order->get('ord_usr_user_id')){
+					$order_user = new User($order->get('ord_usr_user_id'), TRUE);
+					if($order_user->key){
+						$found_user = TRUE;
+					}
+				}
+
+				if(!$found_user && $charge->customer){
+					$order_user = User::GetByStripeCustomerId($charge->customer);
+					if($order_user->key){
+						$found_user = TRUE;
+					}
+				}
+				
+				if(!$found_user && $charge['metadata']['customer_email']){
+					$order_user = User::GetByEmail($charge['metadata']['customer_email']);
+					if($order_user->key){
+						$found_user = TRUE;
+					}
+				}
+				
+				if(!$found_user && $charge->billing_details->email){
+					$order_user = User::GetByEmail($charge->billing_details->email);
+					if($order_user->key){
+						$found_user = TRUE;
+					}
+				}			
+
+				if(!$found_user && $order->get('ord_stripe_invoice_id')){
+					$existing_invoices = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $order->get('ord_stripe_invoice_id')));
+					$existing_invoices->load();
+					foreach ($existing_invoices as $existing_invoice){
+						if(!$found_user){
+							if($existing_invoice->get('siv_usr_user_id')){
+								$order_user = new User($existing_invoice->get('siv_usr_user_id'), TRUE);
+								if($order_user->key){
+									$found_user = TRUE; 
+								}
+							}
+						}
+					}
+				}
+		
 				
 				if(!$found_order){
 					$order = new Order(NULL);
@@ -233,50 +278,7 @@
 				echo 'Invoice: '.$order->get('ord_stripe_invoice_id').'<br>';
 		
 				
-				//HANDLE THE ORDER USER
-				$found_user = FALSE;
-				if($order->get('ord_usr_user_id')){
-					$order_user = new User($order->get('ord_usr_user_id'), TRUE);
-					if($order_user->key){
-						$found_user = TRUE;
-					}
-				}
 
-				if(!$found_user && $charge->customer){
-					$order_user = User::GetByStripeCustomerId($charge->customer);
-					if($order_user->key){
-						$found_user = TRUE;
-					}
-				}
-				
-				if(!$found_user && $charge['metadata']['customer_email']){
-					$order_user = User::GetByEmail($charge['metadata']['customer_email']);
-					if($order_user->key){
-						$found_user = TRUE;
-					}
-				}
-				
-				if(!$found_user && $charge->billing_details->email){
-					$order_user = User::GetByEmail($charge->billing_details->email);
-					if($order_user->key){
-						$found_user = TRUE;
-					}
-				}			
-
-				if(!$found_user && $order->get('ord_stripe_invoice_id')){
-					$existing_invoices = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $order->get('ord_stripe_invoice_id')));
-					$existing_invoices->load();
-					foreach ($existing_invoices as $existing_invoice){
-						if(!$found_user){
-							if($existing_invoice->get('siv_usr_user_id')){
-								$order_user = new User($existing_invoice->get('siv_usr_user_id'), TRUE);
-								if($order_user->key){
-									$found_user = TRUE; 
-								}
-							}
-						}
-					}
-				}
 				
 
 				
