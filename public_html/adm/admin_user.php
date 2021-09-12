@@ -361,7 +361,7 @@
 							}
 						}
 						else{
-							echo ' [<a class="sortlink" href="/admin/admin_phone_edit.php?usr_user_id='. $user->key . '">Add address</a>]<br />';
+							echo ' [<a class="sortlink" href="/admin/admin_address_edit.php?usr_user_id='. $user->key . '">Add address</a>]<br />';
 						}
 						
 						echo '<br />Timezone: '.$user->get('usr_timezone'). ' [<a href="/admin/admin_users_edit?usr_user_id='.$user->key.'">edit</a>]';
