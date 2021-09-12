@@ -176,7 +176,7 @@
 									$order = new Order($order_item->get('odi_ord_order_id'), TRUE);
 									$found_order = TRUE;
 									echo 'Found order from charge id by using subscription<br>';
-									//TODO LATER ADD THE INVOICE TO THE ORDER TABLE
+									//TODO LATER ADD THE INVOICE TO THE ORDER TABLE	
 								}
 							} 
 						}
@@ -190,6 +190,21 @@
 					$order->set('ord_status', Order::STATUS_PAID);
 					echo '<b>NEW ORDER</b><br>';
 					echo 'Time: '.$order->get('ord_timestamp').'<br>';
+					$order->save();
+					$order->load();
+					
+					$order_item = new OrderItem(NULL);
+					$order_item->set('odi_ord_order_id', $order->key);
+					$order_item->set('odi_pro_product_id', 5); //THIS IS THE PRODUCT ID FOR SUBSCRIPTION PAYMENTS
+					$order_item->set('odi_usr_user_id', $order_user->key);
+					$order_item->set('odi_price', $charge->amount/100);
+					//TODO: DECIDE IF SUBSCRIPTION PAYMENTS ARE MARKED AS SUBSCRIPTIONS
+					//$order_item->set('odi_is_subscription', true);
+					//$order_item->set('odi_stripe_subscription_id', );
+					$order_item->set('odi_stripe_foreign_invoice_id', $charge->invoice);
+					$order_item->set('odi_status', OrderItem::STATUS_PAID);
+					$order_item->set('odi_status_change_time', 'NOW');
+					$order_item->save();			
 				}
 				
 				if(!$order->get('ord_total_cost')){
