@@ -138,7 +138,7 @@
 	$active_subscriptions = new MultiOrderItem(
 	array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
 	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	10, //NUMBER PER PAGE
+	15, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
 	$active_subscriptions->load();	
@@ -148,7 +148,7 @@
 	$cancelled_subscriptions = new MultiOrderItem(
 	array('user_id' => $user->key, 'is_cancelled_subscription' => true), //SEARCH CRITERIA
 	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	10, //NUMBER PER PAGE
+	15, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
 	$cancelled_subscriptions->load();	
