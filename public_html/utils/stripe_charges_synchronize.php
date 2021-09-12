@@ -302,7 +302,7 @@
 						$address->set('usa_is_default', TRUE);
 						$address->set('usa_privacy', 2);
 						print_r($address);
-						//$address->save();
+						$address->save();
 						//$address->update_coordinates();
 								
 					}
@@ -311,12 +311,12 @@
 					$user_name = LibraryFunctions::doSplitName($charge->billing_details->name);
 					if($charge['metadata']['customer_email']){
 						echo '<b>NEW USER: '.$charge['metadata']['customer_email'].'</b><br>';
-						//$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge['metadata']['customer_email'], NULL, FALSE);
+						$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge['metadata']['customer_email'], NULL, FALSE);
 						//echo '<b>'.$print_r($order_user).'</b><br>'; 					
 					}
 					else if($charge->billing_details->email){
 						echo '<b>NEW USER: '.$charge->billing_details->email.'</b><br>';
-						//$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
+						$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
 						//echo '<b>'.$print_r($order_user).'</b><br>'; 					
 					}
 					else{
@@ -330,7 +330,7 @@
 				$page->disprow($rowvalues);
 				echo '<br><br>';
 				$offset = $charge->id;
-				//$order->save();
+				$order->save();
 			}
 			else{
 				echo 'NOT PAID: '.$charge->id.'<br><br>';
@@ -349,8 +349,6 @@
 		}	
 	}
 	$page->endtable();	
-	
-	//echo '<a style="text-align:center" href="/admin/admin_stripe_orders?offset='.$offset .'">Next 100 >></a>';
 
 
 	if(!$_GET['print-format']){
