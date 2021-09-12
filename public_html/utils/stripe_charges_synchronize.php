@@ -161,6 +161,7 @@
 						$found_order = TRUE;
 					}
 					else{
+						//IT MAY BE AN INITIAL SUBSCRIPTION
 						//CHECK TO SEE IF THE CHARGE IS IN THE INVOICES TABLE
 						$existing_invoices = new MultiStripeInvoice(array('stripe_charge_id' => $charge->id));
 						$existing_invoices->load();
@@ -175,6 +176,7 @@
 									$order = new Order($order_item->get('odi_ord_order_id'), TRUE);
 									$found_order = TRUE;
 									echo 'Found order from charge id by using subscription<br>';
+									//TODO LATER ADD THE INVOICE TO THE ORDER TABLE
 								}
 							} 
 						}
@@ -186,14 +188,14 @@
 					$order = new Order(NULL);
 					$order->set('ord_timestamp', gmdate("c", $charge->created));
 					$order->set('ord_status', Order::STATUS_PAID);
+					echo '<b>NEW ORDER</b><br>';
 					echo 'Time: '.$order->get('ord_timestamp').'<br>';
-					echo 'NEW ORDER<br>'; 
 				}
 				
 				if(!$order->get('ord_total_cost')){
 					$order->set('ord_total_cost', $charge->amount/100);
 				}
-				echo 'Amount: '.$order->get('ord_amount_paid').'<br>';
+				echo 'Amount: '.$order->get('ord_total_cost').'<br>';
 				
 				if(!$order->get('ord_refund_amount')){
 					$order->set('ord_refund_amount', $charge->amount_refunded/100);
