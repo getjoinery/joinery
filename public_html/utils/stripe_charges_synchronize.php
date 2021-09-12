@@ -185,12 +185,12 @@
 
 				if(!$found_order){
 					$order = new Order(NULL);
-					$order->set('ord_timestamp', gmdate("c", $charge->created));
-					$order->set('ord_status', Order::STATUS_PAID);
-					echo '<b>NEW ORDER</b><br>';
-					echo 'Time: '.$order->get('ord_timestamp').'<br>';
 					$order->save();
 					$order->load();
+					echo '<b>NEW ORDER</b><br>';
+					echo 'Time: '.$order->get('ord_timestamp').'<br>';
+					$order->set('ord_timestamp', gmdate("c", $charge->created));
+					$order->set('ord_status', Order::STATUS_PAID);
 				}
 
 
