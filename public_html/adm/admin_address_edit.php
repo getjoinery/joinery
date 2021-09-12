@@ -31,6 +31,10 @@
 
 		$address = Address::CreateAddressFromForm($_POST, $user_id, $address);
 		
+		if(!$address_id){
+			$address->set('usa_is_default', TRUE);
+			$address->save();
+		}
 		
 		LibraryFunctions::redirect('/admin/admin_user?usr_user_id='. $user_id );
 		exit;

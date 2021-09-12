@@ -285,7 +285,17 @@ class MultiOrder extends SystemMultiBase {
 		if (array_key_exists('event_id', $this->options)) {
 			$where_clauses[] = 'ord_evt_event_id = ?';
 			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}		
+		}	
+
+		if (array_key_exists('created_before', $this->options)) {
+			$where_clauses[] = 'ord_timestamp <= ?';
+			$bind_params[] = array($this->options['created_before'], PDO::PARAM_STR);
+		}	
+
+		if (array_key_exists('created_after', $this->options)) {
+			$where_clauses[] = 'ord_timestamp >= ?';
+			$bind_params[] = array($this->options['created_after'], PDO::PARAM_STR);
+		}			
 
 		if (array_key_exists('order_finished', $this->options)) {
 			if($this->options['order_finished']) {

@@ -21,10 +21,29 @@
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	
 	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
-	
+	$startdate = LibraryFunctions::fetch_variable('startdate', NULL, 0, '');	
+	$enddate = LibraryFunctions::fetch_variable('enddate', NULL, 0, '');	
+
 	$search_criteria = NULL;
+	$search_criteria = array();
+	
+	if($startdate){
+		$display_startdate = $startdate;	
+		$time_combined = $startdate . ' ' . LibraryFunctions::toDBTime('12:01:00 am');
+		$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
+		$search_criteria['created_after'] = $utc_time;
+	}
+
+	
+	if($enddate){
+		$display_enddate = $enddate;
+		$time_combined = $enddate . ' ' . LibraryFunctions::toDBTime('12:59:59 pm');
+		$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
+		$search_criteria['created_before'] = $utc_time;		
+	}	
+
+	
 	if($user_id){
-		$search_criteria = array();
 		if($user_id){
 			$search_criteria['user_id'] = $user_id;
 		}
@@ -45,15 +64,24 @@
 		'breadcrumbs' => array(
 			'Orders'=>'', 
 		),
-		//'page_title' => 'Event Sessions',
-		//'readable_title' => 'Event Sessions',
+		'page_title' => 'Orders',
+		'readable_title' => 'Orders',
 		'session' => $session,
 	)
 	);	
 
+	$formwriter = new FormWriterMaster("form1");
+	echo $formwriter->begin_form("", "get", "/admin/admin_orders");
+	echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
+	echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
+	echo $formwriter->hiddeninput('source', 'form');
+	echo $formwriter->start_buttons();
+	echo $formwriter->new_form_button('Submit');
+	echo $formwriter->end_buttons();
+	echo $formwriter->end_form();	
 	
 	$headers = array('Order ID', 'User', 'Order Time', 'Products', 'Total');
-	$altlinks = array();
+	$altlinks = array('Sync Invoices' => '/utils/admin_stripe_invoices_synchronize', 'Sync Orders' => '/utils/stripe_charges_synchronize');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
@@ -83,6 +111,7 @@
 			
 			if($order_item->get('odi_usr_user_id')){
 				$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);
+				$address_id = $order_item_user->get_default_address();
 			}
 
 			if (array_key_exists($order_item->get('odi_pro_product_id'), $PRODUCT_ID_TO_NAME_CACHE)) {
@@ -94,7 +123,12 @@
 			}
 			
 			if($order_item->get('odi_usr_user_id')){
-				$this_out = $title . ' - <a href="/admin/admin_user?usr_user_id=' . $order_item_user->key . '">' . $order_item_user->display_name() . '</a>' . ' ('.$currency_symbol. $order_item->get('odi_price') .')';
+				$this_out = $title . ' - <a href="/admin/admin_user?usr_user_id=' . $order_item_user->key . '">' . $order_item_user->display_name() . '</a>';
+				if($address_id){
+					$address = new Address($address_id, TRUE);
+					$this_out .= ' '.$address->get('usa_city') . ', '.$address->get('usa_zip_code_id'). ' ' . Address::GetCountryAbbrFromCountryCode($address->get('usa_cco_country_code_id'));
+				}
+				$this_out .= ' ('.$currency_symbol. $order_item->get('odi_price') .')';
 			}
 			else{
 				$this_out = $title . ' ('.$currency_symbol. $order_item->get('odi_price') .')';

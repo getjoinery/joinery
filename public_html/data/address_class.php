@@ -187,6 +187,25 @@ class Address extends SystemBase {
 		return $country_code->cco_code;			
 	}
 
+	public static function GetCountryAbbrFromCountryCode($code){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+
+		$sql = "SELECT cco_iso_code_2 FROM cco_country_codes WHERE cco_code=?";
+		try {
+			$q = $dblink->prepare($sql);
+			$q->bindValue(1, $code, PDO::PARAM_INT);
+			$success = $q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		} catch(PDOException $e) {
+			$dbhelper->handle_query_error($e);
+		}
+
+		$country_code = $q->fetch();
+		return $country_code->cco_iso_code_2;			
+	}
+
 	public static function CreateAddressFromForm($form, $user_id, $address = NULL, $and_save=TRUE, $use_transaction=TRUE, $strict_checks=TRUE) {
 		
 		$new_address = FALSE;
