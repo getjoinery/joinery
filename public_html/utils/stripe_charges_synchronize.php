@@ -280,17 +280,14 @@
 				}
 				echo 'Invoice: '.$order->get('ord_stripe_invoice_id').'<br>';
 		
-				
-
+				if(!$order->get('ord_usr_user_id')){
+					$order->set('ord_usr_user_id', $order_user->key);			
+				}				
+				echo 'User: '.$order_user->display_name().'<br>';
 				
 
 				
 				if($order_user->key){
-					if(!$order->get('ord_usr_user_id')){
-						$order->set('ord_usr_user_id', $order_user->key);			
-					}
-					echo 'User: '.$order_user->display_name().'<br>';
-
 					//HANDLE Address
 					$address_id = $order_user->get_default_address();
 					if($address_id){

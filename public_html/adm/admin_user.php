@@ -138,7 +138,7 @@
 	$subscriptions = new MultiOrderItem(
 	array('user_id' => $user->key, 'is_subscription' => true), //SEARCH CRITERIA
 	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	5, //NUMBER PER PAGE
+	10, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
 	$subscriptions->load();	
