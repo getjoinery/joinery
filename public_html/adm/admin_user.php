@@ -313,18 +313,18 @@
 					echo '<h4>Active Subscriptions</h4>';
 					foreach($active_subscriptions as $subscription){	
 							
-						$status = ' <a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
+						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month <a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
 						
-						echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span><br />
+						?><span><?php echo $status; ?></span><br />
 						<?php
 					}
 
 					echo '<h4>Cancelled Subscriptions</h4>';
 					foreach($cancelled_subscriptions as $subscription){	
 							
-						$status = ' canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
+						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
 						
-						echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span><br />
+						?><span><?php echo $status; ?></span><br />
 						<?php
 					}
 				
