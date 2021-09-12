@@ -260,6 +260,14 @@ class MultiOrderItem extends SystemMultiBase {
 			$where_clauses[] = 'odi_is_subscription = TRUE';
 		}
 
+		if (array_key_exists('is_active_subscription', $this->options)) {
+			$where_clauses[] = '(odi_is_subscription = TRUE AND odi_subscription_cancelled_time IS NULL)';
+		}
+
+		if (array_key_exists('is_cancelled_subscription', $this->options)) {
+			$where_clauses[] = '(odi_is_subscription = TRUE AND odi_subscription_cancelled_time IS NOT NULL)';
+		}
+
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
 		} else {

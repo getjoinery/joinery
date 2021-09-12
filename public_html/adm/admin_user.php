@@ -135,14 +135,23 @@
 	$numeventsregistrations = $event_registrations->count_all();	
 	
 	//SUBSCRIPTIONS
-	$subscriptions = new MultiOrderItem(
-	array('user_id' => $user->key, 'is_subscription' => true), //SEARCH CRITERIA
+	$active_subscriptions = new MultiOrderItem(
+	array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
 	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
 	10, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
-	$subscriptions->load();	
+	$active_subscriptions->load();	
 
+
+	//SUBSCRIPTIONS
+	$cancelled_subscriptions = new MultiOrderItem(
+	array('user_id' => $user->key, 'is_cancelled_subscription' => true), //SEARCH CRITERIA
+	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+	10, //NUMBER PER PAGE
+	NULL //OFFSET
+	);
+	$cancelled_subscriptions->load();	
 	/*
 	$search_criteria = NULL;
 	$search_criteria['user_id'] = $user->key;
@@ -266,7 +275,27 @@
 			//}
 			?>	
 			
+				<p class="text-center">
+				<?php
+				echo 'Email address:  <strong>'.$user->get('usr_email').'</strong> ';
+				if($user->get('usr_email_is_verified')) {
+					echo ' Verified';
+				}
+				else{
+					echo ' Unverified';
+				}	
 
+				if($user->get('usr_contact_preferences')) {
+					echo '<strong> Subscribed to newsletter</strong>';
+				}
+				else{
+					echo '<strong> Unsubscribed from newsletter</strong>';
+				}	
+				if($user->get('usr_contact_preferences_last_change')) {
+					echo ', last change:  '. LibraryFunctions::convert_time($event_registration->get('usr_contact_preferences_last_change'), 'UTC', $session->get_timezone());
+				}						
+				?>
+				</p>
 
               <p class="text-center"><?php echo 'Signed up: '.LibraryFunctions::convert_time($user->get('usr_signup_date'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></p>
 			  
@@ -281,14 +310,20 @@
 					echo 'Disabled';
 				}
 				else {	
-					foreach($subscriptions as $subscription){	
+					echo '<h4>Active Subscriptions</h4>';
+					foreach($active_subscriptions as $subscription){	
 							
-						if($subscription->get('odi_subscription_cancelled_time')){
-							$status = ' canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
-						}
-						else{
-							$status = '<a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
-						}
+						$status = ' <a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
+						
+						echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span><br />
+						<?php
+					}
+
+					echo '<h4>Cancelled Subscriptions</h4>';
+					foreach($cancelled_subscriptions as $subscription){	
+							
+						$status = ' canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
+						
 						echo '$'.$subscription->get('odi_price') .'/month'; ?><span><?php echo $status; ?></span><br />
 						<?php
 					}
@@ -299,27 +334,7 @@
 
   
              
-						<p class="text-center">
-						<?php
-						echo 'Email address:  <strong>'.$user->get('usr_email').'</strong> ';
-						if($user->get('usr_email_is_verified')) {
-							echo ' Verified';
-						}
-						else{
-							echo ' Unverified';
-						}	
 
-						if($user->get('usr_contact_preferences')) {
-							echo '<strong> Subscribed to newsletter</strong>';
-						}
-						else{
-							echo '<strong> Unsubscribed from newsletter</strong>';
-						}	
-						if($user->get('usr_contact_preferences_last_change')) {
-							echo ', last change:  '. LibraryFunctions::convert_time($event_registration->get('usr_contact_preferences_last_change'), 'UTC', $session->get_timezone());
-						}						
-						?>
-						</p>
 
 						<p class="text-center">
 						<?php
