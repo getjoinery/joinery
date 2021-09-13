@@ -45,8 +45,6 @@
 	
 	if ($_POST['confirm']){
 		
-		print_r($_POST['refund_amount']);
-		exit;
 			
 		//HOW TO REFUND PART OF A CHARGE https://stripe.com/docs/refunds#issuing
 
