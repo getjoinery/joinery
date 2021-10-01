@@ -378,12 +378,14 @@
 
 			
 				$page->disprow($rowvalues);
-				echo '<br><br>';
+				if(!$verbose){
+					echo '<br><br>';
+				}
 				$offset = $charge->id;
 				$order->save();
 			}
 			else{
-				echo 'NOT PAID: '.$charge->id.'<br><br>';
+				echo 'Skipping unpaid charge: '.$charge->id.'<br><br>';
 			}
 		}
 		
