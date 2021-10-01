@@ -120,7 +120,7 @@
 		$page->tableheader($headers, $box_vars);
 	}
 	else{
-		$pageoptions['title'] = 'Stripe invoices synchronize';
+		$pageoptions['title'] = 'Stripe charges synchronize';
 		$page->begin_box($pageoptions);
 	}
 	$pagenum = 1;
@@ -133,6 +133,9 @@
 			
 		foreach($charges as $charge) {
 			$chargenum++;
+			else{
+				echo 'Processing charge '. $chargenum.'...<br>';
+			}
 			$error = '';
 			if($charge->paid){
 				$rowvalues = array();
