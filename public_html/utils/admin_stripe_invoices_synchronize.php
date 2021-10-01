@@ -35,7 +35,8 @@
 	$nextpage = $currpage + 1;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$startdate = LibraryFunctions::fetch_variable('startdate', NULL, 0, '');	
-	$enddate = LibraryFunctions::fetch_variable('enddate', NULL, 0, '');	
+	$enddate = LibraryFunctions::fetch_variable('enddate', NULL, 0, '');
+	$verbose = LibraryFunctions::fetch_variable('verbose', NULL, 0, '');	
 	
 	if($startdate){
 		$display_startdate = $startdate;	
@@ -123,14 +124,15 @@
 			
 		foreach($stripe_invoices as $stripe_invoice) {
 			$stripe_invoicenum++;
-			$rowvalues = array();
-			array_push($rowvalues, '('.$stripe_invoicenum . ') '.$stripe_invoice->id);
-			array_push($rowvalues, $stripe_invoice->customer_email);	
-			array_push($rowvalues, $stripe_invoice->amount_paid/100);
-			array_push($rowvalues, $stripe_invoice->subscription);
-			array_push($rowvalues, gmdate("c", $stripe_invoice->created));  //or "Y-m-d"
-			array_push($rowvalues, $stripe_invoice->description);
-
+			if($verbose){
+				$rowvalues = array();
+				array_push($rowvalues, '('.$stripe_invoicenum . ') '.$stripe_invoice->id);
+				array_push($rowvalues, $stripe_invoice->customer_email);	
+				array_push($rowvalues, $stripe_invoice->amount_paid/100);
+				array_push($rowvalues, $stripe_invoice->subscription);
+				array_push($rowvalues, gmdate("c", $stripe_invoice->created));  //or "Y-m-d"
+				array_push($rowvalues, $stripe_invoice->description);
+			}
 
 			
 			$existing_invoice = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $stripe_invoice->id));
@@ -176,10 +178,14 @@
 				
 				$invoice->prepare();
 				$invoice->save();
-				array_push($rowvalues, 'saved');
+				if($verbose){
+					array_push($rowvalues, 'saved');
+				}
 			}
 			else{
-				array_push($rowvalues, 'skipped');
+				if($verbose){
+					array_push($rowvalues, 'skipped');
+				}
 			}
 			$page->disprow($rowvalues);
 			$offset = $stripe_invoice->id;
@@ -197,6 +203,7 @@
 	}
 	$page->endtable();	
 
+	echo 'Invoices updated.  <a href="/admin/admin_orders">Return to orders</a>';
 
 	if(!$_GET['print-format']){
 		$page->admin_footer();

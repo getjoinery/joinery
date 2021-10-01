@@ -38,6 +38,7 @@
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$startdate = LibraryFunctions::fetch_variable('startdate', NULL, 0, '');	
 	$enddate = LibraryFunctions::fetch_variable('enddate', NULL, 0, '');	
+	$verbose = LibraryFunctions::fetch_variable('verbose', NULL, 0, '');
 	
 	if($startdate){
 		$display_startdate = $startdate;	
@@ -139,7 +140,9 @@
 					try{
 						$order = new Order($charge->metadata['ord_order_id'], TRUE);
 						$found_order = TRUE;
-						echo 'Found order from metadata<br>';
+						if($verbose){
+							echo 'Found order from metadata<br>';
+						}
 					}
 					catch (exception $e){
 						$found_order = FALSE;
@@ -149,7 +152,9 @@
 				if(!$found_order && $charge->payment_intent){
 					$order = Order::GetByStripePaymentIntent($charge->payment_intent);
 					if($order->key){
-						echo 'Found order from payment intent<br>';
+						if($verbose){
+							echo 'Found order from payment intent<br>';
+						}
 						$found_order = TRUE;
 					}
 				}
@@ -157,7 +162,9 @@
 				if(!$found_order && $charge->id){
 					$order = Order::GetByStripeCharge($charge->id);
 					if($order->key){
-						echo 'Found order from charge id<br>';
+						if($verbose){
+							echo 'Found order from charge id<br>';
+						}
 						$found_order = TRUE;
 					}
 					else{
@@ -175,7 +182,9 @@
 									$order_item = $order_items->get(0);
 									$order = new Order($order_item->get('odi_ord_order_id'), TRUE);
 									$found_order = TRUE;
-									echo 'Found order from charge id by using subscription<br>';
+									if($verbose){
+										echo 'Found order from charge id by using subscription<br>';
+									}
 									//TODO LATER ADD THE INVOICE TO THE ORDER TABLE	
 								}
 							} 
@@ -188,7 +197,9 @@
 					$order->save();
 					$order->load();
 					echo '<b>NEW ORDER</b><br>';
-					echo 'Time: '.$order->get('ord_timestamp').'<br>';
+					if($verbose){
+						echo 'Time: '.$order->get('ord_timestamp').'<br>';
+					}
 					$order->set('ord_timestamp', gmdate("c", $charge->created));
 					$order->set('ord_status', Order::STATUS_PAID);
 				}
@@ -301,8 +312,10 @@
 						if(!$address->get('usa_city')){
 							$address->set('usa_city', $charge->billing_details->address->city);
 							$address->save();
-						}		
-						echo 'Default address: '.$address->get_address_string().'<br>';						
+						}	
+						if($verbose){						
+							echo 'Default address: '.$address->get_address_string().'<br>';		
+						}							
 					}
 					else{
 						$address = new Address(NULL);
@@ -318,7 +331,9 @@
 						$address->set('usa_usr_user_id', $order_user->key);
 						$address->set('usa_is_default', TRUE);
 						$address->set('usa_privacy', 2);
-						print_r($address);
+						if($verbose){
+							print_r($address);
+						}
 						$address->save();
 						//$address->update_coordinates();
 								
@@ -366,6 +381,8 @@
 		}	
 	}
 	$page->endtable();	
+	
+	echo 'Charges updated.  <a href="/admin/admin_orders">Return to orders</a>';
 
 
 	if(!$_GET['print-format']){
