@@ -133,7 +133,7 @@
 			
 		foreach($charges as $charge) {
 			$chargenum++;
-			else{
+			if(!$verbose){
 				echo 'Processing charge '. $chargenum.'...<br>';
 			}
 			$error = '';
