@@ -140,7 +140,7 @@
 			if($charge->paid){
 				$rowvalues = array();
 				//print_r($charge);
-				echo 'Order count: '.$chargenum.'<br>';
+				//echo 'Order count: '.$chargenum.'<br>';
 				
 				$found_order = FALSE;
 				if($charge->metadata['ord_order_id']){
@@ -276,33 +276,44 @@
 				if(!$order->get('ord_total_cost')){
 					$order->set('ord_total_cost', $charge->amount/100);
 				}
-				echo 'Amount: '.$order->get('ord_total_cost').'<br>';
+				if($verbose){
+					echo 'Amount: '.$order->get('ord_total_cost').'<br>';
+				} 
 				
 				if(!$order->get('ord_refund_amount')){
 					$order->set('ord_refund_amount', $charge->amount_refunded/100);
 				}
-				echo 'Refund: '.$order->get('ord_refund_amount').'<br>';		
+				if($verbose){
+					echo 'Refund: '.$order->get('ord_refund_amount').'<br>';		
+				}
 				
 				if(!$order->get('ord_stripe_charge_id')){
 					$order->set('ord_stripe_charge_id', $charge->id);			
 				}
-				echo 'Charge: '.$order->get('ord_stripe_charge_id').'<br>';	
+				if($verbose){
+					echo 'Charge: '.$order->get('ord_stripe_charge_id').'<br>';	
+				}
 				
 				if(!$order->get('ord_stripe_payment_intent_id')){
 					$order->set('ord_stripe_payment_intent_id', $charge->payment_intent);					
 				}
-				echo 'PI: '.$order->get('ord_stripe_payment_intent_id').'<br>';
-		
+				if($verbose){
+					echo 'PI: '.$order->get('ord_stripe_payment_intent_id').'<br>';
+				}
+				
 				if(!$order->get('ord_stripe_invoice_id')){
 					$order->set('ord_stripe_invoice_id', $charge->invoice);					
 				}
-				echo 'Invoice: '.$order->get('ord_stripe_invoice_id').'<br>';
-		
+				if($verbose){
+					echo 'Invoice: '.$order->get('ord_stripe_invoice_id').'<br>';
+				}
+				
 				if(!$order->get('ord_usr_user_id')){
 					$order->set('ord_usr_user_id', $order_user->key);			
-				}				
-				echo 'User: '.$order_user->display_name().'<br>';
-				
+				}	
+				if($verbose){				
+					echo 'User: '.$order_user->display_name().'<br>';
+				}
 
 				
 				if($order_user->key){
