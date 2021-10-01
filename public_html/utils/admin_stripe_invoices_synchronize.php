@@ -105,15 +105,20 @@
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();	
 	
-	
-	$headers = array('ID', 'Customer', 'Amount', 'Subscription', 'Time', 'Description', 'Sync');
-	//$altlinks = array('Print format' => '/admin/admin_stripe_orders?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
-	$altlinks = array();
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => "Stripe invoices"
-	);
-	$page->tableheader($headers, $box_vars);
+	if($verbose){
+		$headers = array('ID', 'Customer', 'Amount', 'Subscription', 'Time', 'Description', 'Sync');
+		//$altlinks = array('Print format' => '/admin/admin_stripe_orders?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
+		$altlinks = array();
+		$box_vars =	array(
+			'altlinks' => $altlinks,
+			'title' => "Stripe invoices"
+		);
+		$page->tableheader($headers, $box_vars);
+	}
+	else{
+		$pageoptions['title'] = 'Edit Address';
+		$page->begin_box($pageoptions);
+	}
 
 	$pagenum = 1;
 	$stripe_invoicenum = 0;
@@ -201,9 +206,15 @@
 			break;
 		}
 	}
-	$page->endtable();	
+	if($verbose){
+		$page->endtable();	
+	}
+	else{
+		echo '<p>Invoices updated.  <a href="/admin/admin_orders">Return to orders</a></p>';
+		$page->end_box();
+	}
 
-	echo 'Invoices updated.  <a href="/admin/admin_orders">Return to orders</a>';
+	
 
 	if(!$_GET['print-format']){
 		$page->admin_footer();

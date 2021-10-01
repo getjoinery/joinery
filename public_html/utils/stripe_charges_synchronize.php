@@ -109,16 +109,20 @@
 	echo $formwriter->end_form();	
 	
 	
-	
-	$headers = array('Date', 'Order #', 'Total Amount', 'Billing User', 'Billing Email', 'Address');
-	//$altlinks = array('Print format' => '/admin/stripe_charges_synchronize?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
-	$altlinks = array();
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => "Stripe charges synchronize"
-	);
-	$page->tableheader($headers, $box_vars);
-
+	if($verbose){
+		$headers = array('Date', 'Order #', 'Total Amount', 'Billing User', 'Billing Email', 'Address');
+		//$altlinks = array('Print format' => '/admin/stripe_charges_synchronize?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
+		$altlinks = array();
+		$box_vars =	array(
+			'altlinks' => $altlinks,
+			'title' => "Stripe charges synchronize"
+		);
+		$page->tableheader($headers, $box_vars);
+	}
+	else{
+		$pageoptions['title'] = 'Stripe invoices synchronize';
+		$page->begin_box($pageoptions);
+	}
 	$pagenum = 1;
 	$chargenum = 0;
 	
@@ -380,9 +384,13 @@
 			break;
 		}	
 	}
-	$page->endtable();	
-	
-	echo 'Charges updated.  <a href="/admin/admin_orders">Return to orders</a>';
+	if($verbose){
+		$page->endtable();	
+	}
+	else{
+		echo '<p>Charges updated.  <a href="/admin/admin_orders">Return to orders</a></p>';
+		$page->end_box();
+	}
 
 
 	if(!$_GET['print-format']){
