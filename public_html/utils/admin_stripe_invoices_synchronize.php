@@ -116,7 +116,7 @@
 		$page->tableheader($headers, $box_vars);
 	}
 	else{
-		$pageoptions['title'] = 'Edit Address';
+		$pageoptions['title'] = 'Stripe invoices synchronize';
 		$page->begin_box($pageoptions);
 	}
 
@@ -137,6 +137,9 @@
 				array_push($rowvalues, $stripe_invoice->subscription);
 				array_push($rowvalues, gmdate("c", $stripe_invoice->created));  //or "Y-m-d"
 				array_push($rowvalues, $stripe_invoice->description);
+			}
+			else{
+				echo 'Processing invoice '. $stripe_invoicenum.'...<br>';
 			}
 
 			
