@@ -378,7 +378,7 @@
 
 			
 				$page->disprow($rowvalues);
-				if(!$verbose){
+				if($verbose){
 					echo '<br><br>';
 				}
 				$offset = $charge->id;
