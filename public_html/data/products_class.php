@@ -1188,7 +1188,12 @@ class MultiProduct extends SystemMultiBase {
 		if (array_key_exists('event_id', $this->options)) {
 			$where_clauses[] = 'pro_evt_event_id = ?';
 			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}		
+		}	
+
+		if (array_key_exists('is_active', $this->options)) {
+			$where_clauses[] = 'pro_is_active = ?';
+			$bind_params[] = array($this->options['is_active'], PDO::PARAM_BOOL);
+		}			
 
 		if (array_key_exists('product_id_is_not', $this->options)) {
 			$where_clauses[] = 'pro_product_id != ?';

@@ -215,16 +215,27 @@ class Event extends SystemBase {
 	
 	function get_register_url() {
 		$products = new MultiProduct(
-		array('event_id' => $this->get('evt_event_id')));
+		array('event_id' => $this->get('evt_event_id'), 'is_active' => true));
 		$numproducts = $products->count_all();
 
 		if($this->get('evt_external_register_link')){
 			return $this->get('evt_external_register_link');	
 		}
-		else if($numproducts){
+		else if($numproducts == 1){
 			$products->load();
 			$product = $products->get(0);
 			return '/product?product_id=' . $product->key;	
+		}
+		else if($numproducts > 1){
+			$products->load();			
+			$product_list = array();
+			foreach ($products as $product){
+				$product_temp = array();
+				$product_temp['label'] = $product->get('pro_name');
+				$product_temp['link'] = '/product?product_id=' . $product->key;
+				$product_list[] = $product_temp;
+			}
+			return $product_list;	
 		}
 		else{
 			throw new SystemDisplayablePermanentError(

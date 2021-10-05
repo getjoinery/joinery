@@ -37,6 +37,24 @@
 	$pageoptions['subtitle'] = implode(' | ', $subtitle);
 	echo PublicPage::BeginPage($event->get('evt_name'), $pageoptions);
 		
+
+	if($view_course_link){
+		?>
+		<div class="section padding-top-20">
+			<div class="container">
+				<div class="row">
+					<div class="col-12 text-center">
+						<?php
+							echo '<a class="button button-lg button-dark" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a>';	
+						?>
+					</div>
+				</div><!-- end row -->
+			</div><!-- end container -->
+		</div>	
+		<?php
+	}
+							
+		
 		if($picture_link = $event->get_picture_link('medium')){
 		?>
 		<div class="section padding-top-20">
@@ -57,25 +75,39 @@
 				<div class="row">
 					<div class="col-12">
 						<h3>Description</h3>
-						<?php echo $event->get('evt_description'); ?></p>					
+						<?php echo $event->get('evt_description'); ?></p>	
 					</div>
 				</div><!-- end row -->
 			</div><!-- end container -->
 		</div>	
 		
+
+			<div class="container">
+					<h3>Payment Options</h3>
+			</div>
+
+		
 		<div class="margin-top-70 text-center">
 			<?php
 					
-			if($view_course_link){
-				echo '<a class="button button-lg button-dark" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a>';		
-			}
 			
 			if($registration_message){
 				echo '<p>'.$registration_message.'</p>';
 			}
 
-			if($register_link){
-				echo '<a class="button button-lg button-dark" href="'.$register_link.'">Register Now</a>';
+			if($register_urls){
+				$register_urls = $event->get_register_url();
+				if(is_array($register_urls)){
+					foreach($register_urls as $register_url){
+						$register_text .= '<a class="button button-lg button-dark"  href="'.$register_url['link'].'">Register Now ('.$register_url['label'].')</a><br>';
+					}
+					echo $register_text;
+				}
+				else{
+					echo '<a href="'.$register_urls.'">Register Now</a>';
+				}			
+				
+				
 			}
 			
 			if($waiting_list_link){

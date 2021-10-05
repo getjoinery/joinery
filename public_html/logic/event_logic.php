@@ -52,8 +52,16 @@
 					
 	if($is_registered){
 		$view_course_link = '/profile/event_sessions_course?event_id='.$event->key;
-
-		$additional_payment_message = '<p>If you are registered, you can make additional payments here: <a href="'.$event->get_register_url().'">Make a payment</a>.</p>';
+		$register_urls = $event->get_register_url();
+		if(is_array($register_urls)){
+			foreach($register_urls as $register_url){
+				$register_html .= '<a href="'.$register_url['link'].'">Make a payment ('.$register_url['label'].')</a><br>';
+			}
+		}
+		else{
+			$register_html = '<a href="'.$register_urls.'">Make a payment</a>';
+		}
+		$additional_payment_message = '<p>If you are registered, you can make additional payments here:<br>'.$register_html.'.</p>';
 	}
 	else{
 		if($event->get('evt_status') == Event::STATUS_COMPLETED){
@@ -71,7 +79,7 @@
 				$registration_message = 'This event is full.';
 			}
 			else{
-				$register_link = $event->get_register_url();		
+				$register_urls = $event->get_register_url();		
 			}
 		}
 		else if($event->get('evt_allow_waiting_list')){
