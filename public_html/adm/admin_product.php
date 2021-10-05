@@ -56,7 +56,7 @@
 		
 		if(!$orders->count_all()){
 			if($_SESSION['permission'] == 10){
-				$options['altlinks'] += array('Delete Product'=> '/admin/admin_products?action=remove&p='.$product->key);
+				$options['altlinks'] += array('Delete Product'=> '/admin/admin_product?action=remove&pro_product_id='.$product->key);
 			}		
 		}
 		$page->begin_box($options);
