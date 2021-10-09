@@ -162,6 +162,17 @@
 	echo $formwriter->dropinput("Use captcha", "use_captcha", "ctrlHolder", $optionvals, $settings->get_setting('use_captcha'), '', FALSE);	
 	
 	echo '<hr>';
+	
+	
+ 	echo '<h3>Product Settings</h3>';
+
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("List regular products on product index", "products_list_items_active", "ctrlHolder", $optionvals, $settings->get_setting('products_list_items_active'), '', FALSE);	
+	
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("List event products on product index", "products_list_events_active", "ctrlHolder", $optionvals, $settings->get_setting('products_list_events_active'), '', FALSE);	
+	
+	echo '<hr>';
 
 	echo '<h3>Email Settings</h3>';
 	$templates = new MultiEmailTemplateStore(

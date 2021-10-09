@@ -197,6 +197,10 @@
 	$optionvals = array("Active"=>1, "Disabled"=>0 );
 	echo $formwriter->dropinput("Active?", "pro_is_active", "ctrlHolder", $optionvals, $product_status, '', FALSE);
 	echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
+
+	$optionvals = array("Event ticket"=>'1', 'Other Item' => '2', 'System (do not change)' => 0);
+	echo $formwriter->dropinput("Product type", "product_type", "ctrlHolder", $optionvals, $product->get('product_type'), '', FALSE);	
+
 	//echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
 	echo $formwriter->textbox('Product Description', 'pro_description', 'ctrlHolder', 5, 80, $product->get('pro_description'), '', 'yes');
 	
