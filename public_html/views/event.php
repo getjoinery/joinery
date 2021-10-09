@@ -109,7 +109,7 @@
 					echo $register_text;
 				}
 				else{
-					if($register_url['link']){
+					if($register_urls){
 						echo '<a class="button button-lg button-dark" href="'.$register_urls.'">Register Now</a>';
 					}
 					else{
