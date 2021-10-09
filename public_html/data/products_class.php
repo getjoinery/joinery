@@ -699,6 +699,10 @@ class Product extends SystemBase {
 	const PRICE_TYPE_ONE = 1;
 	const PRICE_TYPE_MULTIPLE = 2;
 	const PRICE_TYPE_USER_CHOOSE = 3;
+
+	const PRODUCT_TYPE_SYSTEM = 0;
+	const PRODUCT_TYPE_EVENT = 1;
+	const PRODUCT_TYPE_ITEM = 2;
 	
 	const PRODUCT_ID_OPTIONAL_DONATION=4;
 
@@ -717,7 +721,8 @@ class Product extends SystemBase {
 		'pro_expires' => 'How much time until the purchase expires.',
 		'pro_is_active' => 'Active or disabled',
 		'pro_price_type' => 'The pricing type',
-		'pro_grp_group_id' => 'The group id of the bundle if the product is for a bundle'
+		'pro_grp_group_id' => 'The group id of the bundle if the product is for a bundle',
+		'pro_type' => 'Type of product e.g. event ticket or digital item'
 	);
 	
 	public function get_requirement_info($output='text') {
@@ -1122,7 +1127,8 @@ class Product extends SystemBase {
 			  "pro_is_active" bool DEFAULT true, 
 			  "pro_expires" int4,
 			  "pro_price_type" int4,
-			  "pro_grp_group_id" int4
+			  "pro_grp_group_id" int4,
+			  "pro_type" int4
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -1214,6 +1220,11 @@ class MultiProduct extends SystemMultiBase {
 			$where_clauses[] = 'pro_is_active = ?';
 			$bind_params[] = array($this->options['is_active'], PDO::PARAM_BOOL);
 		}			
+		
+		if (array_key_exists('product_type', $this->options)) {
+			$where_clauses[] = 'pro_type = ?';
+			$bind_params[] = array($this->options['product_type'], PDO::PARAM_INT);
+		}	
 
 		if (array_key_exists('product_id_is_not', $this->options)) {
 			$where_clauses[] = 'pro_product_id != ?';
