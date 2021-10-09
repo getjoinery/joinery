@@ -99,12 +99,22 @@
 				$register_urls = $event->get_register_url();
 				if(is_array($register_urls)){
 					foreach($register_urls as $register_url){
-						$register_text .= '<a class="button button-lg button-dark"  href="'.$register_url['link'].'">Register Now ('.$register_url['label'].')</a><br>';
+						if($register_url['link']){
+							$register_text .= '<a class="button button-lg button-dark"  href="'.$register_url['link'].'">Register Now ('.$register_url['label'].')</a><br>';
+						}
+						else{
+							$register_text .= '<a class="button button-lg button-dark"  href="javascript:void(0);">Sold Out ('.$register_url['label'].')</a><br>';							
+						}
 					}
 					echo $register_text;
 				}
 				else{
-					echo '<a class="button button-lg button-dark" href="'.$register_urls.'">Register Now</a>';
+					if($register_url['link']){
+						echo '<a class="button button-lg button-dark" href="'.$register_urls.'">Register Now</a>';
+					}
+					else{
+						echo '<a class="button button-lg button-dark" href="javascript:void(0);">Sold Out</a>';
+					}
 				}			
 				
 				

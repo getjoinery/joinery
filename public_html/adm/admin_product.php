@@ -73,7 +73,7 @@
 			echo 'Price: <b>User chooses</b><br>';
 		}
 		
-		echo 'Max purchase: <b>'. $product->get('pro_max_purchase_count').'</b><br>';
+		echo 'Max that can be added to cart: <b>'. $product->get('pro_max_cart_count').'</b><br>';
 		if($product->get('pro_evt_event_id')){
 			$event = new Event($product->get('pro_evt_event_id'), TRUE);
 			$event_date = '';

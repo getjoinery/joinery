@@ -8,6 +8,8 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
 
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
+
 class ProductException extends SystemClassException {}
 
 class ProductRequirementException extends SystemClassException {}
@@ -706,7 +708,8 @@ class Product extends SystemBase {
 		'pro_description' => 'Product Description',
 		'pro_price' => 'Price',
 		'pro_requirements' => 'Requirements of this product',
-		'pro_max_purchase_count' => 'Maximum number of this item that can be bought at one time',
+		'pro_max_cart_count' => 'Maximum number of this item that can be bought at one time',
+		'pro_max_purchase_count' => 'Maximum number of this item that can be bought total',
 		'pro_prg_product_group_id' => 'Product group this product is part of',
 		'pro_after_purchase_message' => 'Message shown after purchase of the item',
 		'pro_evt_event_id' => 'Event id if the order is for an event',
@@ -819,6 +822,22 @@ class Product extends SystemBase {
 		return NULL;
 	}
 	
+	function get_number_purchased($status = OrderItem::STATUS_PAID){
+		//COUNT THE NUMBER OF PRODUCTS PURCHASED SO FAR
+		$orders = new MultiOrderItem(array('product_id' => $this->key, 'status' => $status));
+		return $orders->count_all();		
+	}
+	
+	function is_sold_out(){
+		//CHECK AGAINST MAX NUMBER ALLOWED
+		$sold_out = false;
+		if($this->get('pro_max_purchase_count')){
+			if($this->get_number_purchased() >= $this->get('pro_max_purchase_count')){
+				$sold_out = true;
+			}
+		}	
+		return $sold_out;
+	}
 
 	function GetProductById($product_id) {
 		$data = SingleRowFetch('pro_products', 'pro_product_id',
@@ -1095,6 +1114,7 @@ class Product extends SystemBase {
 			  "pro_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
 			  "pro_description" text COLLATE "pg_catalog"."default",
 			  "pro_max_purchase_count" int4 DEFAULT 0,
+			  "pro_max_cart_count" int4 DEFAULT 0,
 			  "pro_prg_product_group_id" int4,
 			  "pro_after_purchase_message" text COLLATE "pg_catalog"."default",
 			  "pro_evt_event_id" int4,

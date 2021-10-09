@@ -37,6 +37,9 @@ $page->public_header(array(
 		if(!$product->get('pro_is_active')){
 			echo '<p>Sorry, this item is currently not available for purchase/registration.</p>';		
 		}
+		else if($product->is_sold_out()){
+			echo '<p>Sorry, this item is currently sold out.</p>';		
+		}
 		else{
 				?>
 				<!--<ul class="list-inline-slash font-small margin-bottom-10">
