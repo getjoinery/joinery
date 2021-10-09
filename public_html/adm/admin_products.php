@@ -57,10 +57,10 @@
 		$page->tableheader($headers, $table_options, $pager);
 
 		foreach($products as $product) {
-			$orders = new MultiOrderItem(array('product_id' => $product->get('pro_product_id')));
-			$orders->load();
-			$product_order_count = count($orders);
-			$product_rev = array_sum($orders->get_prices());
+			$order_items = new MultiOrderItem(array('product_id' => $product->get('pro_product_id'), 'status' => OrderItem::STATUS_PAID));
+			$order_items->load();
+			$product_order_count = count($order_items);
+			$product_rev = array_sum($order_items->get_prices());
 	
 			if($product->get('pro_evt_event_id')){
 				$event = new Event($product->get('pro_evt_event_id'), TRUE);

@@ -39,7 +39,7 @@ class ShoppingCart {
 	public function add_item($product, $form_data) {
 		// First lets validate we can add this item to the cart!
 		$current_count = 0;
-		if ($product->get('pro_max_purchase_count')) {
+		if ($product->get('pro_max_cart_count')) {
 			// Check to make sure we haven't gone over this item's maximum purchase count
 			foreach($this->get_items() as $item) {
 				list ($unused_id, $item_quantity, $item_product) = $item;
@@ -48,10 +48,10 @@ class ShoppingCart {
 				}
 			}
 
-			if ($current_count >= $product->get('pro_max_purchase_count')) {
+			if ($current_count >= $product->get('pro_max_cart_count')) {
 				throw new ShoppingCartException(
-					'Sorry, you can not add this item to you cart more than ' . $product->get('pro_max_purchase_count') 
-					. (($product->get('pro_max_purchase_count') == 1) ? ' time' : ' times') . '.  <a href="/cart">
+					'Sorry, you can not add this item to you cart more than ' . $product->get('pro_max_cart_count') 
+					. (($product->get('pro_max_cart_count') == 1) ? ' time' : ' times') . '.  <a href="/cart">
 					View your current shopping cart</a> for more details.');
 			}
 		}

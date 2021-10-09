@@ -224,15 +224,26 @@ class Event extends SystemBase {
 		else if($numproducts == 1){
 			$products->load();
 			$product = $products->get(0);
-			return '/product?product_id=' . $product->key;	
+			if($product->is_sold_out()){
+				return NULL;
+			}
+			else{
+				return '/product?product_id=' . $product->key;	
+			}
 		}
 		else if($numproducts > 1){
 			$products->load();			
 			$product_list = array();
 			foreach ($products as $product){
 				$product_temp = array();
-				$product_temp['label'] = $product->get('pro_name');
-				$product_temp['link'] = '/product?product_id=' . $product->key;
+				if($product->is_sold_out()){
+					$product_temp['label'] = $product->get('pro_name');
+					$product_temp['link'] = NULL;					
+				}
+				else{
+					$product_temp['label'] = $product->get('pro_name');
+					$product_temp['link'] = '/product?product_id=' . $product->key;
+				}
 				$product_list[] = $product_temp;
 			}
 			return $product_list;	

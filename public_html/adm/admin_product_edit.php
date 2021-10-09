@@ -71,7 +71,7 @@
 				$product->set('pro_recurring', NULL);
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
@@ -129,6 +129,7 @@
 	
 	$validation_rules = array();
 	$validation_rules['pro_name']['required']['value'] = 'true';
+	$validation_rules['pro_max_cart_count']['required']['value'] = 'true';
 	$validation_rules['pro_max_purchase_count']['required']['value'] = 'true';
 	$validation_rules['pro_requirements']['required']['value'] = 'true';
 	
@@ -234,7 +235,8 @@
 	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);
 
 	echo $formwriter->textinput('Price ('.$currency_symbol.'no cents)', 'pro_price', 'ctrlHolder', 100, (int)$product->get('pro_price'), '', 5, '');
-	echo $formwriter->textinput('Max Number that can be added to cart:', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 3, '');
+	echo $formwriter->textinput('Max Number that can be added to cart (0 for unlimited):', 'pro_max_cart_count', 'ctrlHolder', 100, $product->get('pro_max_cart_count'), '', 3, '');
+	echo $formwriter->textinput('Max Number that can be purchased total (0 for unlimited):', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 3, '');
 	echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
 	
 
