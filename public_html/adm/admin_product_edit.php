@@ -223,10 +223,13 @@
 		NULL,  //NUM PER PAGE
 		NULL,  //OFFSET
 	);
-	$groups->load();
-	$optionvals = $groups->get_dropdown_array();
-	echo $formwriter->dropinput("Event Bundle", "pro_grp_group_id", "ctrlHolder", $optionvals, $product->get('pro_grp_group_id'), '', TRUE);
-
+	$numbundles = $groups->count_all();
+	if($numbundles){
+		$groups->load();
+		$optionvals = $groups->get_dropdown_array();
+		echo $formwriter->dropinput("Event Bundle", "pro_grp_group_id", "ctrlHolder", $optionvals, $product->get('pro_grp_group_id'), '', TRUE);
+	}
+	
 	$optionvals = array("One price"=>1, 'Multiple pricing levels' => 2, 'User chooses price'=>3);
 	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);
 
