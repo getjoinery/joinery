@@ -86,22 +86,19 @@
 		$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 	}
 	
-	if($order_item->get('odi_evr_event_registrant_id')){
-		$event_registrant = new EventRegistrant($order_item->get('odi_evr_event_registrant_id'), TRUE);
-		$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-		
-		echo 'Current event registration:<br>  '. $order_item_user->display_name(). ' - ' . $event->get('evt_name').'<br>';
-	}
-	
 
 	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => ASC));
 	$users->load();
 	$optionvals = $users->get_dropdown_array();
 	echo $formwriter->dropinput("User", "odi_usr_user_id", "ctrlHolder", $optionvals, $order_item->get('odi_usr_user_id'), '', TRUE, FALSE, '/ajax/user_search_ajax');	 
  	
+	if($order_item->get('odi_evr_event_registrant_id')){
+		$event_registrant = new EventRegistrant($order_item->get('odi_evr_event_registrant_id'), TRUE);
+		$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
+		
+		echo 'Current event registration:<br>  '. $order_item_user->display_name(). ' - ' . $event->get('evt_name').'<br>';
+	}
 
-	//$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
-	//$event_registrants->load();
 	$products = new MultiProduct(array('user_id'=> $user->key));
 	$products->load();
 	$optionvals = $products->get_dropdown_array();
