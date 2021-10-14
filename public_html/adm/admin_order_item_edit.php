@@ -6,6 +6,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -19,12 +20,24 @@
 	$user = new User($order_item->get('odi_usr_user_id'), TRUE);
 	
 	if($_POST){
-		if(!$_POST['odi_evr_event_registrant_id']){
-			$order_item->set('odi_evr_event_registrant_id', NULL);
+		
+		$order_item->set('odi_pro_product_id', $_POST['odi_pro_product_id']);
+		
+		$product = new Product($_POST['odi_pro_product_id'], TRUE);
+		if($product->get('pro_evt_event_id')){
+			$event_registrant = EventRegistrant::check_if_registrant_exists($user->key, $product->get('pro_evt_event_id'));
+			if($event_registrant){
+				//CHANGE THE EXISTING ONE
+				$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
+			}
+			else{
+				//CREATE AN EVENT REGISTRANT IF DOESN'T EXIST
+				$event = new Event($product->get('pro_evt_event_id'), TRUE);
+				$event_registrant = $event->add_registrant($user->key);
+				$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);			
+			} 	
 		}
-		else{
-			$order_item->set('odi_evr_event_registrant_id', $_POST['odi_evr_event_registrant_id']);
-		}
+		
 		
 		$order_item->set('odi_usr_user_id', $_POST['odi_usr_user_id']);
 		
@@ -87,10 +100,12 @@
 	echo $formwriter->dropinput("User", "odi_usr_user_id", "ctrlHolder", $optionvals, $order_item->get('odi_usr_user_id'), '', TRUE, FALSE, '/ajax/user_search_ajax');	 
  	
 
-	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
-	$event_registrants->load();
-	$optionvals = $event_registrants->get_dropdown_array();
-	echo $formwriter->dropinput("Event registration", "odi_evr_event_registrant_id", "ctrlHolder", $optionvals, $order_item->get('odi_evr_event_registrant_id'), '', TRUE);	
+	//$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
+	//$event_registrants->load();
+	$products = new MultiProduct(array('user_id'=> $user->key));
+	$products->load();
+	$optionvals = $products->get_dropdown_array();
+	echo $formwriter->dropinput("Product purchased", "odi_pro_product_id", "ctrlHolder", $optionvals, $order_item->get('odi_pro_product_id'), '', TRUE);	
 	
 
  
