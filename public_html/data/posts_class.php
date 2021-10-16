@@ -395,7 +395,7 @@ class MultiPost extends SystemMultiBase {
 				$tags[] = $group->key;
 			}
 		}	
-		return $tags;
+		return array_unique($tags);
 	}
 	
 	static function get_posts_for_tag($tag, $numperpage=NULL, $page_offset=NULL){ 
