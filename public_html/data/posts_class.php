@@ -406,7 +406,7 @@ class MultiPost extends SystemMultiBase {
 		
 		$group_members = new MultiGroupMember(
 			array('group_id' => $group->key),  //SEARCH CRITERIA
-			NULL,
+			array('post_id'=>'desc'),
 			$numperpage,
 			$page_offset
 		);
