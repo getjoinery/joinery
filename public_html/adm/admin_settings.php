@@ -76,6 +76,7 @@
 
 
 	$pageoptions['altlinks'] = array('New Setting'=>'/admin/admin_setting_edit');
+	$pageoptions['altlinks'] = array('Menu'=>'/admin/admin_public_menu');
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
