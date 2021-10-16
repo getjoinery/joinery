@@ -120,7 +120,7 @@
 								}
 
 								echo $formwriter->start_buttons();
-								echo $formwriter->new_form_button('Comment');
+								echo $formwriter->new_form_button('Comment', 'button button-lg button-dark');
 								echo $formwriter->end_buttons();
 								echo $formwriter->end_form();
 								?>
