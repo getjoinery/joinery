@@ -45,7 +45,7 @@
 										<span class="font-small"><?php echo $author->display_name().' at '.LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'); ?></span>
 									</div>
 								</div>
-								<h5><a href="<?php echo $post->get('pst_link'); ?>"><?php echo $post->get('pst_title'); ?></a></h5>
+								<h5><a href="<?php echo $post->get_url(); ?>"><?php echo $post->get('pst_title'); ?></a></h5>
 								
 								<?php
 								echo'<p>';					
@@ -58,7 +58,7 @@
 								echo '</p>';
 								?>
 								<div class="margin-top-20">
-									<a class="button-text-1" href="<?php echo $post->get('pst_link'); ?>">Read More</a>
+									<a class="button-text-1" href="<?php echo $post->get_url(); ?>">Read More</a>
 								</div>
 							</div>
 						</div>

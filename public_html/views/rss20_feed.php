@@ -27,8 +27,8 @@
 
 		echo '<item><title>'.$title.'</title>
 		<description><![CDATA['.$post->get('pst_short_description').']]></description>
-		<link>'.$settings->get_setting('webDir_SSL').'/'.$post->get('pst_link').'</link>
-		<guid>'.$settings->get_setting('webDir_SSL').'/'.$post->get('pst_link').'</guid>
+		<link>'.$settings->get_setting('webDir_SSL').$post->get_url().'</link>
+		<guid>'.$settings->get_setting('webDir_SSL').$post->get_url().'</guid>
 		<pubDate>'.LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York', DATE_RSS).'</pubDate>
 		</item>';
 
