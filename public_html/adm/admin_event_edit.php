@@ -28,10 +28,6 @@
 				$_POST['evt_description'] = LibraryFunctions::ToUTF8($_POST['evt_description']);
 		}
 		
-		if(!$event->get('evt_link')){
-			$event->set('evt_link', $event->create_url());
-		}
-		
 		if($_POST['evt_fil_file_id']){
 			$event->set('evt_fil_file_id', (int)$_POST['evt_fil_file_id']);
 		}
@@ -73,7 +69,9 @@
 			$event->set($field, $_REQUEST[$field]);
 		}
 		
-		
+		if(!$event->get('evt_link')){
+			$event->set('evt_link', $event->create_url());
+		}		
 
 		if($_POST['evt_start_time_date'] && $_POST['evt_start_time_time']){
 			$time_combined = $_POST['evt_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evt_start_time_time']);
