@@ -1221,12 +1221,12 @@ class MultiUser extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$items[$item->display_name()] = $item->key;
+			$items[$item->display_name().' - '.$item->get('usr_email')] = $item->key;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
 		}
-		return $items;
+		return $items; 
 
 	}
 	

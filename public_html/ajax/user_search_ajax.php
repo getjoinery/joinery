@@ -60,7 +60,10 @@ foreach ($users as $user) {
 
 $json = [];
 foreach ($users as $user) {
-     $json[] = ['id'=>$user->key, 'text'=>$user->display_name()];
+     $json[] = [
+		'id'=>$user->key, 
+		'text'=> $user->display_name().' - '.$user->get('usr_email')
+		];
 }
 
 echo json_encode($json);
