@@ -6,6 +6,10 @@
 	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/points_class.php');
 	
+		
+	echo 'turned off';
+	exit;
+	
 	$settings = Globalvars::get_instance();
 	$node_dir = $settings->get_setting('node_dir');
 
