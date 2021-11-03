@@ -288,7 +288,8 @@ class SessionControl{
 		}
 
 		//REMOVE INVALID URL
-		if(strpos(strtok($_SERVER["REQUEST_URI"],'?'), '/api')){
+		$page = strtok($_SERVER["REQUEST_URI"],'?');
+		if($page == '/api'){
 			return false;
 		}
 		
