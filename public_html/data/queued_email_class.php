@@ -170,7 +170,7 @@ class QueuedEmail extends SystemBase {
 			  "equ_to" varchar(64) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
 			  "equ_to_name" varchar(70) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
 			  "equ_body" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_subject" varchar(32) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
+			  "equ_subject" varchar(128) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
 			  "equ_timestamp" timestamp(6) NOT NULL DEFAULT now(),
 			  "equ_status" int2 DEFAULT (0)::smallint,
 			  "equ_ers_recurring_email_log_id" int4

@@ -286,6 +286,11 @@ class SessionControl{
 		if (!filter_var('http://fillerurl.com'.$_SERVER["REQUEST_URI"], FILTER_VALIDATE_URL)) {
 			return false;
 		}
+
+		//REMOVE INVALID URL
+		if(strpos($_SERVER["REQUEST_URI"], '/api')){
+			return false;
+		}
 		
 		//REMOVE UNSAFE ENCODING
 		if(strpos($_SERVER["REQUEST_URI"], '%')){
