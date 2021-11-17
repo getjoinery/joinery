@@ -36,7 +36,7 @@ if($settings->get_setting('urls_active')){
 	//CHECK REDIRECTS
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/urls_class.php');
 	$urls = new MultiUrl(
-		array('deleted'=>false, 'incoming'=>$static_routes_path),
+		array('deleted'=>false, 'incoming'=> mb_convert_encoding($static_routes_path, 'UTF-8', 'UTF-8')),
 		NULL,
 		1,
 		0,

@@ -12,6 +12,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/For
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 
 $session = SessionControl::get_instance();
+$session->check_permission(0);
 $session->set_return("/profile");
 
 $user = new User($session->get_user_id(), TRUE);
