@@ -173,6 +173,11 @@ class PublicPageMaster {
 
 	public function public_header_common($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
+		
+		if(!isset($options['is_404'])){
+			$options['is_404'] = 0;
+		}		
+		
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('force_https')){
@@ -196,10 +201,8 @@ class PublicPageMaster {
 		if(empty($options['noheader']) && !$options['is_404'] && $options['title']){ 
 			//TRACKING
 			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
-				if(!isset($options['is_404'])){
-					$options['is_404'] = 0;
-				}
-
+				print_r($options);
+				exit;
 				$session->save_visitor_event(1, $options['is_404']);
 			}
 		}
