@@ -263,18 +263,7 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 	public function public_footer($options=array()) {
 		$session = SessionControl::get_instance();
 		$session->clear_clearable_messages();
-				
-
-		//TRACKING
-		if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
-			if(!$session->crawlerDetect($_SERVER["HTTP_USER_AGENT"])){
-				if(!isset($options['is_404'])){
-					$options['is_404'] = 0;
-				}
-
-				$session->save_visitor_event(1, $options['is_404'], $session->get_user_id());
-			}
-		}		
+	
 ?>
 		
 			

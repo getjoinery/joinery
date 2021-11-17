@@ -86,18 +86,6 @@ class PublicPageMaster {
 		
 		$this->theme_url = LibraryFunctions::get_theme_path('web');
 		
-		
-		if(empty($options['noheader'])){
-			//TRACKING
-			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
-				if(!isset($options['is_404'])){
-					$options['is_404'] = 0;
-				}
-
-				$session->save_visitor_event(1, $options['is_404']);
-			}
-		}
-		
 	}
 	
 	public static function get_public_menu(){
@@ -177,7 +165,6 @@ class PublicPageMaster {
 		if(!isset($options['is_404'])){
 			$options['is_404'] = 0;
 		}		
-		
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('force_https')){
@@ -201,9 +188,9 @@ class PublicPageMaster {
 		if(empty($options['noheader']) && !$options['is_404'] && $options['title']){ 
 			//TRACKING
 			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
-				print_r($options);
-				exit;
-				$session->save_visitor_event(1, $options['is_404']);
+				if(!$session->crawlerDetect($_SERVER["HTTP_USER_AGENT"])){
+					$session->save_visitor_event(1, $options['is_404']);
+				}
 			}
 		}
 		
