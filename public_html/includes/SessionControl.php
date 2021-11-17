@@ -242,24 +242,40 @@ class SessionControl{
 	}
 	
 	public static function is_valid_page($page){
-		$check_list = array(
-			'.gif',
-			'.jpg',
-			'.jpeg',
-			'.png',
-			'.css',
-			'.js',
-			'.xml',
-			'google-captcha',
-			'.ico'
-		);
-
-
-		if (in_array($page, $check_list)) {
+		$page_parts = pathinfo($page);
+		
+		switch($page_parts['extension']){
+			
+			case 'gif':
 			return false;
-		} else {
-			return true;
+
+			case 'jpg':
+			return false;
+
+			case 'jpeg':
+			return false;
+
+			case 'png':
+			return false;
+
+			case 'css':
+			return false;
+
+			case 'js':
+			return false;		
+
+			case 'js':
+			return false;
+
+			case 'xml':
+			return false;
+
+			case 'ico':
+			return false;
+		
 		}
+		
+		return true;
 	}	
 	
 	
@@ -279,7 +295,7 @@ class SessionControl{
 			return false;
 		}		
 		
-		if(!SessionControl::is_valid_page(strtok($_SERVER["REQUEST_URI"],'?'))){
+		if(!SessionControl::is_valid_page($_SERVER["REQUEST_URI"])){
 			return false;
 		}
 		
@@ -302,23 +318,7 @@ class SessionControl{
 		if(strlen($_SERVER["REQUEST_URI"]) > 254){
 			return false;
 		}	
-
-		//DROP IMAGES
-		/*
-		$drop_these_extensions = array(
-			'gif',
-			'jpg',
-			'jpeg',
-			'png',
-			'ico',
-			'js',
-			'css'
-		);
-		$ext = pathinfo(strtolower($_SERVER["REQUEST_URI"]), PATHINFO_EXTENSION);
-		if (in_array($ext, $drop_these_extensions)) {
-			return false;
-		} 
-		*/
+		
 		
 		$source = NULL;
 		$campaign = NULL;
