@@ -753,7 +753,7 @@ class Product extends SystemBase {
 			}
 			else{
 				$error = 'This product is missing the price override.';
-				throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+				throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
 				exit;
 			}
 		}
@@ -764,7 +764,7 @@ class Product extends SystemBase {
 			} 
 			else{
 				$error = 'This product is missing a version.';
-				throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+				throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
 				exit;
 			}
 		}
@@ -779,13 +779,13 @@ class Product extends SystemBase {
 			}
 			else{
 				$error = 'This product is missing a price.';
-				throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+				throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
 				exit;
 			}
 		}	
 		else{
 			$error = 'This product has no price.';
-			throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+			throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
 			exit;
 		}
 		

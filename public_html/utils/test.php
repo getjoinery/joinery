@@ -10,6 +10,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
 
 	$session = SessionControl::get_instance();
+	
+	exit;
 
 	
 	$numperpage = 30;

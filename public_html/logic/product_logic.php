@@ -49,7 +49,7 @@ if ($_POST || isset($_GET['cart'])) {
 			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
 			$form_data['user_price_override'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $_REQUEST['user_price_override'])); 	
 			if(!$form_data['user_price_override']){
-				throw new ProductRequirementException(
+				throw new SystemDisplayableError(
 					'You must enter an amount in the "Price to pay" field.');
 			}
 			$cart->add_item($product, $form_data);
