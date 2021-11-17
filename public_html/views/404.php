@@ -5,7 +5,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
-		'title' => 'Page not found',
+		'title' => 'Page not found', 
 		'is_404' => 1,
 	);
 	$page->public_header($hoptions);

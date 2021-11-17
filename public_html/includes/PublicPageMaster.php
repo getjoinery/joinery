@@ -193,7 +193,7 @@ class PublicPageMaster {
 			$options['meta_description'] = $settings->get_setting('site_description');
 		}
 		
-		if(empty($options['noheader'])){
+		if(empty($options['noheader']) && !$options['is_404'] && $options['title']){ 
 			//TRACKING
 			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
 				if(!isset($options['is_404'])){
