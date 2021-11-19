@@ -87,7 +87,7 @@
 					<div class="col-12 col-lg-6">
 						<h3 class="font-weight-light margin-bottom-20">Our focus is on quality of movement, healthy body awareness, comfort, and longevity.</h3>
 						<p></p>
-						<a class="button button-lg button-radius button-reveal-right-dark margin-top-30" href="#"><i class="ti-arrow-right"></i><span>Learn More</span></a>
+						<a class="button button-lg button-radius button-reveal-right-dark margin-top-30" href="/events"><i class="ti-arrow-right"></i><span>Learn More</span></a>
 					</div>
 				</div>
 			</div><!-- end container -->
