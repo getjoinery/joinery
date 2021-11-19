@@ -63,13 +63,13 @@
 					<!-- Icon text box 2 -->
 					<div class="col-12 col-md-4">
 						<!--<i class="ti-blackboard text-dark"></i>-->
-						<h5 class="font-weight-normal margin-top-20">Specificity without Dogma</h5>
+						<h5 class="font-weight-normal margin-top-20">Specificity without Dogma ✨</h5>
 						<p>Frustrated with vague descriptions of "energy"?  We like to get specific, detached of dogma, with vibrant imagery that shows you all possibilities informed by anatomy and physics. </p>
 					</div>
 					<!-- Icon text box 3 -->
 					<div class="col-12 col-md-4">
 						<!--<i class="ti-comment-alt text-dark"></i>-->
-						<h5 class="font-weight-normal margin-top-20">Hilarious Delivery</h5>
+						<h5 class="font-weight-normal margin-top-20">Hilarious Delivery 🤣</h5>
 						<p>We're pretty funny - just ask our therapists and our students.</p>
 					</div>
 				</div><!-- end row -->
