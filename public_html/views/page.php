@@ -31,6 +31,7 @@
 	
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
+		'is_valid_page' => $is_valid_page,
 		'title' => $page_content->get('pac_title')
 	));
 	echo PublicPage::BeginPage($page_content->get('pac_title'));

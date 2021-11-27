@@ -7,6 +7,7 @@
 	
 	$page = new PublicPage(TRUE);
 	$page_options = array(
+		'is_valid_page' => $is_valid_page,
 		'title' => $event->get('evt_name')
 	);
 	if($event->get('evt_short_description')){

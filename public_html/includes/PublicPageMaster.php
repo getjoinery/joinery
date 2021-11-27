@@ -184,13 +184,11 @@ class PublicPageMaster {
 		if(!isset($options['meta_description']) || !$options['meta_description']){
 			$options['meta_description'] = $settings->get_setting('site_description');
 		}
-		
-		if(empty($options['noheader']) && !$options['is_404'] && $options['title']){ 
+
+		if(empty($options['noheader']) && !$options['is_404'] && $options['is_valid_page'] ){ 
 			//TRACKING
 			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
-				if(!$session->crawlerDetect($_SERVER["HTTP_USER_AGENT"])){
-					$session->save_visitor_event(1, $options['is_404']);
-				}
+				$session->save_visitor_event(1, $options['is_404']);
 			}
 		}
 		

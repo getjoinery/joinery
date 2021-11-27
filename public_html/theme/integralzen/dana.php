@@ -12,6 +12,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
+		'is_valid_page' => $is_valid_page,
 		'title' => 'Integral Zen Donations (Dana)',
 		'description' => '',
 		'body_id' => 'about-integral-zen',

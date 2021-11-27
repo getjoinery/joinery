@@ -8,6 +8,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
+		'is_valid_page' => $is_valid_page,
 		'title' => 'Galactic Tribune - An urbit news site'
 	);
 	$page->public_header($hoptions); 

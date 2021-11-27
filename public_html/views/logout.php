@@ -9,6 +9,7 @@
 
 	$page = new PublicPage();
 	$page->public_header(array(
+		'is_valid_page' => $is_valid_page,
 		'title' => 'Log Out'
 		),
 	NULL);

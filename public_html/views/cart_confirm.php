@@ -17,7 +17,8 @@
 	
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
-	'title' => "Checkout confirmation"
+		'is_valid_page' => $is_valid_page,
+		'title' => "Checkout confirmation"
 	));
 	echo PublicPage::BeginPage('Checkout confirmation');	
 	?>

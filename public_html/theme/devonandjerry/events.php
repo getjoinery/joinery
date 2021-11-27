@@ -6,6 +6,7 @@
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
+		'is_valid_page' => $is_valid_page,
 		'title' => 'Events'
 	));
 	echo PublicPage::BeginPage('Courses');

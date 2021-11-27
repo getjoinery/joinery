@@ -11,6 +11,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
+		'is_valid_page' => $is_valid_page,
 		'title' => 'Sitemap',
 	
 	);

@@ -35,6 +35,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
+		'is_valid_page' => $is_valid_page,
 		'title' => 'Jeremy Tunnell Blog',
 		'description' => 'Jeremy Tunnell blog.',
 		'banner' => 'Blog',

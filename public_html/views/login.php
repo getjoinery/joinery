@@ -8,6 +8,7 @@
 
 	$page = new PublicPage(TRUE);
 	$hoptions=array(
+		'is_valid_page' => $is_valid_page,
 		'title'=>'Log In'
 		);
 	$page->public_header($hoptions,NULL);
