@@ -11,6 +11,8 @@ $settings = Globalvars::get_instance();
 $site_template = $settings->get_setting('site_template');
 $template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template;
 
+//FOR STATS.  WE WILL ONLY RECORD HITS TO ACTUAL PAGES.
+$is_valid_page = false;
 
 //ALLOW CURRENT SITE TO OVERRIDE OR ADD ROUTES
 $template_file = $template_directory.'/serve.php';
@@ -141,6 +143,7 @@ if($settings->get_setting('files_active')){
 if(!$params[0]){
 	$template_file = $template_directory.'/index.php';
 	$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/index.php';
+	$is_valid_page = true;
 
 	if(file_exists($template_file)){
 		require_once($template_file);
@@ -180,6 +183,8 @@ if($params[0] == 'profile'){
 		$template_file = $template_directory.'/profile/profile.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/profile/profile.php';
 	}
+	
+	$is_valid_page = true;
 
 	if(file_exists($template_file)){
 		require_once($template_file);
@@ -211,6 +216,9 @@ if($settings->get_setting('blog_active')){
 	if($post){
 		$template_file = $template_directory.'/post.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/post.php';
+		
+		$is_valid_page = true;
+		
 		if(file_exists($template_file)){
 			require_once($template_file);
 			exit();
@@ -230,6 +238,9 @@ if($settings->get_setting('page_contents_active')){
 
 		$template_file = $template_directory.'/page.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
+		
+		$is_valid_page = true;
+		
 		if(file_exists($template_file)){
 			require_once($template_file);
 			exit();
@@ -245,6 +256,8 @@ if($settings->get_setting('page_contents_active')){
 if($params[0]){
 	$template_file = $template_directory.'/'.$params[0].'.php';
 	$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/'.$params[0].'.php';
+	
+	$is_valid_page = true; 
 
 	if(file_exists($template_file)){
 		require_once($template_file);

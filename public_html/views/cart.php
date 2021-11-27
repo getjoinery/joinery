@@ -6,7 +6,8 @@
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
-	'title' => 'Checkout'
+		'is_valid_page' => $is_valid_page,
+		'title' => 'Checkout'
 	));
 
 	echo PublicPage::BeginPage('Checkout');

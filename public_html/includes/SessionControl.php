@@ -294,7 +294,7 @@ class SessionControl{
 		if($is_404){
 			return false;
 		}		
-		
+		/*
 		if(!SessionControl::is_valid_page($_SERVER["REQUEST_URI"])){
 			return false;
 		}
@@ -313,6 +313,7 @@ class SessionControl{
 		if(strpos($_SERVER["REQUEST_URI"], '%')){
 			return false;
 		}
+		*/
 		
 		//DROP URLS THAT ARE TOO LONG
 		if(strlen($_SERVER["REQUEST_URI"]) > 254){

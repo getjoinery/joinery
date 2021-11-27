@@ -7,6 +7,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
 $page = new PublicPage(TRUE);
 $page->public_header(array(
+	'is_valid_page' => $is_valid_page,
 	'title' => $product->get('pro_name')
 	));
 	echo PublicPage::BeginPage('Add to Cart');

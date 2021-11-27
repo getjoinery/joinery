@@ -5,6 +5,7 @@
 
 	$page = new PublicPage();
 	$hoptions = array(
+		'is_valid_page' => $is_valid_page,
 		'title' => 'Page not found', 
 		'is_404' => 1,
 	);
