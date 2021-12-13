@@ -39,6 +39,7 @@
 
 	$cart = $session->get_shopping_cart();
 	$charge_total = $cart->get_total();
+
 	$receipts = array();
 	
 	
@@ -113,11 +114,11 @@
 	$stripe_item_list = array();
 	foreach($cart->items as $key => $cart_item) {
 		$email_fill = array();
-		list($quantity, $product, $data) = $cart_item;
+		list($quantity, $product, $data, $price, $discount) = $cart_item;
 		$product_version = $product->get_product_version($data);
-		$price = $product->get_price($product_version, $data);
+		//$price = $product->get_price($product_version, $data);
 		$product_name = $product->get('pro_name').' '. $product_version->prv_version_name;
-		$email_fill['purchase_amount'] = $price;
+		$email_fill['purchase_amount'] = $price - $discount;
 
 		//HANDLE SUBSCRIPTIONS
 		if($product->get('pro_recurring')){
@@ -146,7 +147,7 @@
 			$order_item->set('odi_pro_product_id', $product->key);
 			$order_item->set('odi_usr_user_id', $user->key);
 			$order_item->set('odi_product_info', base64_encode(serialize($data)));
-			$order_item->set('odi_price', $price);	
+			$order_item->set('odi_price', $price - $discount);	
 			
 			//STORE COMMENT IF ENTERED
 			if(isset($data['comment'])){
@@ -162,19 +163,19 @@
 			if($settings->get_setting('checkout_type') == 'stripe_regular'){
 				//CHECK FOR EXISTING PLAN
 				try{
-					$plan_name = 'subscription-' . (int)$price;
+					$plan_name = 'subscription-' . (int)($price - $discount);
 					$plan = \Stripe\Plan::retrieve($plan_name);
 				}
 				catch (Exception $e) {
 					//CREATE NEW PLAN
 					$plan = \Stripe\Plan::create([
-					  "amount" => (int)$price * 100,
+					  "amount" => (int)($price - $discount) * 100,
 					  "interval" => 'month',
 					  "product" => [
-						"name" => 'Subscription '.$currency_symbol . (int)$price,
+						"name" => 'Subscription '.$currency_symbol . (int)($price - $discount),
 					  ],
 					  "currency" => $currency_code,
-					  "id" => 'subscription-' . (int)$price,
+					  "id" => 'subscription-' . (int)($price - $discount),
 					]); 							
 				}
 
@@ -313,7 +314,7 @@
 			}
 			else{
 				//RECURRING DONATION
-				$email_fill['purchase_amount'] = $price;
+				$email_fill['purchase_amount'] = ($price - $discount);
 				$final_fill = array_merge($default_fill, $email_fill);
 				$activation_email = new EmailTemplate('monthly_donation_reciept', $user);
 				$activation_email->fill_template($final_fill);
@@ -324,15 +325,15 @@
 			
 			$receipts[$key+1][pname] = $product_name;
 			$receipts[$key+1][name] = $data['full_name_first']. ' ' .$data['full_name_last'];
-			$receipts[$key+1][price] = $price;				
+			$receipts[$key+1][price] = $price - $discount;				
 	
 						
 
-			$charge_total = $charge_total - $price;
+			$charge_total = $charge_total - $price - $discount;
 		}
 		else{
 			//ASSEMBLE THE STRIPE CHARGE DESCRIPTION
-			$stripe_current_item = substr($product_name, 0, 40) .' ('.$quantity.') - $'. $price. ' ';
+			$stripe_current_item = substr($product_name, 0, 40) .' ('.$quantity.') - $'. ($price - $discount). ' ';
 			array_push($stripe_item_list, $stripe_current_item);		
 		}
 	}		
@@ -412,10 +413,10 @@
 	//NOW HANDLE ALL OF THE NON RECURRING ITEMS
 	foreach($cart->items as $key => $cart_item) {
 		$email_fill = array();
-		list($quantity, $product, $data) = $cart_item;
+		list($quantity, $product, $data, $price, $discount) = $cart_item;
 		$product_version = $product->get_product_version($data);
-		$price = $product->get_price($product_version, $data);
-		$email_fill['purchase_amount'] = $price;
+		//$price = $product->get_price($product_version, $data);
+		$email_fill['purchase_amount'] = $price - $discount;
 
 		//ONLY NON RECURRING
 		$one_time_purchase_exists = 0;
@@ -445,7 +446,7 @@
 			$order_item->set('odi_pro_product_id', $product->key);
 			$order_item->set('odi_usr_user_id', $user->key);
 			$order_item->set('odi_product_info', base64_encode(serialize($data)));
-			$order_item->set('odi_price', $price);
+			$order_item->set('odi_price', $price - $discount);
 			$order_item->set('odi_is_subscription', false);			
 			if ($product_version) {
 				$order_item->set('odi_prv_product_version_id', $product_version->prv_product_version_id);
@@ -519,7 +520,7 @@
 			}
 			else{
 				//SINGLE DONATION
-				$email_fill['donation_amount'] = $price;
+				$email_fill['donation_amount'] = $price - $discount;
 				$final_fill = array_merge($default_fill, $email_fill);
 				$activation_email = new EmailTemplate('single_donation_reciept', $user);
 				$activation_email->fill_template($final_fill);
@@ -528,7 +529,7 @@
 
 			$receipts[$key+1][pname] = $product->get('pro_name').' '. $product_version->prv_version_name;
 			$receipts[$key+1][name] = $data['full_name_first']. ' ' .$data['full_name_last'];
-			$receipts[$key+1][price] = $price;				
+			$receipts[$key+1][price] = $price - $discount;				
 			
 			
 		}

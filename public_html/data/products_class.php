@@ -9,6 +9,8 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_codes_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_code_products_class.php');
 
 class ProductException extends SystemClassException {}
 
@@ -789,6 +791,36 @@ class Product extends SystemBase {
 			exit;
 		}
 		
+	}
+	
+	public function has_coupon($coupon_code_name){
+		$coupon_code = CouponCode::get_by_name($coupon_code_name);
+		if(!$coupon_code){
+			return false;
+		}
+
+		$searches = array('coupon_code_id' => $coupon_code->key);	
+		$coupon_code_products = new MultiCouponCodeProduct($searches);
+		$coupon_code_products->load();
+		foreach($coupon_code_products as $coupon_code_product){
+			if($coupon_code_product->get('ccp_pro_product_id') == $this->key){
+				$coupon_code = new CouponCode($coupon_code_product->get('ccp_ccd_coupon_code_id'), TRUE);
+				//CHECK VALIDITY
+				if($coupon_code->get('ccd_is_active')){
+
+					$current_time = LibraryFunctions::get_current_time('UTC');
+					if($coupon_code->get('ccd_start_time') && $coupon_code->get('ccd_start_time') > $current_time){
+						continue;
+					}
+					
+					if($coupon_code->get('ccd_end_time') && $coupon_code->get('ccd_end_time') < $current_time){
+						continue;
+					}
+					return $coupon_code;
+				}
+			}
+		}
+		return false;
 	}
 	
 
