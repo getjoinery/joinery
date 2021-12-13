@@ -172,6 +172,9 @@
 	
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("List event products on product index", "products_list_events_active", "ctrlHolder", $optionvals, $settings->get_setting('products_list_events_active'), '', FALSE);	
+
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Allow coupon codes", "coupons_active", "ctrlHolder", $optionvals, $settings->get_setting('coupons_active'), '', FALSE);
 	
 	echo '<hr>';
 

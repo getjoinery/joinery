@@ -13,6 +13,7 @@ class ShoppingCart {
 	public $items;
 	public $billing_user;
 	public $last_receipt;
+	public $coupon_code;
 
 	public function __construct() {
 		$this->items = array();
@@ -37,6 +38,7 @@ class ShoppingCart {
 	}
 
 	public function add_item($product, $form_data) {
+
 		// First lets validate we can add this item to the cart!
 		$current_count = 0;
 		if ($product->get('pro_max_cart_count')) {
@@ -73,8 +75,48 @@ class ShoppingCart {
 			}
 		}
 
+		$product_version = $product->get_product_version($form_data);
+		$price = $product->get_price($product_version, $form_data);
 
-		$this->items[] = array(1,	$product,	$form_data);
+		//HANDLE COUPONS
+		$settings = Globalvars::get_instance();
+		if($settings->get_setting('coupons_active')){
+			$discount = 0;
+			if($this->coupon_code){
+				if($coupon_obj = $product->has_coupon($this->coupon_code)){
+					$discount = $coupon_obj->get_discount($price);
+					//NO COUPONS GREATER THAN THE ITEM PRICE
+					if($discount > $price){
+						$discount = $price;
+					}
+
+				}
+			}
+		}
+
+		$this->items[] = array(1,	$product,	$form_data, $price, $discount);
+	}
+	
+	public function update_items_for_coupon(){
+
+		foreach($this->items as $key => $cart_item) {
+			list($quantity, $product, $data, $price, $discount) = $cart_item;
+			$product_version = $product->get_product_version($data);
+			$price = $product->get_price($product_version, $data);
+
+			if($this->coupon_code){
+				if($coupon_obj = $product->has_coupon($this->coupon_code)){
+					$coupon_discount = $coupon_obj->get_discount($price);
+					//NO COUPONS GREATER THAN THE ITEM PRICE
+					if($coupon_discount > $price){
+						$coupon_discount = $price;
+					}
+				}
+			}
+
+
+			$this->items[$key][4] = $coupon_discount;
+		}
 	}
 
 	public function count_items() {
@@ -92,7 +134,7 @@ class ShoppingCart {
 	public function get_items_generic() {
 		$item_array = array();
 		foreach($this->items as $key => $cart_item) {
-			list($quantity, $product, $data) = $cart_item;
+			list($quantity, $product, $data, $price, $discount) = $cart_item;
 			$item_array[] = array($key, $quantity, (array)$product, (array)$data);
 		}
 		return $item_array;
@@ -101,20 +143,19 @@ class ShoppingCart {
 	public function get_detailed_items() {
 		$detailed_items = array();
 		foreach ($this->items as $key => $cart_item) {
-			list($quantity, $product, $data) = $cart_item; 
+			list($quantity, $product, $data, $price, $discount) = $cart_item; 
 			$product_version = $product->get_product_version($data);
 			if ($product_version !== NULL) {
 				$name = $product->get('pro_name') . ' - ' . $product_version->prv_version_name;
 			} else {
 				$name = $product->get('pro_name');
 			}
-			
-			$price = $product->get_price($product_version, $data);
 
 			$detailed_items[] = array(
 				'id' => $key,
 				'name' => $name,
 				'price' => $price,
+				'discount' => $discount,
 				'quantity' => $quantity,
 				'total' => $quantity * $price,
 				'recurring' => $product->get('pro_recurring'),
@@ -180,7 +221,8 @@ class ShoppingCart {
 	public function get_total() {
 		$total_price = 0;
 		foreach($this->get_detailed_items() as $cart_item) {
-			$total_price += $cart_item['total'];
+			$this_item_price = $cart_item['total'] -  $cart_item['discount'];
+			$total_price += $this_item_price;
 		}
 		return $total_price;
 	}
@@ -208,6 +250,7 @@ class ShoppingCart {
 	public function clear_cart() {
 		$this->items = array();
 		$this->item_id = 0;
+		$this->coupon_code = NULL;
 	}
 
 }

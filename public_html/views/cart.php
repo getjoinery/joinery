@@ -32,24 +32,28 @@
 							$page->public_footer($foptions=array('track'=>TRUE));
 							exit();
 					} 
-					
-	
 				
 					$headers = array('Item', 'Description', 'Price', '');
 					$page->tableheader($headers, 'table cart-table');
 					
 
-
+					$total_discount = 0;
 					foreach($cart->items as $key => $cart_item) {
+						
 						$rowvalues = array();
-						list($quantity, $product, $data) = $cart_item;
-						$product_version = $product->get_product_version($data);
+						list($quantity, $product, $data, $price, $discount) = $cart_item;
 
-						$price = $product->get_price($product_version, $data);
 
 						array_push($rowvalues, $key+1);
 						array_push($rowvalues, $product->get('pro_name').' '. $product_version->prv_version_name . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') ');
-						array_push($rowvalues, $currency_symbol . money_format('%i', $price));
+						
+						$coupon_discount_words = '';
+						//HANDLE COUPONS
+						if($discount){
+							$coupon_discount_words = ' ('.$currency_symbol.money_format('%i', $discount). ' discount)'; 
+						}
+						
+						array_push($rowvalues, $currency_symbol . money_format('%i', $price). $coupon_discount_words);
 						array_push($rowvalues, '<span class="icon-remove"><a href="/cart?r=' . $key	. '">Remove</a></span>');
 						$page->disprow($rowvalues);
 				
@@ -57,7 +61,7 @@
 					}	
 					$page->endtable();		
 					?>
-					<p class="cart-total">Total: <?php echo $currency_symbol; ?><?php echo  money_format('%i', $cart->get_total()); ?>			
+					<p class="cart-total">Total: <?php echo $currency_symbol; ?><?php echo  money_format('%i', $cart->get_total() - $total_discount); ?>			
 					<span style="float:right;">(<a href="/cart_clear">clear cart</a>)</span>
 					</p> 				
 					</div>
@@ -108,7 +112,7 @@
 						$optionvals = array();
 						$selected = '';
 						foreach($cart->items as $key => $cart_item) {
-							list($quantity, $product, $data) = $cart_item;
+							list($quantity, $product, $data, $price, $discount) = $cart_item;
 							$name = $data['full_name_first'] . ' ' . $data['full_name_last'];
 							$optionvals[$name] = $data['email'];
 							if(!$selected){
@@ -129,8 +133,55 @@
 							
 					}
 
+					$settings = Globalvars::get_instance();
+					if($settings->get_setting('coupons_active')){
+						echo '<h5 class="font-weight-medium">Coupon Code</h5>';
+						if($cart->coupon_code){
+							echo 'Applied: '.$cart->coupon_code.' <a href="/cart?clear_coupon_code=1">clear coupon</a><br><br>';
+						}
+						else{
+							?>
+							<style>
+							#coupon_code {
+							  font-size: 16px;
+							  font-size: max(16px, 1em);
+							  font-family: inherit;
+							  padding: 0.25em 0.5em;
+							  background-color: #fff;
+							  border: 2px solid var(--input-border);
+							  border-radius: 4px;
+							  width: 150px;
+							  display: inline-block;
+							}
+							
+							.button-custom-coupon {
+								display: inline-block;
+								font: 400 13px
+								 "Poppins", sans-serif;
+									letter-spacing: 1px;
+									text-transform: uppercase;
+								height: 35px;
+							}
+							
+							.coupon_code_container {
+								display: inline-block;
+							}
+							
+							</style>
+							<?php
+							$formwriter = new FormWriterPublic("form_coupon", TRUE);
+							echo $formwriter->begin_form("", "get", '/cart');
 
-	
+							//echo $formwriter->textinput('', 'coupon_code', NULL, 64, NULL, '', 255, '');
+							?><input name="coupon_code" id="coupon_code" value="" size="64" type="text" class="uk-input "  maxlength="255" /><?php
+							//echo $formwriter->start_buttons();
+							//echo '<input type="button" value="Submit" style="width:100px;">';
+							echo $formwriter->new_form_button('Add Coupon', 'button button-sm button-dark button-custom-coupon', 'submit1');
+							//echo $formwriter->end_buttons();
+
+							echo $formwriter->end_form();
+						}
+					}
 					if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
 
 						if($settings->get_setting('checkout_type') == 'stripe_checkout'){
@@ -142,19 +193,19 @@
 									
 									//CHECK FOR EXISTING PLAN
 									try{
-										$plan_name = 'recurring_donation-' . (int)$cart_item['price'];
+										$plan_name = 'recurring_donation-' . (int)($cart_item['price'] - $cart_item['discount']);
 										$plan = \Stripe\Plan::retrieve($plan_name);
 									}
 									catch (Exception $e) {
 										//CREATE NEW PLAN
 										$plan = \Stripe\Plan::create([
-										  "amount" => (int)$cart_item['price'] * 100,
+										  "amount" => (int)($cart_item['price'] - $cart_item['discount']) * 100,
 										  "interval" => "month",
 										  "product" => [
-											"name" => 'Recurring donation $' . (int)$cart_item['price'],
+											"name" => 'Recurring donation $' . (int)($cart_item['price'] - $cart_item['discount']),
 										  ],
 										  "currency" => $currency_code,
-										  "id" => 'recurring_donation-' . (int)$cart_item['price'],
+										  "id" => 'recurring_donation-' . (int)($cart_item['price'] - $cart_item['discount']),
 										]); 							
 									}
 
@@ -172,10 +223,12 @@
 								else{
 									//ASSEMBLE THE STRIPE PRODUCT ARRAY
 									//'images' => ['https://example.com/t-shirt.png'],
+
+																	
 									$stripe_current_item = array(
 										'name' => $cart_item['name'],
 										'description' => $cart_item['name'].' ',			
-										'amount' => (int)$cart_item['price'] * 100,
+										'amount' => (int)($cart_item['price'] - $cart_item['discount']) * 100,
 										'currency' => $currency_code,
 										'quantity' => $cart_item['quantity'],
 									);
