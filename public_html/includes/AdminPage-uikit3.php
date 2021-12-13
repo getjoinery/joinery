@@ -387,6 +387,9 @@ $("#admin_panel").toggle();
 					if($menu_id == 32 && !$settings->get_setting('urls_active')){
 						continue;
 					}
+					if($menu_id == 36 && !$settings->get_setting('coupons_active')){
+						continue;
+					}
 					
 					if(!$menu_info['parent']){
 						if($menu_info['currentmain']){
