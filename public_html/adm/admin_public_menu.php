@@ -53,7 +53,7 @@
 	foreach ($menus as $menu){
 		if($menu[parent]){
 			$rowvalues = array();
-			array_push($rowvalues, $menu['name'].' (ID: '.$menu['id'].')');
+			array_push($rowvalues, $menu['name']);
 			if(empty($submenus)){	
 				array_push($rowvalues, 'None');
 			}
@@ -67,6 +67,7 @@
 			<input type="hidden" class="hidden" name="pmu_public_menu_id" value="'.$menu[id].'" />
 			<button type="submit">Delete</button>
 			</form>';
+				$delform .= ' <a href="/admin/admin_public_menu_edit?pmu_public_menu_id='.$menu[id].'">edit</a>';
 			array_push($rowvalues, $delform);	
 			$page->disprow($rowvalues);		
 			
@@ -82,6 +83,7 @@
 					<input type="hidden" class="hidden" name="pmu_public_menu_id" value="'.$submenu[id].'" />
 					<button type="submit">Delete</button>
 					</form>';
+					$delform .= ' <a href="/admin/admin_public_menu_edit?pmu_public_menu_id='.$submenu[id].'">edit</a>';
 					array_push($rowvalues, $delform);	
 					$page->disprow($rowvalues);					
 					

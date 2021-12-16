@@ -67,7 +67,16 @@
 	
 	echo $formwriter->textinput('Menu name', 'pmu_name', NULL, 100, $public_menu->get('pmu_name'), '', 255, '');	
 	echo $formwriter->textinput('Menu link', 'pmu_link', NULL, 100, $public_menu->get('pmu_link'), '', 255, '');
-	echo $formwriter->textinput('Parent Menu Id', 'pmu_parent_menu_id', NULL, 4, $public_menu->get('pmu_parent_menu_id'), '', 255, '');
+	
+	$menulist = new MultiPublicMenu(
+		array('has_no_parent_menu_id'=>true),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$menulist->load();
+	$optionvals = $menulist->get_dropdown_array();
+	echo $formwriter->dropinput("Parent Menu", "amu_parent_menu_id", "ctrlHolder", $optionvals, $public_menu->get('amu_parent_menu_id'), '', TRUE);	
+	
 	echo $formwriter->textinput('Order', 'pmu_order', NULL, 4, $public_menu->get('pmu_order'), '', 255, '');
 
 	echo $formwriter->start_buttons();

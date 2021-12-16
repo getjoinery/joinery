@@ -5,6 +5,8 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Pager.php');
 
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/admin_menus_class.php');
+
 class AdminPage{
 
 	private $rowcount;
@@ -358,7 +360,7 @@ $("#admin_panel").toggle();
 					<li class="uk-nav-header">MAIN MENU</li>
 
 				<?php 		
-				$admin_menu = $this->getadminmenu($user->get('usr_permission'), $pagevars['menu-id']); 
+				$admin_menu = MultiAdminMenu::getadminmenu($user->get('usr_permission'), $pagevars['menu-id']); 
 				$iterate_menu = $admin_menu;
 				
 				foreach ($admin_menu as $menu_id=>$menu_info){	
@@ -527,7 +529,7 @@ $("#admin_panel").toggle();
 					<li class="uk-active"><a href="#">Active</a></li>
 					<li class="uk-parent">
 				<?php 		
-				$admin_menu = $this->getadminmenu($user->get('usr_permission'), $pagevars['menu-id']); 
+				$admin_menu = MultiAdminMenu::getadminmenu($user->get('usr_permission'), $pagevars['menu-id']); 
 				$iterate_menu = $admin_menu;				
 				foreach ($admin_menu as $menu_id=>$menu_info){			
 					if(!$menu_info['parent']){
@@ -611,68 +613,6 @@ $("#admin_panel").toggle();
 <?php
 	}
 
-
-
-	function getadminmenu($user_permission, $current_menuid){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		//TOP MENU
-		$sql = "SELECT amu_admin_menu_id, amu_icon,amu_menudisplay, amu_defaultpage,amu_parent_menu_id FROM amu_admin_menus WHERE amu_min_permission <= :currpermission AND amu_disable=0 ORDER BY amu_admin_menus.amu_order ASC";
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':currpermission', $user_permission, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		$entries = $q->fetchAll();
-		$entries2 = $entries;
-	   
-
-	   //FIND OUT WHICH SUBTAB WE ARE ON BY GETTING THE CURRENT FILE
-	   $thisfile = basename($_SERVER['PHP_SELF']);
-
-		$firsttime=0;
-		while(current($_GET)){
-			$thisgetvar = key($_GET);
-			$thisgetval = current($_GET);
-
-			if($firsttime == 0){
-				$thisfile .= "?$thisgetvar=$thisgetval";
-				$firsttime=1;
-			}
-			else{
-				$thisfile .= "&$thisgetvar=$thisgetval";
-			}
-			next($_GET);
-		}
-
-	
-		$finalmenu = array();
-		foreach ($entries as $entry){
-			$has_subs = FALSE;
-			foreach ($entries2 as $entry2){
-				if($entry2->amu_parent_menu_id == $entry->amu_admin_menu_id){
-					$has_subs = TRUE;
-				}
-			}			
-			
-			
-			$finalmenu[$entry->amu_admin_menu_id] = array('parent'=>$entry->amu_parent_menu_id, 'currentmain'=>FALSE, 'currentsub'=>FALSE, 'defaultpage'=>$entry->amu_defaultpage, 'display'=>$entry->amu_menudisplay, 'icon'=>$entry->amu_icon, 'has_subs'=>$has_subs);
-
-			if($current_menuid == $entry->amu_admin_menu_id){
-				$finalmenu[$entry->amu_admin_menu_id]['currentmain'] = 1;
-			}
-			else if($thisfile == $entry->amu_defaultpage){
-				$finalmenu[$entry->amu_admin_menu_id]['currentsub'] = 1;
-			}
-		}
-		
-		return $finalmenu;
-	}
 
 
 	
