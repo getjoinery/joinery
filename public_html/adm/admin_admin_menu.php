@@ -19,7 +19,7 @@
 		exit();				
 	}
 
-	$admin_menu = MultiAdminMenu::getadminmenu(10, NULL); 
+	$admin_menu = MultiAdminMenu::getadminmenu(10, NULL, TRUE); 
 	$iterate_menu = $admin_menu;
 
 	$page = new AdminPage();
@@ -54,8 +54,14 @@
 		$menu_obj = new AdminMenu($menu_id, TRUE);
 		
 		if(!$menu_info['parent']){
+			
+			$disablednote = '';
+			if($menu_obj->get('amu_disable')){
+				$disablednote = '<b>disabled</b>';
+			}
+			
 			$rowvalues = array();
-			array_push($rowvalues, $menu_info['display']);
+			array_push($rowvalues, $menu_info['display'] . ' ' . $disablednote);
 			array_push($rowvalues, $menu_info['defaultpage']);
 			array_push($rowvalues, $menu_info['icon']);
 			array_push($rowvalues, $menu_obj->get('amu_order'));
@@ -69,8 +75,14 @@
 			foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
 				if($iterate_menu_info['parent'] == $menu_id){
 					$menu_obj = new AdminMenu($iterate_menu_id, TRUE);
+					
+					$disablednote = '';
+					if($menu_obj->get('amu_disable')){
+						$disablednote = '<b>disabled</b>';
+					}
+					
 					$rowvalues = array();
-					array_push($rowvalues, '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'.$iterate_menu_info['display']);
+					array_push($rowvalues, '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'.$iterate_menu_info['display']. ' ' .$disablednote);
 					array_push($rowvalues, $iterate_menu_info['defaultpage']);
 					array_push($rowvalues, $iterate_menu_info['icon']);
 					array_push($rowvalues, $menu_obj->get('amu_order'));
