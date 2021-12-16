@@ -16,7 +16,15 @@
 
 	if($_POST){
 		
-		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_parent_menu_id', 'amu_order', 'amu_min_permission', 'amu_icon', 'amu_disabled');
+
+		if($_REQUEST[$amu_parent_menu_id]){
+			$admin_menu->set('amu_parent_menu_id', $_REQUEST[$amu_parent_menu_id]);
+		}
+		else{
+			$admin_menu->set('amu_parent_menu_id', NULL);
+		}
+		
+		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission', 'amu_icon', 'amu_disable');
 
 		foreach($editable_fields as $field) {
 			$admin_menu->set($field, $_REQUEST[$field]);
@@ -79,7 +87,7 @@
 	echo $formwriter->textinput('Minimum permission', 'amu_min_permission', NULL, 4, $admin_menu->get('amu_min_permission'), '', 255, '');
 	
 	$optionvals = array("Enabled"=>0, 'Disabled' => 1);
-	echo $formwriter->dropinput("Enabled", "amu_disabled", "ctrlHolder", $optionvals, $admin_menu->get('amu_disabled'), '', FALSE);
+	echo $formwriter->dropinput("Enabled", "amu_disable", "ctrlHolder", $optionvals, $admin_menu->get('amu_disable'), '', FALSE);
 	
 	echo $formwriter->textinput('Icon name', 'amu_icon', NULL, 100, $admin_menu->get('amu_icon'), '', 255, '');
 

@@ -28,7 +28,7 @@ class AdminMenu extends SystemBase {
 	public static $constants = array();
 
 	public static $required = array(
-		'amu_menudisplay', 'amu_defaultpage');
+		'amu_menudisplay');
 
 	public static $field_constraints = array();	
 	
@@ -221,15 +221,23 @@ class MultiAdminMenu extends SystemMultiBase {
 
 	}
 	
-	static function getadminmenu($user_permission, $current_menuid){
+	static function getadminmenu($user_permission, $current_menuid, $get_all=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
 		//TOP MENU
-		$sql = "SELECT amu_admin_menu_id, amu_icon,amu_menudisplay, amu_defaultpage,amu_parent_menu_id FROM amu_admin_menus WHERE amu_min_permission <= :currpermission AND amu_disable=0 ORDER BY amu_admin_menus.amu_order ASC";
+		if($get_all){
+			$sql = "SELECT amu_admin_menu_id, amu_icon,amu_menudisplay, amu_defaultpage,amu_parent_menu_id FROM amu_admin_menus WHERE true ORDER BY amu_admin_menus.amu_order ASC";
+		}
+		else{
+			$sql = "SELECT amu_admin_menu_id, amu_icon,amu_menudisplay, amu_defaultpage,amu_parent_menu_id FROM amu_admin_menus WHERE amu_min_permission <= :currpermission AND amu_disable=0 ORDER BY amu_admin_menus.amu_order ASC";
+		}
+		
 		try{
 			$q = $dblink->prepare($sql);
-			$q->bindParam(':currpermission', $user_permission, PDO::PARAM_INT);
+			if(!$get_all){
+				$q->bindParam(':currpermission', $user_permission, PDO::PARAM_INT);
+			}
 			$count = $q->execute();
 			$q->setFetchMode(PDO::FETCH_OBJ);
 		}
@@ -298,6 +306,10 @@ class MultiAdminMenu extends SystemMultiBase {
 
 		if (array_key_exists('has_parent_menu_id', $this->options)) {
 			$where_clauses[] = '(amu_parent_menu_id IS NOT NULL OR amu_parent_menu_id != 0)';
+		}
+	
+		if (array_key_exists('is_not_disabled', $this->options)) {
+			$where_clauses[] = '(amu_disabled IS NOT NULL OR amu_disabled != false)';
 		}
 		
 		if (array_key_exists('has_no_parent_menu_id', $this->options)) {

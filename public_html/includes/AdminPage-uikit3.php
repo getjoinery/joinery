@@ -364,34 +364,6 @@ $("#admin_panel").toggle();
 				$iterate_menu = $admin_menu;
 				
 				foreach ($admin_menu as $menu_id=>$menu_info){	
-					//DON'T SHOW IF TURNED OFF
-					if($menu_id == 26 && !$settings->get_setting('blog_active')){
-						continue;
-					}
-					if($menu_id == 2 && !$settings->get_setting('events_active')){
-						continue;
-					}
-					if($menu_id == 4 && !$settings->get_setting('products_active')){
-						continue;
-					}
-					if($menu_id == 5 && !$settings->get_setting('products_active')){
-						continue;
-					}
-					if($menu_id == 11 && !$settings->get_setting('emails_active')){
-						continue;
-					}
-					if($menu_id == 3 && !$settings->get_setting('videos_active')){
-						continue;
-					}
-					if($menu_id == 9 && !$settings->get_setting('files_active')){
-						continue;
-					}
-					if($menu_id == 32 && !$settings->get_setting('urls_active')){
-						continue;
-					}
-					if($menu_id == 36 && !$settings->get_setting('coupons_active')){
-						continue;
-					}
 					
 					if(!$menu_info['parent']){
 						if($menu_info['currentmain']){
