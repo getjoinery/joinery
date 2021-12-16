@@ -1145,46 +1145,6 @@ class User extends SystemBase {
 		catch  (Exception $e){
 			//SKIP
 		}		
-	
-		//ADMIN MENUS
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS amu_admin_menus_amu_admin_menu_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."amu_admin_menus" (
-			  "amu_admin_menu_id" int4 NOT NULL DEFAULT nextval(\'amu_admin_menus_amu_admin_menu_id_seq\'::regclass),
-			  "amu_menudisplay" varchar(32) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "amu_parent_menu_id" int4 DEFAULT \'-1\'::integer,
-			  "amu_defaultpage" varchar(64) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "amu_order" int2 NOT NULL DEFAULT (0)::smallint,
-			  "amu_min_permission" int4 NOT NULL DEFAULT 0,
-			  "amu_disable" int2 NOT NULL DEFAULT (0)::smallint,
-			  "amu_main_section" bool,
-			  "amu_icon" varchar(16) COLLATE "pg_catalog"."default"
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."amu_admin_menus" ADD CONSTRAINT "amu_admin_menus_pkey" PRIMARY KEY ("amu_admin_menu_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
 
 		//VISITOR EVENTS
 		
