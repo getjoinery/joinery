@@ -18,6 +18,7 @@ class Order extends SystemBase {
 	public const STATUS_PAID = 2;
 	public const STATUS_ERROR = 3;
 
+
 	public static $fields = array(
 		'ord_order_id' => 'Order ID',
 		'ord_usr_user_id' => 'User of the order',
@@ -46,6 +47,15 @@ class Order extends SystemBase {
 
 		if ($this->data === NULL) {
 			throw new OrderException('Invalid order ID');
+		}
+	}
+	
+	function is_stripe_order(){
+		if($this->get('ord_stripe_session_id') || $this->get('ord_stripe_payment_intent_id') || $this->get('ord_stripe_charge_id') || $this->get('ord_stripe_invoice_id')){
+			return true;
+		}
+		else{
+			return false;
 		}
 	}
 

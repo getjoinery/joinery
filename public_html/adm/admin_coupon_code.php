@@ -37,7 +37,7 @@
 	)
 	);
 	
-	$options['title'] = 'CouponCode';
+	$options['title'] = 'Coupon Code';
 	$options['altlinks'] = array('Edit Coupon Code'=>'/admin/admin_coupon_code_edit?ccd_coupon_code_id='.$coupon_code->key);
 	$options['altlinks'] += array('Delete Coupon Code' => '/admin/admin_coupon_code?action=remove&ccd_coupon_code_id='.$coupon_code->key);
 	$page->begin_box($options);
