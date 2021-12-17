@@ -141,6 +141,14 @@ class CouponCode extends SystemBase {
 				}
 			}
 		}
+		
+		if($this->get('ccd_amount_discount') && $this->get('ccd_percent_discount')){
+			throw new CouponCodeException('You cannot have an amount discount and a percent discount at the same time.');				
+		}
+		
+		if(CouponCode::get_by_name($this->get('ccd_code')) && !$this->key){
+			throw new CouponCodeException('That coupon code already exists.');
+		}		
 
 	}	
 	

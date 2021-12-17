@@ -15,10 +15,9 @@
 	}
 
 	if($_POST){
-		
 
-		if($_REQUEST[$amu_parent_menu_id]){
-			$admin_menu->set('amu_parent_menu_id', $_REQUEST[$amu_parent_menu_id]);
+		if($_POST['amu_parent_menu_id']){
+			$admin_menu->set('amu_parent_menu_id', $_POST['amu_parent_menu_id']);
 		}
 		else{
 			$admin_menu->set('amu_parent_menu_id', NULL);
