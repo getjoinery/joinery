@@ -29,6 +29,7 @@
 		'page_title' => 'Coupon Codes',
 		'readable_title' => 'Coupon Codes',
 		'breadcrumbs' => array(
+			'Products'=>'/admin/admin_products', 
 			'Coupon Codes'=>'/admin/admin_coupon_codes', 
 			'Coupon Code',
 		),

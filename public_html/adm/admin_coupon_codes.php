@@ -33,6 +33,7 @@
 	array(
 		'menu-id'=> 35,
 		'breadcrumbs' => array(
+			'Products'=>'/admin/admin_products', 
 			'Coupon Codes'=>'', 
 		),
 		'session' => $session,
@@ -41,7 +42,7 @@
 	
 
 
-	$headers = array("CouponCode",  "Type", "Created", "Published", "Active");
+	$headers = array("CouponCode",  "Created",  "Active");
 	$altlinks = array('New Coupon Code'=>'/admin/admin_coupon_code_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
@@ -60,7 +61,7 @@
 		array_push($rowvalues, "<a href='/admin/admin_coupon_code?ccd_coupon_code_id=$coupon_code->key'>".$coupon_code->get('ccd_code')."</a>");	
 		//array_push($rowvalues, $coupon_code->get('ccd_type'));
 		array_push($rowvalues, LibraryFunctions::convert_time($coupon_code->get('ccd_create_time'), 'UTC', $session->get_timezone()));
-		array_push($rowvalues, LibraryFunctions::convert_time($coupon_code->get('ccd_published_time'), 'UTC', $session->get_timezone()));
+		//array_push($rowvalues, LibraryFunctions::convert_time($coupon_code->get('ccd_published_time'), 'UTC', $session->get_timezone()));
 
 		if($coupon_code->get('ccd_delete_time')) {
 			$status = 'Deleted';

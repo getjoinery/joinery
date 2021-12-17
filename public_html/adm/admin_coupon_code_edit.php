@@ -33,11 +33,7 @@
 			$coupon_code->set('ccd_end_time', $utc_time);	
 			$coupon_code->set('ccd_end_time_local', $time_combined);			
 		}
-		
-		if($_POST['ccd_amount_discount'] && $_POST['ccd_percent_discount']){
-			throw new SystemDisplayableError('You cannot have an amount discount and a percent discount at the same time.');
-			exit();					
-		}
+
 		
 		if(!$_POST['ccd_amount_discount']){
 			$coupon_code->set('ccd_amount_discount', NULL);
@@ -66,6 +62,7 @@
 			$coupon_code->set($field, $_REQUEST[$field]);
 		}
 
+		$coupon_code->prepare();
 		$coupon_code->save();
 		$coupon_code->load();
 
@@ -131,7 +128,7 @@
 
 	echo $formwriter->textinput('Amount of discount ('.$currency_symbol.')', 'ccd_amount_discount', NULL, 100, $coupon_code->get('ccd_amount_discount'), '', 255, '');
 	
-	echo $formwriter->textinput('Percent of discount', 'ccd_percent_discount', NULL, 100, $coupon_code->get('ccd_percent_discount'), '', 255, '');
+	echo $formwriter->textinput('or percent of discount', 'ccd_percent_discount', NULL, 100, $coupon_code->get('ccd_percent_discount'), '', 255, '');
 	
 	//GET ALL PRODUCTS
 	$searches = array();
