@@ -33,8 +33,8 @@ class Order extends SystemBase {
 		'ord_status' => '1=unpaid, 2=paid, 3=error',
 		'ord_error' => 'Error if the order does not go through.',
 		'ord_refund_amount' => 'Amount refunded',
-		'ord_refund_time' => 'Time of last refund',
-		'ord_refund_note' => 'Note for the refund',
+		'ord_refund_time' => '***DEPRECATED***Time of last refund', 
+		'ord_refund_note' => '***DEPRECATED***Note for the refund',
 		'ord_stripe_charge_id' => 'Charge ID from stripe',
 		'ord_stripe_invoice_id' => 'Stripe invoice for subscriptions'
 	);

@@ -63,18 +63,23 @@
 		
 		$charge = \Stripe\Charge::retrieve($_POST['charge_id']);
 		
-		$order_item = new OrderItem($_REQUEST['order_item_id'], TRUE);
+		$order_item = new OrderItem($_REQUEST['order_item_id'], TRUE); 
+		$order_item->set('odi_refund_amount', $_POST['refund_amount']);
+		$order_item->set('odi_refund_note', $_POST['odi_refund_note']);
+		$order_item->set('odi_refund_time', 'now()');
+		$order_item->save();
+		
 		$order = $order_item->get_order();
 		$order->set('ord_refund_time', 'now()');
 		$order->set('ord_refund_amount', $charge->amount_refunded/100);
-		$order->set('ord_refund_note', $_POST['ord_refund_note']);
+		//$order->set('ord_refund_note', $_POST['ord_refund_note']);
 		$order->save();
 
 
 		$pageoptions['title'] = 'Refund confirm';
 		$page->begin_box($pageoptions);
 	
-		echo $order->get('ord_refund_amount'). ' was refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
+		echo $order_item->get('odi_refunded'). ' was refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
 		
 
 
@@ -87,6 +92,7 @@ else{
 	}
 	
 	$order_item = new OrderItem($_REQUEST['oi'], TRUE);
+	$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
 	$order = $order_item->get_order();
 
 	if ($order->get('ord_stripe_charge_id')){
@@ -129,6 +135,10 @@ else{
 		$amount_left = $charge->amount/100;
 	}
 	
+	if($amount_left > $order_item->get('odi_price')){
+		$amount_left = $order_item->get('odi_price');
+	}
+	
 	$session = SessionControl::get_instance();
 	$session->set_return("/admin/admin_order_refund");
 
@@ -148,13 +158,13 @@ else{
 	
 	echo $formwriter->begin_form("form", "post", "/admin/admin_order_refund");
 
-	echo '<fieldset><h4>Confirm Refund</h4>';
+	echo '<fieldset><h4>Confirm Refund ('.$product->get('pro_name').')</h4>';
 		echo '<div class="fields full">';	
 		echo 'Total charge: ', $currency_symbol.$charge->amount/100 .'. '.$currency_symbol.$amount_refunded. ' refunded so far.';
 	
 	if($amount_left != 0){
 		echo $formwriter->textinput("Amount to refund (".$currency_symbol.$amount_left. " maximum)", 'refund_amount',"ctrlHolder", 20, $amount_left , '', 255, NULL);	
-		echo $formwriter->textinput("Refund description or reason", 'ord_refund_note',"ctrlHolder", 20, $order->get('ord_refund_note'), '', 255, '');	
+		echo $formwriter->textinput("Refund description or reason", 'odi_refund_note',"ctrlHolder", 20, $order_item->get('odi_refund_note'), '', 255, '');	
 		echo $formwriter->hiddeninput("confirm", 1);
 		echo $formwriter->hiddeninput("charge_id", $charge_id);
 		echo $formwriter->hiddeninput("order_item_id", $order_item->key);

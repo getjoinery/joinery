@@ -156,8 +156,8 @@
 			$this_out .= ' (Note: '.$product_data['comment'].')';
 		}
 
-		if($order_item->get('odi_refunded')){
-			$this_out .= ' REFUNDED $'.$order_item->get('odi_refunded');
+		if($order_item->get('odi_refund_amount')){
+			$this_out .= ' REFUNDED $'.$order_item->get('odi_refund_amount') . ' ' . LibraryFunctions::convert_time($order_item->get('odi_refund_time'), 'UTC', $session->get_timezone()). '<br />Comment: '.$order_item->get('odi_refund_note');
 		}
 		
 		if($order_item->get('odi_subscription_cancelled_time')){
