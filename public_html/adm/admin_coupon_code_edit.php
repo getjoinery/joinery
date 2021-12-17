@@ -34,29 +34,18 @@
 			$coupon_code->set('ccd_end_time_local', $time_combined);			
 		}
 
-		
-		if(!$_POST['ccd_amount_discount']){
+		if(empty($_POST['ccd_amount_discount'])){
 			$coupon_code->set('ccd_amount_discount', NULL);
 		}
-		else{
-			$coupon_code->set('ccd_amount_discount', $_POST['ccd_amount_discount']);
-		}
-		
-		if(!$_POST['ccd_percent_discount']){
+
+		if(empty($_POST['ccd_percent_discount'])){
 			$coupon_code->set('ccd_percent_discount', NULL);
 		}
-		else{
-			$coupon_code->set('ccd_percent_discount', $_POST['ccd_percent_discount']);
-		}
-		
-		if($_POST['ccd_is_active']){
-			$coupon_code->set('ccd_is_active', 1);
-		}
-		else{
-			$coupon_code->set('ccd_is_active', 0);
-		}
+	
+		$_POST['ccd_is_active'] = (bool)$_POST['ccd_is_active'];
 
-		$editable_fields = array('ccd_code');
+
+		$editable_fields = array('ccd_code', 'ccd_is_active');
 
 		foreach($editable_fields as $field) {
 			$coupon_code->set($field, $_REQUEST[$field]);
