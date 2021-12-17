@@ -47,9 +47,8 @@
 	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
-	echo '<br /><strong>Code:</strong> '.$coupon_code->get('ccd_code') .'<br />';	
+	echo '<br /><strong>Code:</strong> '.$coupon_code->get('ccd_code') . ' (' . LibraryFunctions::bool_to_english($coupon_code->get('ccd_is_active'), "Active", "Inactive") . ')<br />';	
 	
-	echo '<br /><strong>Status:</strong> '.$coupon_code->get('ccd_is_active')? "Active" : "Inactive" .'<br />';	
 	
 	echo '<br /><strong>Discount amount:</strong> '.$coupon_code->get('ccd_amount_discount') .'<br />';	
 	echo '<br /><strong>Discount percent:</strong> '.$coupon_code->get('ccd_percent_discount') .'<br />';	
