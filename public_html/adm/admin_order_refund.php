@@ -79,7 +79,7 @@
 		$pageoptions['title'] = 'Refund confirm';
 		$page->begin_box($pageoptions);
 	
-		echo $order_item->get('odi_refunded'). ' was refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
+		echo $order_item->get('odi_refund_amount'). ' was refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
 		
 
 
