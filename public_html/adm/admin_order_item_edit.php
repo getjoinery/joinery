@@ -27,16 +27,14 @@
 	
 	if($_POST){
 		
-		if(!$order->is_stripe_order()){
-			if($order_item->key){
-				$order_item->set('odi_price', $_POST['odi_price']);	
-			}
-			else{
-				$order_item->set('odi_price', $_POST['odi_price']);	
-				$order_item->set('odi_status', OrderItem::STATUS_PAID);
-				$order_item->set('odi_status_change_time', 'now()');
-				$order_item->set('odi_ord_order_id', $order->key);	
-			}
+		if($order_item->key){
+			$order_item->set('odi_price', $_POST['odi_price']);	
+		}
+		else{
+			$order_item->set('odi_price', $_POST['odi_price']);	
+			$order_item->set('odi_status', OrderItem::STATUS_PAID);
+			$order_item->set('odi_status_change_time', 'now()');
+			$order_item->set('odi_ord_order_id', $order->key);	
 		}
 		
 		$order_item->set('odi_usr_user_id', $_POST['odi_usr_user_id']);
@@ -113,10 +111,8 @@
 		echo $formwriter->hiddeninput('ord_order_id', $_GET['ord_order_id']);
 	}
 
-	if(!$order_item->key || !$order->is_stripe_order()){
-		echo $formwriter->textinput('Order total', 'odi_price', NULL, 100, $order_item->get('odi_price'), '', 255, '');
-	}
-	
+
+	echo $formwriter->textinput('Price', 'odi_price', NULL, 100, $order_item->get('odi_price'), '', 255, '');
 	
 	if($order_item->get('odi_usr_user_id')){
 		$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);

@@ -124,9 +124,8 @@
 
 
 	echo '<h2>Items in Order</h2>';
-	if(!$order->is_stripe_order()){
-		echo '<a href="/admin/admin_order_item_edit?ord_order_id='.$order->key.'">Add Order Item</a><br />';
-	}
+	echo '<a href="/admin/admin_order_item_edit?ord_order_id='.$order->key.'">Add Order Item</a><br />';
+	
 	
 	$order_items = $order->get_order_items();
 	$order_items_out = array();
