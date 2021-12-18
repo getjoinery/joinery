@@ -142,6 +142,10 @@
 			$order_items_out[] = $this_out;
 
 		}
+		
+		if($order->get('ord_error')){
+			$order_items_out[] = '<b>ERROR - '.$order->get('ord_error').'</b>';
+		}
 
 		array_push($rowvalues,'<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>');
 
@@ -164,11 +168,7 @@
 		}
 		
 		$page->disprow($rowvalues);
-		if($order->get('ord_error')){
-			$rowvalues = array();
-			array_push($rowvalues, '<b>Order: '.$order->key.' error - '.$order->get('ord_error').'</b>');
-			$page->disprow($rowvalues);
-		}
+
 	}
 	$page->endtable($pager);		
 	
