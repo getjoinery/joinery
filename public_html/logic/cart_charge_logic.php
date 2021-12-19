@@ -102,10 +102,6 @@
 			exit();					
 		}	
 
-		//STORE PAYMENT METHOD 
-		$source_result = \Stripe\Customer::createSource( 
-			$stripe_customer_id, 
-			[ 'source' => [ 'object' => 'source', 'type' => 'card', 'token' => $_REQUEST['stripeToken'], ], ] );
 	}
 
 	//PROCESS RECURRING ITEMS
@@ -341,6 +337,11 @@
 		try{	
 			if($charge_total > 0){
 				
+				//STORE PAYMENT METHOD 
+				$source_result = \Stripe\Customer::createSource( 
+					$stripe_customer_id, 
+					[ 'source' => [ 'object' => 'source', 'type' => 'card', 'token' => $_REQUEST['stripeToken'], ], ] );
+				
 				//CHARGE THE PURCHASE
 				$charge_result = \Stripe\Charge::create([
 				  'source' => $source_result[id],
@@ -353,7 +354,7 @@
 					 "ord_order_id" => $order->get('ord_order_id'), 
 					 "customer_name" => $billing_name,
 					 "customer_email" => $billing_user->get('usr_email')],
-				]);
+				]); 
 				
 			}
 
