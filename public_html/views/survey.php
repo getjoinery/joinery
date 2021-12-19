@@ -9,7 +9,7 @@
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Surveys'
 	));
-	echo PublicPage::BeginPage('Surveys');
+	echo PublicPage::BeginPage($survey->get('svy_name'));
 
 	$formwriter = new FormWriterMaster('form1');
 	echo $formwriter->begin_form('form1', 'POST', '/survey');
@@ -37,7 +37,7 @@
 			}
 		}
 		
-		echo $formwriter->hiddeninput('survey_id', $survey->key);
+		echo $formwriter->hiddeninput('survey_id', LibraryFunctions::encode($survey->key));
 		$validation_rules = array();
 		$validation_rules = $question->output_js_validation($validation_rules);
 		echo $formwriter->set_validate($validation_rules);

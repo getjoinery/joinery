@@ -201,7 +201,7 @@ class SurveyAnswer extends SystemBase {
 			  "sva_qst_question_id" int4 NOT NULL,
 			  "sva_usr_user_id" int4,
 			  "sva_answer" text,
-			  "sva_create_time" timestamp(6);
+			  "sva_create_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);
