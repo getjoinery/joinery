@@ -9,7 +9,7 @@
 	$PRODUCT_ID_TO_NAME_CACHE = array();
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
+	$session->check_permission(10);
 	$session->set_return();
 	
 	$settings = Globalvars::get_instance();
@@ -90,8 +90,13 @@
 	$products = new MultiProduct();
 	$products->load();	
 	
+	$count = 1;
 	$results = array();
 	while ($user = $q->fetch()) {
+		if($count % 100 == 0){
+			echo $count.'<br>';
+		}
+
 
 		$total_for_user = 0;
 		//$results[$user->usr_user_id][name] = $user->display_name();
@@ -122,10 +127,13 @@
 		$results[$user->usr_user_id][total] = $total_for_user;
 	}
 
+	print_r($results);
+
+	/*
 	foreach($results as $result){
 		if($result[total] > 0){
 			$rowvalues = array();
-			array_push($rowvalues, $result[name]);
+			array_push($rowvalues, $result[email]);
 			$page->disprow($rowvalues);
 			foreach($result[products] as $product){
 				$rowvalues = array();
@@ -142,7 +150,7 @@
 			$page->disprow($rowvalues);		
 		}		
 	}
-		
+	*/
 	$page->endtable($pager);		
 	
 	$page->admin_footer();
