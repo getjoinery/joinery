@@ -92,8 +92,11 @@
 	if($survey->get('svy_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($survey->get('svy_delete_time'), 'UTC', $session->get_timezone()).'<br />';
 	}
+	else{
+		echo '<p>Link: <a href="/survey?survey_id='.LibraryFunctions::encode($survey->key).'">/survey?survey_id='.LibraryFunctions::encode($survey->key).'</a></p><br />';
+	}
 
-	$headers = array('User', 'Action');
+	$headers = array('Question', 'Action');
 	$altlinks = array();
 	if(!$survey->get('svy_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = '/admin/admin_survey?action=delete&svy_survey_id='.$survey->key;
@@ -126,28 +129,34 @@
 
 		$page->disprow($rowvalues);
 	}
-	
-	echo '<tr><td colspan="3">';
-	$formwriter = new FormWriterMaster('form3');
-	//$validation_rules = array();
-	//$validation_rules['evt_event_id']['required']['value'] = 'true';
-	//echo $formwriter->set_validate($validation_rules);
-	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_survey?svy_survey_id='. $survey->key);
-	
 	$questions = new MultiQuestion(
 		array('deleted'=>false),
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$questions->load();
+	$numquestions = $questions->count_all();
 	
-	$optionvals = $questions->get_dropdown_array();
-	echo $formwriter->hiddeninput('action', 'addquestion');
-	echo $formwriter->dropinput("Add a question", "qst_question_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-	echo $formwriter->new_form_button('Add');
-	echo $formwriter->end_form();	
-	echo '</td></tr>';			
-	
+	if($numquestions){
+		echo '<tr><td colspan="3">';
+		$formwriter = new FormWriterMaster('form3');
+		//$validation_rules = array();
+		//$validation_rules['evt_event_id']['required']['value'] = 'true';
+		//echo $formwriter->set_validate($validation_rules);
+		echo $formwriter->begin_form('form2', 'POST', '/admin/admin_survey?svy_survey_id='. $survey->key);
+		
+
+		
+		$optionvals = $questions->get_dropdown_array();
+		echo $formwriter->hiddeninput('action', 'addquestion');
+		echo $formwriter->dropinput("Add a question", "qst_question_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+		echo $formwriter->new_form_button('Add');
+		echo $formwriter->end_form();	
+		echo '</td></tr>';			
+	}
+	else{
+		echo 'There are no questions.  <a href="/admin/admin_questions">Add one</a>.';
+	}
 	$page->endtable($pager);
 
 	$page->admin_footer();

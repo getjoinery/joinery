@@ -407,7 +407,7 @@ class Question extends SystemBase {
 			  "qst_is_on_homepage" bool DEFAULT true,
 			  "qst_create_time" timestamp(6),
 			  "qst_published_time" timestamp(6),
-			  "qst_delete_time" timestamp(6),
+			  "qst_delete_time" timestamp(6)
 			)
 			;';
 		$q = $dblink->prepare($sql);

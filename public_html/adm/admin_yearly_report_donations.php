@@ -16,11 +16,11 @@
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 	$numperpage = 60;
-	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'ord_order_id', 0, '');	
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
+	//$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
+	//$sort = LibraryFunctions::fetch_variable('sort', 'ord_order_id', 0, '');	
+	//$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	
-	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
+	//$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
 	$startdate = LibraryFunctions::fetch_variable('startdate', '2021-01-01', 0, '');	
 	$enddate = LibraryFunctions::fetch_variable('enddate', '2021-12-31', 0, '');	
 
@@ -69,7 +69,7 @@
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
 
-	$sql = "SELECT usr_user_id, usr_email, usr_first_name, usr_last_name FROM usr_users WHERE usr_is_disabled=false";
+	$sql = "SELECT usr_user_id, usr_email, usr_first_name, usr_last_name FROM usr_users WHERE usr_is_disabled=false ORDER BY usr_last_name ASC";
 	try {
 		$q = $dblink->prepare($sql);
 		//$q->bindValue(1, $abbr, PDO::PARAM_STR);
@@ -121,14 +121,14 @@
 				$rowvalues = array();
 				array_push($rowvalues, '');
 				array_push($rowvalues, $product[name]);
-				array_push($rowvalues, '$'.$product[amount]);
+				array_push($rowvalues, $currency_symbol.$product[amount]);
 				$page->disprow($rowvalues);				
 			}
 		
 			$rowvalues = array();
 			array_push($rowvalues, '');
 			array_push($rowvalues, '<b>Total:</b>');
-			array_push($rowvalues, '<b>$'.$result[total].'</b>');
+			array_push($rowvalues, '<b>'.$currency_symbol.$result[total].'</b>');
 			$page->disprow($rowvalues);		
 		}		
 	}

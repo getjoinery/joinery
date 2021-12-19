@@ -12,7 +12,7 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
 
-	$survey_id = LibraryFunctions::fetch_variable('survey_id', NULL, 0, 'Survey id is required');
+	$survey_id = LibraryFunctions::decode(LibraryFunctions::fetch_variable('survey_id', NULL, 0, 'Survey id is required'));
 
 	$survey = new Survey($survey_id, TRUE);
 	
@@ -42,6 +42,7 @@
 				if($valid == 'valid'){
 					$survey_answer = new SurveyAnswer(NULL);
 					$survey_answer->set('sva_svy_survey_id', $survey->key);
+					$survey_answer->set('sva_create_time', 'now()');
 					$survey_answer->set('sva_qst_question_id', $question->key);
 					$survey_answer->set('sva_usr_user_id', $session->get_user_id());
 					if(is_array($_POST['question_'.$question->key])){
@@ -59,11 +60,15 @@
 					else{
 						$survey_answer->save();
 					}
+					
 				}
 				else{
 					$invalid_messages[] = $valid;
 				}
 			}
+		}
+		if(empty($invalid_messages)){
+			LibraryFunctions::Redirect('/survey_finish?survey_id='.LibraryFunctions::encode($survey->key));
 		}
 	}
 	
