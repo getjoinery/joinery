@@ -73,27 +73,40 @@
 	
 	$result_array = array();
 	
-	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => ASC));
-	$users->load();
+	//DIRECT QUERY FOR MEMORY EFFICIENCY
+	$dbhelper = DbConnector::get_instance();
+	$dblink = $dbhelper->get_db_link();
+
+	$sql = "SELECT usr_user_id, usr_email FROM usr_users WHERE usr_is_disabled=false";
+	try {
+		$q = $dblink->prepare($sql);
+		//$q->bindValue(1, $abbr, PDO::PARAM_STR);
+		$success = $q->execute();
+		$q->setFetchMode(PDO::FETCH_OBJ);
+	} catch(PDOException $e) {
+		$dbhelper->handle_query_error($e);
+	}
+
+	$products = new MultiProduct();
+	$products->load();	
 	
 	$results = array();
-	foreach ($users as $user){
+	while ($user = $q->fetch()) {
+
 		$total_for_user = 0;
-		$results[$user->key][name] = $user->display_name();
-		$results[$user->key][email] = $user->get('usr_email');
-		$results[$user->key][products] = array();
+		//$results[$user->usr_user_id][name] = $user->display_name();
+		$results[$user->usr_user_id][email] = $user->usr_email;
+		$results[$user->usr_user_id][products] = array();
 		
 		//$rowvalues = array();
-		//array_push($rowvalues, $user->display_name());
-		
-		$products = new MultiProduct();
-		$products->load();
+		//array_push($rowvalues, $user->display_name());	
+
 		foreach($products as $product) {
 			$product_array = array();
 			$product_array[id] = $product->key;
 			$product_array[name] = $product->get('pro_name');
 			$product_array[amount] = 0;
-			$order_items = new MultiOrderItem(array('user_id' => $user->key, 'product_id' => $product->key, 'status' => Order::STATUS_PAID));
+			$order_items = new MultiOrderItem(array('user_id' => $user->usr_user_id, 'product_id' => $product->key, 'status' => Order::STATUS_PAID));
 			$order_items->load();
 			
 			foreach ($order_items as $order_item){
@@ -101,12 +114,12 @@
 			}
 			
 			
-			$results[$user->key][products][] = $product_array;
+			$results[$user->usr_user_id][products][] = $product_array;
 			$total_for_user += $product_array[amount];
 		
 		}
 		
-		$results[$user->key][total] = $total_for_user;
+		$results[$user->usr_user_id][total] = $total_for_user;
 	}
 
 	foreach($results as $result){
