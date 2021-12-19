@@ -21,29 +21,11 @@
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	
 	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
-	$startdate = LibraryFunctions::fetch_variable('startdate', NULL, 0, '');	
-	$enddate = LibraryFunctions::fetch_variable('enddate', NULL, 0, '');	
+	$startdate = LibraryFunctions::fetch_variable('startdate', '2021-01-01', 0, '');	
+	$enddate = LibraryFunctions::fetch_variable('enddate', '2021-12-31', 0, '');	
 
 	$search_criteria = NULL;
 	$search_criteria = array();
-	
-	if($startdate){
-		$display_startdate = $startdate;	
-		$time_combined = $startdate . ' ' . LibraryFunctions::toDBTime('12:01:00 am');
-		$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-		$search_criteria['created_after'] = $utc_time;
-	}
-
-	
-	if($enddate){
-		$display_enddate = $enddate;
-		$time_combined = $enddate . ' ' . LibraryFunctions::toDBTime('12:59:59 pm');
-		$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-		$search_criteria['created_before'] = $utc_time;		
-	}	
-
-	
-
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -59,6 +41,16 @@
 	);	
 
 	$formwriter = new FormWriterMaster("form1");
+	echo $formwriter->begin_form("", "get", "/admin/admin_yearly_report_donations");
+	echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);
+	echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $enddate, "", 10);
+	echo $formwriter->hiddeninput('source', 'form');
+	echo '<b>All times in UTC.</b>';
+	echo $formwriter->start_buttons();
+	echo $formwriter->new_form_button('Submit');
+	echo $formwriter->end_buttons();
+	echo $formwriter->end_form();	
+
 	
 	$headers = array('Name', 'Product', 'Total');
 	$altlinks = array();
@@ -77,7 +69,7 @@
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
 
-	$sql = "SELECT usr_user_id, usr_email FROM usr_users WHERE usr_is_disabled=false";
+	$sql = "SELECT usr_user_id, usr_email, usr_first_name, usr_last_name FROM usr_users WHERE usr_is_disabled=false";
 	try {
 		$q = $dblink->prepare($sql);
 		//$q->bindValue(1, $abbr, PDO::PARAM_STR);
@@ -87,53 +79,43 @@
 		$dbhelper->handle_query_error($e);
 	}
 
+	//BUILD PRODUCT ARRAY
 	$products = new MultiProduct();
 	$products->load();	
+	$product_array = array();
+	foreach($products as $product) {
+		$product_array[$product->key] = $product->get('pro_name');
+	}
 	
-	$count = 1;
 	$results = array();
 	while ($user = $q->fetch()) {
-		if($count % 100 == 0){
-			echo $count.'<br>';
-		}
-
-
 		$total_for_user = 0;
-		//$results[$user->usr_user_id][name] = $user->display_name();
+		$results[$user->usr_user_id][name] = $user->usr_first_name . ' ' . $user->usr_last_name;
 		$results[$user->usr_user_id][email] = $user->usr_email;
-		$results[$user->usr_user_id][products] = array();
+		$results[$user->usr_user_id][products] = array();	
+			
+		$sql = "SELECT odi_price, odi_pro_product_id, odi_refund_amount FROM odi_order_items WHERE odi_usr_user_id = ".$user->usr_user_id." AND odi_status = 2 AND odi_price > 0 AND odi_status_change_time >= '".$startdate . "' and odi_status_change_time <= '" . $enddate . "'";
+		try {
+			$r = $dblink->prepare($sql);
+			$success = $r->execute();
+			$r->setFetchMode(PDO::FETCH_OBJ);
+		} catch(PDOException $e) {
+			$dbhelper->handle_query_error($e);
+		}			
 		
-		//$rowvalues = array();
-		//array_push($rowvalues, $user->display_name());	
-
-		foreach($products as $product) {
-			$product_array = array();
-			$product_array[id] = $product->key;
-			$product_array[name] = $product->get('pro_name');
-			$product_array[amount] = 0;
-			$order_items = new MultiOrderItem(array('user_id' => $user->usr_user_id, 'product_id' => $product->key, 'status' => Order::STATUS_PAID));
-			$order_items->load();
-			
-			foreach ($order_items as $order_item){
-				$product_array[amount] += ($order_item->get('odi_price') - $order_item->get('odi_refund_amount'));
-			}
-			
-			
-			$results[$user->usr_user_id][products][] = $product_array;
-			$total_for_user += $product_array[amount];
-		
+		while($order_item = $r->fetch()){
+			$item_amount = $order_item->odi_price - $order_item->odi_refund_amount;
+			$results[$user->usr_user_id][products][$order_item->odi_pro_product_id][name] = $product_array[$order_item->odi_pro_product_id];
+			$results[$user->usr_user_id][products][$order_item->odi_pro_product_id][amount] += $item_amount;
+			$total_for_user += $item_amount;
 		}
-		
 		$results[$user->usr_user_id][total] = $total_for_user;
 	}
-
-	print_r($results);
-
-	/*
+	
 	foreach($results as $result){
 		if($result[total] > 0){
 			$rowvalues = array();
-			array_push($rowvalues, $result[email]);
+			array_push($rowvalues, $result[name] . ' ('.$result[email].')');
 			$page->disprow($rowvalues);
 			foreach($result[products] as $product){
 				$rowvalues = array();
@@ -150,7 +132,7 @@
 			$page->disprow($rowvalues);		
 		}		
 	}
-	*/
+	
 	$page->endtable($pager);		
 	
 	$page->admin_footer();
