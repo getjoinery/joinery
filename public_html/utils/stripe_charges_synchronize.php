@@ -269,7 +269,9 @@
 					//$order_item->set('odi_stripe_subscription_id', );
 					$order_item->set('odi_stripe_foreign_invoice_id', $charge->invoice);
 					$order_item->set('odi_status', OrderItem::STATUS_PAID);
-					$order_item->set('odi_status_change_time', 'NOW');
+					//SET THE CREATE TIME TO THE ONE IN STRIPE
+					$created_time = date("Y-m-d H:i:s", $charge->created);
+					$order_item->set('odi_status_change_time', $created_time);
 					$order_item->save();			
 				}
 				
