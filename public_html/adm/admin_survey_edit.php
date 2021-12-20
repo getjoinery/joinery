@@ -36,14 +36,14 @@
 		'menu-id'=> 35,
 		'breadcrumbs' => array(
 			'Surveys'=>'/admin/admin_surveys', 
-			'New Survey' => '',
+			'New/Edit Survey' => '',
 		),
 		'session' => $session,
 	)
 	);	
 
 	
-	$pageoptions['title'] = "New Survey";
+	$pageoptions['title'] = "New/Edit Survey";
 	$page->begin_box($pageoptions);
 
 	// Editing an existing email

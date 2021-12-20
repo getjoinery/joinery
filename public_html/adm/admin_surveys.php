@@ -39,8 +39,7 @@
 		'page_title' => 'Add User',
 		'readable_title' => 'Add User',
 		'breadcrumbs' => array(
-			'Users'=>'/admin/admin_users', 
-			'Surveys' => '',
+			'Surveys'=>''
 		),
 		'session' => $session,
 	)

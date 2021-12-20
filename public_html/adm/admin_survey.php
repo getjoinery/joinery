@@ -82,7 +82,7 @@
 		'readable_title' => 'Users in Survey',
 		'breadcrumbs' => array(
 			'Surveys'=>'/admin/admin_surveys', 
-			'Users in '. $survey->get('svy_name') => '',
+			$survey->get('svy_name') => '',
 		),
 		'session' => $session,
 	)
@@ -96,7 +96,7 @@
 		echo '<p>Link: <a href="/survey?survey_id='.LibraryFunctions::encode($survey->key).'">/survey?survey_id='.LibraryFunctions::encode($survey->key).'</a></p><br />';
 	}
 
-	$headers = array('Question', 'Action');
+	$headers = array('Question', 'Answers', 'Action');
 	$altlinks = array();
 	if(!$survey->get('svy_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = '/admin/admin_survey?action=delete&svy_survey_id='.$survey->key;
@@ -118,13 +118,14 @@
 		$rowvalues = array();
 		array_push($rowvalues, $question->get('qst_question'));
 
-
+		array_push($rowvalues, '<a href="/admin/admin_survey_answers?survey_id='.$survey->key.'&question_id='.$survey_question->key.'">answers</a>');
+		
+		
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="removequestion" />
 		<input type="hidden" class="hidden" name="srq_survey_question_id" value="'.$survey_question->key.'" />
 		<button type="submit">Remove</button>
 		</form>';
-
 		array_push($rowvalues, $delform);
 
 		$page->disprow($rowvalues);

@@ -35,6 +35,7 @@
 	array(
 		'menu-id'=> 35,
 		'breadcrumbs' => array(
+			'Surveys'=>'/admin/admin_surveys', 
 			'Questions'=>'/admin/admin_questions', 
 			'Question '.$question->key=>'',
 		),

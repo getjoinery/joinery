@@ -273,7 +273,11 @@ class MultiSurveyAnswer extends SystemMultiBase {
 			else {
 				if (array_key_exists('survey_answer_id', $this->order_by)) {
 					$sql .= ' sva_survey_answer_id ' . $this->order_by['survey_answer_id'];
-				}		
+				}
+				
+				if (array_key_exists('question_id', $this->order_by)) {
+					$sql .= ' sva_qst_question_id ' . $this->order_by['question_id'];
+				}				
 			}				
 
 			$sql .= ' '.$this->generate_limit_and_offset();				
