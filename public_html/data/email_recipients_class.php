@@ -28,12 +28,15 @@ class EmailRecipient extends SystemBase {
 	);
 	
 
-	public static $constants = array();
 
-	public static $required = array(
+	public static $required_fields = array(
 		'erc_email', 'erc_eml_email_id');
+		
+	public static $zero_variables = array();
 
 	public static $field_constraints = array();	
+	
+	public static $initial_default_values = array();
 	
 	function load() {
 		parent::load();
@@ -46,27 +49,7 @@ class EmailRecipient extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new EmailRecipientException('This email_recipient has no data.');
-		}
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
-		}
+		
 	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
@@ -82,6 +65,7 @@ class EmailRecipient extends SystemBase {
 	}
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

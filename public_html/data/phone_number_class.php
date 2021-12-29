@@ -25,9 +25,7 @@ class PhoneNumber extends SystemBase {
 		'phn_cco_country_code_id' => 'Country code for the phone number',
 	);
 
-	public static $constants = array();
-
-	public static $required = array(
+	public static $required_fields = array(
 		'phn_phone_number', 'phn_usr_user_id');
 
 	public static $field_constraints = array(
@@ -43,6 +41,8 @@ class PhoneNumber extends SystemBase {
 			'NoCaps',
 			),*/
 		);
+		
+	public static $zero_variables = array();
 
 	public static $initial_default_values = array(
 		'phn_create_time' => 'now()');	
@@ -147,27 +147,6 @@ class PhoneNumber extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new PhoneNumberException('This phone has no data.');
-		}
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
-		}
 
 		if (strlen($this->get('phn_phone_number')) == 11) {
 			// If they gave us 11 digits, and the first one is a one, kill it
@@ -368,7 +347,6 @@ class PhoneNumber extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['phn_phone_number_id']);
-			$rowdata['phn_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

@@ -26,6 +26,15 @@ class StripeInvoice extends SystemBase {
 		'siv_stripe_payment_intent_id' => 'Stripe payment intent id',
 	);
 
+	public static $required_fields = array();
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();	
+
+	public static $initial_default_values = array(
+		);	
+		
 	function load() {
 		parent::load();
 
@@ -38,7 +47,7 @@ class StripeInvoice extends SystemBase {
 	}
 
 	function save() {
-		// Saving requires some session control for authentication checking and whatnot
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

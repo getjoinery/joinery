@@ -37,11 +37,17 @@
 		if(empty($_POST['ccd_amount_discount'])){
 			$coupon_code->set('ccd_amount_discount', NULL);
 		}
+		else{
+			$coupon_code->set('ccd_amount_discount', $_POST['ccd_amount_discount']);
+		}
 
 		if(empty($_POST['ccd_percent_discount'])){
-			$coupon_code->set('ccd_percent_discount', NULL);
+			$_POST['ccd_percent_discount'] = NULL;
 		}
-	
+		else{
+			$coupon_code->set('ccd_percent_discount', $_POST['ccd_percent_discount']);
+		}
+		
 		$_POST['ccd_is_active'] = (bool)$_POST['ccd_is_active'];
 
 

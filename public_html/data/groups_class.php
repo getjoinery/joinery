@@ -28,16 +28,15 @@ class Group extends SystemBase {
 		'grp_type' => 'Type of group:  1-user, 2-event, 3-post'
 	);
 	
-	public static $constants = array();
 
-	public static $required = array(
+	public static $required_fields = array(
 		'grp_name');
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();	
 
-	public static $default_values = array(
+	public static $initial_default_values = array(
 		'grp_create_time' => 'now()', 
 		'grp_update_time' => 'now()'
 		);		
@@ -197,51 +196,12 @@ class Group extends SystemBase {
 	
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new GroupException('This has no data.');
-		}
 		
 		//CHECK FOR DUPLICATES
 		if(!$this->key){
 			if($this->_check_for_duplicate_group()){
 				throw new GroupException(
 				'This group already exists');
-			}
-		}
-
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					echo $variable;
-					$this->set($variable, 0);
-				}
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) { 
-					$this->set($variable, $value);
-				}
-			}
-		}		
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
 			}
 		}
 
@@ -271,6 +231,7 @@ class Group extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -283,7 +244,6 @@ class Group extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['grp_group_id']);
-			//$rowdata['grp_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

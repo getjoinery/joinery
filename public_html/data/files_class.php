@@ -25,6 +25,15 @@ class File extends SystemBase {
 		'fil_delete_time' => 'Time of file deletion',
 		'fil_gal_gallery_id' => 'Gallery this file is part of TODO'
 	);
+
+	public static $required_fields = array();
+	
+	public static $field_constraints = array();
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array(
+	'fil_create_time'=> 'now()',);
 	
 	public static function get_by_name($name) {
 		$dbhelper = DbConnector::get_instance();
@@ -296,6 +305,7 @@ class File extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -308,7 +318,6 @@ class File extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['fil_file_id']);
-			$rowdata['fil_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

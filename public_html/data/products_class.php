@@ -690,7 +690,6 @@ class ProductVersion {
 }
 
 class Product extends SystemBase {
-	public static $required_fields = array();
 
 
 	public static $currency_symbols = array(
@@ -726,6 +725,14 @@ class Product extends SystemBase {
 		'pro_grp_group_id' => 'The group id of the bundle if the product is for a bundle',
 		'pro_type' => 'Type of product e.g. event ticket or digital item'
 	);
+	
+	public static $required_fields = array();
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array();	
 	
 	public function get_requirement_info($output='text') {
 		$requirements_out = array();
@@ -898,7 +905,7 @@ class Product extends SystemBase {
 	}
 
 	function save() {
-		// Saving requires some session control for authentication checking and whatnot
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

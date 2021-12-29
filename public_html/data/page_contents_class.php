@@ -26,18 +26,17 @@ class PageContent extends SystemBase {
 		'pac_delete_time' => 'Time of deletion',
 	);
 
-	public static $constants = array();
 
-	public static $required = array(
-		);
+	public static $required_fields = array();
 
 	public static $field_constraints = array();	
 	
-	public static $zero_variables = array();
-	
-	public static $default_values = array(
-	'pac_create_time' => 'now()', 'pac_is_published' => FALSE
-	);	
+	public static $zero_variables = array();	
+
+	public static $initial_default_values = array(
+		'pac_create_time' => 'now()', 'pac_is_published' => FALSE
+		);
+		
 	
 	static function get_by_link($link){
 		$results = new MultiPageContent(array('link' => $link, 'deleted'=>false));
@@ -120,49 +119,11 @@ class PageContent extends SystemBase {
 	}
 	
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new PageContentException('This has no data.');
-		}
 		
 		//CHECK FOR DUPLICATES
 		if($this->check_for_duplicate_link($this->get('pac_link'))){
 			throw new SystemAuthenticationError(
 					'This page link is a duplicate.');
-		}
-
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					$this->set($variable, 0);
-				}
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) { 
-					$this->set($variable, $value);
-				}
-			}
-		}		
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
 		}
 
 	}	
@@ -181,6 +142,7 @@ class PageContent extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -196,7 +158,6 @@ class PageContent extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['pac_page_content_id']);
-			$rowdata['pac_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

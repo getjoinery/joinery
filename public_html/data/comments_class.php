@@ -27,9 +27,8 @@ class Comment extends SystemBase {
 		'usr_email_is_verified_time', 'usr_lastlogin_time', 'usr_admin_disabled_time',
 		'usr_signup_date');
 
-	public static $constants = array();
 
-	public static $required = array(
+	public static $required_fields = array(
 		'cmt_body');
 
 	public static $field_constraints = array(
@@ -39,7 +38,7 @@ class Comment extends SystemBase {
 	public static $zero_variables = array(
 				);
 				
-	public static $default_values = array(
+	public static $initial_default_values = array(
 		'cmt_created_time'=> 'now()',
 		'cmt_is_approved' => TRUE,
 	);
@@ -75,29 +74,7 @@ class Comment extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new CommentException('This comment has no data.');
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					$this->set($variable, 0);
-				} 
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					$this->set($variable, $value);
-				}
-			}
-		}		
-		
-
-		CheckRequiredFields($this, self::$required, self::$fields);		
+				
 	}	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -113,6 +90,7 @@ class Comment extends SystemBase {
 
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

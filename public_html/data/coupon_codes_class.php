@@ -27,17 +27,19 @@ class CouponCode extends SystemBase {
 		'ccd_delete_time' => 'Time deleted'
 	);
 
-	public static $constants = array();
+	public static $required_fields = array(array('ccd_percent_discount', 'ccd_amount_discount'));
 
-	public static $required = array(
-		);
-
-	public static $field_constraints = array();	
+	public static $field_constraints = array(
+		'ccd_code' => array(
+			array('WordLength', 0, 64),
+			'NoCaps',
+			),
+	);	
 	
 	public static $zero_variables = array();
 	
-	public static $default_values = array(
-	'ccd_create_time' => 'now()'
+	public static $initial_default_values = array(
+		'ccd_create_time' => 'now()'
 	);	
 
 	static function check_if_exists($key) {
@@ -102,49 +104,6 @@ class CouponCode extends SystemBase {
 	}
 	
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new CouponCodeException('This has no data.');
-		}
-		
-
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					$this->set($variable, 0);
-				}
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) { 
-					$this->set($variable, $value);
-				}
-			}
-		}		
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
-		}
-		
-		if($this->get('ccd_amount_discount') && $this->get('ccd_percent_discount')){
-			throw new CouponCodeException('You cannot have an amount discount and a percent discount at the same time.');				
-		}
 		
 		if(CouponCode::get_by_name($this->get('ccd_code')) && !$this->key){
 			throw new CouponCodeException('That coupon code already exists.');
@@ -163,6 +122,7 @@ class CouponCode extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -175,7 +135,6 @@ class CouponCode extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['ccd_coupon_code_id']);
-			$rowdata['ccd_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

@@ -21,6 +21,15 @@ class Url extends SystemBase {
 		'url_create_time' => 'Time added'
 	);
 
+	public static $required_fields = array();
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();	
+
+	public static $initial_default_values = array('url_create_time' => 'now()'
+		);		
+		
 	function load() {
 		parent::load();
 		$this->data = SingleRowFetch('url_urls', 'url_url_id',
@@ -54,6 +63,7 @@ class Url extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -66,7 +76,6 @@ class Url extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new 
 			unset($rowdata['url_url_id']);
-			$rowdata['url_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

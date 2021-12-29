@@ -24,62 +24,21 @@ class AdminMenu extends SystemBase {
 		'amu_disable' => 'If disabled',
 		'amu_icon' => 'Icon for the menu item'
 	);
-	
-	public static $constants = array();
 
-	public static $required = array(
+
+	public static $required_fields = array(
 		'amu_menudisplay');
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();	
 
-	public static $default_values = array(
+	public static $initial_default_values = array(
 		'amu_disable' => 0, 
 		);		
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new AdminMenuException('This has no data.');
-		}
 		
-
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					echo $variable;
-					$this->set($variable, 0);
-				}
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) { 
-					$this->set($variable, $value);
-				}
-			}
-		}		
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
-		}
-
 	}
 
 	function load() {
@@ -116,7 +75,6 @@ class AdminMenu extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['amu_admin_menu_id']);
-			//$rowdata['amu_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

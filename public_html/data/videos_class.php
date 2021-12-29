@@ -25,6 +25,13 @@ class Video extends SystemBase {
 		'vid_delete_time' => 'Time of deletion',
 	);
 
+	public static $required_fields = array();
+	
+	public static $field_constraints = array();
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array('vid_create_time' => 'now()');
 
 	function load() {
 		parent::load();
@@ -206,6 +213,7 @@ class Video extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -218,7 +226,6 @@ class Video extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new 
 			unset($rowdata['vid_video_id']);
-			$rowdata['vid_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

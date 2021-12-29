@@ -23,15 +23,14 @@ class GroupMember extends SystemBase {
 		'grm_pst_post_id' => 'Post in group'
 	);
 	
-	public static $constants = array();
 
-	public static $required = array('grm_grp_group_id');
+	public static $required_fields = array('grm_grp_group_id');
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();	
 
-	public static $default_values = array(
+	public static $initial_default_values = array(
 		);		
 		
 	
@@ -65,9 +64,6 @@ class GroupMember extends SystemBase {
 	
 
 	function prepare() {	
-		if ($this->data === NULL) {
-			throw new GroupMemberException('This has no data.');
-		}
 
 		//MAKE SURE THE RECORD HAS ONLY ONE FOREIGN KEY
 		$count = 0;
@@ -90,42 +86,6 @@ class GroupMember extends SystemBase {
 			}
 		}
 		
-
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					echo $variable;
-					$this->set($variable, 0);
-				}
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) { 
-					$this->set($variable, $value);
-				}
-			}
-		}		
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
-		}
 
 	}
 
@@ -153,6 +113,7 @@ class GroupMember extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -165,7 +126,6 @@ class GroupMember extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['grm_group_member_id']);
-			//$rowdata['grm_create_time'] = 'now()';
 			
 			if($this->_check_for_duplicates()){
 				return FALSE;

@@ -1,6 +1,7 @@
 <?php
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SqlBuilder.php');
+require_once('FieldConstraints.php');
 
 
 interface CustomErrorPage {
@@ -295,6 +296,8 @@ abstract class SystemBase {
 	}
 
 	function check_field_constraints() {
+		/*
+		//MOVED TO THE SAVE FUNCTION
 		CheckRequiredFields($this, static::$required, static::$fields);
 
 		foreach (static::$field_constraints as $field => $constraints) {
@@ -312,19 +315,79 @@ abstract class SystemBase {
 				}
 			}
 		}
+		*/
 	}
 
 	// To prepare it is without error
 	function prepare() {}
 	// And to save it to the database
 	function save() {
+		if ($this->data === NULL) {
+			throw new SystemClassException('This object has no data.');
+		}		
+		
 		if ($this->key === NULL) {
+			//SET INITIAL DEFAULT VALUES
 			foreach (static::$initial_default_values as $key => $value) {
 				if ($this->get($key) === NULL) {
 					$this->set($key, $value);
 				}
 			}
+			
+			//SET ZERO VARIABLES
+			foreach (static::$zero_variables as $variable) {
+				if ($this->key === NULL && $this->get($variable) === NULL) {
+					$this->set($variable, 0);
+				}
+			}
 		}
+
+		//CHECK REQUIRED FIELDS
+		foreach (static::$required_fields as $required_field) {
+
+			if (gettype($required_field) == 'array') {
+				$one_true = FALSE;
+				foreach($required_field as $element) {
+
+					if ($this->get($element)) {
+						// If they pass an array, we check to see if one of them is true
+						// If so, we are good.
+						$one_true = TRUE;
+						break;
+					}
+				}
+
+				if (!$one_true) {
+					$display_names = array();
+					foreach($required_field as $field) {
+						$display_names[] = "'" . $field . "'";
+					}
+					throw new SystemClassException('One of ' . implode(', ', $display_names) . ' must be set.');
+				}
+			} 
+			else if (is_null($this->get($required_field)) || $this->get($required_field) === '') {
+				throw new SystemClassException('Required field "' . $required_field . '" must be set.');
+			}
+		}
+		
+		//CHECK FIELD CONSTRAINTS
+		foreach (static::$field_constraints as $field => $constraints) {
+			foreach($constraints as $constraint) {
+				if (gettype($constraint) == 'array') {
+					$params = array();
+					$params[] = $field;
+					$params[] = $this->get($field);
+					for($i=1;$i<count($constraint);$i++) {
+						$params[] = $constraint[$i];
+					}
+					call_user_func_array($constraint[0], $params);
+				} 
+				else {
+					call_user_func($constraint, $field, $this->get($field));
+				}
+			}
+		}		
+		
 	}
 
 	function authenticate_read($session, $other_data=NULL) {}

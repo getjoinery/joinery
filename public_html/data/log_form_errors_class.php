@@ -24,6 +24,15 @@ class FormError extends SystemBase {
 		'lfe_context' => 'The DOM selector form the form (in case more than one form on the page)',
 	);
 
+	public static $required_fields = array();
+	
+	public static $field_constraints = array();
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array(
+	'lfe_log_time'=> 'now()',);
+	
 	public static $public_actions = array(
 		'logformerror' => array(
 			'messages' => TRUE,
@@ -45,6 +54,7 @@ class FormError extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -57,7 +67,6 @@ class FormError extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['lfe_log_form_error_id']);
-			$rowdata['lfe_log_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

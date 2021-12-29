@@ -42,6 +42,15 @@ class QueuedEmail extends SystemBase {
 		'equ_ers_recurring_email_log_id' => 'Log ID this is linked with',
 	);
 
+	public static $required_fields = array();
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array(
+	'equ_timestamp' => 'now()');
+
 	function get_status() {
 		return self::$status_to_text[$this->get('equ_status')];
 	}
@@ -123,6 +132,7 @@ class QueuedEmail extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -133,7 +143,6 @@ class QueuedEmail extends SystemBase {
 			// Editing an existing record
 		} else {
 			$p_keys = NULL;
-			$rowdata['equ_timestamp'] = 'NOW';
 			// Creating a new record
 			unset($rowdata['equ_queued_email_id']);
 		}

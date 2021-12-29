@@ -19,6 +19,14 @@ class ProductGroup extends SystemBase {
 		'prg_description' => 'Description of the product group',
 	);
 
+	public static $required_fields = array();
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array();
+	
 	function get_url() {
 		return '/products/' . str_replace(' ', '-', $this->get('prg_name')) . '/' . $this->key;
 	}
@@ -35,7 +43,7 @@ class ProductGroup extends SystemBase {
 	}
 
 	function save() {
-		// Saving requires some session control for authentication checking and whatnot
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
