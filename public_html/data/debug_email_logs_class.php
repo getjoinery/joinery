@@ -20,6 +20,15 @@ class DebugEmailLog extends SystemBase {
 		'del_create_time' => 'Time added',
 	);
 
+	public static $required_fields = array();
+	
+	public static $field_constraints = array();
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array(
+	'del_create_time'=> 'now()',);
+	
 	function load() {
 		parent::load();
 		$this->data = SingleRowFetch('del_debug_email_logs', 'del_debug_email_log_id',
@@ -31,6 +40,7 @@ class DebugEmailLog extends SystemBase {
 	}
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

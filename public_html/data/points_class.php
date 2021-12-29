@@ -23,7 +23,13 @@ class Point extends SystemBase {
 		'pnt_is_booted' => 'If booted'
 	);
 	
+	public static $required_fields = array();
 
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();	
+
+	public static $initial_default_values = array();
 
 	function load() {
 		parent::load();
@@ -36,10 +42,9 @@ class Point extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new PointException('This point has no data.');
-		}
+
 	}	
+	
 	function authenticate_write($session, $other_data=NULL) {
 
 	}
@@ -73,6 +78,7 @@ class Point extends SystemBase {
 	}	
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

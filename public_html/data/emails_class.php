@@ -47,10 +47,15 @@ class Email extends SystemBase {
 		'eml_delete_time' => 'Time of deletion',
 		
 	);
+
+	public static $required_fields = array();
 	
-	/*TEMPORARILY REMOVED
-		'eml_cpn_type' => 'Nonuser contact preference type',
-		*/
+	public static $field_constraints = array();
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array(
+	'del_create_time'=> 'now()',);	
 	
 	public function __construct($key, $load=FALSE) { 
 		parent::__construct($key, $load);
@@ -139,10 +144,9 @@ class Email extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new EmailException('This email has no data.');
-		}
+
 	}	
+	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
 		if ($this->get('eml_usr_user_id') != $current_user) {
@@ -170,6 +174,7 @@ class Email extends SystemBase {
 	}
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

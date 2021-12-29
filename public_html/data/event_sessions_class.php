@@ -62,17 +62,12 @@ class EventSession extends SystemBase {
 		'evs_delete_time' => 'Time of deletion',
 		); 
 
-	public static $generated_fields = array(
-		//'evs_is_expired' => 'Is this request expired?'
-	);
 
-	public static $constants = array(
-		//'evs_usr_user_id'
-		);
-
-	public static $required = array(
+	public static $required_fields = array(
 		'evs_evt_event_id'
 	);
+	
+	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
 		'evs_is_public' => FALSE
@@ -388,6 +383,7 @@ class EventSession extends SystemBase {
 	}	
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -401,7 +397,6 @@ class EventSession extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['evs_event_session_id']);
-			//$rowdata['evt_create_time'] = 'NOW()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

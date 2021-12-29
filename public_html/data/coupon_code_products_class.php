@@ -21,16 +21,14 @@ class CouponCodeProduct extends SystemBase {
 		'ccp_pro_product_id' => 'Product id',
 	);
 
-	public static $constants = array();
-
-	public static $required = array(
+	public static $required_fields = array(
 		);
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();
 	
-	public static $default_values = array();	
+	public static $initial_default_values = array();	
 
 	static function check_if_exists($key) {
 		$data = SingleRowFetch('ccp_coupon_code_products', 'ccp_coupon_code_product_id',
@@ -55,45 +53,6 @@ class CouponCodeProduct extends SystemBase {
 	}
 	
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new CouponCodeProductException('This has no data.');
-		}
-
-
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					$this->set($variable, 0);
-				}
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) { 
-					$this->set($variable, $value);
-				}
-			}
-		}		
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
-		}		
 
 	}	
 	
@@ -108,6 +67,7 @@ class CouponCodeProduct extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

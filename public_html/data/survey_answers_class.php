@@ -24,15 +24,14 @@ class SurveyAnswer extends SystemBase {
 		'sva_create_time' => 'Time of answer'
 	);
 	
-	public static $constants = array();
 
-	public static $required = array('sva_svy_survey_id', 'sva_qst_question_id');
+	public static $required_fields = array('sva_svy_survey_id', 'sva_qst_question_id');
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();	
 
-	public static $default_values = array('sva_create_time'=>'now()');		
+	public static $initial_default_values = array('sva_create_time'=>'now()');		
 		
 	
 	function check_for_duplicates() {
@@ -79,54 +78,12 @@ class SurveyAnswer extends SystemBase {
 	
 
 	function prepare() {	
-		if ($this->data === NULL) {
-			throw new SurveyAnswerException('This has no data.');
-		}
-
-		
 		if(!$this->key){
 			if($this->check_for_duplicates()){
 				throw new SurveyAnswerException('This is a duplicate.');
 			}
 		}
 		
-
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					echo $variable;
-					$this->set($variable, 0);
-				}
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) { 
-					$this->set($variable, $value);
-				}
-			}
-		}		
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
-		}
-
 	}
 
 	function load() {
@@ -151,6 +108,7 @@ class SurveyAnswer extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -163,7 +121,6 @@ class SurveyAnswer extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['sva_survey_answer_id']);
-			//$rowdata['sva_create_time'] = 'now()';
 			
 			if($this->check_for_duplicates()){
 				return FALSE;

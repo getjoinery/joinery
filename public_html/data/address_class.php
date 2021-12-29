@@ -108,8 +108,11 @@ class Address extends SystemBase {
 		'usa_cco_country_code_id' => 'Country code id',
 	);
 
-	public static $required = array(
-		'usa_zip_code_id');
+	public static $required_fields = array();
+	
+	public static $field_constraints = array();
+	
+	public static $zero_variables = array();
 
 	public static $initial_default_values = array(
 		'usa_create_time' => 'now()');
@@ -445,11 +448,6 @@ class Address extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new AddressException('This has no data.');
-		}
-
-		CheckRequiredFields($this, self::$required, self::$fields);
 
 		//TODO MORE CHECKING FOR US
 		// Only pull the first 5 digits of the zip code

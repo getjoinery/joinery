@@ -16,7 +16,14 @@ class EventType extends SystemBase {
 		'ety_name' => 'Name of the event type'
 	);
 
-
+	public static $required_fields = array();
+	
+	public static $field_constraints = array();
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array();
+	
 	function load() {
 		parent::load();
 
@@ -29,6 +36,7 @@ class EventType extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		// Saving requires some session control for authentication checking and whatnot
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {

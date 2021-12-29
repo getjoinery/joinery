@@ -39,6 +39,16 @@ class Order extends SystemBase {
 		'ord_stripe_invoice_id' => 'Stripe invoice for subscriptions'
 	);
 
+	public static $required_fields = array();
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();	
+
+	public static $initial_default_values = array(
+		'ord_timestamp' => 'now()'
+		);	
+
 	function load() {
 		parent::load();
 
@@ -60,7 +70,7 @@ class Order extends SystemBase {
 	}
 
 	function save() {
-		// Saving requires some session control for authentication checking and whatnot
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -72,7 +82,6 @@ class Order extends SystemBase {
 		} else {
 			$p_keys = NULL;
 			// Creating a new order
-			$rowdata['ord_timestamp'] = 'now()';
 			unset($rowdata['ord_order_id']);
 		}
 		

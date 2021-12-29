@@ -27,17 +27,15 @@ class EmailTemplateStore extends SystemBase {
 		'emt_update_time' => 'Updated',
 		'emt_delete_time' => 'Is this email_template deleted?',
 	);
-	
-	public static $constants = array();
 
-	public static $required = array(
+	public static $required_fields = array(
 		'emt_name');
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();	
 
-	public static $default_values = array(
+	public static $initial_default_values = array(
 		'emt_create_time' => 'now()', 
 		'emt_update_time' => 'now()'
 		);		
@@ -57,51 +55,12 @@ class EmailTemplateStore extends SystemBase {
 	
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new EmailTemplateStoreException('This has no data.');
-		}
 		
 		//CHECK FOR DUPLICATES
 		if(!$this->key){
 			if($this->_check_for_duplicate_email_template()){
 				throw new EmailTemplateStoreException(
 				'This email_template already exists');
-			}
-		}
-
-		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					echo $variable;
-					$this->set($variable, 0);
-				}
-			}
-
-		}
-		
-		if ($this->key === NULL) {
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) { 
-					$this->set($variable, $value);
-				}
-			}
-		}		
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
 			}
 		}
 
@@ -127,6 +86,7 @@ class EmailTemplateStore extends SystemBase {
 	}
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -142,7 +102,6 @@ class EmailTemplateStore extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['emt_email_template_id']);
-			//$rowdata['emt_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

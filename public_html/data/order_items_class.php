@@ -39,6 +39,15 @@ class OrderItem extends SystemBase {
 		'odi_stripe_foreign_invoice_id' => 'Stripe invoice id if it is the first of a subscription'
 	);
 
+	public static $required_fields = array();
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();	
+
+	public static $initial_default_values = array(
+		'odi_status_change_time' => 'now()'
+		);
 
 	function load($for_update=FALSE) {
 		parent::load($for_update);
@@ -64,6 +73,7 @@ class OrderItem extends SystemBase {
 	}	
 
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

@@ -87,17 +87,12 @@ class Event extends SystemBase {
 		'evt_delete_time' => 'Time of deletion',
 	); 
 
-	public static $generated_fields = array(
-		//'evt_is_expired' => 'Is this request expired?'
-	);
 
-	public static $constants = array(
-		//'evt_usr_user_id'
-		);
-
-	public static $required = array(
+	public static $required_fields = array(
 		'evt_name'
 	);
+
+	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
 		'evt_create_time' => NOW, 'evt_visibility' => 0, 'evt_status' => 1, 'evt_show_add_to_calendar_link' => true

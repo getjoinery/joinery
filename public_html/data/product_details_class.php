@@ -21,7 +21,13 @@ class ProductDetail extends SystemBase {
 		'prd_notes' => 'notes',
 	);
 	
+	public static $required_fields = array();
 
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array();
 
 	function load() {
 		parent::load();
@@ -34,10 +40,9 @@ class ProductDetail extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new ProductDetailException('This product_detail has no data.');
-		}
+
 	}	
+	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
 
@@ -45,6 +50,7 @@ class ProductDetail extends SystemBase {
 
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

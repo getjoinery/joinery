@@ -32,7 +32,15 @@ class EventLog extends SystemBase {
 		'evl_create_time' => 'Time added',
 	);
 
-
+	public static $required_fields = array();
+	
+	public static $field_constraints = array();
+	
+	public static $zero_variables = array();
+	
+	public static $initial_default_values = array(
+	'evl_create_time'=> 'now()',);
+	
 	//DEPRECATED
 	static function StoreEventLog($event, $user_id, $event_id=NULL) {
 		$event_log = new EventLog(NULL);
@@ -52,6 +60,7 @@ class EventLog extends SystemBase {
 	}
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -64,7 +73,6 @@ class EventLog extends SystemBase {
 			$p_keys = NULL;
 			// Creating a new record
 			unset($rowdata['evl_event_log_id']);
-			$rowdata['evl_create_time'] = 'now()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

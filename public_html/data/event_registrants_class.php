@@ -55,20 +55,15 @@ class EventRegistrant extends SystemBase {
 		'evr_grp_group_id' => 'Event bundle that created this registration, if applicable'
 	);
 
-	public static $generated_fields = array(
-		//'evr_is_expired' => 'Is this request expired?'
-	);
 
-	public static $constants = array(
-		//'evr_usr_user_id'
-		);
-
-	public static $required = array(
+	public static $required_fields = array(
 		'evr_evt_event_id', 'evr_usr_user_id'
 	);
 	
+	public static $zero_variables = array();
+	
 	public static $initial_default_values = array(
-		'evr_create_time' => NOW
+		'evr_create_time' => 'now()'
 	);	
 
 	public static $field_constraints = array(
@@ -146,14 +141,7 @@ class EventRegistrant extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new EventRegistrantException('This request has no data.');
-		}
 		
-		//DONT ALLOW DUPLICATES
-		//TODO
-
-		$this->check_field_constraints();
 	}
 
 	function export_as_array($session=NULL) { 
@@ -206,7 +194,6 @@ class EventRegistrant extends SystemBase {
 			}
 			
 			unset($rowdata['evr_event_registrant_id']);
-			$rowdata['evr_create_time'] = 'NOW()';
 		}
 
 		$dbhelper = DbConnector::get_instance();

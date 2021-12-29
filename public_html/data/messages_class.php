@@ -20,6 +20,14 @@ class Message extends SystemBase {
 		'msg_sent_time' => 'Time_sent',
 		'msg_delete_time' => 'Time of deletion',
 	);
+
+	public static $required_fields = array();
+
+	public static $field_constraints = array();	
+	
+	public static $zero_variables = array();	
+
+	public static $initial_default_values = array();	
 	
 	function display_title(){
 		if($this->get('msg_body')){
@@ -43,10 +51,9 @@ class Message extends SystemBase {
 	}
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new MessageException('This message has no data.');
-		}
+
 	}	
+	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
 		if ($this->get('msg_usr_user_id') != $current_user) {
@@ -61,6 +68,7 @@ class Message extends SystemBase {
 
 	
 	function save() {
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);

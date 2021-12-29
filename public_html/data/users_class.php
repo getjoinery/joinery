@@ -82,9 +82,8 @@ class User extends SystemBase {
 		self::SIGNUP_TYPE_DIRECT_TRAFFIC => 'Direct Traffic',
 	);
 
-	public static $constants = array();
 
-	public static $required = array(
+	public static $required_fields = array(
 		'usr_first_name', 'usr_first_name', 'usr_email');
 
 	public static $field_constraints = array(
@@ -101,14 +100,16 @@ class User extends SystemBase {
 	public static $zero_variables = array(
 				'usr_permission');
 				
-	public static $default_values = array(
+	public static $initial_default_values = array(
 		'usr_timezone'=> 'America/New_York',
 		'usr_is_activated' => FALSE,
 		'usr_is_disabled' => FALSE,
 		'usr_email_is_verified' => FALSE,
 		'usr_contact_preferences' => 0,
+		'usr_signup_date' => 'now()',
+		'usr_lastlogin_time' => 'now()',
 	);
-	
+
 	public static $public_actions = array(
 		'defaultaddressforsession' => array(),
 	);
@@ -313,18 +314,6 @@ class User extends SystemBase {
 
 	public function prepare() {
 		if ($this->key === NULL) {
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					$this->set($variable, 0);
-				} 
-			}
-		
-
-			foreach (static::$default_values as $variable=>$value) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					$this->set($variable, $value);
-				}
-			}
 			
 
 			//CHECK FOR DUPLICATES
@@ -337,24 +326,6 @@ class User extends SystemBase {
 		if (!LibraryFunctions::IsValidEmail($this->get('usr_email'))) {
 			throw new DisplayableUserException(
 				'Sorry, that email address "'.$this->get('usr_email').'" you entered is invalid.  Please go back and try again.');
-		}
-
-		CheckRequiredFields($this, self::$required, self::$fields);
-
-		foreach (self::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = self::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, self::$fields[$field], $this->get($field));
-				}
-			}
 		}
 
 		//CAPITALIZATION
@@ -641,7 +612,7 @@ class User extends SystemBase {
 	}
 
 	function save() {
-		// Saving requires some session control for authentication checking and whatnot
+		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
 			$rowdata[$field] = $this->get($field);
@@ -652,8 +623,6 @@ class User extends SystemBase {
 			// Editing an existing record
 		} else {
 			$p_keys = NULL;
-			$rowdata['usr_signup_date'] = 'NOW';
-			$rowdata['usr_lastlogin_time'] = 'NOW';
 			// Creating a new record
 			unset($rowdata['usr_user_id']);
 		}

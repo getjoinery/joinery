@@ -78,31 +78,5 @@ function WordLength($field, $value, $min, $max) {
 	}
 }
 
-function CheckRequiredFields($object, $required_fields, $fields) {
-	foreach ($required_fields as $required_field) {
-		if (gettype($required_field) == 'array') {
-			$one_true = FALSE;
-			foreach($required_field as $element) {
-				if ($object->get($element)) {
-					// If they pass an array, we check to see if one of them is true
-					// If so, we are good.
-					$one_true = TRUE;
-					break;
-				}
-			}
-			if (!$one_true) {
-				$display_names = array();
-				foreach($required_field as $field) {
-					$display_names[] = "'" . $fields[$field] . "'";
-				}
-				throw new FieldConstraintError(
-					'One of ' . implode(', ', $display_names) . ' must be set.');
-				}
-			} else if (is_null($object->get($required_field)) || $object->get($required_field) === '') {
-			throw new FieldConstraintError(
-				'Required field "' . $fields[$required_field] . '" must be set.');
-		}
-	}
-}
 
 ?>
