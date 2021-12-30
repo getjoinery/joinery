@@ -38,11 +38,11 @@
 	*/
 
 	$session = SessionControl::get_instance();
-	
+
 	if($_POST){
 		
 		$new_comment = Comment::add_comment($post->key, $session, $_POST);
-		
+
 		//IF AUTHOR IS COMMENTER
 		if($author->key == $new_comment->get('cmt_usr_user_id')){
 			$new_comment->set('cmt_is_approved', TRUE);
@@ -55,7 +55,8 @@
 			foreach($notify_emails as $notify_email){
 				try {
 					$notify_user = User::GetByEmail($notify_email);
-					$body = 'Comment '.$comment->key.' was added.';
+					$body = '<p>Comment '.$new_comment->key.' was added by "'.htmlspecialchars($new_comment->get('cmt_author_name')).'".</p>';
+					$body .= '<p>Link: <a href="'. $settings->get_setting('webDir') . $post->get_url().'">'.$settings->get_setting('webDir') . $post->get_url().'</a>';
 					$email_inner_template = $settings->get_setting('individual_email_inner_template');
 					$email = new EmailTemplate($email_inner_template, $notify_user);
 					$email->fill_template(array(
