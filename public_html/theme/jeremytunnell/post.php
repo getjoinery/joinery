@@ -4,32 +4,7 @@
 	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/comments_class.php');
-
-	$settings = Globalvars::get_instance();
-	if(!$settings->get_setting('blog_active')){
-		//TURNED OFF
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();			
-	}
-
-	if(!$post){
-		$post = Post::get_by_link($params[1]);
-	}
-	if(!$post || !$post->get('pst_is_published')){
-		require_once(LibraryFunctions::display_404_page());			
-	}
-
-	$session = SessionControl::get_instance();
-	$session->set_return();
-	
-	if($_POST){
-		
-		$new_comment = Comment::add_comment($post->key, $session, $_POST);
-
-	}
+	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
 
 	$page = new PublicPage();
 	$hoptions = array(
