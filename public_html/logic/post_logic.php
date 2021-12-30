@@ -41,7 +41,13 @@
 	
 	if($_POST){
 		
-		Comment::add_comment($post->key, $session, $_POST);
+		$new_comment = Comment::add_comment($post->key, $session, $_POST);
+		
+		//IF AUTHOR IS COMMENTER
+		if($author->key == $new_comment->get('cmt_usr_user_id')){
+			$new_comment->set('cmt_is_approved', TRUE);
+			$new_comment->save();
+		}
 
 		//SEND NOTIFICATION
 		if($settings->get_setting('comment_notification_emails')){
