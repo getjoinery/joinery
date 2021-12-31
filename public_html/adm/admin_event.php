@@ -126,13 +126,13 @@
 					echo '<b>Private</b><br />';
 				} 
 				else if($event->get('evt_visibility') == 1){
-					echo '<b>Public</b> - <a href="' . $event->get_url() . '">Public link</a><br />';
+					echo '<b>Public:</b> <a href="' . $event->get_url() . '">'.$settings->get_setting('webDir_SSL').$event->get_url().'</a><br />';
 				}
 				else{
-					echo '<b>Public but unlisted</b> - <a href="' . $event->get_url() . '">Public link</a><br />';
+					echo '<b>Public but unlisted:</b> <a href="' . $event->get_url() . '">Public link</a><br />';
 				}		
 				
-				echo '<a href="/profile/event_sessions_course?event_id='.$event->key.'">Sessions link</a><br />';
+				echo '<b>Sessions page:</b> <a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$settings->get_setting('webDir_SSL').'/profile/event_sessions_course?event_id='.$event->key.'</a><br />';
 				?>
 				</p>
 			  <p class="text-center">

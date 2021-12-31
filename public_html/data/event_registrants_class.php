@@ -37,6 +37,7 @@ class EventRegistrantUnviewableDisplayException extends EventRegistrantException
 
 class EventRegistrant extends SystemBase {
 
+	public $prefix = 'evr';
 
 	public static $fields = array(
 		'evr_event_registrant_id' => 'event_registrant ID',
@@ -69,8 +70,6 @@ class EventRegistrant extends SystemBase {
 	public static $field_constraints = array(
 
 		);
-		
-	public $prefix = 'evt';
 
 	public static $public_actions = array(
 
