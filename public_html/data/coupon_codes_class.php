@@ -14,6 +14,10 @@ class CouponCodeException extends SystemClassException {}
 
 class CouponCode extends SystemBase {
 
+	//public $prefix = 'ccd';  NOT USED YET
+	
+	//public $primary_key = 'ccd_coupon_code_id'; NOT USED YET
+	
 	public static $fields = array(
 		'ccd_coupon_code_id' => 'ID of the coupon_code',
 		'ccd_code' => 'The code',

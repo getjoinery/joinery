@@ -78,5 +78,4 @@ function WordLength($field, $value, $min, $max) {
 	}
 }
 
-
 ?>
