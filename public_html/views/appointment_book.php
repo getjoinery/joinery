@@ -8,6 +8,8 @@
 	
 	$booking_id = LibraryFunctions::fetch_variable('booking_id', NULL,1,'booking id');
 
+	//TURNED OFF FOR NON ADMINS
+	$session->check_permission(10);
 
 	$session = SessionControl::get_instance();
 	$session->set_return();
