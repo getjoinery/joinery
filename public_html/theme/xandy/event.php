@@ -28,7 +28,7 @@
 		$subtitle[] = 'Led by '. $leader->display_name();
 	}
 	$pageoptions['subtitle'] = implode(' | ', $subtitle);
-	'is_valid_page' => $is_valid_page,
+	$pageoptions['is_valid_page'] = $is_valid_page;
 	echo PublicPage::BeginPage($event->get('evt_name'), $pageoptions);
 		
 		if($picture_link = $event->get_picture_link('medium')){
