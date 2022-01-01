@@ -59,7 +59,49 @@
 		
 		<div class="margin-top-70 text-center">
 			<?php
-					
+
+			if($registration_message){
+				echo '<p>'.$registration_message.'</p>';
+			}
+
+			if($register_urls){
+				$register_urls = $event->get_register_url();
+				if(is_array($register_urls)){
+					foreach($register_urls as $register_url){
+						if($register_url['link']){
+							$register_text .= '<a class="button-group filter-button-group filter-button-group2"  href="'.$register_url['link'].'">Register Now ('.$register_url['label'].')</a><br>';
+						}
+						else{
+							$register_text .= '<a class="button-group filter-button-group filter-button-group2"  href="javascript:void(0);">Sold Out ('.$register_url['label'].')</a><br>';							
+						}
+					}
+					echo $register_text;
+				}
+				else{
+					if($register_urls){
+						echo '<a class="button-group filter-button-group filter-button-group2" href="'.$register_urls.'">Register Now</a>';
+					}
+					else{
+						echo '<a class="button-group filter-button-group filter-button-group2" href="javascript:void(0);">Sold Out</a>';
+					}
+				}			
+				
+				
+			}
+			
+			if($waiting_list_link){
+				echo '<a class="button-group filter-button-group filter-button-group2" href="'.$waiting_list_link.'">Get on the waiting list</a>';
+			}
+
+			if($additional_payment_message){
+				echo '<p>'.$additional_payment_message.'</p>';
+			}
+			
+			if($if_registered_message){
+				echo '<p>'.$if_registered_message.'</p>';
+			}
+
+			/*
 			if($view_course_link){
 				echo '<a href="/profile/event_sessions_course?event_id='.$event->key.'"><div class="button-group filter-button-group filter-button-group2"><button class="gallery-btn">View Course</button></a>';		
 			}
@@ -79,7 +121,7 @@
 			if($if_registered_message){
 				echo '<p>'.$if_registered_message.'</p>';
 			}
-
+*/
 			?>
 			<!--<a class="button button-lg button-rounded button-reveal-right-dark" href="#"><span>Get In Touch</span><i class="ti-arrow-right"></i></a>-->
 		</div>		
