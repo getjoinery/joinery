@@ -52,7 +52,7 @@
 					
 	if($is_registered){
 		$view_course_link = '/profile/event_sessions_course?event_id='.$event->key;
-		$register_urls = $event->get_register_url();
+		$register_urls = NULL;
 		if(is_array($register_urls)){
 			foreach($register_urls as $register_url){
 				$register_html .= '<a href="'.$register_url['link'].'">Make a payment ('.$register_url['label'].')</a><br>';
@@ -71,6 +71,7 @@
 			$registration_message = 'This event has been cancelled.';
 		}						
 		else if($event->get('evt_is_accepting_signups') && $event->get_register_url()){	
+
 			if($event->get('evt_allow_waiting_list') && ($event->get('evt_max_signups') && $numregistrants >= $event->get('evt_max_signups'))){
 				$registration_message = 'Registration is full, but you may add yourself to the waiting list.';
 				$waiting_list_link = '/event_waiting_list?event_id='.$event->key;
