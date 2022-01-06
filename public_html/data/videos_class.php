@@ -61,8 +61,16 @@ class Video extends SystemBase {
 			$elink = 'http://www.liveleak.com/e/';
 			return $this->get_swfobject_html($elink . $this->get('vid_video_number'), $vidwidth, $vidheight);
 		} else if ($this->get('vid_source') == 4) {
-			$elink = 'https://vimeo.com/';
-			$link = '<iframe src="https://player.vimeo.com/video/'.$this->get('vid_video_number').'" width="'.$vidwidth.'" height="'.$vidheight.'" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>';
+			//DEAL WITH THE TWO WAYS VIMEO STRUCTURES VIDEO EMBEDS
+			if (preg_match('((\d+)/(\d+))', $this->get('vid_video_number'), $matches)) {
+				$vid_video_number = $matches[1];
+				$elink = 'https://vimeo.com/';
+				$link = '<iframe src="https://player.vimeo.com/video/'.$matches[1].'?h='.$matches[2].'" width="'.$vidwidth.'" height="'.$vidheight.'" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>';
+			} 
+			else{
+				$elink = 'https://vimeo.com/';
+				$link = '<iframe src="https://player.vimeo.com/video/'.$this->get('vid_video_number').'" width="'.$vidwidth.'" height="'.$vidheight.'" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>';
+			}
 			return $link;
 					
 			/*
@@ -182,6 +190,9 @@ class Video extends SystemBase {
 			} 
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)(&|$|"))', $vid_url, $matches)) {
 				$vid_video_number = $matches[1];
+			}
+			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/(\d+)(&|$|"))', $vid_url, $matches)) {
+				$vid_video_number = $matches[1] . '/' . $matches[2];
 			}
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/(\w+)(&|$|"))', $vid_url, $matches)) {
 				$vid_video_number = $matches[1];
