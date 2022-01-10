@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic-tw.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 
 
 	$session = SessionControl::get_instance();
