@@ -9,7 +9,7 @@
 	$session->check_permission(10);
 
 	if (isset($_REQUEST['pmu_public_menu_id'])) {
-		$public_menu = new PublicMenu($_REQUEST['amu_public_menu_id'], TRUE);
+		$public_menu = new PublicMenu($_REQUEST['pmu_public_menu_id'], TRUE);
 	} else {
 		$public_menu = new PublicMenu(NULL);
 	}
@@ -75,7 +75,7 @@
 		NULL);  //OFFSET
 	$menulist->load();
 	$optionvals = $menulist->get_dropdown_array();
-	echo $formwriter->dropinput("Parent Menu", "amu_parent_menu_id", "ctrlHolder", $optionvals, $public_menu->get('amu_parent_menu_id'), '', TRUE);	
+	echo $formwriter->dropinput("Parent Menu", "pmu_parent_menu_id", "ctrlHolder", $optionvals, $public_menu->get('pmu_parent_menu_id'), '', TRUE);	
 	
 	echo $formwriter->textinput('Order', 'pmu_order', NULL, 4, $public_menu->get('pmu_order'), '', 255, '');
 
