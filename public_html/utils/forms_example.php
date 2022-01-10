@@ -17,7 +17,7 @@
 	echo PublicPage::BeginPage('Log In');
 
 	
-	$formwriter = new FormWriterMaster1('form1');
+	$formwriter = new FormWriterMasterTW('form1');
 	
 	?>
 	<!--
