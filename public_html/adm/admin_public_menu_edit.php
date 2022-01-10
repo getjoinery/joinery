@@ -9,7 +9,7 @@
 	$session->check_permission(10);
 
 	if (isset($_REQUEST['pmu_public_menu_id'])) {
-		$public_menu = new PublicMenu($_REQUEST['pmu_public_menu_id'], TRUE);
+		$public_menu = new PublicMenu($_REQUEST['amu_public_menu_id'], TRUE);
 	} else {
 		$public_menu = new PublicMenu(NULL);
 	}
