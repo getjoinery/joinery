@@ -194,6 +194,9 @@ class Video extends SystemBase {
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/([A-Za-z0-9]+)(&|$|"))', $vid_url, $matches)) {
 				$vid_video_number = $matches[1] . '/' . $matches[2];
 			}
+			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/manage/videos/(\d+)/([A-Za-z0-9]+)(&|$|"))', $vid_url, $matches)) {
+				$vid_video_number = $matches[1] . '/' . $matches[2];
+			}
 			/*
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/(\w+)(&|$|"))', $vid_url, $matches)) {
 				$vid_video_number = $matches[1];
