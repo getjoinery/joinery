@@ -39,7 +39,7 @@ class Video extends SystemBase {
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
 		if ($this->data === NULL) {
 			throw new VideoException(
-				'This video does not exist');
+				'This video ('.$this->key.') does not exist');
 		}
 	}
 	
@@ -62,7 +62,7 @@ class Video extends SystemBase {
 			return $this->get_swfobject_html($elink . $this->get('vid_video_number'), $vidwidth, $vidheight);
 		} else if ($this->get('vid_source') == 4) {
 			//DEAL WITH THE TWO WAYS VIMEO STRUCTURES VIDEO EMBEDS
-			if (preg_match('((\d+)/(\d+))', $this->get('vid_video_number'), $matches)) {
+			if (preg_match('((\d+)/([A-Za-z0-9]+))', $this->get('vid_video_number'), $matches)) {
 				$vid_video_number = $matches[1];
 				$elink = 'https://vimeo.com/';
 				$link = '<iframe src="https://player.vimeo.com/video/'.$matches[1].'?h='.$matches[2].'" width="'.$vidwidth.'" height="'.$vidheight.'" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>';
@@ -191,12 +191,14 @@ class Video extends SystemBase {
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)(&|$|"))', $vid_url, $matches)) {
 				$vid_video_number = $matches[1];
 			}
-			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/(\d+)(&|$|"))', $vid_url, $matches)) {
+			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/([A-Za-z0-9]+)(&|$|"))', $vid_url, $matches)) {
 				$vid_video_number = $matches[1] . '/' . $matches[2];
 			}
+			/*
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/(\w+)(&|$|"))', $vid_url, $matches)) {
 				$vid_video_number = $matches[1];
 			}
+			*/
 			else {
 				return FALSE;
 			}
