@@ -102,6 +102,20 @@
 			exit();					
 		}	
 
+		try {
+			//STORE PAYMENT METHOD 
+			$source_result = \Stripe\Customer::createSource( 
+				$stripe_customer_id, 
+				[ 'source' => [ 'object' => 'source', 'type' => 'card', 'token' => $_REQUEST['stripeToken'], ], ] );
+		}	
+		catch (Exception $e) {
+			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
+			$order->set('ord_error', substr($error, 0, 250));
+			$order->save();		
+			
+			throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
+			exit();		
+		}
 	}
 
 	//PROCESS RECURRING ITEMS
@@ -336,11 +350,6 @@
 	if($settings->get_setting('checkout_type') == 'stripe_regular'){
 		try{	
 			if($charge_total > 0){
-				
-				//STORE PAYMENT METHOD 
-				$source_result = \Stripe\Customer::createSource( 
-					$stripe_customer_id, 
-					[ 'source' => [ 'object' => 'source', 'type' => 'card', 'token' => $_REQUEST['stripeToken'], ], ] );
 				
 				//CHARGE THE PURCHASE
 				$charge_result = \Stripe\Charge::create([
