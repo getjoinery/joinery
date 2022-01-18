@@ -67,7 +67,7 @@
 		if($event->get('evt_status') == Event::STATUS_COMPLETED){
 			$registration_message = 'This event is complete.';
 		}	
-		else if($event->get('evt_status') == Event::STATUS_CANCELLED){
+		else if($event->get('evt_status') == Event::STATUS_CANCELED){
 			$registration_message = 'This event has been cancelled.';
 		}						
 		else if($event->get('evt_is_accepting_signups') && $event->get_register_url()){	

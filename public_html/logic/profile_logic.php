@@ -33,6 +33,14 @@
 	$user = new User($session->get_user_id(), TRUE);	
 	include($_SERVER['DOCUMENT_ROOT'] . '/utils/registrant_maintenance.php');
 	
+
+	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
+	$num_events = $event_registrants->count_all();
+	$event_registrants->load();
+	
+	
+	//COMPATIBILITY WITH OLD TEMPLATE
+	
 	$event_registrants_future = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => false), array('event_id'=> 'DESC'));
 	$num_future_events = $event_registrants_future->count_all();
 	$event_registrants_future->load();
@@ -41,6 +49,9 @@
 	$num_past_events = $event_registrants_future->count_all();
 	$event_registrants_past->load();
 	
+	//END COMPATIBILITY WITH OLD TEMPLATE
+
+		
 	$phone_numbers = new MultiPhoneNumber(
 		array('user_id' => $session->get_user_id(), 'deleted' => FALSE));
 	$num_phone_numbers = $phone_numbers->count_all();
@@ -52,6 +63,25 @@
 	else{
 		$phone_number = new PhoneNumber(NULL);
 	}
+	
+	//ORDERS
+	$numperpage = 5;
+	$conoffset = LibraryFunctions::fetch_variable('conoffset', 0, 0, '');
+	$consort = LibraryFunctions::fetch_variable('consort', 'ord_order_id', 0, '');	
+	$consdirection = LibraryFunctions::fetch_variable('consdirection', 'DESC', 0, '');
+	$search_criteria = NULL;
+	
+	$search_criteria = array();
+	$search_criteria['user_id'] = $session->get_user_id();
+	
+
+	$orders = new MultiOrder(
+		$search_criteria,
+		array($consort=>$consdirection),
+		$numperpage,
+		$conoffset);
+	$numrecords = $orders->count_all();
+	$orders->load();
 	
 
 	$addresses = new MultiAddress(

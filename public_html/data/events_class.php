@@ -47,7 +47,7 @@ class Event extends SystemBase {
 
 	const STATUS_ACTIVE = 1;
 	const STATUS_COMPLETED = 2;
-	const STATUS_CANCELLED = 3;
+	const STATUS_CANCELED = 3;
 	
 	const DISPLAY_CONDENSED = 1;
 	const DISPLAY_SEPARATE = 2;
