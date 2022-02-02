@@ -298,25 +298,56 @@ class FormWriterMasterTW {
 		return '<div class="pt-5"><div class="'.$class.'">';
 	}
 
-	//TYPE IS 'primary' or 'secondary'
-	function new_form_button($label='Submit', $type='primary', $class='', $id=NULL) {
+	//STYLE IS 'primary' or 'secondary'
+	//WIDTH IS 'standard' or 'full'
+	function new_button($label='Submit', $link, $style='primary', $width='standard', $class='', $id=NULL) {
 		
-		if($type == 'primary'){
+		if($style == 'primary'){
 			$class = $this->button_primary_class . ' ' . $class;
 		}
 		else{
 			$class = $this->button_secondary_class . ' ' . $class;
 		}
 		
+		if($width == 'full'){
+			$class = 'w-full '. $class;
+		}
 		
-		$output = '<button type="button" class="'.$class.'"';
+		
+		$output = '<a href="'.$link.'"><button type="button" class="'.$class.'"';
 		if($id != '' && !is_null($id)){
 			$output .= ' id="'.$id.'"';
 		}
-		$output .= '">';
+		$output .= '>';
+		$output .= $label.'</button></a>';
+		return $output;
+	}
+
+	//STYLE IS 'primary' or 'secondary'
+	//WIDTH IS 'standard' or 'full'
+	function new_form_button($label='Submit', $style='primary', $width='standard', $class='', $id=NULL) {
+		
+		if($style == 'primary'){
+			$class = $this->button_primary_class . ' ' . $class;
+		}
+		else{
+			$class = $this->button_secondary_class . ' ' . $class;
+		}
+
+		if($width == 'full'){
+			$class = 'w-full '. $class;
+		}		
+		
+		$output = '<button type="submit" class="'.$class.'"';
+		if($id != '' && !is_null($id)){
+			$output .= ' id="'.$id.'"';
+		}
+		$output .= '>';
 		$output .= $label.'</button>';
 		return $output;
 	}
+
+
 
 	
 	function end_buttons() {
