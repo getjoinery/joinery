@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	require_once(LibraryFunctions::get_logic_file_path('event_withdraw_logic.php'));
 
 
@@ -20,7 +20,7 @@
 			<div class="container">';
 
 	if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
-		$formwriter = new FormWriterPublic("form1");
+		$formwriter = new FormWriterPublicTW("form1");
 		echo $formwriter->begin_form("form", "post", "/profile/event_withdraw");
 
 		echo '<h4>Confirm withdrawal from '.$event->get('evt_name').'</h4>';
@@ -29,7 +29,7 @@
 		echo $formwriter->hiddeninput("confirm", 1);
 		echo $formwriter->hiddeninput("evr_event_registrant_id", $evr_event_registrant_id);
 
-		echo $formwriter->new_form_button('Confirm','button button-lg button-dark');
+		echo $formwriter->new_form_button('Confirm');
 		echo ' <a href="/profile">Cancel, I changed my mind</a>';
 
 			echo '</div>';

@@ -86,4 +86,14 @@
 
 	} 
 
+	$tab_menus = array(
+		'Edit Account' => '/profile/account_edit',
+		'Change Password' => '/profile/password_edit',
+		'Edit Address' => '/profile/address_edit',
+		'Edit Phone Number' => '/profile/phone_numbers_edit',
+		'Change Contact Preferences' => '/profile/contact_preferences',
+	);
+	
+	$_REQUEST['menu_item'] = 'Edit Address';
+
 ?>

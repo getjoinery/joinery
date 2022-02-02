@@ -18,45 +18,120 @@
 	$page->public_header($hoptions,NULL);
 	
 
-	$time_string = $event->get_time_string();
-	if($event->get('evt_timezone') != $session->get_timezone()){
-		$time_string .= '('. $event->get_time_string($session->get_timezone()) . ')';
-	}		
-	$time_string .= '<br>';
 	
 	$options=array();
-	$options['subtitle'] = $time_string .'<a href="/profile/profile">Back to my profile</a>';
-	echo PublicPage::BeginPage($event->get('evt_name'), $options);	
+	echo PublicPage::BeginPage('Event', $options);	
 	
 
 	?>
-	<div class="section padding-top-20">
-		<div class="container">
-			<div class="row col-spacing-50">
-				<!-- Blog Posts -->
-				<div class="col-12 col-lg-8"> 
-				<?php
-				
-
+ <main class="-mt-24 pb-8">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
+      <h1 class="sr-only">Profile</h1>
+      <!-- Main 3 column grid -->
+      <div class="grid grid-cols-1 gap-4 items-start lg:grid-cols-3 lg:gap-8">
+        <!-- Left column -->
+        <div class="grid grid-cols-1 gap-4 lg:col-span-2">
+          <!-- Welcome panel -->
+          <section aria-labelledby="profile-overview-title">
+            
+			
+			
+			
+			
+			<div class="rounded-lg bg-white overflow-hidden shadow">
+              <h2 class="sr-only" id="profile-overview-title">Sessions Overview</h2>
+              <div class="bg-white p-6">
+                <div class="sm:flex sm:items-center sm:justify-between">
+                  <div class="sm:flex sm:space-x-5">
+					<!--
+                    <div class="flex-shrink-0">
+                      <img class="mx-auto h-20 w-20 rounded-full" src="https://images.unsplash.com/photo-1550525811-e5869dd03032?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+                    </div>
+					-->
 	
 
 	
-	//DISPLAY REGISTER FINISH LINKS FOR ANY EVENTS
-	if($event->get('evt_collect_extra_info')){
-		$event_registrants = new MultiEventRegistrant(array('user_id' => $session->get_user_id(), 'event_id' => $event->key), NULL);
-		$event_registrants->load();
-		foreach($event_registrants as $event_registrant){
-			if(!$event_registrant->get('evr_extra_info_completed')){
-				$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-				$line = 'Your registration for <strong>'.$event->get('evt_name').'</strong> needs some additional information. <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">click here to add the information</a>';
-				echo '<div class="status_warning">'.$line.'</div><br /><br />';
-			}
-		}
-	}		
+					
+                    <div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
+                      <p class="text-xl font-bold text-gray-900 sm:text-2xl"><?php echo htmlspecialchars($event->get('evt_name')); ?></p>
+                      <p class="text-sm font-medium text-gray-600">
+					  <?php 	
+					  $time_string = $event->get_time_string();
+						if($event->get('evt_timezone') != $session->get_timezone()){
+							$time_string .= ' ('. $event->get_time_string($session->get_timezone()) . ')';
+						}	
+						echo $time_string;
+						?>
+					</p>
+					  
+					<?php
+					$calendar_text = '';
+					if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+						$calendar_links = $event->get_add_to_calendar_links();
+						if($calendar_links){
+							$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
+							$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
+							$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
+							$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
+						}
+					}
+					echo '<div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">'.$calendar_text.'</div>';
+					?>
+
+                    </div>
+                  </div>
+                  <div class="mt-5 flex justify-center sm:mt-0">
+                    <a href="<?php echo $event->get_url(); ?>" class="flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                      View Public Event
+                    </a>
+                  </div>
+                </div>
+              </div>
 
 
+  <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
+    <?php echo $event->get('evt_short_description'); ?>
+  </div>
 
-
+<!--
+  <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
+    <dl class="grid grid-cols-1 gap-4 gap-y-8 sm:grid-cols-2">
+      <div class="sm:col-span-1">
+        <dt class="text-sm font-medium text-gray-500">
+          Email
+        </dt>
+        <dd class="mt-1 text-sm text-gray-900">
+          <?php //echo htmlspecialchars($user->get('usr_email')); ?>
+        </dd>
+      </div>
+      <div class="sm:col-span-1">
+        <dt class="text-sm font-medium text-gray-500">
+          Phone
+        </dt>
+        <dd class="mt-1 text-sm text-gray-900">
+          <?php //echo $phone_number->get_phone_string(); ?>
+        </dd>
+      </div>
+      <div class="sm:col-span-1">
+        <dt class="text-sm font-medium text-gray-500">
+          Address
+        </dt>
+        <dd class="mt-1 text-sm text-gray-900">
+          <?php //echo $address->get_address_string(', '); ?>
+        </dd>
+      </div>
+      <div class="sm:col-span-1">
+        <dt class="text-sm font-medium text-gray-500">
+          Timezone
+        </dt>
+        <dd class="mt-1 text-sm text-gray-900">
+          <?php //echo $user->get('usr_timezone'); ?>
+        </dd>
+      </div>
+    </dl>
+  </div>
+-->
+	<?php
 	if($next_session){
 		if($next_session->get('evs_title')){
 			$session_name = $next_session->get('evs_title');
@@ -81,119 +156,404 @@
 			$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
 		}
 		?>
-		<div class="padding-40 border-all border-radius hover-shadow">
-			<h4 class="font-weight-normal margin-0">Next Session: <?php echo $session_name; ?></h4>
-			<div class="margin-bottom-10 margin-lg-bottom-20 text-black-03">
-				<p><i class="fas fa-map-marker-alt margin-right-10"></i><span><?php echo $time_string; ?></span></p>
-				<p><i class="fas fa-map-marker-alt margin-right-10"></i><span><?php echo $calendar_text; ?></span></p>
-			</div>
-			<p><?php echo $next_session->get('evs_content'); ?></p>
-			<!--<div class="text-right margin-top-10 margin-lg-top-20">
-				<a class="button-text-1" href="#">Apply Now</a>
-			</div>-->
-		</div>
+										<div class="px-4 py-4 sm:px-6">
+										<h2>Next Session</h2>
+										  <div class="flex items-center justify-between">
+											<p class="text-sm font-medium text-indigo-600 truncate">
+											  <?php echo $session_name; ?>
+											</p>
+											<div class="ml-2 flex-shrink-0 flex">
+											  
+												<?php
+												/*
+												if($event->get('evt_status') == Event::STATUS_ACTIVE){
+													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Upcoming</p>';
+												} 
+												else if($event->get('evt_status') == Event::STATUS_CANCELED){
+													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Canceled</p>';
+												}
+												else if($event->get('evt_status') == Event::STATUS_COMPLETED){
+													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Completed</p>';
+												}
+												*/
+												?>
+											  
+											</div>
+										  </div>
+										  <div class="mt-2 sm:flex sm:justify-between">
+											<div class="sm:flex">
+											  <p class="flex items-center text-sm text-gray-500">
+											  <!-- Heroicon name: solid/calendar -->
+											  <svg class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+												<path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
+											  </svg>
+												<?php echo $time_string; ?>
+											  </p>
+											  
+											  </div>
+											  <div class="sm:flex">
+													<p><?php echo $calendar_text; ?></p>
+												</div>
+											
+											<div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+											
+											  <!-- Heroicon name: solid/calendar -->
+											  <!--
+											  <svg class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+												<path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
+											  </svg>
+											  -->
+											  <p>
+												<?php //echo $actions; ?>
+												<!--<time datetime="2020-01-07">January 7, 2020</time>-->
+											  </p>
+											</div>
+										  </div>
+										  <p><?php echo $next_session->get('evs_content'); ?></p>
+										</div>		
+		
+
 		<?php
-	}
+	}	
+	?>	
+	<!--	
+              <div class="border-t border-gray-200 bg-gray-50 grid grid-cols-1 divide-y divide-gray-200 sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
+                <div class="px-6 py-5 text-sm font-medium text-center">
+                  <span class="text-gray-900">12</span>
+                  <span class="text-gray-600">Vacation days left</span>
+                </div>
 
-	if ($num_sessions){
-		echo '<h2>Past Sessions</h2>';
-	}
-	else{
-		echo '<h2>Past Sessions</h2><p>There are no sessions here.</p>';
-	}
+                <div class="px-6 py-5 text-sm font-medium text-center">
+                  <span class="text-gray-900">4</span>
+                  <span class="text-gray-600">Sick days left</span>
+                </div>
 
-	foreach($event_sessions as $event_session){
-		if($event_session->get('evs_vid_video_id')){
-			$video = new Video($event_session->get('evs_vid_video_id'), TRUE);
-		}
-		else{
-			$video = new Video(NULL);
-		}	
+                <div class="px-6 py-5 text-sm font-medium text-center">
+                  <span class="text-gray-900">2</span>
+                  <span class="text-gray-600">Personal days left</span>
+                </div>
+              </div>
+			  -->
+            </div>
+          </section>
 
-		if($event_session->get('evs_title')){
-			$session_name = $event_session->get('evs_title');
-		}
-		else{
-			$session_name = 'Session '.$event_session->get('evs_session_number');
-		}
-		
-		if($event->get('evt_timezone') == $session->get_timezone()){
-			$time_string = $event_session->get_time_string($event->get('evt_timezone'));				
-		}
-		else{
-			$time_string = $event_session->get_time_string($event->get('evt_timezone')) . ' (Your time: ' . $event_session->get_time_string($session->get_timezone()). ')';
-		}			
-		
+<?php /*
+<div>
+  <div class="sm:hidden">
+    <label for="tabs" class="sr-only">Select a tab</label>
+    <!-- Use an "onChange" listener to redirect the user to the selected tab URL. -->
+    <select id="tabs" name="tabs" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+      <option <?php if(!$_REQUEST['tab']){ echo 'selected'; } ?>>Active Events</option>
+
+      <option <?php if($_REQUEST['tab'] == 'past'){ echo 'selected'; } ?>>Past Events</option>
+
+    </select>
+  </div>
+  <div class="hidden sm:block">
+    <div class="border-b border-gray-200">
+      <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+        <!-- Current: "border-indigo-500 text-indigo-600", Default: "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" -->
+		<?php
+		$current_style = 'class="border-indigo-500 text-indigo-600 group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm" aria-current="page"';
+		$standard_style = 'class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"';
 		?>
-		<div class="padding-40 border-all border-radius hover-shadow margin-bottom-20">
-			<h4 class="font-weight-normal margin-0"><?php echo $session_name; ?></h4>
-			<div class="margin-bottom-10 margin-lg-bottom-20 text-black-03">
-				<p><i class="fas fa-map-marker-alt margin-right-10"></i><span><?php echo $time_string; ?></span></p>
-			</div>
-			<?php echo $video->get_embed(); ?>
-			<p><?php echo $event_session->get('evs_content'); ?></p>
-			<?php
-			$session_files = $event_session->get_files();
-			$num_session_files = 0;
-			foreach($session_files as $session_file){
-				$num_session_files++;
-			}
-			if($num_session_files){
-			?>
-			<div class="margin-top-20">
-				<h6 class="font-family-tertiary font-small font-weight-medium uppercase">Materials:</h6>
-				<ul class="list-dash">
-					<?php
-					foreach($session_files as $session_file){
-						echo '<li><a href="'.$session_file->get_url().'">'.$session_file->get_name().'</a></li>';
-					}		
-					?>						
-				</ul>
-			</div>
-			<?php
-			}
-			?>
-			<!--<div class="text-right margin-top-10 margin-lg-top-20">
-				<a class="button-text-1" href="#">Apply Now</a>
-			</div>-->
-		</div>
-		<?php			
+        <a href="/profile/profile"  <?php if(!$_REQUEST['tab']){ echo $current_style; } else{ echo $standard_style; } ?>>
+          Active Events
+        </a>
+
+        <a href="/profile/profile?tab=past" <?php if($_REQUEST['tab'] == 'past'){ echo $current_style; } else{ echo $standard_style; } ?>>
+          Past Events
+        </a>
+      </nav>
+    </div>
+  </div>
+</div>
+*/
+?>
+
+          <!-- Actions panel -->
+          <section aria-labelledby="quick-links-title">
+            <div class="rounded-lg bg-gray-200 overflow-hidden shadow divide-y divide-gray-200 sm:divide-y-0 sm:grid  sm:gap-px">
+              <h2 class="sr-only" id="quick-links-title">Sessions</h2>
+
+
+                
+
+<div class="bg-white shadow overflow-hidden sm:rounded-md">
+  <ul role="list" class="divide-y divide-gray-200">
+    
+
+
+	<?php
+
+
+								foreach($event_sessions as $event_session){
+									if($event_session->get('evs_vid_video_id')){
+										$video = new Video($event_session->get('evs_vid_video_id'), TRUE);
+									}
+									else{
+										$video = new Video(NULL);
+									}	
+
+									if($event_session->get('evs_title')){
+										$session_name = $event_session->get('evs_title');
+									}
+									else{
+										$session_name = 'Session '.$event_session->get('evs_session_number');
+									}
+									
+									if($event->get('evt_timezone') == $session->get_timezone()){
+										$time_string = $event_session->get_time_string($event->get('evt_timezone'));				
+									}
+									else{
+										$time_string = $event_session->get_time_string($event->get('evt_timezone')) . ' (Your time: ' . $event_session->get_time_string($session->get_timezone()). ')';
+									}	
+									
+									/*
+									$calendar_text = '';
+									if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+										$calendar_links = $event->get_add_to_calendar_links();
+										if($calendar_links){
+											$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
+											$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
+										}
+									}
+									*/
+									
+									?>			
+									<li>
+									  <!--<a href="<?php echo $course_link; ?>" class="block hover:bg-gray-50">-->
+										<div class="px-4 py-4 sm:px-6">
+										  <div class="flex items-center justify-between">
+											<p class="text-sm font-medium text-indigo-600 truncate">
+											  <?php echo $session_name; ?>
+											</p>
+											<div class="ml-2 flex-shrink-0 flex">
+											  
+												<?php
+												/*
+												if($event->get('evt_status') == Event::STATUS_ACTIVE){
+													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Upcoming</p>';
+												} 
+												else if($event->get('evt_status') == Event::STATUS_CANCELED){
+													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Canceled</p>';
+												}
+												else if($event->get('evt_status') == Event::STATUS_COMPLETED){
+													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Completed</p>';
+												}
+												*/
+												?>
+											  
+											</div>
+										  </div>
+										  <div class="mt-2 sm:flex sm:justify-between">
+											<div class="sm:flex">
+											  <p class="flex items-center text-sm text-gray-500">
+											  <!-- Heroicon name: solid/calendar -->
+											  <svg class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+												<path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
+											  </svg>
+												<?php echo $time_string; ?>
+											  </p>
+											  </div>
+
+											
+											<div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+											
+											  <!-- Heroicon name: solid/calendar -->
+											  <!--
+											  <svg class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+												<path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
+											  </svg>
+											  -->
+											  <p>
+												<?php echo $actions; ?>
+												<!--<time datetime="2020-01-07">January 7, 2020</time>-->
+											  </p>
+											</div>
+										  </div>
+										  
+										  
+									<?php echo $video->get_embed(); ?>
+												<p><?php echo $event_session->get('evs_content'); ?></p>
+												<?php
+												$session_files = $event_session->get_files();
+												$num_session_files = 0;
+												foreach($session_files as $session_file){
+													$num_session_files++;
+												}
+												if($num_session_files){
+												?>
+												<div class="margin-top-20">
+													<h6 class="font-family-tertiary font-small font-weight-medium uppercase">Materials:</h6>
+													<ul class="list-dash">
+														<?php
+														foreach($session_files as $session_file){
+															echo '<li><a href="'.$session_file->get_url().'">'.$session_file->get_name().'</a></li>';
+														}		
+														?>						
+													</ul>
+												</div>
+												<?php
+												}
+												?>										  
+										  
+										  
+										  
+										  
+										  
+										  
+										  
+										  
+										</div>
+									  <!--</a>-->
+									</li>			
+									<?php
+									
+								}
+								
+
+	
+								if($num_sessions > 5){
+									echo '            <div>
+									  <a href="/profile/event_sessions?show_all=1&evt_event_id='.$event->key.'" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">See all '.$num_sessions.' sessions</a>
+									</div>';
+									
+								}								
+								
+								
+							
+	?>
+
+  </ul>
+</div>
+
+
+             
+           
+          </section>
+        </div>
+
+        <!-- Right column -->
+        <div class="grid grid-cols-1 gap-4">
 		
-	}
+		<?php /* ?>
+          <!-- Announcements -->
+          <section aria-labelledby="announcements-title">
+            <div class="rounded-lg bg-white overflow-hidden shadow">
+              <div class="p-6">
+                <h2 class="text-base font-medium text-gray-900" id="announcements-title">Announcements</h2>
+                <div class="flow-root mt-6">
+                  <ul role="list" class="-my-5 divide-y divide-gray-200">
+                    <li class="py-5">
+                      <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
+                        <h3 class="text-sm font-semibold text-gray-800">
+                          <a href="#" class="hover:underline focus:outline-none">
+                            <!-- Extend touch target to entire panel -->
+                            <span class="absolute inset-0" aria-hidden="true"></span>
+                            Office closed on July 2nd
+                          </a>
+                        </h3>
+                        <p class="mt-1 text-sm text-gray-600 line-clamp-2">
+                          Cum qui rem deleniti. Suscipit in dolor veritatis sequi aut. Vero ut earum quis deleniti. Ut a sunt eum cum ut repudiandae possimus. Nihil ex tempora neque cum consectetur dolores.
+                        </p>
+                      </div>
+                    </li>
+
+                    <li class="py-5">
+                      <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
+                        <h3 class="text-sm font-semibold text-gray-800">
+                          <a href="#" class="hover:underline focus:outline-none">
+                            <!-- Extend touch target to entire panel -->
+                            <span class="absolute inset-0" aria-hidden="true"></span>
+                            New password policy
+                          </a>
+                        </h3>
+                        <p class="mt-1 text-sm text-gray-600 line-clamp-2">
+                          Alias inventore ut autem optio voluptas et repellendus. Facere totam quaerat quam quo laudantium cumque eaque excepturi vel. Accusamus maxime ipsam reprehenderit rerum id repellendus rerum. Culpa cum vel natus. Est sit autem mollitia.
+                        </p>
+                      </div>
+                    </li>
+
+                    <li class="py-5">
+                      <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
+                        <h3 class="text-sm font-semibold text-gray-800">
+                          <a href="#" class="hover:underline focus:outline-none">
+                            <!-- Extend touch target to entire panel -->
+                            <span class="absolute inset-0" aria-hidden="true"></span>
+                            Office closed on July 2nd
+                          </a>
+                        </h3>
+                        <p class="mt-1 text-sm text-gray-600 line-clamp-2">
+                          Tenetur libero voluptatem rerum occaecati qui est molestiae exercitationem. Voluptate quisquam iure assumenda consequatur ex et recusandae. Alias consectetur voluptatibus. Accusamus a ab dicta et. Consequatur quis dignissimos voluptatem nisi.
+                        </p>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
+                <div class="mt-6">
+                  <a href="#" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    View all
+                  </a>
+                </div>
+              </div>
+            </div>
+          </section>
+		  
+		  <?php */ ?>
+
+			
+			
+          <!-- Private Info -->
+		  <?php
+			if($event->get('evt_private_info')){
+				?>
+				<section aria-labelledby="recent-hires-title">
+					<div class="rounded-lg bg-white overflow-hidden shadow">
+					  <div class="p-6">
+						<h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Registrant Info</h2>
+						<div class="flow-root mt-6">
+						 <?php echo $event->get('evt_private_info'); ?>
+                </div>
+                
+              </div>
+            </div>
+          </section>
+		  <?php
+			}
+			?>			
+			
+        </div>
+      </div>
+    </div>
+</main>	
 	
-	if($num_sessions > 5){
-		echo '<p><a class="button button-lg button-dark" href="/profile/event_sessions?show_all=1&evt_event_id='.$event->key.'">See all '.$num_sessions.' sessions</a></p>';
-	}
-
-
-
-	?>
-	</div>
 	
-	<?php
-	if($event->get('evt_private_info')){
-	?>
-	<div class="col-12 col-lg-4 sidebar-wrapper">
-		<!-- Sidebar box 1 - About me -->
-		<div class="sidebar-box">
-			<div class="text-center">
-				<h6 class="font-small font-weight-normal uppercase">Live Info</h6>
+
+				<?php
 				
-				
-				<!--<img class="img-circle-md margin-bottom-20" src="../assets/images/img-circle-medium.jpg" alt="">
-				<p>Aenean massa. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus.</p>-->
-			</div>
-			<p><?php echo $event->get('evt_private_info'); ?></p>
-		</div>
-		<?php
-	}
-	?>
-				</div>
-				<!-- end Blog Sidebar -->
-			</div><!-- end row -->
-		</div><!-- end container -->
-	</div>
-	<?php
+
+	
+
+	
+	//DISPLAY REGISTER FINISH LINKS FOR ANY EVENTS
+	/*
+	if($event->get('evt_collect_extra_info')){
+		$event_registrants = new MultiEventRegistrant(array('user_id' => $session->get_user_id(), 'event_id' => $event->key), NULL);
+		$event_registrants->load();
+		foreach($event_registrants as $event_registrant){
+			if(!$event_registrant->get('evr_extra_info_completed')){
+				$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
+				$line = 'Your registration for <strong>'.$event->get('evt_name').'</strong> needs some additional information. <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">click here to add the information</a>';
+				echo '<div class="status_warning">'.$line.'</div><br /><br />';
+			}
+		}
+	}		
+	*/
+
+
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

@@ -81,23 +81,27 @@ class PublicPage extends PublicPageMaster {
 		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />
 		<meta name="msapplication-TileImage" content="/theme/integralzen/images/cropped-IZ-Icon-07-270x270.png" />	
 		-->
+		
 		<!-- CSS -->
-		<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />
+		<!--<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />-->
 		<!--<link rel="stylesheet" type="text/css" href="/theme/default/includes/uikit-3.4.2/css/uikit.min.css">-->
+		
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">
 		
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
-		<!--<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/sal/sal.min.css" rel="stylesheet">-->
-	
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">-->
+		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/sal/sal.min.css" rel="stylesheet">-->
+		
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/theme.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/site_styles.css" rel="stylesheet">
-		<!-- Fonts/Icons -->
+
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
 		
+		<link rel="stylesheet" type="text/css" href="<?php echo $this->theme_url; ?>/includes/output.css" >
+		<!--<script src="https://cdn.tailwindcss.com/"></script>
 		<?php
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';
