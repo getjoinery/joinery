@@ -215,7 +215,7 @@
 	<?php
 
 							if(!$num_events){
-									echo '<p class="mt-6">You have no event registrations.</p>';						
+									echo '<p class="mt-6 px-4 py-5 ">You have no event registrations.</p>';						
 							}
 							else{
 								foreach($event_registrants as $event_registrant){
