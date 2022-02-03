@@ -62,7 +62,9 @@
 					  <?php 	
 					  $time_string = $event->get_time_string();
 						if($event->get('evt_timezone') != $session->get_timezone()){
-							$time_string .= ' ('. $event->get_time_string($session->get_timezone()) . ')';
+							if($local_string = $event->get_time_string($session->get_timezone())){
+								$time_string .= ' ('. $local_string . ')';
+							}
 						}	
 						echo $time_string;
 						?>
