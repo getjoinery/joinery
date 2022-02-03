@@ -100,7 +100,7 @@ class PublicPage extends PublicPageMaster {
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">
 		
-		<link rel="stylesheet" type="text/css" href="<?php echo $this->theme_url; ?>/includes/output.css" >
+		
 		<!--<script src="https://cdn.tailwindcss.com/"></script>
 		<?php
 		if($settings->get_setting('custom_css')){
