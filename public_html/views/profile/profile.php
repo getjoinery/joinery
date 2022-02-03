@@ -1,18 +1,22 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 	require_once(LibraryFunctions::get_logic_file_path('profile_logic.php'));
 
 	
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'My Profile', 
+		'breadcrumbs' => array (
+			'My Profile' => '',
+			),
 	);
 	$page->public_header($hoptions,NULL);
-	echo PublicPage::BeginPage('My Profile');
+
+	echo PublicPageTW::BeginPage('My Profile', $hoptions);
 	
 
 		$display_messages = $session->get_messages($_SERVER['REQUEST_URI']);
@@ -40,7 +44,7 @@
 
 
 
-  <main class="-mt-24 pb-8">
+
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
       <h1 class="sr-only">Profile</h1>
       <!-- Main 3 column grid -->
@@ -211,7 +215,7 @@
 	<?php
 
 							if(!$num_events){
-									echo '<p>You have no event registrations.</p>';						
+									echo '<p class="mt-6">You have no event registrations.</p>';						
 							}
 							else{
 								foreach($event_registrants as $event_registrant){
@@ -292,6 +296,7 @@
 										  </div>
 										  <div class="mt-2 sm:flex sm:justify-between">
 											<div class="sm:flex">
+												<?php if($time){ ?>
 											  <p class="flex items-center text-sm text-gray-500">
 											  <!-- Heroicon name: solid/calendar -->
 											  <svg class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -299,9 +304,10 @@
 											  </svg>
 												<?php echo $time; ?>
 											  </p>
+												<?php } ?>
 											  </div>
 
-											
+
 											<div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
 											
 											  <!-- Heroicon name: solid/calendar -->
@@ -550,7 +556,7 @@
         </div>
       </div>
     </div>
-</main>
+
 
 
 
@@ -597,6 +603,6 @@
 		*/
 		
 
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>
