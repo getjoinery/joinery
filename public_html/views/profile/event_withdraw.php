@@ -1,23 +1,19 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	require_once(LibraryFunctions::get_logic_file_path('event_withdraw_logic.php'));
 
 
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 	$hoptions=array(
 		'title'=>'Withdraw from Event/Course'
 		);
 	$page->public_header($hoptions);
 
-	$options=array();
-	$options['subtitle'] = '<a href="/profile/profile">Back to my profile</a>';
-	echo PublicPage::BeginPage('Withdraw from Event/Course', $options);
-	
-	echo '<div class="section padding-top-20">
-			<div class="container">';
+
+	echo PublicPageTW::BeginPage('Withdraw from Event/Course', $hoptions);
 
 	if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
 		$formwriter = new FormWriterPublicTW("form1");
@@ -39,8 +35,8 @@
 	else{
 		echo 'You cannot withdraw from an event in the past.';
 	}
-	echo '</div></div>';
-	echo PublicPage::EndPage();
+
+	echo PublicPageTW::EndPage();
 	$page->public_footer();
 
 ?>
