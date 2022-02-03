@@ -1,26 +1,27 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	require_once(LibraryFunctions::get_logic_file_path('event_sessions_logic.php'));	
 
 
 	if($error_message){
-		PublicPage::OutputGenericPublicPage('Not Registered', 'Not Registered', $error_message);
+		PublicPageTW::OutputGenericPublicPage('Not Registered', 'Not Registered', $error_message);
 		exit();
 	}	
 
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Sessions', 
+		'breadcrumbs' => array(
+			'My Profile' => '/profile/profile',
+			'Event' => '',
+		),
 	);
 	$page->public_header($hoptions,NULL);
 	
-
-	
-	$options=array();
-	echo PublicPage::BeginPage('Event', $options);	
+	echo PublicPageTW::BeginPage('Event', $hoptions);	
 	
 
 	?>
@@ -554,6 +555,6 @@
 	*/
 
 
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>
