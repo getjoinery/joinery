@@ -285,12 +285,12 @@ class FormWriterMasterTW {
 	}	
 
 	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
-		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'">';
+		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"><div class="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">';
 		return $output;
 	}
 
 	function end_form(){
-		return '</form>';
+		return '</div></form>';
 	}
 	
 	
