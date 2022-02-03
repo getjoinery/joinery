@@ -39,6 +39,12 @@
 	}
 	*/
 
+	foreach($display_messages AS $display_message) {
+		if($display_message->identifier == 'addressbox') {			
+			echo '<div class="'.$display_message->get_message_class().'">'.$display_message->message.'</div>';
+		}
+	}	
+
 	Address::PlainForm($formwriter, $address);
 
 	echo '<a href="/profile/account_edit">Cancel</a> ';

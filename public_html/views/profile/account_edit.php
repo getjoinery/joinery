@@ -49,38 +49,9 @@
 
 	echo $formwriter->new_form_button('Submit');
 
-
 	echo $formwriter->end_form();
 
 	
-
-	foreach($display_messages AS $display_message) {
-		if($display_message->identifier == 'addressbox') {			
-			echo '<div class="'.$display_message->get_message_class().'">'.$display_message->message.'</div>';
-		}
-	}			
-
-	echo '<h2 class="text-lg leading-6 font-medium text-gray-900 mt-6">Address</h2>';
-	foreach($addresses as $address){
-		echo $address->get_address_string(', ') . ' (<a href="/profile/address_edit?usa_address_id=' . $address->key . '" >edit</a>)<br>';
-
-	}
-		
-	if(!$numaddressrecords){
-		echo $formwriter->new_button('Add New Address', '/profile/address_edit', 'secondary');
-	}
-	
-	
-	
-	echo '<h2 class="text-lg leading-6 font-medium text-gray-900 mt-6">Phone Number</h2>';
-	foreach($phone_numbers as $phone_number){
-		echo $phone_number->get('phn_is_verified') ? $phone_number->get_phone_string() : $phone_number->get_phone_string() . ' (<a href="/profile/phone_numbers_edit.php?phn_phone_number_id='.$phone_number->key.'">edit</a>)<br>';
-	}
-		
-
-	if(!$numphonerecords){
-		echo $formwriter->new_button('Add New Phone Number', '/profile/phone_numbers_edit', 'secondary');
-	}
 		
 	echo PublicPageTW::EndPage();	
 	$page->public_footer($foptions=array('track'=>TRUE));
