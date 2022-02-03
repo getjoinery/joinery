@@ -21,7 +21,7 @@
 	);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPageTW::BeginPage($event->get('evt_name'), $hoptions);
+	echo PublicPageTW::BeginPage('&nbsp;', $hoptions);
 	
 
 	$session_name = 'Session ' . $event_session->get('evs_session_number') . ' - '.$event_session->get('evs_title');

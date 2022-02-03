@@ -21,7 +21,7 @@
 	);
 	$page->public_header($hoptions,NULL);
 	
-	echo PublicPageTW::BeginPage('Event', $hoptions);	
+	echo PublicPageTW::BeginPage('&nbsp;', $hoptions);	
 	
 
 	?>
