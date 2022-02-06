@@ -271,7 +271,6 @@
 	}
 	else{	
 		if($future_numsessions > 0){
-			echo '<h3>Upcoming Sessions</h3>';
 
 			foreach($future_event_sessions as $event_session){	
 				if($time_string = $event_session->get_time_string($tz)){
