@@ -4,6 +4,7 @@
 	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	
+	$formwriter = new FormWriterPublicTW("form1", TRUE, TRUE);
 	
 	$page = new PublicPageTW(TRUE);
 	$page_options = array(
@@ -195,59 +196,12 @@
 								echo '<p>'.$registration_message.'</p>';
 							}
 
-							if($register_urls){
-								$register_urls = $event->get_register_url();
-								if(is_array($register_urls)){
-									foreach($register_urls as $register_url){
-										if($register_url['link']){
-											$register_text .= '<div class="mt-6">
-											  <a href="'.$register_url['link'].'" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
-												Register Now ('.$register_url['label'].')
-											  </a>
-											</div>	';
-										}
-										else{
-											$register_text .= '<div class="mt-6">
-											  <a href="javascript:void(0);" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
-												Sold Out ('.$register_url['label'].')
-											  </a>
-											</div>	';						
-										}
-									}
-									echo $register_text;
-								}
-								else{
-									if($register_urls){
-											echo '<div class="mt-6">
-											  <a href="'.$register_url['link'].'" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
-												Register Now
-											  </a>
-											</div>	';
-									}
-									else{
-										echo '<div class="mt-6">
-											  <a href="javascript:void(0);" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
-												Sold Out 
-											  </a>
-											</div>	';	
-									}
-								}			
-								
-								
-							}
-							
-							if($waiting_list_link){
-								echo '<div class="mt-6">
-								  <a href="'.$waiting_list_link.'" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
-									Get on the waiting list
-								  </a>
-								</div>	';								
-								//echo '<a class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white " href="'.$waiting_list_link.'">Get on the waiting list</a>';
-							}
 
-							if($additional_payment_message){
-								echo '<p>'.$additional_payment_message.'</p>';
-							}
+							foreach($register_urls as $register_url){
+								echo $formwriter->new_button($register_url['label'], $register_url['link'], 'primary', 'full');	
+							}			
+							
+
 							
 							if($if_registered_message){
 								echo '<p>'.$if_registered_message.'</p>';
@@ -259,21 +213,7 @@
                    
                 </div>
 
-				<?php
-				if($view_course_link){
-					?>
-					<div class="section padding-top-20">
-						<div class="container">
-							<div class="row">
-								<div class="col-12 text-center">
-									<?php
-										echo '<a class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a>';	
-									?>
-								</div>
-							</div><!-- end row -->
-						</div><!-- end container -->
-					</div>	
-				<?php } ?>
+
 				<!--				
                 <div class="mt-6">
                   <a href="#" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">

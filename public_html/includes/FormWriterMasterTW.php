@@ -28,8 +28,8 @@ class FormWriterMasterTW {
 							}';
 	
 	//FORM STYLING
-	protected $button_primary_class = 'inline-flex justify-center mr-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';
-	protected $button_secondary_class = 'bg-white py-2 px-4 mr-3 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';	
+	protected $button_primary_class = 'inline-flex justify-center mr-3 mt-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';
+	protected $button_secondary_class = 'bg-white py-2 px-4 mr-3 mt-3 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';	
 	
 	protected $fileinput_label_class = 'block text-sm font-medium text-gray-700';
 	protected $fileinput_input_class = '';
