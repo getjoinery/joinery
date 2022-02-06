@@ -46,22 +46,14 @@
 	$waiting_list_link ='';
 	$if_registered_message ='';
 	$is_registered = 0;
+	$register_urls = array();
 	if($session->get_user_id()){
 		$is_registered = EventRegistrant::check_if_registrant_exists($session->get_user_id(), $event->key);
 	}
 					
 	if($is_registered){
-		$view_course_link = '/profile/event_sessions_course?event_id='.$event->key;
-		$register_urls = NULL;
-		if(is_array($register_urls)){
-			foreach($register_urls as $register_url){
-				$register_html .= '<a href="'.$register_url['link'].'">Make a payment ('.$register_url['label'].')</a><br>';
-			}
-		}
-		else{
-			$register_html = '<a href="'.$register_urls.'">Make a payment</a>';
-		}
-		$additional_payment_message = '<p>If you are registered, you can make additional payments here:<br>'.$register_html.'.</p>';
+		$register_urls[] = array('label' => 'Make a payment', 'link' => $event->get_register_url());
+		$register_urls[] = array('label' => 'View Course', 'link' => '/profile/event_sessions_course?event_id='.$event->key);
 	}
 	else{
 		if($event->get('evt_status') == Event::STATUS_COMPLETED){
@@ -74,18 +66,18 @@
 
 			if($event->get('evt_allow_waiting_list') && ($event->get('evt_max_signups') && $numregistrants >= $event->get('evt_max_signups'))){
 				$registration_message = 'Registration is full, but you may add yourself to the waiting list.';
-				$waiting_list_link = '/event_waiting_list?event_id='.$event->key;
+				$register_urls[] = array('label' => 'Join Waiting List', 'link' => '/event_waiting_list?event_id='.$event->key);
 			}
 			else if($event->get('evt_max_signups') && $numregistrants >= $event->get('evt_max_signups')){
 				$registration_message = 'This event is full.';
 			}
 			else{
-				$register_urls = $event->get_register_url();		
+				$register_urls[] = array('label' => 'Register Now', 'link' => $event->get_register_url());
 			}
 		}
 		else if($event->get('evt_allow_waiting_list')){
 				$registration_message = 'Registration is not open yet, but you may add yourself to the waiting list.';
-				$waiting_list_link = '/event_waiting_list?event_id='.$event->key;
+				$register_urls[] = array('label' => 'Join Waiting List', 'link' => '/event_waiting_list?event_id='.$event->key);
 		}
 		else{
 			$registration_message = 'There is no registration for this event at this time.';
