@@ -45,19 +45,19 @@
 		/*
 		$user_phone = $user->phone();
 		$optionvals = PhoneNumber::get_country_code_drop_array();
-		echo $formwriter->dropinput("Country code", "phn_cco_country_code_id", "ctrlHolder", $optionvals, ($user_phone ? $user_phone->get('phn_cco_country_code_id') : ''), '', FALSE);
-		echo $formwriter->textinput("Phone Number*", "phn_phone_number", "ctrlHolder", 20, ($user_phone ? $user_phone->get('phn_phone_number') : ''), NULL , 20, "");
+		echo $formwriter->dropinput("Country code", "phn_cco_country_code_id", NULL, $optionvals, ($user_phone ? $user_phone->get('phn_cco_country_code_id') : ''), '', FALSE);
+		echo $formwriter->textinput("Phone Number*", "phn_phone_number", NULL, 20, ($user_phone ? $user_phone->get('phn_phone_number') : ''), NULL , 20, "");
 		echo '<hr><br><br>';
 		*/
 	}	
 	$nickname_display = $settings->get_setting('nickname_display_as');
 	if($nickname_display){
-		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 255, "");
+		echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, @$form_fields->usr_nickname, "" , 255, "");
 	}
 	$optionvals = array("Yes"=>"1", "No"=>"0");
 	echo $formwriter->dropinput("Is this your first event with us?*", "evr_first_event", "ctrlHolder", $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
 
-	echo $formwriter->textinput("If no, what other events have you attended?", "evr_other_events", "ctrlHolder", 20, ($event_registrant ? $event_registrant->get('evr_other_events') : ''), "", 255,"");
+	echo $formwriter->textinput("If no, what other events have you attended?", "evr_other_events", NULL, 20, ($event_registrant ? $event_registrant->get('evr_other_events') : ''), "", 255,"");
 	echo '<br />';		
 	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy-policy/'>privacy policy</a>", "privacy_policy", "checkbox", "left", NULL, 1, "");
 
