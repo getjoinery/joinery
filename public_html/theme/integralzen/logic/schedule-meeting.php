@@ -9,14 +9,14 @@ if($user_id = $session->get_user_id()){
 	$user = new User($user_id, TRUE);
 	$group = Group::get_by_name('Existing_Students');
 	if($group->is_member_in_group($user->key)){
-		$replace_values['doshin_appt'] = '<p>If you have been invited to make an appointment:<br /><br /><a class="button button-dark" href="https://integralzen.as.me/?appointmentType=category:Session%20with%20Doshin">Schedule a meeting with Doshin</a></p>';
+		$replace_values['doshin_appt'] = 'yes';
 	}
 	else{
-		$replace_values['doshin_appt'] =  '<p>Meetings with Doshin are available to existing students only.</p>';	
+		$replace_values['doshin_appt'] =  'no';	
 	}
 }
 else
 {
-	$replace_values['doshin_appt'] =  '<p>Please <a href="/login">log in</a> to book a session with Doshin.</p>';
+	$replace_values['doshin_appt'] =  'login';
 }
 ?> 
