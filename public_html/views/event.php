@@ -161,7 +161,7 @@
 					</div>
 				<?php } ?>
 			<h2 id="quick-links-title">Description</h2>
-              <?php echo $event->get('evt_description'); ?>
+              <?php echo '<div class="prose">'.$event->get('evt_description').'</div>'; ?>
 
 
             </div>
