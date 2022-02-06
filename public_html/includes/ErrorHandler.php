@@ -5,7 +5,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
 
 $settings = Globalvars::get_instance();
 $site_template = $settings->get_setting('site_template');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPage.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPageTW.php');
 
 class ErrorHandler{
 
@@ -44,7 +44,7 @@ class ErrorHandler{
 	
 		if(!isset($_GLOBALS['page_header_loaded'])){
 			
-			$page = new PublicPage($this->secure);
+			$page = new PublicPageTW($this->secure);
 			$hoptions= array(
 				'title' => self::$ERROR_TYPE_TITLES[$error_type],
 				'showmap' => FALSE,
@@ -56,7 +56,7 @@ class ErrorHandler{
 			);
 			$page->public_header($hoptions,NULL);
 			
-			echo PublicPage::BeginPage($title);
+			echo PublicPageTW::BeginPage($title);
 		}
 		if ($errortext) {
 			echo '<div class="form-error"><strong>'.$errortext.'</strong></div>';
@@ -68,7 +68,7 @@ class ErrorHandler{
 		echo '<p>If you need quick help, you can contact the webmaster at '.$email.'.</p>';	
 		echo '<p>Press your Back button or <a href="#" onclick="history.go(-1);return false;">click here</a> to go to the last page</p>';
 		
-		echo PublicPage::EndPage();
+		echo PublicPageTW::EndPage();
 		$page->public_footer($foptions=array('track'=>FALSE));
 		exit;
 	}
