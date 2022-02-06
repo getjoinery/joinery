@@ -52,7 +52,8 @@ if ($_POST) {
 
 	// Now delete the code
 	Activation::deleteTempCode($act_code);
-
-	$message = '<p>Your password has been reset. <a href="/login">Click here to log in</a>.</p>';
+	$message_type = 'success';
+	$message_title = 'Password reset';
+	$message = 'Your password has been reset. <a href="/login">Click here to log in</a>.';
 } 
 ?>

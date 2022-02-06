@@ -28,8 +28,8 @@ class FormWriterMasterTW {
 							}';
 	
 	//FORM STYLING
-	protected $button_primary_class = 'ml-3 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';
-	protected $button_secondary_class = 'bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';	
+	protected $button_primary_class = 'inline-flex justify-center mr-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';
+	protected $button_secondary_class = 'bg-white py-2 px-4 mr-3 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';	
 	
 	protected $fileinput_label_class = 'block text-sm font-medium text-gray-700';
 	protected $fileinput_input_class = '';
@@ -90,7 +90,7 @@ class FormWriterMasterTW {
 
 		
 		if($correct_answer){
-			$output .= $this->textinput("Type '".strtolower($correct_answer)."' into this field (to prove you are human)", "antispam_question", "ctrlHolder", 30, '', "", 255, ""); 
+			$output .= $this->textinput("Type '".strtolower($correct_answer)."' into this field (to prove you are human)", "antispam_question", NULL, 30, '', "", 255, ""); 
 			$output .= $this->hiddeninput("antispam_question_answer", strtolower($correct_answer));			
 			return $output;
 		}
@@ -147,7 +147,7 @@ class FormWriterMasterTW {
 				$("#'.$name.'_container").hide();
 			});
 			</script>';
-			$output .= $this->textinput($label, $name, "ctrlHolder", 30, '', "", 255, ""); 
+			$output .= $this->textinput($label, $name, NULL, 30, '', "", 255, ""); 
 			return $output;
 		}
 		else{
@@ -284,13 +284,23 @@ class FormWriterMasterTW {
 		}
 	}	
 
-	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
-		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"><div class="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">';
+	function begin_form($class, $method, $action, $use_grid = false, $charset = 'UTF-8'){
+		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'">';
+		
+		if($use_grid){
+			$output .= '<div class="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">';
+		}
 		return $output;
 	}
 
-	function end_form(){
-		return '</div></form>';
+	function end_form($use_grid = NULL){
+		if($use_grid){
+			return '</div></form>';
+		}
+		else{
+			return '</form>';
+		}
+		
 	}
 	
 	
