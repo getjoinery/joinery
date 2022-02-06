@@ -1,23 +1,24 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 
 
 	$session = SessionControl::get_instance();
 		
-	$page = new PublicPage(TRUE);
+	$page = new PublicPageTW(TRUE);
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
 		'title'=>'Log In'
 		);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPage::BeginPage('Log In');
+	echo PublicPageTW::BeginPage('Log In');
 
 	
 	$formwriter = new FormWriterMasterTW('form1');
+	
 	
 	?>
 	<!--
@@ -47,8 +48,7 @@
 	echo $formwriter->set_validate($validation_rules);	
 
 
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin');
-	echo '<div class="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">';
+	echo $formwriter->begin_form('form1', 'POST', '/admin/admin', true);
 	
 	echo $formwriter->text('Text only field', 'To:', 'something something here is some text to test out columns', NULL);
 
@@ -118,8 +118,8 @@
 	echo $formwriter->new_form_button('Cancel', 'secondary');
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
-	echo '</div>';
+	echo $formwriter->end_form(true);
+
 	
 	?>
 
@@ -440,7 +440,7 @@
 
 	<?php
 	
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 	
 ?>

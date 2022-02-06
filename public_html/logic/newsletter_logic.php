@@ -50,18 +50,26 @@
 		$user->save();
 			
 		if($user->get('usr_contact_preferences')){
+			$message_type = 'warn';
+			$message_title = 'Already subscribed';
 			$message = '<p>You are already subscribed to our newsletter.  If you would like to unsubscribe, visit <a href="/profile">the My Profile page</a></p>';
 		}
 		else{
 			$status = $user->add_to_mailing_list();		
 
 			if(!$status){
+				$message_type = 'error';
+				$message_title = 'Error';
 				$message = '<p>We were unable to add you to our mailing list.  Please try again later.</p>';
 			}			
 			else if($status->title == 'Member Exists'){
+				$message_type = 'warn';
+				$message_title = 'Already subscribed';
 				$message =  '<p>You are already signed up for our mailing list.</p>';
 			}
 			else{
+				$message_type = 'success';
+				$message_title = 'Success';
 				$message =  '<p>You are now signed up for our mailing list.</p>';
 			}
 		}
