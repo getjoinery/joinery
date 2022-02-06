@@ -108,9 +108,9 @@
 								
 								echo $formwriter->begin_form("uniForm", "post", $_SERVER['REQUEST_URI']);
 
-								echo $formwriter->textinput("Name", "name", "ctrlHolder", 20, NULL , "",255, "");	
-								//echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, @$form_fields->usr_last_name, "" , 255, "");
-								//echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, '', "" , 255, "");
+								echo $formwriter->textinput("Name", "name", NULL, 20, NULL , "",255, "");	
+								//echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 20, @$form_fields->usr_last_name, "" , 255, "");
+								//echo $formwriter->textinput("Email", "usr_email", NULL, 20, '', "" , 255, "");
 								echo $formwriter->textbox('Comment', 'cmt', 'ctrlHolder', 5, 80, NULL, '', '');
 								
 								if(!$session->get_user_id()){

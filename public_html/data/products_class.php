@@ -61,8 +61,8 @@ class FullNameRequirement extends ProductRequirement {
     }
 
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("First Name", "full_name_first", "ctrlHolder", 20, $user ? $user->get('usr_first_name') : '', '', 255, '');
-		echo $formwriter->textinput("Last Name", "full_name_last", "ctrlHolder", 20, $user ? $user->get('usr_last_name') : '', '', 255, '');
+		echo $formwriter->textinput("First Name", "full_name_first", NULL, 20, $user ? $user->get('usr_first_name') : '', '', 255, '');
+		echo $formwriter->textinput("Last Name", "full_name_last", NULL, 20, $user ? $user->get('usr_last_name') : '', '', 255, '');
 	}
 
 	public function validate_form($data, $session=NULL) {
@@ -108,7 +108,7 @@ class PhoneNumberRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Phone Number", "phone", "ctrlHolder", 11, '', "Example: (+1) 123-456-6789", 17, "");
+		echo $formwriter->textinput("Phone Number", "phone", NULL, 11, '', "Example: (+1) 123-456-6789", 17, "");
 	}
 
 	public function get_validation_info() {
@@ -235,7 +235,7 @@ class AddressRequirement extends ProductRequirement {
 			$new_address_display = true;
 
 			if (count($address_dropdown_builder) > 1) {
-				echo '<div id="address_container" class="ctrlHolder">
+				echo '<div id="address_container" class=NULL>
 					<label for="address">Address</label>
 					<select name="address" id="address">'
 					. implode('', $address_dropdown_builder) .
@@ -323,7 +323,7 @@ class GDPRNoticeRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo '<div id="gdpr_terms_container" class="ctrlHolder">';
+		echo '<div id="gdpr_terms_container" class=NULL>';
 		echo '<label for="gdpr_terms">Privacy Notice</label>';
 		echo "<div><div onclick=\"$('#gdpr_terms').attr('checked', !$('#gdpr_terms').attr('checked')); return false;\" style=\"overflow:auto; height: 100px; border: 1px solid #DDDAD3; width: 45%; padding: 6px; margin-bottom: 5px; background-color: #f5f5f5;\">Your personal data will be used to process your order, support your experience throughout this website, and for other purposes described in our privacy policy.</div>";
 		echo '<label></label><input name="gdpr_terms" id="gdpr_terms" value="1" type="checkbox"  /><span onclick="$(\'#gdpr_terms\').attr(\'checked\', !$(\'#gdpr_terms\').attr(\'checked\')); return false;"> I have read and agree to the privacy policy.</span></div>';
@@ -362,7 +362,7 @@ class RecordConsentRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo '<div id="record_terms_container" class="ctrlHolder">';
+		echo '<div id="record_terms_container" class=NULL>';
 		echo '<label for="record_terms">Recording Notice</label>';
 		echo '<input name="record_terms" id="record_terms" value="1" type="checkbox"  /><span onclick="$(\'#record_terms\').attr(\'checked\', !$(\'#record_terms\').attr(\'checked\')); return false;"> I am aware that the course/event may be recorded and consent to being recorded. </span></div>';
 	}
@@ -402,7 +402,7 @@ class EmailRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Email", "email", "ctrlHolder", 20, $user ? $user->get('usr_email') : '', '', 255, '');
+		echo $formwriter->textinput("Email", "email", NULL, 20, $user ? $user->get('usr_email') : '', '', 255, '');
 		
 	}
 
@@ -447,7 +447,7 @@ class UserPriceRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Optional donation amount ($)", "user_price", "ctrlHolder", 20, '', '', 255, '');
+		echo $formwriter->textinput("Optional donation amount ($)", "user_price", NULL, 20, '', '', 255, '');
 		
 	}
 
@@ -503,7 +503,7 @@ class NewsletterSignupRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo '<div id="newsletter_container" class="ctrlHolder">';
+		echo '<div id="newsletter_container" class=NULL>';
 		echo '<label for="newsletter">Newsletter Signup</label>';
 		echo '<input name="newsletter" id="newsletter" value="1" type="checkbox"  /><span> Please add me to the newsletter.</span></div>';
 	}
@@ -544,7 +544,7 @@ class CommentRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Optional comment", "comment", "ctrlHolder", 20, '', '', 255, '');
+		echo $formwriter->textinput("Optional comment", "comment", NULL, 20, '', '', 255, '');
 		
 	}
 
