@@ -166,7 +166,7 @@ class PublicPageTW extends PublicPageMaster {
 		
 		$notification_menu = NULL;
 
-		$menus = PublicPage::get_public_menu();
+		$menus = PublicPageTW::get_public_menu();
 			
 
 		?>
