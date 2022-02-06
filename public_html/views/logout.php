@@ -1,31 +1,29 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 
 	$session = SessionControl::get_instance();
 	$session->logout();
 
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Log Out'
 		),
 	NULL);
 
-	echo PublicPage::BeginPage();
+	echo PublicPageTW::BeginPage('You are now logged out');
 		
-	echo '<div class="section padding-top-20">
-			<div class="container">';
+	echo PublicPageTW::BeginPanel();
 	?>
-	<h2>You are now logged out</h2>
 
 	<p>You can visit the <a href="/">home page</a> or <a href="/login">log in again</a>.</p>
 
 	<?php
-	echo '</div></div>';
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPanel();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'fbconnect'=>TRUE));
 
 ?>

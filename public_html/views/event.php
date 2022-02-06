@@ -1,11 +1,11 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('event_logic.php'));
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	
 	
-	$page = new PublicPage(TRUE);
+	$page = new PublicPageTW(TRUE);
 	$page_options = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => $event->get('evt_name')
@@ -18,161 +18,310 @@
 	}
 	$page->public_header($page_options);
 	
+	echo PublicPageTW::BeginPage('&nbsp;', $pageoptions);
 	
-	if($time){
-		$subtitle[] = $time;
-	} 
+
+
 	
-	if($time_user){
-		$subtitle[] = '( '.$time_user .')';
-	}
-				
-	if($event->get('evt_location')){
-		$subtitle[] = $event->get('evt_location');
-	}	
 
-	if($event->get('evt_usr_user_id_leader')){
-		$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
-		$subtitle[] = 'Led by '. $leader->display_name();
-	}
-	$pageoptions['subtitle'] = implode(' | ', $subtitle);
-	echo PublicPage::BeginPage($event->get('evt_name'), $pageoptions);
-		
+	?>
+	<!--
+	STYLE FOR ACCORDION
+	-->
+	        <!-- THE CSS -->
+        <style>
+                details summary::-webkit-details-marker {
+                display: none;
+            }
 
-	if($view_course_link){
-		?>
-		<div class="section padding-top-20">
-			<div class="container">
-				<div class="row">
-					<div class="col-12 text-center">
-						<?php
-							echo '<a class="button button-lg button-dark" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a>';	
-						?>
-					</div>
-				</div><!-- end row -->
-			</div><!-- end container -->
-		</div>	
-		<?php
-	}
-							
-		
-		if($picture_link = $event->get_picture_link('medium')){
-		?>
-		<div class="section padding-top-20">
-			<div class="container">
-				<div class="row">
-					<div class="col-12 text-center">
-						<?php
-							echo '<img src="'.$picture_link. '"  alt="" />';
-						?>
-					</div>
-				</div><!-- end row -->
-			</div><!-- end container -->
-		</div>		
-		<?php } ?>
-		
-		<div class="section">
-			<div class="container">
-				<div class="row">
-					<div class="col-12">
-						<h3>Description</h3>
-						<?php echo $event->get('evt_description'); ?></p>	
-					</div>
-				</div><!-- end row -->
-			</div><!-- end container -->
-		</div>	
-		
+             
+            details[open] summary {
+                background: blue;
+                color: white
+            }
 
-			<div class="container">
-					<h3>Payment Options</h3>
-			</div>
+            details[open] summary::after {
+                content: "-";
+            }
 
-		
-		<div class="margin-top-70 text-center">
-			<?php
-					
-			
-			if($registration_message){
-				echo '<p>'.$registration_message.'</p>';
-			}
+            details[open] summary ~ * {
+                animation: slideDown 0.3s ease-in-out;
+            }
 
-			if($register_urls){
-				$register_urls = $event->get_register_url();
-				if(is_array($register_urls)){
-					foreach($register_urls as $register_url){
-						if($register_url['link']){
-							$register_text .= '<a class="button button-lg button-dark"  href="'.$register_url['link'].'">Register Now ('.$register_url['label'].')</a><br>';
+            details[open] summary p {
+                opacity: 0;
+                animation-name: showContent;
+                animation-duration: 0.6s;
+                animation-delay: 0.2s;
+                animation-fill-mode: forwards;
+                margin: 0;
+            }
+
+            @keyframes showContent {
+                from {
+                opacity: 0;
+                height: 0;
+                }
+                to {
+                opacity: 1;
+                height: auto;
+                }
+            }
+            @keyframes slideDown {
+                from {
+                opacity: 0;
+                height: 0;
+                padding: 0;
+                }
+
+                to {
+                opacity: 1;
+                height: auto;
+                }
+            }
+        </style>
+  <main class="-mt-24 pb-8">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
+      <h1 class="sr-only">Profile</h1>
+      <!-- Main 3 column grid -->
+      <div class="grid grid-cols-1 gap-4 items-start lg:grid-cols-3 lg:gap-8">
+        <!-- Left column -->
+        <div class="grid grid-cols-1 gap-4 lg:col-span-2">
+          <!-- Welcome panel -->
+          <section aria-labelledby="profile-overview-title">
+            <div class="rounded-lg bg-white overflow-hidden shadow">
+              <h2 class="sr-only" id="profile-overview-title">Profile Overview</h2>
+              <div class="bg-white p-6">
+                <div class="sm:flex sm:items-center sm:justify-between">
+                  <div class="sm:flex sm:space-x-5">
+                    <!--<div class="flex-shrink-0">
+                      <img class="mx-auto h-20 w-20 rounded-full" src="https://images.unsplash.com/photo-1550525811-e5869dd03032?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+                    </div>-->
+                    <div class="mt-4 sm:mt-0 sm:pt-1 ">
+                      <p class="text-xl font-bold text-gray-900 sm:text-2xl"><?php echo htmlspecialchars($event->get('evt_name')); ?></p>
+					  <?php 
+					  if($time_string = $event->get_time_string()){
+						  echo '<p class="text-xl font-medium text-gray-600">'.$time_string.'</p>';
+					  }
+					  ?>
+					  
+					  <?php
+						if($event->get('evt_timezone') != $session->get_timezone()){
+							echo '<p class="text-xl font-medium text-gray-600">'.$event->get_time_string($session->get_timezone()).'</p>';
+						}	
+					  ?>
+					  <?php
+					  	if($event->get('evt_location')){
+							echo '<p class="text-l font-medium text-gray-600">'.$event->get('evt_location').'</p>';
 						}
-						else{
-							$register_text .= '<a class="button button-lg button-dark"  href="javascript:void(0);">Sold Out ('.$register_url['label'].')</a><br>';							
+					  ?>
+					  <?php
+						$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
+					  	if($leader){
+							echo '<p class="text-l font-medium text-gray-600">Led by: '.$leader->display_name().'</p>';
 						}
-					}
-					echo $register_text;
-				}
-				else{
-					if($register_urls){
-						echo '<a class="button button-lg button-dark" href="'.$register_urls.'">Register Now</a>';
-					}
-					else{
-						echo '<a class="button button-lg button-dark" href="javascript:void(0);">Sold Out</a>';
-					}
-				}			
-				
-				
-			}
-			
-			if($waiting_list_link){
-				echo '<a class="button button-lg button-dark" href="'.$waiting_list_link.'">Get on the waiting list</a>';
-			}
+					  ?>
+                      
+                    </div>
+                  </div>
+                  
+                </div>
+              </div>
+			  <!--
+              <div class="border-t border-gray-200 bg-gray-50 grid grid-cols-1 divide-y divide-gray-200 sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
+                <div class="px-6 py-5 text-sm font-medium text-center">
+                  <span class="text-gray-900">12</span>
+                  <span class="text-gray-600">Test
+                </div>
 
-			if($additional_payment_message){
-				echo '<p>'.$additional_payment_message.'</p>';
-			}
-			
-			if($if_registered_message){
-				echo '<p>'.$if_registered_message.'</p>';
-			}
+                <div class="px-6 py-5 text-sm font-medium text-center">
+                  <span class="text-gray-900">4</span>
+                  <span class="text-gray-600">Sick days left</span>
+                </div>
 
-			?>
-			<!--<a class="button button-lg button-rounded button-reveal-right-dark" href="#"><span>Get In Touch</span><i class="ti-arrow-right"></i></a>-->
-		</div>		
+                <div class="px-6 py-5 text-sm font-medium text-center">
+                  <span class="text-gray-900">2</span>
+                  <span class="text-gray-600">Personal days left</span>
+                </div>
+              </div>
+			  -->
+            </div>
+		
+          </section>
+
+          <!-- Actions panel -->
+          <section aria-labelledby="quick-links-title">
+            <div class="rounded-lg overflow-hidden shadow p-6">
+              
+				
+				<?php if($picture_link = $event->get_picture_link('medium')){ ?>
+					<div class="mb-5">
+					<img src="<?php echo $picture_link; ?>">
+					</div>
+				<?php } ?>
+			<h2 id="quick-links-title">Description</h2>
+              <?php echo $event->get('evt_description'); ?>
+
+
+            </div>
+          </section>
+        </div>
+
+        <!-- Right column -->
+        <div class="grid grid-cols-1 gap-4">
 		
 		
-		<div class="section">
-			<div class="container">
-				<div class="row col-spacing-50">
-					<div class="row">
-						<ul class="accordion single-open">
+		<!-- Register Info -->
+          <section aria-labelledby="announcements-title">
+            <div class="rounded-lg bg-white overflow-hidden shadow">
+              <div class="p-6">
+                <h2 class="text-base font-medium text-gray-900" id="announcements-title">Registration</h2>
+                <div class="flow-root mt-6">
+                  
+                      <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
+                       <!--
+					   <h3 class="text-sm font-semibold text-gray-800">
+                          <a href="#" class="hover:underline focus:outline-none">
+                            
+                            <span class="absolute inset-0" aria-hidden="true"></span>
+                            Office closed on July 2nd
+                          </a>
+                        </h3>
+						-->
+                        <p class="mt-1 text-sm text-gray-600 line-clamp-2">
+                          <?php
+			
+							if($registration_message){
+								echo '<p>'.$registration_message.'</p>';
+							}
+
+							if($register_urls){
+								$register_urls = $event->get_register_url();
+								if(is_array($register_urls)){
+									foreach($register_urls as $register_url){
+										if($register_url['link']){
+											$register_text .= '<div class="mt-6">
+											  <a href="'.$register_url['link'].'" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
+												Register Now ('.$register_url['label'].')
+											  </a>
+											</div>	';
+										}
+										else{
+											$register_text .= '<div class="mt-6">
+											  <a href="javascript:void(0);" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
+												Sold Out ('.$register_url['label'].')
+											  </a>
+											</div>	';						
+										}
+									}
+									echo $register_text;
+								}
+								else{
+									if($register_urls){
+											echo '<div class="mt-6">
+											  <a href="'.$register_url['link'].'" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
+												Register Now
+											  </a>
+											</div>	';
+									}
+									else{
+										echo '<div class="mt-6">
+											  <a href="javascript:void(0);" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
+												Sold Out 
+											  </a>
+											</div>	';	
+									}
+								}			
+								
+								
+							}
 							
+							if($waiting_list_link){
+								echo '<div class="mt-6">
+								  <a href="'.$waiting_list_link.'" class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white ">
+									Get on the waiting list
+								  </a>
+								</div>	';								
+								//echo '<a class="w-full flex justify-center items-center px-4 py-2 border bg-blue-600 border-blue-600 shadow-sm text-sm font-medium rounded-md text-white " href="'.$waiting_list_link.'">Get on the waiting list</a>';
+							}
+
+							if($additional_payment_message){
+								echo '<p>'.$additional_payment_message.'</p>';
+							}
+							
+							if($if_registered_message){
+								echo '<p>'.$if_registered_message.'</p>';
+							}
+
+							?>
+                        </p>
+                      </div>
+                   
+                </div>
+
+				<?php
+				if($view_course_link){
+					?>
+					<div class="section padding-top-20">
+						<div class="container">
+							<div class="row">
+								<div class="col-12 text-center">
+									<?php
+										echo '<a class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="/profile/event_sessions_course?event_id='.$event->key.'">View Course</a>';	
+									?>
+								</div>
+							</div><!-- end row -->
+						</div><!-- end container -->
+					</div>	
+				<?php } ?>
+				<!--				
+                <div class="mt-6">
+                  <a href="#" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    View all
+                  </a>
+                </div>
+				-->
+              </div>
+            </div>
+          </section>		
+		
+		
+		
+          <!-- Sessions -->
+          <section aria-labelledby="announcements-title">
+            <div class="rounded-lg bg-white overflow-hidden shadow">
+              <div class="p-6">
+                <h2 class="text-base font-medium text-gray-900" id="announcements-title">Sessions</h2>
+                <div class="flow-root mt-6">
+				
+	
 
 <?php
 	//CHECK FOR SESSIONS
 	if($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $numsessions > 0){
-		echo '<h2>Course Details</h2>';
 
 		foreach($event_sessions as $event_session){	
 			if($event_session->get('evs_session_number')){
 				?>
-							<li>
-								<div class="accordion-title">
-									<h6 class="font-small font-weight-normal uppercase"><?php echo 'Session ' . $event_session->get('evs_session_number') . ' -  ' . $event_session->get('evs_title'); ?></h6>
-								</div>
-								<div class="accordion-content">
-									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p>
-								</div>
-							</li>
+ 
+				<details class="w-full bg-white border border-blue-500 cursor-pointer mb-3">
+					<summary class="w-full bg-white text-dark flex justify-between px-4 py-3  after:content-['+']"><?php echo 'Session ' . $event_session->get('evs_session_number') . ' -  ' . $event_session->get('evs_title'); ?></summary>
+					<div class="px-4 py-3">
+					<?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?>
+					</div>
+				</details>
+							
 				<?php
 			}
 			else{
 				?>
-							<li>
-								<div class="accordion-title">
-									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title'); ?></h6>
-								</div>
-								<div class="accordion-content">
-									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p>
-								</div>
-							</li>
+				<details class="w-full bg-white border border-blue-500 cursor-pointer mb-3">
+					<summary class="w-full bg-white text-dark flex justify-between px-4 py-3  after:content-['+']"><?php echo $event_session->get('evs_title'); ?></summary>
+					<div class="px-4 py-3">
+					<?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?>
+					</div>
+				</details>
+						
 				<?php						
 			}
 			
@@ -189,14 +338,12 @@
 					$time_string = ' -  ' . $time_string;
 				}
 				?>
-							<li>
-								<div class="accordion-title">
-									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title') . $time_string; ?></h6>
-								</div>
-								<div class="accordion-content">
-									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p> 
-								</div>
-							</li>
+				<details class="w-full bg-white border border-blue-500 cursor-pointer mb-3">
+					<summary class="w-full bg-white text-dark flex justify-between px-4 py-3  after:content-['+']"><?php echo $event_session->get('evs_title'); ?></summary>
+					<div class="px-4 py-3">
+					<?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?>
+					</div>
+				</details>
 				<?php							
 			}	
 		}
@@ -210,31 +357,147 @@
 					$time_string = ' -  ' . $time_string;
 				}
 				?>
-							<li>
-								<div class="accordion-title">
-									<h6 class="font-small font-weight-normal uppercase"><?php echo $event_session->get('evs_title') . $time_string; ?></h6>
-								</div>
-								<div class="accordion-content">
-									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p> 
-									<?php
-									echo '<a href="/profile/event_sessions?evt_event_id='. $event->key.'">View videos and materials</a>';
-									?>
-								</div>
-							</li>
+				<details class="w-full bg-white border border-blue-500 cursor-pointer mb-3">
+					<summary class="w-full bg-white text-dark flex justify-between px-4 py-3  after:content-['+']"><?php echo $event_session->get('evs_title') . $time_string; ?></summary>
+					<div class="px-4 py-3">
+					<?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?>
+					echo '<p><a href="/profile/event_sessions?evt_event_id='. $event->key.'">View videos and materials</a></p>';
+					</div>
+				</details>
+							
 				<?php									
 			}	
 		}			
 	}
 	?>
-						</ul>
-					</div>
-				</div><!-- end row -->
-			</div><!-- end container -->
-		</div>
+
+
+                </div>
+				<!--
+                <div class="mt-6">
+                  <a href="#" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    View all
+                  </a>
+                </div>
+				-->
+              </div>
+            </div>
+          </section>
+
+          <!-- Recent Hires -->
+		  <!--
+          <section aria-labelledby="recent-hires-title">
+            <div class="rounded-lg bg-white overflow-hidden shadow">
+              <div class="p-6">
+                <h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Recent Hires</h2>
+                <div class="flow-root mt-6">
+                  <ul role="list" class="-my-5 divide-y divide-gray-200">
+                    <li class="py-4">
+                      <div class="flex items-center space-x-4">
+                        <div class="flex-shrink-0">
+                          <img class="h-8 w-8 rounded-full" src="https://images.unsplash.com/photo-1519345182560-3f2917c472ef?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <p class="text-sm font-medium text-gray-900 truncate">
+                            Leonard Krasner
+                          </p>
+                          <p class="text-sm text-gray-500 truncate">
+                            @leonardkrasner
+                          </p>
+                        </div>
+                        <div>
+                          <a href="#" class="inline-flex items-center shadow-sm px-2.5 py-0.5 border border-gray-300 text-sm leading-5 font-medium rounded-full text-gray-700 bg-white hover:bg-gray-50">
+                            View
+                          </a>
+                        </div>
+                      </div>
+                    </li>
+
+                    <li class="py-4">
+                      <div class="flex items-center space-x-4">
+                        <div class="flex-shrink-0">
+                          <img class="h-8 w-8 rounded-full" src="https://images.unsplash.com/photo-1463453091185-61582044d556?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <p class="text-sm font-medium text-gray-900 truncate">
+                            Floyd Miles
+                          </p>
+                          <p class="text-sm text-gray-500 truncate">
+                            @floydmiles
+                          </p>
+                        </div>
+                        <div>
+                          <a href="#" class="inline-flex items-center shadow-sm px-2.5 py-0.5 border border-gray-300 text-sm leading-5 font-medium rounded-full text-gray-700 bg-white hover:bg-gray-50">
+                            View
+                          </a>
+                        </div>
+                      </div>
+                    </li>
+
+                    <li class="py-4">
+                      <div class="flex items-center space-x-4">
+                        <div class="flex-shrink-0">
+                          <img class="h-8 w-8 rounded-full" src="https://images.unsplash.com/photo-1502685104226-ee32379fefbe?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <p class="text-sm font-medium text-gray-900 truncate">
+                            Emily Selman
+                          </p>
+                          <p class="text-sm text-gray-500 truncate">
+                            @emilyselman
+                          </p>
+                        </div>
+                        <div>
+                          <a href="#" class="inline-flex items-center shadow-sm px-2.5 py-0.5 border border-gray-300 text-sm leading-5 font-medium rounded-full text-gray-700 bg-white hover:bg-gray-50">
+                            View
+                          </a>
+                        </div>
+                      </div>
+                    </li>
+
+                    <li class="py-4">
+                      <div class="flex items-center space-x-4">
+                        <div class="flex-shrink-0">
+                          <img class="h-8 w-8 rounded-full" src="https://images.unsplash.com/photo-1500917293891-ef795e70e1f6?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <p class="text-sm font-medium text-gray-900 truncate">
+                            Kristin Watson
+                          </p>
+                          <p class="text-sm text-gray-500 truncate">
+                            @kristinwatson
+                          </p>
+                        </div>
+                        <div>
+                          <a href="#" class="inline-flex items-center shadow-sm px-2.5 py-0.5 border border-gray-300 text-sm leading-5 font-medium rounded-full text-gray-700 bg-white hover:bg-gray-50">
+                            View
+                          </a>
+                        </div>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
+                <div class="mt-6">
+                  <a href="#" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    View all
+                  </a>
+                </div>
+              </div>
+            </div>
+          </section>
+		  -->
+        </div>
+      </div>
+    </div>
+  </main>	
+	
+	
+		
+
 		<?php
 
 
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 

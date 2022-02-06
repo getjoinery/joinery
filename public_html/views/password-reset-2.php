@@ -1,24 +1,23 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	require_once (LibraryFunctions::get_logic_file_path('password-reset-2_logic.php'));
 
-	$page = new PublicPage(TRUE);
+	$page = new PublicPageTW(TRUE);
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
 		'title'=>'Password Reset', 
 	);
 	$page->public_header($hoptions,NULL);
-		echo PublicPage::BeginPage('Password Reset');
-			echo '<div class="section padding-top-20">
-			<div class="container">';
+	echo PublicPageTW::BeginPage('Password Reset');
+	echo PublicPageTW::BeginPanel();
+		
 	if($message){
-		echo $message;
-		echo PublicPage::EndPage();	
+		echo PublicPageTW::alert($message_title, $message, $message_type);
 	}
 	else{
-		$formwriter = new FormWriterPublic("form1", TRUE, TRUE);
+		$formwriter = new FormWriterPublicTW("form1", TRUE, TRUE);
 		$validation_rules = array();
 		$validation_rules['usr_password']['required']['value'] = 'true';
 		$validation_rules['usr_password']['minlength']['value'] = 5;
@@ -28,18 +27,18 @@
 		$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
 		echo $formwriter->set_validate($validation_rules);		
 
-		echo $formwriter->begin_form("", "post", "/password-reset-2");
-		echo $formwriter->passwordinput("New Password", "usr_password", "ctrlHolder", 20, NULL , 'Must be at least 5 characters.',255, "");
-		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", "ctrlHolder", 20, "" , "", 255,"");
+		echo $formwriter->begin_form("", "post", "/password-reset-2", true);
+		echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
+		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", NULL, 20, "" , "", 255,"");
 		echo $formwriter->hiddeninput('act_code',$act_code);
-		echo $formwriter->new_form_button('Submit', 'button button-lg button-dark', 'submit1');
+		echo $formwriter->new_form_button('Submit');
 		echo $formwriter->end_form();
 
 	
 	}
 
-	echo '</div></div>';
-	echo PublicPage::EndPage();	
+	echo PublicPageTW::EndPanel();
+	echo PublicPageTW::EndPage();	
 	$page->public_footer(array('track'=>TRUE, 'formvalidate'=>TRUE));
 	
 ?>

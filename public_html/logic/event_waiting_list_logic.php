@@ -70,7 +70,7 @@
 		}
 		$group->add_member($user->key);
 		$display_message = 'You have been added to the '.$event->get('evt_name').' waiting list.';
-		$message_type = 'status_announcement';	
+		$message_type = 'success';	
 
 		if($_POST['newsletter']){
 			$status = $user->add_to_mailing_list();	

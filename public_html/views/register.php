@@ -1,31 +1,35 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	require_once (LibraryFunctions::get_logic_file_path('register_logic.php'));
 
 
 	$settings = Globalvars::get_instance();
-	$page = new PublicPage(TRUE);
+	$page = new PublicPageTW(TRUE);
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
 		'title'=>'Register',
 	);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPage::BeginPage('Register');
-		echo '<div class="section padding-top-20">
-			<div class="container">';
+	$extra = '';
+	if(isset($_GET['m'])){ 
+		$extra = '?m='.htmlspecialchars($_GET['m']); 
+	}
+	$options['subtitle'] = '<a href="/login'.$extra.'">Already a member? Log in</a>';
+	echo PublicPageTW::BeginPage('Register', $options);
+
 			
 	if(isset($_GET['msgtext'])){
 		if (array_key_exists($_GET['msgtext'], $LOGIN_MESSAGES)) {
-			echo '<div class="status_warning">'.htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]).'</div>';
+			echo PublicPageTW::alert('Login warning', htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]), 'warn');
 		}
 	}		
 			
 
 
-	$formwriter = new FormWriterPublic("form1", TRUE);
+	$formwriter = new FormWriterPublicTW("form1", TRUE);
 
 	$validation_rules = array();
 	$validation_rules['usr_first_name']['required']['value'] = 'true';
@@ -50,42 +54,40 @@
 	$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);
 
-	echo $formwriter->begin_form("", "post", "/register");
+	echo $formwriter->begin_form("form1", "post", "/register", TRUE);
 	echo $formwriter->hiddeninput("prevformname", "register");
-	?>
-	<h2>Register</h2>
-	<div><a href="/login<?php if(isset($_GET['m'])){ echo '?m='.htmlspecialchars($_GET['m']); } ?>">Already a member? Log in</a></div>
-	<?php
 
-	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, @$form_fields->usr_first_name , "",32, "");	
-	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, @$form_fields->usr_last_name, "" , 32, "");
+	echo $formwriter->textinput("First Name", "usr_first_name", 'sm:col-span-2', 20, @$form_fields->usr_first_name , "",32, "");	
+	echo $formwriter->textinput("Last Name", "usr_last_name", 'sm:col-span-2', 20, @$form_fields->usr_last_name, "" , 32, "");
 	$nickname_display = $settings->get_setting('nickname_display_as');
 	if($nickname_display){
-		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 32, "");
+		echo $formwriter->textinput($nickname_display, "usr_nickname", 'sm:col-span-2', 20, @$form_fields->usr_nickname, "" , 32, "");
 	}
-	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, '', "" , 64, "");
+	echo $formwriter->textinput("Email", "usr_email", 'sm:col-span-2', 20, '', "" , 64, "");
 
-	echo $formwriter->passwordinput("Create Password", "usr_password", "ctrlHolder", 20, "" , "", 255,"");
+	echo $formwriter->passwordinput("Create Password", "usr_password", 'sm:col-span-2', 20, "" , "", 255,"");
 
 	$optionvals = Address::get_timezone_drop_array();
 	$default_timezone = $settings->get_setting('default_timezone');
-	echo $formwriter->dropinput("Timezone", "usr_timezone", "ctrlHolder", $optionvals, $default_timezone, '', FALSE);	
+	echo $formwriter->dropinput("Timezone", "usr_timezone", 'sm:col-span-2', $optionvals, $default_timezone, '', FALSE);	
 	
 	echo $formwriter->antispam_question_input();
-	//echo $formwriter->textinput("Zip Code", "usa_zip_code_id", "ctrlHolder", 20, @$form_fields->usa_zip_code_id, "", 255,"");
+	//echo $formwriter->textinput("Zip Code", "usa_zip_code_id", NULL, 20, @$form_fields->usa_zip_code_id, "", 255,"");
 
-	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy-policy'>privacy policy</a>", "privacy", "ctrlHolder", "normal", NULL, "yes", '');
-	echo $formwriter->checkboxinput("Please add me to the mailing list", "mailing_list", "ctrlHolder", "normal", NULL, "yes", '');	
-	echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "ctrlHolder", "normal", 'yes', "yes", '');
+
+	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy-policy'>privacy policy</a>", "privacy", "sm:col-span-6", "normal", NULL, "yes", '');
+	echo $formwriter->checkboxinput("Please add me to the mailing list", "mailing_list", "sm:col-span-6", "normal", NULL, "yes", '');	
+	echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "sm:col-span-6", "normal", 'yes', "yes", '');
 	echo $formwriter->honeypot_hidden_input();	
 
 	echo $formwriter->captcha_hidden_input();
-	echo $formwriter->new_form_button('Submit', 'button button-lg button-dark', 'submit1');
+	//echo $formwriter->start_buttons();
+	//echo $formwriter->new_form_button('Cancel', 'secondary');
+	echo $formwriter->new_form_button('Submit');
+	//echo $formwriter->end_buttons();
+	echo $formwriter->end_form(true);
 
-	echo $formwriter->end_form();
-
-	echo '</div></div>';
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'fbconnect'=>TRUE));
 
 ?>

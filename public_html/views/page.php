@@ -1,8 +1,8 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/page_contents_class.php');
 
@@ -29,18 +29,20 @@
 		exit();
 	}	
 	
-	$page = new PublicPage(TRUE);
+	$page = new PublicPageTW(TRUE);
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
 		'title' => $page_content->get('pac_title')
 	));
-	echo PublicPage::BeginPage($page_content->get('pac_title'));
+	echo PublicPageTW::BeginPage($page_content->get('pac_title'));
+	echo PublicPageTW::BeginPanel();
 	
-	echo '<div class="section padding-top-20">
-			<div class="container">';
+	echo '
+    <div class="text-lg prose max-w-prose mx-auto">';
 	echo '<div>'. $page_content->get_filled_content() . '</div>';
-	echo '</div></div>';
-	echo PublicPage::EndPage();
+	echo '</div>';
+	echo PublicPageTW::EndPanel();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 
