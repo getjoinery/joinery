@@ -160,7 +160,7 @@
 					<img src="<?php echo $picture_link; ?>">
 					</div>
 				<?php } ?>
-			<h2 id="quick-links-title">Description</h2>
+			<h2 class="text-base font-medium text-gray-900" id="description-title">Description</h2>
               <?php echo '<div class="prose">'.$event->get('evt_description').'</div>'; ?>
 
 
@@ -173,10 +173,10 @@
 		
 		
 		<!-- Register Info -->
-          <section aria-labelledby="announcements-title">
+          <section aria-labelledby="registration-title">
             <div class="rounded-lg bg-white overflow-hidden shadow">
               <div class="p-6">
-                <h2 class="text-base font-medium text-gray-900" id="announcements-title">Registration</h2>
+                <h2 class="text-base font-medium text-gray-900" id="registration-title">Registration</h2>
                 <div class="flow-root mt-6">
                   
                       <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
