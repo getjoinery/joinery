@@ -12,12 +12,13 @@ class PublicPageTW extends PublicPageMaster {
 					'showheader' => TRUE
 				),
 				$options));
-		echo PublicPageTW::BeginPage($header);
-	
-
+		echo PublicPageTW::BeginPage($title);
+		echo PublicPageTW::BeginPanel();
+		echo '<div class="text-lg max-w-prose mx-auto">';
 		echo '<div>'.$body.'</div>';
-
+		echo '</div>';
 		
+		echo PublicPageTW::EndPanel();
 		echo PublicPageTW::EndPage();
 		$page->public_footer();
 		exit;
@@ -78,7 +79,10 @@ class PublicPageTW extends PublicPageMaster {
 
 
 				
-				echo '</ol>
+				echo '</ol>';
+				
+
+		echo '
 			  </div>
 			</nav>
 		  </div>
@@ -86,11 +90,21 @@ class PublicPageTW extends PublicPageMaster {
 		';
 			
 		}
-		
+
+
 		
 		if($title){
-			$output .= '<h1 class="flex-1 text-2xl font-bold text-gray-900 mb-6">'.$title.'</h1>';
-		}					
+			$output .= '<div class="py-10 text-center relative">
+				<div class="max-w-7xl mx-auto sm:px-6 lg:px-8"><h1 class="flex-1 text-3xl font-bold text-gray-900 mb-6">'.$title.'</h1>';
+		}
+				
+		if($options['subtitle']){
+			$output .= '<p class="mt-4 text-lg text-gray-500">'.$options['subtitle'].'</p>';
+		}
+
+		$output .= '</div></div>';
+		
+				
 						
 		return $output;
 	}	
@@ -103,6 +117,22 @@ class PublicPageTW extends PublicPageMaster {
   </div>'; 
 		return $output;
 	}	
+
+	public static function BeginPanel($options=array()) {
+		$output = '<div class="relative py-16 bg-white rounded-lg shadow-lg overflow-hidden">
+  <div class="relative px-4 sm:px-6 lg:px-8">'; 
+		return $output;
+	}
+
+
+
+	public static function EndPanel($options=array()) {
+		$output = '
+		</div>
+	  </div>'; 
+		return $output;
+	}
+
 
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
@@ -162,25 +192,13 @@ class PublicPageTW extends PublicPageMaster {
 		-->
 		
 		<!-- CSS -->
-		<!--<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />-->
-		<!--<link rel="stylesheet" type="text/css" href="/theme/default/includes/uikit-3.4.2/css/uikit.min.css">-->
-		
-		<!--<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/bootstrap/bootstrap.min.css" rel="stylesheet">-->
+
 		
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
 		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
-		<!--<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/magnific-popup/magnific-popup.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/sal/sal.min.css" rel="stylesheet">-->
-		
-		<!--<link href="<?php echo $this->theme_url; ?>/includes/assets/css/theme.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/css/site_styles.css" rel="stylesheet">-->
 
-		<!--<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/font-awesome/css/all.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/themify/themify-icons.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/simple-line-icons/css/simple-line-icons.css" rel="stylesheet">-->
 		
 		<link rel="stylesheet" type="text/css" href="<?php echo $this->theme_url; ?>/includes/output.css" >
-		<!--<script src="https://cdn.tailwindcss.com/"></script>
 		<?php
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';
@@ -235,7 +253,7 @@ class PublicPageTW extends PublicPageMaster {
 <div class="min-h-full">
 
 <!-- This example requires Tailwind CSS v2.0+ -->
-<div class="bg-white">
+<div class="bg-gray-50">
   <div class="relative bg-white">
     <div class="max-w-7xl mx-auto px-4 sm:px-6">
       <div class="flex justify-between items-center py-6 md:justify-start md:space-x-10">
@@ -245,7 +263,7 @@ class PublicPageTW extends PublicPageMaster {
 			<?php 
 			echo '<span class="sr-only">'.$settings->get_setting('site_name').'</span>';
 			if($settings->get_setting('logo_link')){
-				echo '<a href="/"><img class="h-10 w-auto sm:h-10" src="'.$settings->get_setting('logo_link').'" alt=""></a>';
+				echo '<a href="/"><img class="h-14 w-auto sm:h-10" src="'.$settings->get_setting('logo_link').'" alt=""></a>';
 			}
 			else{
 				echo '<h3><a href="/">'.$settings->get_setting('site_name').'</a></h3>';
@@ -348,7 +366,7 @@ class PublicPageTW extends PublicPageMaster {
 			<?php } ?>
 
 			<?php if(!empty($cart_menu)){ ?>
-			<a href="#" class="ml-5 flex-shrink-0 bg-white rounded-full p-1 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500">
+			<a href="<?php echo $cart_menu['Cart']; ?>" class="ml-5 flex-shrink-0 bg-white rounded-full p-1 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500">
             <span class="sr-only">Cart</span>
             <!-- Heroicon name: outline/bell -->
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -666,6 +684,74 @@ class PublicPageTW extends PublicPageMaster {
 		<?php
 	}
 
+	static function alert($title, $content, $type){
+		if($type == 'error'){
+			$output = '<div class="rounded-md bg-red-50 p-4">
+			  <div class="flex">
+				<div class="flex-shrink-0">
+				  <!-- Heroicon name: solid/x-circle -->
+				  <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+					<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+				  </svg>
+				</div>
+				<div class="ml-3">
+				  <h3 class="text-sm font-medium text-red-800">'.$title.'</h3>
+				  <div class="mt-2 text-sm text-red-700">
+					'.$content.'
+				  </div>
+				</div>
+			  </div>
+			</div>';
+		}
+		else if($type == 'warn'){
+			$output = '<div class="rounded-md bg-yellow-50 p-4">
+			  <div class="flex">
+				<div class="flex-shrink-0">
+				  <!-- Heroicon name: solid/exclamation -->
+				  <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+					<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+				  </svg>
+				</div>
+				<div class="ml-3">
+				  <h3 class="text-sm font-medium text-yellow-800">'.$title.'</h3>
+				  <div class="mt-2 text-sm text-yellow-700">
+					<p>'.$content.'</p>
+				  </div>
+				</div>
+			  </div>
+			</div>';	
+		}
+		else if($type == 'success'){
+			$output = '<div class="rounded-md bg-green-50 p-4">
+			  <div class="flex">
+				<div class="flex-shrink-0">
+				  <!-- Heroicon name: solid/check-circle -->
+				  <svg class="h-5 w-5 text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+					<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+				  </svg>
+				</div>
+				<div class="ml-3">
+				  <h3 class="text-sm font-medium text-green-800">'.$title.'</h3>
+				  <div class="mt-2 text-sm text-green-700">
+					<p>'.$content.'</p>
+				  </div>
+				  <!--
+				  <div class="mt-4">
+					<div class="-mx-2 -my-1.5 flex">
+					  <button type="button" class="bg-green-50 px-2 py-1.5 rounded-md text-sm font-medium text-green-800 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-green-50 focus:ring-green-600">View status</button>
+					  <button type="button" class="ml-3 bg-green-50 px-2 py-1.5 rounded-md text-sm font-medium text-green-800 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-green-50 focus:ring-green-600">Dismiss</button>
+					</div>
+				  </div>-->
+				</div>
+			  </div>
+			</div>';
+		}
+		
+		return $output;
+	}
+
+
+
 
 	static function tab_menu($tab_menus, $type=NULL){
 		$output = '';
@@ -727,14 +813,21 @@ class PublicPageTW extends PublicPageMaster {
 	}
 
 
-	function tableheader($headers, $class='table cart-table', $id='table1'){
-		echo '<table class="'.$class.'" id="'.$id.'" cellspacing="0">
-			<thead><tr>';
+	function tableheader($headers, $class='', $id='table1'){
+		echo '<div class="my-6"><div class="flex flex-col">
+		  <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
+			<div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+			  <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
+				<table class="min-w-full divide-y divide-gray-200">
+				  <thead class="bg-gray-50">
+					<tr>';
+		
 
 		foreach ($headers as $value) {
-			printf('<th scope="col" abbr="%s">%s</th>', $value, $value);
+			printf('<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" abbr="%s">%s</th>', $value, $value);
 		}
-		echo '</tr></thead><tbody>';
+		echo '</tr>
+          </thead><tbody class="bg-white divide-y divide-gray-200">';
 	}
 
 	function disprow($dataarray){
@@ -747,7 +840,7 @@ class PublicPageTW extends PublicPageMaster {
 			}
 
 
-			printf('<td>%s</td>', $value);
+			printf('<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">%s</td>', $value);
 
 		}
 		echo "</tr>\n";
@@ -755,7 +848,10 @@ class PublicPageTW extends PublicPageMaster {
 	}
 
 	function endtable(){
-		echo '</tbody></table>';
+		echo '</tbody></table>      </div>
+    </div>
+  </div>
+</div></div>';
 	}
 }
 
