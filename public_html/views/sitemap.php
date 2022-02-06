@@ -1,24 +1,23 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Sitemap',
 	
 	);
 	$page->public_header($hoptions);
-	echo PublicPage::BeginPage('Sitemap');
-		echo '<div class="section padding-top-20">
-			<div class="container">';
+	echo PublicPageTW::BeginPage('Sitemap');
+	echo PublicPageTW::BeginPanel();
 			
 	$settings = Globalvars::get_instance();
 	if($settings->get_setting('page_contents_active')){
@@ -83,7 +82,7 @@
 		echo '</ul>';	
 	}
 
-	echo '</div></div>';
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPanel();
+	echo PublicPageTW::EndPage();
 	$page->public_footer(array('track'=>TRUE, 'is_404'=> 1));
 ?>
