@@ -152,7 +152,7 @@
 
           <!-- Actions panel -->
           <section aria-labelledby="quick-links-title">
-            <div class="rounded-lg overflow-hidden shadow p-6">
+            <div class="rounded-lg bg-white overflow-hidden shadow p-6">
               
 				
 				<?php if($picture_link = $event->get_picture_link('medium')){ ?>
