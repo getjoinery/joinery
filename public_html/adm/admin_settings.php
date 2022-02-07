@@ -164,7 +164,22 @@
 	echo $formwriter->dropinput("Use captcha", "use_captcha", "ctrlHolder", $optionvals, $settings->get_setting('use_captcha'), '', FALSE);	
 	
 	echo '<hr>';
-	
+
+ 	echo '<h3>Social Settings</h3>';
+
+	echo $formwriter->textinput("Facebook link", "social_facebook_link", "ctrlHolder", 20, $settings->get_setting('social_facebook_link'), "" , 255, "");	
+
+	echo $formwriter->textinput("Instagram link", "social_instagram_link", "ctrlHolder", 20, $settings->get_setting('social_instagram_link'), "" , 255, "");
+		
+	echo $formwriter->textinput("Soundcloud link", "social_soundcloud_link", "ctrlHolder", 20, $settings->get_setting('social_soundcloud_link'), "" , 255, "");
+			
+	echo $formwriter->textinput("Spotify link", "social_spotify_link", "ctrlHolder", 20, $settings->get_setting('social_spotify_link'), "" , 255, "");
+				
+	echo $formwriter->textinput("Youtube link", "social_youtube_link", "ctrlHolder", 20, $settings->get_setting('social_youtube_link'), "" , 255, "");
+					
+	echo $formwriter->textinput("Mixcloud link", "social_mixcloud_link", "ctrlHolder", 20, $settings->get_setting('social_mixcloud_link'), "" , 255, "");
+
+
 	
  	echo '<h3>Product Settings</h3>';
 
