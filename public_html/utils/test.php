@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/theme/integralzen/includes/PublicPage.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/theme/integralzen/includes/PublicPageTW.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Pager.php');
 

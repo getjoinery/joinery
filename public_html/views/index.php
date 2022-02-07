@@ -1,21 +1,21 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
 
 	$session = SessionControl::get_instance();
 
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Homepage',
 	);
 	$page->public_header($hoptions);
 
-	echo PublicPage::BeginPage('');
+	echo PublicPageTW::BeginPage('');
 	
 	?>
 		<!-- Hero section -->
@@ -301,7 +301,7 @@
 		<!-- end Clients section -->
 		<?php
 
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 
 	$page->public_footer(array('track'=>TRUE));
 ?>

@@ -5,8 +5,8 @@
 
 	$settings = Globalvars::get_instance();
 	$site_template = $settings->get_setting('site_template');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/FormWriterPublic.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPageTW.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/FormWriterPublicTW.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	
@@ -16,7 +16,7 @@
 	
 	$user = new User($session->get_user_id(), TRUE);
 	
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 
 	try{
 		$settings = Globalvars::get_instance();
