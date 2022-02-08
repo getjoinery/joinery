@@ -25,7 +25,7 @@
 
 	if($event->get('evt_session_display_type') != 2){
 		//REDIRECT
-		LibraryFunctions::redirect('/profile/event_sessions?evt_event_id='.$event->key);						
+		LibraryFunctions::redirect('/profile/event_sessions?evt_event_id='. $event->key);						
 		exit();
 	}
 

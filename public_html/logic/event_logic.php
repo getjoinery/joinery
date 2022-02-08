@@ -88,7 +88,7 @@
 				$if_registered_message .= 'If you are registered, you can access the course link, info, videos, and materials <a href="/profile/event_sessions_course?event_id='.$event->key.'">in the my profile section of the website</a>.';
 			}
 			else{
-				$if_registered_message .= 'If you are registered, you can access the course link, info, videos, and materials <a href="/profile/event_sessions?evt_event_id='.$event->key.'">in the my profile section of the website</a>.';							
+				$if_registered_message .= 'If you are registered, you can access the course link, info, videos, and materials <a href="/profile/event_sessions?evt_event_id='. $event->key .'">in the my profile section of the website</a>.';							
 			}
 		}
 	}
