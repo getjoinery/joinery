@@ -120,7 +120,7 @@
 									array_push($rowvalues, '<h3><a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$event->get('evt_name').'</a></h3>'. $time. $calendar_text);
 								}
 								else{
-									array_push($rowvalues, '<h3><a href="/profile/event_sessions?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a></h3>'. $time. $calendar_text);
+									array_push($rowvalues, '<h3><a href="/profile/event_sessions?evt_event_id='. $event->key .'">'.$event->get('evt_name').'</a></h3>'. $time. $calendar_text);
 								}
 								
 

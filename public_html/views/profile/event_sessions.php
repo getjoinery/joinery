@@ -421,7 +421,7 @@
 	
 								if($num_sessions > 5){
 									echo '            <div>
-									  <a href="/profile/event_sessions?show_all=1&evt_event_id='.$event->key.'" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">See all '.$num_sessions.' sessions</a>
+									  <a href="/profile/event_sessions?show_all=1&evt_event_id='. $event->key .'" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">See all '.$num_sessions.' sessions</a>
 									</div>';
 									
 								}								

@@ -299,8 +299,8 @@
 				<details class="w-full bg-white border border-blue-500 cursor-pointer mb-3">
 					<summary class="w-full bg-white text-dark flex justify-between px-4 py-3  after:content-['+']"><?php echo $event_session->get('evs_title') . $time_string; ?></summary>
 					<div class="px-4 py-3">
-					<?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?>
-					echo '<p><a href="/profile/event_sessions?evt_event_id='. $event->key.'">View videos and materials</a></p>';
+					<?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); 
+					echo '<p><a href="/profile/event_sessions?evt_event_id='. $event->key .'">View videos and materials</a></p>';?>
 					</div>
 				</details>
 							

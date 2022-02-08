@@ -200,7 +200,7 @@
 								<div class="accordion-content">
 									<p><?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?></p> 
 									<?php
-									echo '<a href="/profile/event_sessions?evt_event_id='. $event->key.'">View videos and materials</a>';
+									echo '<a href="/profile/event_sessions?evt_event_id='. $event->key .'">View videos and materials</a>';
 									?>
 								</div>
 							</li>
