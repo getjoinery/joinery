@@ -443,7 +443,7 @@ class PublicPageTW extends PublicPageMaster {
         From: "opacity-100 scale-100"
         To: "opacity-0 scale-95"
     -->
-    <div  id="mobile-menu" class="invisible absolute top-0 inset-x-0 p-2 transition transform origin-top-right md:hidden">
+    <div  id="mobile-menu" class="invisible absolute top-0 inset-x-0 p-2 transition transform origin-top-right md:hidden z-50">
       <div class="rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 bg-white divide-y-2 divide-gray-50">
         <div class="pt-5 pb-6 px-5">
           <div class="flex items-center justify-between">
