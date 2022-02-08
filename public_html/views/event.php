@@ -117,8 +117,8 @@
 						}
 					  ?>
 					  <?php
-						$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
-					  	if($leader){
+						if($event->get('evt_usr_user_id_leader')){
+							$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
 							echo '<p class="text-l font-medium text-gray-600">Led by: '.$leader->display_name().'</p>';
 						}
 					  ?>
