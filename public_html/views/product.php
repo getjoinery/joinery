@@ -13,7 +13,7 @@ $page->public_header(array(
 	
 
 	if(!$product->get('pro_is_active')){
-		PublicPage::OutputGenericPublicPage('Product not available', 'Product not available', '<p>Sorry, this item is currently not available for purchase/registration.</p>');	
+		PublicPageTW::OutputGenericPublicPage('Product not available', 'Product not available', '<p>Sorry, this item is currently not available for purchase/registration.</p>');	
 	}
 	
 	echo PublicPageTW::BeginPage('Add to Cart');
