@@ -480,11 +480,11 @@ class PublicPageTW extends PublicPageMaster {
 					if(empty($submenus)){
 						?>
 					  <a href="<?php echo $menu['link']; ?>" class="-m-3 p-3 flex items-center rounded-md hover:bg-gray-50">
-						<!-- Heroicon name: outline/chart-bar -->
-						<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-						  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-						</svg>
-						<span class="ml-3 text-base font-medium text-gray-900">
+						
+						<!--<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+</svg>-->
+						<span class="ml-3 text-base font-bold text-gray-900">
 						  <?php echo $menu['name']; ?>
 						</span>
 					  </a>
@@ -493,11 +493,10 @@ class PublicPageTW extends PublicPageMaster {
 					else{	
 						?>
 					  <a href="<?php echo $menu['link']; ?>" class="-m-3 p-3 flex items-center rounded-md hover:bg-gray-50">
-						<!-- Heroicon name: outline/chart-bar -->
-						<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-						  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-						</svg>
-						<span class="ml-3 text-base font-medium text-gray-900">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+</svg>
+						<span class="ml-3 text-base font-bold text-gray-900">
 						  <?php echo $menu['name']; ?>
 						</span>
 					  </a>
