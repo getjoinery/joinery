@@ -81,16 +81,22 @@
 							$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
 						}
 					}
-					echo '<div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">'.$calendar_text.'</div>';
+					
+					if($calendar_text){
+						echo '<div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">'.$calendar_text.'</div>';
+					}
 					?>
 
                     </div>
                   </div>
+					<!--
                   <div class="mt-5 flex justify-center sm:mt-0">
-                    <a href="<?php echo $event->get_url(); ?>" class="flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                      View Public Event
+                    <a href="<?php echo $event->get_url(); ?>" class="flex justify-center items-center px-4 py-2 text-gray-700 bg-white hover:bg-gray-50">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+					</svg>
                     </a>
-                  </div>
+                  </div>-->
                 </div>
               </div>
 
@@ -231,7 +237,8 @@
 											</div>
 										  </div>
 										  <div class="mt-2 sm:flex sm:justify-between">
-											<div class="sm:flex">
+											<?php if($time_string){ ?>
+											<div class="sm:flex mb-3">
 											  <p class="flex items-center text-sm text-gray-500">
 											  <!-- Heroicon name: solid/calendar -->
 											  <svg class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -240,7 +247,7 @@
 												<?php echo $time_string; ?>
 											  </p>
 											  </div>
-
+											<?php } ?>
 											
 											<div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
 											
@@ -266,7 +273,7 @@
 							echo '<img width="800" height="532" src="'.$event_session->get('evs_picture_link'). '"  alt="" />';
 						}
 						?>
-						<p><?php echo $event_session->get('evs_content'); ?></p>
+						<div class="prose mt-3"><?php echo $event_session->get('evs_content'); ?></div>
 						<?php
 						$session_files = $event_session->get_files();
 						$num_session_files = 0;
@@ -277,7 +284,7 @@
 						$session_files = $event_session->get_files();
 						if($session_files){
 						?>
-						<div class="margin-top-20">
+						<div class="margin-top-20 prose">
 							<h6 class="font-family-tertiary font-small font-weight-medium uppercase">Materials:</h6>
 							<ul class="list-dash">
 								<?php
@@ -408,7 +415,7 @@
 					<div class="rounded-lg bg-white overflow-hidden shadow">
 					  <div class="p-6">
 						<h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Sessions</h2>
-						<div class="flow-root mt-6">
+						<div class="flow-root mt-6 prose">
 						 <?php 
 						 foreach($event_sessions as $aevent_session){			
 							echo '<a href="/profile/event_sessions_course?session_number='.$aevent_session->get('evs_session_number').'&event_id='. $event->key.'">Session ' . $aevent_session->get('evs_session_number') . ' - '.$aevent_session->get('evs_title').'</a><br />';

@@ -78,16 +78,19 @@
 							$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
 						}
 					}
-					echo '<div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">'.$calendar_text.'</div>';
+					echo '<div class="mt-4 text-sm font-medium text-gray-600 sm:mt-0 sm:pt-1 sm:text-left">'.$calendar_text.'</div>';
 					?>
 
                     </div>
-                  </div>
-                  <div class="mt-5 flex justify-center sm:mt-0">
+                  </div> 
+				  <!--
+                  <div class="mt-5 flex justify-center sm:mt-0 min-w-200">
                     <a href="<?php echo $event->get_url(); ?>" class="flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                      View Public Event
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+</svg>
                     </a>
-                  </div>
+                  </div>-->
                 </div>
               </div>
 
@@ -212,7 +215,7 @@
 											  </p>
 											</div>
 										  </div>
-										  <p><?php echo $next_session->get('evs_content'); ?></p>
+										  <p class="prose"><?php echo $next_session->get('evs_content'); ?></p>
 										</div>		
 		
 
@@ -298,11 +301,15 @@
 										$video = new Video(NULL);
 									}	
 
+									$session_name = '';
+									if($event_session->get('evs_session_number')){
+										$session_name .= 'Session '.$event_session->get('evs_session_number'). ' - ';
+									}
 									if($event_session->get('evs_title')){
-										$session_name = $event_session->get('evs_title');
+										$session_name .= $event_session->get('evs_title');
 									}
 									else{
-										$session_name = 'Session '.$event_session->get('evs_session_number');
+										$session_name .= 'Session '.$event_session->get('evs_session_number');
 									}
 									
 									if($event->get('evt_timezone') == $session->get_timezone()){
@@ -351,7 +358,7 @@
 											  
 											</div>
 										  </div>
-										  <div class="mt-2 sm:flex sm:justify-between">
+										  <div class="mt-2 mb-3 sm:flex sm:justify-between">
 											<div class="sm:flex">
 											  <p class="flex items-center text-sm text-gray-500">
 											  <!-- Heroicon name: solid/calendar -->
@@ -380,7 +387,7 @@
 										  
 										  
 									<?php echo $video->get_embed(); ?>
-												<p><?php echo $event_session->get('evs_content'); ?></p>
+												<p class="mt-3"><?php echo $event_session->get('evs_content'); ?></p>
 												<?php
 												$session_files = $event_session->get_files();
 												$num_session_files = 0;
@@ -389,7 +396,7 @@
 												}
 												if($num_session_files){
 												?>
-												<div class="margin-top-20">
+												<div class="mt-3 prose">
 													<h6 class="font-family-tertiary font-small font-weight-medium uppercase">Materials:</h6>
 													<ul class="list-dash">
 														<?php
@@ -517,7 +524,7 @@
 					<div class="rounded-lg bg-white overflow-hidden shadow">
 					  <div class="p-6">
 						<h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Registrant Info</h2>
-						<div class="flow-root mt-6">
+						<div class="flow-root mt-6 prose">
 						 <?php echo $event->get('evt_private_info'); ?>
                 </div>
                 
