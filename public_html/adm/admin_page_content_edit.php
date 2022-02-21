@@ -118,6 +118,13 @@
 		echo $formwriter->textinput('Label', 'pac_location_name', NULL, 100, $page_content->get('pac_location_name'), '', 255, '');	
 		echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/page/', 'pac_link', NULL, 100, $page_content->get('pac_link'), '', 255, '');	
 	}
+	else{
+		echo $formwriter->hiddeninput('pac_location_name', $page_content->get('pac_location_name'));
+		echo $formwriter->hiddeninput('pac_link', $page_content->get('pac_link'));		
+	}
+	
+	
+	
 	echo $formwriter->textinput('Script file (optional)', 'pac_script_filename', NULL, 100, $page_content->get('pac_script_filename'), '', 255, '');
 	
 	echo $formwriter->textinput('Page title (optional)', 'pac_title', NULL, 100, $page_content->get('pac_title'), '', 255, '');	
