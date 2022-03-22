@@ -194,10 +194,6 @@ class PublicPageTW extends PublicPageMaster {
 		<!-- CSS -->
 
 		
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.carousel.min.css" rel="stylesheet">
-		<link href="<?php echo $this->theme_url; ?>/includes/assets/plugins/owl-carousel/owl.theme.default.min.css" rel="stylesheet">
-
-		
 		<link rel="stylesheet" type="text/css" href="<?php echo $this->theme_url; ?>/includes/output.css" >
 		<?php
 		if($settings->get_setting('custom_css')){
