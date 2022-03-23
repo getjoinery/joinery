@@ -26,6 +26,53 @@
 
 	?>
  <main class="-mt-24 pb-8">
+ 
+ 
+ 
+ <header class="relative z-20 flex items-center justify-between pb-4 px-4 sm:px-6 lg:flex-none">
+	<div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
+		<h1 class="text-xl font-bold text-gray-900 sm:text-2xl">
+			<?php echo htmlspecialchars($event->get('evt_name')); ?>
+		</h1>
+		<p class="text-sm font-medium text-gray-600">
+		  <?php 	
+		  $time_string = $event->get_time_string();
+			if($event->get('evt_timezone') != $session->get_timezone()){
+				if($local_string = $event->get_time_string($session->get_timezone())){
+					$time_string .= ' ('. $local_string . ')';
+				}
+			}	
+			echo $time_string;
+			?>
+		</p>
+		<?php
+		$calendar_text = '';
+		if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+			$calendar_links = $event->get_add_to_calendar_links();
+			if($calendar_links){
+				$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
+				$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
+				$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
+				$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
+			}
+		}
+		echo '<div class="mt-4 text-sm font-medium text-gray-600 sm:mt-0 sm:pt-1 sm:text-left">'.$calendar_text.'</div>';
+		?>
+	</div>
+	
+	
+	<?php 
+	if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
+		$options = array('Withdraw from Course'=> '/profile/event_withdraw?evr_event_registrant_id='.$event_registrant->key);
+	}
+	else{
+		$options = array();
+	}
+	echo PublicPageTW::dropdown_button('actions_button', $options);
+	?>
+	</header>
+ 
+ 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
       <h1 class="sr-only">Profile</h1>
       <!-- Main 3 column grid -->
@@ -41,61 +88,31 @@
 			
 			<div class="rounded-lg bg-white overflow-hidden shadow">
               <h2 class="sr-only" id="profile-overview-title">Sessions Overview</h2>
-              <div class="bg-white p-6">
+              <!--<div class="bg-white p-6">
                 <div class="sm:flex sm:items-center sm:justify-between">
                   <div class="sm:flex sm:space-x-5">
-					<!--
+					
                     <div class="flex-shrink-0">
                       <img class="mx-auto h-20 w-20 rounded-full" src="https://images.unsplash.com/photo-1550525811-e5869dd03032?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
                     </div>
-					-->
-	
-
-	
 					
-                    <div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
-                      <p class="text-xl font-bold text-gray-900 sm:text-2xl"><?php echo htmlspecialchars($event->get('evt_name')); ?></p>
-                      <p class="text-sm font-medium text-gray-600">
-					  <?php 	
-					  $time_string = $event->get_time_string();
-						if($event->get('evt_timezone') != $session->get_timezone()){
-							if($local_string = $event->get_time_string($session->get_timezone())){
-								$time_string .= ' ('. $local_string . ')';
-							}
-						}	
-						echo $time_string;
-						?>
-					</p>
-					  
-					<?php
-					$calendar_text = '';
-					if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-						$calendar_links = $event->get_add_to_calendar_links();
-						if($calendar_links){
-							$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
-							$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
-							$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
-							$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
-						}
-					}
-					echo '<div class="mt-4 text-sm font-medium text-gray-600 sm:mt-0 sm:pt-1 sm:text-left">'.$calendar_text.'</div>';
-					?>
+	
 
-                    </div>
+
                   </div> 
-				  <!--
+				  
                   <div class="mt-5 flex justify-center sm:mt-0 min-w-200">
                     <a href="<?php echo $event->get_url(); ?>" class="flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
                       <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
 </svg>
                     </a>
-                  </div>-->
+                  </div>
                 </div>
-              </div>
+              </div>-->
 
 
-  <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
+  <div class="px-4 py-5 sm:px-6">
     <?php echo $event->get('evt_short_description'); ?>
   </div>
 
