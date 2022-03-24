@@ -36,6 +36,8 @@
 		$numrecords = $posts->count_all();	
 		$posts->load();	
 	}
+	
+	$tags = MultiPost::get_all_tags();
 
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 

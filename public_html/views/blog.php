@@ -12,7 +12,7 @@
 		'title' => 'Blog'
 	);
 	$page->public_header($hoptions); 
-	$post_tags = MultiPost::get_all_tags();
+	
 	echo PublicPageTW::BeginPage($title);		
 ?>
 
@@ -31,10 +31,11 @@
 		<?php
 		foreach ($posts as $post){  
 			$author = new User($post->get('pst_usr_user_id'), TRUE);
+			$post_tags = $post->get_tags();
 			?>							
 			
 			
-			<div class="rounded-lg bg-white overflow-hidden shadow">
+			<div class="rounded-lg bg-white overflow-hidden shadow mb-6">
 			  <h2 class="sr-only" id="profile-overview-title">Profile Overview</h2>
 			  <div class="p-6">
 				<p class="text-sm text-gray-500">
@@ -184,7 +185,7 @@
                 <h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Tags</h2>
                 <div class="flow-root mt-6">
 					<?php
-					foreach ($post_tags as $tag){
+					foreach ($tags as $tag){
 						echo '<a href="/blog/tag/'.urlencode($tag).'" class="inline-block p-1">
 						<span class="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">'.$tag.'</span>
 						</a>';			
