@@ -305,7 +305,7 @@ class FormWriterMasterTW {
 	
 	
 	function start_buttons($class = 'flex justify-end') {
-		return '<div class="pt-5"><div class="'.$class.'">';
+		return '<div class="'.$class.'">';
 	}
 
 	//STYLE IS 'primary' or 'secondary'
@@ -361,7 +361,7 @@ class FormWriterMasterTW {
 
 	
 	function end_buttons() {
-		return '</div></div>';
+		return '</div>';
 	}
 	
 	function set_validate($validation_rules){
