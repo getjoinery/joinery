@@ -38,14 +38,14 @@
 		'menu-id'=> NULL,
 		'breadcrumbs' => array(
 			'PublicMenus'=>'/admin/admin_public_menus', 
-			'New PublicMenu' => '',
+			'New Public Menu' => '',
 		),
 		'session' => $session,
 	)
 	);	
 
 	
-	$pageoptions['title'] = "New PublicMenu";
+	$pageoptions['title'] = "New Public Menu";
 	$page->begin_box($pageoptions);
 
 	// Editing an existing email
@@ -65,8 +65,12 @@
 		echo $formwriter->hiddeninput('action', 'edit');
 	}
 	
-	echo $formwriter->textinput('Menu name', 'pmu_name', NULL, 100, $public_menu->get('pmu_name'), '', 255, '');	
-	echo $formwriter->textinput('Menu link', 'pmu_link', NULL, 100, $public_menu->get('pmu_link'), '', 255, '');
+	echo $formwriter->textinput('Menu name', 'pmu_name', NULL, 100, $public_menu->get('pmu_name'), '', 255, '');
+
+	$settings = Globalvars::get_instance();
+	$webDir = $settings->get_setting('webDir'); 
+	
+	echo $formwriter->textinput('Menu link ('.$webDir.')', 'pmu_link', NULL, 100, $public_menu->get('pmu_link'), '', 255, '');
 	
 	$menulist = new MultiPublicMenu(
 		array('has_no_parent_menu_id'=>true),
