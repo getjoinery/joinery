@@ -17,6 +17,9 @@
 		require_once(LibraryFunctions::display_404_page());		
 	}
 	
+	$settings = Globalvars::get_instance();
+	$site_template = $settings->get_setting('site_template');
+	
 	//GET AUTHOR
 	$author = new User($post->get('pst_usr_user_id'), TRUE);
 	$tags = $post->get_tags();
