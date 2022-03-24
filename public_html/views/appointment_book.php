@@ -1,8 +1,8 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	//require_once (LibraryFunctions::get_logic_file_path('event_logic.php'));
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/bookings_class.php');	
 	
@@ -14,7 +14,7 @@
 	$session = SessionControl::get_instance();
 	$session->set_return();
 
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 	$hoptions = array(
 		'title' => 'Book',
 		'description' => 'Book',

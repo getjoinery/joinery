@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once('/var/www/html/test/public_html/theme/default/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once('/var/www/html/test/public_html/theme/default/includes/FormWriterPublicTW.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
@@ -19,18 +19,18 @@
 		
 	}
 
-	$page = new PublicPage(TRUE);
+	$page = new PublicPageTW(TRUE);
 	$page->public_header(array(
 	'title' => 'Form Test'
 	));
 	
-	echo PublicPage::BeginPage('Form Test');
+	echo PublicPageTW::BeginPage('Form Test');
 
 	echo '<div class="section-lg">
 		<div class="container">';
 
 	// Editing an existing event
-	$formwriter = new FormWriterPublic('form1');
+	$formwriter = new FormWriterPublicTW('form1');
 	
 	$validation_rules = array();
 	$validation_rules['evt_name']['required']['value'] = 'true';
@@ -48,7 +48,7 @@
 	echo $formwriter->textinput('Event name', 'evt_name', NULL, 100, NULL, '', 255, '');
 	
 	$optionvals = array("Online Course"=>1, "Retreat"=>2);
-	echo $formwriter->dropinput("Event type", "evt_type", "ctrlHolder", $optionvals, NULL, '', TRUE);
+	echo $formwriter->dropinput("Event type", "evt_type", NULL, $optionvals, NULL, '', TRUE);
 
 	$files = new MultiFile(
 		array('deleted'=>false, 'picture'=>true),
@@ -57,13 +57,13 @@
 		NULL);  //OFFSET
 	$files->load();
 	$optionvals = $files->get_image_dropdown_array();
-	echo $formwriter->imageinput("Main image", "evt_fil_file_id", "ctrlHolder", $optionvals, NULL, '', TRUE, TRUE, FALSE, TRUE);	
+	echo $formwriter->imageinput("Main image", "evt_fil_file_id", NULL, $optionvals, NULL, '', TRUE, TRUE, FALSE, TRUE);	
 	
-	echo $formwriter->textbox('Event short description (no html)', 'evt_short_description', 'ctrlHolder', 5, 80, NULL, '', 'yes');
+	echo $formwriter->textbox('Event short description (no html)', 'evt_short_description', NULL, 5, 80, NULL, '', 'yes');
 
 	echo $formwriter->hiddeninput('evt_collect_extra_info', '0');
 	
-	echo $formwriter->datetimeinput('Event start time', 'evt_start_time', 'ctrlHolder', NULL, '', '', '');
+	echo $formwriter->datetimeinput('Event start time', 'evt_start_time', NULL, NULL, '', '', '');
 
 	$optionvals = array(
 		'Name' => 1, 
@@ -82,7 +82,7 @@
 	$readonlyvals = array(); //DEFAULT
 	$disabledvals = array();
 	
-	echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+	echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', NULL, $optionvals, $checkedvals, $disabledvals, $readonlyvals);
  
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit', 'button');
@@ -93,7 +93,7 @@
 	echo '</div></div>';
 
 
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 
 ?>
