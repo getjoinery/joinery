@@ -1,24 +1,23 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
+	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
 	require_once(LibraryFunctions::get_logic_file_path('event_register_finish_logic.php'));
 
 	$settings = Globalvars::get_instance();
-	$page = new PublicPage();
+	$page = new PublicPageTW();
 	$hoptions=array(
 		'title'=>'Edit Event Info'
 		);
 	$page->public_header($hoptions);
 
-	echo PublicPage::BeginPage('Edit Registrant Info');
-	echo '<div class="section padding-top-20">
-			<div class="container">';
+	echo PublicPageTW::BeginPage('Edit Registrant Info');
+
 			
 	echo '<h3>Please fill out this extra info for your registration in the <strong>'. $event->get('evt_name') . '</strong> event.</h3>';
 
-	$formwriter = new FormWriterPublic("form1");
+	$formwriter = new FormWriterPublicTW("form1");
 	$validation_rules = array();
 	$validation_rules['phn_phone_number']['required']['value'] = 'true';
 	$validation_rules['privacy_policy']['required']['value'] = 'true';
@@ -55,21 +54,20 @@
 		echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, @$form_fields->usr_nickname, "" , 255, "");
 	}
 	$optionvals = array("Yes"=>"1", "No"=>"0");
-	echo $formwriter->dropinput("Is this your first event with us?*", "evr_first_event", "ctrlHolder", $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
+	echo $formwriter->dropinput("Is this your first event with us?*", "evr_first_event", NULL, $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
 
 	echo $formwriter->textinput("If no, what other events have you attended?", "evr_other_events", NULL, 20, ($event_registrant ? $event_registrant->get('evr_other_events') : ''), "", 255,"");
 	echo '<br />';		
 	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy-policy/'>privacy policy</a>", "privacy_policy", "checkbox", "left", NULL, 1, "");
 
 
-	echo $formwriter->new_form_button('Submit', 'button button-lg button-dark', 'submit1');
+	echo $formwriter->new_form_button('Submit');
 
 	echo $formwriter->end_form();
 
 	$page->endtable();
 
-	echo '</div></div>';
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 
 ?>
