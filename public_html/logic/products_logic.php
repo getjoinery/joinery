@@ -19,7 +19,13 @@
 	}
 
 	$numperpage = 5;
-	$offset = LibraryFunctions::fetch_variable('offset', NULL, 0, '');;
+	$offset = LibraryFunctions::fetch_variable('offset', NULL, 0, '');
+	if(!$offset){
+		$offsetdisp = 1;
+	}
+	else{
+		$offsetdisp = $offset + 1;
+	}
 	$sort = 'product_id';
 	$sdirection = 'ASC';
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', NULL, 0, '');
@@ -46,6 +52,8 @@
 		'AND');
 	$products->load();	
 	$numrecords = $products->count_all();		
+	
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')]; 
 	
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
   
