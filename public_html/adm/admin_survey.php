@@ -116,7 +116,7 @@
 		$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 
 		$rowvalues = array();
-		array_push($rowvalues, $question->get('qst_question'));
+		array_push($rowvalues, '<a href="/admin/admin_question?qst_question_id='.$survey_question->get('srq_qst_question_id').'">'.$question->get('qst_question').'</a>');
 
 		array_push($rowvalues, '<a href="/admin/admin_survey_answers?survey_id='.$survey->key.'&question_id='.$survey_question->key.'">answers</a>');
 		

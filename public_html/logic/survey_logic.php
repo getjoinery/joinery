@@ -21,7 +21,6 @@
 	$sort = LibraryFunctions::fetch_variable('sort', 'survey_question_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 
-	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 	
 	$survey_questions = new MultiSurveyQuestion(
 		array('survey_id' => $survey->key, 'deleted'=>FALSE),  //SEARCH CRITERIA
@@ -30,8 +29,9 @@
 		$offset,  //OFFSET
 		'AND'  //AND OR OR
 	);
-	$numrecords = $survey_questions->count_all();
 	$survey_questions->load();
+	$numrecords = $survey_questions->count_all();
+
 
 	if($_POST){
 		$invalid_messages = array();
