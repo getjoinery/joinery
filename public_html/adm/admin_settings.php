@@ -179,7 +179,27 @@
 					
 	echo $formwriter->textinput("Mixcloud link", "social_mixcloud_link", "ctrlHolder", 20, $settings->get_setting('social_mixcloud_link'), "" , 255, "");
 
-
+	echo $formwriter->textinput("Discord link", "social_discord_link", "ctrlHolder", 20, $settings->get_setting('social_discord_link'), "" , 255, "");
+	
+	echo $formwriter->textinput("Google link", "social_google_link", "ctrlHolder", 20, $settings->get_setting('social_google_link'), "" , 255, "");
+	
+	echo $formwriter->textinput("Linkedin link", "social_linkedin_link", "ctrlHolder", 20, $settings->get_setting('social_linkedin_link'), "" , 255, "");
+	
+	echo $formwriter->textinput("Pinterest link", "social_pinterest_link", "ctrlHolder", 20, $settings->get_setting('social_pinterest_link'), "" , 255, "");
+	
+	echo $formwriter->textinput("Stack Overflow link", "social_stack_link", "ctrlHolder", 20, $settings->get_setting('social_stack_link'), "" , 255, "");
+	
+	echo $formwriter->textinput("Telegram link", "social_telegram_link", "ctrlHolder", 20, $settings->get_setting('social_telegram_link'), "" , 255, "");
+	
+	echo $formwriter->textinput("Tiktok link", "social_tiktok_link", "ctrlHolder", 20, $settings->get_setting('social_tiktok_link'), "" , 255, "");
+	
+	echo $formwriter->textinput("Snapchat link", "social_snapchat_link", "ctrlHolder", 20, $settings->get_setting('social_snapchat_link'), "" , 255, "");
+	
+	echo $formwriter->textinput("Slack link", "social_slack_link", "ctrlHolder", 20, $settings->get_setting('social_slack_link'), "" , 255, "");
+	echo $formwriter->textinput("Github link", "social_github_link", "ctrlHolder", 20, $settings->get_setting('social_github_link'), "" , 255, "");
+	echo $formwriter->textinput("Reddit link", "social_reddit_link", "ctrlHolder", 20, $settings->get_setting('social_reddit_link'), "" , 255, "");
+	echo $formwriter->textinput("Whatsapp link", "social_whatsapp_link", "ctrlHolder", 20, $settings->get_setting('social_whatsapp_link'), "" , 255, "");
+	echo $formwriter->textinput("Twitch link", "social_twitch_link", "ctrlHolder", 20, $settings->get_setting('social_twitch_link'), "" , 255, "");
 	
  	echo '<h3>Product Settings</h3>';
 
