@@ -47,7 +47,7 @@
                       Roshi
                     </a>
                   </p>
-                  <a href="https://integralzen.as.me/?appointmentType=category:Session%20with%20Doshin" class="block mt-2">
+                  <a href="#" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       Pre-arranged meeting with Doshin
                     </p>
@@ -76,7 +76,7 @@
 
             <div class="flex flex-col rounded-lg shadow-lg overflow-hidden">
               <div class="flex-shrink-0">
-                <img class="h-48 w-full object-cover" src="https://integralzen.org/uploads/medium/kodo_nhv8mskf.jpg" alt="">
+                <img class="h-48 w-full object-cover" src="/uploads/medium/kodo_nhv8mskf.jpg" alt="">
               </div>
               <div class="flex-1 bg-white p-6 flex flex-col justify-between">
                 <div class="flex-1">
@@ -85,7 +85,7 @@
                       Lay Teacher
                     </a>
                   </p>
-                  <a href="/event/28/Sunday-Integral-Dharma-Calls" class="block mt-2">
+                  <a href="https://integralzen.as.me/schedule.php?appointmentType=category%3AIntegral+Zen+Lay+Teachers" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       Introductory Meeting [1 hour]
                     </p>
@@ -102,7 +102,7 @@
 
             <div class="flex flex-col rounded-lg shadow-lg overflow-hidden">
               <div class="flex-shrink-0">
-                <img class="h-48 w-full object-cover" src="https://integralzen.org/uploads/medium/kodo3_a9w3xq9f.JPG" alt="">
+                <img class="h-48 w-full object-cover" src="/uploads/medium/kodo3_a9w3xq9f.JPG" alt="">
               </div>
               <div class="flex-1 bg-white p-6 flex flex-col justify-between">
                 <div class="flex-1">
@@ -111,7 +111,7 @@
                       Lay Teacher
                     </a>
                   </p>
-                  <a href="/page/jun-po-roshi" class="block mt-2">
+                  <a href="https://integralzen.as.me/schedule.php?appointmentType=category%3AIntegral+Zen+Lay+Teachers" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       One on One [1 hour]
                     </p>
@@ -129,7 +129,7 @@
 			
             <div class="flex flex-col rounded-lg shadow-lg overflow-hidden">
               <div class="flex-shrink-0">
-                <img class="h-48 w-full object-cover" src="https://integralzen.org/uploads/medium/Mondo-Zen-UK-Retreat-1-1024x577.jpg" alt="">
+                <img class="h-48 w-full object-cover" src="/uploads/medium/Mondo-Zen-UK-Retreat-1-1024x577.jpg" alt="">
               </div>
               <div class="flex-1 bg-white p-6 flex flex-col justify-between">
                 <div class="flex-1">
@@ -138,7 +138,7 @@
                       Lay Teacher
                     </a>
                   </p>
-                  <a href="/event/28/Sunday-Integral-Dharma-Calls" class="block mt-2">
+                  <a href="https://integralzen.as.me/schedule.php?appointmentType=category%3AIntegral+Zen+Lay+Teachers" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       Awareness Intervention [1-2 hour] (by Invitation Only)
                     </p>
@@ -156,7 +156,7 @@
 
             <div class="flex flex-col rounded-lg shadow-lg overflow-hidden">
               <div class="flex-shrink-0">
-                <img class="h-48 w-full object-cover" src="https://integralzen.org/uploads/medium/Janel_True_Face_Activity-23_p9828a1.JPEG" alt="">
+                <img class="h-48 w-full object-cover" src="/uploads/medium/Janel_True_Face_Activity-23_p9828a1.JPEG" alt="">
               </div>
               <div class="flex-1 bg-white p-6 flex flex-col justify-between">
                 <div class="flex-1">
@@ -165,7 +165,7 @@
                       Apprentice
                     </a>
                   </p>
-                  <a href="/event/28/Sunday-Integral-Dharma-Calls" class="block mt-2">
+                  <a href="mailto:integralzenjanel@gmail.com" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       Touching the True Face Session [1 hour]
                     </p>
