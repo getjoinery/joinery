@@ -89,6 +89,9 @@ class File extends SystemBase {
 		if($size == 'thumbnail'){
 			$file_path = $upload_web_dir.'/thumbnail/'.$this->get('fil_name');
 		}
+		if($size == 'lthumbnail'){
+			$file_path = $upload_web_dir.'/lthumbnail/'.$this->get('fil_name');
+		}
 		if($size == 'small'){
 			$file_path = $upload_web_dir.'/small/'.$this->get('fil_name');
 		}		
@@ -151,7 +154,8 @@ class File extends SystemBase {
 					
 	}
 	
-	function delete_resized(){
+	//SIZE CAN BE thumbnail, lthumbnail, small, medium, large
+	function delete_resized($size = 'all'){
 		if (!$this->is_image()) {
 			return false;
 		}
@@ -159,35 +163,48 @@ class File extends SystemBase {
 		$settings = Globalvars::get_instance();
 		$upload_dir = $settings->get_setting('upload_dir');
 		
-		$file_path = $upload_dir.'/small/'.$this->get('fil_name');
-		if (!unlink($file_path)) { 		
-			//echo ("$file_path cannot be deleted due to an error");  
-			//return false;
-		}  
-
+		if($size == 'all' || $size == 'small'){
+			$file_path = $upload_dir.'/small/'.$this->get('fil_name');
+			if (!unlink($file_path)) { 		
+				//echo ("$file_path cannot be deleted due to an error");  
+				//return false;
+			}  
+		}
 		
-		$file_path = $upload_dir.'/medium/'.$this->get('fil_name');
-		if (!unlink($file_path)) { 		
-			//echo ("$file_path cannot be deleted due to an error");
-			//return false;			
-		}  
- 
-
-		$file_path = $upload_dir.'/large/'.$this->get('fil_name');
-		if (!unlink($file_path)) { 		
-			//echo ("$file_path cannot be deleted due to an error");
-			//return false;			
-		}  
-
-		$file_path = $upload_dir.'/thumbnail/'.$this->get('fil_name');
-		if (!unlink($file_path)) { 		
-			//echo ("$file_path cannot be deleted due to an error");
-			//return false;			
-		} 		
+		if($size == 'all' || $size == 'medium'){
+			$file_path = $upload_dir.'/medium/'.$this->get('fil_name');
+			if (!unlink($file_path)) { 		
+				//echo ("$file_path cannot be deleted due to an error");
+				//return false;			
+			}  
+ 		}
 		
+		if($size == 'all' || $size == 'large'){
+			$file_path = $upload_dir.'/large/'.$this->get('fil_name');
+			if (!unlink($file_path)) { 		
+				//echo ("$file_path cannot be deleted due to an error");
+				//return false;			
+			}  
+		}
+		if($size == 'all' || $size == 'thumbnail'){
+			$file_path = $upload_dir.'/thumbnail/'.$this->get('fil_name');
+			if (!unlink($file_path)) { 		
+				//echo ("$file_path cannot be deleted due to an error");
+				//return false;			
+			} 		
+		}	
+
+		if($size == 'all' || $size == 'lthumbnail'){
+			$file_path = $upload_dir.'/lthumbnail/'.$this->get('fil_name');
+			if (!unlink($file_path)) { 		
+				//echo ("$file_path cannot be deleted due to an error");
+				//return false;			
+			} 		
+		}		
 	}
 	
-	function resize(){
+	//SIZE CAN BE thumbnail, lthumbnail, small, medium, large
+	function resize($size='all'){
 		$settings = Globalvars::get_instance();
 		$upload_dir = $settings->get_setting('upload_dir');
 
@@ -198,62 +215,117 @@ class File extends SystemBase {
 		
 
 			//THUMBNAIL SIZE
-			
-			try
-			{
-				$img = new Imagick($old_path);
-				$new_path = $upload_dir.'/thumbnail/'.$this->get('fil_name');
-				$img->thumbnailImage(80 , 80 , TRUE);
-				$img->writeImage($new_path);
-				
+			if($size == 'all' || $size == 'thumbnail'){
+				try
+				{
+					$width = 80;
+					$height = 80;
+					$img = new Imagick($old_path);
+					$new_path = $upload_dir.'/thumbnail/'.$this->get('fil_name');
+					
+					// get the current image dimensions
+					$geo = $img->getImageGeometry();
+
+					// crop the image
+					if(($geo['width']/$width) < ($geo['height']/$height))
+					{
+						$img->cropImage($geo['width'], floor($height*$geo['width']/$width), 0, (($geo['height']-($height*$geo['width']/$width))/2));
+					}
+					else
+					{
+						$img->cropImage(ceil($width*$geo['height']/$height), $geo['height'], (($geo['width']-($width*$geo['height']/$height))/2), 0);
+					}				
+					
+					$img->thumbnailImage($width , $height , TRUE);
+					$img->writeImage($new_path);
+					
+				}
+				catch(Exception $e)
+				{
+					echo 'Caught exception: ',  $e->getMessage(), '\n';
+				}	
 			}
-			catch(Exception $e)
-			{
-				echo 'Caught exception: ',  $e->getMessage(), '\n';
-			}	
+
+			//LARGE THUMBNAIL SIZE
+			if($size == 'all' || $size == 'lthumbnail'){
+				try
+				{
+					$width = 256;
+					$height = 256;
+					$img = new Imagick($old_path);
+					$new_path = $upload_dir.'/lthumbnail/'.$this->get('fil_name');
+					
+					// get the current image dimensions
+					$geo = $img->getImageGeometry();
+
+					// crop the image
+					if(($geo['width']/$width) < ($geo['height']/$height))
+					{
+						$img->cropImage($geo['width'], floor($height*$geo['width']/$width), 0, (($geo['height']-($height*$geo['width']/$width))/2));
+					}
+					else
+					{
+						$img->cropImage(ceil($width*$geo['height']/$height), $geo['height'], (($geo['width']-($width*$geo['height']/$height))/2), 0);
+					}				
+					
+					$img->thumbnailImage($width , $height , TRUE);
+					$img->writeImage($new_path);
+					
+				}
+				catch(Exception $e)
+				{
+					echo 'Caught exception: ',  $e->getMessage(), '\n';
+				}	
+			}
 			
 			
 			//SMALL SIZE
-			try
-			{
-				$img = new Imagick($old_path);
-				$new_path = $upload_dir.'/small/'.$this->get('fil_name');
-				$img->thumbnailImage(500 , 300 , TRUE);
-				$img->writeImage($new_path);
-				
-			}
-			catch(Exception $e)
-			{
-				echo 'Caught exception: ',  $e->getMessage(), '\n';
-			}		
+			if($size == 'all' || $size == 'small'){
+				try
+				{
+					$img = new Imagick($old_path);
+					$new_path = $upload_dir.'/small/'.$this->get('fil_name');
+					$img->thumbnailImage(500 , 300 , TRUE);
+					$img->writeImage($new_path);
+					
+				}
+				catch(Exception $e)
+				{
+					echo 'Caught exception: ',  $e->getMessage(), '\n';
+				}	
+			}				
 			
 			//MEDIUM SIZE
-			try
-			{
-				$img = new Imagick($old_path);
-				$new_path = $upload_dir.'/medium/'.$this->get('fil_name');
-				$img->thumbnailImage(800 , 600 , TRUE);
-				$img->writeImage($new_path);
-				
-			}
-			catch(Exception $e)
-			{
-				echo 'Caught exception: ',  $e->getMessage(), '\n';
-			}			
+			if($size == 'all' || $size == 'medium'){
+				try
+				{
+					$img = new Imagick($old_path);
+					$new_path = $upload_dir.'/medium/'.$this->get('fil_name');
+					$img->thumbnailImage(800 , 600 , TRUE);
+					$img->writeImage($new_path);
+					
+				}
+				catch(Exception $e)
+				{
+					echo 'Caught exception: ',  $e->getMessage(), '\n';
+				}
+			}				
 
 			//LARGE SIZE
-			try
-			{
-				$img = new Imagick($old_path);
-				$new_path = $upload_dir.'/large/'.$this->get('fil_name');
-				$img->thumbnailImage(1200 , 1000 , TRUE);
-				$img->writeImage($new_path);
-				
-			}
-			catch(Exception $e)
-			{
-				echo 'Caught exception: ',  $e->getMessage(), '\n';
-			}		
+			if($size == 'all' || $size == 'large'){
+				try
+				{
+					$img = new Imagick($old_path);
+					$new_path = $upload_dir.'/large/'.$this->get('fil_name');
+					$img->thumbnailImage(1200 , 1000 , TRUE);
+					$img->writeImage($new_path);
+					
+				}
+				catch(Exception $e)
+				{
+					echo 'Caught exception: ',  $e->getMessage(), '\n';
+				}	
+			}				
 		}
 		else{
 			return false;

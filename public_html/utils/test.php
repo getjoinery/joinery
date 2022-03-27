@@ -1,7 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/theme/integralzen/includes/PublicPageTW.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Pager.php');
 
@@ -10,6 +9,26 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
 
 	$session = SessionControl::get_instance();
+	$session->check_permission(10);
+
+	$numperpage = 30;
+	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
+	$sort = LibraryFunctions::fetch_variable('sort', 'file_id', 0, '');
+	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
+	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
+
+	$files = new MultiFile();
+	$files->load();	
+	
+	foreach ($files as $file){
+		$file->delete_resized('thumbnail');
+		$file->resize('thumbnail');
+		$file->resize('lthumbnail');
+		echo $file->get('fil_name'). '<br>';
+	}
+
+
+
 	
 	exit;
 
