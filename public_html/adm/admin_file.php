@@ -108,6 +108,7 @@
 		echo '<div class="padding10px">Large size:  <pre><a href="'.$settings->get_setting('webDir_SSL').'/uploads/large/'.$file->get('fil_name').'">'.$settings->get_setting('webDir_SSL').'/uploads/large/'.$file->get('fil_name').'</a></pre></div>'; 
 		echo '<div class="padding10px">Medium size:  <pre><a href="'.$settings->get_setting('webDir_SSL').'/uploads/medium/'.$file->get('fil_name').'">'.$settings->get_setting('webDir_SSL').'/uploads/medium/'.$file->get('fil_name').'</a></pre></div>';
 		echo '<div class="padding10px">Small size:  <pre><a href="'.$settings->get_setting('webDir_SSL').'/uploads/small/'.$file->get('fil_name').'">'.$settings->get_setting('webDir_SSL').'/uploads/small/'.$file->get('fil_name').'</a></pre></div>';
+		echo '<div class="padding10px">Large thumbnail size:  <pre><a href="'.$settings->get_setting('webDir_SSL').'/uploads/lthumbnail/'.$file->get('fil_name').'">'.$settings->get_setting('webDir_SSL').'/uploads/lthumbnail/'.$file->get('fil_name').'</a></pre></div>';
 		echo '<div class="padding10px">Thumbnail size:  <pre><a href="'.$settings->get_setting('webDir_SSL').'/uploads/thumbnail/'.$file->get('fil_name').'">'.$settings->get_setting('webDir_SSL').'/uploads/thumbnail/'.$file->get('fil_name').'</a></pre></div>';
 		//echo '<div class="padding10px"><img src="/uploads/medium/'.$file->get('fil_name').'"/></div>';
 	}
