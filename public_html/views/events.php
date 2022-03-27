@@ -83,7 +83,7 @@
 		<li class="col-span-1 flex flex-col text-center bg-white rounded-lg shadow divide-y divide-gray-200">
 			<div class="flex-1 flex flex-col p-8">
 				<?php
-				if($pic = $event->get_picture_link('small')){
+				if($pic = $event->get_picture_link('lthumbnail')){
 					echo '<img class="w-32 h-32 flex-shrink-0 mx-auto rounded-full" src="'.$pic.'" alt="">';
 				}
 				?>
