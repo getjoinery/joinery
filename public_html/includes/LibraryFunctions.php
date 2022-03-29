@@ -121,6 +121,7 @@ class LibraryFunctions {
 
 	}		
 	
+	//DEPRECATED
 	static function get_theme_path($path_format='system'){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
@@ -135,8 +136,43 @@ class LibraryFunctions {
 			//WE WANT A URL
 			return '/theme/'.$site_template;
 		}
+		
 		return $theme_dir;
 	}	
+	
+	static function get_theme_file_path($filename, $subdirectory='/includes', $path_format='system'){
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');
+		$site_template = $settings->get_setting('site_template');
+			
+		$theme_file = $siteDir.'/theme/'.$site_template.$subdirectory.'/'.$filename;
+		$default_file = $siteDir.'/theme/default'.$subdirectory.'/'.$filename;
+		
+
+		if(file_exists($theme_file)){
+			if($path_format == 'system'){
+				//WE WANT A FILE PATH
+				return $theme_file;
+			}
+			else{
+				//WE WANT A URL
+				return '/theme/'.$site_template.$subdirectory.'/'.basename($filename, '.php');
+			}
+		}
+		else if(file_exists($default_file)){
+			if($path_format == 'system'){
+				//WE WANT A FILE PATH
+				return $default_file;
+			}
+			else{
+				//WE WANT A URL
+				return '/theme/default'.$subdirectory.'/'.basename($filename, '.php');
+			}
+		}
+		else{
+			throw new SystemDisplayablePermanentError('Could not find the specified theme file: '. $filename);					
+		}
+	}
 	
 	static function get_logic_file_path($filename, $path_format='system'){
 		$settings = Globalvars::get_instance();
