@@ -8,7 +8,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
 
-require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php'));
 
 class QuestionException extends SystemClassException {}
 
@@ -145,7 +145,7 @@ class Question extends SystemBase {
 			return $formwriter->textinput($this->get('qst_question'), $field_name , NULL, 100, $value, '', $field_max_length, '');
 		}
 		else if ($this->get('qst_type') == Question::TYPE_LONG_TEXT){
-			return $formwriter->textbox($this->get('qst_question'), $field_name, 'ctrlHolder', 5, 80, $value, '', 'no');
+			return $formwriter->textbox($this->get('qst_question'), $field_name, NULL, 5, 80, $value, '', 'no');
 		}
 		else if ($this->get('qst_type') == Question::TYPE_DROPDOWN){
 			$options = new MultiQuestionOption(
@@ -156,7 +156,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->dropinput($this->get('qst_question'), $field_name, "ctrlHolder", $optionvals, $value, '', TRUE);
+			echo $formwriter->dropinput($this->get('qst_question'), $field_name, NULL, $optionvals, $value, '', TRUE);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_RADIO){
 			$options = new MultiQuestionOption(
@@ -179,7 +179,7 @@ class Question extends SystemBase {
 			$options->load();
 			$truevalue = $options->get(0)->get('qop_question_option_value');
 			//TODO ERROR CHECKING HERE 
-			echo $formwriter->checkboxinput($this->get('qst_question'), $field_name, "ctrlHolder", NULL, $value, $truevalue, '');			
+			echo $formwriter->checkboxinput($this->get('qst_question'), $field_name, NULL, NULL, $value, $truevalue, '');			
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(
@@ -190,7 +190,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->checkboxlist($this->get('qst_question'), $field_name, "ctrlHolder", $optionvals, $value, '', TRUE);			
+			echo $formwriter->checkboxlist($this->get('qst_question'), $field_name, NULL, $optionvals, $value, '', TRUE);			
 		}
 	}
 	

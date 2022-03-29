@@ -8,7 +8,6 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
 
-require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 
 class CouponCodeException extends SystemClassException {}
 
