@@ -3,7 +3,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Pager.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php'); 	
 
 	$session = SessionControl::get_instance();
