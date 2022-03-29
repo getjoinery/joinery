@@ -1,8 +1,8 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('survey_logic.php'));
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPageTW.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublicTW.php');
+	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php'));
+	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php'));
 
 
 	$page = new PublicPageTW(TRUE);

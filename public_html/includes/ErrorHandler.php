@@ -2,10 +2,11 @@
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-
-$settings = Globalvars::get_instance();
-$site_template = $settings->get_setting('site_template');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPageTW.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php'));
+//$settings = Globalvars::get_instance();
+//$site_template = $settings->get_setting('site_template');
+//require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPageTW.php');
 
 class ErrorHandler{
 

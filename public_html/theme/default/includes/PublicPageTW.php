@@ -762,7 +762,7 @@ class PublicPageTW extends PublicPageMaster {
 <?php } ?>
 </div>
     <p class="mt-8 text-center text-base text-gray-400">
-      &copy; 2022 Joinery, Inc. All rights reserved.
+      &copy; <?php echo date("Y") . ' ' . $settings->get_setting('site_name'); ?> All rights reserved.
     </p>
   </div>
 </footer>		
