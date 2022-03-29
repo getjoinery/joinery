@@ -408,7 +408,7 @@
 				 <!-- <button class="button button-lg button-dark">Submit Payment</button>-->
 				</form>					
 				
-				<script language="javascript" src="<?php echo LibraryFunctions::get_theme_path('web'); ?>/includes/stripe_payment_js.php"></script>
+				<script language="javascript" src="<?php echo LibraryFunctions::get_theme_file_path('stripe_payment_js.php', '/includes', 'web'); ?>"></script>
 
 				<?php
 			}
