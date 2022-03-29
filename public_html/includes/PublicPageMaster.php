@@ -130,12 +130,8 @@ class PublicPageMaster {
 	public function global_includes_top($options=array()){
 		$settings = Globalvars::get_instance();
 		?>
-		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
-		<script type="text/javascript" src="<?php echo $this->theme_url; ?>/includes/jquery.validate-1.9.1.js"></script>	
-		<!--<link type="text/css" href="<?php echo $this->theme_url; ?>/includes/jquery-ui-1.7.custom_5.css" rel="stylesheet" />-->
-		
-		<!--<link type="text/css" href="<?php echo $this->theme_url; ?>/css/default_theme.css" rel="stylesheet" />
-		<link type="text/css" href="<?php echo $this->theme_url; ?>/css/site_styles.css" rel="stylesheet" />-->
+		<script src="<?php echo LibraryFunctions::get_theme_file_path('jquery-3.4.1.min.js'); ?>"></script>
+		<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js'); ?>"></script>	
 		
 		<?php
 		//CHECK TO SEE IF WE PASSED IN A PREVIEW IMAGE
