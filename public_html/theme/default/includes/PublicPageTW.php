@@ -199,18 +199,12 @@ class PublicPageTW extends PublicPageMaster {
 		<!-- CSS -->
 
 		
-		<link rel="stylesheet" type="text/css" href="<?php echo $this->theme_url; ?>/includes/output.css" >
+		<link rel="stylesheet" type="text/css" href="<?php echo LibraryFunctions::get_theme_file_path('output.css', '/includes', 'web'); ?>">
 		<?php
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';
 		}
-		?>
-		
-		<script src="<?php echo $this->theme_url; ?>/includes/jquery-3.4.1.min.js"></script>
-		<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
-		
-		<!-- jQuery validate -->
-		<script type="text/javascript" src="<?php echo $this->theme_url; ?>/includes/jquery.validate-1.9.1.js"></script>				
+		?>			
 		
 
 		
