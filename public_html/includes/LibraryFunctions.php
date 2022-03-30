@@ -140,7 +140,7 @@ class LibraryFunctions {
 		return $theme_dir;
 	}	
 	
-	static function get_theme_file_path($filename, $subdirectory='/includes', $path_format='system'){
+	static function get_theme_file_path($filename, $subdirectory='', $path_format='system'){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
 		$site_template = $settings->get_setting('site_template');
