@@ -17,6 +17,7 @@
 	$event_log->set('evl_event', 'stripe_invoice_synchronize');
 	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
 	$event_log->save();
+	$event_log->load();
 
 	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 		$api_key = $settings->get_setting('stripe_api_key_test');

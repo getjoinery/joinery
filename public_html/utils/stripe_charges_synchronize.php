@@ -20,6 +20,7 @@
 	$event_log->set('evl_event', 'stripe_charges_synchronize');
 	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
 	$event_log->save();
+	$event_log->load();
 	
 	$settings = Globalvars::get_instance();
 

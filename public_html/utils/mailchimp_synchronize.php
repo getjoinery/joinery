@@ -9,6 +9,13 @@
 	require $composer_dir.'autoload.php';
 	use MailchimpAPI\Mailchimp;
 
+	require_once($siteDir . '/data/event_logs_class.php');
+	
+	$event_log = new EventLog(NULL);
+	$event_log->set('evl_event', 'mailchimp_synchronize');
+	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
+	$event_log->save();
+	$event_log->load();
 	
 	$settings = Globalvars::get_instance();
 
@@ -103,6 +110,10 @@
 			}
 		}
 	}
+	
+	$event_log->set('evl_was_success', 1);
+	$event_log->set('evl_note', 'Users processed: '.$x);
+	$event_log->save();	
 	
 	exit();
 	?>
