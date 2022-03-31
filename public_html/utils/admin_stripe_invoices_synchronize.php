@@ -11,8 +11,12 @@
 	require_once($siteDir . '/data/stripe_invoices_class.php');
 	require_once($siteDir . '/data/orders_class.php');
 	require_once($siteDir . '/data/users_class.php');
+	require_once($siteDir . '/data/event_logs_class.php');
 	
-
+	$event_log = new EventLog(NULL);
+	$event_log->set('evl_event', 'stripe_invoice_synchronize');
+	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
+	$event_log->save();
 
 	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 		$api_key = $settings->get_setting('stripe_api_key_test');
@@ -125,7 +129,7 @@
 		}
 	}
 
-
+	$num_processed = 0;
 	$pagenum = 1;
 	$stripe_invoicenum = 0;
 	//SAFEGUARD, ONLY RUN 50 PAGES
@@ -208,6 +212,7 @@
 				print_r($rowvalues);
 			}
 			$offset = $stripe_invoice->id;
+			$num_processed++;
 		}
 		
 		if($stripe_invoices->has_more){
@@ -235,4 +240,8 @@
 	else{
 		echo "Invoices updated.\n";
 	}
+	
+	$event_log->set('evl_was_success', 1);
+	$event_log->set('evl_note', 'Invoices processed: '.$num_processed);
+	$event_log->save();	
 ?>
