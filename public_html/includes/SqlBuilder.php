@@ -1,6 +1,5 @@
 <?php
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
+require_once('DbConnector.php');
 
 class SQLBuilder {
 

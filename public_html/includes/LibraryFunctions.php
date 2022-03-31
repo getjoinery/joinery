@@ -1,6 +1,5 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
+require_once('SystemClass.php');
 
 class LibraryFunctions {
 
@@ -100,8 +99,8 @@ class LibraryFunctions {
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
 		$site_template = $settings->get_setting('site_template');
-		$theme_file = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/404.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'] . '/views/404.php';
+		$theme_file = $siteDir . '/theme/'.$site_template.'/404.php';
+		$base_file = $siteDir . '/views/404.php';
 
 		header("HTTP/1.0 404 Not Found");
 		if(file_exists($theme_file)){
@@ -412,7 +411,7 @@ class LibraryFunctions {
 
 	static function write_to_log($type, $entry){
 
-		$dbhelper = DbConnector::get_instance();
+		$dbhelper = DbConnector::$siteDir();
 		$dblink = $dbhelper->get_db_link();
 
 
@@ -456,7 +455,7 @@ class LibraryFunctions {
 			return FALSE;
 		}
 
-		$dbhelper = DbConnector::get_instance();
+		$dbhelper = DbConnector::$siteDir();
 		$dblink = $dbhelper->get_db_link();
 
 		try {
@@ -515,7 +514,7 @@ class LibraryFunctions {
 	}
 
 	static function state_to_abbr($fullstate) {
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+		require_once($siteDir . '/data/address_class.php');
 		$abbrev = array_search($fullstate, Address::$states);
 		return $abbrev;
 	}
@@ -524,7 +523,7 @@ class LibraryFunctions {
 		/*
 		$ipnum = ip2long($ip);
 
-		$dbhelper = DbConnector::get_instance();
+		$dbhelper = DbConnector::$siteDir();
 		$dblink = $dbhelper->get_db_link();
 		$sql = "
 			SELECT region,city FROM geoip.locations
@@ -672,7 +671,7 @@ class LibraryFunctions {
 		x(ST_Transform(ST_SetSRID(ST_MakePoint(?, ?),4269),2163)),
 		y(ST_Transform(ST_SetSRID(ST_MakePoint(?, ?),4269),2163))';
 
-		$dbhelper = DbConnector::get_instance();
+		$dbhelper = DbConnector::$siteDir();
 		$dblink = $dbhelper->get_db_link();
 		try{
 			$q = $dblink->prepare($sql);
@@ -696,7 +695,7 @@ class LibraryFunctions {
 	static function GetTimezoneFromZipCode($zip_code) {
 		$sql = "SELECT zip_timezone FROM zips.zip_codes WHERE zip_code_id = ? LIMIT 1";
 
-		$dbhelper = DbConnector::get_instance();
+		$dbhelper = DbConnector::$siteDir();
 		$dblink = $dbhelper->get_db_link();
 		try {
 			$q = $dblink->prepare($sql);
@@ -876,7 +875,7 @@ class LibraryFunctions {
 
 	//RETURN LAT/LONG FOR CURRENT USER
 	static function get_current_lat_lon(){
-		$session = SessionControl::get_instance();
+		$session = SessionControl::$siteDir();
 
 		$location_data = $session->get_location_data();
 		if ($location_data) {

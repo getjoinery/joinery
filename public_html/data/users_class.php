@@ -1,15 +1,16 @@
 <?php
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/DbConnector.php');
+require_once($siteDir . '/includes/FieldConstraints.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SessionControl.php');
+require_once($siteDir . '/includes/SingleRowAccessor.php');
+require_once($siteDir . '/includes/SystemClass.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FieldConstraints.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
+require_once($siteDir . '/data/groups_class.php');
+require_once($siteDir . '/data/address_class.php');
+require_once($siteDir . '/data/phone_number_class.php');
 
 $settings = Globalvars::get_instance();
 $composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -191,8 +192,8 @@ class User extends SystemBase {
 			$user->load();
 			
 			if($send_emails){
-				require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-				require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+				require_once($siteDir . '/includes/EmailTemplate.php');
+				require_once($siteDir . '/includes/Activation.php');
 				
 				//SEND NEW USER WELCOME EMAIL
 				$welcome_email = new EmailTemplate('new_account_content', $user);
@@ -368,7 +369,7 @@ class User extends SystemBase {
 			throw new DisplayableUserException('Your password cannot contain spaces.');
 		}
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PasswordHash.php');
+		require_once($siteDir . '/includes/PasswordHash.php');
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->HashPassword($password);
 	}
@@ -547,7 +548,7 @@ class User extends SystemBase {
 	}
 
 	function check_password($password) {
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PasswordHash.php');
+		require_once($siteDir . '/includes/PasswordHash.php');
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->CheckPassword($password, $this->get('usr_password'));
 	}
@@ -785,7 +786,7 @@ class User extends SystemBase {
 		}		
 
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
+		require_once($siteDir . '/data/orders_class.php');
 		$orders = new MultiOrder(
 		array('user_id'=>$this->key),
 		NULL,
@@ -797,7 +798,7 @@ class User extends SystemBase {
 			$order->permanent_delete();
 		}
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
+		require_once($siteDir . '/data/emails_class.php');
 		$emails = new MultiEmail(
 		array('user_id'=>$this->key),
 		NULL,
@@ -810,7 +811,7 @@ class User extends SystemBase {
 			$email->save();
 		}	
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipients_class.php');
+		require_once($siteDir . '/data/email_recipients_class.php');
 		$email_recipients = new MultiEmailRecipient(
 		array('user_id'=>$this->key),
 		NULL,
@@ -822,7 +823,7 @@ class User extends SystemBase {
 			$email_recipient->permanent_delete();
 		}
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
+		require_once($siteDir . '/data/events_class.php');
 		$events = new MultiEvent(
 		array('user_id_leader'=>$this->key),
 		NULL,
@@ -835,7 +836,7 @@ class User extends SystemBase {
 			$event->save();
 		}	
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
+		require_once($siteDir . '/data/event_registrants_class.php');
 		$event_registrants = new MultiEventRegistrant(
 		array('user_id'=>$this->key),
 		NULL,
@@ -848,7 +849,7 @@ class User extends SystemBase {
 		}		
 
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
+		require_once($siteDir . '/data/posts_class.php');
 		$posts = new MultiPost(
 		array('user_id'=>$this->key),
 		NULL,
@@ -861,7 +862,7 @@ class User extends SystemBase {
 			$post->save();
 		}
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
+		require_once($siteDir . '/data/phone_number_class.php');
 		$phone_numbers = new MultiPhoneNumber(
 		array('user_id'=>$this->key),
 		NULL,
@@ -873,7 +874,7 @@ class User extends SystemBase {
 			$phone_number->permanent_delete();
 		}
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+		require_once($siteDir . '/data/address_class.php');
 		$addresses = new MultiAddress(
 		array('user_id'=>$this->key),
 		NULL,
@@ -885,7 +886,7 @@ class User extends SystemBase {
 			$address->permanent_delete();
 		}
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
+		require_once($siteDir . '/data/videos_class.php');
 		$videos = new MultiVideo(
 		array('user_id'=>$this->key),
 		NULL,
@@ -898,7 +899,7 @@ class User extends SystemBase {
 			$video->save();
 		}	
 		
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
+		require_once($siteDir . '/data/files_class.php');
 		$files = new MultiFile(
 		array('user_id'=>$this->key),
 		NULL,
@@ -911,7 +912,7 @@ class User extends SystemBase {
 			$file->save();
 		}	
 	
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/messages_class.php');
+		require_once($siteDir . '/data/messages_class.php');
 		$messages = new MultiMessage(
 		array('user_id_recipient'=>$this->key),
 		NULL,

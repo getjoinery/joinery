@@ -1,8 +1,9 @@
 <?php
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/DbConnector.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SystemClass.php');
 	
 
 class PointException extends SystemClassException {}

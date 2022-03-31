@@ -1,10 +1,11 @@
 <?php
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/SessionControl.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+require_once($siteDir . '/data/address_class.php');
+require_once($siteDir . '/data/users_class.php');
 
 class LocationInfo {
 

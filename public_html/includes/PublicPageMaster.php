@@ -1,10 +1,12 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
+require_once('Globalvars.php');
+require_once('SessionControl.php');
+require_once('ShoppingCart.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/public_menus_class.php');
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/data/users_class.php');
+require_once($siteDir . '/data/public_menus_class.php');
 
 class PublicPageMaster {
 

@@ -1,5 +1,7 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/PublicPageMaster.php');
 
 class PublicPageTW extends PublicPageMaster {
 

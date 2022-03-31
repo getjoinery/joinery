@@ -1,20 +1,21 @@
 <?php
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/DbConnector.php');
+require_once($siteDir . '/includes/FieldConstraints.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SessionControl.php');
+require_once($siteDir . '/includes/SingleRowAccessor.php');
+require_once($siteDir . '/includes/SystemClass.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FieldConstraints.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
+require_once($siteDir . '/data/event_registrants_class.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Link.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generator.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/Google.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/Ics.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/Yahoo.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/WebOutlook.php');
+require_once($siteDir . '/includes/calendar-links/Link.php');
+require_once($siteDir . '/includes/calendar-links/Generator.php');
+require_once($siteDir . '/includes/calendar-links/Generators/Google.php');
+require_once($siteDir . '/includes/calendar-links/Generators/Ics.php');
+require_once($siteDir . '/includes/calendar-links/Generators/Yahoo.php');
+require_once($siteDir . '/includes/calendar-links/Generators/WebOutlook.php');
 use Spatie\CalendarLinks\Link;
 
 class EventSessionsException extends SystemClassException {}

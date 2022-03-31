@@ -1,6 +1,5 @@
 <?php
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+require_once('Globalvars.php');
 
 //class SystemDatabaseException extends PDOException {}
 

@@ -1,14 +1,15 @@
 <?php
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/DbConnector.php');
+require_once($siteDir . '/includes/FieldConstraints.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SessionControl.php');
+require_once($siteDir . '/includes/SingleRowAccessor.php');
+require_once($siteDir . '/includes/SystemClass.php');
+require_once($siteDir . '/includes/Validator.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FieldConstraints.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
+require_once($siteDir . '/data/order_items_class.php');
 
 class OrderException extends SystemClassException {}
 

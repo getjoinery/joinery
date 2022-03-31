@@ -1,9 +1,10 @@
 <?php
-
-require_once($_SERVER['DOCUMENT_ROOT'].'/data/videos_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'].'/data/friend_reviews_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'].'/data/queued_email_class.php');
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir.'/data/videos_class.php');
+require_once($siteDir.'/data/friend_reviews_class.php');
+require_once($siteDir.'/data/users_class.php');
+require_once($siteDir.'/data/queued_email_class.php');
 
 class RecurringMailerException extends SystemClassException {}
 
@@ -112,7 +113,7 @@ class RecurringMailer {
 		$this->web_dir = $settings->get_setting('webDir');
 		$this->email_template_contents = array();
 		$this->email_templates = array();
-		//$this->_load_templates($_SERVER['DOCUMENT_ROOT'] . '/theme/emailtemplates/recurring_emails');
+		//$this->_load_templates($siteDir . '/theme/emailtemplates/recurring_emails');
 	}
 
 	public function get_send_counts($range) {

@@ -1,11 +1,13 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FieldConstraints.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/DbConnector.php');
+require_once($siteDir . '/includes/FieldConstraints.php');
+require_once($siteDir . '/includes/Globalvars.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SingleRowAccessor.php');
+require_once($siteDir . '/includes/SystemClass.php');
+require_once($siteDir . '/includes/Validator.php');
 
 class SurveyException extends SystemClassException {}
 
@@ -110,7 +112,7 @@ class Survey extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/survey_answers_class.php');
+		require_once($siteDir . '/data/survey_answers_class.php');
 		$survey_answers = new SurveyAnswer(
 		array('survey_id'=>$this->key),
 		NULL,
@@ -122,7 +124,7 @@ class Survey extends SystemBase {
 			$survey_answer->permanent_delete();
 		}
 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/survey_questions_class.php');
+		require_once($siteDir . '/data/survey_questions_class.php');
 		$survey_questions = new SurveyAnswer(
 		array('survey_id'=>$this->key),
 		NULL,

@@ -2,16 +2,16 @@
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($siteDir . '/includes/ErrorHandler.php');
+	require_once($siteDir . '/includes/LibraryFunctions.php');
+	require_once($siteDir . '/includes/SessionControl.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
+	require_once($siteDir . '/data/users_class.php');
+	require_once($siteDir . '/data/events_class.php');
+	require_once($siteDir . '/data/event_registrants_class.php');
+	require_once($siteDir . '/data/event_sessions_class.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+	require_once($siteDir.'/includes/stripe-php/init.php');
 
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
@@ -64,7 +64,7 @@
 			$order_item = new OrderItem($event_registrant->get('evr_odi_order_item_id'), TRUE);
 			if($order_item->get('odi_is_subscription')){
 				//CHECK SUBSCRIPTION STATUS
-				require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+				require_once($siteDir.'/includes/stripe-php/init.php');
 				$settings = Globalvars::get_instance();
 				try{
 					if($_SESSION['test_mode'] || $settings->get_setting('debug')){

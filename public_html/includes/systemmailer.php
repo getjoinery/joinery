@@ -1,6 +1,6 @@
 <?php
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PHPMailer.php');
+require_once('PHPMailer.php');
 
 class systemmailer extends PHPMailer {
 	function __construct() {

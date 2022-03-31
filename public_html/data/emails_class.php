@@ -1,11 +1,12 @@
 <?php
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/DbConnector.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SystemClass.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipients_class.php');	
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');	
+require_once($siteDir . '/data/email_recipients_class.php');	
+require_once($siteDir . '/data/users_class.php');	
 
 class EmailException extends SystemClassException {}
 class EmailNotSentException extends EmailException {};
