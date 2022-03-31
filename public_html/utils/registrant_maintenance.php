@@ -13,6 +13,15 @@
 	
 	require_once($siteDir.'/includes/stripe-php/init.php');
 
+	require_once($siteDir . '/data/event_logs_class.php');
+	
+	$event_log = new EventLog(NULL);
+	$event_log->set('evl_event', 'event_registrant_maintenance');
+	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
+	$event_log->save();
+	$event_log->load();
+
+
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
 	
@@ -102,6 +111,8 @@
 	
 	}
 
-	
+	$event_log->set('evl_was_success', 1);
+	$event_log->set('evl_note', '');
+	$event_log->save();		
 
 ?>
