@@ -13,7 +13,7 @@
 	$settings = Globalvars::get_instance();
 
 	for ($x=0; $x<=10000; $x+=1000){
-		echo $x.'<br>';
+		echo $x."<br>\n";
 		$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
 		$return = $mailchimp
 		->lists($settings->get_setting('mailchimp_list_id'))
@@ -24,7 +24,7 @@
 		]);
 		$results = $return->deserialize();
 		if(count($results->members) == 0){
-			echo 'DONE';
+			echo "DONE\n";
 			exit;
 		}
 		foreach ($results->members as $result){ 
@@ -96,7 +96,7 @@
 						echo ' set mailchimp to unsubscribed';
 					}
 				}
-				echo '<br>';
+				echo "<br>\n";
 				if($user->get('usr_first_name') && $user->get('usr_last_name') && $user->get('usr_email')){
 					$user->save();
 				}

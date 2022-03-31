@@ -2,7 +2,7 @@
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');
-	echo turned off;
+	echo 'turned off';
 	exit; 
 
 	require_once($siteDir.'/includes/SessionControl.php');
