@@ -24,7 +24,7 @@ class Globalvars {
 			return $this->settings[$setting];
 		}
 		else{
-			require_once($_SERVER['DOCUMENT_ROOT'] . '/data/settings_class.php');
+			require_once($this->settings['siteDir'] . '/data/settings_class.php');
 			$search_criteria['setting_name'] = $setting;
 			$user_settings = new MultiSetting(
 			$search_criteria,

@@ -1,4 +1,5 @@
 <?php
+	error_reporting(E_ERROR | E_PARSE);
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	
@@ -10,12 +11,8 @@
 	require_once($siteDir . '/data/stripe_invoices_class.php');
 	require_once($siteDir . '/data/orders_class.php');
 	require_once($siteDir . '/data/users_class.php');
-
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	
-	$settings = Globalvars::get_instance();
+
 
 	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 		$api_key = $settings->get_setting('stripe_api_key_test');
@@ -47,7 +44,12 @@
 	}
 	else{
 		//DEFAULT
-		$startdate = strtotime('-1 month',time());
+		if($_GET['html-format']){
+			$startdate = strtotime('-1 month',time());
+		}
+		else{
+			$startdate = strtotime('-1 year',time());
+		}
 		$display_startdate = gmdate("Y-m-d", $startdate);
 	}
 
@@ -61,8 +63,6 @@
 		$enddate = time();
 		$display_enddate = gmdate("Y-m-d", $enddate);
 	}
-
-	
 
 
 
@@ -80,7 +80,8 @@
 
 
 	
-	if(!$_GET['print-format']){
+	if($_GET['html-format']){
+		$session = SessionControl::get_instance();
 		$page = new AdminPage();
 		$page->admin_header(
 		array(
@@ -96,32 +97,34 @@
 		);	
 				
 		
-	}
+
 	
-	$formwriter = new FormWriterMaster("form1");
-	echo $formwriter->begin_form("", "get", "/admin/admin_stripe_invoices");
-	echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
-	echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
-	echo $formwriter->hiddeninput('source', 'form');
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();	
-	
-	if($verbose){
-		$headers = array('ID', 'Customer', 'Amount', 'Subscription', 'Time', 'Description', 'Sync');
-		//$altlinks = array('Print format' => '/admin/admin_stripe_orders?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
-		$altlinks = array();
-		$box_vars =	array(
-			'altlinks' => $altlinks,
-			'title' => "Stripe invoices"
-		);
-		$page->tableheader($headers, $box_vars);
+		$formwriter = new FormWriterMaster("form1");
+		echo $formwriter->begin_form("", "get", "/utils/admin_stripe_invoices_synchronize");
+		echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
+		echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
+		echo $formwriter->hiddeninput('source', 'form');
+		echo $formwriter->start_buttons();
+		echo $formwriter->new_form_button('Submit');
+		echo $formwriter->end_buttons();
+		echo $formwriter->end_form();	
+
+		if($verbose){
+			$headers = array('ID', 'Customer', 'Amount', 'Subscription', 'Time', 'Description', 'Sync');
+			//$altlinks = array('Print format' => '/admin/admin_stripe_orders?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
+			$altlinks = array();
+			$box_vars =	array(
+				'altlinks' => $altlinks,
+				'title' => "Stripe invoices"
+			);
+			$page->tableheader($headers, $box_vars);
+		}
+		else{
+			$pageoptions['title'] = 'Stripe invoices synchronize';
+			$page->begin_box($pageoptions);
+		}
 	}
-	else{
-		$pageoptions['title'] = 'Stripe invoices synchronize';
-		$page->begin_box($pageoptions);
-	}
+
 
 	$pagenum = 1;
 	$stripe_invoicenum = 0;
@@ -142,7 +145,7 @@
 				array_push($rowvalues, $stripe_invoice->description);
 			}
 			else{
-				echo 'Processing invoice '. $stripe_invoicenum.'...<br>';
+				echo "Processing invoice ". $stripe_invoicenum."...<br>\n";
 			}
 
 			
@@ -198,7 +201,12 @@
 					array_push($rowvalues, 'skipped');
 				}
 			}
-			$page->disprow($rowvalues);
+			if($_GET['html-format']){
+				$page->disprow($rowvalues);
+			}
+			else{
+				print_r($rowvalues);
+			}
 			$offset = $stripe_invoice->id;
 		}
 		
@@ -212,17 +220,19 @@
 			break;
 		}
 	}
-	if($verbose){
-		$page->endtable();	
+
+	if($_GET['html-format']){
+		if($verbose){
+			$page->endtable();	
+		}
+		else{
+			echo "<p>Invoices updated.  <a href=\"/admin/admin_orders\">Return to orders</a></p>\n";
+			$page->end_box();
+		}
+
+		$page->admin_footer();
 	}
 	else{
-		echo '<p>Invoices updated.  <a href="/admin/admin_orders">Return to orders</a></p>';
-		$page->end_box();
-	}
-
-	
-
-	if(!$_GET['print-format']){
-		$page->admin_footer();
+		echo "Invoices updated.\n";
 	}
 ?>
