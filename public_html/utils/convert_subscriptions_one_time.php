@@ -1,16 +1,19 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
+	require_once($siteDir . '/includes/ErrorHandler.php');
+	require_once($siteDir . '/includes/LibraryFunctions.php');
+	require_once($siteDir . '/includes/SessionControl.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
+	require_once($siteDir . '/data/users_class.php');
+	require_once($siteDir . '/data/products_class.php');
+	require_once($siteDir . '/data/phone_number_class.php');
+	require_once($siteDir . '/data/orders_class.php');
+	require_once($siteDir . '/data/events_class.php');
+	require_once($siteDir . '/data/order_items_class.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+	require_once($siteDir.'/includes/stripe-php/init.php');
 
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();

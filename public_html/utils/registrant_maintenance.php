@@ -1,4 +1,7 @@
 <?php
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');

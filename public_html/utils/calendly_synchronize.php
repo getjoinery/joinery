@@ -1,10 +1,13 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
+	require_once($siteDir . '/includes/ErrorHandler.php');
+	require_once($siteDir . '/includes/LibraryFunctions.php');
+	require_once($siteDir . '/includes/SessionControl.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/bookings_class.php');
+	require_once($siteDir . '/data/users_class.php');
+	require_once($siteDir . '/data/bookings_class.php');
 
 	$session = SessionControl::get_instance();
 

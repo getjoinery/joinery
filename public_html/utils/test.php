@@ -1,4 +1,12 @@
 <?php
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');
+	echo turned off;
+	exit; 
+
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
@@ -10,6 +18,8 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
+
+
 
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');

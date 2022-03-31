@@ -1,12 +1,18 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
+	require_once($siteDir . '/includes/EmailTemplate.php');
+	require_once($siteDir . '/data/email_templates_class.php');
+	require_once($siteDir . '/data/users_class.php');
 
 	if($_REQUEST['password'] != 'testemail'){
 		echo 'bad password';
 		exit;
 	}
+	
+	echo 'feature turned off';
+	exit;
 
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	

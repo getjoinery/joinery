@@ -1,8 +1,13 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
+require_once($siteDir . '/includes/SessionControl.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SessionControl.php');
 
+echo 'feature turned off';
+exit;
 error_reporting(E_ALL | E_STRICT);
 
 $session = SessionControl::get_instance();

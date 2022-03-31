@@ -1,16 +1,19 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
+	require_once($siteDir.'/includes/stripe-php/init.php');
+	require_once($siteDir.'/includes/Activation.php');
+	require_once($siteDir.'/includes/ShoppingCart.php');
+		require_once($siteDir . '/data/files_class.php');
+	require_once($siteDir . '/data/orders_class.php');
+	require_once($siteDir . '/data/products_class.php');
+	require_once($siteDir . '/data/events_class.php');
+	require_once($siteDir . '/data/groups_class.php');
+	require_once($siteDir . '/data/product_details_class.php');
+	require_once($siteDir . '/data/event_registrants_class.php');
+	require_once($siteDir . '/includes/EmailTemplate.php');
+	require_once($siteDir . '/data/email_templates_class.php');
 	use Mailgun\Mailgun;
 	
 	$settings = Globalvars::get_instance();
@@ -42,10 +45,10 @@ div();
 	print_r($ext);
 	
 	exit();
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Link.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generator.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/Google.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/calendar-links/Generators/Ics.php');
+	require_once($siteDir . '/includes/calendar-links/Link.php');
+	require_once($siteDir . '/includes/calendar-links/Generator.php');
+	require_once($siteDir . '/includes/calendar-links/Generators/Google.php');
+	require_once($siteDir . '/includes/calendar-links/Generators/Ics.php');
 	use Spatie\CalendarLinks\Link;
 	$from = DateTime::createFromFormat('Y-m-d H:i', '2018-02-01 09:00');
 $to = DateTime::createFromFormat('Y-m-d H:i', '2018-02-01 18:00');
@@ -112,7 +115,7 @@ exit();
 	
 	$settings = Globalvars::get_instance();
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/AcuityScheduling.php');
+	require_once($siteDir.'/includes/AcuityScheduling.php');
 exit();
 
 	$settings = Globalvars::get_instance();
