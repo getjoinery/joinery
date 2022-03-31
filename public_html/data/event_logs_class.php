@@ -50,7 +50,7 @@ class EventLog extends SystemBase {
 		}
 	}
 	
-	function save() {
+	function save($debug=0) {
 		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
@@ -69,7 +69,7 @@ class EventLog extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'evl_event_logs', $p_keys, $rowdata, FALSE, 0);
+			$dbhelper, $dblink, 'evl_event_logs', $p_keys, $rowdata, FALSE, $debug);
 
 		$this->key = $p_keys_return['evl_event_log_id'];
 	}
@@ -78,7 +78,7 @@ class EventLog extends SystemBase {
 	
 		try{
 			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS evl_events_log_evl_events_log_id_seq
+				CREATE SEQUENCE IF NOT EXISTS evl_event_logs_evl_event_log_id_seq
 				INCREMENT BY 1
 				NO MAXVALUE
 				NO MINVALUE
@@ -92,7 +92,7 @@ class EventLog extends SystemBase {
 		
 		$sql = '
 			CREATE TABLE IF NOT EXISTS "public"."evl_event_logs" (
-			  "evl_event_log_id" int4 NOT NULL DEFAULT nextval(\'evl_events_log_evl_events_log_id_seq\'::regclass),
+			  "evl_event_log_id" int4 NOT NULL DEFAULT nextval(\'evl_event_logs_evl_event_log_id_seq\'::regclass),
 			  "evl_event" varchar(255),
 			  "evl_usr_user_id" int4,
 			  "evl_create_time" timestamp(6) NOT NULL DEFAULT now(),
