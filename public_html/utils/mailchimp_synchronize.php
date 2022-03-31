@@ -1,21 +1,16 @@
 <?php
-
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-
+	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
+	require_once($siteDir . '/includes/EmailTemplate.php');
+	require_once($siteDir . '/data/users_class.php');
+
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require $composer_dir.'autoload.php';
 	use MailchimpAPI\Mailchimp;
 
-
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(10);
-	$session_id = $_GET['session_id']; 
 	
 	$settings = Globalvars::get_instance();
-
 
 	for ($x=0; $x<=10000; $x+=1000){
 		echo $x.'<br>';

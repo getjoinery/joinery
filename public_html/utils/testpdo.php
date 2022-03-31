@@ -1,4 +1,10 @@
 <?php
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
+	
+	echo 'feature turned off';
+	exit;
 #
 # This is a test program for the portable PHP password hashing framework.
 #

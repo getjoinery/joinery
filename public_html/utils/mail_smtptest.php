@@ -1,6 +1,11 @@
 <?php
+	require_once('../includes/Globalvars.php');
+	$settings = Globalvars::get_instance();
+	$siteDir = $settings->get_setting('siteDir');	
 require_once("../includes/systemmailer.php");
 
+echo 'feature turned off';
+exit;
 
 $mail = new systemmailer();
 
