@@ -1277,16 +1277,18 @@ class LibraryFunctions {
 		}
 
 		if($debug){
-
 			echo $q->debugDumpParams();
 			echo '</pre>';
-			exit();
 		}
 
 		$q->execute();
 		if($op == 'edit'){
 			if($use_transaction){
 				$dblink->commit();
+			}
+			
+			if($debug){
+				exit;			
 			}
 			return $p_keys;
 		}
@@ -1298,6 +1300,10 @@ class LibraryFunctions {
 			$columnsql = "SELECT COUNT(*) FROM information_schema.sequences WHERE sequence_name ='$seq'";
 			$results = $dblink->query($columnsql);
 			$seq_exists = $results->fetch(PDO::FETCH_OBJ);
+			if($debug){
+				echo $columnsql."\n";
+				echo "Sequence exists? ". $seq_exists->count ."\n";
+			}
 
 			if($seq_exists->count == 1){
 				$returnval = array($pkeyname => $dblink->lastInsertId($seq));
@@ -1309,6 +1315,10 @@ class LibraryFunctions {
 
 			if($use_transaction){
 				$dblink->commit();
+			}
+			
+			if($debug){
+				exit;			
 			}
 			return($returnval);
 		}
