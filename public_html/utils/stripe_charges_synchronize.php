@@ -1,4 +1,5 @@
 <?php
+	error_reporting(E_ERROR | E_PARSE);
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	
@@ -13,9 +14,6 @@
 	require_once($siteDir . '/data/address_class.php');
 	require_once($siteDir . '/data/stripe_invoices_class.php');
 
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	
 	$settings = Globalvars::get_instance();
 
@@ -49,7 +47,12 @@
 	}
 	else{
 		//DEFAULT
-		$startdate = strtotime('-1 month',time());
+		if($_GET['html-format']){
+			$startdate = strtotime('-1 month',time());
+		}
+		else{
+			$startdate = strtotime('-1 year',time());
+		}
 		$display_startdate = gmdate("Y-m-d", $startdate);
 	}
 
@@ -83,7 +86,7 @@
 
 	
 
-	if(!$_GET['print-format']){
+	if($_GET['html-format']){
 		$page = new AdminPage();
 		$page->admin_header(
 		array(
@@ -99,32 +102,33 @@
 		);	
 				
 		
-	}
+
 	
-	$formwriter = new FormWriterMaster("form1");
-	echo $formwriter->begin_form("", "get", "/utils/stripe_charges_synchronize");
-	echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
-	echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
-	echo $formwriter->hiddeninput('source', 'form');
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();	
-	
-	
-	if($verbose){
-		$headers = array('Date', 'Order #', 'Total Amount', 'Billing User', 'Billing Email', 'Address');
-		//$altlinks = array('Print format' => '/admin/stripe_charges_synchronize?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
-		$altlinks = array();
-		$box_vars =	array(
-			'altlinks' => $altlinks,
-			'title' => "Stripe charges synchronize"
-		);
-		$page->tableheader($headers, $box_vars);
-	}
-	else{
-		$pageoptions['title'] = 'Stripe charges synchronize';
-		$page->begin_box($pageoptions);
+		$formwriter = new FormWriterMaster("form1");
+		echo $formwriter->begin_form("", "get", "/utils/stripe_charges_synchronize");
+		echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
+		echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
+		echo $formwriter->hiddeninput('source', 'form');
+		echo $formwriter->start_buttons();
+		echo $formwriter->new_form_button('Submit');
+		echo $formwriter->end_buttons();
+		echo $formwriter->end_form();	
+		
+		
+		if($verbose){
+			$headers = array('Date', 'Order #', 'Total Amount', 'Billing User', 'Billing Email', 'Address');
+			//$altlinks = array('Print format' => '/admin/stripe_charges_synchronize?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
+			$altlinks = array();
+			$box_vars =	array(
+				'altlinks' => $altlinks,
+				'title' => "Stripe charges synchronize"
+			);
+			$page->tableheader($headers, $box_vars);
+		}
+		else{
+			$pageoptions['title'] = 'Stripe charges synchronize';
+			$page->begin_box($pageoptions);
+		}
 	}
 	$pagenum = 1;
 	$chargenum = 0;
@@ -137,7 +141,7 @@
 		foreach($charges as $charge) {
 			$chargenum++;
 			if(!$verbose){
-				echo 'Processing charge '. $chargenum.'...<br>';
+				echo "Processing charge ". $chargenum."...<br>\n";
 			}
 			$error = '';
 			if($charge->paid){
@@ -381,10 +385,11 @@
 				}
 						
 
-			
-				$page->disprow($rowvalues);
-				if($verbose){
-					echo '<br><br>';
+				if($_GET['html-format']){
+					$page->disprow($rowvalues);
+					if($verbose){
+						echo '<br><br>';
+					}
 				}
 				$offset = $charge->id;
 				$order->save();
@@ -405,16 +410,20 @@
 			break;
 		}	
 	}
-	if($verbose){
-		$page->endtable();	
+	
+	if($_GET['html-format']){
+		if($verbose){
+			$page->endtable();	
+		}
+		else{
+			echo '<p>Charges updated.  <a href="/admin/admin_orders">Return to orders</a></p>';
+			$page->end_box();
+		}
+
+		$page->admin_footer();
 	}
 	else{
-		echo '<p>Charges updated.  <a href="/admin/admin_orders">Return to orders</a></p>';
-		$page->end_box();
-	}
-
-
-	if(!$_GET['print-format']){
-		$page->admin_footer();
+		echo "Stripe charges synchronized.\n";
+		
 	}
 ?>
