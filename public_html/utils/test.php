@@ -5,16 +5,16 @@
 	echo turned off;
 	exit; 
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Pager.php');
+	require_once($siteDir.'/includes/SessionControl.php');
+	require_once($siteDir.'/includes/LibraryFunctions.php');
+	require_once($siteDir.'/includes/stripe-php/init.php');
+	require_once($siteDir.'/includes/SessionControl.php');
+	require_once($siteDir.'/includes/LibraryFunctions.php');
+	require_once($siteDir.'/includes/Pager.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/files_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
+	require_once($siteDir.'/data/events_class.php');
+	require_once($siteDir.'/data/files_class.php');
+	require_once($siteDir.'/data/users_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);

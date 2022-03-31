@@ -1,5 +1,7 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir.'/data/users_class.php');
 
 $session = SessionControl::get_instance();
 $session->check_permission(9);

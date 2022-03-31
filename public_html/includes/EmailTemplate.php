@@ -1,18 +1,18 @@
 <?php
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/smtpmailer.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	
+require_once('Globalvars.php');
 $settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once('smtpmailer.php');
+require_once('LibraryFunctions.php');
+	
 $composer_dir = $settings->get_setting('composerAutoLoad');	
 require $composer_dir.'autoload.php';
 use Mailgun\Mailgun;
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/queued_email_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/debug_email_logs_class.php');
+require_once($siteDir . '/data/users_class.php');
+require_once($siteDir . '/data/email_templates_class.php');
+require_once($siteDir . '/data/queued_email_class.php');
+require_once($siteDir . '/data/debug_email_logs_class.php');
 
 class EmailTemplateError extends Exception {}
 

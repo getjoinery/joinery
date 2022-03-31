@@ -1,7 +1,7 @@
 <?php
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');	
+	$siteDir = $settings->get_setting('siteDir');
 	require_once($siteDir . '/includes/EmailTemplate.php');
 	require_once($siteDir . '/data/users_class.php');
 

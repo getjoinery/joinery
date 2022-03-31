@@ -6,8 +6,10 @@ TO A LOGIN PAGE IF NOT
 require_once ('DbConnector.php');
 require_once ('LibraryFunctions.php');
 //require_once ('ShoppingCart.php');
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/login_class.php');
+require_once($siteDir . '/data/login_class.php');
 
 class DisplayMessage {
 

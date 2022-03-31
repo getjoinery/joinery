@@ -1,16 +1,17 @@
 <?php
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/DbConnector.php');
+require_once($siteDir . '/includes/FieldConstraints.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SessionControl.php');
+require_once($siteDir . '/includes/SingleRowAccessor.php');
+require_once($siteDir . '/includes/SystemClass.php');
+require_once($siteDir . '/includes/Validator.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FieldConstraints.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_codes_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_code_products_class.php');
+require_once($siteDir . '/data/order_items_class.php');
+require_once($siteDir . '/data/coupon_codes_class.php');
+require_once($siteDir . '/data/coupon_code_products_class.php');
 
 class ProductException extends SystemClassException {}
 
@@ -1342,7 +1343,7 @@ class MultiProduct extends SystemMultiBase {
 }
 
 // Also require all the sub-products
-foreach (glob($_SERVER['DOCUMENT_ROOT'] . '/data/products/*.php') as $sub) {
+foreach (glob($siteDir . '/data/products/*.php') as $sub) {
 	require_once($sub);
 }
 

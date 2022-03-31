@@ -1,14 +1,15 @@
 <?php
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/DbConnector.php');
+require_once($siteDir . '/includes/FieldConstraints.php');
+require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once($siteDir . '/includes/SessionControl.php');
+require_once($siteDir . '/includes/SingleRowAccessor.php');
+require_once($siteDir . '/includes/SystemClass.php');
+require_once($siteDir . '/includes/Validator.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FieldConstraints.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Validator.php');
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+require_once($siteDir . '/data/address_class.php');
 
 class OrderItemException extends SystemClassException {}
 
@@ -131,7 +132,7 @@ class OrderItem extends SystemBase {
 	}
 
 	function get_product_version($product_id){
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
+		require_once($siteDir . '/data/products_class.php');
 		
 		if($this->get('odi_prv_product_version_id')){
 			return ProductVersion::GetActiveProductVersion($product_id, $this->get('odi_prv_product_version_id'));

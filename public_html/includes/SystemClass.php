@@ -1,6 +1,5 @@
 <?php
-
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SqlBuilder.php');
+require_once('SqlBuilder.php');
 require_once('FieldConstraints.php');
 
 
@@ -648,10 +647,13 @@ class SystemMultiBaseIncremental implements Iterator {
 // Since SystemClass is the base of everything, it needs to be defined before
 // we setup the default exception handler.  Thus in this case it is OK for us to
 // require_once things not at the top of the file!
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/general_errors_class.php');
+require_once('ErrorHandler.php');
+require_once('Globalvars.php');
+require_once('SessionControl.php');
+require_once('Globalvars.php');
+$settings = Globalvars::get_instance();
+$siteDir = $settings->get_setting('siteDir');
+require_once($siteDir  . '/data/general_errors_class.php');
 
 if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) { 
 	function default_exception_handler($e) {
