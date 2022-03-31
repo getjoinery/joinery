@@ -14,6 +14,12 @@
 	require_once($siteDir . '/data/address_class.php');
 	require_once($siteDir . '/data/stripe_invoices_class.php');
 
+	require_once($siteDir . '/data/event_logs_class.php');
+	
+	$event_log = new EventLog(NULL);
+	$event_log->set('evl_event', 'stripe_charges_synchronize');
+	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
+	$event_log->save();
 	
 	$settings = Globalvars::get_instance();
 
@@ -130,6 +136,8 @@
 			$page->begin_box($pageoptions);
 		}
 	}
+	
+	$num_processed = 0;
 	$pagenum = 1;
 	$chargenum = 0;
 	
@@ -397,6 +405,8 @@
 			else{
 				echo 'Skipping unpaid charge: '.$charge->id.'<br><br>';
 			}
+			
+			$num_processed++;
 		}
 		
 
@@ -426,4 +436,8 @@
 		echo "Stripe charges synchronized.\n";
 		
 	}
+	
+	$event_log->set('evl_was_success', 1);
+	$event_log->set('evl_note', 'Charges processed: '.$num_processed);
+	$event_log->save();	
 ?>

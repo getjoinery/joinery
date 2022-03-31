@@ -13,24 +13,21 @@ class EventLogException extends SystemClassException {}
 
 class EventLog extends SystemBase {
 
-	const SHOW_PHONE = 1;
-	const ACCESS_SERVICE_FLYER = 2;
-
-
+	/*
 	public static $valid_events = array(
 		self::SHOW_PHONE,
 		self::ACCESS_SERVICE_FLYER,
 	);
+	*/
 	
-	public static $event_descriptions = array(
-		self::SURVEY_COMPLETED => 'Survey completion',
-	);	
 
 	public static $fields = array(
 		'evl_event_log_id' => 'ID of the event_log',
 		'evl_event' => 'see above',
 		'evl_usr_user_id' => 'User this event_log is associated with',
 		'evl_create_time' => 'Time added',
+		'evl_was_success' => 'Did it run to completion?',
+		'evl_note' => 'Any notes'
 	);
 
 	public static $required_fields = array();
@@ -42,13 +39,6 @@ class EventLog extends SystemBase {
 	public static $initial_default_values = array(
 	'evl_create_time'=> 'now()',);
 	
-	//DEPRECATED
-	static function StoreEventLog($event, $user_id, $event_id=NULL) {
-		$event_log = new EventLog(NULL);
-		$event_log->set('evl_event', $event);
-		$event_log->set('evl_usr_user_id', $user_id);
-		$event_log->save();
-	}
 
 	function load() {
 		parent::load();
@@ -103,9 +93,11 @@ class EventLog extends SystemBase {
 		$sql = '
 			CREATE TABLE IF NOT EXISTS "public"."evl_event_logs" (
 			  "evl_event_log_id" int4 NOT NULL DEFAULT nextval(\'evl_events_log_evl_events_log_id_seq\'::regclass),
-			  "evl_event" int2,
+			  "evl_event" varchar(255),
 			  "evl_usr_user_id" int4,
-			  "evl_create_time" timestamp(6) NOT NULL DEFAULT now()
+			  "evl_create_time" timestamp(6) NOT NULL DEFAULT now(),
+			  "evl_was_success" boolean,
+			  "evl_note" varchar(255)
 			)
 			;';
 		$q = $dblink->prepare($sql);
@@ -138,7 +130,7 @@ class MultiEventLog extends SystemMultiBase {
 
 		if (array_key_exists('event', $this->options)) {
 		 	$where_clauses[] = 'evl_event = ?';
-		 	$bind_params[] = array($this->options['event'], PDO::PARAM_INT);
+		 	$bind_params[] = array($this->options['event'], PDO::PARAM_STR);
 		}
 				
 		
