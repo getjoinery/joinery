@@ -51,7 +51,7 @@
 	if($nickname_display){
 		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
 	}
-	$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules);
+	$validation_rules = FormWriterPublicTW::antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);
 
 	echo $formwriter->begin_form("form1", "post", "/register", TRUE);

@@ -33,7 +33,7 @@
 		$validation_rules['usr_email']['required']['value'] = 'true';
 		$validation_rules['usr_email']['email']['value'] = 'true';
 		$validation_rules['usr_email']['maxlength']['value'] = 64;
-		$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules);
+		$validation_rules = FormWriterPublicTW::antispam_question_validate($validation_rules);
 		echo $formwriter->set_validate($validation_rules);		
 		
 		echo $formwriter->begin_form("", "post", "/event_waiting_list");
