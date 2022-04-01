@@ -309,7 +309,7 @@
 	}
 	*/
 
-	echo PublicPage::EndPage();
+	echo PublicPageTW::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 

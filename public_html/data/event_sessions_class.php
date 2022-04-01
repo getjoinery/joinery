@@ -31,7 +31,7 @@ class EventSessionsUnviewableDisplayException extends EventSessionsException imp
 	}
 
 	function display_error_page() {
-		PublicPage::OutputGenericPublicPage(
+		PublicPageTW::OutputGenericPublicPage(
 			$this->title,
 			$this->title,
 			$this->error_message,
