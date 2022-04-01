@@ -32,7 +32,7 @@ $page->public_header(array(
 
 		echo $formwriter->new_form_button('Next Step');
 		echo $formwriter->end_form();
-		echo PublicPage::EndPage();
+		echo PublicPageTW::EndPage();
 		$page->public_footer($foptions=array('track'=>TRUE));
 		exit;
 	} 

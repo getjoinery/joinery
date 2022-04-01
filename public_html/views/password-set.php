@@ -12,7 +12,7 @@
 	);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPage::BeginPageTW('Set a Password');
+	echo PublicPageTW::BeginPage('Set a Password');
 	echo PublicPageTW::BeginPanel();
 	if($message){
 		echo PublicPageTW::alert($message_title, $message, $message_type);

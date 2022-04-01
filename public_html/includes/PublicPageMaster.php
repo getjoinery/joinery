@@ -95,7 +95,7 @@ class PublicPageMaster {
 	}
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
-		$page = new PublicPage();
+		$page = new PublicPageTW();
 		$page->public_header(
 			array_merge(
 				array(
@@ -103,11 +103,11 @@ class PublicPageMaster {
 					'showheader' => TRUE
 				),
 				$options));
-		echo PublicPage::BeginPage($header);
+		echo PublicPageTW::BeginPage($header);
 	
 		echo '<p>'.$body.'</p>';
 		
-		echo PublicPage::EndPage();
+		echo PublicPageTW::EndPage();
 		$page->public_footer();
 		exit;
 	}
