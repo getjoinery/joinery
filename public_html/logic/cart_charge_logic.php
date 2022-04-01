@@ -374,7 +374,7 @@
 			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
 			$order->set('ord_error', substr($error, 0, 250));
 			$order->save();	
-			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
 		} 
 		catch (\Stripe\Exception\RateLimitException $e) {
 		  // Too many requests made to the API too quickly
