@@ -369,6 +369,8 @@ class User extends SystemBase {
 			throw new DisplayableUserException('Your password cannot contain spaces.');
 		}
 
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');
 		require_once($siteDir . '/includes/PasswordHash.php');
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->HashPassword($password);
@@ -548,6 +550,8 @@ class User extends SystemBase {
 	}
 
 	function check_password($password) {
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');
 		require_once($siteDir . '/includes/PasswordHash.php');
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->CheckPassword($password, $this->get('usr_password'));
