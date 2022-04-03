@@ -10,7 +10,7 @@ require_once($siteDir . '/includes/SystemClass.php');
 
 require_once($siteDir . '/data/groups_class.php');
 require_once($siteDir . '/data/address_class.php');
-require_once($siteDir . '/data/phone_number_class.php');
+require_once($siteDir . '/data/phone_number_class.php'); 
 
 $settings = Globalvars::get_instance();
 $composer_dir = $settings->get_setting('composerAutoLoad');	
