@@ -192,6 +192,8 @@ class User extends SystemBase {
 			$user->load();
 			
 			if($send_emails){
+				$settings = Globalvars::get_instance();
+				$siteDir = $settings->get_setting('siteDir');	
 				require_once($siteDir . '/includes/EmailTemplate.php');
 				require_once($siteDir . '/includes/Activation.php');
 				
@@ -789,7 +791,8 @@ class User extends SystemBase {
 			$dbhelper->handle_query_error($e);
 		}		
 
-
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');	
 		require_once($siteDir . '/data/orders_class.php');
 		$orders = new MultiOrder(
 		array('user_id'=>$this->key),
