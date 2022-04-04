@@ -485,7 +485,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		usort($this->multi_data, $callback);
 	}
 
-	function load() {
+	function load($debug = false) {
 		// Make sure to clear out the existing array when we load in data
 		$this->clear();
 		if ($this->loadable) {
@@ -575,7 +575,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		$this->multi_data = array_values($this->multi_data);
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		return FALSE;
 	}
 

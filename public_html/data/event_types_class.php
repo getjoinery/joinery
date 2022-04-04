@@ -25,7 +25,7 @@ class EventType extends SystemBase {
 	
 	public static $initial_default_values = array();
 	
-	function load() {
+	function load($debug = false) {
 		parent::load();
 
 		$this->data = SingleRowFetch('ety_event_types', 'ety_event_type_id',
@@ -149,7 +149,7 @@ class MultiEventType extends SystemMultiBase {
 
 	}
 
-	private function _get_results($only_count=FALSE) {
+	function _get_results($only_count=FALSE, $debug = false) {
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -174,6 +174,11 @@ class MultiEventType extends SystemMultiBase {
 		try {
 			$q = $dblink->prepare($sql);
 
+			if($debug){
+				echo $sql. "<br>\n";
+				print_r($this->options);
+			}
+
 			$total_params = count($bind_params);
 			for($i=0;$i<$total_params;$i++) {
 				list($param, $type) = $bind_params[$i];
@@ -189,7 +194,7 @@ class MultiEventType extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
 			$child = new EventType($row->ety_event_type_id);
@@ -198,7 +203,7 @@ class MultiEventType extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE);
 		$counter = $q->fetch();
 		return $counter->count_all;

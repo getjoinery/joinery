@@ -137,7 +137,7 @@ class PhoneNumber extends SystemBase {
 		return $phone_data;
 	}
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 		$this->data = SingleRowFetch('phn_phone_numbers', 'phn_phone_number_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -491,7 +491,7 @@ class MultiPhoneNumber extends SystemMultiBase {
 		return $dropdown_builder;
 	}
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 
 		$dbhelper = DbConnector::get_instance();
@@ -544,6 +544,11 @@ class MultiPhoneNumber extends SystemMultiBase {
 		try {
 			$q = $dblink->prepare($sql);
 
+			if($debug){
+				echo $sql. "<br>\n";
+				print_r($this->options);
+			}
+
 			$total_params = count($bind_params);
 			for($i=0;$i<$total_params;$i++) {
 				list($param, $type) = $bind_params[$i];
@@ -564,7 +569,7 @@ class MultiPhoneNumber extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
@@ -612,6 +617,11 @@ class MultiPhoneNumber extends SystemMultiBase {
 
 		try {
 			$q = $dblink->prepare($sql);
+
+			if($debug){
+				echo $sql. "<br>\n";
+				print_r($this->options);
+			}
 
 			$total_params = count($bind_params);
 			for($i=0;$i<$total_params;$i++) {

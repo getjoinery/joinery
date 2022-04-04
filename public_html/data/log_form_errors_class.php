@@ -44,7 +44,7 @@ class FormError extends SystemBase {
 		)
 	);
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 		$this->data = SingleRowFetch('lfe_log_form_errors', 'lfe_log_form_error_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -148,7 +148,7 @@ class FormError extends SystemBase {
 
 class MultiFormError extends SystemMultiBase {
 
-	private function _get_results($only_count=FALSE) { 
+	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -186,6 +186,11 @@ class MultiFormError extends SystemMultiBase {
 
 		$q = DbConnector::GetPreparedStatement($sql);
 
+		if($debug){
+			echo $sql. "<br>\n";
+			print_r($this->options);
+		}
+
 		$total_params = count($bind_params);
 		for ($i=0; $i<$total_params; $i++) {
 			list($param, $type) = $bind_params[$i];
@@ -197,7 +202,7 @@ class MultiFormError extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
 			$child = new FormError($row->lfe_log_form_error_id);
@@ -206,7 +211,7 @@ class MultiFormError extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE);
 		$counter = $q->fetch();
 		return $counter->count;

@@ -438,7 +438,7 @@ class Event extends SystemBase {
 		return TRUE;
 	}	
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 
 		//$sql = 'SELECT *, (COALESCE(evt_expires_time, NOW()) < NOW()) as evt_is_expired FROM evt_events WHERE evt_event_id = ?';
@@ -706,7 +706,7 @@ class Multievent extends SystemMultiBase {
 
 	}
 
-	private function _get_results($only_count=FALSE) { 
+	private function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -817,25 +817,26 @@ class Multievent extends SystemMultiBase {
 		}
 
 		$q = DbConnector::GetPreparedStatement($sql);
-		/*
-		if($_SESSION['permission'] == 10){
-			print_r($sql);
+
+		if($debug){
+			echo $sql. "<br>\n";
+			print_r($this->options);
 		}
-		*/
 
 		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
+		for($i=0;$i<$total_params;$i++) {
 			list($param, $type) = $bind_params[$i];
 			$q->bindValue($i+1, $param, $type);
 		}
+
 		$q->execute();
 		$q->setFetchMode(PDO::FETCH_OBJ);
 
 		return $q;
 	}
 
-	function load() {
-		$q = $this->_get_results();
+	function load($debug = false) {
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Event($row->evt_event_id);
 			$child->load_from_data($row, array_keys(Event::$fields));
@@ -843,8 +844,8 @@ class Multievent extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
-		$q = $this->_get_results(TRUE);
+	function count_all($debug = false) {
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count;
 	}

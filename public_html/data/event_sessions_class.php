@@ -185,7 +185,7 @@ class EventSession extends SystemBase {
 
 
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 		$this->data = SingleRowFetch('evs_event_sessions', 'evs_event_session_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -596,7 +596,7 @@ class MultiEventSessions extends SystemMultiBase {
 
 
 
-	private function _get_results($only_count=FALSE) {
+	function _get_results($only_count=FALSE, $debug = false) {
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -703,7 +703,11 @@ class MultiEventSessions extends SystemMultiBase {
 
 		try {
 			$q = $dblink->prepare($sql);
-			//print_r($sql);
+			
+			if($debug){
+				echo $sql. "<br>\n";
+				print_r($this->options);
+			}
 
 			$total_params = count($bind_params);
 			for($i=0;$i<$total_params;$i++) {
@@ -720,7 +724,7 @@ class MultiEventSessions extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
 			$child = new EventSession($row->evs_event_session_id);
@@ -729,7 +733,7 @@ class MultiEventSessions extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE);
 		$counter = $q->fetch();
 		return $counter->count_all;
