@@ -9,9 +9,6 @@
 	require_once( __DIR__ . '/../data/users_class.php');
 	require_once( __DIR__ . '/../data/bookings_class.php');
 
-	$session = SessionControl::get_instance();
-
-	$session->check_permission(10);
 
 	$event_uuid = LibraryFunctions::fetch_variable('event_uuid', NULL,0,'');
 	$min_start_time = LibraryFunctions::fetch_variable('min_start_time', NULL,0,'');
