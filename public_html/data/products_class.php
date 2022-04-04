@@ -724,7 +724,9 @@ class Product extends SystemBase {
 		'pro_is_active' => 'Active or disabled',
 		'pro_price_type' => 'The pricing type',
 		'pro_grp_group_id' => 'The group id of the bundle if the product is for a bundle',
-		'pro_type' => 'Type of product e.g. event ticket or digital item'
+		'pro_type' => 'Type of product e.g. event ticket or digital item',
+		'pro_digital_link' => 'Link for a digital download',
+		'pro_num_remaining_calc' => 'Calculated field of number remaining in stock'
 	);
 	
 	public static $required_fields = array();
@@ -905,7 +907,7 @@ class Product extends SystemBase {
 		}
 	}
 
-	function save() {
+	function save($debug = false) {
 		parent::save();
 		$rowdata = array();
 		foreach(array_keys(self::$fields) as $field) {
@@ -924,7 +926,7 @@ class Product extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "pro_products", $p_keys, $rowdata, FALSE, 0);
+			$dbhelper, $dblink, "pro_products", $p_keys, $rowdata, FALSE, $debug);
 
 		$this->key = $p_keys_return['pro_product_id'];
 	}
@@ -1242,7 +1244,7 @@ class MultiProduct extends SystemMultiBase {
 	}
 
 
-	private function _get_results($only_count=FALSE) {
+	private function _get_results($only_count=FALSE, $debug = false) {
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -1264,6 +1266,10 @@ class MultiProduct extends SystemMultiBase {
 		if (array_key_exists('product_type', $this->options)) {
 			$where_clauses[] = 'pro_type = ?';
 			$bind_params[] = array($this->options['product_type'], PDO::PARAM_INT);
+		}	
+		
+		if (array_key_exists('in_stock', $this->options)) {
+			$where_clauses[] = '(pro_max_purchase_count IS NULL OR pro_max_purchase_count = 0 OR (pro_max_purchase_count > 0 AND (pro_num_remaining_calc IS NULL OR pro_num_remaining_calc > 0)))';
 		}	
 
 		if (array_key_exists('product_id_is_not', $this->options)) {
@@ -1309,6 +1315,10 @@ class MultiProduct extends SystemMultiBase {
 		}
 
 		try {
+			if($debug){
+				echo $sql. "<br>\n";
+				print_r($this->options);
+			}
 			$q = $dblink->prepare($sql);
 
 			$total_params = count($bind_params);
@@ -1326,8 +1336,8 @@ class MultiProduct extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
-		$q = $this->_get_results();
+	function load($debug = false) {
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Product($row->pro_product_id);
 			$child->load_from_data($row, array_keys(Product::$fields));
@@ -1335,8 +1345,8 @@ class MultiProduct extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
-		$q = $this->_get_results(TRUE);
+	function count_all($debug = false) {
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count_all;
 	}

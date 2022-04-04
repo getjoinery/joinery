@@ -71,12 +71,14 @@
 				$product->set('pro_recurring', NULL);
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id');
+
+			
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_REQUEST[$field]);
 			}
-
+			
 			$product->prepare();
 			$product->save();
 			$product->load();
@@ -150,6 +152,18 @@
 				$("#pro_price_container").hide();				
 			}			
 		}
+		
+		function set_type_choices(){
+			var value = $("#pro_type").val();
+			if(value == 1){  //EVENT TICKET	
+				$("#pro_evt_event_id_container").show();
+				$("#pro_digital_link").hide();
+			}	
+			else if(value == 2){  //ITEM
+				$("#pro_evt_event_id_container").hide();
+				$("#pro_digital_link").show();			
+			}		
+		}
 	
 		function set_expire_choices(){
 			var value = $("#pro_recurring").val(); 
@@ -171,6 +185,11 @@
 			set_expire_choices();
 			$("#pro_recurring").change(function() {	
 				set_expire_choices();
+			});
+			
+			set_type_choices();
+			$("#pro_type").change(function() {	
+				set_type_choices();
 			});	
 		});
 	
@@ -198,13 +217,13 @@
 	echo $formwriter->dropinput("Active?", "pro_is_active", "ctrlHolder", $optionvals, $product_status, '', FALSE);
 	echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
 
-	if($product->key && $product->get('product_type') == 0){
+	if($product->key && $product->get('pro_type') == 0){
 		$optionvals = array('System (do not change)' => 0);
-		echo $formwriter->dropinput("Product type", "product_type", "ctrlHolder", $optionvals, $product->get('product_type'), '', FALSE);	
+		echo $formwriter->dropinput("Product type", "pro_type", "ctrlHolder", $optionvals, $product->get('pro_type'), '', FALSE);	
 	}
 	else{
-		$optionvals = array("Event ticket"=>'1', 'Other Item' => '2');	
-		echo $formwriter->dropinput("Product type", "product_type", "ctrlHolder", $optionvals, $product->get('product_type'), '', FALSE);			
+		$optionvals = array("Event ticket"=>Product::PRODUCT_TYPE_EVENT, 'Other Item' => Product::PRODUCT_TYPE_ITEM);	
+		echo $formwriter->dropinput("Product type", "pro_type", "ctrlHolder", $optionvals, $product->get('pro_type'), '', FALSE);			
 	}
 
 
@@ -219,6 +238,8 @@
 		$recurring=0;
 	}
 	echo $formwriter->dropinput("Subscription?", "pro_recurring", "ctrlHolder", $optionvals, $recurring, '', FALSE);	
+	
+	echo $formwriter->textinput('Digital item link', 'pro_digital_link', NULL, 100, $product->get('pro_digital_link'), '', 255, '');
 	
 	$events = new MultiEvent(
 		array('deleted'=>false, 'past'=>false),

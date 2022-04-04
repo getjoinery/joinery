@@ -537,7 +537,11 @@
 
 			$receipts[$key+1][pname] = $product->get('pro_name').' '. $product_version->prv_version_name;
 			$receipts[$key+1][name] = $data['full_name_first']. ' ' .$data['full_name_last'];
-			$receipts[$key+1][price] = $price - $discount;				
+			$receipts[$key+1][price] = $price - $discount;
+			
+			if($product->get('pro_digital_link')){			
+				$receipts[$key+1][link] = $product->get('pro_digital_link');	
+			}			
 			
 			
 		}
@@ -565,6 +569,13 @@
 				}
 			}
 		}
+		
+		//UPDATE THE CALCULATED STILL AVAILABLE FIELD
+		if($product->get('pro_max_purchase_count') > 0){
+			$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
+			$product->set('pro_num_remaining_calc', $remaining);
+			$product->save();
+		}		
 	}			
 	
 

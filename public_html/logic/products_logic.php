@@ -18,7 +18,7 @@
 		exit();			
 	}
 
-	$numperpage = 5;
+	$numperpage = 12;
 	$offset = LibraryFunctions::fetch_variable('offset', NULL, 0, '');
 	if(!$offset){
 		$offsetdisp = 1;
@@ -34,14 +34,17 @@
 	$searches = array();
 	$searches['active'] = TRUE;
 	
-	if($show_items){
+	if($show_items && !$show_events){
 		$searches['product_type'] = 2;
 	}
-	
-	if($show_events){
+	else if($show_events && !$show_items){
 		$searches['product_type'] = 1;
 	}
+	else{ 
+		//RETURN ALL
+	}
 
+	$searches['in_stock'] = true;
 	$sdirection = 'DESC';	
 
 	$products = new MultiProduct(
