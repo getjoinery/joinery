@@ -896,7 +896,7 @@ class Product extends SystemBase {
 
 	}
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 
 		$this->data = SingleRowFetch('pro_products', 'pro_product_id',
@@ -1320,6 +1320,11 @@ class MultiProduct extends SystemMultiBase {
 				print_r($this->options);
 			}
 			$q = $dblink->prepare($sql);
+
+			if($debug){
+				echo $sql. "<br>\n";
+				print_r($this->options);
+			}
 
 			$total_params = count($bind_params);
 			for($i=0;$i<$total_params;$i++) {

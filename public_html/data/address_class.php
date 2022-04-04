@@ -420,7 +420,7 @@ class Address extends SystemBase {
 		return NULL;
 	}
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -902,7 +902,7 @@ class MultiAddress extends SystemMultiBase {
 		return $address_dropdown_builder;
 	}
 
-	function _get_results($only_count=FALSE) {
+	function _get_results($only_count=FALSE, $debug = false) {
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -973,6 +973,11 @@ class MultiAddress extends SystemMultiBase {
 		try {
 			$q = $dblink->prepare($sql);
 
+			if($debug){
+				echo $sql. "<br>\n";
+				print_r($this->options);
+			}
+
 			$total_params = count($bind_params);
 			for($i=0;$i<$total_params;$i++) {
 				list($param, $type) = $bind_params[$i];
@@ -988,9 +993,9 @@ class MultiAddress extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results();
+		$q = $this->_get_results(false, $debug);
 
 		// So now we have all of the messages from this thread.
 		foreach($q->fetchAll() as $row) {
@@ -1000,8 +1005,8 @@ class MultiAddress extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
-		$q = $this->_get_results(TRUE);
+	function count_all($debug = false) {
+		$q = $this->_get_results(TRUE, $debug);
 		$row = $q->fetch();
 		return $row->total_count;
 	}

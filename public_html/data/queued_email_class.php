@@ -56,7 +56,7 @@ class QueuedEmail extends SystemBase {
 		return self::$status_to_text[$this->get('equ_status')];
 	}
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 
 		$this->data = SingleRowFetch('equ_queued_emails', 'equ_queued_email_id',
@@ -223,7 +223,7 @@ class MultiQueuedEmail extends SystemMultiBase {
 		}
 	}
 
-	private function _get_results($only_count=FALSE) {
+	function _get_results($only_count=FALSE, $debug = false) {
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -262,6 +262,11 @@ class MultiQueuedEmail extends SystemMultiBase {
 		try {
 			$q = $dblink->prepare($sql);
 
+			if($debug){
+				echo $sql. "<br>\n";
+				print_r($this->options);
+			}
+
 			$total_params = count($bind_params);
 			for($i=0;$i<$total_params;$i++) {
 				list($param, $type) = $bind_params[$i];
@@ -277,7 +282,7 @@ class MultiQueuedEmail extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
 			$child = new QueuedEmail($row->equ_queued_email_id);
@@ -286,7 +291,7 @@ class MultiQueuedEmail extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE);
 		$counter = $q->fetch();
 		return $counter->count_all;

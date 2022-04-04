@@ -53,7 +53,7 @@ class Booking extends SystemBase {
 	}
 
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 		$this->data = SingleRowFetch('bkn_bookings', 'bkn_booking_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -210,7 +210,7 @@ class Booking extends SystemBase {
 
 class MultiBooking extends SystemMultiBase {
 
-	private function _get_results($only_count=FALSE) { 
+	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -268,6 +268,11 @@ class MultiBooking extends SystemMultiBase {
 
 		$q = DbConnector::GetPreparedStatement($sql);
 
+		if($debug){
+			echo $sql. "<br>\n";
+			print_r($this->options);
+		}
+			
 		$total_params = count($bind_params);
 		for ($i=0; $i<$total_params; $i++) {
 			list($param, $type) = $bind_params[$i];
@@ -279,7 +284,7 @@ class MultiBooking extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
 			$child = new Booking($row->bkn_booking_id);
@@ -288,7 +293,7 @@ class MultiBooking extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE);
 		$counter = $q->fetch();
 		return $counter->count;

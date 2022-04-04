@@ -31,7 +31,7 @@ class Url extends SystemBase {
 	public static $initial_default_values = array('url_create_time' => 'now()'
 		);		
 		
-	function load() {
+	function load($debug = false) {
 		parent::load();
 		$this->data = SingleRowFetch('url_urls', 'url_url_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -169,7 +169,7 @@ class Url extends SystemBase {
 
 class MultiUrl extends SystemMultiBase {
 
-	private function _get_results($only_count=FALSE) { 
+	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -209,6 +209,11 @@ class MultiUrl extends SystemMultiBase {
 
 		$q = DbConnector::GetPreparedStatement($sql);
 
+		if($debug){
+			echo $sql. "<br>\n";
+			print_r($this->options);
+		}
+
 		$total_params = count($bind_params);
 		for ($i=0; $i<$total_params; $i++) {
 			list($param, $type) = $bind_params[$i];
@@ -220,7 +225,7 @@ class MultiUrl extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
 			$child = new Url($row->url_url_id);
@@ -229,7 +234,7 @@ class MultiUrl extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE);
 		$counter = $q->fetch();
 		return $counter->count;

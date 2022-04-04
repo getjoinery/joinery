@@ -1167,7 +1167,7 @@ class MultiUser extends SystemMultiBase {
 
 	}
 	
-	private function _get_results($only_count=FALSE) { 
+	private function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -1291,8 +1291,13 @@ class MultiUser extends SystemMultiBase {
 
 		$q = DbConnector::GetPreparedStatement($sql);
 
+		if($debug){
+			echo $sql. "<br>\n";
+			print_r($this->options);
+		}
+
 		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
+		for($i=0;$i<$total_params;$i++) {
 			list($param, $type) = $bind_params[$i];
 			$q->bindValue($i+1, $param, $type);
 		}
@@ -1302,8 +1307,8 @@ class MultiUser extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
-		$q = $this->_get_results();
+	function load($debug = false) {
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new User($row->usr_user_id);
 			$child->load_from_data($row, array_keys(User::$fields));
@@ -1311,8 +1316,8 @@ class MultiUser extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
-		$q = $this->_get_results(TRUE);
+	function count_all($debug = false) {
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count;
 	}	

@@ -40,7 +40,7 @@ class EventLog extends SystemBase {
 	'evl_create_time'=> 'now()',);
 	
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 		$this->data = SingleRowFetch('evl_event_logs', 'evl_event_log_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -119,7 +119,7 @@ class EventLog extends SystemBase {
 
 class MultiEventLog extends SystemMultiBase {
 
-	private function _get_results($only_count=FALSE) { 
+	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -162,6 +162,11 @@ class MultiEventLog extends SystemMultiBase {
 
 		$q = DbConnector::GetPreparedStatement($sql);
 
+		if($debug){
+			echo $sql. "<br>\n";
+			print_r($this->options);
+		}
+
 		$total_params = count($bind_params);
 		for ($i=0; $i<$total_params; $i++) {
 			list($param, $type) = $bind_params[$i];
@@ -173,7 +178,7 @@ class MultiEventLog extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
 			$child = new EventLog($row->evl_event_log_id);
@@ -182,7 +187,7 @@ class MultiEventLog extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE);
 		$counter = $q->fetch();
 		return $counter->count;

@@ -87,7 +87,7 @@ class SurveyAnswer extends SystemBase {
 		
 	}
 
-	function load() {
+	function load($debug = false) {
 		parent::load();
 		$this->data = SingleRowFetch('sva_survey_answers', 'sva_survey_answer_id',
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -193,7 +193,7 @@ class MultiSurveyAnswer extends SystemMultiBase {
 		return $items;
 	}
 	
-	private function _get_results($only_count=FALSE) { 
+	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -244,6 +244,11 @@ class MultiSurveyAnswer extends SystemMultiBase {
 
 		$q = DbConnector::GetPreparedStatement($sql);
 
+		if($debug){
+			echo $sql. "<br>\n";
+			print_r($this->options);
+		}
+
 		$total_params = count($bind_params);
 		for ($i=0; $i<$total_params; $i++) {
 			list($param, $type) = $bind_params[$i];
@@ -255,7 +260,7 @@ class MultiSurveyAnswer extends SystemMultiBase {
 		return $q;
 	}
 
-	function load() {
+	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
 			$child = new SurveyAnswer($row->sva_survey_answer_id);
@@ -264,7 +269,7 @@ class MultiSurveyAnswer extends SystemMultiBase {
 		}
 	}
 
-	function count_all() {
+	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE);
 		$counter = $q->fetch();
 		return $counter->count;
