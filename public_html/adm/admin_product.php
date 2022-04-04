@@ -73,6 +73,11 @@
 			echo 'Price: <b>User chooses</b><br>';
 		}
 		
+		if($product->get('pro_max_purchase_count') > 0){
+			$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
+			echo 'Total items: <b>'. $product->get('pro_max_purchase_count').' ('. $remaining .' remaining)</b><br>';
+		}
+		
 		echo 'Max that can be added to cart: <b>'. $product->get('pro_max_cart_count').'</b><br>';
 		if($product->get('pro_evt_event_id')){
 			$event = new Event($product->get('pro_evt_event_id'), TRUE);
@@ -87,7 +92,10 @@
 			$pg = new ProductGroup($product->get('pro_prg_product_group_id'), TRUE);
 			echo 'Product group: <b>'. $pg->get('prg_name').'</b><br>';
 		}
-		
+	
+		if($product->get('pro_digital_link')){
+			echo 'Digital link: <b>'.$product->get('pro_digital_link').'</b><br>';
+		}
 
 		$requirements = implode(', ', $product->get_requirement_info());
 		echo 'Product info collected at purchase: <b>'. $requirements.'</b><br>';

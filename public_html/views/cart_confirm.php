@@ -26,10 +26,10 @@
 	if($receipts){
 		
 		?>
-		<p class="mt-3 text-base text-gray-500">Thank you for your purchase.  An email has been sent to the email address of all registrants with your purchase confirmation and a link to provide any further info that we need to finalize registrations.</p>
+		<p class="mt-3 text-base text-gray-500">Thank you for your purchase.  An email has been sent to the email address of all registrants with your purchase confirmation and a link to provide any further info that we need.</p>
 		<?php
 		
-		$headers = array('Cart item', 'Item', 'Price');
+		$headers = array('Cart item', 'Item', 'Price', 'Other info');
 		$page->tableheader($headers);
 
 		$total = 0;
@@ -40,6 +40,7 @@
 			array_push($rowvalues, $rkey);
 			array_push($rowvalues, $receipt[pname] . ' ('. $receipt[name]. ') ');
 			array_push($rowvalues, '$' . money_format('%i', $receipt[price]));
+			array_push($rowvalues, '<a href="'.$receipt[link].'">'.$receipt[link].'</a>');
 			$page->disprow($rowvalues);
 		}
 			$rowvalues = array();	

@@ -27,6 +27,15 @@ else {
 
 $product = Product::GetProductById($product_id);
 
+//IF NO ITEMS REMAINING, SHOW ERROR
+if($product->get('pro_max_purchase_count') > 0){
+	$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
+	if(!$remaining){
+		throw new SystemDisplayableError(
+					'This item is sold out.');
+	}
+}
+
 $currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')]; 
 
 
