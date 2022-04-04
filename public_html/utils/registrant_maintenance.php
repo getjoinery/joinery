@@ -1,19 +1,18 @@
+#!/usr/bin/php
 <?php
-	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');
-	require_once($siteDir . '/includes/Globalvars.php');	
-	require_once($siteDir . '/includes/ErrorHandler.php');
-	require_once($siteDir . '/includes/LibraryFunctions.php');
-	require_once($siteDir . '/includes/SessionControl.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');	
+	require_once( __DIR__ . '/../includes/ErrorHandler.php');
+	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
+	require_once( __DIR__ . '/../includes/SessionControl.php');
 
-	require_once($siteDir . '/data/users_class.php');
-	require_once($siteDir . '/data/events_class.php');
-	require_once($siteDir . '/data/event_registrants_class.php');
-	require_once($siteDir . '/data/event_sessions_class.php');
+	require_once( __DIR__ . '/../data/users_class.php');
+	require_once( __DIR__ . '/../data/events_class.php');
+	require_once( __DIR__ . '/../data/event_registrants_class.php');
+	require_once( __DIR__ . '/../data/event_sessions_class.php');
 	
-	require_once($siteDir.'/includes/stripe-php/init.php');
+	require_once( __DIR__ . '/../includes/stripe-php/init.php');
 
-	require_once($siteDir . '/data/event_logs_class.php');
+	require_once( __DIR__ . '/../data/event_logs_class.php');
 	
 	$event_log = new EventLog(NULL);
 	$event_log->set('evl_event', 'event_registrant_maintenance');

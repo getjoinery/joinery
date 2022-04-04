@@ -1,23 +1,24 @@
+#!/usr/bin/php
 <?php
 	error_reporting(E_ERROR | E_PARSE);
-	require_once('../includes/Globalvars.php');
-	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');	
-	require_once($siteDir . '/includes/AdminPage-uikit3.php');
-	require_once($siteDir . '/includes/FormWriterMaster.php');
-	require_once($siteDir . '/includes/LibraryFunctions.php');
-	require_once($siteDir.'/includes/stripe-php/init.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/AdminPage-uikit3.php');
+	require_once( __DIR__ . '/../includes/FormWriterMaster.php');
+	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
+	require_once( __DIR__ . '/../includes/stripe-php/init.php');
 
-	require_once($siteDir . '/data/stripe_invoices_class.php');
-	require_once($siteDir . '/data/orders_class.php');
-	require_once($siteDir . '/data/users_class.php');
-	require_once($siteDir . '/data/event_logs_class.php');
+	require_once( __DIR__ . '/../data/stripe_invoices_class.php');
+	require_once( __DIR__ . '/../data/orders_class.php');
+	require_once( __DIR__ . '/../data/users_class.php');
+	require_once( __DIR__ . '/../data/event_logs_class.php');
 	
 	$event_log = new EventLog(NULL);
 	$event_log->set('evl_event', 'stripe_invoice_synchronize');
 	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
 	$event_log->save();
 	$event_log->load();
+	
+	$settings = Globalvars::get_instance();
 
 	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 		$api_key = $settings->get_setting('stripe_api_key_test');

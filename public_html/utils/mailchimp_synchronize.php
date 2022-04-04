@@ -1,15 +1,17 @@
+#!/usr/bin/php
 <?php
-	require_once('../includes/Globalvars.php');
+	error_reporting(E_ERROR | E_PARSE);
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/EmailTemplate.php');
+	require_once( __DIR__ . '/../data/users_class.php');
+	
 	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');
-	require_once($siteDir . '/includes/EmailTemplate.php');
-	require_once($siteDir . '/data/users_class.php');
 
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require $composer_dir.'autoload.php';
 	use MailchimpAPI\Mailchimp;
 
-	require_once($siteDir . '/data/event_logs_class.php');
+	require_once( __DIR__ . '/../data/event_logs_class.php');
 	
 	$event_log = new EventLog(NULL);
 	$event_log->set('evl_event', 'mailchimp_synchronize');
@@ -31,8 +33,7 @@
 		]);
 		$results = $return->deserialize();
 		if(count($results->members) == 0){
-			echo "DONE\n";
-			exit;
+			break;
 		}
 		foreach ($results->members as $result){ 
 			$user = User::GetByEmail($result->email_address);
