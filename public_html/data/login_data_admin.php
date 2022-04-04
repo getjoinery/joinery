@@ -1,7 +1,6 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir.'/data/users_class.php');
+require_once( __DIR__ . '/../includes/Globalvars.php');	
+require_once( __DIR__ . '/../data/users_class.php');
 
 $session = SessionControl::get_instance();
 $session->check_permission(9);
