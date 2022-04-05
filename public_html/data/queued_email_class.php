@@ -11,6 +11,10 @@ require_once($siteDir . '/includes/SystemClass.php');
 class QueuedEmailException extends SystemClassException {}
 
 class QueuedEmail extends SystemBase {
+	public $prefix = 'equ';
+	public $tablename = 'equ_queued_emails';
+	public $pkey_column = 'equ_queued_email_id';
+	
 	// The various states an email can be in
 	const QUEUED = 1; // Queued, but not approved yet
 	const READY_TO_SEND = 2; // Queued and approved, ready to send
@@ -56,16 +60,6 @@ class QueuedEmail extends SystemBase {
 		return self::$status_to_text[$this->get('equ_status')];
 	}
 
-	function load($debug = false) {
-		parent::load();
-
-		$this->data = SingleRowFetch('equ_queued_emails', 'equ_queued_email_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-
-		if ($this->data === NULL) {
-			throw new QueuedEmailException('Invalid queued email ID');
-		}
-	}
 
 	function get_stats() {
 		return SingleRowFetch('ers_recurring_email_logs', 'ers_recurring_email_log_id',
@@ -132,29 +126,6 @@ class QueuedEmail extends SystemBase {
 		$dblink->commit();
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('equ_queued_email_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['equ_queued_email_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "equ_queued_emails", $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['equ_queued_email_id'];
-	}
 	
 	static function InitDB($mode='structure'){
 	

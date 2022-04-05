@@ -14,7 +14,10 @@ require_once($siteDir . '/includes/Validator.php');
 class EmailTemplateStoreException extends SystemClassException {}
 
 class EmailTemplateStore extends SystemBase {
-
+	public $prefix = 'emt';
+	public $tablename = 'emt_email_templates';
+	public $pkey_column = 'emt_email_template_id';
+	
 	const TEMPLATE_TYPE_OUTER = 1;
 	const TEMPLATE_TYPE_INNER = 2;
 	const TEMPLATE_TYPE_FOOTER = 3;
@@ -67,16 +70,6 @@ class EmailTemplateStore extends SystemBase {
 
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('emt_email_templates', 'emt_email_template_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new EmailTemplateStoreException(
-				'This email_template does not exist');
-		}
-	}
-	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -87,76 +80,15 @@ class EmailTemplateStore extends SystemBase {
 	}
 
 	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('emt_email_template_id' => $this->key);
-			// Editing an existing record
-			
+		if($this->key){
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			ContentVersion::NewVersion(ContentVersion::TYPE_EMAIL_TEMPLATE, $this->key, $this->get('emt_body'), $this->get('emt_name'), $this->get('emt_name'));
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['emt_email_template_id']);
 		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'emt_email_templates', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['emt_email_template_id'];
+		
+		parent::save();
 	}
 
 
-	function soft_delete(){
-		$this->set('emt_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('emt_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		
-		$this_transaction = false;
-		/*
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-		*/
-
-		$sql = 'DELETE FROM emt_email_templates WHERE emt_email_template_id=:emt_email_template_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':emt_email_template_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		$this->key = NULL;
-		
-		return true;		
-	}
 	
 
 	static function InitDB($mode='structure'){

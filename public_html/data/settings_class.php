@@ -14,7 +14,9 @@ require_once($siteDir . '/includes/Validator.php');
 class SettingException extends SystemClassException {}
 
 class Setting extends SystemBase {
-
+	public $prefix = 'stg';
+	public $tablename = 'stg_settings';
+	public $pkey_column = 'stg_setting_id';
 
 	public static $fields = array(
 		'stg_setting_id' => 'ID of the setting',
@@ -72,16 +74,6 @@ class Setting extends SystemBase {
 
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('stg_settings', 'stg_setting_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new SettingException(
-				'This setting does not exist');
-		}
-	}
-	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -90,64 +82,6 @@ class Setting extends SystemBase {
 				'Current user does not have permission to edit this setting.');
 		}
 	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('stg_setting_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['stg_setting_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'stg_settings', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['stg_setting_id'];
-	}
-
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		/*
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-		*/
-
-		$sql = 'DELETE FROM stg_settings WHERE stg_setting_id=:stg_setting_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':stg_setting_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
-	
 
 	static function InitDB($mode='structure'){
 	

@@ -12,7 +12,10 @@ class EmailException extends SystemClassException {}
 class EmailNotSentException extends EmailException {};
 
 class Email extends SystemBase {
-
+	public $prefix = 'eml';
+	public $tablename = 'eml_emails';
+	public $pkey_column = 'eml_email_id';
+	
 	const FORMAT_HTML = 1;
 	const FORMAT_PLAINTEXT = 2;
 	
@@ -134,19 +137,6 @@ class Email extends SystemBase {
 	}		
 	
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('eml_emails', 'eml_email_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new EmailException(
-				'This email number does not exist');
-		}
-	}
-
-	function prepare() {
-
-	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -174,30 +164,6 @@ class Email extends SystemBase {
 		}
 	}
 	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('eml_email_id' => $this->key);
-			// Editing an existing
-		} else {
-			$p_keys = NULL;
-			// Creating a new
-			unset($rowdata['eml_email_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'eml_emails', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['eml_email_id'];
-	}
-	
 	function mark_all_recipients_sent(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -217,17 +183,6 @@ class Email extends SystemBase {
 	}		
 	
 	
-	function soft_delete(){
-		$this->set('eml_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('eml_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();

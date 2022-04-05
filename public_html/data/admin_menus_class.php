@@ -14,6 +14,9 @@ class AdminMenuException extends SystemClassException {}
 
 class AdminMenu extends SystemBase {
 
+	public $prefix = 'amu';
+	public $tablename = 'amu_admin_menus';
+	public $pkey_column = 'amu_admin_menu_id';
 
 	public static $fields = array(
 		'amu_admin_menu_id' => 'ID of the admin_menu',
@@ -37,20 +40,6 @@ class AdminMenu extends SystemBase {
 	public static $initial_default_values = array(
 		'amu_disable' => 0, 
 		);		
-
-	function prepare() {
-		
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('amu_admin_menus', 'amu_admin_menu_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new AdminMenuException(
-				'This admin_menu does not exist');
-		}
-	}
 	
 	
 	function authenticate_write($session, $other_data=NULL) {
@@ -63,60 +52,6 @@ class AdminMenu extends SystemBase {
 
 	}
 
-	function save() {
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('amu_admin_menu_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['amu_admin_menu_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'amu_admin_menus', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['amu_admin_menu_id'];
-	}
-
-
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}	
-
-		$sql = 'DELETE FROM amu_admin_menus WHERE amu_admin_menu_id=:amu_admin_menu_id OR amu_parent_menu_id=:amu_admin_menu_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':amu_admin_menu_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
 	
 
 	static function InitDB($mode='structure'){

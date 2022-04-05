@@ -43,7 +43,9 @@ class EventSessionsUnviewableDisplayException extends EventSessionsException imp
 */
 
 class EventSession extends SystemBase {
-
+	public $prefix = 'evs';
+	public $tablename = 'evs_event_sessions';
+	public $pkey_column = 'evs_event_session_id';
 
 	public static $fields = array(
 		'evs_event_session_id' => 'event session ID',
@@ -87,8 +89,6 @@ class EventSession extends SystemBase {
 					*/
 		);
 
-		
-	public $prefix = 'evs';
 
 	public static $public_actions = array(
 		'togglepublic' => array('w' => TRUE),
@@ -185,15 +185,6 @@ class EventSession extends SystemBase {
 
 
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('evs_event_sessions', 'evs_event_session_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new EventSessionsException(
-				'This session does not exist');
-		}
-	}
 
 	function prepare() {
 		if ($this->data === NULL) {
@@ -382,75 +373,7 @@ class EventSession extends SystemBase {
 				'Current user does not have permission to edit this item.');
 		}
 	}	
-	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
 
-		if ($this->key) {
-			$p_keys = array('evs_event_session_id' => $this->key);
-			//$rowdata['evt_lastedit_time'] = 'NOW()';
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['evs_event_session_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "evs_event_sessions", $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['evs_event_session_id'];
-	}	
-
-	function soft_delete(){
-		$this->set('evs_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('evs_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		$this->remove_all_files();
-
-		$sql = 'DELETE FROM evs_event_sessions WHERE evs_event_session_id=:evs_event_session_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':evs_event_session_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
-	
-	/*
-	static public function TogglePublic($session, $request) { 
-		$event = new event($request['w'], TRUE);
-		$event->authenticate_write($session);
-		$event->set('evs_is_public', ($event->get('evs_is_public') ? FALSE : TRUE));
-		$event->save();
-		return $event;
-	} 
-	*/
 	
 	static function InitDB($mode='structure'){
 	

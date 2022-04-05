@@ -12,7 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class EmailRecipientException extends SystemClassException {}
 
 class EmailRecipient extends SystemBase {
-
+	public $prefix = 'erc';
+	public $tablename = 'erc_email_recipients';
+	public $pkey_column = 'erc_email_recipient_id';
+	
 	// Status codes
 	const EMAIL_SENT = 1;
 	const UNSUBSCRIBED = 2;
@@ -39,19 +42,6 @@ class EmailRecipient extends SystemBase {
 	
 	public static $initial_default_values = array();
 	
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('erc_email_recipients', 'erc_email_recipient_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new EmailRecipientException(
-				'This email_recipient number does not exist');
-		}
-	}
-
-	function prepare() {
-		
-	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -65,29 +55,6 @@ class EmailRecipient extends SystemBase {
 		}
 	}
 	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('erc_email_recipient_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['erc_email_recipient_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'erc_email_recipients', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['erc_email_recipient_id'];
-	}
 	
 	function check_for_duplicates() {
 		$count = new MultiEmailRecipient(array(
@@ -233,25 +200,6 @@ class EmailRecipient extends SystemBase {
 		}	
 	}	
 	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'DELETE FROM erc_email_recipients WHERE erc_email_recipient_id=:erc_email_recipient_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':erc_email_recipient_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}	
 	
 
 	static function TrackingCodeForRecipient($erc_email_recipient_id) { 

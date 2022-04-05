@@ -12,6 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class ProductGroupException extends SystemClassException {}
 
 class ProductGroup extends SystemBase {
+	public $prefix = 'prg';
+	public $tablename = 'prg_product_groups';
+	public $pkey_column = 'prg_product_group_id';
+
 	public static $fields = array(
 		'prg_product_group_id' => 'ID for this product group',
 		'prg_max_items' => 'Max # of items allowed in the cart from this product group.',
@@ -32,75 +36,6 @@ class ProductGroup extends SystemBase {
 		return '/products/' . str_replace(' ', '-', $this->get('prg_name')) . '/' . $this->key;
 	}
 
-	function load($debug = false) {
-		parent::load();
-
-		$this->data = SingleRowFetch('prg_product_groups', 'prg_product_group_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-
-		if ($this->data === NULL) {
-			throw new ProductGroupException('Invalid product ID');
-		}
-	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('prg_product_group_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['prg_product_group_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "prg_product_groups", $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['prg_product_group_id'];
-	}
-	
-	function permanent_delete() {
-		
-		$dbhelper = DbConnector::get_instance(); 
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		/*
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-		*/
-
-		$sql = 'DELETE FROM prg_product_groups WHERE prg_product_group_id=:prg_product_group_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':prg_product_group_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-
-		return TRUE;
-		
-	}		
-	
 	static function InitDB($mode='structure'){
 	
 		try{

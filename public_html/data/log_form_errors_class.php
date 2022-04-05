@@ -12,7 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class FormErrorException extends SystemClassException {}
 
 class FormError extends SystemBase {
-
+	public $prefix = 'lfe';
+	public $tablename = 'lfe_log_form_errors';
+	public $pkey_column = 'lfe_log_form_error_id';
+	
 	public static $fields = array(
 		'lfe_log_form_error_id' => 'ID of the lfe_log_form_error',
 		'lfe_error' => 'error',
@@ -44,39 +47,6 @@ class FormError extends SystemBase {
 		)
 	);
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('lfe_log_form_errors', 'lfe_log_form_error_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new FormErrorException(
-				'This lfe_log_form_error does not exist');
-		}
-	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('lfe_log_form_error_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['lfe_log_form_error_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'lfe_log_form_errors', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['lfe_log_form_error_id'];
-	}
 	
 	function display_time($session) {
 		return LibraryFunctions::convert_time(

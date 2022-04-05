@@ -12,7 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class PageContentException extends SystemClassException {}
 
 class PageContent extends SystemBase {
-
+	public $prefix = 'pac';
+	public $tablename = 'pac_page_contents';
+	public $pkey_column = 'pac_page_content_id';
+	
 	public static $fields = array(
 		'pac_page_content_id' => 'ID of the page_content',
 		'pac_location_name' => 'Location of the content',
@@ -109,15 +112,6 @@ class PageContent extends SystemBase {
 		}
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('pac_page_contents', 'pac_page_content_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new PageContentException(
-				'This page_content does not exist');
-		}
-	}
 	
 	function prepare() {
 		
@@ -143,63 +137,13 @@ class PageContent extends SystemBase {
 	}
 
 	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
 		if ($this->key) {
-			$p_keys = array('pac_page_content_id' => $this->key);
-			// Editing an existing record
-			
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			ContentVersion::NewVersion(ContentVersion::TYPE_PAGE_CONTENT, $this->key, $this->get('pac_body'), $this->get('pac_title'), $this->get('pac_title'));
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['pac_page_content_id']);
+			ContentVersion::NewVersion(ContentVersion::TYPE_PAGE_CONTENT, $this->key, $this->get('pac_body'), $this->get('pac_title'), $this->get('pac_title'));			
 		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'pac_page_contents', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['pac_page_content_id'];
+		parent::save();
 	}
 
-	function soft_delete(){
-		$this->set('pac_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('pac_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'DELETE FROM pac_page_contents WHERE pac_page_content_id=:pac_page_content_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':pac_page_content_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
 	
 	static public function GetPublicActions() { 
 		return self::$public_actions;

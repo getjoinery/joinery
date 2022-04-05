@@ -21,7 +21,10 @@ class UserException extends SystemClassException {}
 class DisplayableUserException extends UserException implements DisplayableErrorMessage {}
 
 class User extends SystemBase {
-
+	public $prefix = 'usr';
+	public $tablename = 'usr_users';
+	public $pkey_column = 'usr_user_id';
+	
 	// Constants for contact preferences
 	const NEWSLETTER = 1; 
 	//const EMAIL_OFFERS = 2;
@@ -590,16 +593,6 @@ class User extends SystemBase {
 	}
 	*/
 
-	function load($for_update=FALSE) {
-		parent::load();
-
-		$this->data = SingleRowFetch('usr_users', 'usr_user_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS, $for_update);
-
-		if ($this->data === NULL) {
-			throw new UserException('Invalid user ID');
-		}
-	}
 
 	function actions_allowed() {
 		if ($this->get('usr_is_disabled') || $this->get('usr_is_admin_disabled')) {
@@ -620,26 +613,8 @@ class User extends SystemBase {
 
 	function save() {
 		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('usr_user_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['usr_user_id']);
-		}
-
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "usr_users", $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['usr_user_id'];
 		
 		//ADD THE USER TO ANY GROUPS NEEDED
 		//TODO REMOVE FROM GROUPS NO LONGER APPLICABLE
@@ -696,17 +671,6 @@ class User extends SystemBase {
 		}
 	}
 
-	function soft_delete(){
-		$this->set('usr_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('usr_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
 	
 	function permanent_delete(){
 	

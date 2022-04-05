@@ -12,7 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class GeneralErrorException extends SystemClassException {}
 
 class GeneralError extends SystemBase {
-
+	public $prefix = 'err';
+	public $tablename = 'err_general_errors';
+	public $pkey_column = 'err_general_error_id';
+	
 	public static $fields = array(
 		'err_general_error_id' => 'ID of the err_general_error',
 		'err_error' => 'error',
@@ -36,52 +39,7 @@ class GeneralError extends SystemBase {
 	
 	public static $initial_default_values = array(
 	'err_create_time'=> 'now()',);
-	
-	/*
-	public static $public_actions = array(
-		'logformerror' => array(
-			'messages' => TRUE,
-			'page' => TRUE,
-			'url' => TRUE,
-			'formfields' => TRUE,
-			'context' => TRUE,
-		)
-	);
-	*/
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('err_general_errors', 'err_general_error_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new GeneralErrorException(
-				'This err_general_error does not exist');
-		}
-	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('err_general_error_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['err_general_error_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'err_general_errors', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['err_general_error_id'];
-	}
 	
 	function display_time($session) {
 		return LibraryFunctions::convert_time(

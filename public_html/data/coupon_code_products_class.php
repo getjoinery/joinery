@@ -15,6 +15,9 @@ require_once($siteDir . '/data/groups_class.php');
 class CouponCodeProductException extends SystemClassException {}
 
 class CouponCodeProduct extends SystemBase {
+	public $prefix = 'ccp';
+	public $tablename = 'ccp_coupon_code_products';
+	public $pkey_column = 'ccp_coupon_code_product_id';
 
 	public static $fields = array(
 		'ccp_coupon_code_product_id' => 'ID of the coupon_code_product',
@@ -42,16 +45,6 @@ class CouponCodeProduct extends SystemBase {
 		}
 	}
 	
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('ccp_coupon_code_products', 'ccp_coupon_code_product_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new CouponCodeProductException(
-				'This coupon_code_product does not exist');
-		}
-	}
 	
 	function prepare() {
 
@@ -67,50 +60,6 @@ class CouponCodeProduct extends SystemBase {
 		}
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('ccp_coupon_code_product_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['ccp_coupon_code_product_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'ccp_coupon_code_products', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['ccp_coupon_code_product_id'];
-	}
-
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'DELETE FROM ccp_coupon_code_products WHERE ccp_coupon_code_product_id=:ccp_coupon_code_product_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':ccp_coupon_code_product_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
 	
 	static function InitDB($mode='structure'){
 	

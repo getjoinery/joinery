@@ -15,6 +15,10 @@ class QuestionException extends SystemClassException {}
 
 class Question extends SystemBase {
 	
+	public $prefix = 'qst';
+	public $tablename = 'qst_questions';
+	public $pkey_column = 'qst_question_id';
+	
 	const LANGUAGE_ENGLISH = 1;
 	
 	const TYPE_SHORT_TEXT = 1;
@@ -248,16 +252,7 @@ class Question extends SystemBase {
 		}		
 	}	
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('qst_questions', 'qst_question_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new QuestionException(
-				'This question does not exist');
-		}
-	}
-	
+
 	function prepare() {
 
 	}	
@@ -272,42 +267,8 @@ class Question extends SystemBase {
 		
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('qst_question_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['qst_question_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'qst_questions', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['qst_question_id'];
-	}
-
-	function soft_delete(){
-		$this->set('qst_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('qst_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
+	//TODO
+	/*
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -338,7 +299,7 @@ class Question extends SystemBase {
 		
 		return true;		
 	}
-	
+	*/
 	static function InitDB($mode='structure'){
 	
 		try{

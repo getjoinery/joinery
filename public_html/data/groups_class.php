@@ -14,7 +14,10 @@ require_once($siteDir . '/data/group_members_class.php');
 class GroupException extends SystemClassException {}
 
 class Group extends SystemBase {
-
+	public $prefix = 'grp';
+	public $tablename = 'grp_groups';
+	public $pkey_column = 'grp_group_id';
+	
 	const GROUP_TYPE_USER = 1;
 	const GROUP_TYPE_EVENT = 2;
 	const GROUP_TYPE_POST_TAG = 3;
@@ -207,16 +210,6 @@ class Group extends SystemBase {
 		}
 
 	}
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('grp_groups', 'grp_group_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new GroupException(
-				'This group does not exist');
-		}
-	}
 	
 	
 	function authenticate_write($session, $other_data=NULL) {
@@ -231,42 +224,7 @@ class Group extends SystemBase {
 		}
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
 
-		if ($this->key) {
-			$p_keys = array('grp_group_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['grp_group_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'grp_groups', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['grp_group_id'];
-	}
-
-
-	function soft_delete(){
-		$this->set('grp_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('grp_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();

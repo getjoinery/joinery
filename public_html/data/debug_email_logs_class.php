@@ -12,7 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class DebugEmailLogException extends SystemClassException {}
 
 class DebugEmailLog extends SystemBase {
-
+	public $prefix = 'del';
+	public $tablename = 'del_debug_email_logs';
+	public $pkey_column = 'del_debug_email_log_id';
+	
 	public static $fields = array(
 		'del_debug_email_log_id' => 'ID of the debug_email_log',
 		'del_subject' => 'subject of the email',
@@ -30,40 +33,6 @@ class DebugEmailLog extends SystemBase {
 	public static $initial_default_values = array(
 	'del_create_time'=> 'now()',);
 	
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('del_debug_email_logs', 'del_debug_email_log_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new DebugEmailLogException(
-				'This debug_email_log does not exist');
-		}
-	}
-	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('del_debug_email_log_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['del_debug_email_log_id']);
-			$rowdata['del_create_time'] = 'now()';
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'del_debug_email_logs', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['del_debug_email_log_id'];
-	}
 	
 	static function InitDB($mode='structure'){
 	

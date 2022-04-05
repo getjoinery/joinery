@@ -14,7 +14,10 @@ require_once($siteDir . '/data/address_class.php');
 class OrderItemException extends SystemClassException {}
 
 class OrderItem extends SystemBase {
-
+	public $prefix = 'odi';
+	public $tablename = 'odi_order_items';
+	public $pkey_column = 'odi_order_item_id';
+	
 	public const STATUS_UNPAID = 1;
 	public const STATUS_PAID = 2;
 	public const STATUS_ERROR = 3;
@@ -50,16 +53,6 @@ class OrderItem extends SystemBase {
 		'odi_status_change_time' => 'now()'
 		);
 
-	function load($for_update=FALSE) {
-		parent::load($for_update);
-
-		$this->data = SingleRowFetch('odi_order_items', 'odi_order_item_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS, $for_update);
-
-		if ($this->data === NULL) {
-			throw new OrderItemException('Invalid order_item ID');
-		}
-	}
 
 	function get_order() {
 		$order = new Order($this->get('odi_ord_order_id'), TRUE);
@@ -72,30 +65,6 @@ class OrderItem extends SystemBase {
 				'Current user does not have permission to perform this action.');
 		}
 	}	
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			//throw new OrderItemException('Cannot edit an existing order item.');
-			$p_keys = array('odi_order_item_id' => $this->key);
-		} else {
-			$p_keys = NULL;
-			// Creating a new order item
-			unset($rowdata['odi_order_item_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'odi_order_items', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['odi_order_item_id'];
-	}
 
 	protected function _unsafe_edit() {
 		$rowdata = array();
@@ -141,27 +110,6 @@ class OrderItem extends SystemBase {
 			return FALSE;
 		}
 		
-	}
-
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'DELETE FROM odi_order_items WHERE odi_order_item_id=:odi_order_item_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':odi_order_item_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
 	}
 
 	static function InitDB($mode='structure'){

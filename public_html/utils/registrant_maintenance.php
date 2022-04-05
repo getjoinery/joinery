@@ -1,4 +1,3 @@
-#!/usr/bin/php
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');	
 	require_once( __DIR__ . '/../includes/ErrorHandler.php');

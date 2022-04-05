@@ -14,6 +14,9 @@ require_once($siteDir . '/data/order_items_class.php');
 class OrderException extends SystemClassException {}
 
 class Order extends SystemBase {
+	public $prefix = 'ord';
+	public $tablename = 'ord_orders';
+	public $pkey_column = 'ord_order_id';
 	
 	public const STATUS_UNPAID = 1;
 	public const STATUS_PAID = 2;
@@ -50,16 +53,6 @@ class Order extends SystemBase {
 		'ord_timestamp' => 'now()'
 		);	
 
-	function load($debug = false) {
-		parent::load();
-
-		$this->data = SingleRowFetch('ord_orders', 'ord_order_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-
-		if ($this->data === NULL) {
-			throw new OrderException('Invalid order ID');
-		}
-	}
 	
 	function is_stripe_order(){
 		if($this->get('ord_stripe_session_id') || $this->get('ord_stripe_payment_intent_id') || $this->get('ord_stripe_charge_id') || $this->get('ord_stripe_invoice_id')){
@@ -70,35 +63,6 @@ class Order extends SystemBase {
 		}
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('ord_order_id' => $this->key);
-			//throw new OrderException('Order are immutable, cannot be edited.');
-		} else {
-			$p_keys = NULL;
-			// Creating a new order
-			unset($rowdata['ord_order_id']);
-		}
-		
-		
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "ord_orders", $p_keys, $rowdata, FALSE, 0);
-			
-
-		$this->key = $p_keys_return['ord_order_id'];
-		
-		
-	}
 	
 	/*
 	function save_serialized_cart($cart){

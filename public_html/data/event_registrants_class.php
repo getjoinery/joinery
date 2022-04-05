@@ -37,8 +37,9 @@ class EventRegistrantUnviewableDisplayException extends EventRegistrantException
 */
 
 class EventRegistrant extends SystemBase {
-
 	public $prefix = 'evr';
+	public $tablename = 'evr_event_registrants';
+	public $pkey_column = 'evr_event_registrant_id';
 
 	public static $fields = array(
 		'evr_event_registrant_id' => 'event_registrant ID',
@@ -140,9 +141,6 @@ class EventRegistrant extends SystemBase {
 		$this->data = $q->fetch();
 	}
 
-	function prepare() {
-		
-	}
 
 	function export_as_array($session=NULL) { 
 		$output_array = parent::export_as_array();
@@ -160,20 +158,7 @@ class EventRegistrant extends SystemBase {
 	}	
 	
 	function save() {
-		parent::save();
-		// Saving requires some session control for authentication checking and whatnot
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('evr_event_registrant_id' => $this->key);
-			// Editing an existing item
-		} else {
-			$p_keys = NULL;
-			// Creating a new item
-			
+		if(!$this->key){
 			$dbhelper = DbConnector::get_instance();
 			$dblink = $dbhelper->get_db_link();
 			//MAKE SURE NO DUPLICATES
@@ -191,30 +176,11 @@ class EventRegistrant extends SystemBase {
 			
 			if($numfound){
 				throw new DisplayableEventRegistrantException('You cannot register twice for the same event.');
-			}
-			
-			unset($rowdata['evr_event_registrant_id']);
+			}			
 		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "evr_event_registrants", $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['evr_event_registrant_id'];
+		parent::save();
 	}	
-	
-	function soft_delete(){
-		$this->set('evr_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('evr_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
+
 
 	static public function GetPublicActions() { 
 		return self::$public_actions;

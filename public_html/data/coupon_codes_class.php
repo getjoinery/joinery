@@ -14,9 +14,9 @@ class CouponCodeException extends SystemClassException {}
 
 class CouponCode extends SystemBase {
 
-	//public $prefix = 'ccd';  NOT USED YET
-	
-	//public $primary_key = 'ccd_coupon_code_id'; NOT USED YET
+	public $prefix = 'ccd';
+	public $tablename = 'ccd_coupon_codes';
+	public $pkey_column = 'ccd_coupon_code_id';
 	
 	public static $fields = array(
 		'ccd_coupon_code_id' => 'ID of the coupon_code',
@@ -97,15 +97,6 @@ class CouponCode extends SystemBase {
 		}
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('ccd_coupon_codes', 'ccd_coupon_code_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new CouponCodeException(
-				'This coupon_code does not exist');
-		}
-	}
 	
 	function prepare() {
 		
@@ -125,72 +116,6 @@ class CouponCode extends SystemBase {
 		
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('ccd_coupon_code_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['ccd_coupon_code_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'ccd_coupon_codes', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['ccd_coupon_code_id'];
-	}
-
-	function soft_delete(){
-		$this->set('ccd_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('ccd_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$comments = new MultiComment(
-		array('coupon_code_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$comments->load();
-		
-		foreach ($comments as $comment){
-			$comment->permanent_delete();
-		}
-
-		$sql = 'DELETE FROM ccd_coupon_codes WHERE ccd_coupon_code_id=:ccd_coupon_code_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':ccd_coupon_code_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
 	
 	static function InitDB($mode='structure'){
 	

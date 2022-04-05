@@ -12,13 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class EventLogException extends SystemClassException {}
 
 class EventLog extends SystemBase {
-
-	/*
-	public static $valid_events = array(
-		self::SHOW_PHONE,
-		self::ACCESS_SERVICE_FLYER,
-	);
-	*/
+	public $prefix = 'evl';
+	public $tablename = 'evl_event_logs';
+	public $pkey_column = 'evl_event_log_id';
 	
 
 	public static $fields = array(
@@ -40,39 +36,6 @@ class EventLog extends SystemBase {
 	'evl_create_time'=> 'now()',);
 	
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('evl_event_logs', 'evl_event_log_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new EventLogException(
-				'This event_log does not exist');
-		}
-	}
-	
-	function save($debug=0) {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('evl_event_log_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['evl_event_log_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'evl_event_logs', $p_keys, $rowdata, FALSE, $debug);
-
-		$this->key = $p_keys_return['evl_event_log_id'];
-	}
 	
 	static function InitDB($mode='structure'){
 	

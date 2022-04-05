@@ -15,7 +15,10 @@ require_once($siteDir.'/data/users_class.php');
 class SurveyAnswerException extends SystemClassException {}
 
 class SurveyAnswer extends SystemBase {
-
+	public $prefix = 'sva';
+	public $tablename = 'sva_survey_answers';
+	public $pkey_column = 'sva_survey_answer_id';
+	
 	public static $fields = array(
 		'sva_survey_answer_id' => 'ID of the survey question',
 		'sva_svy_survey_id' => 'Survey id',
@@ -87,16 +90,6 @@ class SurveyAnswer extends SystemBase {
 		
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('sva_survey_answers', 'sva_survey_answer_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new VideoException(
-				'This survey_answer does not exist');
-		}
-	}
-	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -109,31 +102,12 @@ class SurveyAnswer extends SystemBase {
 	}
 
 	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('sva_survey_answer_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['sva_survey_answer_id']);
-			
+		if(!$this->key){
 			if($this->check_for_duplicates()){
 				return FALSE;
-			}
+			}			
 		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'sva_survey_answers', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['sva_survey_answer_id'];
+		parent::save();
 	}
 	
 	static function InitDB($mode='structure'){

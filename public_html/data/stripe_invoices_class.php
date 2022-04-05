@@ -14,7 +14,10 @@ require_once($siteDir . '/includes/Validator.php');
 class StripeInvoiceException extends SystemClassException {}
 
 class StripeInvoice extends SystemBase {
-
+	public $prefix = 'siv';
+	public $tablename = 'siv_stripe_invoices';
+	public $pkey_column = 'siv_stripe_invoice_id';
+	
 	public static $fields = array(
 		'siv_stripe_invoice_id' => 'StripeInvoice ID',
 		'siv_stripe_foreign_invoice_id' => 'ID at stripe',
@@ -35,76 +38,6 @@ class StripeInvoice extends SystemBase {
 
 	public static $initial_default_values = array(
 		);	
-		
-	function load($debug = false) {
-		parent::load();
-
-		$this->data = SingleRowFetch('siv_stripe_invoices', 'siv_stripe_invoice_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-
-		if ($this->data === NULL) {
-			throw new StripeInvoiceException('Invalid stripe_invoice ID');
-		}
-	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('siv_stripe_invoice_id' => $this->key);
-			//throw new StripeInvoiceException('StripeInvoice are immutable, cannot be edited.');
-		} else {
-			$p_keys = NULL;
-			// Creating a new stripe_invoice
-			unset($rowdata['siv_stripe_invoice_id']);
-		}
-		
-		
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "siv_stripe_invoices", $p_keys, $rowdata, FALSE, 0);
-			
-
-		$this->key = $p_keys_return['siv_stripe_invoice_id'];
-		
-		
-	}
-	
-	function permanent_delete() {
-		
-		$dbhelper = DbConnector::get_instance(); 
-		$dblink = $dbhelper->get_db_link();
-		
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-
-
-		$sql = 'DELETE FROM siv_stripe_invoices WHERE siv_stripe_invoice_id=:siv_stripe_invoice_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':siv_stripe_invoice_id', $this->key, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-	
-		$this->key = NULL;
-
-		return TRUE;
-		
-	}	
 	
 
 	public static function GetByStripeSession($session_id) {

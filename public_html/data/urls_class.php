@@ -12,7 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class UrlException extends SystemClassException {}
 
 class Url extends SystemBase {
-
+	public $prefix = 'url';
+	public $tablename = 'url_urls';
+	public $pkey_column = 'url_url_id';
+	
 	public static $fields = array(
 		'url_url_id' => 'ID of the url',
 		'url_incoming' => 'Incoming url',
@@ -30,16 +33,7 @@ class Url extends SystemBase {
 
 	public static $initial_default_values = array('url_create_time' => 'now()'
 		);		
-		
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('url_urls', 'url_url_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new UrlException(
-				'This url does not exist');
-		}
-	}
+	
 	
 	function get_type_text() {
 		if($this->get('url_type') == 301){
@@ -62,58 +56,6 @@ class Url extends SystemBase {
 			}
 		}
 	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('url_url_id' => $this->key);
-			// Editing an existing 
-		} else {
-			$p_keys = NULL;
-			// Creating a new 
-			unset($rowdata['url_url_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dburl = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dburl, 'url_urls', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['url_url_id'];
-	}
-		
-	
-
-	function permanent_delete() {
-		
-		$dbhelper = DbConnector::get_instance(); 
-		$dburl = $dbhelper->get_db_link();
-		//$dburl->beginTransaction();
-
-		$sql = 'DELETE FROM url_urls WHERE url_url_id=:url_url_id';
-
-		try{
-			$q = $dburl->prepare($sql);
-			$q->bindParam(':url_url_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-		
-		//$dburl->commit();
-		
-		$this->key = NULL;
-
-		return TRUE;
-		
-	}	
 
 	static function InitDB($mode='structure'){
 	

@@ -45,7 +45,10 @@ class EventUnviewableDisplayException extends EventException implements CustomEr
 */
 
 class Event extends SystemBase {
-
+	public $prefix = 'evt';
+	public $tablename = 'evt_events';
+	public $pkey_column = 'evt_event_id';
+	
 	const STATUS_ACTIVE = 1;
 	const STATUS_COMPLETED = 2;
 	const STATUS_CANCELED = 3;
@@ -110,7 +113,6 @@ class Event extends SystemBase {
 		//	),
 		);
 		
-	public $prefix = 'evt';
 
 	public static $public_actions = array(
 		'togglepublic' => array('w' => TRUE),
@@ -438,6 +440,7 @@ class Event extends SystemBase {
 		return TRUE;
 	}	
 
+/*
 	function load($debug = false) {
 		parent::load();
 
@@ -462,6 +465,7 @@ class Event extends SystemBase {
 
 		$this->data = $q->fetch();
 	}
+	*/
 
 	function prepare() {
 		if ($this->data === NULL) {
@@ -499,33 +503,14 @@ class Event extends SystemBase {
 	}	
 	
 	function save() {
-		parent::save();
-		// Saving requires some session control for authentication checking and whatnot
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
+		
 		if ($this->key) {
-			$p_keys = array('evt_event_id' => $this->key);
-			//$rowdata['evt_lastedit_time'] = 'NOW()';
-			// Editing an existing record
-			
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			ContentVersion::NewVersion(ContentVersion::TYPE_EVENT, $this->key, $this->get('evt_description'), $this->get('evt_name'), $this->get('evt_name'));			
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['evt_event_id']);
-			$rowdata['evt_create_time'] = 'NOW()';
+			ContentVersion::NewVersion(ContentVersion::TYPE_EVENT, $this->key, $this->get('evt_description'), $this->get('evt_name'), $this->get('evt_name'));				
 		}
+		
+		parent::save();
 
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "evt_events", $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['evt_event_id'];
 	}	
 	
 	
@@ -549,17 +534,6 @@ class Event extends SystemBase {
 		return $event;
 	}
 	
-	function soft_delete(){
-		$this->set('evt_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('evt_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
