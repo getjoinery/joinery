@@ -15,7 +15,10 @@ require_once($siteDir . '/data/groups_class.php');
 class QuestionOptionException extends SystemClassException {}
 
 class QuestionOption extends SystemBase {
-
+	public $prefix = 'qop';
+	public $tablename = 'qop_question_options';
+	public $pkey_column = 'qop_question_option_id';
+	
 	public static $fields = array(
 		'qop_question_option_id' => 'ID of the question_option',
 		'qop_qst_question_id' => 'Question id for the options',
@@ -49,21 +52,6 @@ class QuestionOption extends SystemBase {
 		}
 	}
 	
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('qop_question_options', 'qop_question_option_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new QuestionOptionException(
-				'This question_option does not exist');
-		}
-	}
-	
-	function prepare() {
-		
-	}	
-	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		// If the user's ID doesn't match , we have to make
@@ -72,51 +60,6 @@ class QuestionOption extends SystemBase {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this question_option.');
 		}
-	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('qop_question_option_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['qop_question_option_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'qop_question_options', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['qop_question_option_id'];
-	}
-
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'DELETE FROM qop_question_options WHERE qop_question_option_id=:qop_question_option_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':qop_question_option_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
 	}
 	
 	static function InitDB($mode='structure'){

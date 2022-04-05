@@ -15,7 +15,10 @@ require_once($siteDir.'/data/users_class.php');
 class GroupMemberException extends SystemClassException {}
 
 class GroupMember extends SystemBase {
-
+	public $prefix = 'grm';
+	public $tablename = 'grm_group_members';
+	public $pkey_column = 'grm_group_member_id';
+	
 	public static $fields = array(
 		'grm_group_member_id' => 'ID of the group member',
 		'grm_grp_group_id' => 'group id',
@@ -89,16 +92,6 @@ class GroupMember extends SystemBase {
 		
 
 	}
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('grm_group_members', 'grm_group_member_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new VideoException(
-				'This group_member does not exist');
-		}
-	}
 	
 	
 	function authenticate_write($session, $other_data=NULL) {
@@ -114,31 +107,12 @@ class GroupMember extends SystemBase {
 	}
 
 	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('grm_group_member_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['grm_group_member_id']);
-			
+		if(!$this->key){
 			if($this->_check_for_duplicates()){
 				return FALSE;
-			}
+			}			
 		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'grm_group_members', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['grm_group_member_id'];
+		parent::save();
 	}
 	
 	static function InitDB($mode='structure'){

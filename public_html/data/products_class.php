@@ -691,7 +691,9 @@ class ProductVersion {
 }
 
 class Product extends SystemBase {
-
+	public $prefix = 'pro';
+	public $tablename = 'pro_products';
+	public $pkey_column = 'pro_product_id';
 
 	public static $currency_symbols = array(
 	 'usd' => '$',
@@ -896,41 +898,7 @@ class Product extends SystemBase {
 
 	}
 
-	function load($debug = false) {
-		parent::load();
 
-		$this->data = SingleRowFetch('pro_products', 'pro_product_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-
-		if ($this->data === NULL) {
-			throw new ProductException('Invalid product ID');
-		}
-	}
-
-	function save($debug = false) {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('pro_product_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['pro_product_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, "pro_products", $p_keys, $rowdata, FALSE, $debug);
-
-		$this->key = $p_keys_return['pro_product_id'];
-	}
-	
 	function permanent_delete(){
 		//CANNOT DELETE A PRODUCT WITH ORDERS
 		$orders = new MultiOrderItem(array('product_id' => $this->key));

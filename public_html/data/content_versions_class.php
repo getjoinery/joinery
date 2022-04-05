@@ -13,6 +13,10 @@ class ContentVersionException extends SystemClassException {}
 
 class ContentVersion extends SystemBase {
 
+	public $prefix = 'cnv';
+	public $tablename = 'cnv_content_versions';
+	public $pkey_column = 'cnv_content_version_id';
+	
 	const TYPE_POST = 1;
 	const TYPE_PAGE_CONTENT = 2;
 	const TYPE_EMAIL = 3;
@@ -117,21 +121,6 @@ class ContentVersion extends SystemBase {
 
 	}
 	
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('cnv_content_versions', 'cnv_content_version_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new ContentVersionException(
-				'This content_version does not exist');
-		}
-	}
-	
-	function prepare() {
-
-	}	
-	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		if ($session->get_permission() < 5) {
@@ -139,31 +128,6 @@ class ContentVersion extends SystemBase {
 				'Current user does not have permission to edit this content_version.');
 		}
 	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('cnv_content_version_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['cnv_content_version_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'cnv_content_versions', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['cnv_content_version_id'];
-	}
-
 
 	
 	function permanent_delete(){
@@ -187,21 +151,7 @@ class ContentVersion extends SystemBase {
 			$next_version->save();	
 		}
 		
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'DELETE FROM cnv_content_versions WHERE cnv_content_version_id=:cnv_content_version_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':cnv_content_version_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
+		parent::permanent_delete();
 		
 		return true;		
 	}

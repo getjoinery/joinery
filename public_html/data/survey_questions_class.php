@@ -15,7 +15,10 @@ require_once($siteDir.'/data/users_class.php');
 class SurveyQuestionException extends SystemClassException {}
 
 class SurveyQuestion extends SystemBase {
-
+	public $prefix = 'srq';
+	public $tablename = 'srq_survey_questions';
+	public $pkey_column = 'srq_survey_question_id';
+	
 	public static $fields = array(
 		'srq_survey_question_id' => 'ID of the survey question',
 		'srq_svy_survey_id' => 'Survey id',
@@ -48,17 +51,6 @@ class SurveyQuestion extends SystemBase {
 		return NULL;
 	}	
 	
-	function soft_delete(){
-		$this->set('srq_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('srq_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
@@ -97,16 +89,6 @@ class SurveyQuestion extends SystemBase {
 		
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('srq_survey_questions', 'srq_survey_question_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new VideoException(
-				'This survey_question does not exist');
-		}
-	}
-	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -119,31 +101,12 @@ class SurveyQuestion extends SystemBase {
 	}
 
 	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('srq_survey_question_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['srq_survey_question_id']);
-			
+		if(!$this->key){
 			if($this->_check_for_duplicates()){
 				return FALSE;
-			}
+			}			
 		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'srq_survey_questions', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['srq_survey_question_id'];
+		parent::save();
 	}
 	
 	static function InitDB($mode='structure'){

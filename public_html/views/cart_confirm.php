@@ -50,8 +50,8 @@
 			$page->disprow($rowvalues);		
 		$page->endtable();
 
-		echo '<div class="mt-3 text-base text-gray-500"><br><br>All of your courses, and events can be found in the <a href="/profile">My Profile</a> section of the website.';
-		echo '<p><a href="/profile" >See all of your courses and events</a></p></div>';		
+		echo '<div class="mt-3 text-base text-gray-500"><br><br>All of your purchases can be found in the <a href="/profile">My Profile</a> section of the website.';
+		echo '<p><a href="/profile" >See all of your purchases</a></p></div>';		
 	}
 	else{
 		$settings = Globalvars::get_instance();

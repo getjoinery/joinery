@@ -2,8 +2,8 @@
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');
-	echo 'turned off';
-	exit; 
+	//echo 'turned off';
+	//exit; 
 
 	require_once($siteDir.'/includes/SessionControl.php');
 	require_once($siteDir.'/includes/LibraryFunctions.php');
@@ -15,6 +15,18 @@
 	require_once($siteDir.'/data/events_class.php');
 	require_once($siteDir.'/data/files_class.php');
 	require_once($siteDir.'/data/users_class.php');
+	require_once($siteDir.'/data/questions_class.php');
+	
+	$question = new Question(5, TRUE);
+	$question->permanent_delete();
+	//$question->set('qst_question', 'test');
+	//$question->save();
+	//$question->load();
+	//$question->soft_delete();
+	//$question->undelete();
+	//print_r($question);
+	exit;
+	
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);

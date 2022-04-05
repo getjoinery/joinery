@@ -8,6 +8,10 @@ require_once($siteDir . '/includes/SystemClass.php');
 class BookingException extends SystemClassException {}
 
 class Booking extends SystemBase {
+	
+	public $prefix = 'bkn';
+	public $tablename = 'bkn_bookings';
+	public $pkey_column = 'bkn_booking_id';
 
 	const BOOKING_STATUS_CREATED = 0;
 	const BOOKING_STATUS_BOOKED = 1;
@@ -52,20 +56,6 @@ class Booking extends SystemBase {
 		}
 	}
 
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('bkn_bookings', 'bkn_booking_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new BookingException(
-				'This booking number does not exist');
-		}
-	}
-
-	function prepare() {
-
-	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -79,78 +69,6 @@ class Booking extends SystemBase {
 		}
 	}
 
-	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('bkn_booking_id' => $this->key);
-			// Editing an existing
-		} else {
-			$p_keys = NULL;
-			// Creating a new
-			unset($rowdata['bkn_booking_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'bkn_bookings', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['bkn_booking_id'];
-	}
-
-	function soft_delete(){
-		$this->set('bkn_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('bkn_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
-
-	function permanent_delete() {
-		
-		$dbhelper = DbConnector::get_instance(); 
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		/*
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-		*/
-
-		$sql = 'DELETE FROM bkn_bookings WHERE bkn_booking_id=:bkn_booking_id';
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':bkn_booking_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-
-		return TRUE;
-		
-	}
 	
 	static function InitDB($mode='structure'){
 	

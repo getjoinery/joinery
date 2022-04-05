@@ -13,7 +13,10 @@ class PhoneNumberException extends SystemDisplayableError {}
 class DisplayablePhoneNumberException extends PhoneNumberException implements DisplayableErrorMessage {}
 
 class PhoneNumber extends SystemBase {
-
+	public $prefix = 'phn';
+	public $tablename = 'phn_phone_numbers';
+	public $pkey_column = 'phn_phone_number_id';
+	
 	public static $fields = array(
 		'phn_phone_number_id' => 'Phone number id',
 		'phn_phone_number' => 'Phone number',
@@ -137,15 +140,6 @@ class PhoneNumber extends SystemBase {
 		return $phone_data;
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('phn_phone_numbers', 'phn_phone_number_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new PhoneNumberException(
-				'This phone number does not exist');
-		}
-	}
 
 	function prepare() {
 
@@ -332,31 +326,6 @@ class PhoneNumber extends SystemBase {
 			}
 		}
 	}
-	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('phn_phone_number_id' => $this->key);
-			// Editing an existing record
-			unset($rowdata['phn_usr_user_id']);
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['phn_phone_number_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'phn_phone_numbers', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['phn_phone_number_id'];
-	}	
 
 	
 	function permanent_delete(){

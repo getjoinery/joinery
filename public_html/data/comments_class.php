@@ -11,6 +11,9 @@ class CommentNotSentException extends CommentException {};
 
 class Comment extends SystemBase {
 
+	public $prefix = 'cmt';
+	public $tablename = 'cmt_comments';
+	public $pkey_column = 'cmt_comment_id';
 
 	public static $fields = array(
 		'cmt_comment_id' => 'Comment id',
@@ -63,20 +66,6 @@ class Comment extends SystemBase {
 	}
 	
 
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('cmt_comments', 'cmt_comment_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new CommentException(
-				'This comment number does not exist');
-		}
-	}
-
-	function prepare() {
-				
-	}	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
 		if ($this->get('cmt_usr_user_id') != $current_user) {
@@ -89,62 +78,6 @@ class Comment extends SystemBase {
 		}
 	}
 
-	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('cmt_comment_id' => $this->key);
-			// Editing an existing
-		} else {
-			$p_keys = NULL;
-			// Creating a new
-			unset($rowdata['cmt_comment_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'cmt_comments', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['cmt_comment_id'];
-	}
-
-	function soft_delete(){
-		$this->set('cmt_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('cmt_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'DELETE FROM cmt_comments WHERE cmt_comment_id=:cmt_comment_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':cmt_comment_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
 	
 	static function add_comment($post_id, $session, $data){
 		$settings = Globalvars::get_instance();

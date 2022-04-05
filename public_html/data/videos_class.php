@@ -12,7 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class VideoException extends SystemClassException {}
 
 class Video extends SystemBase {
-
+	public $prefix = 'vid';
+	public $tablename = 'vid_videos';
+	public $pkey_column = 'vid_video_id';
+	
 	public static $fields = array(
 		'vid_video_id' => 'ID of the video',
 		'vid_title' => 'Video Title',
@@ -33,16 +36,6 @@ class Video extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array('vid_create_time' => 'now()');
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('vid_videos', 'vid_video_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new VideoException(
-				'This video ('.$this->key.') does not exist');
-		}
-	}
 	
 
 	function get_embed($vidwidth = 560, $vidheight = 315) {
@@ -229,77 +222,6 @@ class Video extends SystemBase {
 		}
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('vid_video_id' => $this->key);
-			// Editing an existing 
-		} else {
-			$p_keys = NULL;
-			// Creating a new 
-			unset($rowdata['vid_video_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'vid_videos', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['vid_video_id'];
-	}
-		
-	function soft_delete(){
-		$this->set('vid_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('vid_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
-
-	function permanent_delete() {
-		
-		$dbhelper = DbConnector::get_instance(); 
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		/*
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-		*/
-
-		$sql = 'DELETE FROM vid_videos WHERE vid_video_id=:vid_video_id';
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':vid_video_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-
-		return TRUE;
-		
-	}	
 
 	static function InitDB($mode='structure'){
 	

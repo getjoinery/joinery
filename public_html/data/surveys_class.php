@@ -12,7 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class SurveyException extends SystemClassException {}
 
 class Survey extends SystemBase {
-
+	public $prefix = 'svy';
+	public $tablename = 'svy_surveys';
+	public $pkey_column = 'svy_survey_id';
+	
 	public static $fields = array(
 		'svy_survey_id' => 'ID of the survey',
 		'svy_name' => 'The survey',
@@ -45,20 +48,6 @@ class Survey extends SystemBase {
 	}
 	
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('svy_surveys', 'svy_survey_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new SurveyException(
-				'This survey does not exist');
-		}
-	}
-	
-	function prepare() {
-		
-	}	
-	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -72,41 +61,6 @@ class Survey extends SystemBase {
 		}
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('svy_survey_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['svy_survey_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'svy_surveys', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['svy_survey_id'];
-	}
-
-	function soft_delete(){
-		$this->set('svy_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('svy_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();

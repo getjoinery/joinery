@@ -55,6 +55,18 @@ abstract class SystemBase {
 		$this->data = new StdClass;
 		$this->loaded = FALSE;
 		$this->cached_references = array();
+		
+		if(!$this->prefix){
+			throw new SystemClassException('This object has no prefix.');
+		}
+		
+		if(!$this->tablename){
+			throw new SystemClassException('This object has no table name.');
+		}
+		
+		if(!$this->pkey_column){
+			throw new SystemClassException('This object has no primary key.');
+		}
 
 		if ($and_load) {
 			$this->load();
@@ -239,19 +251,74 @@ abstract class SystemBase {
 		return $this->cached_references[$method_name];
 	}
 
-	// $for_update is a placeholder here and doesn't do anything unless (and in fact will break) unless
-	// the sub-class defines it and has support for it
-	function load($for_update=FALSE) {
+
+	function load() {
 		$this->loaded = TRUE;
 		if ($this->key === NULL) {
-			throw new SystemClassNoKeyError('Cannot load an object with no key.');
+			throw new SystemClassNoKeyError('Cannot load a '.$this->tablename.' object with no key.');
 		}
+		
+		$this->data = SingleRowFetch($this->tablename, $this->pkey_column,
+			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
+		if ($this->data === NULL) {
+			throw new Exception(
+				'This '.$this->tablename.' row ('.$this->pkey_column.'='.$this->key.') does not exist');
+		}		
+		
 	}
 
-	// Just a convenience function for load($for_update == TRUE).  This will fail if the subclass
-	// doesn't support the $for_update parameter.
-	function load_for_update() {
-		$this->load(TRUE);		
+	function soft_delete(){
+		foreach(array_keys(get_class($this)::$fields) as $field) {
+			if($field == $this->prefix.'_delete_time'){
+				$this->set($this->prefix.'_delete_time', 'now()');
+				$this->save();
+				return true;				
+			}
+		}
+		throw new Exception(
+			'This '.$this->tablename.' column ('.$this->prefix.'_delete_time) does not exist');
+	}
+	
+	function undelete(){
+		foreach(array_keys(get_class($this)::$fields) as $field) {
+			if($field == $this->prefix.'_delete_time'){
+				$this->set($this->prefix.'_delete_time', NULL);
+				$this->save();	
+				return true;			
+			}
+		}
+		throw new Exception(
+			'This '.$this->tablename.' column ('.$this->prefix.'_delete_time) does not exist');
+	}
+	
+	function permanent_delete(){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+		$this_transaction = false;
+		if(!$dblink->inTransaction()){
+			$dblink->beginTransaction();
+			$this_transaction = true;
+		}	
+		
+		$sql = 'DELETE FROM '.$this->tablename.' WHERE '.$this->pkey_column.'=:param1';
+		try{
+			$q = $dblink->prepare($sql);
+			$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
+			$count = $q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		}
+		catch(PDOException $e){
+			$dbhelper->handle_query_error($e);
+		}
+
+		if($this_transaction){
+			$dblink->commit();
+		}
+		
+		$this->key = NULL;
+		
+		return true;		
 	}
 
 	function safe_load_and_set($key, $value, $and_prepare=FALSE) { 
@@ -319,10 +386,12 @@ abstract class SystemBase {
 
 	// To prepare it is without error
 	function prepare() {}
+	
+	
 	// And to save it to the database
-	function save() {
+	function save($debug=false) {
 		if ($this->data === NULL) {
-			throw new SystemClassException('This object has no data.');
+			throw new SystemClassException('This '.$this->tablename.' object has no data.');
 		}		
 		
 		if ($this->key === NULL) {
@@ -385,7 +454,30 @@ abstract class SystemBase {
 					call_user_func($constraint, $field, $this->get($field));
 				}
 			}
-		}		
+		}	
+
+
+		$rowdata = array();
+		foreach(array_keys(get_class($this)::$fields) as $field) {
+			$rowdata[$field] = $this->get($field);
+		}
+
+		if ($this->key) {
+			$p_keys = array($this->pkey_column => $this->key);
+			// Editing an existing record
+		} else {
+			$p_keys = NULL;
+			// Creating a new record
+			unset($rowdata[$this->pkey_column]);
+		}
+
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+		$p_keys_return = LibraryFunctions::edit_table(
+			$dbhelper, $dblink, $this->tablename, $p_keys, $rowdata, FALSE, $debug);
+
+		$this->key = $p_keys_return[$this->pkey_column];
+			
 		
 	}
 

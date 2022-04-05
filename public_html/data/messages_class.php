@@ -10,7 +10,10 @@ class MessageException extends SystemClassException {}
 class MessageNotSentException extends MessageException {};
 
 class Message extends SystemBase {
-
+	public $prefix = 'msg';
+	public $tablename = 'msg_messages';
+	public $pkey_column = 'msg_message_id';
+	
 
 	public static $fields = array(
 		'msg_message_id' => 'Message id',
@@ -40,20 +43,6 @@ class Message extends SystemBase {
 	}
 	
 
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('msg_messages', 'msg_message_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new MessageException(
-				'This message number does not exist');
-		}
-	}
-
-	function prepare() {
-
-	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
@@ -67,78 +56,6 @@ class Message extends SystemBase {
 		}
 	}
 
-	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('msg_message_id' => $this->key);
-			// Editing an existing
-		} else {
-			$p_keys = NULL;
-			// Creating a new
-			unset($rowdata['msg_message_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'msg_messages', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['msg_message_id'];
-	}
-
-	function soft_delete(){
-		$this->set('msg_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('msg_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
-	
-
-	function permanent_delete() {
-		
-		$dbhelper = DbConnector::get_instance(); 
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		/*
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-		*/
-
-		$sql = 'DELETE FROM msg_messages WHERE msg_message_id=:msg_message_id';
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':msg_message_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-
-		return TRUE;
-		
-	}
 	
 	static function InitDB($mode='structure'){
 	

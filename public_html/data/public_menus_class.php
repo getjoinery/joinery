@@ -13,7 +13,9 @@ require_once($siteDir . '/includes/Validator.php');
 class PublicMenuException extends SystemClassException {}
 
 class PublicMenu extends SystemBase {
-
+	public $prefix = 'pmu';
+	public $tablename = 'pmu_public_menus';
+	public $pkey_column = 'pmu_public_menu_id';
 
 	public static $fields = array(
 		'pmu_public_menu_id' => 'ID of the public_menu',
@@ -35,20 +37,6 @@ class PublicMenu extends SystemBase {
 	public static $initial_default_values = array(
 		'pmu_is_active' => 1, 
 		);		
-
-	function prepare() {
-		
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('pmu_public_menus', 'pmu_public_menu_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new PublicMenuException(
-				'This public_menu does not exist');
-		}
-	}
 	
 	
 	function authenticate_write($session, $other_data=NULL) {
@@ -60,63 +48,6 @@ class PublicMenu extends SystemBase {
 		}
 
 	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('pmu_public_menu_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['pmu_public_menu_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'pmu_public_menus', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['pmu_public_menu_id'];
-	}
-
-
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}	
-
-		$sql = 'DELETE FROM pmu_public_menus WHERE pmu_public_menu_id=:pmu_public_menu_id OR pmu_parent_menu_id=:pmu_public_menu_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':pmu_public_menu_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
-	
 
 	static function InitDB($mode='structure'){
 	

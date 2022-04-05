@@ -17,6 +17,10 @@ require_once('jpgraph/jpgraph_log.php');
 class AdminGraphException extends SystemClassException {}
 
 class AdminGraph extends SystemBase {
+	
+	public $prefix = 'agp';
+	public $tablename = 'agp_graphs';
+	public $pkey_column = 'agp_admin_graph_id';
 
 	public static $fields = array(
 		'agp_admin_graph_id' => 'ID for the graph',
@@ -109,28 +113,7 @@ class AdminGraph extends SystemBase {
 		}
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('agp_admin_graph_id' => $this->key);
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['agp_admin_graph_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'agp_admin_graphs', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['agp_admin_graph_id'];
-	}
+	
 
 	function generate_graph($width=900, $height=400) {
 		$dbhelper = DbConnector::get_instance();

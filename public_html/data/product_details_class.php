@@ -10,7 +10,9 @@ class ProductDetailException extends SystemClassException {}
 class ProductDetailNotSentException extends ProductDetailException {};
 
 class ProductDetail extends SystemBase {
-
+	public $prefix = 'prd';
+	public $tablename = 'prd_product_details';
+	public $pkey_column = 'prd_product_detail_id';
 
 	public static $fields = array(
 		'prd_product_detail_id' => 'ProductDetail id',
@@ -30,68 +32,10 @@ class ProductDetail extends SystemBase {
 	
 	public static $initial_default_values = array();
 
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('prd_product_details', 'prd_product_detail_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new ProductDetailException(
-				'This product_detail number does not exist');
-		}
-	}
-
-	function prepare() {
-
-	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
 
-	}
-
-	
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('prd_product_detail_id' => $this->key);
-			// Editing an existing
-		} else {
-			$p_keys = NULL;
-			// Creating a new
-			unset($rowdata['prd_product_detail_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'prd_product_details', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['prd_product_detail_id'];
-	}
-
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'DELETE FROM prd_product_details WHERE prd_product_detail_id=:prd_product_detail_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':prd_product_detail_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
 	}
 
 	static function InitDB($mode='structure'){

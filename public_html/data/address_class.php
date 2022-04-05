@@ -14,6 +14,10 @@ class DisplayableAddressException extends AddressException implements Displayabl
 class AddressTravelMismatchException extends DisplayableAddressException {}
 
 class Address extends SystemBase {
+	
+	public $prefix = 'usa';
+	public $tablename = 'usa_users_addrs';
+	public $pkey_column = 'usa_users_addr_id';
 
 	const PRIVACY_SHOW_ALL = 1;
 	const PRIVACY_SHOW_CLIENTS = 2;
@@ -420,33 +424,6 @@ class Address extends SystemBase {
 		return NULL;
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		//GET THE DATA
-		$sql = "
-			SELECT
-				*
-			FROM usa_users_addrs
-			WHERE usa_users_addr_id = :address_id LIMIT 1";
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':address_id', $this->key, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}	catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		$this->data = $q->fetch();
-
-		if ($this->data === NULL) {
-			throw new AddressException(
-				'This address does not exist');
-		}
-	}
 
 	function prepare() {
 
@@ -500,30 +477,6 @@ class Address extends SystemBase {
 		$this->set('usa_address1', Address::UcAddress($this->get('usa_address1')));
 		$this->set('usa_address2', Address::UcAddress($this->get('usa_address2')));
 
-	}
-
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('usa_users_addr_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['usa_users_addr_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'usa_users_addrs', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['usa_users_addr_id'];
 	}
 
 
@@ -701,25 +654,7 @@ class Address extends SystemBase {
 		}
 	}
 	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
 
-		$sql = 'DELETE FROM usa_users_addrs WHERE usa_users_addr_id=:usa_users_addr_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usa_users_addr_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
 
 	static function getPointFromAddress($street, $city, $state){
 

@@ -14,7 +14,10 @@ require_once($siteDir . '/data/event_sessions_class.php');
 class FileException extends SystemClassException {}
 
 class File extends SystemBase {
-
+	public $prefix = 'fil';
+	public $tablename = 'fil_files';
+	public $pkey_column = 'fil_file_id';
+	
 	public static $fields = array(
 		'fil_file_id' => 'ID of the file',
 		'fil_name' => 'Name',
@@ -114,18 +117,6 @@ class File extends SystemBase {
 		}
 		
 	}	
-
-	function soft_delete(){
-		$this->set('fil_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('fil_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
 
 	function permanent_delete(){
 		$settings = Globalvars::get_instance();
@@ -352,17 +343,6 @@ class File extends SystemBase {
 		
 		return $event_sessions;
 	}		
-
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('fil_files', 'fil_file_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new FileException(
-				'This file does not exist');
-		}
-	}
 	
 	
 	function authenticate_write($session, $other_data=NULL) {
@@ -377,29 +357,6 @@ class File extends SystemBase {
 		}
 	}
 
-	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if ($this->key) {
-			$p_keys = array('fil_file_id' => $this->key);
-			// Editing an existing record
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['fil_file_id']);
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'fil_files', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['fil_file_id'];
-	}
 	
 	static function InitDB($mode='structure'){
 	

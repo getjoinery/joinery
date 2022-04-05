@@ -15,7 +15,10 @@ require_once($siteDir . '/data/groups_class.php');
 class PostException extends SystemClassException {}
 
 class Post extends SystemBase {
-
+	public $prefix = 'pst';
+	public $tablename = 'pst_posts';
+	public $pkey_column = 'pst_post_id';
+	
 	public static $fields = array(
 		'pst_post_id' => 'ID of the post',
 		'pst_title' => 'Post Title',
@@ -196,48 +199,20 @@ class Post extends SystemBase {
 	}
 
 	function save() {
-		parent::save();
-		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
 		if ($this->key) {
-			$p_keys = array('pst_post_id' => $this->key);
-			// Editing an existing record
-			
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			ContentVersion::NewVersion(ContentVersion::TYPE_POST, $this->key, $this->get('pst_body'), $this->get('pst_title'), $this->get('pst_title'));
-		} else {
-			$p_keys = NULL;
-			// Creating a new record
-			unset($rowdata['pst_post_id']);
+			ContentVersion::NewVersion(ContentVersion::TYPE_POST, $this->key, $this->get('pst_body'), $this->get('pst_title'), $this->get('pst_title'));			
 		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'pst_posts', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['pst_post_id'];
+		parent::save();
 	}
 	
-	function soft_delete(){
-		$this->set('pst_delete_time', 'now()');
-		$this->save();
-		return true;
-	}
-	
-	function undelete(){
-		$this->set('pst_delete_time', NULL);
-		$this->save();	
-		return true;
-	}
 	
 	function permanent_delete(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
+		$settings = Globalvars::get_instance();
+		$settings->get_setting('siteDir');
 		require_once($siteDir . '/data/comments_class.php');
 		$comments = new MultiComment(
 		array('post_id'=>$this->key),
