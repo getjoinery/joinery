@@ -17,6 +17,10 @@ class OrderItem extends SystemBase {
 	public $prefix = 'odi';
 	public $tablename = 'odi_order_items';
 	public $pkey_column = 'odi_order_item_id';
+	public static $permanent_delete_actions = array(
+		'odi_order_item_id' => 'delete',	
+		'evr_odi_order_item_id' => 'delete',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
 	public const STATUS_UNPAID = 1;
 	public const STATUS_PAID = 2;

@@ -18,6 +18,9 @@ class CouponCodeProduct extends SystemBase {
 	public $prefix = 'ccp';
 	public $tablename = 'ccp_coupon_code_products';
 	public $pkey_column = 'ccp_coupon_code_product_id';
+	public static $permanent_delete_actions = array(
+		'ccp_coupon_code_product_id' => 'prevent',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
 		'ccp_coupon_code_product_id' => 'ID of the coupon_code_product',

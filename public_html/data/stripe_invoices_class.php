@@ -17,7 +17,10 @@ class StripeInvoice extends SystemBase {
 	public $prefix = 'siv';
 	public $tablename = 'siv_stripe_invoices';
 	public $pkey_column = 'siv_stripe_invoice_id';
-	
+	public static $permanent_delete_actions = array(
+		'siv_stripe_invoice_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
 	public static $fields = array(
 		'siv_stripe_invoice_id' => 'StripeInvoice ID',
 		'siv_stripe_foreign_invoice_id' => 'ID at stripe',

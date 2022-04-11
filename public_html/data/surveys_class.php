@@ -15,7 +15,12 @@ class Survey extends SystemBase {
 	public $prefix = 'svy';
 	public $tablename = 'svy_surveys';
 	public $pkey_column = 'svy_survey_id';
-	
+	public static $permanent_delete_actions = array(
+		'svy_survey_id' => 'delete',	
+		'srq_svy_survey_id' => 'prevent',
+		'sva_svy_survey_id' => 'prevent',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
 	public static $fields = array(
 		'svy_survey_id' => 'ID of the survey',
 		'svy_name' => 'The survey',
@@ -61,51 +66,7 @@ class Survey extends SystemBase {
 		}
 	}
 
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
 
-		require_once($siteDir . '/data/survey_answers_class.php');
-		$survey_answers = new SurveyAnswer(
-		array('survey_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$survey_answers->load();
-		
-		foreach ($survey_answers as $survey_answer){
-			$survey_answer->permanent_delete();
-		}
-
-		require_once($siteDir . '/data/survey_questions_class.php');
-		$survey_questions = new SurveyAnswer(
-		array('survey_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$survey_questions->load();
-		
-		foreach ($survey_questions as $survey_question){
-			$survey_question->permanent_delete();
-		}
-
-
-		$sql = 'DELETE FROM svy_surveys WHERE svy_survey_id=:svy_survey_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':svy_survey_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
 	
 	static function InitDB($mode='structure'){
 	

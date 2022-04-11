@@ -15,6 +15,9 @@ class FormError extends SystemBase {
 	public $prefix = 'lfe';
 	public $tablename = 'lfe_log_form_errors';
 	public $pkey_column = 'lfe_log_form_error_id';
+	public static $permanent_delete_actions = array(
+		'lfe_log_form_error_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
 		'lfe_log_form_error_id' => 'ID of the lfe_log_form_error',

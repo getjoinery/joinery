@@ -14,7 +14,10 @@ class QueuedEmail extends SystemBase {
 	public $prefix = 'equ';
 	public $tablename = 'equ_queued_emails';
 	public $pkey_column = 'equ_queued_email_id';
-	
+	public static $permanent_delete_actions = array(
+		'equ_queued_email_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
 	// The various states an email can be in
 	const QUEUED = 1; // Queued, but not approved yet
 	const READY_TO_SEND = 2; // Queued and approved, ready to send

@@ -48,6 +48,17 @@ class Event extends SystemBase {
 	public $prefix = 'evt';
 	public $tablename = 'evt_events';
 	public $pkey_column = 'evt_event_id';
+	public static $permanent_delete_actions = array(
+		'evt_event_id' => 'delete',
+		'evs_evt_event_id' => 'delete',	
+		'evr_evt_event_id' => 'prevent',
+		'erg_evt_event_id' => 'prevent',
+		'grm_evt_event_id' => 'prevent',
+		'msg_evt_event_id' => 'delete',
+		'pro_evt_event_id' => 'prevent',
+		'sev_evt_event_id' => 'delete',
+		
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	const STATUS_ACTIVE = 1;
 	const STATUS_COMPLETED = 2;
@@ -77,7 +88,7 @@ class Event extends SystemBase {
 		'evt_is_accepting_signups' => 'Are we taking signups',
 		'evt_picture_link' => 'If present, is the promo picture for the event', //DEPRECATED
 		'evt_collect_extra_info' => 'extra info',
-		'evt_grp_group_id' => 'Group for the event registrants',
+		'evt_grp_group_id' => 'Group for the event registrants', //DEPRECATED
 		'evt_private_info' => 'Information displayed only to registrants',
 		'evt_status' => '1: active, 2: completed, 3: cancelled', 
 		'evt_max_signups' => 'Max amount of signups',
@@ -440,32 +451,6 @@ class Event extends SystemBase {
 		return TRUE;
 	}	
 
-/*
-	function load($debug = false) {
-		parent::load();
-
-		//$sql = 'SELECT *, (COALESCE(evt_expires_time, NOW()) < NOW()) as evt_is_expired FROM evt_events WHERE evt_event_id = ?';
-		$sql = 'SELECT * FROM evt_events WHERE evt_event_id = ?';
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-			
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $this->key, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} catch (PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		if (!$q->rowCount()) {
-			throw new DisplayablePermanenteventException('Sorry, this request doesn\'t exist.');
-		}
-
-		$this->data = $q->fetch();
-	}
-	*/
 
 	function prepare() {
 		if ($this->data === NULL) {
@@ -533,64 +518,7 @@ class Event extends SystemBase {
 
 		return $event;
 	}
-	
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
 
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-
-		
-		$event_registrants = new MultiEventRegistrant(
-		array('event_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$event_registrants->load();
-		
-		foreach ($event_registrants as $event_registrant){
-			$event_registrant->remove();
-		}
-
-		$event_sessions = new MultiEventSessions(
-		array('event_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$event_sessions->load();
-		
-		foreach ($event_sessions as $event_session){
-			$event_session->permanent_delete();
-		}
-
-		$sql = 'DELETE FROM evt_events WHERE evt_event_id=:evt_event_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':evt_event_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-			
-		if($this_transaction){
-			$dblink->commit();
-		}
-		$this->key = NULL;
-		
-		return true;		
-	}	
-	
-
-	static public function GetPublicActions() { 
-		return self::$public_actions;
-	}
 
 	static function InitDB($mode='structure'){
 	

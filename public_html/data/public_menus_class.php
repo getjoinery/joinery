@@ -16,6 +16,9 @@ class PublicMenu extends SystemBase {
 	public $prefix = 'pmu';
 	public $tablename = 'pmu_public_menus';
 	public $pkey_column = 'pmu_public_menu_id';
+	public static $permanent_delete_actions = array(
+		'pmu_public_menu_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
 		'pmu_public_menu_id' => 'ID of the public_menu',

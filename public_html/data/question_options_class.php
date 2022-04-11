@@ -18,6 +18,9 @@ class QuestionOption extends SystemBase {
 	public $prefix = 'qop';
 	public $tablename = 'qop_question_options';
 	public $pkey_column = 'qop_question_option_id';
+	public static $permanent_delete_actions = array(
+		'qop_question_option_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
 		'qop_question_option_id' => 'ID of the question_option',

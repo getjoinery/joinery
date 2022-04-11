@@ -15,6 +15,9 @@ class DebugEmailLog extends SystemBase {
 	public $prefix = 'del';
 	public $tablename = 'del_debug_email_logs';
 	public $pkey_column = 'del_debug_email_log_id';
+	public static $permanent_delete_actions = array(
+		'del_debug_email_log_id' => 'delete',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
 		'del_debug_email_log_id' => 'ID of the debug_email_log',

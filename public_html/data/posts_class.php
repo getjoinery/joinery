@@ -18,6 +18,11 @@ class Post extends SystemBase {
 	public $prefix = 'pst';
 	public $tablename = 'pst_posts';
 	public $pkey_column = 'pst_post_id';
+	public static $permanent_delete_actions = array(
+		'pst_post_id' => 'delete',	
+		'cmt_pst_post_id' => 'delete',
+		'grm_pst_post_id' => 'delete'
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
 		'pst_post_id' => 'ID of the post',
@@ -206,40 +211,6 @@ class Post extends SystemBase {
 		parent::save();
 	}
 	
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$settings = Globalvars::get_instance();
-		$settings->get_setting('siteDir');
-		require_once($siteDir . '/data/comments_class.php');
-		$comments = new MultiComment(
-		array('post_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$comments->load();
-		
-		foreach ($comments as $comment){
-			$comment->permanent_delete();
-		}
-
-		$sql = 'DELETE FROM pst_posts WHERE pst_post_id=:pst_post_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':pst_post_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
 	
 	static function InitDB($mode='structure'){
 	

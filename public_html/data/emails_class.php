@@ -15,6 +15,12 @@ class Email extends SystemBase {
 	public $prefix = 'eml';
 	public $tablename = 'eml_emails';
 	public $pkey_column = 'eml_email_id';
+	public static $permanent_delete_actions = array(
+		'eml_email_id' => 'delete',
+		'erc_eml_email_id' => 'delete',
+		'erg_eml_email_id' => 'delete',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	
 	
 	const FORMAT_HTML = 1;
 	const FORMAT_PLAINTEXT = 2;
@@ -181,40 +187,6 @@ class Email extends SystemBase {
 		
 		return true;		
 	}		
-	
-	
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-
-		EmailRecipient::DeleteAll($email->key);
-
-		$sql = 'DELETE FROM eml_emails WHERE eml_email_id=:eml_email_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':eml_email_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}	
 	
 
 	function get_user() { 

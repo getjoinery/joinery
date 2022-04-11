@@ -40,6 +40,10 @@ class EventRegistrant extends SystemBase {
 	public $prefix = 'evr';
 	public $tablename = 'evr_event_registrants';
 	public $pkey_column = 'evr_event_registrant_id';
+	public static $permanent_delete_actions = array(
+		'evr_event_registrant_id' => 'delete',	
+		'odi_evr_event_registrant_id' => 'prevent'
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
 	public static $fields = array(
 		'evr_event_registrant_id' => 'event_registrant ID',

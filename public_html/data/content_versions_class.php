@@ -132,6 +132,8 @@ class ContentVersion extends SystemBase {
 	
 	function permanent_delete(){
 		
+		$dblink->beginTransaction();
+		
 		$next_version = $this->get_next_version();
 		$previous_version = $this->get_previous_version();
 		
@@ -152,6 +154,8 @@ class ContentVersion extends SystemBase {
 		}
 		
 		parent::permanent_delete();
+		
+		$dblink->commit();
 		
 		return true;		
 	}
