@@ -15,6 +15,9 @@ class PageContent extends SystemBase {
 	public $prefix = 'pac';
 	public $tablename = 'pac_page_contents';
 	public $pkey_column = 'pac_page_content_id';
+	public static $permanent_delete_actions = array(
+		'pac_page_content_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
 	public static $fields = array(
 		'pac_page_content_id' => 'ID of the page_content',

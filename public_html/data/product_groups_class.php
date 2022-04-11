@@ -15,7 +15,11 @@ class ProductGroup extends SystemBase {
 	public $prefix = 'prg';
 	public $tablename = 'prg_product_groups';
 	public $pkey_column = 'prg_product_group_id';
-
+	public static $permanent_delete_actions = array(
+		'prg_product_group_id' => 'delete',	
+		'pro_prg_product_group_id' => 'prevent'
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	
 	public static $fields = array(
 		'prg_product_group_id' => 'ID for this product group',
 		'prg_max_items' => 'Max # of items allowed in the cart from this product group.',

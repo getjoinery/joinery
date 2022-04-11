@@ -17,7 +17,10 @@ class Setting extends SystemBase {
 	public $prefix = 'stg';
 	public $tablename = 'stg_settings';
 	public $pkey_column = 'stg_setting_id';
-
+	public static $permanent_delete_actions = array(
+		'stg_setting_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	
 	public static $fields = array(
 		'stg_setting_id' => 'ID of the setting',
 		'stg_name' => 'Name',

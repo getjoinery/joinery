@@ -18,6 +18,9 @@ class SurveyQuestion extends SystemBase {
 	public $prefix = 'srq';
 	public $tablename = 'srq_survey_questions';
 	public $pkey_column = 'srq_survey_question_id';
+	public static $permanent_delete_actions = array(
+		'srq_survey_question_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
 		'srq_survey_question_id' => 'ID of the survey question',
@@ -51,32 +54,6 @@ class SurveyQuestion extends SystemBase {
 		return NULL;
 	}	
 	
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		require_once($siteDir . '/data/survey_answers_class.php');
-		$survey_answers = new SurveyAnswer(
-		array('question_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$survey_answers->load();
-		
-		foreach ($survey_answers as $survey_answer){
-			$survey_answer->permanent_delete();
-		}
-
-
-		
-		$q = $dblink->prepare('DELETE FROM srq_survey_questions WHERE srq_survey_question_id=?');
-		$q->bindValue(1, $this->key, PDO::PARAM_INT);
-		
-		$success = $q->execute();
-		
-		return $success;		
-	}	
 	
 
 	function prepare() {	

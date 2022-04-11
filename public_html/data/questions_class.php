@@ -18,6 +18,12 @@ class Question extends SystemBase {
 	public $prefix = 'qst';
 	public $tablename = 'qst_questions';
 	public $pkey_column = 'qst_question_id';
+	public static $permanent_delete_actions = array(
+		'qop_qst_question_id' => 'delete', 
+		'qst_question_id' => 'delete', 
+		'srq_qst_question_id' => 'prevent',
+		'sva_qst_question_id' => 'prevent',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	const LANGUAGE_ENGLISH = 1;
 	
@@ -267,39 +273,6 @@ class Question extends SystemBase {
 		
 	}
 
-	//TODO
-	/*
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$comments = new MultiComment(
-		array('question_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$comments->load();
-		
-		foreach ($comments as $comment){
-			$comment->permanent_delete();
-		}
-
-		$sql = 'DELETE FROM qst_questions WHERE qst_question_id=:qst_question_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':qst_question_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
-	}
-	*/
 	static function InitDB($mode='structure'){
 	
 		try{

@@ -694,7 +694,14 @@ class Product extends SystemBase {
 	public $prefix = 'pro';
 	public $tablename = 'pro_products';
 	public $pkey_column = 'pro_product_id';
-
+	public static $permanent_delete_actions = array(
+		'pro_product_id' => 'delete',	
+		'prd_pro_product_id' => 'delete',
+		'prv_pro_product_id' => 'delete',
+		'ccp_pro_product_id' => 'delete',
+		'odi_pro_product_id' => 'prevent',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	
 	public static $currency_symbols = array(
 	 'usd' => '$',
 	 'eur' => '&euro;'
@@ -897,30 +904,6 @@ class Product extends SystemBase {
 			return $product;
 
 	}
-
-
-	function permanent_delete(){
-		//CANNOT DELETE A PRODUCT WITH ORDERS
-		$orders = new MultiOrderItem(array('product_id' => $this->key));
-		if($orders->count_all()){
-			throw new SystemDisplayableError("You cannot delete a product with orders.");
-			exit();	
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		$q = $dblink->prepare('DELETE FROM pro_products WHERE pro_product_id=?');
-		$q->bindValue(1, $this->key, PDO::PARAM_INT);
-		$q->execute();	
-		
-		$q = $dblink->prepare('DELETE FROM prv_product_versions WHERE prv_pro_product_id=?');
-		$q->bindValue(1, $this->key, PDO::PARAM_INT);
-		$q->execute();				
-		
-		$this->key = NULL;
-		return true;			
-	}	
 	
 
 	function get_url() {

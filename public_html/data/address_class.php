@@ -18,6 +18,9 @@ class Address extends SystemBase {
 	public $prefix = 'usa';
 	public $tablename = 'usa_users_addrs';
 	public $pkey_column = 'usa_users_addr_id';
+	public static $permanent_delete_actions = array(
+		'usa_users_addr_id' => 'delete', 
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	const PRIVACY_SHOW_ALL = 1;
 	const PRIVACY_SHOW_CLIENTS = 2;

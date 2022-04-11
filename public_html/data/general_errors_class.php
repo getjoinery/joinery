@@ -15,6 +15,9 @@ class GeneralError extends SystemBase {
 	public $prefix = 'err';
 	public $tablename = 'err_general_errors';
 	public $pkey_column = 'err_general_error_id';
+	public static $permanent_delete_actions = array(
+		'err_general_error_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
 		'err_general_error_id' => 'ID of the err_general_error',

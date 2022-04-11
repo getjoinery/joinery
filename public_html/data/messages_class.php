@@ -13,7 +13,9 @@ class Message extends SystemBase {
 	public $prefix = 'msg';
 	public $tablename = 'msg_messages';
 	public $pkey_column = 'msg_message_id';
-	
+	public static $permanent_delete_actions = array(
+		'msg_message_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
 	public static $fields = array(
 		'msg_message_id' => 'Message id',

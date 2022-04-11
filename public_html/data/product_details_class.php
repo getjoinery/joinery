@@ -13,7 +13,10 @@ class ProductDetail extends SystemBase {
 	public $prefix = 'prd';
 	public $tablename = 'prd_product_details';
 	public $pkey_column = 'prd_product_detail_id';
-
+	public static $permanent_delete_actions = array(
+		'prd_product_detail_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	
 	public static $fields = array(
 		'prd_product_detail_id' => 'ProductDetail id',
 		'prd_pro_product_id' => 'Product id',

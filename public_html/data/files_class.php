@@ -17,6 +17,11 @@ class File extends SystemBase {
 	public $prefix = 'fil';
 	public $tablename = 'fil_files';
 	public $pkey_column = 'fil_file_id';
+	public static $permanent_delete_actions = array(
+		'fil_file_id' => 'delete',	
+		'esf_fil_file_id' => 'prevent',
+		'evt_fil_file_id' => 'prevent',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
 		'fil_file_id' => 'ID of the file',
@@ -130,20 +135,8 @@ class File extends SystemBase {
 		
 		$this->delete_resized();
 		
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		$q = $dblink->prepare('DELETE FROM fil_files WHERE fil_file_id=?');
-		$q->bindValue(1, $this->key, PDO::PARAM_INT);
-		$q->execute();	
-		
-		$q = $dblink->prepare('DELETE FROM esf_event_session_files WHERE esf_fil_file_id=?');
-		$q->bindValue(1, $this->key, PDO::PARAM_INT);
-		$q->execute();			
-		
-		$this->key = NULL;
-		return true;
-					
+		parent::permanent_delete();
+		return true;		
 	}
 	
 	//SIZE CAN BE thumbnail, lthumbnail, small, medium, large

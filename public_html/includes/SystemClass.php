@@ -38,7 +38,6 @@ abstract class SystemBase {
 	protected $loaded;
 	protected $cached_references;
 
-	static $object_description = NULL;
 	static $fields = array();
 	static $timestamp_fields = array();	// Used for the mailer
 	static $constants = array();
@@ -49,6 +48,7 @@ abstract class SystemBase {
 	static $initial_default_values = array();
 	static $public_actions = array();
 	static $json_vars = array('key');
+	static $permanent_delete_actions = array();
 
 	function __construct($key, $and_load=FALSE) {
 		$this->key = $key;
@@ -73,9 +73,6 @@ abstract class SystemBase {
 		}
 	}
 
-	function get_object_description() {
-		return static::$object_description;
-	}	
 	
 	function set($key, $value, $check_existance=TRUE) {
 		if ($check_existance && !array_key_exists($key, static::$fields)) {
@@ -291,33 +288,199 @@ abstract class SystemBase {
 			'This '.$this->tablename.' column ('.$this->prefix.'_delete_time) does not exist');
 	}
 	
-	function permanent_delete(){
+	
+	//DEFAULT ACTION ON PERMANENT DELETE IS TO DELETE ALL ROWS WITH FOREIGN KEY 
+	//FOR OTHER BEHAVIOR SET THE permanent_delete_actions ARRAY
+	//OPTIONS FOR permanent_delete_actions ARRAY:
+	//'delete' = DELETE THE ROW WITH THE FOREIGN KEY
+	//'null' = SET THE FOREIGN KEY TO NULL
+	//value = SET THE FOREIGN KEY TO A VALUE
+	//'skip' = SKIP THE FOREIGN KEY
+	//'prevent' = IF FOREIGN KEY ROWS ARE PRESENT, DO NOT ALLOW PERMANENT DELETE...THROWS AN ERROR
+	function permanent_delete($debug=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}	
-		
-		$sql = 'DELETE FROM '.$this->tablename.' WHERE '.$this->pkey_column.'=:param1';
+		if(!$debug){
+			$this_transaction = false;
+			if(!$dblink->inTransaction()){
+				$dblink->beginTransaction();
+				$this_transaction = true;
+			}	
+		}
+
+		$sql = '		select
+			t.table_name,
+			array_agg(c.column_name::text) as columns
+		from
+			information_schema.tables t
+		inner join information_schema.columns c on
+			t.table_name = c.table_name
+		where
+			t.table_schema = \'public\'
+			--and t.table_type= \'BASE TABLE\'
+			and c.table_schema = \'public\'
+		group by t.table_name;	';
 		try{
 			$q = $dblink->prepare($sql);
-			$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
+			//$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
+			$q->execute();
 			$q->setFetchMode(PDO::FETCH_OBJ);
 		}
 		catch(PDOException $e){
 			$dbhelper->handle_query_error($e);
+		}	
+		
+		//MAKE A LIST OF FOUND FOREIGN KEYS
+		$found_foreign_keys = array();
+		while ($row = $q->fetch()) {
+			$table_name = $row->table_name;
+			$columns = $row->columns;
+			$columns_array = explode(',', trim($columns, '{}'));
+			
+			foreach($columns_array as $column){
+				if(str_contains($column, $this->pkey_column)){
+					if($debug){
+						echo $this->pkey_column . ' is in ' .$column. "\n<br>";
+					}
+					$found_foreign_keys[$column] = $table_name;
+				}
+			}
 		}
+		
+		
 
-		if($this_transaction){
-			$dblink->commit();
+		//CHECK FOR 'PREVENT' CONSTRAINT FIRST AND IF FOUND, THEN ABORT THE PERMANENT DELETE WITH AN ERROR
+
+		foreach($found_foreign_keys as $column=>$table_name){
+			$action = 'delete';  //DELETE IS DEFAULT
+			foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
+				if($pcolumn == $column){
+					$action = $paction;
+				}
+			}
+			
+			if($action == 'prevent'){
+				if($debug){
+					echo 'Checking "prevent" constraint on foreign key '.$column.' in '.$table_name. ': ';
+				}
+				$sql = 'SELECT COUNT(1) FROM '.$table_name.' WHERE '.$column.'=:param1';
+				
+				try{
+					$q = $dblink->prepare($sql);
+					$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
+					$count = $q->execute();
+				}
+				catch(PDOException $e){
+					$dbhelper->handle_query_error($e);
+				}
+				if($count->count){
+					if($debug){
+						echo "FOUND<br>\n";
+					}
+					else{
+						//IF FOUND, ERROR AND ABORT PERMANENT DELETE
+						if($this_transaction){
+							$dblink->rollBack();
+						}
+						
+						throw new SystemClassException('Cannot permanent delete '.$this->pkey_column.'='.$this->key.' from '.$this->tablename.'. Columns exist in table '. $table_name);
+						return false;
+					}
+					
+				}
+				else{
+					if($debug){
+						echo "NOT FOUND<br>\n";
+					}
+				}
+			}								
 		}
+			
+
+
+
+		//IF NO PREVENT CONSTRAINT EXISTS, THEN DO THE DELETES
+		foreach($found_foreign_keys as $column=>$table_name){
+			
+			$action = 'delete';  //DELETE IS DEFAULT
+			foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
+				if($pcolumn == $column){
+					$action = $paction;
+				}
+			}
+			
+			if($action == 'prevent'){	
+				//DO NOTHING
+			}					
+			else if($action == 'delete'){
+			
+				$sql = 'DELETE FROM '.$table_name.' WHERE '.$column.'=:param1';
+				
+				if($debug){
+					echo $sql . "<br>";
+				}
+				else{
+
+					try{
+						$q = $dblink->prepare($sql);
+						$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
+						$q->execute();
+					}
+					catch(PDOException $e){
+						$dbhelper->handle_query_error($e);
+					}
+				}
+			}
+			else if($action == 'null'){
+			
+				$sql = 'UPDATE '.$table_name.' SET '.$column.'=NULL WHERE '.$column.'=:param1';
+				if($debug){
+					echo $sql . "<br>";
+				}
+				else{	
+					try{
+						$q = $dblink->prepare($sql);
+						$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
+						$q->execute();
+					}
+					catch(PDOException $e){
+						$dbhelper->handle_query_error($e);
+					}
+				}					
+			}
+			else if($action == 'skip'){
+				//DO NOTHING
+			}
+			else{
+				$sql = 'UPDATE '.$table_name.' SET '.$column.'='.$action.' WHERE '.$column.'=:param1';
+				if($debug){
+					echo $sql . "<br>";
+				}
+				else{	
+					
+					try{
+						$q = $dblink->prepare($sql);
+						$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
+						$q->execute();
+					}
+					catch(PDOException $e){
+						$dbhelper->handle_query_error($e);
+					}
+							
+				}					
+			}		
+		}			
+
 		
-		$this->key = NULL;
 		
+		if(!$debug){
+			if($this_transaction){
+				$dblink->commit();
+			}
+		
+			$this->key = NULL;
+		}
 		return true;		
 	}
 

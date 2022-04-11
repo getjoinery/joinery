@@ -15,6 +15,9 @@ class EmailRecipient extends SystemBase {
 	public $prefix = 'erc';
 	public $tablename = 'erc_email_recipients';
 	public $pkey_column = 'erc_email_recipient_id';
+	public static $permanent_delete_actions = array(
+		'erc_email_recipient_id' => 'delete',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	// Status codes
 	const EMAIL_SENT = 1;

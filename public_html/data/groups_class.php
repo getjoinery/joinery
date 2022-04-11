@@ -17,6 +17,14 @@ class Group extends SystemBase {
 	public $prefix = 'grp';
 	public $tablename = 'grp_groups';
 	public $pkey_column = 'grp_group_id';
+	public static $permanent_delete_actions = array(
+		'grp_group_id' => 'delete',	
+		'evr_grp_group_id' => 'prevent',
+		'evt_grp_group_id' => 'null',
+		'grm_grp_group_id' => 'delete',
+		'pro_grp_group_id' => 'prevent',
+		'erg_grp_group_id' => 'prevent',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	const GROUP_TYPE_USER = 1;
 	const GROUP_TYPE_EVENT = 2;
@@ -222,51 +230,6 @@ class Group extends SystemBase {
 					'Current user does not have permission to edit this group.');
 			}
 		}
-	}
-
-
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-
-		$group_members = new MultiGroupMember(
-			array('group_id' => $this->key),  //SEARCH CRITERIA
-			NULL,  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
-			NULL,  //NUM PER PAGE
-			NULL,  //OFFSET
-			NULL  //AND OR OR
-		);
-		$group_members->load();
-		
-		foreach ($group_members as $group_member){
-			$group_member->remove();
-		}	
-
-		$sql = 'DELETE FROM grp_groups WHERE grp_group_id=:grp_group_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':grp_group_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
 	}
 	
 

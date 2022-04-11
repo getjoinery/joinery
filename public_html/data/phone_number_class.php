@@ -16,6 +16,11 @@ class PhoneNumber extends SystemBase {
 	public $prefix = 'phn';
 	public $tablename = 'phn_phone_numbers';
 	public $pkey_column = 'phn_phone_number_id';
+	public static $permanent_delete_actions = array(
+		'phn_phone_number_id' => 'delete',	
+		'act_activation_codes' => 'delete',
+		'usr_phn_phone_number_id' => 'prevent',
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
 	public static $fields = array(
 		'phn_phone_number_id' => 'Phone number id',
@@ -325,68 +330,6 @@ class PhoneNumber extends SystemBase {
 					'Current user does not have permission to edit this number.');
 			}
 		}
-	}
-
-	
-	function permanent_delete(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-		
-		//DELETE AUTH CODES FOR PHONE
-		$sql = 'UPDATE act_activation_codes SET act_deleted=TRUE WHERE act_phn_phone_number_id = :act_phn_phone_number_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(':act_phn_phone_number_id', $this->key);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		//REMOVE LINKS WITH USERS
-		$sql = 'UPDATE usr_users SET usr_phn_phone_number_id=NULL WHERE usr_phn_phone_number_id = :usr_phn_phone_number_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(':usr_phn_phone_number_id', $phone_number->key);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		$sql = 'DELETE FROM phn_phone_numbers WHERE phn_phone_number_id=:phn_phone_number_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':phn_phone_number_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-		
-		// Check for another phone number to set as default
-		if ($phone_number->get('phn_is_default')) { 
-			$phones = new MultiPhoneNumber(array('user_id' => $this->get('phn_usr_user_id'), 'deleted' => FALSE));
-			$phones->load();
-			if (count($phones)) { 
-				$phones->get(0)->set_default(FALSE);
-			}
-		}		
-
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-		
-		return true;		
 	}
 	
 	

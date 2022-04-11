@@ -17,6 +17,12 @@ class Order extends SystemBase {
 	public $prefix = 'ord';
 	public $tablename = 'ord_orders';
 	public $pkey_column = 'ord_order_id';
+	public static $permanent_delete_actions = array(
+		'ord_order_id' => 'delete',	
+		'odi_ord_order_id' => 'delete',
+		'cls_ord_order_id' => 'delete',
+		'evr_ord_order_id' => 'null'
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
 	public const STATUS_UNPAID = 1;
 	public const STATUS_PAID = 2;
@@ -84,56 +90,6 @@ class Order extends SystemBase {
 	}
 	*/
 	
-	function permanent_delete() {
-		
-		$dbhelper = DbConnector::get_instance(); 
-		$dblink = $dbhelper->get_db_link();
-		
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-
-
-		$sql = 'DELETE FROM ord_orders WHERE ord_order_id=:ord_order_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':ord_order_id', $this->key, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-	
-		$order_items = new MultiOrderItem(array('order_id' => $this->key));
-		$order_items->load();
-	
-		foreach ($order_items as $order_item){
-			$order_item->permanent_delete();
-		}
-		
-		$sql = 'UPDATE evr_event_registrants SET evr_ord_order_id=NULL where evr_ord_order_id=:ord_order_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':ord_order_id', $this->key, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}		
-			
-		if($this_transaction){
-			$dblink->commit();
-		}
-		
-		$this->key = NULL;
-
-		return TRUE;
-		
-	}	
 	
 
 	public static function GetByStripeSession($session_id) {

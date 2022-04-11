@@ -15,6 +15,9 @@ class Url extends SystemBase {
 	public $prefix = 'url';
 	public $tablename = 'url_urls';
 	public $pkey_column = 'url_url_id';
+	public static $permanent_delete_actions = array(
+		'url_url_id' => 'delete',	
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
 		'url_url_id' => 'ID of the url',

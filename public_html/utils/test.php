@@ -15,16 +15,22 @@
 	require_once($siteDir.'/data/events_class.php');
 	require_once($siteDir.'/data/files_class.php');
 	require_once($siteDir.'/data/users_class.php');
-	require_once($siteDir.'/data/questions_class.php');
+	require_once($siteDir.'/data/address_class.php');
+
 	
-	$question = new Question(5, TRUE);
-	$question->permanent_delete();
-	//$question->set('qst_question', 'test');
-	//$question->save();
-	//$question->load();
-	//$question->soft_delete();
-	//$question->undelete();
-	//print_r($question);
+	/*
+	$object = new Address(NULL);
+	$object->set('usa_address1', 'test');
+	$object->set('usa_usr_user_id', 1);
+	$object->save();
+	$object->permanent_delete(true);
+	*/
+	$object = new Address(2007, true);
+	$object->permanent_delete();
+	
+	
+	
+	
 	exit;
 	
 
