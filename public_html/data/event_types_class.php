@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class EventTypeException extends SystemClassException {}
 
 class EventType extends SystemBase {
-	public $prefix = 'ety';
-	public $tablename = 'ety_event_types';
-	public $pkey_column = 'ety_event_type_id';
+	public static $prefix = 'ety';
+	public static $tablename = 'ety_event_types';
+	public static $pkey_column = 'ety_event_type_id';
 	public static $permanent_delete_actions = array(
 		'ety_event_type_id' => 'delete',	
 		'evt_ety_event_type_id' => 'prevent',
@@ -25,6 +25,11 @@ class EventType extends SystemBase {
 		'ety_name' => 'Name of the event type'
 	);
 
+	public static $field_specifications = array(
+		'ety_event_type_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'ety_name' =>  array('type'=>'varchar(100)'),
+	);
+	
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
@@ -34,43 +39,6 @@ class EventType extends SystemBase {
 	public static $initial_default_values = array();
 	
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS ety_event_types_ety_event_type_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."ety_event_types" (
-		  "ety_event_type_id" int4 NOT NULL DEFAULT nextval(\'ety_event_types_ety_event_type_id_seq\'::regclass),
-		  "ety_name" varchar(100) COLLATE "pg_catalog"."default"
-		)
-		;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."ety_event_types" ADD CONSTRAINT "ety_event_types_pkey" PRIMARY KEY ("ety_event_type_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 
 }
 

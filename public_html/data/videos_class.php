@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class VideoException extends SystemClassException {}
 
 class Video extends SystemBase {
-	public $prefix = 'vid';
-	public $tablename = 'vid_videos';
-	public $pkey_column = 'vid_video_id';
+	public static $prefix = 'vid';
+	public static $tablename = 'vid_videos';
+	public static $pkey_column = 'vid_video_id';
 	public static $permanent_delete_actions = array(
 		'vid_video_id' => 'delete',	
 		'evs_vid_video_id' => 'prevent',
@@ -33,6 +33,19 @@ class Video extends SystemBase {
 		'vid_delete_time' => 'Time of deletion',
 	);
 
+	public static $field_specifications = array(
+		'vid_video_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'vid_title' => array('type'=>'varchar(255)'),
+		'vid_description' => array('type'=>'text'),
+		'vid_usr_user_id' =>  array('type'=>'int4'),
+		'vid_source' =>  array('type'=>'int2'),
+		'vid_video_number' =>  array('type'=>'varchar(255)'),
+		'vid_create_time' =>  array('type'=>'timestamp(6)'),
+		'vid_video_text'=> array('type'=>'text'),
+		'vid_version' =>  array('type'=>'int2'),
+		'vid_delete_time' => array('type'=>'timestamp(6)'),
+	);
+	
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
@@ -226,65 +239,6 @@ class Video extends SystemBase {
 		}
 	}
 
-
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS vid_videos_vid_video_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."vid_videos" (
-			  "vid_video_id" int4 NOT NULL DEFAULT nextval(\'vid_videos_vid_video_id_seq\'::regclass),
-			  "vid_source" int2,
-			  "vid_video_number" varchar(255) COLLATE "pg_catalog"."default",
-			  "vid_create_time" timestamp(6) DEFAULT now(),
-			  "vid_usr_user_id" int4,
-			  "vid_video_text" text COLLATE "pg_catalog"."default",
-			  "vid_version" int2,
-			  "vid_title" varchar(255) COLLATE "pg_catalog"."default",
-			  "vid_description" text COLLATE "pg_catalog"."default",
-			  "vid_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."vid_videos" ADD CONSTRAINT "vid_videos_pkey" PRIMARY KEY ("vid_video_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		try{		
-			$sql = 'COMMENT ON COLUMN "public"."vid_videos"."vid_source" IS \'1 - youtube
-			2 - google vid
-			3 - liveleak
-			4 - vimeo
-			5 - blip\';';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-	
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 }
 
 class MultiVideo extends SystemMultiBase {

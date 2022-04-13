@@ -11,9 +11,9 @@ require_once($siteDir . '/includes/SystemClass.php');
 class QueuedEmailException extends SystemClassException {}
 
 class QueuedEmail extends SystemBase {
-	public $prefix = 'equ';
-	public $tablename = 'equ_queued_emails';
-	public $pkey_column = 'equ_queued_email_id';
+	public static $prefix = 'equ';
+	public static $tablename = 'equ_queued_emails';
+	public static $pkey_column = 'equ_queued_email_id';
 	public static $permanent_delete_actions = array(
 		'equ_queued_email_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -50,6 +50,19 @@ class QueuedEmail extends SystemBase {
 		'equ_ers_recurring_email_log_id' => 'Log ID this is linked with',
 	);
 
+	public static $field_specifications = array(
+		'equ_queued_email_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'equ_from_name' => array('type'=>'varchar(70)'),
+		'equ_from' => array('type'=>'varchar(64)'),
+		'equ_to' => array('type'=>'varchar(64)'),
+		'equ_to_name' => array('type'=>'varchar(70)'),
+		'equ_body' => array('type'=>'text'),
+		'equ_subject' => array('type'=>'varchar(128)'),
+		'equ_timestamp' => array('type'=>'timestamp(6)'),
+		'equ_status' => array('type'=>'int2'),
+		'equ_ers_recurring_email_log_id' => array('type'=>'int4'),
+	);
+
 	public static $required_fields = array();
 
 	public static $field_constraints = array();	
@@ -57,7 +70,7 @@ class QueuedEmail extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
-	'equ_timestamp' => 'now()');
+	'equ_timestamp' => 'now()', 'equ_status'=> 0);
 
 	function get_status() {
 		return self::$status_to_text[$this->get('equ_status')];
@@ -130,51 +143,6 @@ class QueuedEmail extends SystemBase {
 	}
 
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS equ_queued_emails_equ_queued_email_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."equ_queued_emails" (
-			  "equ_queued_email_id" int4 NOT NULL DEFAULT nextval(\'equ_queued_emails_equ_queued_email_id_seq\'::regclass),
-			  "equ_from_name" varchar(70) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_from" varchar(64) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_to" varchar(64) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_to_name" varchar(70) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_body" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_subject" varchar(128) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "equ_timestamp" timestamp(6) NOT NULL DEFAULT now(),
-			  "equ_status" int2 DEFAULT (0)::smallint,
-			  "equ_ers_recurring_email_log_id" int4
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."equ_queued_emails" ADD CONSTRAINT "equ_queued_email_id_pkey" PRIMARY KEY ("equ_queued_email_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 }
 
 

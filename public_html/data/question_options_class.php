@@ -15,9 +15,9 @@ require_once($siteDir . '/data/groups_class.php');
 class QuestionOptionException extends SystemClassException {}
 
 class QuestionOption extends SystemBase {
-	public $prefix = 'qop';
-	public $tablename = 'qop_question_options';
-	public $pkey_column = 'qop_question_option_id';
+	public static $prefix = 'qop';
+	public static $tablename = 'qop_question_options';
+	public static $pkey_column = 'qop_question_option_id';
 	public static $permanent_delete_actions = array(
 		'qop_question_option_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -31,6 +31,14 @@ class QuestionOption extends SystemBase {
 		'qop_create_time' => 'Time Created',
 	);
 
+	public static $field_specifications = array(
+		'qop_question_option_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'qop_qst_question_id' => array('type'=>'int4'),
+		'qop_question_option_label' => array('type'=>'varchar(255)'),
+		'qop_question_option_value' => array('type'=>'varchar(255)'),
+		'qop_edited_time' => array('type'=>'timestamp(6)'),
+		'qop_create_time' => array('type'=>'timestamp(6)'),
+	);
 
 	public static $required_fields = array(
 		);
@@ -65,57 +73,6 @@ class QuestionOption extends SystemBase {
 		}
 	}
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS qop_question_options_qop_question_option_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-	
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."qop_question_options" (
-			  "qop_question_option_id" int4 NOT NULL DEFAULT nextval(\'qop_question_options_qop_question_option_id_seq\'::regclass),
-			  "qop_qst_question_id" int4 NOT NULL,
-			  "qop_question_option_label" varchar(255) COLLATE "pg_catalog"."default",
-			  "qop_question_option_value" varchar(255) COLLATE "pg_catalog"."default",
-			  "qop_edited_time" timestamp(6),
-			  "qop_create_time" timestamp(6),
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."qop_question_options" ADD CONSTRAINT "qop_question_options_pkey" PRIMARY KEY ("qop_question_option_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		/*
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY qop_question_options_qop_link ON qop_question_options USING HASH (qop_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		*/
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class SurveyException extends SystemClassException {}
 
 class Survey extends SystemBase {
-	public $prefix = 'svy';
-	public $tablename = 'svy_surveys';
-	public $pkey_column = 'svy_survey_id';
+	public static $prefix = 'svy';
+	public static $tablename = 'svy_surveys';
+	public static $pkey_column = 'svy_survey_id';
 	public static $permanent_delete_actions = array(
 		'svy_survey_id' => 'delete',	
 		'srq_svy_survey_id' => 'prevent',
@@ -29,6 +29,14 @@ class Survey extends SystemBase {
 		'svy_delete_time' => 'Time of deletion',
 	);
 
+	public static $field_specifications = array(
+		'svy_survey_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'svy_name' => array('type'=>'varchar(255)'),
+		'svy_edited_time' => array('type'=>'timestamp(6)'),
+		'svy_create_time' => array('type'=>'timestamp(6)'),
+		'svy_delete_time' => array('type'=>'timestamp(6)'),
+	);
+	
 	public static $required_fields = array(
 		);
 
@@ -65,59 +73,6 @@ class Survey extends SystemBase {
 			}
 		}
 	}
-
-
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS svy_surveys_svy_survey_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-	
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."svy_surveys" (
-			  "svy_survey_id" int4 NOT NULL DEFAULT nextval(\'svy_surveys_svy_survey_id_seq\'::regclass),
-			  "svy_name" varchar(255) COLLATE "pg_catalog"."default",
-			  "svy_edited_time" timestamp(6),
-			  "svy_create_time" timestamp(6),
-			  "svy_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."svy_surveys" ADD CONSTRAINT "svy_surveys_pkey" PRIMARY KEY ("svy_survey_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		/*
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY svy_surveys_svy_link ON svy_surveys USING HASH (svy_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		*/
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

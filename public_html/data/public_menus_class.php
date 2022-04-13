@@ -13,9 +13,9 @@ require_once($siteDir . '/includes/Validator.php');
 class PublicMenuException extends SystemClassException {}
 
 class PublicMenu extends SystemBase {
-	public $prefix = 'pmu';
-	public $tablename = 'pmu_public_menus';
-	public $pkey_column = 'pmu_public_menu_id';
+	public static $prefix = 'pmu';
+	public static $tablename = 'pmu_public_menus';
+	public static $pkey_column = 'pmu_public_menu_id';
 	public static $permanent_delete_actions = array(
 		'pmu_public_menu_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -28,7 +28,15 @@ class PublicMenu extends SystemBase {
 		'pmu_parent_menu_id' => 'pmu_public_menu_id of parent if a subitem',
 		'pmu_order' => 'Order of appearance'
 	);
-	
+
+	public static $field_specifications = array(
+		'pmu_public_menu_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'pmu_name' => array('type'=>'varchar(100)'),
+		'pmu_link' => array('type'=>'varchar(100)'),
+		'pmu_is_active' => array('type'=>'bool'),
+		'pmu_parent_menu_id' => array('type'=>'int4'),
+		'pmu_order' => array('type'=>'int2'),
+	);	
 
 	public static $required_fields = array(
 		'pmu_name', 'pmu_link');
@@ -52,47 +60,6 @@ class PublicMenu extends SystemBase {
 
 	}
 
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS pmu_public_menus_pmu_public_menu_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."pmu_public_menus" (
-			  "pmu_public_menu_id" int4 NOT NULL DEFAULT nextval(\'pmu_public_menus_pmu_public_menu_id_seq\'::regclass),
-			  "pmu_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "pmu_link" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "pmu_is_active" bool,
-			  "pmu_parent_menu_id" int4,
-			  "pmu_order" int2
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."pmu_public_menus" ADD CONSTRAINT "pmu_public_menus_pkey" PRIMARY KEY ("pmu_public_menu_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 }
 
 class MultiPublicMenu extends SystemMultiBase {

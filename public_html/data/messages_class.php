@@ -10,9 +10,9 @@ class MessageException extends SystemClassException {}
 class MessageNotSentException extends MessageException {};
 
 class Message extends SystemBase {
-	public $prefix = 'msg';
-	public $tablename = 'msg_messages';
-	public $pkey_column = 'msg_message_id';
+	public static $prefix = 'msg';
+	public static $tablename = 'msg_messages';
+	public static $pkey_column = 'msg_message_id';
 	public static $permanent_delete_actions = array(
 		'msg_message_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -25,6 +25,16 @@ class Message extends SystemBase {
 		'msg_body' => 'The message',
 		'msg_sent_time' => 'Time_sent',
 		'msg_delete_time' => 'Time of deletion',
+	);
+
+	public static $field_specifications = array(
+		'msg_message_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'msg_usr_user_id_recipient' => array('type'=>'int4'),
+		'msg_usr_user_id_sender' => array('type'=>'int4'),
+		'msg_evt_event_id' => array('type'=>'int4'),
+		'msg_body' => array('type'=>'text'),
+		'msg_sent_time' => array('type'=>'timestamp(6)'),
+		'msg_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
 	public static $required_fields = array();
@@ -59,52 +69,6 @@ class Message extends SystemBase {
 	}
 
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS msg_messages_msg_message_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."msg_messages" (
-			  "msg_message_id" int4 NOT NULL DEFAULT nextval(\'msg_messages_msg_message_id_seq\'::regclass),
-			  "msg_usr_user_id_recipient" int4,
-			  "msg_usr_user_id_sender" int4,
-			  "msg_evt_event_id" int4,
-			  "msg_body" text COLLATE "pg_catalog"."default" NOT NULL,
-			  "msg_sent_time" timestamp(6) NOT NULL DEFAULT now(),
-			  "msg_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."msg_messages" ADD CONSTRAINT "msg_messages_pkey" PRIMARY KEY ("msg_message_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
-
-
-
-
 }
 
 class MultiMessage extends SystemMultiBase {

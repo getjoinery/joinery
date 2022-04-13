@@ -14,9 +14,9 @@ require_once($siteDir . '/data/order_items_class.php');
 class OrderException extends SystemClassException {}
 
 class Order extends SystemBase {
-	public $prefix = 'ord';
-	public $tablename = 'ord_orders';
-	public $pkey_column = 'ord_order_id';
+	public static $prefix = 'ord';
+	public static $tablename = 'ord_orders';
+	public static $pkey_column = 'ord_order_id';
 	public static $permanent_delete_actions = array(
 		'ord_order_id' => 'delete',	
 		'odi_ord_order_id' => 'delete',
@@ -47,6 +47,26 @@ class Order extends SystemBase {
 		'ord_refund_note' => '***DEPRECATED***Note for the refund',
 		'ord_stripe_charge_id' => 'Charge ID from stripe',
 		'ord_stripe_invoice_id' => 'Stripe invoice for subscriptions'
+	);
+
+	public static $field_specifications = array(
+		'ord_order_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'ord_usr_user_id' => array('type'=>'int4'),
+		'ord_timestamp' => array('type'=>'timestamp(6)'),
+		'ord_total_cost' => array('type'=>'numeric(10,2)'),
+		'ord_billing_address_id' => array('type'=>'int4'),
+		'ord_stripe_session_id' => array('type'=>'varchar(70)'),
+		'ord_stripe_payment_intent_id' => array('type'=>'varchar(32)'),
+		'ord_raw_response' => array('type'=>'text'),
+		'ord_raw_cart' => array('type'=>'text'),
+		'ord_serialized_cart' => array('type'=>'text'),
+		'ord_status' => array('type'=>'int4'),
+		'ord_error' => array('type'=>'varchar(255)'),
+		'ord_refund_amount' => array('type'=>'int4'),
+		'ord_refund_time' => array('type'=>'timestamp(6)'), 
+		'ord_refund_note' => array('type'=>'varchar(255)'),
+		'ord_stripe_charge_id' => array('type'=>'varchar(64)'),
+		'ord_stripe_invoice_id' => array('type'=>'varchar(64)'),
 	);
 
 	public static $required_fields = array();
@@ -151,58 +171,6 @@ class Order extends SystemBase {
 		return $multi_order_item;
 	}
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS ord_orders_ord_order_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."ord_orders" (
-			  "ord_order_id" int4 NOT NULL DEFAULT nextval(\'ord_orders_ord_order_id_seq\'::regclass),
-			  "ord_usr_user_id" int4,
-			  "ord_total_cost" numeric(10,2),
-			  "ord_timestamp" timestamp(6) DEFAULT now(),
-			  "ord_raw_response" text COLLATE "pg_catalog"."default",
-			  "ord_billing_address_id" int4,
-			  "ord_stripe_session_id" varchar(64) COLLATE "pg_catalog"."default",
-			  "ord_stripe_payment_intent_id" varchar(32) COLLATE "pg_catalog"."default",
-			  "ord_raw_cart" text COLLATE "pg_catalog"."default",
-			  "ord_serialized_cart" text COLLATE "pg_catalog"."default",
-			  "ord_status" int4, 
-			  "ord_error" varchar(255) COLLATE "pg_catalog"."default",
-			  "ord_refund_amount" => int4,
-			  "ord_refund_time" => timestamp(6),
-			  "ord_refund_note" varchar(255),
-			  "ord_stripe_charge_id" varchar(64),
-			  "ord_stripe_invoice_id" varchar(64)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."ord_orders" ADD CONSTRAINT "ord_orders_pkey" PRIMARY KEY ("ord_order_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}			
 }
 
 

@@ -14,9 +14,9 @@ require_once($siteDir . '/data/group_members_class.php');
 class GroupException extends SystemClassException {}
 
 class Group extends SystemBase {
-	public $prefix = 'grp';
-	public $tablename = 'grp_groups';
-	public $pkey_column = 'grp_group_id';
+	public static $prefix = 'grp';
+	public static $tablename = 'grp_groups';
+	public static $pkey_column = 'grp_group_id';
 	public static $permanent_delete_actions = array(
 		'grp_group_id' => 'delete',	
 		'evr_grp_group_id' => 'prevent',
@@ -39,7 +39,16 @@ class Group extends SystemBase {
 		'grp_delete_time' => 'Is this group deleted?',
 		'grp_type' => 'Type of group:  1-user, 2-event, 3-post'
 	);
-	
+
+	public static $field_specifications = array(
+		'grp_group_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'grp_name' => array('type'=>'varchar(100)'),
+		'grp_usr_user_id_created' => array('type'=>'int4'),
+		'grp_create_time' => array('type'=>'timestamp()'),
+		'grp_update_time' => array('type'=>'timestamp()'),
+		'grp_delete_time' => array('type'=>'timestamp()'),
+		'grp_type' => array('type'=>'int2'),
+	);	
 
 	public static $required_fields = array(
 		'grp_name');
@@ -233,47 +242,6 @@ class Group extends SystemBase {
 	}
 	
 
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS grp_groups_grp_group_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."grp_groups" (
-			  "grp_group_id" int4 NOT NULL DEFAULT nextval(\'grp_groups_grp_group_id_seq\'::regclass),
-			  "grp_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "grp_usr_user_id_created" int4,
-			  "grp_create_time" timestamp(6) NOT NULL,
-			  "grp_update_time" timestamp(6),
-			  "grp_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."grp_groups" ADD CONSTRAINT "grp_groups_pkey" PRIMARY KEY ("grp_group_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 }
 
 class MultiGroup extends SystemMultiBase {

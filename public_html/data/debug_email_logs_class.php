@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class DebugEmailLogException extends SystemClassException {}
 
 class DebugEmailLog extends SystemBase {
-	public $prefix = 'del';
-	public $tablename = 'del_debug_email_logs';
-	public $pkey_column = 'del_debug_email_log_id';
+	public static $prefix = 'del';
+	public static $tablename = 'del_debug_email_logs';
+	public static $pkey_column = 'del_debug_email_log_id';
 	public static $permanent_delete_actions = array(
 		'del_debug_email_log_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -27,6 +27,14 @@ class DebugEmailLog extends SystemBase {
 		'del_create_time' => 'Time added',
 	);
 
+	public static $field_specifications = array(
+		'del_debug_email_log_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'del_subject' => array('type'=>'varchar(255)'),
+		'del_recipient_email' => array('type'=>'varchar(255)'),
+		'del_body' => array('type'=>'text'),
+		'del_create_time' =>  array('type'=>'timestamp(6)'),
+	);
+			
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
@@ -36,47 +44,6 @@ class DebugEmailLog extends SystemBase {
 	public static $initial_default_values = array(
 	'del_create_time'=> 'now()',);
 	
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS del_debug_email_log_del_debug_email_log_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-	
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."del_debug_email_logs" (
-			  "del_debug_email_log_id" int4 NOT NULL DEFAULT nextval(\'del_debug_email_log_del_debug_email_log_id_seq\'::regclass),
-			  "del_subject" varchar(255),
-			  "del_recipient_email" varchar(255),
-			  "del_body" text,
-			  "del_create_time" timestamp(6) NOT NULL DEFAULT now()
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."del_debug_email_logs" ADD CONSTRAINT "del_debug_email_logs_pkey" PRIMARY KEY ("del_debug_email_log_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 }
 
 class MultiDebugEmailLog extends SystemMultiBase {

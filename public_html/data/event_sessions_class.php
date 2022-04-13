@@ -9,6 +9,8 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 
 require_once($siteDir . '/data/event_registrants_class.php');
+require_once($siteDir . '/data/event_session_files_class.php');
+require_once($siteDir . '/data/session_analytics_class.php');
 
 require_once($siteDir . '/includes/calendar-links/Link.php');
 require_once($siteDir . '/includes/calendar-links/Generator.php');
@@ -43,9 +45,9 @@ class EventSessionsUnviewableDisplayException extends EventSessionsException imp
 */
 
 class EventSession extends SystemBase {
-	public $prefix = 'evs';
-	public $tablename = 'evs_event_sessions';
-	public $pkey_column = 'evs_event_session_id';
+	public static $prefix = 'evs';
+	public static $tablename = 'evs_event_sessions';
+	public static $pkey_column = 'evs_event_session_id';
 	public static $permanent_delete_actions = array(
 		'evs_event_session_id' => 'delete',	
 		'sev_evs_event_session_id' => 'delete',
@@ -70,7 +72,24 @@ class EventSession extends SystemBase {
 		'evs_delete_time' => 'Time of deletion',
 		); 
 
-
+	public static $field_specifications = array(
+		'evs_event_session_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'evs_evt_event_id' => array('type'=>'int4'),
+		'evs_title' => array('type'=>'varchar(255)'),
+		'evs_content' => array('type'=>'text'),
+		'evs_start_time' => array('type'=>'timestamp(6)'),
+		'evs_start_time_local' => array('type'=>'timestamp(6)'),
+		'evs_end_time' => array('type'=>'timestamp(6)'),
+		'evs_end_time_local' => array('type'=>'timestamp(6)'),
+		'evs_links' => array('type'=>'text'),
+		'evs_picture_link' => array('type'=>'varchar(255)'),
+		'evs_is_public' => array('type'=>'bool'),
+		'evs_order' => array('type'=>'int2'),
+		'evs_vid_video_id' => array('type'=>'int4'),
+		'evs_session_number' => array('type'=>'int2'),
+		'evs_delete_time' => array('type'=>'timestamp(6)'),
+		); 
+			 	
 	public static $required_fields = array(
 		'evs_evt_event_id'
 	);
@@ -95,9 +114,6 @@ class EventSession extends SystemBase {
 		);
 
 
-	public static $public_actions = array(
-		'togglepublic' => array('w' => TRUE),
-	);
 	
 	function get_url() {
 		return '/event/' . $this->key . '/' . str_replace(' ', '-', $this->get('evs_name'));
@@ -379,129 +395,6 @@ class EventSession extends SystemBase {
 		}
 	}	
 
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS evs_event_sessions_evs_event_session_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."evs_event_sessions" (
-			  "evs_event_session_id" int4 NOT NULL DEFAULT nextval(\'evs_event_sessions_evs_event_session_id_seq\'::regclass),
-			  "evs_evt_event_id" int4 NOT NULL,
-			  "evs_content" text COLLATE "pg_catalog"."default",
-			  "evs_video" text COLLATE "pg_catalog"."default",
-			  "evs_start_time" timestamp(6),
-			  "evs_start_time_local" timestamp(6),
-			  "evs_end_time" timestamp(6),
-			  "evs_end_time_local" timestamp(6),
-			  "evs_links" text COLLATE "pg_catalog"."default",
-			  "evs_picture_link" varchar(255) COLLATE "pg_catalog"."default",
-			  "evs_is_public" bool,
-			  "evs_order" int2,
-			  "evs_vid_video_id" int4,
-			  "evs_title" varchar(255) COLLATE "pg_catalog"."default",
-			  "evs_session_number" int2,
-			  "evs_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."evs_event_sessions" ADD CONSTRAINT "evs_event_sessions_pkey" PRIMARY KEY ("evs_event_session_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS esf_event_session_files_esf_event_session_file_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."esf_event_session_files" (
-			  "esf_event_session_file_id" int4 NOT NULL DEFAULT nextval(\'esf_event_session_files_esf_event_session_file_id_seq\'::regclass),
-			  "esf_evs_event_session_id" int4 NOT NULL,
-			  "esf_fil_file_id" int4 NOT NULL
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."esf_event_session_files" ADD CONSTRAINT "esf_event_session_files_pkey" PRIMARY KEY ("esf_event_session_file_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		
-		
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS sev_session_analytics_sev_session_analytic_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."sev_session_analytics" (
-			  "sev_session_analytic_id" int4 NOT NULL DEFAULT nextval(\'sev_session_analytics_sev_session_analytic_id_seq\'::regclass),
-			  "sev_usr_user_id" int4,
-			  "sev_evt_event_id" int4,
-			  "sev_evs_event_session_id" int4,
-			  "sev_type" int2,
-			  "sev_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."sev_session_analytics" ADD CONSTRAINT "sev_session_analytics_pkey" PRIMARY KEY ("sev_session_analytic_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}		
-		
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 
 }
 

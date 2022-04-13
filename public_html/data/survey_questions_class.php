@@ -15,9 +15,9 @@ require_once($siteDir.'/data/users_class.php');
 class SurveyQuestionException extends SystemClassException {}
 
 class SurveyQuestion extends SystemBase {
-	public $prefix = 'srq';
-	public $tablename = 'srq_survey_questions';
-	public $pkey_column = 'srq_survey_question_id';
+	public static $prefix = 'srq';
+	public static $tablename = 'srq_survey_questions';
+	public static $pkey_column = 'srq_survey_question_id';
 	public static $permanent_delete_actions = array(
 		'srq_survey_question_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -30,6 +30,14 @@ class SurveyQuestion extends SystemBase {
 		'srq_delete_time' => 'Time of deletion',
 	);
 
+	public static $field_specifications = array(
+		'srq_survey_question_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'srq_svy_survey_id' => array('type'=>'int4'),
+		'srq_qst_question_id' => array('type'=>'int4'),
+		'srq_order' => array('type'=>'int4'),
+		'srq_delete_time' => array('type'=>'timestamp(6)'),
+	);
+	
 	public static $required_fields = array('srq_svy_survey_id', 'srq_qst_question_id');
 
 	public static $field_constraints = array();	
@@ -85,47 +93,6 @@ class SurveyQuestion extends SystemBase {
 		}
 		parent::save();
 	}
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS srq_survey_questions_srq_survey_question_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."srq_survey_questions" (
-			  "srq_survey_question_id" int4 NOT NULL DEFAULT nextval(\'srq_survey_questions_srq_survey_question_id_seq\'::regclass),
-			  "srq_svy_survey_id" int4 NOT NULL,
-			  "srq_qst_question_id" int4 NOT NULL,
-			  "srq_order" int4,
-			  "srq_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."srq_survey_questions" ADD CONSTRAINT "srq_survey_questions_pkey" PRIMARY KEY ("srq_survey_question_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

@@ -11,6 +11,8 @@ require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/data/groups_class.php');
 require_once($siteDir . '/data/address_class.php');
 require_once($siteDir . '/data/phone_number_class.php'); 
+require_once($siteDir . '/data/activation_codes_class.php'); 
+require_once($siteDir . '/data/visitor_events_class.php');
 
 $settings = Globalvars::get_instance();
 $composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -21,9 +23,9 @@ class UserException extends SystemClassException {}
 class DisplayableUserException extends UserException implements DisplayableErrorMessage {}
 
 class User extends SystemBase {
-	public $prefix = 'usr';
-	public $tablename = 'usr_users';
-	public $pkey_column = 'usr_user_id';
+	public static $prefix = 'usr';
+	public static $tablename = 'usr_users';
+	public static $pkey_column = 'usr_user_id';
 	
 	// Constants for contact preferences
 	const NEWSLETTER = 1; 
@@ -74,6 +76,35 @@ class User extends SystemBase {
 		'usr_password_recovery_disabled' => 'When TRUE, password recovery is disabled.'
 	);
 
+	public static $field_specifications = array(
+		'usr_user_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'usr_first_name' => array('type'=>'varchar(32)'),
+		'usr_last_name' => array('type'=>'varchar(32)'),
+		'usr_email' => array('type'=>'varchar(64)'),
+		'usr_signup_date' => array('type'=>'date'),
+		'usr_password' => array('type'=>'character(34)'),
+		'usr_permission' => array('type'=>'int4'),
+		'usr_timezone' => array('type'=>'varchar(32)'),
+		'usr_email_is_verified' => array('type'=>'bool'),
+		'usr_email_is_verified_time' => array('type'=>'timestamp(6)'),
+		'usr_is_activated' => array('type'=>'bool'),
+		'usr_is_disabled' => array('type'=>'bool'),
+		'usr_lastlogin_time' => array('type'=>'timestamp(6)'),
+		'usr_pic_picture_id' => array('type'=>'int4'),
+		'usr_phn_phone_number_id' => array('type'=>'int4'),
+		'usr_contact_preferences' => array('type'=>'varchar(32)'),
+		'usr_disabled_time' => array('type'=>'timestamp(6)'),
+		'usr_nickname' => array('type'=>'varchar(32)'),
+		'usr_authhash' => array('type'=>'varchar(32)'),
+		'usr_stripe_customer_id' => array('type'=>'varchar(32)'),
+		'usr_mailchimp_user_id' => array('type'=>'varchar(64)'),
+		'usr_signup_ip' => array('type'=>'varchar(64)'),
+		'usr_contact_preference_last_changed' => array('type'=>'timestamp(6)'),
+		'usr_organization_name' => array('type'=>'varchar(32)'),
+		'usr_delete_time' => array('type'=>'timestamp(6)'),
+		'usr_password_recovery_disabled' => array('type'=>'bool'),
+	);
+	
 	public static $timestamp_fields = array(
 		'usr_email_is_verified_time', 'usr_lastlogin_time', 'usr_admin_disabled_time',
 		'usr_signup_date');
@@ -114,9 +145,6 @@ class User extends SystemBase {
 		'usr_lastlogin_time' => 'now()',
 	);
 
-	public static $public_actions = array(
-		'defaultaddressforsession' => array(),
-	);
 
 	private static function UcName($string) {
 		$test_string = preg_replace('/[^A-Za-z]/', '', $string);
@@ -955,9 +983,6 @@ class User extends SystemBase {
 		
 	}
 
-	static function GetPublicActions() {
-		return self::$public_actions;
-	}
 
 	static function DefaultAddressForSession($session, $request) {
 		if ($session->get_user_id()) {
@@ -972,148 +997,7 @@ class User extends SystemBase {
 		}
 	}
 	
-	//BECAUSE USERS IS THE PRIMARY CLASS, WE PUT ALL OF THE NECESSARY TABLES HERE
-	//TODO: THIS IS A WORK IN PROGRESS
-	static function InitDB($mode='structure'){
 
-
-
-		//USERS
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS usr_users_usr_user_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();	
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."usr_users" (
-			  "usr_user_id" int8 NOT NULL DEFAULT nextval(\'usr_users_usr_user_id_seq\'::regclass),
-			  "usr_first_name" varchar(32) COLLATE "pg_catalog"."default",
-			  "usr_last_name" varchar(32) COLLATE "pg_catalog"."default",
-			  "usr_email" varchar(64) COLLATE "pg_catalog"."default",
-			  "usr_signup_date" date,
-			  "usr_password" char(34) COLLATE "pg_catalog"."default",
-			  "usr_permission" int4,
-			  "usr_timezone" varchar(32) COLLATE "pg_catalog"."default",
-			  "usr_email_is_verified" bool,
-			  "usr_is_activated" bool,
-			  "usr_is_disabled" bool NOT NULL DEFAULT false,
-			  "usr_lastlogin_time" timestamp(6),
-			  "usr_pic_picture_id" int8,
-			  "usr_phn_phone_number_id" int8,
-			  "usr_contact_preferences" varchar(32) COLLATE "pg_catalog"."default",
-			  "usr_disabled_time" timestamp(6),
-			  "usr_email_is_verified_time" timestamp(6),
-			  "usr_nickname" varchar(128) COLLATE "pg_catalog"."default",
-			  "usr_stripe_customer_id" varchar(32) COLLATE "pg_catalog"."default",
-			  "usr_authhash" varchar(32) COLLATE "pg_catalog"."default",
-			  "usr_mailchimp_user_id" varchar(64) COLLATE "pg_catalog"."default",
-			  "usr_signup_ip" varchar(64) COLLATE "pg_catalog"."default",
-			  "usr_contact_preference_last_changed" timestamp(6),
-			  "usr_delete_time" timestamp(6),
-			  "usr_password_recovery_disabled" boolean,
-			  "usr_organization_name" varchar(32)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."usr_users" ADD CONSTRAINT "usr_users_pkey" PRIMARY KEY ("usr_user_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		
-		try{
-			$sql = 'CREATE UNIQUE INDEX "act_code_unique_non_deleted_index" ON "public"."act_activation_codes" USING btree (
-			  "act_code" COLLATE "pg_catalog"."default" "pg_catalog"."bpchar_ops" ASC NULLS LAST
-			) WHERE act_deleted = false;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}	
-
-		
-		
-		//ACTIVATION CODES
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."act_activation_codes" (
-			  "act_usr_email" varchar(128) COLLATE "pg_catalog"."default",
-			  "act_code" char(12) COLLATE "pg_catalog"."default" NOT NULL,
-			  "act_expires_time" timestamp(6),
-			  "act_usr_user_id" int4,
-			  "act_purpose" int2 NOT NULL DEFAULT 0,
-			  "act_created_time" timestamp(6) NOT NULL DEFAULT now(),
-			  "act_phn_phone_number_id" int4,
-			  "act_deleted" bool NOT NULL DEFAULT false
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'COMMENT ON COLUMN "public"."act_activation_codes"."act_purpose" IS \'0=none
-			1=pic upload
-			2=email verify
-			3=phone verify\';';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		
-		try{
-			$sql = 'CREATE UNIQUE INDEX "act_code_unique_non_deleted_index" ON "public"."act_activation_codes" USING btree (
-			  "act_code" COLLATE "pg_catalog"."default" "pg_catalog"."bpchar_ops" ASC NULLS LAST
-			) WHERE act_deleted = false;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}		
-
-		//VISITOR EVENTS
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."vse_visitor_events" (
-		  "vse_visitor_id" varchar(20) COLLATE "pg_catalog"."default",
-		  "vse_usr_user_id" int4,
-		  "vse_type" int2,
-		  "vse_ip" varchar(64) COLLATE "pg_catalog"."default",
-		  "vse_page" varchar(255) COLLATE "pg_catalog"."default",
-		  "vse_referrer" varchar(255) COLLATE "pg_catalog"."default",
-		  "vse_source" varchar(255) COLLATE "pg_catalog"."default",
-		  "vse_campaign" varchar(255) COLLATE "pg_catalog"."default",
-		  "vse_timestamp" timestamp(6) DEFAULT now(),
-		  "vse_medium" varchar(255) COLLATE "pg_catalog"."default",
-		  "vse_content" varchar(255) COLLATE "pg_catalog"."default",
-		  "vse_is_404" bool
-		)
-		;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-
-		
-
-	
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}
 }
 
 

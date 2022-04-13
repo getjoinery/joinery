@@ -15,9 +15,9 @@ require_once($siteDir . '/data/groups_class.php');
 class CouponCodeProductException extends SystemClassException {}
 
 class CouponCodeProduct extends SystemBase {
-	public $prefix = 'ccp';
-	public $tablename = 'ccp_coupon_code_products';
-	public $pkey_column = 'ccp_coupon_code_product_id';
+	public static $prefix = 'ccp';
+	public static $tablename = 'ccp_coupon_code_products';
+	public static $pkey_column = 'ccp_coupon_code_product_id';
 	public static $permanent_delete_actions = array(
 		'ccp_coupon_code_product_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -26,6 +26,12 @@ class CouponCodeProduct extends SystemBase {
 		'ccp_coupon_code_product_id' => 'ID of the coupon_code_product',
 		'ccp_ccd_coupon_code_id' => 'Coupon id',
 		'ccp_pro_product_id' => 'Product id',
+	);
+
+	public static $field_specifications = array(
+		'ccp_coupon_code_product_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'ccp_ccd_coupon_code_id' =>  array('type'=>'int4'),
+		'ccp_pro_product_id' =>  array('type'=>'int4'),
 	);
 
 	public static $required_fields = array(
@@ -63,55 +69,6 @@ class CouponCodeProduct extends SystemBase {
 		}
 	}
 
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS ccp_coupon_code_products_ccp_coupon_code_product_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-	
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."ccp_coupon_code_products" (
-			  "ccp_coupon_code_product_id" int4 NOT NULL DEFAULT nextval(\'ccp_coupon_code_products_ccp_coupon_code_product_id_seq\'::regclass),
-			  "ccp_ccd_coupon_code_id" int4 NOT NULL,
-			  "ccp_pro_product_id" varchar(255) COLLATE "pg_catalog"."default"
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."ccp_coupon_code_products" ADD CONSTRAINT "ccp_coupon_code_products_pkey" PRIMARY KEY ("ccp_coupon_code_product_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		/*
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY ccp_coupon_code_products_ccp_link ON ccp_coupon_code_products USING HASH (ccp_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		*/
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

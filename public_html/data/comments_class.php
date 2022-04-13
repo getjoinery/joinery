@@ -11,9 +11,9 @@ class CommentNotSentException extends CommentException {};
 
 class Comment extends SystemBase {
 
-	public $prefix = 'cmt';
-	public $tablename = 'cmt_comments';
-	public $pkey_column = 'cmt_comment_id';
+	public static $prefix = 'cmt';
+	public static $tablename = 'cmt_comments';
+	public static $pkey_column = 'cmt_comment_id';
 
 	public static $fields = array(
 		'cmt_comment_id' => 'Comment id',
@@ -26,6 +26,19 @@ class Comment extends SystemBase {
 		'cmt_is_approved' => 'Is it deleted',
 		'cmt_delete_time' => 'Time of deletion',
 	);
+
+	public static $field_specifications = array(
+		'cmt_comment_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'cmt_comment_id_parent' => array('type'=>'int4'),
+		'cmt_usr_user_id' => array('type'=>'int4'),
+		'cmt_author_name' => array('type'=>'varchar(255)'),
+		'cmt_pst_post_id' => array('type'=>'int4'),
+		'cmt_body' => array('type'=>'text'),
+		'cmt_created_time' => array('type'=>'timestamp(6)'),
+		'cmt_is_approved' => array('type'=>'bool'),
+		'cmt_delete_time' => array('type'=>'timestamp(6)'),
+	);
+
 
 	public static $timestamp_fields = array(
 		'usr_email_is_verified_time', 'usr_lastlogin_time', 'usr_admin_disabled_time',
@@ -137,53 +150,6 @@ class Comment extends SystemBase {
 		return $comment;
 	}
 		
-
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS cmt_comments_cmt_comment_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."cmt_comments" (
-			  "cmt_comment_id" int4 NOT NULL DEFAULT nextval(\'cmt_comments_cmt_comment_id_seq\'::regclass),
-			  "cmt_comment_id_parent" int4,
-			  "cmt_usr_user_id" int4,
-			  "cmt_pst_post_id" int4 NOT NULL,
-			  "cmt_body" text COLLATE "pg_catalog"."default",
-			  "cmt_created_time" timestamp(6),
-			  "cmt_is_approved" bool DEFAULT false,
-			  "cmt_author_name" varchar(255) COLLATE "pg_catalog"."default",
-			  "cmt_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."cmt_comments" ADD CONSTRAINT "cmt_comments_pkey" PRIMARY KEY ("cmt_comment_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}
-
-
 
 
 }

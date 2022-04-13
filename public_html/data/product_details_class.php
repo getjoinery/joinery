@@ -10,9 +10,9 @@ class ProductDetailException extends SystemClassException {}
 class ProductDetailNotSentException extends ProductDetailException {};
 
 class ProductDetail extends SystemBase {
-	public $prefix = 'prd';
-	public $tablename = 'prd_product_details';
-	public $pkey_column = 'prd_product_detail_id';
+	public static $prefix = 'prd';
+	public static $tablename = 'prd_product_details';
+	public static $pkey_column = 'prd_product_detail_id';
 	public static $permanent_delete_actions = array(
 		'prd_product_detail_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -26,7 +26,16 @@ class ProductDetail extends SystemBase {
 		'prd_num_used' => 'Number of sessions used',
 		'prd_notes' => 'notes',
 	);
-	
+
+	public static $field_specifications = array(
+		'prd_product_detail_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'prd_pro_product_id' => array('type'=>'int4'),
+		'prd_prv_product_version_id' => array('type'=>'int4'),
+		'prd_usr_user_id' => array('type'=>'int4'),
+		'prd_num_sessions' => array('type'=>'int4'),
+		'prd_num_used' => array('type'=>'int4'),
+		'prd_notes' => array('type'=>'text'),
+	);	
 	public static $required_fields = array();
 
 	public static $field_constraints = array();	
@@ -40,50 +49,6 @@ class ProductDetail extends SystemBase {
 		$current_user = $session->get_user_id();
 
 	}
-
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS prd_product_details_prd_product_detail_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."prd_product_details" (
-			  "prd_product_detail_id" int4 NOT NULL DEFAULT nextval(\'prd_product_details_prd_product_detail_id_seq\'::regclass),
-			  "prd_pro_product_id" int4,
-			  "prd_prv_product_version_id" int4,
-			  "prd_usr_user_id" int4 NOT NULL,
-			  "prd_num_sessions" int4,
-			  "prd_num_used" int4 NOT NULL DEFAULT 0,
-			  "prd_notes" text COLLATE "pg_catalog"."default"
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."prd_product_details" ADD CONSTRAINT "prd_product_details_pkey" PRIMARY KEY ("prd_product_detail_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
-
 
 
 

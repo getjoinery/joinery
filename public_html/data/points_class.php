@@ -10,9 +10,9 @@ class PointException extends SystemClassException {}
 class PointNotSentException extends PointException {};
 
 class Point extends SystemBase {
-	public $prefix = 'pnt';
-	public $tablename = 'pnt_points';
-	public $pkey_column = 'pnt_point_id';
+	public static $prefix = 'pnt';
+	public static $tablename = 'pnt_points';
+	public static $pkey_column = 'pnt_point_id';
 	public static $permanent_delete_actions = array(
 		'pnt_point_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	

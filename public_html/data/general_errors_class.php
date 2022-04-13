@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class GeneralErrorException extends SystemClassException {}
 
 class GeneralError extends SystemBase {
-	public $prefix = 'err';
-	public $tablename = 'err_general_errors';
-	public $pkey_column = 'err_general_error_id';
+	public static $prefix = 'err';
+	public static $tablename = 'err_general_errors';
+	public static $pkey_column = 'err_general_error_id';
 	public static $permanent_delete_actions = array(
 		'err_general_error_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -34,6 +34,21 @@ class GeneralError extends SystemBase {
 		'err_create_time' => '',
 	);
 
+	public static $field_specifications = array(
+		'err_general_error_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'err_error' => array('type'=>'varchar(255)'),
+		'err_code' => array('type'=>'varchar(32)'),
+		'err_usr_user_id' => array('type'=>'int4'),
+		'err_description' => array('type'=>'varchar(255)'),
+		'err_file' => array('type'=>'varchar(255)'),
+		'err_line' => array('type'=>'varchar(32)'),
+		'err_context' => array('type'=>'text'),
+		'err_path' => array('type'=>'varchar(255)'),
+		'err_message' => array('type'=>'varchar(255)'),
+		'err_level' => array('type'=>'varchar(255)'),
+		'err_create_time' => array('type'=>'timestamp(6)'),
+	);
+			
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
@@ -74,62 +89,7 @@ class GeneralError extends SystemBase {
 		}
 		$error->save();
 	}
-	
-
-	/*
-	public static function GetPublicActions() { 
-		return self::$public_actions;
-	}
-	*/
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS err_general_errors_err_general_error_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."err_general_errors" (
-			  "err_general_error_id" int4 DEFAULT nextval(\'err_general_errors_err_general_error_id_seq\'::regclass),
-			  "err_usr_user_id" int4,
-			  "err_create_time" timestamp(6) NOT NULL DEFAULT now(),
-			  "err_code" varchar(32) COLLATE "pg_catalog"."default",
-			  "err_error" varchar COLLATE "pg_catalog"."default",
-			  "err_description" varchar COLLATE "pg_catalog"."default",
-			  "err_file" varchar COLLATE "pg_catalog"."default",
-			  "err_line" varchar(32) COLLATE "pg_catalog"."default",
-			  "err_context" text COLLATE "pg_catalog"."default",
-			  "err_path" varchar COLLATE "pg_catalog"."default",
-			  "err_message" varchar COLLATE "pg_catalog"."default",
-			  "err_level" varchar(255) COLLATE "pg_catalog"."default"
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-
 		
-		try{		
-			$sql = 'ALTER TABLE "public"."err_general_errors" ADD CONSTRAINT "err_general_errors_pkey" PRIMARY KEY ("err_general_error_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 }
 
 class MultiGeneralError extends SystemMultiBase {

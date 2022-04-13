@@ -15,9 +15,9 @@ require_once($siteDir.'/data/users_class.php');
 class GroupMemberException extends SystemClassException {}
 
 class GroupMember extends SystemBase {
-	public $prefix = 'grm';
-	public $tablename = 'grm_group_members';
-	public $pkey_column = 'grm_group_member_id';
+	public static $prefix = 'grm';
+	public static $tablename = 'grm_group_members';
+	public static $pkey_column = 'grm_group_member_id';
 	public static $permanent_delete_actions = array(
 		'grm_group_member_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -29,7 +29,14 @@ class GroupMember extends SystemBase {
 		'grm_evt_event_id' => 'Event in group',
 		'grm_pst_post_id' => 'Post in group'
 	);
-	
+
+	public static $field_specifications = array(
+		'grm_group_member_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'grm_grp_group_id' => array('type'=>'int4'),
+		'grm_usr_user_id' => array('type'=>'int4'),
+		'grm_evt_event_id' => array('type'=>'int4'),
+		'grm_pst_post_id' => array('type'=>'int4'),
+	);	
 
 	public static $required_fields = array('grm_grp_group_id');
 
@@ -118,47 +125,7 @@ class GroupMember extends SystemBase {
 		parent::save();
 	}
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS grm_group_members_grm_group_member_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."grm_group_members" (
-			  "grm_group_member_id" int4 NOT NULL DEFAULT nextval(\'grm_group_members_grm_group_member_id_seq\'::regclass),
-			  "grm_usr_user_id" int4,
-			  "grm_evt_event_id" int4,
-			  "grm_pst_post_id" int4,
-			  "grm_grp_group_id" int4 NOT NULL,
-			  "grm_created_time" timestamp(6) DEFAULT now()
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."grm_group_members" ADD CONSTRAINT "grm_group_members_pkey" PRIMARY KEY ("grm_group_member_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
 
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

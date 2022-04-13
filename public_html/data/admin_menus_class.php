@@ -14,9 +14,9 @@ class AdminMenuException extends SystemClassException {}
 
 class AdminMenu extends SystemBase {
 
-	public $prefix = 'amu';
-	public $tablename = 'amu_admin_menus';
-	public $pkey_column = 'amu_admin_menu_id';
+	public static $prefix = 'amu';
+	public static $tablename = 'amu_admin_menus';
+	public static $pkey_column = 'amu_admin_menu_id';
 
 	public static $fields = array(
 		'amu_admin_menu_id' => 'ID of the admin_menu',
@@ -29,6 +29,17 @@ class AdminMenu extends SystemBase {
 		'amu_icon' => 'Icon for the menu item'
 	);
 
+	public static $field_specifications = array(
+		'amu_admin_menu_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false), 
+		'amu_menudisplay' => array('type'=>'varchar(32)'),
+		'amu_parent_menu_id' => array('type'=>'int4'),
+		'amu_defaultpage' => array('type'=>'varchar(64)'),
+		'amu_order' => array('type'=>'int2'),
+		'amu_min_permission' => array('type'=>'int4'),
+		'amu_disable' => array('type'=>'int2'),
+		'amu_icon' => array('type'=>'varchar(16)'),
+	);
+
 
 	public static $required_fields = array(
 		'amu_menudisplay');
@@ -39,7 +50,7 @@ class AdminMenu extends SystemBase {
 
 	public static $initial_default_values = array(
 		'amu_disable' => 0, 
-		);		
+		);		 
 	
 	
 	function authenticate_write($session, $other_data=NULL) {
@@ -52,52 +63,6 @@ class AdminMenu extends SystemBase {
 
 	}
 
-	
-
-	static function InitDB($mode='structure'){
-	
-		//ADMIN MENUS
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS amu_admin_menus_amu_admin_menu_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."amu_admin_menus" (
-			  "amu_admin_menu_id" int4 NOT NULL DEFAULT nextval(\'amu_admin_menus_amu_admin_menu_id_seq\'::regclass),
-			  "amu_menudisplay" varchar(32) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "amu_parent_menu_id" int4 DEFAULT \'-1\'::integer,
-			  "amu_defaultpage" varchar(64) COLLATE "pg_catalog"."default" NOT NULL DEFAULT \'\'::character varying,
-			  "amu_order" int2 NOT NULL DEFAULT (0)::smallint,
-			  "amu_min_permission" int4 NOT NULL DEFAULT 0,
-			  "amu_disable" int2 NOT NULL DEFAULT (0)::smallint,
-			  "amu_icon" varchar(16) COLLATE "pg_catalog"."default"
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."amu_admin_menus" ADD CONSTRAINT "amu_admin_menus_pkey" PRIMARY KEY ("amu_admin_menu_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 }
 
 class MultiAdminMenu extends SystemMultiBase {

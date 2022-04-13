@@ -14,9 +14,9 @@ require_once($siteDir . '/includes/Validator.php');
 class SettingException extends SystemClassException {}
 
 class Setting extends SystemBase {
-	public $prefix = 'stg';
-	public $tablename = 'stg_settings';
-	public $pkey_column = 'stg_setting_id';
+	public static $prefix = 'stg';
+	public static $tablename = 'stg_settings';
+	public static $pkey_column = 'stg_setting_id';
 	public static $permanent_delete_actions = array(
 		'stg_setting_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -30,7 +30,16 @@ class Setting extends SystemBase {
 		'stg_create_time' => 'Created',
 		'stg_update_time' => 'Updated',
 	);
-	
+
+	public static $field_specifications = array(
+		'stg_setting_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'stg_name' => array('type'=>'varchar(100)'),
+		'stg_value' => array('type'=>'text'),
+		'stg_group_name' => array('type'=>'varchar(255)'),
+		'stg_usr_user_id' => array('type'=>'int4'),
+		'stg_create_time' => array('type'=>'timestamp(6)'),
+		'stg_update_time' => array('type'=>'timestamp(6)'),
+	);	
 
 	public static $required_fields = array(
 		'stg_name');
@@ -86,49 +95,6 @@ class Setting extends SystemBase {
 		}
 	}
 
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS stg_settings_stg_setting_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."stg_settings" (
-			  "stg_setting_id" int4 NOT NULL DEFAULT nextval(\'stg_settings_stg_setting_id_seq\'::regclass),
-			  "stg_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "stg_value" text COLLATE "pg_catalog"."default" NOT NULL,
-			  "stg_group_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "stg_usr_user_id" int4,
-			  "stg_create_time" timestamp(6) NOT NULL,
-			  "stg_update_time" timestamp(6),
-			  "stg_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."stg_settings" ADD CONSTRAINT "stg_settings_pkey" PRIMARY KEY ("stg_setting_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 }
 
 class MultiSetting extends SystemMultiBase {

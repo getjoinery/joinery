@@ -13,9 +13,9 @@ class PhoneNumberException extends SystemDisplayableError {}
 class DisplayablePhoneNumberException extends PhoneNumberException implements DisplayableErrorMessage {}
 
 class PhoneNumber extends SystemBase {
-	public $prefix = 'phn';
-	public $tablename = 'phn_phone_numbers';
-	public $pkey_column = 'phn_phone_number_id';
+	public static $prefix = 'phn';
+	public static $tablename = 'phn_phone_numbers';
+	public static $pkey_column = 'phn_phone_number_id';
 	public static $permanent_delete_actions = array(
 		'phn_phone_number_id' => 'delete',	
 		'act_activation_codes' => 'delete',
@@ -34,6 +34,18 @@ class PhoneNumber extends SystemBase {
 		'phn_cco_country_code_id' => 'Country code for the phone number',
 	);
 
+	public static $field_specifications = array(
+		'phn_phone_number_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'phn_phone_number' => array('type'=>'varchar(30)'),
+		'phn_is_private' => array('type'=>'bool'),
+		'phn_is_verified' => array('type'=>'bool'),
+		'phn_usr_user_id' => array('type'=>'int4'),
+		'phn_phone_carrier' => array('type'=>'varchar(64)'),
+		'phn_is_default' => array('type'=>'bool'),
+		'phn_create_time' => array('type'=>'timestamp(6)'), 
+		'phn_cco_country_code_id' => array('type'=>'int4'),
+	);
+				 
 	public static $required_fields = array(
 		'phn_phone_number', 'phn_usr_user_id');
 
@@ -333,50 +345,6 @@ class PhoneNumber extends SystemBase {
 	}
 	
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS phn_phone_numbers_phn_phone_number_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."phn_phone_numbers" (
-			  "phn_phone_number_id" int4 NOT NULL DEFAULT nextval(\'phn_phone_numbers_phn_phone_number_id_seq\'::regclass),
-			  "phn_phone_number" varchar(30) COLLATE "pg_catalog"."default" NOT NULL,
-			  "phn_is_private" bool NOT NULL DEFAULT true,
-			  "phn_is_verified" bool NOT NULL DEFAULT false,
-			  "phn_usr_user_id" int4 NOT NULL,
-			  "phn_phone_carrier" varchar(64) COLLATE "pg_catalog"."default",
-			  "phn_is_default" bool NOT NULL DEFAULT false,
-			  "phn_create_time" timestamp(6) DEFAULT now(),
-			  "phn_cco_country_code_id" int4
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."phn_phone_numbers" ADD CONSTRAINT "phn_phone_numbers_pkey" PRIMARY KEY ("phn_phone_number_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 }
 
 

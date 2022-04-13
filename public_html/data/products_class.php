@@ -12,6 +12,7 @@ require_once($siteDir . '/includes/Validator.php');
 require_once($siteDir . '/data/order_items_class.php');
 require_once($siteDir . '/data/coupon_codes_class.php');
 require_once($siteDir . '/data/coupon_code_products_class.php');
+require_once($siteDir . '/data/product_versions_class.php');
 
 class ProductException extends SystemClassException {}
 
@@ -570,130 +571,11 @@ class CommentRequirement extends ProductRequirement {
 }
 
 
-class ProductVersion {
-	// Constants for prv_status
-	const ACTIVE = 1;
-	const INACTIVE = 2;
-
-	public static function StoreProductVersion($product_id, $version_name, $version_price, $state, $is_deposit=FALSE) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'INSERT INTO prv_product_versions ' .
-			'(prv_pro_product_id, prv_version_name, prv_version_price, prv_status, prv_is_deposit)
-				VALUES (?, ?, ?, ?, ?)';
-
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $product_id, PDO::PARAM_INT);
-			$q->bindValue(2, $version_name, PDO::PARAM_STR);
-			$q->bindValue(3, $version_price, PDO::PARAM_STR);	
-			$q->bindValue(4, $state, PDO::PARAM_INT);	
-			$q->bindValue(5, $is_deposit, PDO::PARAM_BOOL);			
-			
-			$q->execute();
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
-	public static function GetActiveProductVersion($product_id, $product_version_id) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'SELECT * FROM prv_product_versions WHERE 
-			prv_pro_product_id = ? AND prv_product_version_id = ? AND prv_status = ?';
-
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $product_id, PDO::PARAM_INT);
-			$q->bindValue(2, $product_version_id, PDO::PARAM_INT);
-			$q->bindValue(3, self::ACTIVE, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-
-			if ($q->rowCount()) {
-				return $q->fetch();
-			} else {
-				return NULL;
-			}
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
-	public static function GetAnyProductVersion($product_id, $product_version_id) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'SELECT * FROM prv_product_versions WHERE 
-			prv_pro_product_id = ? AND prv_product_version_id = ?';
-
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $product_id, PDO::PARAM_INT);
-			$q->bindValue(2, $product_version_id, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-
-			if ($q->rowCount()) {
-				return $q->fetch();
-			} else {
-				return NULL;
-			}
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
-	public static function ChangeProductVersionState($product_id, $product_version_id, $new_state) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'UPDATE prv_product_versions SET prv_status = ? WHERE 
-			prv_pro_product_id = ? AND prv_product_version_id = ?';
-
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $new_state, PDO::PARAM_INT);
-			$q->bindValue(2, $product_id, PDO::PARAM_INT);
-			$q->bindValue(3, $product_version_id, PDO::PARAM_INT);
-			$q->execute();
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
-	public static function GetProductVersionsForProduct($product_id, $valid_states=NULL) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'SELECT * FROM prv_product_versions
-			WHERE prv_pro_product_id = ? ORDER BY prv_product_version_id ASC';
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $product_id, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		$versions = array();
-		foreach ($q->fetchall() as $product_version) {
-			if ($valid_states === NULL || in_array($product_version->prv_status, $valid_states)) {
-				$versions[] = $product_version;
-			}
-		}
-		return $versions;
-	}
-}
 
 class Product extends SystemBase {
-	public $prefix = 'pro';
-	public $tablename = 'pro_products';
-	public $pkey_column = 'pro_product_id';
+	public static $prefix = 'pro';
+	public static $tablename = 'pro_products';
+	public static $pkey_column = 'pro_product_id';
 	public static $permanent_delete_actions = array(
 		'pro_product_id' => 'delete',	
 		'prd_pro_product_id' => 'delete',
@@ -737,7 +619,28 @@ class Product extends SystemBase {
 		'pro_digital_link' => 'Link for a digital download',
 		'pro_num_remaining_calc' => 'Calculated field of number remaining in stock'
 	);
-	
+
+	public static $field_specifications = array(
+		'pro_product_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'pro_name' => array('type'=>'varchar(100)'),
+		'pro_description' => array('type'=>'text'),
+		'pro_price' => array('type'=>'numeric(10,2)'),
+		'pro_requirements' => array('type'=>'int4'),
+		'pro_max_cart_count' => array('type'=>'int4'),
+		'pro_max_purchase_count' => array('type'=>'int4'),
+		'pro_prg_product_group_id' => array('type'=>'int4'),
+		'pro_after_purchase_message' =>  array('type'=>'text'),
+		'pro_evt_event_id' => array('type'=>'int4'),
+		'pro_recurring' => array('type'=>'varchar(10)'),
+		'pro_expires' =>  array('type'=>'int4'),
+		'pro_is_active' => array('type'=>'bool'),
+		'pro_price_type' => array('type'=>'int4'),
+		'pro_grp_group_id' => array('type'=>'int4'),
+		'pro_type' => array('type'=>'int4'),
+		'pro_digital_link' =>  array('type'=>'varchar(255)'),
+		'pro_num_remaining_calc' => array('type'=>'int4'),
+	);
+			 
 	public static $required_fields = array();
 
 	public static $field_constraints = array();	
@@ -1087,96 +990,6 @@ class Product extends SystemBase {
 		}
 		return $count;
 	}	
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS pro_products_pro_product_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."pro_products" (
-			  "pro_product_id" int4 NOT NULL DEFAULT nextval(\'pro_products_pro_product_id_seq\'::regclass),
-			  "pro_requirements" int4,
-			  "pro_price" numeric(10,2) NOT NULL,
-			  "pro_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "pro_description" text COLLATE "pg_catalog"."default",
-			  "pro_max_purchase_count" int4 DEFAULT 0,
-			  "pro_max_cart_count" int4 DEFAULT 0,
-			  "pro_prg_product_group_id" int4,
-			  "pro_after_purchase_message" text COLLATE "pg_catalog"."default",
-			  "pro_evt_event_id" int4,
-			  "pro_recurring" varchar(10) COLLATE "pg_catalog"."default" NOT NULL,
-			  "pro_is_active" bool DEFAULT true, 
-			  "pro_expires" int4,
-			  "pro_price_type" int4,
-			  "pro_grp_group_id" int4,
-			  "pro_type" int4
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."pro_products" ADD CONSTRAINT "pro_products_pkey" PRIMARY KEY ("pro_product_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		
-		
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS prv_product_versions_prv_product_version_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."prv_product_versions" (
-			  "prv_product_version_id" int4 NOT NULL DEFAULT nextval(\'prv_product_versions_prv_product_version_id_seq\'::regclass),
-			  "prv_pro_product_id" int4 NOT NULL,
-			  "prv_version_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "prv_version_price" numeric(10,2) NOT NULL,
-			  "prv_status" int2 NOT NULL,
-			  "prv_order" int4,
-			  "prv_percent_tax_deductible" int4
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."prv_product_versions" ADD CONSTRAINT "prv_product_versions_pkey" PRIMARY KEY ("prv_product_version_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}		
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

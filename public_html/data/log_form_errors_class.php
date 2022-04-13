@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class FormErrorException extends SystemClassException {}
 
 class FormError extends SystemBase {
-	public $prefix = 'lfe';
-	public $tablename = 'lfe_log_form_errors';
-	public $pkey_column = 'lfe_log_form_error_id';
+	public static $prefix = 'lfe';
+	public static $tablename = 'lfe_log_form_errors';
+	public static $pkey_column = 'lfe_log_form_error_id';
 	public static $permanent_delete_actions = array(
 		'lfe_log_form_error_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -30,6 +30,19 @@ class FormError extends SystemBase {
 		'lfe_form' => 'The full form',
 		'lfe_context' => 'The DOM selector form the form (in case more than one form on the page)',
 	);
+	
+	public static $field_specifications = array(
+		'lfe_log_form_error_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'lfe_error' => array('type'=>'text'),
+		'lfe_usr_user_id' => array('type'=>'int4'),
+		'lfe_log_time' => array('type'=>'timestamp(6)'),
+		'lfe_user_agent' => array('type'=>'varchar(255)'),
+		'lfe_page' => array('type'=>'varchar(100)'),
+		'lfe_url' =>  array('type'=>'varchar(255)'),
+		'lfe_form' =>  array('type'=>'text'),
+		'lfe_context' =>  array('type'=>'varchar(255)'),
+	);
+
 
 	public static $required_fields = array();
 	
@@ -40,15 +53,6 @@ class FormError extends SystemBase {
 	public static $initial_default_values = array(
 	'lfe_log_time'=> 'now()',);
 	
-	public static $public_actions = array(
-		'logformerror' => array(
-			'messages' => TRUE,
-			'page' => TRUE,
-			'url' => TRUE,
-			'formfields' => TRUE,
-			'context' => TRUE,
-		)
-	);
 
 	
 	function display_time($session) {
@@ -69,54 +73,7 @@ class FormError extends SystemBase {
 		$obj->save();
 	}
 
-	public static function GetPublicActions() { 
-		return self::$public_actions;
-	}
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS lfe_log_form_errors_lfe_log_form_error_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."lfe_log_form_errors" (
-			  "lfe_log_form_error_id" int4 NOT NULL DEFAULT nextval(\'lfe_log_form_errors_lfe_log_form_error_id_seq\'::regclass),
-			  "lfe_usr_user_id" int4,
-			  "lfe_error" text COLLATE "pg_catalog"."default",
-			  "lfe_log_time" timestamp(6) NOT NULL DEFAULT now(),
-			  "lfe_page" varchar(100) COLLATE "pg_catalog"."default",
-			  "lfe_form" text COLLATE "pg_catalog"."default",
-			  "lfe_url" varchar(1000) COLLATE "pg_catalog"."default",
-			  "lfe_context" varchar(200) COLLATE "pg_catalog"."default",
-			  "lfe_user_agent" varchar(1000) COLLATE "pg_catalog"."default"
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."lfe_log_form_errors" ADD CONSTRAINT "lfe_log_form_errors_pkey" PRIMARY KEY ("lfe_log_form_error_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 }
 
 class MultiFormError extends SystemMultiBase {
