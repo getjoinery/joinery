@@ -14,9 +14,9 @@ require_once($siteDir . '/includes/Validator.php');
 class StripeInvoiceException extends SystemClassException {}
 
 class StripeInvoice extends SystemBase {
-	public $prefix = 'siv';
-	public $tablename = 'siv_stripe_invoices';
-	public $pkey_column = 'siv_stripe_invoice_id';
+	public static $prefix = 'siv';
+	public static $tablename = 'siv_stripe_invoices';
+	public static $pkey_column = 'siv_stripe_invoice_id';
 	public static $permanent_delete_actions = array(
 		'siv_stripe_invoice_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -33,13 +33,25 @@ class StripeInvoice extends SystemBase {
 		'siv_stripe_payment_intent_id' => 'Stripe payment intent id',
 	);
 
+	public static $field_specifications = array(
+		'siv_stripe_invoice_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'siv_stripe_foreign_invoice_id' => array('type'=>'varchar(32)'),
+		'siv_timestamp' => array('type'=>'timestamp(6)'),
+		'siv_amount_paid' => array('type'=>'numeric(10,2)'),
+		'siv_usr_user_id' => array('type'=>'int4'),
+		'siv_stripe_subscription_id' => array('type'=>'varchar(32)'),
+		'siv_description' => array('type'=>'text'),
+		'siv_stripe_charge_id' => array('type'=>'varchar(32)'),
+		'siv_stripe_payment_intent_id' => array('type'=>'varchar(32)'),
+	);
+			  	
 	public static $required_fields = array();
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();	
 
-	public static $initial_default_values = array(
+	public static $initial_default_values = array('siv_timestamp' => 'now()'
 		);	
 	
 
@@ -71,50 +83,6 @@ class StripeInvoice extends SystemBase {
 		}
 	}	
 
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS siv_stripe_invoices_siv_stripe_invoice_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."siv_stripe_invoices" (
-			  "siv_stripe_invoice_id" int4 NOT NULL DEFAULT nextval(\'siv_stripe_invoices_siv_stripe_invoice_id_seq\'::regclass),
-			  "siv_stripe_foreign_invoice_id" varchar(32),
-			  "siv_stripe_subscription_id" varchar(32),
-			  "siv_usr_user_id" int4,
-			  "siv_amount_paid" numeric(10,2),
-			  "siv_timestamp" timestamp(6) DEFAULT now(),
-			  "siv_description" text COLLATE "pg_catalog"."default",
-			  "siv_stripe_charge_id" varchar(32),
-			  "siv_stripe_payment_intent_id" varchar(32)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."siv_stripe_invoices" ADD CONSTRAINT "siv_stripe_invoices_pkey" PRIMARY KEY ("siv_stripe_invoice_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}			
 }
 
 

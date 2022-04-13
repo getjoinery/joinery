@@ -14,9 +14,9 @@ require_once($siteDir . '/includes/Validator.php');
 class EmailTemplateStoreException extends SystemClassException {}
 
 class EmailTemplateStore extends SystemBase {
-	public $prefix = 'emt';
-	public $tablename = 'emt_email_templates';
-	public $pkey_column = 'emt_email_template_id';
+	public static $prefix = 'emt';
+	public static $tablename = 'emt_email_templates';
+	public static $pkey_column = 'emt_email_template_id';
 	public static $permanent_delete_actions = array(
 		'emt_email_template_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -35,6 +35,16 @@ class EmailTemplateStore extends SystemBase {
 		'emt_delete_time' => 'Is this email_template deleted?',
 	);
 
+	public static $field_specifications = array(
+		'emt_email_template_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'emt_name' => array('type'=>'varchar(100)'),
+		'emt_type' => array('type'=>'int2'),
+		'emt_body' => array('type'=>'text'),
+		'emt_create_time' => array('type'=>'timestamp(6)'),
+		'emt_update_time' => array('type'=>'timestamp(6)'),
+		'emt_delete_time' => array('type'=>'timestamp(6)'),
+	);
+				
 	public static $required_fields = array(
 		'emt_name');
 
@@ -92,51 +102,6 @@ class EmailTemplateStore extends SystemBase {
 	}
 
 
-	
-
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS emt_email_templates_emt_email_template_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."emt_email_templates" (
-			  "emt_email_template_id" int4 NOT NULL DEFAULT nextval(\'emt_email_templates_emt_email_template_id_seq\'::regclass),
-			  "emt_name" varchar(100) COLLATE "pg_catalog"."default" NOT NULL,
-			  "emt_type" int2,
-			  "emt_body" text COLLATE "pg_catalog"."default",
-			  "emt_usr_user_id_created" int4,
-			  "emt_create_time" timestamp(6) NOT NULL,
-			  "emt_update_time" timestamp(6),
-			  "emt_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."emt_email_templates" ADD CONSTRAINT "emt_email_templates_pkey" PRIMARY KEY ("emt_email_template_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 }
 
 class MultiEmailTemplateStore extends SystemMultiBase {

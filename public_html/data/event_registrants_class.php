@@ -37,9 +37,9 @@ class EventRegistrantUnviewableDisplayException extends EventRegistrantException
 */
 
 class EventRegistrant extends SystemBase {
-	public $prefix = 'evr';
-	public $tablename = 'evr_event_registrants';
-	public $pkey_column = 'evr_event_registrant_id';
+	public static $prefix = 'evr';
+	public static $tablename = 'evr_event_registrants';
+	public static $pkey_column = 'evr_event_registrant_id';
 	public static $permanent_delete_actions = array(
 		'evr_event_registrant_id' => 'delete',	
 		'odi_evr_event_registrant_id' => 'prevent'
@@ -49,11 +49,11 @@ class EventRegistrant extends SystemBase {
 		'evr_event_registrant_id' => 'event_registrant ID',
 		'evr_evt_event_id' => 'The event',
 		'evr_usr_user_id' => 'The attendee',
-		'evr_recording_consent' => 'Timestamp when this event_registrants begins',
+		'evr_recording_consent' => 'Consent to record',
 		'evr_first_event' => 'Is this the persons first event',
 		'evr_create_time' => 'Timestamp when this request was created',
-		'evr_other_events' => 'Is this request public?',
-		'evr_health_notes' => 'Are we taking signups',
+		'evr_other_events' => '',
+		'evr_health_notes' => 'Health notes',
 		'evr_extra_info_completed' => 'Whether the person has entered the needed questions for the event',
 		'evr_ord_order_id' => 'Order for the registration',
 		'evr_expires_time' => 'Time at which this registration expires.', 
@@ -62,7 +62,23 @@ class EventRegistrant extends SystemBase {
 		'evr_grp_group_id' => 'Event bundle that created this registration, if applicable'
 	);
 
-
+	public static $field_specifications = array(
+		'evr_event_registrant_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'evr_evt_event_id' => array('type'=>'int4'),
+		'evr_usr_user_id' => array('type'=>'int4'),
+		'evr_recording_consent' => array('type'=>'bool'),
+		'evr_first_event' => array('type'=>'bool'),
+		'evr_create_time' =>  array('type'=>'timestamp(6)'),
+		'evr_other_events' => array('type'=>'varchar(255)'),
+		'evr_health_notes' => array('type'=>'varchar(255)'),
+		'evr_extra_info_completed' => array('type'=>'bool'),
+		'evr_ord_order_id' => array('type'=>'int4'),
+		'evr_expires_time' => array('type'=>'timestamp(6)'),
+		'evr_odi_order_item_id' => array('type'=>'int4'),
+		'evr_delete_time' => array('type'=>'timestamp(6)'),
+		'evr_grp_group_id' => array('type'=>'int4'),
+	);
+			 
 	public static $required_fields = array(
 		'evr_evt_event_id', 'evr_usr_user_id'
 	);
@@ -77,9 +93,6 @@ class EventRegistrant extends SystemBase {
 
 		);
 
-	public static $public_actions = array(
-
-	);
 	
 	public static $json_vars = array(
 		'evr_event_registrant_id', 'evr_evt_event_id', 'evr_usr_user_id');
@@ -186,59 +199,6 @@ class EventRegistrant extends SystemBase {
 	}	
 
 
-	static public function GetPublicActions() { 
-		return self::$public_actions;
-	}
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS evr_event_registrants_evr_event_registrant_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."evr_event_registrants" (
-			  "evr_event_registrant_id" int4 NOT NULL DEFAULT nextval(\'evr_event_registrants_evr_event_registrant_id_seq\'::regclass),
-			  "evr_evt_event_id" int4 NOT NULL,
-			  "evr_recording_consent" bool,
-			  "evr_first_event" bool,
-			  "evr_other_events" varchar(255) COLLATE "pg_catalog"."default",
-			  "evr_health_notes" varchar(255) COLLATE "pg_catalog"."default",
-			  "evr_usr_user_id" int4 NOT NULL,
-			  "evr_create_time" timestamp(6),
-			  "evr_extra_info_completed" bool NOT NULL DEFAULT false,
-			  "evr_ord_order_id" int4,
-			  "evr_odi_order_item_id" int4,
-			  "evr_delete_time" timestamp(6),
-			  "evr_grp_group_id" int4
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."evr_event_registrants" ADD CONSTRAINT "evr_event_registrants_pkey" PRIMARY KEY ("evr_event_registrant_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
-	
 }
 
 class MultiEventRegistrant extends SystemMultiBase {

@@ -45,9 +45,9 @@ class EventUnviewableDisplayException extends EventException implements CustomEr
 */
 
 class Event extends SystemBase {
-	public $prefix = 'evt';
-	public $tablename = 'evt_events';
-	public $pkey_column = 'evt_event_id';
+	public static $prefix = 'evt';
+	public static $tablename = 'evt_events';
+	public static $pkey_column = 'evt_event_id';
 	public static $permanent_delete_actions = array(
 		'evt_event_id' => 'delete',
 		'evs_evt_event_id' => 'delete',	
@@ -102,7 +102,37 @@ class Event extends SystemBase {
 		'evt_delete_time' => 'Time of deletion',
 	); 
 
-
+	public static $field_specifications = array(
+		'evt_event_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'evt_name' => array('type'=>'varchar(255)'),
+		'evt_description' =>   array('type'=>'text'),
+		'evt_short_description' =>  array('type'=>'text'),
+		'evt_usr_user_id_leader' => array('type'=>'int4'),
+		'evt_location' => array('type'=>'varchar(255)'),
+		'evt_start_time' => array('type'=>'timestamp(6)'),
+		'evt_start_time_local' => array('type'=>'timestamp(6)'),
+		'evt_end_time' => array('type'=>'timestamp(6)'),
+		'evt_end_time_local' => array('type'=>'timestamp(6)'),
+		'evt_create_time' => array('type'=>'timestamp(6)'),
+		'evt_external_register_link' => array('type'=>'varchar(255)'),
+		'evt_timezone' => array('type'=>'varchar(32)'),
+		'evt_is_accepting_signups' => array('type'=>'bool'),
+		'evt_picture_link' => array('type'=>'varchar(255)'), //DEPRECATED
+		'evt_collect_extra_info' => array('type'=>'bool'),
+		'evt_grp_group_id' => array('type'=>'int4'), //DEPRECATED
+		'evt_private_info' =>  array('type'=>'text'),
+		'evt_status' =>  array('type'=>'int4'),
+		'evt_max_signups' =>  array('type'=>'int4'),
+		'evt_allow_waiting_list' =>  array('type'=>'bool'),
+		'evt_session_display_type' =>  array('type'=>'int4'),
+		'evt_visibility'=> array('type'=>'int4'),
+		'evt_fil_file_id' => array('type'=>'int4'),
+		'evt_link' => array('type'=>'varchar(255)'),
+		'evt_show_add_to_calendar_link' => array('type'=>'bool'),
+		'evt_ety_event_type_id' => array('type'=>'int4'),
+		'evt_delete_time' => array('type'=>'timestamp(6)'),
+	); 
+			
 	public static $required_fields = array(
 		'evt_name'
 	);
@@ -125,9 +155,6 @@ class Event extends SystemBase {
 		);
 		
 
-	public static $public_actions = array(
-		'togglepublic' => array('w' => TRUE),
-	);
 	
 	static function get_by_link($link){
 		$params = explode("/", $link);
@@ -518,78 +545,6 @@ class Event extends SystemBase {
 
 		return $event;
 	}
-
-
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS evt_events_evt_event_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."evt_events" (
-			  "evt_event_id" int4 NOT NULL DEFAULT nextval(\'evt_events_evt_event_id_seq\'::regclass),
-			  "evt_name" varchar(128) COLLATE "pg_catalog"."default",
-			  "evt_description" text COLLATE "pg_catalog"."default",
-			  "evt_create_time" timestamp(6) DEFAULT now(),
-			  "evt_start_time" timestamp(6),
-			  "evt_start_time_local" timestamp(6),
-			  "evt_end_time" timestamp(6),
-			  "evt_end_time_local" timestamp(6),
-			  "evt_is_accepting_signups" bool,
-			  "evt_short_description" text COLLATE "pg_catalog"."default",
-			  "evt_location" varchar(255) COLLATE "pg_catalog"."default",
-			  "evt_external_register_link" varchar(255) COLLATE "pg_catalog"."default" DEFAULT NULL::character varying,
-			  "evt_timezone" varchar(32) COLLATE "pg_catalog"."default",
-			  "evt_usr_user_id_leader" int4,
-			  "evt_picture_link" varchar(255) COLLATE "pg_catalog"."default",
-			  "evt_collect_extra_info" bool DEFAULT false,
-			  "evt_grp_group_id" int4,
-			  "evt_private_info" text COLLATE "pg_catalog"."default",
-			  "evt_status" int4,
-			  "evt_max_signups" int4,
-			  "evt_allow_waiting_list" bool,
-			  "evt_session_display_type" int4 DEFAULT 1,
-			  "evt_visibility" int4,
-			  "evt_link" varchar(255) COLLATE "pg_catalog"."default",
-			  "evt_show_add_to_calendar_link" bool, 
-			  "evt_ety_event_type_id" int4,
-			  "evt_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."evt_events" ADD CONSTRAINT "evt_events_pkey" PRIMARY KEY ("evt_event_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY evt_events_evt_link ON evt_events USING HASH (evt_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 
 }
 

@@ -18,9 +18,9 @@ class AdminGraphException extends SystemClassException {}
 
 class AdminGraph extends SystemBase {
 	
-	public $prefix = 'agp';
-	public $tablename = 'agp_graphs';
-	public $pkey_column = 'agp_admin_graph_id';
+	public static $prefix = 'agp';
+	public static $tablename = 'agp_graphs';
+	public static $pkey_column = 'agp_admin_graph_id';
 
 	public static $fields = array(
 		'agp_admin_graph_id' => 'ID for the graph',

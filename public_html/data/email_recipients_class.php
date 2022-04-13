@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class EmailRecipientException extends SystemClassException {}
 
 class EmailRecipient extends SystemBase {
-	public $prefix = 'erc';
-	public $tablename = 'erc_email_recipients';
-	public $pkey_column = 'erc_email_recipient_id';
+	public static $prefix = 'erc';
+	public static $tablename = 'erc_email_recipients';
+	public static $pkey_column = 'erc_email_recipient_id';
 	public static $permanent_delete_actions = array(
 		'erc_email_recipient_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -34,7 +34,15 @@ class EmailRecipient extends SystemBase {
 		'erc_status' => 'Status'
 	);
 	
-
+	public static $field_specifications = array(
+		'erc_email_recipient_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'erc_usr_user_id' => array('type'=>'int4'),
+		'erc_email' => array('type'=>'varchar(64)'),
+		'erc_name' => array('type'=>'varchar(70)'),
+		'erc_eml_email_id' => array('type'=>'int4'),
+		'erc_sent_time' =>  array('type'=>'timestamp(6)'),
+		'erc_status' => array('type'=>'int2'),
+	);
 
 	public static $required_fields = array(
 		'erc_email', 'erc_eml_email_id');
@@ -214,84 +222,6 @@ class EmailRecipient extends SystemBase {
 		return LibraryFunctions::DecodeWithChecksum($code);
 	}
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS erc_email_recipients_erc_email_recipient_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."erc_email_recipients" (
-			  "erc_email_recipient_id" int4 NOT NULL DEFAULT nextval(\'erc_email_recipients_erc_email_recipient_id_seq\'::regclass),
-			  "erc_usr_user_id" int4,
-			  "erc_email" varchar(64),
-			  "erc_eml_email_id" int4,
-			  "erc_name" varchar(70),
-			  "erc_sent_time" timestamp(6) DEFAULT now(),
-			  "erc_status" int2
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."erc_email_recipients" ADD CONSTRAINT "erc_email_recipients_pkey" PRIMARY KEY ("erc_email_recipient_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-
-
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS erg_email_recipient_groups_erg_email_recipient_group_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."erg_email_recipient_groups" (
-			  "erg_email_recipient_group_id" int4 NOT NULL DEFAULT nextval(\'erg_email_recipient_groups_erg_email_recipient_group_id_seq\'::regclass),
-			  "erg_grp_group_id" int4,
-			  "erg_evt_event_id" int4,
-			  "erg_eml_email_id" int4 NOT NULL
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."erg_email_recipient_groups" ADD CONSTRAINT "erg_email_recipient_groups_pkey" PRIMARY KEY ("erg_email_recipient_group_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 }
 
 

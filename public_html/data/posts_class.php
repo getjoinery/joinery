@@ -15,9 +15,9 @@ require_once($siteDir . '/data/groups_class.php');
 class PostException extends SystemClassException {}
 
 class Post extends SystemBase {
-	public $prefix = 'pst';
-	public $tablename = 'pst_posts';
-	public $pkey_column = 'pst_post_id';
+	public static $prefix = 'pst';
+	public static $tablename = 'pst_posts';
+	public static $pkey_column = 'pst_post_id';
 	public static $permanent_delete_actions = array(
 		'pst_post_id' => 'delete',	
 		'cmt_pst_post_id' => 'delete',
@@ -38,6 +38,19 @@ class Post extends SystemBase {
 		'pst_delete_time' => 'Time of deletion',
 	);
 
+	public static $field_specifications = array(
+		'pst_post_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'pst_title' => array('type'=>'varchar(255)'),
+		'pst_link' => array('type'=>'varchar(255)'),
+		'pst_usr_user_id' => array('type'=>'int4'),
+		'pst_body' => array('type'=>'text'),
+		'pst_is_published' => array('type'=>'bool'),
+		'pst_published_time' => array('type'=>'timestamp(6)'),
+		'pst_is_on_homepage' => array('type'=>'bool'),
+		'pst_create_time' => array('type'=>'timestamp(6)'),
+		'pst_short_description' => array('type'=>'varchar(255)'),
+		'pst_delete_time' => array('type'=>'timestamp(6)'),
+	);
 
 	public static $required_fields = array();
 
@@ -210,64 +223,6 @@ class Post extends SystemBase {
 		}
 		parent::save();
 	}
-	
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS pst_posts_pst_post_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."pst_posts" (
-			  "pst_post_id" int4 NOT NULL DEFAULT nextval(\'pst_posts_pst_post_id_seq\'::regclass),
-			  "pst_usr_user_id" int4 NOT NULL,
-			  "pst_link" varchar(255) COLLATE "pg_catalog"."default",
-			  "pst_title" varchar(255) COLLATE "pg_catalog"."default",
-			  "pst_body" text COLLATE "pg_catalog"."default",
-			  "pst_published_time" timestamp(6),
-			  "pst_is_published" bool DEFAULT true,
-			  "pst_is_on_homepage" bool DEFAULT true,
-			  "pst_create_time" timestamp(6),
-			  "pst_short_description" varchar(255) COLLATE "pg_catalog"."default",
-			  "pst_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."pst_posts" ADD CONSTRAINT "pst_posts_pkey" PRIMARY KEY ("pst_post_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY pst_posts_pst_link ON pst_posts USING HASH (pst_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-	
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class PageContentException extends SystemClassException {}
 
 class PageContent extends SystemBase {
-	public $prefix = 'pac';
-	public $tablename = 'pac_page_contents';
-	public $pkey_column = 'pac_page_content_id';
+	public static $prefix = 'pac';
+	public static $tablename = 'pac_page_contents';
+	public static $pkey_column = 'pac_page_content_id';
 	public static $permanent_delete_actions = array(
 		'pac_page_content_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -33,7 +33,20 @@ class PageContent extends SystemBase {
 		'pac_delete_time' => 'Time of deletion',
 	);
 
-
+	public static $field_specifications = array(
+		'pac_page_content_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'pac_location_name' => array('type'=>'varchar(255)'),
+		'pac_title' => array('type'=>'varchar(255)'),
+		'pac_link' => array('type'=>'varchar(255)'),
+		'pac_usr_user_id' => array('type'=>'int4'),
+		'pac_body' => array('type'=>'text'),
+		'pac_is_published' => array('type'=>'bool'),
+		'pac_published_time' => array('type'=>'timestamp(6)'),
+		'pac_create_time' => array('type'=>'timestamp(6)'),
+		'pac_script_filename' => array('type'=>'varchar(255)'),
+		'pac_delete_time' => array('type'=>'timestamp(6)'),
+	);
+			 
 	public static $required_fields = array();
 
 	public static $field_constraints = array();	
@@ -148,65 +161,6 @@ class PageContent extends SystemBase {
 	}
 
 	
-	static public function GetPublicActions() { 
-		return self::$public_actions;
-	}
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS pac_page_contents_pac_page_content_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."pac_page_contents" (
-			  "pac_page_content_id" int4 NOT NULL DEFAULT nextval(\'pac_page_contents_pac_page_content_id_seq\'::regclass),
-			  "pac_usr_user_id" int4,
-			  "pac_location_name" varchar COLLATE "pg_catalog"."default",
-			  "pac_title" varchar COLLATE "pg_catalog"."default",
-			  "pac_link" varchar COLLATE "pg_catalog"."default",
-			  "pac_body" text COLLATE "pg_catalog"."default",
-			  "pac_published_time" timestamp(6),
-			  "pac_create_time" timestamp(6),
-			  "pac_is_published" bool,
-			  "pac_script_filename" varchar COLLATE "pg_catalog"."default",
-			  "pac_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."pac_page_contents" ADD CONSTRAINT "pac_page_contents_pkey" PRIMARY KEY ("pac_page_content_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY pac_page_contents_pac_link ON pac_page_contents USING HASH (pac_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 }
 
 class MultiPageContent extends SystemMultiBase {

@@ -205,6 +205,49 @@ class LibraryFunctions {
 			throw new SystemDisplayablePermanentError('Could not find the specified logic file: '. $filename);					
 		}
 	}
+	
+	static function get_tables_and_columns(){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+
+		$sql = '		select
+			t.table_name,
+			array_agg(c.column_name::text) as columns
+		from
+			information_schema.tables t
+		inner join information_schema.columns c on
+			t.table_name = c.table_name
+		where
+			t.table_schema = \'public\'
+			--and t.table_type= \'BASE TABLE\'
+			and c.table_schema = \'public\'
+		group by t.table_name;	';
+		try{
+			$q = $dblink->prepare($sql);
+			//$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
+			$q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		}
+		catch(PDOException $e){
+			$dbhelper->handle_query_error($e);
+		}	
+		
+		
+		$tables_and_columns = array();
+		while ($row = $q->fetch()) {
+			$table_name = $row->table_name;
+			$columns = $row->columns;
+			$columns_array = explode(',', trim($columns, '{}'));
+			
+			foreach($columns_array as $column){
+				$tables_and_columns[$table_name][] = $column;
+			}
+		}	
+			
+		return $tables_and_columns;
+		
+	}
 
 	static function titleUrlSafe($title){
 		// Transforms a title to be used in url

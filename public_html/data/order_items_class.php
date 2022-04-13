@@ -14,9 +14,9 @@ require_once($siteDir . '/data/address_class.php');
 class OrderItemException extends SystemClassException {}
 
 class OrderItem extends SystemBase {
-	public $prefix = 'odi';
-	public $tablename = 'odi_order_items';
-	public $pkey_column = 'odi_order_item_id';
+	public static $prefix = 'odi';
+	public static $tablename = 'odi_order_items';
+	public static $pkey_column = 'odi_order_item_id';
 	public static $permanent_delete_actions = array(
 		'odi_order_item_id' => 'delete',	
 		'evr_odi_order_item_id' => 'delete',
@@ -45,6 +45,27 @@ class OrderItem extends SystemBase {
 		'odi_refund_note' => 'Note for the refund',
 		'odi_refund_time' => 'Time of last refund',
 		'odi_stripe_foreign_invoice_id' => 'Stripe invoice id if it is the first of a subscription'
+	);
+
+	public static $field_specifications = array(
+		'odi_order_item_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'odi_ord_order_id' => array('type'=>'int4'),
+		'odi_pro_product_id' => array('type'=>'int4'),
+		'odi_prv_product_version_id' => array('type'=>'int4'),
+		'odi_product_info' => array('type'=>'text'),
+		'odi_price' => array('type'=>'numeric(10,2)'),
+		'odi_status' => array('type'=>'int2'),
+		'odi_status_change_time' => array('type'=>'timestamp(6)'),
+		'odi_usr_user_id' => array('type'=>'int4'),
+		'odi_evr_event_registrant_id' => array('type'=>'int4'),
+		'odi_comment' => array('type'=>'varchar(255)'),
+		'odi_stripe_subscription_id' => array('type'=>'varchar(255)'),
+		'odi_is_subscription' => array('type'=>'bool'),
+		'odi_subscription_cancelled_time' => array('type'=>'timestamp(6)'),
+		'odi_refund_amount' => array('type'=>'numeric(10,2)'),
+		'odi_refund_note' => array('type'=>'varchar(255)'),
+		'odi_refund_time' => array('type'=>'timestamp(6)'),
+		'odi_stripe_foreign_invoice_id' => array('type'=>'varchar(64)'),
 	);
 
 	public static $required_fields = array();
@@ -115,61 +136,6 @@ class OrderItem extends SystemBase {
 		}
 		
 	}
-
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS odi_order_items_odi_order_item_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."odi_order_items" (
-			  "odi_order_item_id" int4 NOT NULL DEFAULT nextval(\'odi_order_items_odi_order_item_id_seq\'::regclass),
-			  "odi_ord_order_id" int4 NOT NULL,
-			  "odi_pro_product_id" int4 NOT NULL,
-			  "odi_product_info" text COLLATE "pg_catalog"."default",
-			  "odi_price" numeric(10,2) NOT NULL,
-			  "odi_prv_product_version_id" int4,
-			  "odi_status" int2,
-			  "odi_status_change_time" timestamp(6),
-			  "odi_usr_user_id" int4,
-			  "odi_evr_event_registrant_id" int4,
-			  "odi_comment" varchar(255) COLLATE "pg_catalog"."default",
-			  "odi_percent_tax_deductible" int4,
-			  "odi_stripe_subscription_id" varchar(255) COLLATE "pg_catalog"."default",
-			  "odi_is_subscription" bool,
-			  "odi_subscription_cancelled_time" timestamp(6),
-			  "odi_refund_amount" int4,
-			  "odi_refund_note" varchar(255),
-			  "odi_refund_time" timestamp(6),
-			  "odi_stripe_foreign_invoice_id" varchar(64)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."odi_order_items" ADD CONSTRAINT "odi_order_items_pkey" PRIMARY KEY ("odi_order_item_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 
 }
 

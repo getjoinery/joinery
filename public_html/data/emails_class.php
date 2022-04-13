@@ -12,9 +12,9 @@ class EmailException extends SystemClassException {}
 class EmailNotSentException extends EmailException {};
 
 class Email extends SystemBase {
-	public $prefix = 'eml';
-	public $tablename = 'eml_emails';
-	public $pkey_column = 'eml_email_id';
+	public static $prefix = 'eml';
+	public static $tablename = 'eml_emails';
+	public static $pkey_column = 'eml_email_id';
 	public static $permanent_delete_actions = array(
 		'eml_email_id' => 'delete',
 		'erc_eml_email_id' => 'delete',
@@ -55,9 +55,28 @@ class Email extends SystemBase {
 		'eml_scheduled_time' => 'Scheduled time to send',
 		'eml_type' => 'Type of email for opt out purposes',
 		'eml_delete_time' => 'Time of deletion',
-		
 	);
 
+	public static $field_specifications = array(
+		'eml_email_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'eml_description' => array('type'=>'varchar(255)'),
+		'eml_usr_user_id' => array('type'=>'int4'),
+		'eml_from_address' =>  array('type'=>'varchar(255)'),
+		'eml_from_name' =>  array('type'=>'varchar(255)'),
+		'eml_subject' => array('type'=>'varchar(255)'),
+		'eml_preview_text' => array('type'=>'varchar(255)'),
+		'eml_reply_to' => array('type'=>'varchar(255)'),
+		'eml_message_html' => array('type'=>'text'),
+		'eml_message_plain' => array('type'=>'text'),
+		'eml_message_template_html' => array('type'=>'text'),
+		'eml_message_template_plain' => array('type'=>'text'),
+		'eml_sent_time' => array('type'=>'timestamp(6)'),
+		'eml_status' =>  array('type'=>'int2'),
+		'eml_scheduled_time' => array('type'=>'timestamp(6)'),
+		'eml_type' => array('type'=>'int2'),
+		'eml_delete_time' => array('type'=>'timestamp(6)'),
+	);
+			
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
@@ -245,62 +264,6 @@ class Email extends SystemBase {
 		return $tempplain;
 	}	
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS eml_emails_eml_email_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."eml_emails" (
-			  "eml_email_id" int4 NOT NULL DEFAULT nextval(\'eml_emails_eml_email_id_seq\'::regclass),
-			  "eml_usr_user_id" int4,
-			  "eml_from_address" varchar COLLATE "pg_catalog"."default",
-			  "eml_from_name" varchar COLLATE "pg_catalog"."default",
-			  "eml_subject" varchar COLLATE "pg_catalog"."default",
-			  "eml_return_path" varchar COLLATE "pg_catalog"."default",
-			  "eml_reply_to" varchar COLLATE "pg_catalog"."default",
-			  "eml_message_plain" text COLLATE "pg_catalog"."default",
-			  "eml_message_html" text COLLATE "pg_catalog"."default",
-			  "eml_sent_time" timestamp(6),
-			  "eml_status" int2,
-			  "eml_scheduled_time" timestamp(6),
-			  "eml_lock" bool,
-			  "eml_sending_account" int2,
-			  "eml_is_editable" bool NOT NULL DEFAULT false,
-			  "eml_message_template_html" text COLLATE "pg_catalog"."default",
-			  "eml_message_template_plain" text COLLATE "pg_catalog"."default",
-			  "eml_description" varchar(255) COLLATE "pg_catalog"."default",
-			  "eml_type" int2,
-			  "eml_preview_text" varchar(255) COLLATE "pg_catalog"."default",
-			  "eml_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."eml_emails" ADD CONSTRAINT "eml_emails_pkey" PRIMARY KEY ("eml_email_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 }
 
 class MultiEmail extends SystemMultiBase {

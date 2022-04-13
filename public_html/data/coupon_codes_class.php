@@ -14,9 +14,9 @@ class CouponCodeException extends SystemClassException {}
 
 class CouponCode extends SystemBase {
 
-	public $prefix = 'ccd';
-	public $tablename = 'ccd_coupon_codes';
-	public $pkey_column = 'ccd_coupon_code_id';
+	public static $prefix = 'ccd';
+	public static $tablename = 'ccd_coupon_codes';
+	public static $pkey_column = 'ccd_coupon_code_id';
 	public static $permanent_delete_actions = array(
 		'ccd_coupon_code_id' => 'delete', 
 		'ccp_ccd_coupon_code_id' => 'prevent',
@@ -35,6 +35,19 @@ class CouponCode extends SystemBase {
 		'ccd_delete_time' => 'Time deleted'
 	);
 
+	public static $field_specifications = array(
+		'ccd_coupon_code_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'ccd_code' => array('type'=>'varchar(64)'),
+		'ccd_amount_discount' => array('type'=>'numeric(10,2)'),
+		'ccd_percent_discount' => array('type'=>'int4'),
+		'ccd_start_time' => array('type'=>'timestamp(6)'),
+		'ccd_end_time' => array('type'=>'timestamp(6)'),
+		'ccd_is_active' => array('type'=>'bool'),
+		'ccd_published_time' => array('type'=>'timestamp(6)'),
+		'ccd_create_time' => array('type'=>'timestamp(6)'),
+		'ccd_delete_time' => array('type'=>'timestamp(6)'),
+	);
+			
 	public static $required_fields = array(array('ccd_percent_discount', 'ccd_amount_discount'));
 
 	public static $field_constraints = array(
@@ -121,62 +134,6 @@ class CouponCode extends SystemBase {
 	}
 
 	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS ccd_coupon_codes_ccd_coupon_code_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-	
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."ccd_coupon_codes" (
-			  "ccd_coupon_code_id" int4 NOT NULL DEFAULT nextval(\'ccd_coupon_codes_ccd_coupon_code_id_seq\'::regclass), 
-			  "ccd_code" varchar(64),
-			  "ccd_amount_discount" numeric(10,2),
-			  "ccd_percent_discount" int4,
-			  "ccd_start_time" timestamp(6),
-			  "ccd_end_time" timestamp(6),
-			  "ccd_is_active" bool DEFAULT true,
-			  "ccd_create_time" timestamp(6),
-			  "ccd_published_time" timestamp(6),
-			  "ccd_delete_time" timestamp(6),
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."ccd_coupon_codes" ADD CONSTRAINT "ccd_coupon_codes_pkey" PRIMARY KEY ("ccd_coupon_code_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		/*
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY ccd_coupon_codes_ccd_link ON ccd_coupon_codes USING HASH (ccd_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		*/
-	
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

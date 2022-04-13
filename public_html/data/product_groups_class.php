@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class ProductGroupException extends SystemClassException {}
 
 class ProductGroup extends SystemBase {
-	public $prefix = 'prg';
-	public $tablename = 'prg_product_groups';
-	public $pkey_column = 'prg_product_group_id';
+	public static $prefix = 'prg';
+	public static $tablename = 'prg_product_groups';
+	public static $pkey_column = 'prg_product_group_id';
 	public static $permanent_delete_actions = array(
 		'prg_product_group_id' => 'delete',	
 		'pro_prg_product_group_id' => 'prevent'
@@ -28,6 +28,14 @@ class ProductGroup extends SystemBase {
 		'prg_description' => 'Description of the product group',
 	);
 
+	public static $field_specifications = array(
+		'prg_product_group_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'prg_max_items' => array('type'=>'int4'),
+		'prg_error' => array('type'=>'text'),
+		'prg_name' => array('type'=>'varchar(100)'),
+		'prg_description' => array('type'=>'text'),
+	);
+
 	public static $required_fields = array();
 
 	public static $field_constraints = array();	
@@ -39,47 +47,6 @@ class ProductGroup extends SystemBase {
 	function get_url() {
 		return '/products/' . str_replace(' ', '-', $this->get('prg_name')) . '/' . $this->key;
 	}
-
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS prg_product_groups_prg_product_group_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."prg_product_groups" (
-		  "prg_product_group_id" int4 NOT NULL DEFAULT nextval(\'prg_product_groups_prg_product_group_id_seq\'::regclass),
-		  "prg_max_items" int4 NOT NULL,
-		  "prg_error" text COLLATE "pg_catalog"."default",
-		  "prg_name" varchar(100) COLLATE "pg_catalog"."default",
-		  "prg_description" text COLLATE "pg_catalog"."default"
-		)
-		;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."prg_product_groups" ADD CONSTRAINT "prg_product_groups_pkey" PRIMARY KEY ("prg_product_group_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 
 }
 

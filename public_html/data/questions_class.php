@@ -15,9 +15,9 @@ class QuestionException extends SystemClassException {}
 
 class Question extends SystemBase {
 	
-	public $prefix = 'qst';
-	public $tablename = 'qst_questions';
-	public $pkey_column = 'qst_question_id';
+	public static $prefix = 'qst';
+	public static $tablename = 'qst_questions';
+	public static $pkey_column = 'qst_question_id';
 	public static $permanent_delete_actions = array(
 		'qop_qst_question_id' => 'delete', 
 		'qst_question_id' => 'delete', 
@@ -48,7 +48,20 @@ class Question extends SystemBase {
 		'qst_delete_time' => 'Time deleted'
 	);
 
-
+	public static $field_specifications = array(
+		'qst_question_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'qst_translation_of_question_id' => array('type'=>'int4'),
+		'qst_language' => array('type'=>'int4'),
+		'qst_question' => array('type'=>'text'),
+		'qst_options' => array('type'=>'text'),
+		'qst_validate' => array('type'=>'varchar(255)'),
+		'qst_type' => array('type'=>'int4'),
+		'qst_is_published' => array('type'=>'bool'),
+		'qst_published_time' => array('type'=>'timestamp(6)'),
+		'qst_create_time' => array('type'=>'timestamp(6)'),
+		'qst_delete_time' => array('type'=>'timestamp(6)'),
+	);
+	
 	public static $required_fields = array(
 		);
 
@@ -57,7 +70,7 @@ class Question extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
-	'qst_create_time' => 'now()'
+	'qst_create_time' => 'now()', 'qst_is_published' => true
 	);	
 
 	static function check_if_exists($key) {
@@ -273,64 +286,6 @@ class Question extends SystemBase {
 		
 	}
 
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS qst_questions_qst_question_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-	
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."qst_questions" (
-			  "qst_question_id" int4 NOT NULL DEFAULT nextval(\'qst_questions_qst_question_id_seq\'::regclass),
-			  "qst_translation_of_question_id" int4,
-			  "qst_language" int4,
-			  "qst_question" text COLLATE "pg_catalog"."default",
-			  "qst_options" text COLLATE "pg_catalog"."default",
-			  "qst_validate" varchar(255) COLLATE "pg_catalog"."default",
-			  "qst_type" int4,
-			  "qst_is_published" bool DEFAULT true,
-			  "qst_is_on_homepage" bool DEFAULT true,
-			  "qst_create_time" timestamp(6),
-			  "qst_published_time" timestamp(6),
-			  "qst_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."qst_questions" ADD CONSTRAINT "qst_questions_pkey" PRIMARY KEY ("qst_question_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		/*
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY qst_questions_qst_link ON qst_questions USING HASH (qst_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		*/
-	
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

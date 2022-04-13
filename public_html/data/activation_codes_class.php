@@ -9,62 +9,63 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
-class EventLogException extends SystemClassException {}
+class ActivationCodeException extends SystemClassException {}
 
-class EventLog extends SystemBase {
-	public static $prefix = 'evl';
-	public static $tablename = 'evl_event_logs';
-	public static $pkey_column = 'evl_event_log_id';
+class ActivationCode extends SystemBase {
+	public static $prefix = 'act';
+	public static $tablename = 'act_activation_codes';
+	public static $pkey_column = 'act_activation_code_id';
 	public static $permanent_delete_actions = array(
-		'evl_event_log_id' => 'delete',		
+		'act_activation_code_id' => 'delete',		
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
 	public static $fields = array(
-		'evl_event_log_id' => 'ID of the event_log',
-		'evl_event' => 'see above',
-		'evl_usr_user_id' => 'User this event_log is associated with',
-		'evl_create_time' => 'Time added',
-		'evl_was_success' => 'Did it run to completion?',
-		'evl_note' => 'Any notes'
+		'act_activation_code_id' => 'ID of the activation_code',
+		'act_usr_email' => 'Email of the user',
+		'act_code' => 'The code',
+		'act_expires_time' => 'Code expires at this time',
+		'act_usr_user_id' => 'User attached to the code',
+		'act_purpose' => 'Purpose',
+		'act_created_time' => 'Created at',
+		'act_phn_phone_number_id' => 'Phone number for text messages',
+		'act_deleted' => 'Is it deleted',
 	);
 
 	public static $field_specifications = array(
-		'evl_event_log_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'evl_event' => array('type'=>'varchar(255)'),
-		'evl_usr_user_id' => array('type'=>'int4'),
-		'evl_create_time' => array('type'=>'timestamp(6)'),
-		'evl_was_success' => array('type'=>'bool'),
-		'evl_note' => array('type'=>'varchar(255)'),
+		'act_activation_code_id' => array('type'=>'int8', 'serial'=>true),
+		'act_usr_email' => array('type'=>'varchar(128)'),
+		'act_code' => array('type'=>'character(12)'),
+		'act_expires_time' => array('type'=>'timestamp(6)'),
+		'act_usr_user_id' => array('type'=>'int4'),
+		'act_purpose' => array('type'=>'int2'),
+		'act_created_time' => array('type'=>'timestamp(6)'),
+		'act_phn_phone_number_id' => array('type'=>'int4'),
+		'act_deleted' => array('type'=>'bool'),
 	);
-			
+
+
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
 	
 	public static $zero_variables = array();
 	
-	public static $initial_default_values = array(
-	'evl_create_time'=> 'now()',);
+	public static $initial_default_values = array('act_deleted' => false, 'act_created_time' => 'now()', 'act_purpose' => 0);
 	
 
 	
 }
 
-class MultiEventLog extends SystemMultiBase {
+class MultiActivationCode extends SystemMultiBase {
 
 	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'evl_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
+		if (array_key_exists('code', $this->options)) {
+		 	$where_clauses[] = 'act_code = ?';
+		 	$bind_params[] = array($this->options['code'], PDO::PARAM_STR);
 		} 
-
-		if (array_key_exists('event', $this->options)) {
-		 	$where_clauses[] = 'evl_event = ?';
-		 	$bind_params[] = array($this->options['event'], PDO::PARAM_STR);
-		}
 				
 		
 		if ($where_clauses) {
@@ -74,19 +75,19 @@ class MultiEventLog extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM evl_event_logs ' . $where_clause;
+			$sql = 'SELECT COUNT(1) FROM act_activation_codes ' . $where_clause;
 		} 
 		else {
-			$sql = 'SELECT * FROM evl_event_logs
+			$sql = 'SELECT * FROM act_activation_codes
 				' . $where_clause . '
 				ORDER BY ';
 
 			if (!$this->order_by) {
-				$sql .= " evl_event_log_id ASC ";
+				$sql .= " act_activation_code_id ASC ";
 			}
 			else {
-				if (array_key_exists('event_log_id', $this->order_by)) {
-					$sql .= ' evl_event_log_id ' . $this->order_by['event_log_id'];
+				if (array_key_exists('activation_code_id', $this->order_by)) {
+					$sql .= ' act_activation_code_id ' . $this->order_by['activation_code_id'];
 				}			
 			}
 			
@@ -114,8 +115,8 @@ class MultiEventLog extends SystemMultiBase {
 	function load($debug = false) {
 		$q = $this->_get_results();
 		foreach($q->fetchAll() as $row) {
-			$child = new EventLog($row->evl_event_log_id);
-			$child->load_from_data($row, array_keys(EventLog::$fields));
+			$child = new ActivationCode($row->act_activation_code_id);
+			$child->load_from_data($row, array_keys(ActivationCode::$fields));
 			$this->add($child);
 		}
 	}

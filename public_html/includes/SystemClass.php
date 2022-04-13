@@ -46,7 +46,6 @@ abstract class SystemBase {
 	static $field_constraints = array();
 	static $field_constraints_user = array();	
 	static $initial_default_values = array();
-	static $public_actions = array();
 	static $json_vars = array('key');
 	static $permanent_delete_actions = array();
 
@@ -56,15 +55,15 @@ abstract class SystemBase {
 		$this->loaded = FALSE;
 		$this->cached_references = array();
 		
-		if(!$this->prefix){
+		if(!static::$prefix){
 			throw new SystemClassException('This object has no prefix.');
 		}
 		
-		if(!$this->tablename){
+		if(!static::$tablename){
 			throw new SystemClassException('This object has no table name.');
 		}
 		
-		if(!$this->pkey_column){
+		if(!static::$pkey_column){
 			throw new SystemClassException('This object has no primary key.');
 		}
 
@@ -139,7 +138,7 @@ abstract class SystemBase {
 	}
 
 	function get_without_prefix($key) {
-		return $this->get($this->prefix . '_' . $key);	
+		return $this->get(static::$prefix . '_' . $key);	
 	}
 
 	function get_array($key) {
@@ -252,40 +251,40 @@ abstract class SystemBase {
 	function load() {
 		$this->loaded = TRUE;
 		if ($this->key === NULL) {
-			throw new SystemClassNoKeyError('Cannot load a '.$this->tablename.' object with no key.');
+			throw new SystemClassNoKeyError('Cannot load a '.static::$tablename.' object with no key.');
 		}
 		
-		$this->data = SingleRowFetch($this->tablename, $this->pkey_column,
+		$this->data = SingleRowFetch(static::$tablename, static::$pkey_column,
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
 		if ($this->data === NULL) {
 			throw new Exception(
-				'This '.$this->tablename.' row ('.$this->pkey_column.'='.$this->key.') does not exist');
+				'This '.static::$tablename.' row ('.static::$pkey_column.'='.$this->key.') does not exist');
 		}		
 		
 	}
 
 	function soft_delete(){
 		foreach(array_keys(get_class($this)::$fields) as $field) {
-			if($field == $this->prefix.'_delete_time'){
-				$this->set($this->prefix.'_delete_time', 'now()');
+			if($field == static::$prefix.'_delete_time'){
+				$this->set(static::$prefix.'_delete_time', 'now()');
 				$this->save();
 				return true;				
 			}
 		}
 		throw new Exception(
-			'This '.$this->tablename.' column ('.$this->prefix.'_delete_time) does not exist');
+			'This '.static::$tablename.' column ('.static::$prefix.'_delete_time) does not exist');
 	}
 	
 	function undelete(){
 		foreach(array_keys(get_class($this)::$fields) as $field) {
-			if($field == $this->prefix.'_delete_time'){
-				$this->set($this->prefix.'_delete_time', NULL);
+			if($field == static::$prefix.'_delete_time'){
+				$this->set(static::$prefix.'_delete_time', NULL);
 				$this->save();	
 				return true;			
 			}
 		}
 		throw new Exception(
-			'This '.$this->tablename.' column ('.$this->prefix.'_delete_time) does not exist');
+			'This '.static::$tablename.' column ('.static::$prefix.'_delete_time) does not exist');
 	}
 	
 	
@@ -339,9 +338,9 @@ abstract class SystemBase {
 			$columns_array = explode(',', trim($columns, '{}'));
 			
 			foreach($columns_array as $column){
-				if(str_contains($column, $this->pkey_column)){
+				if(str_contains($column, static::$pkey_column)){
 					if($debug){
-						echo $this->pkey_column . ' is in ' .$column. "\n<br>";
+						echo static::$pkey_column . ' is in ' .$column. "\n<br>";
 					}
 					$found_foreign_keys[$column] = $table_name;
 				}
@@ -384,7 +383,7 @@ abstract class SystemBase {
 							$dblink->rollBack();
 						}
 						
-						throw new SystemClassException('Cannot permanent delete '.$this->pkey_column.'='.$this->key.' from '.$this->tablename.'. Columns exist in table '. $table_name);
+						throw new SystemClassException('Cannot permanent delete '.static::$pkey_column.'='.$this->key.' from '.static::$tablename.'. Columns exist in table '. $table_name);
 						return false;
 					}
 					
@@ -554,7 +553,7 @@ abstract class SystemBase {
 	// And to save it to the database
 	function save($debug=false) {
 		if ($this->data === NULL) {
-			throw new SystemClassException('This '.$this->tablename.' object has no data.');
+			throw new SystemClassException('This '.static::$tablename.' object has no data.');
 		}		
 		
 		if ($this->key === NULL) {
@@ -626,20 +625,20 @@ abstract class SystemBase {
 		}
 
 		if ($this->key) {
-			$p_keys = array($this->pkey_column => $this->key);
+			$p_keys = array(static::$pkey_column => $this->key);
 			// Editing an existing record
 		} else {
 			$p_keys = NULL;
 			// Creating a new record
-			unset($rowdata[$this->pkey_column]);
+			unset($rowdata[static::$pkey_column]);
 		}
 
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, $this->tablename, $p_keys, $rowdata, FALSE, $debug);
+			$dbhelper, $dblink, static::$tablename, $p_keys, $rowdata, FALSE, $debug);
 
-		$this->key = $p_keys_return[$this->pkey_column];
+		$this->key = $p_keys_return[static::$pkey_column];
 			
 		
 	}
@@ -662,9 +661,6 @@ abstract class SystemBase {
 		return $json;
 	}
 
-	public static function GetPublicActions() { 
-		return static::$public_actions;
-	}
 }
 
 abstract class SystemMultiBase implements IteratorAggregate, Countable {

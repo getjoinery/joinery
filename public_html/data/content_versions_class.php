@@ -13,9 +13,9 @@ class ContentVersionException extends SystemClassException {}
 
 class ContentVersion extends SystemBase {
 
-	public $prefix = 'cnv';
-	public $tablename = 'cnv_content_versions';
-	public $pkey_column = 'cnv_content_version_id';
+	public static $prefix = 'cnv';
+	public static $tablename = 'cnv_content_versions';
+	public static $pkey_column = 'cnv_content_version_id';
 	
 	const TYPE_POST = 1;
 	const TYPE_PAGE_CONTENT = 2;
@@ -37,7 +37,20 @@ class ContentVersion extends SystemBase {
 		'cnv_delete_time' => 'Time Deleted'
 	);
 
-
+	public static $field_specifications = array(
+		'cnv_content_version_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'cnv_title' => array('type'=>'varchar(255)'),
+		'cnv_usr_user_id' => array('type'=>'int4'),
+		'cnv_description' => array('type'=>'varchar(255)'),
+		'cnv_type' => array('type'=>'varchar(255)'),
+		'cnv_foreign_key_id' => array('type'=>'int4'),
+		'cnv_next_version_id' => array('type'=>'int4'),
+		'cnv_previous_version_id' => array('type'=>'int4'),
+		'cnv_content' => array('type'=>'text'),
+		'cnv_create_time' => array('type'=>'timestamp(6)'),
+		'cnv_delete_time' => array('type'=>'timestamp(6)'),
+	);
+			
 	public static $required_fields = array(
 		);
 
@@ -159,62 +172,7 @@ class ContentVersion extends SystemBase {
 		
 		return true;		
 	}
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS cnv_content_versions_cnv_content_version_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-	
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."cnv_content_versions" (
-			  "cnv_content_version_id" int4 NOT NULL DEFAULT nextval(\'cnv_content_versions_cnv_content_version_id_seq\'::regclass),
-			  "cnv_usr_user_id" int4,
-			  "cnv_foreign_key_id" int4 NOT NULL,
-			  "cnv_next_version_id" int4,
-			  "cnv_previous_version_id" int4,
-			  "cnv_title" varchar(255) COLLATE "pg_catalog"."default",
-			  "cnv_type" varchar(255) COLLATE "pg_catalog"."default",
-			  "cnv_description" varchar(255) COLLATE "pg_catalog"."default",
-			  "cnv_content" text COLLATE "pg_catalog"."default",
-			  "cnv_create_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."cnv_content_versions" ADD CONSTRAINT "cnv_content_versions_pkey" PRIMARY KEY ("cnv_content_version_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
 
-		/*
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY cnv_content_versions_cnv_link ON cnv_content_versions USING HASH (cnv_link);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		*/
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 	
 }
 

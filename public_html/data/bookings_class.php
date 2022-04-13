@@ -9,9 +9,9 @@ class BookingException extends SystemClassException {}
 
 class Booking extends SystemBase {
 	
-	public $prefix = 'bkn';
-	public $tablename = 'bkn_bookings';
-	public $pkey_column = 'bkn_booking_id';
+	public static $prefix = 'bkn';
+	public static $tablename = 'bkn_bookings';
+	public static $pkey_column = 'bkn_booking_id';
 
 	const BOOKING_STATUS_CREATED = 0;
 	const BOOKING_STATUS_BOOKED = 1;
@@ -35,6 +35,25 @@ class Booking extends SystemBase {
 		'bkn_create_time' => 'Time created',
 		'bkn_delete_time' => 'Time of deletion',
 	);
+
+	public static $field_specifications = array(
+		'bkn_booking_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'bkn_calendly_event_uuid' => array('type'=>'varchar(36)'),
+		'bkn_usr_user_id_booked' => array('type'=>'int4'),
+		'bkn_usr_user_id_client' => array('type'=>'int4'),
+		'bkn_pro_product_id' => array('type'=>'int4'),
+		'bkn_type' => array('type'=>'int4'),
+		'bkn_notes' => array('type'=>'varchar(255)'),
+		'bkn_start_time' => array('type'=>'timestamp(6)'),
+		'bkn_end_time' => array('type'=>'timestamp(6)'),
+		'bkn_status' => array('type'=>'int4'),
+		'bkn_cancel_link' => array('type'=>'varchar(255)'),
+		'bkn_reschedule_link' => array('type'=>'varchar(255)'),
+		'bkn_location' => array('type'=>'varchar(255)'),
+		'bkn_create_time' => array('type'=>'timestamp(6)'),
+		'bkn_delete_time' => array('type'=>'timestamp(6)'),
+	);
+
 
 	public static $required_fields = array();
 
@@ -68,60 +87,6 @@ class Booking extends SystemBase {
 			}
 		}
 	}
-
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS bkn_bookings_bkn_booking_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."bkn_bookings" (
-			  "bkn_booking_id" int4 NOT NULL DEFAULT nextval(\'bkn_bookings_bkn_booking_id_seq\'::regclass),
-			  "bkn_calendly_event_uuid" varchar(36),
-			  "bkn_usr_user_id_booked" int4,
-			  "bkn_usr_user_id_client" int4,
-			  "bkn_pro_product_id" int4,
-			  "bkn_type" int4,
-			  "bkn_notes" varchar(255),
-			  "bkn_start_time" timestamp(6),
-			  "bkn_end_time" timestamp(6),
-			  "bkn_cancel_link" varchar(255),
-			  "bkn_reschedule_link" varchar(255),
-			  "bkn_location" varchar(255),
-			  "bkn_status" int4,
-			  "bkn_create_time" timestamp(6),
-			  "bkn_delete_time" timestamp(6)
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."bkn_bookings" ADD CONSTRAINT "bkn_bookings_pkey" PRIMARY KEY ("bkn_booking_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
-
-
 
 
 }

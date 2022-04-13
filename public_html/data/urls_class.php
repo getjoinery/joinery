@@ -12,9 +12,9 @@ require_once($siteDir . '/includes/Validator.php');
 class UrlException extends SystemClassException {}
 
 class Url extends SystemBase {
-	public $prefix = 'url';
-	public $tablename = 'url_urls';
-	public $pkey_column = 'url_url_id';
+	public static $prefix = 'url';
+	public static $tablename = 'url_urls';
+	public static $pkey_column = 'url_url_id';
 	public static $permanent_delete_actions = array(
 		'url_url_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -28,6 +28,15 @@ class Url extends SystemBase {
 		'url_create_time' => 'Time added'
 	);
 
+	public static $field_specifications = array(
+		'url_url_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'url_incoming' => array('type'=>'varchar(255)'),
+		'url_redirect_url' => array('type'=>'varchar(255)'),
+		'url_redirect_file' => array('type'=>'varchar(255)'),
+		'url_type' => array('type'=>'int2'),
+		'url_create_time' => array('type'=>'timestamp(6)'),
+	);
+	
 	public static $required_fields = array();
 
 	public static $field_constraints = array();	
@@ -60,56 +69,6 @@ class Url extends SystemBase {
 		}
 	}
 
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS url_urls_url_url_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."url_urls" (
-			  "url_url_id" int4 NOT NULL DEFAULT nextval(\'url_urls_url_url_id_seq\'::regclass),
-			  "url_incoming" varchar(255) COLLATE "pg_catalog"."default",
-			  "url_redirect_url" varchar(255) COLLATE "pg_catalog"."default",
-			  "url_redirect_file" varchar(255) COLLATE "pg_catalog"."default",
-			  "url_type" int2,
-			  "url_create_time" timestamp(6) DEFAULT now()
-			)
-			;';
-		$q = $dburl->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."url_urls" ADD CONSTRAINT "url_urls_pkey" PRIMARY KEY ("url_url_id");';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-		
-		try{		
-			$sql = 'CREATE INDEX CONCURRENTLY url_url_url_incoming ON url_urls USING HASH (url_incoming);';
-			$q = $dburl->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-	
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 }
 
 class MultiUrl extends SystemMultiBase {

@@ -15,9 +15,9 @@ class AddressTravelMismatchException extends DisplayableAddressException {}
 
 class Address extends SystemBase {
 	
-	public $prefix = 'usa';
-	public $tablename = 'usa_users_addrs';
-	public $pkey_column = 'usa_users_addr_id';
+	public static $prefix = 'usa';
+	public static $tablename = 'usa_users_addrs';
+	public static $pkey_column = 'usa_users_addr_id';
 	public static $permanent_delete_actions = array(
 		'usa_users_addr_id' => 'delete', 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -114,7 +114,25 @@ class Address extends SystemBase {
 		'usa_timezone' => 'Timezone this address is in',
 		'usa_create_time' => 'time created', 
 		'usa_cco_country_code_id' => 'Country code id',
+		'test' => 'test field'
 	);
+
+	public static $field_specifications = array(
+		'usa_users_addr_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false), 
+		'usa_type' => array('type'=>'int2'),
+		'usa_address1' => array('type'=>'varchar(128)'),
+		'usa_address2' => array('type'=>'varchar(64)'),
+		'usa_city' => array('type'=>'varchar(64)'),
+		'usa_state' => array('type'=>'varchar(32)'),
+		'usa_zip_code_id' => array('type'=>'varchar(10)'),
+		'usa_usr_user_id' => array('type'=>'int8', 'is_nullable'=>false),
+		'usa_is_default' => array('type'=>'bool'),
+		'usa_timezone' => array('type'=>'varchar(64)'),
+		'usa_create_time' => array('type'=>'timestamp(6)'),
+		'usa_cco_country_code_id' => array('type'=>'int2'),
+		'test' => array('type'=>'int4'),
+	);
+
 
 	public static $required_fields = array();
 	
@@ -659,7 +677,7 @@ class Address extends SystemBase {
 	
 
 
-	static function getPointFromAddress($street, $city, $state){
+	static function getPointFromAddress($street, $city, $state){ 
 
 
 
@@ -746,64 +764,7 @@ class Address extends SystemBase {
 			return FALSE;
 		}
 	}
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS usa_users_addrs_usa_users_addr_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
-		
-		$sql = '
-			CREATE TABLE "public"."usa_users_addrs" (
-			  "usa_users_addr_id" int8 NOT NULL DEFAULT nextval(\'usa_users_addrs_usa_users_addr_id_seq\'::regclass),
-			  "usa_type" int2,
-			  "usa_address1" varchar(128) COLLATE "pg_catalog"."default",
-			  "usa_address2" varchar(64) COLLATE "pg_catalog"."default",
-			  "usa_city" varchar(64) COLLATE "pg_catalog"."default",
-			  "usa_state" varchar(32) COLLATE "pg_catalog"."default",
-			  "usa_zip_code_id" varchar(10) COLLATE "pg_catalog"."default",
-			  "usa_usr_user_id" int8 NOT NULL,
-			  "usa_is_default" bool,
-			  "usa_is_private" bool,
-			  "usa_timezone" varchar(64) COLLATE "pg_catalog"."default",
-			  "usa_create_time" timestamp(6),
-			  "usa_cco_country_code_id" int4
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."usa_users_addrs" ADD CONSTRAINT "usa_users_addrs_pkey" PRIMARY KEY ("usa_users_addr_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
 
-		try{		
-			$sql = 'ALTER TABLE "public"."usa_users_addrs" ADD CONSTRAINT "usa_users_addrs_usa_usr_user_id_fkey" FOREIGN KEY ("usa_usr_user_id") REFERENCES "public"."usr_users" ("usr_user_id") ON DELETE NO ACTION ON UPDATE NO ACTION;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-	
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}	
 	
 
 }

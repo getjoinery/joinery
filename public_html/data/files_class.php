@@ -14,9 +14,9 @@ require_once($siteDir . '/data/event_sessions_class.php');
 class FileException extends SystemClassException {}
 
 class File extends SystemBase {
-	public $prefix = 'fil';
-	public $tablename = 'fil_files';
-	public $pkey_column = 'fil_file_id';
+	public static $prefix = 'fil';
+	public static $tablename = 'fil_files';
+	public static $pkey_column = 'fil_file_id';
 	public static $permanent_delete_actions = array(
 		'fil_file_id' => 'delete',	
 		'esf_fil_file_id' => 'prevent',
@@ -35,6 +35,18 @@ class File extends SystemBase {
 		'fil_gal_gallery_id' => 'Gallery this file is part of TODO'
 	);
 
+	public static $field_specifications = array(
+		'fil_file_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'fil_name' => array('type'=>'varchar(255)'),
+		'fil_title' => array('type'=>'varchar(255)'),
+		'fil_description' => array('type'=>'text'),
+		'fil_type' => array('type'=>'varchar(128)'),
+		'fil_usr_user_id' => array('type'=>'int4'),
+		'fil_create_time' => array('type'=>'timestamp(6)'),
+		'fil_delete_time' => array('type'=>'timestamp(6)'),
+		'fil_gal_gallery_id' => array('type'=>'int4'),
+	);
+			  
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
@@ -350,51 +362,7 @@ class File extends SystemBase {
 		}
 	}
 
-	
-	static function InitDB($mode='structure'){
-	
-		try{
-			$sql = '
-				CREATE SEQUENCE IF NOT EXISTS fil_files_fil_file_id_seq
-				INCREMENT BY 1
-				NO MAXVALUE
-				NO MINVALUE
-				CACHE 1;';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}			
 		
-		$sql = '
-			CREATE TABLE IF NOT EXISTS "public"."fil_files" (
-			  "fil_file_id" int4 NOT NULL DEFAULT nextval(\'fil_files_fil_file_id_seq\'::regclass),
-			  "fil_name" varchar(255) COLLATE "pg_catalog"."default",
-			  "fil_type" varchar(128) COLLATE "pg_catalog"."default",
-			  "fil_usr_user_id" int4,
-			  "fil_create_time" timestamp(6) DEFAULT now(),
-			  "fil_delete_time" timestamp(6),
-			  "fil_title" varchar(255) COLLATE "pg_catalog"."default",
-			  "fil_description" text COLLATE "pg_catalog"."default",
-			  "fil_gal_gallery_id" int4
-			)
-			;';
-		$q = $dblink->prepare($sql);
-		$success = $q->execute();
-		
-		try{		
-			$sql = 'ALTER TABLE "public"."fil_files" ADD CONSTRAINT "fil_files_pkey" PRIMARY KEY ("fil_file_id");';
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-		}
-		catch  (Exception $e){
-			//SKIP
-		}
-
-		//FOR FUTURE
-		//ALTER TABLE table_name ADD COLUMN IF NOT EXISTS column_name INTEGER;
-	}		
 }
 
 class MultiFile extends SystemMultiBase {

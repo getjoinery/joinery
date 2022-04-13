@@ -17,6 +17,7 @@
 	require_once($siteDir.'/data/users_class.php');
 	require_once($siteDir.'/data/address_class.php');
 
+	LibraryFunctions::get_tables_and_columns();
 	
 	/*
 	$object = new Address(NULL);
@@ -25,8 +26,8 @@
 	$object->save();
 	$object->permanent_delete(true);
 	*/
-	$object = new Address(2007, true);
-	$object->permanent_delete();
+	//$object = new Address(2007, true);
+	//$object->permanent_delete();
 	
 	
 	
