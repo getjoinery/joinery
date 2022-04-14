@@ -39,7 +39,6 @@
 	$validation_rules['usr_last_name']['required']['value'] = 'true';
 	$validation_rules['usr_last_name']['minlength']['value'] = 2;
 	$validation_rules['usr_last_name']['maxlength']['value'] = 32;
-	$validation_rules['privacy']['required']['value'] = 'true';
 	$validation_rules['usr_email']['required']['value'] = 'true';
 	$validation_rules['usr_email']['email']['value'] = 'true';
 	$validation_rules['usr_email']['maxlength']['value'] = 64;
@@ -48,12 +47,13 @@
 	$validation_rules['usr_password']['required']['value'] = 'true';
 	$validation_rules['usr_password']['minlength']['value'] = 5;	
 	$validation_rules['usr_password']['minlength']['message'] = "'Password must be at least {0} characters'";
+	$validation_rules['privacy']['required']['value'] = 'true';	
 	if($nickname_display){
 		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
 	}
 	$validation_rules = FormWriterPublicTW::antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);
-
+	
 	echo $formwriter->begin_form("form1", "post", "/register", TRUE);
 	echo $formwriter->hiddeninput("prevformname", "register");
 
@@ -83,7 +83,7 @@
 	echo $formwriter->captcha_hidden_input();
 	//echo $formwriter->start_buttons();
 	//echo $formwriter->new_form_button('Cancel', 'secondary');
-	echo $formwriter->new_form_button('Submit');
+	echo $formwriter->new_form_button('Submit', 'primary', 'full');
 	//echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);
 

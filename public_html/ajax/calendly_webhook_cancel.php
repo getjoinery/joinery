@@ -1,10 +1,9 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormattingFunctions.php');
-	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/DbConnector.php');
+	require_once( __DIR__ . '/../includes/FormattingFunctions.php');
+	require_once( __DIR__ . '/../data/orders_class.php');
+	require_once( __DIR__ . '/../data/product_details_class.php');
 
 
 $payload = @file_get_contents('php://input');

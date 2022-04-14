@@ -1,10 +1,10 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormattingFunctions.php');
-	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/bookings_class.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/DbConnector.php');
+	require_once( __DIR__ . '/../includes/FormattingFunctions.php');
+	require_once( __DIR__ . '/../data/orders_class.php');
+	require_once( __DIR__ . '/../data/bookings_class.php');
+
 
 
 
