@@ -1,7 +1,9 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/stripe-php/init.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/stripe-php/init.php');
+	require_once( __DIR__ . '/../data/events_class.php');
+	require_once( __DIR__ . '/../data/orders_class.php');
+
 
 $settings = Globalvars::get_instance();
 \Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));

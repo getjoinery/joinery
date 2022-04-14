@@ -1,9 +1,12 @@
 <?php
 	header('Content-Type: application/json');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/DbConnector.php');
+	require_once( __DIR__ . '/../includes/SessionControl.php');
+	require_once( __DIR__ . '/../data/events_class.php');
+	require_once( __DIR__ . '/../data/event_sessions_class.php');
+
 
 
 	$session = SessionControl::get_instance();

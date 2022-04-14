@@ -1,8 +1,10 @@
 <?php
 	header('Content-Type: application/json');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/SessionControl.php');
+	require_once( __DIR__ . '/../includes/stripe-php/init.php');
+	require_once( __DIR__ . '/../data/users_class.php');
 
 
 	$session = SessionControl::get_instance();

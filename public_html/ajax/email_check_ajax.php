@@ -1,6 +1,6 @@
 <?php
-
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../data/users_class.php');
 
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
