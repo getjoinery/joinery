@@ -26,6 +26,45 @@ class User extends SystemBase {
 	public static $prefix = 'usr';
 	public static $tablename = 'usr_users';
 	public static $pkey_column = 'usr_user_id';
+
+	public static $permanent_delete_actions = array(
+		'usr_user_id' => 'delete',
+		'act_usr_user_id' => 'delete',
+		'lfe_usr_user_id' => 'delete',
+		'log_usr_user_id' => 'delete',
+		'evl_usr_user_id' => 'delete',
+		'ers_usr_user_id' => 'delete',
+		'ord_usr_user_id' => User::USER_DELETED,
+		'odi_usr_user_id' => User::USER_DELETED,
+		'eml_usr_user_id' => User::USER_DELETED,
+		'erc_usr_user_id' => 'delete',
+		'evt_usr_user_id' => User::USER_DELETED,
+		'evr_usr_user_id' => 'delete',
+		'pst_usr_user_id' => User::USER_DELETED,
+		'phn_usr_user_id' => 'delete',
+		'usa_usr_user_id' => 'delete',
+		'vid_usr_user_id' => User::USER_DELETED,
+		'fil_usr_user_id' => User::USER_DELETED,
+		'msg_usr_user_id_recipient' => 'delete',
+		'msg_usr_user_id_sender' => User::USER_DELETED,
+		'grm_usr_user_id' => 'delete',
+		'grp_usr_user_id_created' => User::USER_DELETED,
+		'bkn_usr_user_id_booked' => User::USER_DELETED,
+		'bkn_usr_user_id_client' => User::USER_DELETED,
+		'cls_usr_user_id_logged_in' => 'delete',
+		'cls_usr_user_id_billing' => User::USER_DELETED,
+		'cmt_usr_user_id' => 'delete',
+		'cnv_usr_user_id' => User::USER_DELETED,
+		'err_usr_user_id' => User::USER_DELETED,
+		'evt_usr_user_id_leader' => User::USER_DELETED,
+		'pac_usr_user_id' => User::USER_DELETED,
+		'sev_usr_user_id' => 'delete',
+		'siv_usr_user_id' => User::USER_DELETED,
+		'stg_usr_user_id' => User::USER_DELETED,
+		'sva_usr_user_id' => User::USER_DELETED,
+		'vse_usr_user_id' => User::USER_DELETED,
+
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
 	// Constants for contact preferences
 	const NEWSLETTER = 1; 
@@ -700,284 +739,30 @@ class User extends SystemBase {
 	}
 
 	
-	function permanent_delete(){
-	
+	function permanent_delete($debug=false){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+		
 		if($this->key == User::USER_SYSTEM || $this->key == User::USER_DELETED){
 			throw new SystemAuthenticationError(
 					'You cannot delete this user.');
 		}
-	
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
+		
 		$this_transaction = false;
 		if(!$dblink->inTransaction()){
 			$dblink->beginTransaction();
 			$this_transaction = true;
-		}
-
-		$sql = 'DELETE FROM usr_users WHERE usr_user_id=:usr_user_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		$sql = 'DELETE FROM act_activation_codes WHERE act_usr_user_id=:usr_user_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-
-		$sql = 'DELETE FROM lfe_log_form_errors WHERE lfe_usr_user_id=:usr_user_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-
-		$sql = 'DELETE FROM log_logins WHERE log_usr_user_id=:usr_user_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-
-		$sql = 'DELETE FROM evl_event_logs WHERE evl_usr_user_id=:usr_user_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-		
-		$sql = 'DELETE FROM ers_recurring_email_logs WHERE ers_usr_user_id=:usr_user_id';
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
 		}		
-
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');	
-		require_once($siteDir . '/data/orders_class.php');
-		$orders = new MultiOrder(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$orders->load();
 		
-		foreach ($orders as $order){
-			$order->permanent_delete();
-		}
-
-		require_once($siteDir . '/data/emails_class.php');
-		$emails = new MultiEmail(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$emails->load();
-		
-		foreach ($emails as $email){
-			$email->set('eml_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
-			$email->save();
-		}	
-
-		require_once($siteDir . '/data/email_recipients_class.php');
-		$email_recipients = new MultiEmailRecipient(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$email_recipients->load();
-		
-		foreach ($email_recipients as $email_recipient){
-			$email_recipient->permanent_delete();
-		}
-
-		require_once($siteDir . '/data/events_class.php');
-		$events = new MultiEvent(
-		array('user_id_leader'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$events->load();
-		
-		foreach ($events as $event){
-			$event->set('evt_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
-			$event->save();
-		}	
-
-		require_once($siteDir . '/data/event_registrants_class.php');
-		$event_registrants = new MultiEventRegistrant(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$event_registrants->load();
-		
-		foreach ($event_registrants as $event_registrant){
-			$event_registrant->remove();
-		}		
-
-
-		require_once($siteDir . '/data/posts_class.php');
-		$posts = new MultiPost(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$posts->load();
-		
-		foreach ($posts as $post){
-			$post->set('pst_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
-			$post->save();
-		}
-
-		require_once($siteDir . '/data/phone_number_class.php');
-		$phone_numbers = new MultiPhoneNumber(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$phone_numbers->load();
-		
-		foreach ($phone_numbers as $phone_number){
-			$phone_number->permanent_delete();
-		}
-
-		require_once($siteDir . '/data/address_class.php');
-		$addresses = new MultiAddress(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$addresses->load();
-		
-		foreach ($addresses as $address){
-			$address->permanent_delete();
-		}
-
-		require_once($siteDir . '/data/videos_class.php');
-		$videos = new MultiVideo(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$videos->load();
-		
-		foreach ($videos as $video){
-			$video->set('vid_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
-			$video->save();
-		}	
-		
-		require_once($siteDir . '/data/files_class.php');
-		$files = new MultiFile(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$files->load();
-		
-		foreach ($files as $file){
-			$file->set('fil_usr_user_id', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
-			$file->save();
-		}	
-	
-		require_once($siteDir . '/data/messages_class.php');
-		$messages = new MultiMessage(
-		array('user_id_recipient'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$messages->load();
-		
-		foreach ($messages as $message){
-			$message->permanent_delete();
-		}
-
-		$messages = new MultiMessage(
-		array('user_id_sender'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$messages->load();
-		
-		foreach ($messages as $message){
-			$message->set('user_id_sender', User::USER_DELETED);  //40 IS THE USER ID OF THE SYSTEM DELETED USER
-			$message->save();
-		}		
-
-		/*
-		$details = new MultiProductDetail(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$details->load();
-		foreach ($details as $detail){
-			$detail->permanent_delete();
-		}
-		*/		
-
-
-		$group_members = new MultiGroupMember(
-		array('user_id'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$group_members->load();
-		
-		foreach ($group_members as $group_member){
-			$group_member->remove();
-		}			
-
-		$groups = new MultiGroup(
-		array('grp_usr_user_id_created'=>$this->key),
-		NULL,
-		NULL,
-		NULL);
-		$groups->load();
-		
-		foreach ($groups as $group){
-			$group->set('grp_usr_user_id_created', User::USER_DELETED); //40 is the system deleted user
-			$group->save();
+		if(!$debug){
+			$this->unsubscribe_from_mailing_list();
 		}
 		
+		parent::permanent_delete($debug);
 		
 		if($this_transaction){
 			$dblink->commit();
 		}	
-
-		$this->unsubscribe_from_mailing_list();
-		$this->key = NULL;
 		
 		return true;
 		

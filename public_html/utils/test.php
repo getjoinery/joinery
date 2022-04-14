@@ -15,17 +15,19 @@
 	require_once($siteDir.'/data/events_class.php');
 	require_once($siteDir.'/data/files_class.php');
 	require_once($siteDir.'/data/users_class.php');
-	require_once($siteDir.'/data/address_class.php');
+	require_once($siteDir.'/data/messages_class.php');
 
-	LibraryFunctions::get_tables_and_columns();
+	//LibraryFunctions::get_tables_and_columns();
 	
-	/*
-	$object = new Address(NULL);
+	
+	$object = new User(3729, true);
+	$object->permanent_delete(true);
+	exit;
 	$object->set('usa_address1', 'test');
 	$object->set('usa_usr_user_id', 1);
 	$object->save();
 	$object->permanent_delete(true);
-	*/
+	
 	//$object = new Address(2007, true);
 	//$object->permanent_delete();
 	
