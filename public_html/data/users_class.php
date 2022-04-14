@@ -63,6 +63,7 @@ class User extends SystemBase {
 		'stg_usr_user_id' => User::USER_DELETED,
 		'sva_usr_user_id' => User::USER_DELETED,
 		'vse_usr_user_id' => User::USER_DELETED,
+		'prd_usr_user_id' => User::USER_DELETED,
 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
