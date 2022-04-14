@@ -263,6 +263,9 @@ ini_set('display_startup_errors', 1);
 					}			
 			}
 			
+			//REFRESH THE TABLES AND COLUMNS
+			$tables_and_columns = LibraryFunctions::get_tables_and_columns();
+		
 			
 			echo '---'.$table_name .'---<br>';
 			if(!isset($class::$field_specifications)){
