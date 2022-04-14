@@ -262,8 +262,6 @@ ini_set('display_startup_errors', 1);
 						$live_column_info[$row->column_name][character_maximum_length] = $row->character_maximum_length;
 					}			
 			}
-			
-
 		
 			
 			echo '---'.$table_name .'---<br>';
