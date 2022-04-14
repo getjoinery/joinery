@@ -114,7 +114,6 @@ class Address extends SystemBase {
 		'usa_timezone' => 'Timezone this address is in',
 		'usa_create_time' => 'time created', 
 		'usa_cco_country_code_id' => 'Country code id',
-		'test' => 'test field'
 	);
 
 	public static $field_specifications = array(
@@ -130,7 +129,6 @@ class Address extends SystemBase {
 		'usa_timezone' => array('type'=>'varchar(64)'),
 		'usa_create_time' => array('type'=>'timestamp(6)'),
 		'usa_cco_country_code_id' => array('type'=>'int2'),
-		'test' => array('type'=>'int4'),
 	);
 
 

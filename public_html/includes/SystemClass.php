@@ -288,7 +288,7 @@ abstract class SystemBase {
 	}
 	
 	
-	//DEFAULT ACTION ON PERMANENT DELETE IS TO DELETE ALL ROWS WITH FOREIGN KEY 
+	//DEFAULT ACTION ON PERMANENT DELETE IS TO SKIP ALL ROWS WITH FOREIGN KEY 
 	//FOR OTHER BEHAVIOR SET THE permanent_delete_actions ARRAY
 	//OPTIONS FOR permanent_delete_actions ARRAY:
 	//'delete' = DELETE THE ROW WITH THE FOREIGN KEY
@@ -296,9 +296,11 @@ abstract class SystemBase {
 	//value = SET THE FOREIGN KEY TO A VALUE
 	//'skip' = SKIP THE FOREIGN KEY
 	//'prevent' = IF FOREIGN KEY ROWS ARE PRESENT, DO NOT ALLOW PERMANENT DELETE...THROWS AN ERROR
+	//DOES NOT CASCADE.  IF YOU NEED CASCADE DELETE, THEN CALL THE permanent_delete() FUNCTION DIRECTLY ON THE OTHER CLASS
 	function permanent_delete($debug=false){
 		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
+		$dblink = $dbhelper->get_db_link();  
+		
 
 		if(!$debug){
 			$this_transaction = false;
@@ -347,10 +349,14 @@ abstract class SystemBase {
 			}
 		}
 		
+		//ABORT IF NO permanent_delete_actions SPECIFIED
+		if(!isset(static::$permanent_delete_actions) OR empty(static::$permanent_delete_actions)){
+			throw new SystemClassException('No permanent_delete_actions specified for  '.static::$tablename);
+			return false;
+		}
 		
 
 		//CHECK FOR 'PREVENT' CONSTRAINT FIRST AND IF FOUND, THEN ABORT THE PERMANENT DELETE WITH AN ERROR
-
 		foreach($found_foreign_keys as $column=>$table_name){
 			$action = 'delete';  //DELETE IS DEFAULT
 			foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
@@ -375,7 +381,7 @@ abstract class SystemBase {
 				}
 				if($count->count){
 					if($debug){
-						echo "FOUND<br>\n";
+						echo "Prevent: ".$column." <br>\n";
 					}
 					else{
 						//IF FOUND, ERROR AND ABORT PERMANENT DELETE
@@ -388,11 +394,6 @@ abstract class SystemBase {
 					}
 					
 				}
-				else{
-					if($debug){
-						echo "NOT FOUND<br>\n";
-					}
-				}
 			}								
 		}
 			
@@ -402,7 +403,7 @@ abstract class SystemBase {
 		//IF NO PREVENT CONSTRAINT EXISTS, THEN DO THE DELETES
 		foreach($found_foreign_keys as $column=>$table_name){
 			
-			$action = 'delete';  //DELETE IS DEFAULT
+			$action = 'skip';  //SKIP IS DEFAULT
 			foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
 				if($pcolumn == $column){
 					$action = $paction;
@@ -413,10 +414,12 @@ abstract class SystemBase {
 				//DO NOTHING
 			}					
 			else if($action == 'delete'){
+
 			
 				$sql = 'DELETE FROM '.$table_name.' WHERE '.$column.'=:param1';
 				
 				if($debug){
+					$sql = str_replace(':param1', $this->key, $sql);
 					echo $sql . "<br>";
 				}
 				else{
@@ -435,6 +438,7 @@ abstract class SystemBase {
 			
 				$sql = 'UPDATE '.$table_name.' SET '.$column.'=NULL WHERE '.$column.'=:param1';
 				if($debug){
+					$sql = str_replace(':param1', $this->key, $sql);
 					echo $sql . "<br>";
 				}
 				else{	
@@ -449,11 +453,14 @@ abstract class SystemBase {
 				}					
 			}
 			else if($action == 'skip'){
-				//DO NOTHING
+				if($debug){
+					echo 'Skipping '.$column . "<br>";
+				}
 			}
 			else{
 				$sql = 'UPDATE '.$table_name.' SET '.$column.'='.$action.' WHERE '.$column.'=:param1';
 				if($debug){
+					$sql = str_replace(':param1', $this->key, $sql);
 					echo $sql . "<br>";
 				}
 				else{	
