@@ -22,16 +22,21 @@
 		if($_POST['fil_description']){
 				$_POST['fil_description'] = LibraryFunctions::ToUTF8($_POST['fil_description']);
 		}
-			
-
 		
+		if($_POST['fil_min_permission'] === NULL || $_POST['fil_min_permission'] === ''){
+			$file->set('fil_min_permission', NULL);
+		} 
+		else{
+			$file->set('fil_min_permission', $_POST['fil_min_permission']);
+		}
+
 		$editable_fields = array('fil_description', 'fil_title','fil_gal_gallery_id');
 
 		foreach($editable_fields as $field) {
-			$file->set($field, $_REQUEST[$field]);
+			$file->set($field, $_POST[$field]);
 		}
 		
-
+		
 		
 		$file->prepare();
 		$file->save();
@@ -69,6 +74,9 @@
 
 
 	echo $formwriter->textbox('File Description', 'fil_description', 'ctrlHolder', 10, 80, $file->get('fil_description'), '', 'no');
+	
+	$optionvals = array('Public' => null, 'Regular User (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
+	echo $formwriter->dropinput("Permission level", "fil_min_permission", "ctrlHolder", $optionvals, $file->get('fil_min_permission'), '', FALSE, TRUE);
 	
 	if($file->is_image()){
 		echo $formwriter->checkboxinput("Include this image in the gallery", "fil_gal_gallery_id", "checkbox", "left", $file->get('fil_gal_gallery_id'), 1, "");

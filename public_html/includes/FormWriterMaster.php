@@ -764,13 +764,22 @@ class FormWriterMaster {
 
 
 			foreach ($optionvals as $key => $value) {
-				if($forcestrict && $input === $value){
-					$output .= '<option value="'. $value .'" selected="selected">' . $key . '</option>';
-				} elseif ($input == $value) { 
-					$output .= '<option value="'. $value .'" selected="selected">' . $key . '</option>';
-				} else {
+				if($forcestrict){
+					if ($input === $value) { 
+						$output .= '<option value="'. $value .'" selected="selected">' . $key . '</option>';
+					} 
+					else {
+						$output .= '<option value="'. $value .'">' . $key . '</option>';
+					}					
+				}
+				else{
+					if ($input == $value) { 
+						$output .= '<option value="'. $value .'" selected="selected">' . $key . '</option>';
+					} 
+					else {
 
-					$output .= '<option value="'. $value .'">' . $key . '</option>';
+						$output .= '<option value="'. $value .'">' . $key . '</option>';
+					}
 				}
 			}
 			$output .= '</select>				
