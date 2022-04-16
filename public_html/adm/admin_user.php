@@ -239,6 +239,9 @@
 		if(!$user->get('usr_delete_time')) {
 			if($_SESSION['permission'] > 7){
 				$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
+				if(!$user->get('usr_email_is_verified')){
+					$options['altlinks']['Resend activation email'] = '/admin/admin_email_verify?usr_user_id='.$user->key; 
+				}
 				$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
 
 				$options['altlinks']['Change password'] = '/admin/admin_users_password_edit?usr_user_id='.$user->key;
