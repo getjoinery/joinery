@@ -283,10 +283,6 @@ class User extends SystemBase {
 
 	function lock_for_user($editor_id, $type) {
 
-		if($type != User::LOCK_DOJ) {
-			throw new UserError("Invalid lock column.");
-		}
-
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
@@ -314,12 +310,6 @@ class User extends SystemBase {
 		}
 	}
 
-	public function get_signup_description() {
-		if ($this->get('usr_signup_source')) {
-			return self::$signup_type_to_description[$this->get('usr_signup_source')];
-		}
-		return '';
-	}
 
 	public function export_as_array() {
 		$user_data = parent::export_as_array();
@@ -447,18 +437,6 @@ class User extends SystemBase {
 		require_once($siteDir . '/includes/PasswordHash.php');
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->HashPassword($password);
-	}
-
-	function email_verify_user_from_uak_code($code) {
-		if (!$this->get('usr_email_is_verified')) {
-			$user_code = LibraryFunctions::decode($code, 'activation_key');
-			if ($user_code == $this->key) {
-				// If the user passed in the key that matches their user account,
-				// then lets verify them and reload their user object.
-				$this->email_verify_user(TRUE, TRUE);
-				$this->load();
-			}
-		}
 	}
 
 	function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {

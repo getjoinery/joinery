@@ -160,40 +160,6 @@ class EmailRecipient extends SystemBase {
 		return $q->fetch()->count;
 	}	
 	
-	static function QuickInsert($erc_eml_email_id, $erc_email) {
-		
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'INSERT INTO erc_email_recipients (erc_eml_email_id, erc_email) VALUES (:erc_eml_email_id, :erc_email)';
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(':erc_eml_email_id', $erc_eml_email_id, PDO::PARAM_INT);
-			$q->bindValue(':erc_email', $erc_email, PDO::PARAM_STR);
-			$success = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}	
-	}
-
-	static function QuickDelete($erc_eml_email_id, $erc_email) {
-		
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = "DELETE FROM erc_email_recipients WHERE erc_eml_email_id=:erc_eml_email_id AND LOWER(erc_email)=LOWER(:erc_email)";
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(':erc_eml_email_id', $erc_eml_email_id, PDO::PARAM_INT);
-			$q->bindValue(':erc_email', $erc_email, PDO::PARAM_STR);
-			$q->execute();
-		} catch (PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}	
-	}	
 
 	static function DeleteAll($erc_eml_email_id) {
 		
