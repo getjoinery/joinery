@@ -236,32 +236,39 @@ ini_set('display_startup_errors', 1);
 				//NOW GET THE COLUMNS AGAIN
 				$live_table_columns = $tables_and_columns[$table_name];
 			}
-			else{
-				//PULL THE COLUMN METADATA FOR CURRENT TABLE
-					$sql = 'SELECT
-						column_name,
-						data_type,
-						character_maximum_length
-					FROM
-						information_schema.columns
-					WHERE
-						table_name = \''.$table_name.'\'';
-					try{
-						$q = $dblink->prepare($sql);
-						$q->execute();
-						$q->setFetchMode(PDO::FETCH_OBJ);
-					}
-					catch(PDOException $e){
-						$dbhelper->handle_query_error($e);
-					}	
-					
-					
-					$live_column_info = array();
-					while ($row = $q->fetch()) {
-						$live_column_info[$row->column_name][data_type] = $row->data_type;
-						$live_column_info[$row->column_name][character_maximum_length] = $row->character_maximum_length;
-					}			
-			}
+		}
+		
+		
+		
+		//REFRESH EVERYTHING AFTER ADDING TABLES
+		$tables_and_columns = LibraryFunctions::get_tables_and_columns();
+		foreach ($classes as $class){
+		
+			//PULL THE COLUMN METADATA FOR CURRENT TABLE
+				$sql = 'SELECT
+					column_name,
+					data_type,
+					character_maximum_length
+				FROM
+					information_schema.columns
+				WHERE
+					table_name = \''.$table_name.'\'';
+				try{
+					$q = $dblink->prepare($sql);
+					$q->execute();
+					$q->setFetchMode(PDO::FETCH_OBJ);
+				}
+				catch(PDOException $e){
+					$dbhelper->handle_query_error($e);
+				}	
+				
+				
+				$live_column_info = array();
+				while ($row = $q->fetch()) {
+					$live_column_info[$row->column_name][data_type] = $row->data_type;
+					$live_column_info[$row->column_name][character_maximum_length] = $row->character_maximum_length;
+				}			
+			
 		
 			
 			echo '---'.$table_name .'---<br>';
