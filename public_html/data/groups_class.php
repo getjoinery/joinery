@@ -44,9 +44,9 @@ class Group extends SystemBase {
 		'grp_group_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'grp_name' => array('type'=>'varchar(100)'),
 		'grp_usr_user_id_created' => array('type'=>'int4'),
-		'grp_create_time' => array('type'=>'timestamp()'),
-		'grp_update_time' => array('type'=>'timestamp()'),
-		'grp_delete_time' => array('type'=>'timestamp()'),
+		'grp_create_time' => array('type'=>'timestamp(6)'),
+		'grp_update_time' => array('type'=>'timestamp(6)'),
+		'grp_delete_time' => array('type'=>'timestamp(6)'),
 		'grp_type' => array('type'=>'int2'),
 	);	
 
