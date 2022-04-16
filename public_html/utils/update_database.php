@@ -236,14 +236,16 @@ ini_set('display_startup_errors', 1);
 				//NOW GET THE COLUMNS AGAIN
 				$live_table_columns = $tables_and_columns[$table_name];
 			}
-		}
+		} 
 		
 		
 		
 		//REFRESH EVERYTHING AFTER ADDING TABLES
 		$tables_and_columns = LibraryFunctions::get_tables_and_columns();
 		foreach ($classes as $class){
-		
+			$table_name = $class::$tablename;
+			$pkey_column = $class::$pkey_column;
+			$live_table_columns = $tables_and_columns[$table_name];		
 			//PULL THE COLUMN METADATA FOR CURRENT TABLE
 				$sql = 'SELECT
 					column_name,
