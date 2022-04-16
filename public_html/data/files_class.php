@@ -32,7 +32,8 @@ class File extends SystemBase {
 		'fil_usr_user_id' => 'User who uploaded',
 		'fil_create_time' => 'Created',
 		'fil_delete_time' => 'Time of file deletion',
-		'fil_gal_gallery_id' => 'Gallery this file is part of TODO'
+		'fil_gal_gallery_id' => 'Gallery this file is part of TODO',
+		'fil_min_permission' => 'Permission level required to view file',
 	);
 
 	public static $field_specifications = array(
@@ -45,6 +46,7 @@ class File extends SystemBase {
 		'fil_create_time' => array('type'=>'timestamp(6)'),
 		'fil_delete_time' => array('type'=>'timestamp(6)'),
 		'fil_gal_gallery_id' => array('type'=>'int4'),
+		'fil_min_permission' => array('type'=>'int2'),
 	);
 			  
 	public static $required_fields = array();
@@ -54,7 +56,7 @@ class File extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
-	'fil_create_time'=> 'now()',);
+	'fil_create_time'=> 'now()','fil_min_permission' => null);
 	
 	public static function get_by_name($name) {
 		$dbhelper = DbConnector::get_instance();
