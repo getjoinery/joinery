@@ -63,16 +63,6 @@ class Post extends SystemBase {
 	'pst_is_on_homepage' => true
 	);	
 
-	static function check_if_exists($key) {
-		$data = SingleRowFetch('pst_posts', 'pst_post_id',
-			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($data === NULL) {
-			return FALSE;
-		}
-		else{
-			return TRUE;
-		}
-	}
 	
 	static function get_by_link($link){
 		$results = new MultiPost(array('link' => $link, 'deleted'=>false));

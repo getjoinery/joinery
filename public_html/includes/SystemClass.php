@@ -246,6 +246,17 @@ abstract class SystemBase {
 		}
 		return $this->cached_references[$method_name];
 	}
+	
+	static function check_if_exists($key) {
+		$data = SingleRowFetch(static::$tablename, static::$pkey_column,
+			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
+		if ($data === NULL) {
+			return FALSE;
+		}
+		else{
+			return TRUE;
+		}
+	}
 
 
 	function load() {

@@ -117,16 +117,6 @@ class PageContent extends SystemBase {
 		}
 	}	
 
-	static function check_if_exists($key) {
-		$data = SingleRowFetch('pac_page_contents', 'pac_page_content_id',
-			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($data === NULL) {
-			return FALSE;
-		}
-		else{
-			return TRUE;
-		}
-	}
 
 	
 	function prepare() {
