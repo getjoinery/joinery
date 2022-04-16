@@ -24,6 +24,7 @@ class Group extends SystemBase {
 		'grm_grp_group_id' => 'delete',
 		'pro_grp_group_id' => 'prevent',
 		'erg_grp_group_id' => 'prevent',
+		'fil_grp_group_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	const GROUP_TYPE_USER = 1;

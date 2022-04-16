@@ -57,6 +57,7 @@ class Event extends SystemBase {
 		'msg_evt_event_id' => 'delete',
 		'pro_evt_event_id' => 'prevent',
 		'sev_evt_event_id' => 'delete',
+		'fil_evt_event_id' => 'null',
 		
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
