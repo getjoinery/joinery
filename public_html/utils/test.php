@@ -20,8 +20,15 @@
 	//LibraryFunctions::get_tables_and_columns();
 	
 	
-	$object = new User(3729, true);
-	$object->permanent_delete(true);
+	//$object = new User(3729, true);
+	$exists = User::check_if_exists(40);
+	
+	if($exists){
+		echo 'yes';
+	}
+	else{
+		echo 'no';
+	}
 	exit;
 	$object->set('usa_address1', 'test');
 	$object->set('usa_usr_user_id', 1);

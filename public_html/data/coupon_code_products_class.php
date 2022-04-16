@@ -43,16 +43,6 @@ class CouponCodeProduct extends SystemBase {
 	
 	public static $initial_default_values = array();	
 
-	static function check_if_exists($key) {
-		$data = SingleRowFetch('ccp_coupon_code_products', 'ccp_coupon_code_product_id',
-			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($data === NULL) {
-			return FALSE;
-		}
-		else{
-			return TRUE;
-		}
-	}
 	
 	
 	function prepare() {

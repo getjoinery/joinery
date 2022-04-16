@@ -52,16 +52,6 @@ class QuestionOption extends SystemBase {
 	'qop_edited_time' => 'now()'
 	);	
 
-	static function check_if_exists($key) {
-		$data = SingleRowFetch('qop_question_options', 'qop_question_option_id',
-			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($data === NULL) {
-			return FALSE;
-		}
-		else{
-			return TRUE;
-		}
-	}
 	
 	
 	function authenticate_write($session, $other_data=NULL) {

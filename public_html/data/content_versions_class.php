@@ -61,17 +61,6 @@ class ContentVersion extends SystemBase {
 	public static $initial_default_values = array(
 	'cnv_create_time' => 'now()'
 	);	
-
-	static function check_if_exists($key) {
-		$data = SingleRowFetch('cnv_content_versions', 'cnv_content_version_id',
-			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($data === NULL) {
-			return FALSE;
-		}
-		else{
-			return TRUE;
-		}
-	}
 	
 	function get_previous_version(){
 		if($this->get('cnv_previous_version_id')){

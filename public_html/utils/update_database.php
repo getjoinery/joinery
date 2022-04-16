@@ -293,7 +293,7 @@ ini_set('display_startup_errors', 1);
 					$field_length = extract_length_from_spec($field_specifications[$field][type]);
 					$field_without_length = preg_replace('/[^a-z ]/', '', $field_specifications[$field][type]);
 					if(translate_data_types($live_column_info[$field][data_type]) != $field_without_length){
-						echo 'NOTICE: Data types do not match on field '.$field.' ('. $live_column_info[$field][data_type] .'<->'. $field_without_length .")<br>\n";
+						echo 'NOTICE: Data types do not match on field '.$field.' (live: '. $live_column_info[$field][data_type] .'<->spec:'. $field_without_length .")<br>\n";
 					}
 					
 					//CHECK THE LENGTH
@@ -303,7 +303,7 @@ ini_set('display_startup_errors', 1);
 					}
 					if($live_column_info[$field][character_maximum_length]){
 						if($live_column_info[$field][character_maximum_length] != $field_length){
-							echo 'NOTICE: Max character length does not match on field '.$field.' ('. $live_column_info[$field][character_maximum_length] .'<->'. $field_length .")<br>\n";						
+							echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field][character_maximum_length] .'<->spec: '. $field_length .")<br>\n";						
 						}
 					}
 

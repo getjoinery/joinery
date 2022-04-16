@@ -73,16 +73,6 @@ class Question extends SystemBase {
 	'qst_create_time' => 'now()', 'qst_is_published' => true
 	);	
 
-	static function check_if_exists($key) {
-		$data = SingleRowFetch('qst_questions', 'qst_question_id',
-			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($data === NULL) {
-			return FALSE;
-		}
-		else{
-			return TRUE;
-		}
-	}
 
 	function output_js_validation($validation_rules){
 		$validation_options = unserialize($this->get('qst_validate')); 

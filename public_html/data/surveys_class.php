@@ -49,18 +49,6 @@ class Survey extends SystemBase {
 	'svy_edited_time' => 'now()'
 	);	
 
-	static function check_if_exists($key) {
-		$data = SingleRowFetch('svy_surveys', 'svy_survey_id',
-			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($data === NULL) {
-			return FALSE;
-		}
-		else{
-			return TRUE;
-		}
-	}
-	
-
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();

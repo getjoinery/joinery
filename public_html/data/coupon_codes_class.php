@@ -63,16 +63,6 @@ class CouponCode extends SystemBase {
 		'ccd_create_time' => 'now()'
 	);	
 
-	static function check_if_exists($key) {
-		$data = SingleRowFetch('ccd_coupon_codes', 'ccd_coupon_code_id',
-			$key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($data === NULL) {
-			return FALSE;
-		}
-		else{
-			return TRUE;
-		}
-	}
 
 	public static function get_by_name($name) {
 		$dbhelper = DbConnector::get_instance();
