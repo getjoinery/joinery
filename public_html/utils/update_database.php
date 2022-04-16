@@ -341,7 +341,7 @@ ini_set('display_startup_errors', 1);
 					}
 				}
 				if(!$found){
-					echo $live_column.' is in live db but not in class<br>';
+					echo $live_column.' is in live table '.$table_name.' but not in class<br>';
 				}
 			}
 		}
