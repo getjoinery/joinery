@@ -134,6 +134,34 @@ if($settings->get_setting('files_active')){
 					echo 'Insufficient permissions';
 					exit;
 				}
+				
+				if ($group_id = $file_obj->get('fil_grp_group_id')){
+					require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
+					//CHECK TO SEE IF USER IS IN AUTHORIZED GROUP
+					$group = new Group($group_id, TRUE);
+					if(!$group->is_member_in_group($session->get_user_id())){
+						echo 'Insufficient group permissions';
+						exit;
+					}
+				}
+				
+				if ($event_id = $file_obj->get('fil_evt_event_id')){
+					require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
+					//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
+					$searches['user_id'] = $session->get_user_id();
+					$searches['event_id'] = $event_id;
+					$event_registrations = new MultiEventRegistrant(
+						$searches,
+						NULL, //array('event_id'=>'DESC'),
+						NULL,
+						NULL);
+					$numeventsregistrations = $event_registrations->count_all();	
+
+					if(!$numeventsregistrations){
+						echo 'Insufficient event permissions';
+						exit;
+					}
+				}
 			}
 			
 			$seconds_to_cache = 43200;

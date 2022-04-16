@@ -30,6 +30,22 @@
 			$file->set('fil_min_permission', $_POST['fil_min_permission']);
 		}
 
+		if($_POST['fil_grp_group_id'] === NULL || $_POST['fil_grp_group_id'] === ''){
+			$file->set('fil_grp_group_id', NULL);
+		} 
+		else{
+			$file->set('fil_grp_group_id', $_POST['fil_grp_group_id']);
+		}
+		
+		if($_POST['fil_evt_event_id'] === NULL || $_POST['fil_evt_event_id'] === ''){
+			$file->set('fil_evt_event_id', NULL);
+		} 
+		else{
+			$file->set('fil_evt_event_id', $_POST['fil_evt_event_id']);
+		}
+
+
+
 		$editable_fields = array('fil_description', 'fil_title','fil_gal_gallery_id');
 
 		foreach($editable_fields as $field) {
@@ -59,7 +75,7 @@
 	);
 	
 
-	$pageoptions['title'] = 'File Edit: '.$file->get('fil_name');
+	$pageoptions['title'] = 'File Edit: '.$file->get('fil_title');
 	$page->begin_box($pageoptions);
 
 
@@ -75,8 +91,33 @@
 
 	echo $formwriter->textbox('File Description', 'fil_description', 'ctrlHolder', 10, 80, $file->get('fil_description'), '', 'no');
 	
-	$optionvals = array('Public' => null, 'Regular User (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
-	echo $formwriter->dropinput("Permission level", "fil_min_permission", "ctrlHolder", $optionvals, $file->get('fil_min_permission'), '', FALSE, TRUE);
+	$optionvals = array('Public (anyone)' => null, 'Any logged in user (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
+	echo $formwriter->dropinput("Permission level can access", "fil_min_permission", "ctrlHolder", $optionvals, $file->get('fil_min_permission'), '', FALSE, TRUE);
+	
+	$groups = new MultiGroup(
+		array('type'=>Group::GROUP_TYPE_USER),  //SEARCH 
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$groups->load();
+
+	$optionvals1['All'] = NULL;	
+	$optionvals2 = $groups->get_dropdown_array();
+	$optionvals = array_merge($optionvals1, $optionvals2);
+	echo $formwriter->dropinput("Group can access", "fil_grp_group_id", "ctrlHolder", $optionvals, $file->get('fil_grp_group_id'), '', FALSE, TRUE);
+
+	$events = new MultiEvent(
+		NULL,  //SEARCH 
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$events->load();
+
+	$optionvals['All'] = NULL;	
+	$optionvals2 = $events->get_dropdown_array();
+	$optionvals = array_merge($optionvals1, $optionvals2);
+	echo $formwriter->dropinput("Event can access", "fil_evt_event_id", "ctrlHolder", $optionvals, $file->get('fil_evt_event_id'), '', FALSE, TRUE);
+	
 	
 	if($file->is_image()){
 		echo $formwriter->checkboxinput("Include this image in the gallery", "fil_gal_gallery_id", "checkbox", "left", $file->get('fil_gal_gallery_id'), 1, "");

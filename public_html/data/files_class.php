@@ -34,6 +34,8 @@ class File extends SystemBase {
 		'fil_delete_time' => 'Time of file deletion',
 		'fil_gal_gallery_id' => 'Gallery this file is part of TODO',
 		'fil_min_permission' => 'Permission level required to view file',
+		'fil_grp_group_id' => 'Group with permission to see file',
+		'fil_evt_event_id' => 'Event registrants with permission to see file',
 	);
 
 	public static $field_specifications = array(
@@ -47,6 +49,8 @@ class File extends SystemBase {
 		'fil_delete_time' => array('type'=>'timestamp(6)'),
 		'fil_gal_gallery_id' => array('type'=>'int4'),
 		'fil_min_permission' => array('type'=>'int2'),
+		'fil_grp_group_id' => array('type'=>'int4'),
+		'fil_evt_event_id' => array('type'=>'int4'),
 	);
 			  
 	public static $required_fields = array();
