@@ -265,7 +265,7 @@ class Event extends SystemBase {
 				return NULL;
 			}
 			else{
-				return '/product?product_id=' . $product->key;	
+				return $product->get_url();	
 			}
 		}
 		else if($numproducts > 1){
@@ -279,7 +279,7 @@ class Event extends SystemBase {
 				}
 				else{
 					$product_temp['label'] = $product->get('pro_name');
-					$product_temp['link'] = '/product?product_id=' . $product->key;
+					$product_temp['link'] = $product->get_url();
 				}
 				$product_list[] = $product_temp;
 			}
@@ -288,7 +288,7 @@ class Event extends SystemBase {
 		else{
 			throw new SystemDisplayablePermanentError(
 				'The event ' . $this->get('evt_name') . ' is missing a register link or a product.');
-				exit();	;
+				exit();
 		}
 	}		
 	

@@ -472,7 +472,7 @@
                 <div class="mt-6">
 					<?php
 						if(!$active){
-							echo '<a href="/product?product_id=3" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+							echo '<a href="/product/recurring-donation" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
 							Start a new subscription
 						  </a>';
 							
@@ -541,7 +541,7 @@
                   </ul>
                 </div>
                 <div class="mt-6">
-					<a href="/product?product_id=3" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+					<a href="/product/recurring-donation" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
 						See All Orders
 					  </a>
                 </div>

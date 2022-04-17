@@ -83,7 +83,7 @@
 	}
 
 	if(!$active){
-		echo '<a class="button button-dark" href="/product?product_id=3">Start a new recurring donation</a>';
+		echo '<a class="button button-dark" href="/product/recurring-donation">Start a new recurring donation</a>';
 	}
 	?>
 			</ul>

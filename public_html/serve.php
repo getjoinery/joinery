@@ -273,13 +273,38 @@ if($settings->get_setting('blog_active')){
 }
 
 //PAGE CONTENTS.  DEFAULT IS TO USE THE /PAGE/ SUBDIRECTORY
-if($settings->get_setting('page_contents_active')){
+if($params[0] == 'page'){
+	if($settings->get_setting('page_contents_active')){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/page_contents_class.php');
-	if($params[0] == 'page'){
+
 		$page_content = PageContent::get_by_link($params[1]);		
 
 		$template_file = $template_directory.'/page.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
+		
+		$is_valid_page = true;
+		
+		if(file_exists($template_file)){
+			require_once($template_file);
+			exit();
+		}
+		else if(file_exists($base_file)){
+			require_once($base_file); 
+			exit();		
+		}		
+	}	
+}
+
+//PRODUCTS.  DEFAULT IS TO USE THE /PRODUCT/ SUBDIRECTORY
+if($params[0] == 'product'){
+	if($settings->get_setting('products_active')){
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
+
+		$product = Product::get_by_link($params[1]);	
+		$product_id = $product->key;
+		
+		$template_file = $template_directory.'/product.php';
+		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/product.php';
 		
 		$is_valid_page = true;
 		
@@ -315,6 +340,6 @@ if($params[0]){
 
 
 	
-require_once(LibraryFunctions::display_404_page());		
+LibraryFunctions::display_404_page();		
 
 ?>

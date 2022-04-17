@@ -28,6 +28,9 @@
 	if ($_POST || $_REQUEST['action']) {
 		
 		if ($_REQUEST['action'] == 'add' || $_REQUEST['action'] == 'edit') {
+			$_REQUEST['pro_link'] = trim(strtolower($_REQUEST['pro_link']));
+			$_REQUEST['pro_link'] = preg_replace("/[^a-zA-Z0-9-]/", "", $_REQUEST['pro_link']);
+			
 		
 			if($_REQUEST['pro_requirements']){
 				$total_value = 0;
@@ -270,6 +273,10 @@
 	echo $formwriter->textinput('Max Number that can be added to cart (0 for unlimited):', 'pro_max_cart_count', 'ctrlHolder', 100, $product->get('pro_max_cart_count'), '', 3, '');
 	echo $formwriter->textinput('Max Number that can be purchased total (0 for unlimited):', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 3, '');
 	echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
+	
+
+	echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/product/', 'pro_link', NULL, 100, $product->get('pro_link'), '', 255, '');	
+
 	
 
 	
