@@ -617,7 +617,8 @@ class Product extends SystemBase {
 		'pro_grp_group_id' => 'The group id of the bundle if the product is for a bundle',
 		'pro_type' => 'Type of product e.g. event ticket or digital item',
 		'pro_digital_link' => 'Link for a digital download',
-		'pro_num_remaining_calc' => 'Calculated field of number remaining in stock'
+		'pro_num_remaining_calc' => 'Calculated field of number remaining in stock',
+		'pro_link' => 'Link to use for accessing',
 	);
 
 	public static $field_specifications = array(
@@ -639,15 +640,28 @@ class Product extends SystemBase {
 		'pro_type' => array('type'=>'int4'),
 		'pro_digital_link' =>  array('type'=>'varchar(255)'),
 		'pro_num_remaining_calc' => array('type'=>'int4'),
+		'pro_link' => array('type'=>'varchar(255)'),
 	);
 			 
-	public static $required_fields = array();
+	public static $required_fields = array('pro_link');
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array();	
+	
+	public static function get_by_link($link){
+		$results = new MultiProduct(array('link' => $link, 'deleted'=>false));
+		$results->load();
+
+		if(count($results)){	
+			return $results->get(0);	
+		}
+		else{
+			return false;
+		}
+	}	
 	
 	public function get_requirement_info($output='text') {
 		$requirements_out = array();
@@ -810,7 +824,7 @@ class Product extends SystemBase {
 	
 
 	function get_url() {
-		return '/product?product_id=' . $this->key;
+		return '/product/'.$this->get('pro_link');
 	}
 
 	
@@ -991,6 +1005,17 @@ class Product extends SystemBase {
 		return $count;
 	}	
 	
+	function prepare(){
+		parent::prepare();
+		//DO NOT ALLOW DUPLICATE PRODUCT LINKS
+		if($product = Product::get_by_link($this->get('pro_link'))){
+			if($product->key != $this->key){
+				throw new SystemDisplayableError('This product link already exists.');
+				exit;
+			}
+		}	
+	}
+	
 }
 
 class MultiProduct extends SystemMultiBase {
@@ -1026,7 +1051,12 @@ class MultiProduct extends SystemMultiBase {
 			$where_clauses[] = 'pro_is_active = ?';
 			$bind_params[] = array($this->options['is_active'], PDO::PARAM_BOOL);
 		}			
-		
+
+		if (array_key_exists('link', $this->options)) {
+			$where_clauses[] = 'pro_link = ?';
+			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
+		}		
+	
 		if (array_key_exists('product_type', $this->options)) {
 			$where_clauses[] = 'pro_type = ?';
 			$bind_params[] = array($this->options['product_type'], PDO::PARAM_INT);

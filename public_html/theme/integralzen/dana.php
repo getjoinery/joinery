@@ -45,7 +45,7 @@
         </a>
         <div class="mt-6 flex items-center">
                   <div class="mt-8 inline-flex rounded-md shadow">
-				  	<?php echo $formwriter->new_button('Monthly Donation', '/product?product_id=3'); ?>
+				  	<?php echo $formwriter->new_button('Monthly Donation', '/product/recurring-donation'); ?>
         </div>
         </div>
       </div>
@@ -62,7 +62,7 @@
         </a>
         <div class="mt-6 flex items-center">
                   <div class="mt-8 inline-flex rounded-md shadow">
-				  		<?php echo $formwriter->new_button('One Time Donation', '/product?product_id=2'); ?>
+				  		<?php echo $formwriter->new_button('One Time Donation', '/product/one-time-donation'); ?>
         </div>
         </div>
       </div>

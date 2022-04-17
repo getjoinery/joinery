@@ -9,7 +9,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 
 $settings = Globalvars::get_instance();
-if(!$settings->get_setting('products_active')){
+if(!$settings->get_setting('products_active') || !$product_id){
 	header("HTTP/1.0 404 Not Found");
 	echo 'This feature is turned off';
 	exit();
@@ -17,14 +17,14 @@ if(!$settings->get_setting('products_active')){
 	
 $session = SessionControl::get_instance();
 //$session->check_permission(0);
-	
+/*
 if (!isset($_REQUEST['product_id']) || !is_numeric($_REQUEST['product_id'])) {
 	$product_id = 3;
 } 
 else {
 	$product_id = LibraryFunctions::fetch_variable('product_id', '', TRUE, '', TRUE, 'int');
 }
-
+*/
 $product = Product::GetProductById($product_id);
 
 //IF NO ITEMS REMAINING, SHOW ERROR
