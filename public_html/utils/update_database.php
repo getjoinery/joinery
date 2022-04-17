@@ -1,9 +1,17 @@
 <?php
 	error_reporting(E_ERROR | E_PARSE);
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-//error_reporting(E_ALL);
+	ini_set('display_errors', 1);
+	ini_set('display_startup_errors', 1);
+	//error_reporting(E_ALL);
 	
+	if($_REQUEST['verbose']){
+		$verbose=$_REQUEST['verbose'];
+	}
+	else{
+		$verbose=false;
+	}
+
+
 	/*
 	THIS WILL CHECK THE SPECS IN THE $fields and $field_specifications VARIABLES AND CREATE AND/OR UPDATE THE TABELS AS NEEDED
 	
@@ -272,8 +280,9 @@ ini_set('display_startup_errors', 1);
 				}			
 			
 		
-			
-			echo '---'.$table_name .'---<br>';
+			if($verbose){
+				echo '---'.$table_name .'---<br>';
+			}
 			if(!isset($class::$field_specifications)){
 				echo 'ERROR:  '.$table_name . ' has no field specifications.';
 				exit;
@@ -289,28 +298,32 @@ ini_set('display_startup_errors', 1);
 				}
 				
 				if($found){
-					//CHECK THE COLUMN SPECS
-					$field_length = extract_length_from_spec($field_specifications[$field][type]);
-					$field_without_length = preg_replace('/[^a-z ]/', '', $field_specifications[$field][type]);
-					if(translate_data_types($live_column_info[$field][data_type]) != $field_without_length){
-						echo 'NOTICE: Data types do not match on field '.$field.' (live: '. $live_column_info[$field][data_type] .'<->spec:'. $field_without_length .")<br>\n";
-					}
-					
-					//CHECK THE LENGTH
-					$length_phrase = '';
-					if($field_length){
-						$length_phrase = '('.$field_length.')';
-					}
-					if($live_column_info[$field][character_maximum_length]){
-						if($live_column_info[$field][character_maximum_length] != $field_length){
-							echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field][character_maximum_length] .'<->spec: '. $field_length .")<br>\n";						
+					if($verbose){
+						//CHECK THE COLUMN SPECS
+						$field_length = extract_length_from_spec($field_specifications[$field][type]);
+						$field_without_length = preg_replace('/[^a-z ]/', '', $field_specifications[$field][type]);
+						if(translate_data_types($live_column_info[$field][data_type]) != $field_without_length){
+							echo 'NOTICE: Data types do not match on field '.$field.' (live: '. $live_column_info[$field][data_type] .'<->spec:'. $field_without_length .")<br>\n";
+						}
+						
+						//CHECK THE LENGTH
+						$length_phrase = '';
+						if($field_length){
+							$length_phrase = '('.$field_length.')';
+						}
+						if($live_column_info[$field][character_maximum_length]){
+							if($live_column_info[$field][character_maximum_length] != $field_length){
+								echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field][character_maximum_length] .'<->spec: '. $field_length .")<br>\n";						
+							}
 						}
 					}
 
 
 				}
 				else{
-					echo $field.' needs to be added to live db<br>';
+					if($verbose){
+						echo $field.' needs to be added to live db<br>';
+					}
 
 					$sql = 'ALTER TABLE '.$table_name.'
 						ADD COLUMN '.$field.' '.$field_specifications[$field][type];
@@ -341,7 +354,9 @@ ini_set('display_startup_errors', 1);
 					}
 				}
 				if(!$found){
-					echo $live_column.' is in live table '.$table_name.' but not in class<br>';
+					if($verbose){
+						echo $live_column.' is in live table '.$table_name.' but not in class<br>';
+					}
 				}
 			}
 		}
@@ -351,6 +366,7 @@ ini_set('display_startup_errors', 1);
 	}
 	
 	update_database();
+	echo 'Database update complete'. "<br>\n";
 
 
 ?>
