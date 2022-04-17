@@ -1,7 +1,7 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMasterTW.php');
+require_once( __DIR__ . '/../../../includes/Globalvars.php');
+require_once( __DIR__ . '/../../../includes/DbConnector.php');
+require_once( __DIR__ . '/../../../includes/FormWriterMasterTW.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
