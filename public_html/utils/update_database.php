@@ -367,6 +367,7 @@
 	
 	update_database();
 	echo 'Database update complete'. "<br>\n";
+	return 0;
 
 
 ?>
