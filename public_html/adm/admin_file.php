@@ -97,6 +97,36 @@
 	}
 	echo '<strong>Name:</strong> '.$file->get('fil_name') .'<br />';	
 	echo '<strong>Title:</strong> '.$file->get('fil_title') .'<br />';	
+	echo '<strong>File permissions:</strong> ';
+	$group_or_event=false;
+	if($file->get('fil_grp_group_id')){
+		$group = new Group($file->get('fil_grp_group_id'), TRUE);
+		echo 'ONLY logged in users in the "'.$group->get('grp_name').'" group ';
+		$group_or_event=true;
+	}
+	if($file->get('fil_evt_event_id')){
+		$event = new Event($file->get('fil_evt_event_id'), TRUE);
+		echo 'ONLY logged in users registered for the "'.$event->get('evt_name').'" event ';
+		$group_or_event=true;		
+	}
+	if($group_or_event){
+		if($file->get('fil_min_permission') > 0){
+			echo 'with minimum permission ('.$file->get('fil_min_permission').') ';
+		}
+	}
+	else{
+		if($file->get('fil_min_permission') === NULL){
+			echo 'Anyone ';
+		}
+		else if($file->get('fil_min_permission') === 0){
+			echo 'Anyone logged in';
+		}
+		else{
+			echo 'Minimum permission ('.$file->get('fil_min_permission').') ';
+		}		
+	}
+	
+	echo '<br />';	
 	echo '<strong>Description:</strong> '.$file->get('fil_description') .'<br />';	
 	echo '<strong>User:</strong> ('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a><br />';	
 	echo '<strong>Uploaded:</strong> '.LibraryFunctions::convert_time($file->get('fil_create_time'), 'UTC', $session->get_timezone()) .'<br />';
