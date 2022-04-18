@@ -106,12 +106,12 @@ $page->public_header(array(
 				if(!$product->is_sold_out()){
 
 					$formwriter = new FormWriterPublicTW("product_form", TRUE);
-					echo $formwriter->begin_form("product-quantity margin-top-30", "POST", "/product"); 
+					echo $formwriter->begin_form("product-quantity m-3", "POST", "/product"); 
 					echo $formwriter->hiddeninput('product_id', $product_id);
 					if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 						$validation_rules = array();
 						$validation_rules['user_price_override']['required']['value'] = 'true';
-						echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', 'ctrlHolder', 100, NULL, '', 5, ''); 
+						echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
 					}
 					if ($product->output_product_form($formwriter, $user, $extra_data)) {
 						echo $formwriter->new_form_button('Add to Cart', 'primary','full');

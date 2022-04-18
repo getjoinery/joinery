@@ -145,7 +145,7 @@ class DOBRequirement extends ProductRequirement {
 	
 	public function get_form($formwriter, $user=NULL) {
 ?>
-			<div id="dob_container" class="ctrlHolder errorplacement">
+			<div id="dob_container" class="errorplacement">
 				<label for="dob_date">Date of Birth</label>
 
 				<select style="width: 125px" name="dob_month" id="dob_month">
@@ -505,9 +505,17 @@ class NewsletterSignupRequirement extends ProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo '<div id="newsletter_container" class=NULL>';
-		echo '<label for="newsletter">Newsletter Signup</label>';
-		echo '<input name="newsletter" id="newsletter" value="1" type="checkbox"  /><span> Please add me to the newsletter.</span></div>';
+		echo '<div id="newsletter_container" class="sm:col-span-6 errorplacement">
+					<div class="relative flex items-start">
+						<div class="flex items-center h-5">
+							<input class="" type="checkbox" id="newsletter" name="newsletter" value=""   />
+						</div>
+						<div class="ml-3 text-sm">
+							<label class="font-medium text-gray-700" for="newsletter">Please add me to the newsletter.</label>      
+						</div>
+					</div>
+				</div>';
+
 	}
 
 	function validate_form($data, $session) {
@@ -980,7 +988,7 @@ class Product extends SystemBase {
 			echo $formwriter->dropinput(
 				'Product',
 				'product_version',
-				'ctrlHolder',
+				NULL,
 				$version_dropdown,
 				'',
 				'',
