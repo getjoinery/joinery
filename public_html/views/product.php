@@ -40,9 +40,9 @@ $page->public_header(array(
 	?>
 	<main class="mt-8 max-w-2xl mx-auto pb-16 px-4 sm:pb-24 sm:px-6 lg:max-w-7xl lg:px-8">
     <div class="lg:grid lg:grid-cols-12 lg:auto-rows-min lg:gap-x-8">
-      <div class="lg:col-start-8 lg:col-span-5">
+      <div class="mb-4 lg:col-start-8 lg:col-span-5">
         <div class="flex justify-between">
-          <h1 class="text-xl font-medium text-gray-900">
+          <h1 class="mb-4 text-xl font-medium text-gray-900">
             <?php echo $product->get('pro_name'); ?>
           </h1>
           <p class="text-xl font-medium text-gray-900">
@@ -102,6 +102,26 @@ $page->public_header(array(
             </div>
           </div>
         </div>-->
+					<?php
+				if(!$product->is_sold_out()){
+
+					$formwriter = new FormWriterPublicTW("product_form", TRUE);
+					echo $formwriter->begin_form("product-quantity margin-top-30", "POST", "/product"); 
+					echo $formwriter->hiddeninput('product_id', $product_id);
+					if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+						$validation_rules = array();
+						$validation_rules['user_price_override']['required']['value'] = 'true';
+						echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', 'ctrlHolder', 100, NULL, '', 5, ''); 
+					}
+					if ($product->output_product_form($formwriter, $user, $extra_data)) {
+						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
+					}
+					echo $formwriter->end_form();
+					$product->output_javascript($validation_rules);
+				}
+				?>	 		
+		
+		
       </div>
 
       <!-- Image gallery -->
@@ -250,25 +270,6 @@ $page->public_header(array(
 		  <?php */ ?>
 
 
-				<?php
-				if(!$product->is_sold_out()){
-
-					$formwriter = new FormWriterPublicTW("product_form", TRUE);
-					echo $formwriter->begin_form("product-quantity margin-top-30", "POST", "/product"); 
-					echo $formwriter->hiddeninput('product_id', $product_id);
-					if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
-						$validation_rules = array();
-						$validation_rules['user_price_override']['required']['value'] = 'true';
-						echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', 'ctrlHolder', 100, NULL, '', 5, ''); 
-					}
-					if ($product->output_product_form($formwriter, $user, $extra_data)) {
-						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
-					}
-					echo $formwriter->end_form();
-					$product->output_javascript($validation_rules);
-				}
-				?>
-
 
 
 
@@ -279,9 +280,15 @@ $page->public_header(array(
         <div class="mt-10">
           <h2 class="text-sm font-medium text-gray-900">Description</h2>
 
+
+
           <div class="mt-4 prose prose-sm text-gray-500">
             <?php echo $product->get('pro_description'); ?>
           </div>
+		  
+		   
+		  
+		  
         </div>
 
         <!--<div class="mt-8 border-t border-gray-200 pt-8">
