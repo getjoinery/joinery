@@ -413,7 +413,12 @@ class MultiFile extends SystemMultiBase {
 		} 	
 		
 		if (array_key_exists('picture', $this->options)) {
-		 	$where_clauses[] = '(fil_type = \'image/jpeg\' OR fil_type = \'image/jpg\' OR fil_type = \'image/png\' OR fil_type = \'image/gif\')';
+			if($this->options['picture']){
+				$where_clauses[] = '(fil_type LIKE \'image/%\')';
+			}
+			else{
+				$where_clauses[] = '(fil_type NOT LIKE \'image%\')';
+			}
 		} 	
 
 		if (array_key_exists('filename_like', $this->options)) {
