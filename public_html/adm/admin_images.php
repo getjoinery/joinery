@@ -22,7 +22,7 @@
 	if($_SESSION['permission'] < 10){
 		$search_criteria['deleted'] = false;
 	}
-	$search_criteria['picture'] = false;
+	$search_criteria['picture'] = true;
 	$files = new MultiFile(
 		$search_criteria,
 		array($sort=>$sdirection),
@@ -36,10 +36,10 @@
 	$page->admin_header(	
 	array(
 		'menu-id'=> 9,
-		'page_title' => 'Files',
-		'readable_title' => 'Files',
+		'page_title' => 'Images',
+		'readable_title' => 'Images',
 		'breadcrumbs' => array(
-			'Files'=>'', 
+			'Images'=>'', 
 		),
 		'session' => $session,
 	)
@@ -47,7 +47,7 @@
 
 	$headers = array('Thumb','File', 'File Type', 'Uploaded', 'By');
 	$altlinks = array('Upload file'=>'/admin/admin_file_upload');
-	$title= 'Files';
+	$title= 'Images';
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
