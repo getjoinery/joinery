@@ -27,8 +27,6 @@
 
 	if($_POST){
 
-		
-
 		$address = Address::CreateAddressFromForm($_POST, $user_id, $address);
 		
 		if(!$address_id){
