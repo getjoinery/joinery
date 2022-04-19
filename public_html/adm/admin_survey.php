@@ -150,7 +150,7 @@
 		
 		$optionvals = $questions->get_dropdown_array();
 		echo $formwriter->hiddeninput('action', 'addquestion');
-		echo $formwriter->dropinput("Add a question", "qst_question_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+		echo $formwriter->dropinput("Add question to survey", "qst_question_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
 		echo $formwriter->new_form_button('Add');
 		echo $formwriter->end_form();	
 		echo '</td></tr>';			
