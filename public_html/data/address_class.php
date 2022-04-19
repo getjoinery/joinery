@@ -287,17 +287,20 @@ class Address extends SystemBase {
 
 		if ($and_save) {
 			$address->save();
+			$address->load();
 			//$address->update_coordinates();
 
 			// So now the user has entered a new address.  If this address is valid and their
 			// default is not, lets swap it and delete the default one
 			if (!$address->get('usa_is_bad')) {
 				$user = new User($user_id, TRUE);
-				try {
-					$default_address = new Address($user->get_default_address(), TRUE);
-				} catch(AddressException $e) {
+				if($default_address_id = $user->get_default_address()){
+					$default_address = new Address($default_address_id, TRUE);
+				}
+				else{
 					$default_address = NULL;
 				}
+				
 				if ($default_address === NULL || $default_address->get('usa_is_bad')) {
 					// The default address is bad, and the given one is good.
 					// Kill the default one!
