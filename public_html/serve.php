@@ -121,61 +121,64 @@ if($settings->get_setting('files_active')){
 					LibraryFunctions::display_404_page();
 					exit;
 				}
-			}
 
-			if($file_obj->get('fil_min_permission')){
-				require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-				$session = SessionControl::get_instance();
-				if (!isset($_SESSION['loggedin']) || !$_SESSION['loggedin']) {
-					echo 'Insufficient permissions.  Must be logged in.';
-					exit;
-				}
-				if ($session->$session->get_permission() < $file_obj->get('fil_min_permission')){
-					echo 'Insufficient permissions';
-					exit;
-				}
-				
-				if ($group_id = $file_obj->get('fil_grp_group_id')){
-					require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-					//CHECK TO SEE IF USER IS IN AUTHORIZED GROUP
-					$group = new Group($group_id, TRUE);
-					if(!$group->is_member_in_group($session->get_user_id())){
-						echo 'Insufficient group permissions';
+				if($file_obj->get('fil_min_permission')){
+					require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+					$session = SessionControl::get_instance();
+					if (!isset($_SESSION['loggedin']) || !$_SESSION['loggedin']) {
+						echo 'Insufficient permissions.  Must be logged in.';
 						exit;
 					}
-				}
-				
-				if ($event_id = $file_obj->get('fil_evt_event_id')){
-					require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
-					//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
-					$searches['user_id'] = $session->get_user_id();
-					$searches['event_id'] = $event_id;
-					$event_registrations = new MultiEventRegistrant(
-						$searches,
-						NULL, //array('event_id'=>'DESC'),
-						NULL,
-						NULL);
-					$numeventsregistrations = $event_registrations->count_all();	
-
-					if(!$numeventsregistrations){
-						echo 'Insufficient event permissions';
+					if ($session->$session->get_permission() < $file_obj->get('fil_min_permission')){
+						echo 'Insufficient permissions';
 						exit;
 					}
+					
+					if ($group_id = $file_obj->get('fil_grp_group_id')){
+						require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
+						//CHECK TO SEE IF USER IS IN AUTHORIZED GROUP
+						$group = new Group($group_id, TRUE);
+						if(!$group->is_member_in_group($session->get_user_id())){
+							echo 'Insufficient group permissions';
+							exit;
+						}
+					}
+					
+					if ($event_id = $file_obj->get('fil_evt_event_id')){
+						require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
+						//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
+						$searches['user_id'] = $session->get_user_id();
+						$searches['event_id'] = $event_id;
+						$event_registrations = new MultiEventRegistrant(
+							$searches,
+							NULL, //array('event_id'=>'DESC'),
+							NULL,
+							NULL);
+						$numeventsregistrations = $event_registrations->count_all();	
+
+						if(!$numeventsregistrations){
+							echo 'Insufficient event permissions';
+							exit;
+						}
+					}
 				}
+						
+				$seconds_to_cache = 43200;
+				$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+				header("Expires: $ts");
+				header("Pragma: cache");
+				header("Cache-Control: max-age=$seconds_to_cache");
+				$the_content_type = 'Content-type: '.mime_content_type($file);
+				header($the_content_type);
+				readfile($file);
+				exit();
 			}
-			
-			$seconds_to_cache = 43200;
-			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-			header("Expires: $ts");
-			header("Pragma: cache");
-			header("Cache-Control: max-age=$seconds_to_cache");
-			$the_content_type = 'Content-type: '.mime_content_type($file);
-			header($the_content_type);
-			readfile($file);
-			exit();
+			else{
+				LibraryFunctions::display_404_page();		
+			}
 		}
 		else{
-			require_once(LibraryFunctions::display_404_page());		
+			LibraryFunctions::display_404_page();		
 		}	
 	}
 }
