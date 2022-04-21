@@ -68,13 +68,14 @@ class FullNameRequirement extends ProductRequirement {
 	}
 
 	public function validate_form($data, $session=NULL) {
+
 		if (empty($data['full_name_first'])) {
 			throw new ProductRequirementException('First Name is Required');
 		}
 		if (empty($data['full_name_last'])) {
 			throw new ProductRequirementException('Last Name is Required');
 		}
-
+		
 		$return_array = array(
 			'full_name_first' => $data['full_name_first'],
 			'full_name_last' => $data['full_name_last']
@@ -85,7 +86,6 @@ class FullNameRequirement extends ProductRequirement {
 		);
 
 		$display_array['Last Name'] = $data['full_name_last'];
-
 		return array(
 			$return_array, $display_array);
 	}
@@ -651,7 +651,7 @@ class Product extends SystemBase {
 		'pro_link' => array('type'=>'varchar(255)'),
 	);
 			 
-	public static $required_fields = array('pro_link');
+	public static $required_fields = array('pro_link' => 'Product link is required');
 
 	public static $field_constraints = array();	
 	
@@ -868,7 +868,7 @@ class Product extends SystemBase {
 			$form_display_data['Product'] = $version->prv_version_name;
 			$form_data['product_version'] = $version->prv_product_version_id;
 		}
-		
+
 
 		foreach ($this->get_product_requirements() as $product_requirement) {
 
@@ -882,6 +882,7 @@ class Product extends SystemBase {
 			}
 		}
 
+/*
 		$errors = array();
 		foreach (static::$required_fields as $field => $error_message) {
 			if (empty($data[$field])) {
@@ -892,6 +893,7 @@ class Product extends SystemBase {
 			throw new ProductRequirementException(
 				implode('<br>', $errors));
 		}
+		*/
 
 		return array($form_data, $form_display_data);
 	}
