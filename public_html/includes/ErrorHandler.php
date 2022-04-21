@@ -4,9 +4,7 @@ require_once('SessionControl.php');
 require_once('DbConnector.php');
 require_once('LibraryFunctions.php');
 require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-//$settings = Globalvars::get_instance();
-//$site_template = $settings->get_setting('site_template');
-//require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPageTW.php');
+
 
 class ErrorHandler{
 

@@ -1,7 +1,6 @@
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/DbConnector.php');
-	require_once( __DIR__ . '/../includes/FormattingFunctions.php');
 	require_once( __DIR__ . '/../data/emails_class.php');
 
 
