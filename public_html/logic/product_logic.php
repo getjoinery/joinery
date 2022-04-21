@@ -9,11 +9,23 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 
 $settings = Globalvars::get_instance();
-if(!$settings->get_setting('products_active') || !$product_id){
+if($_POST['product_id']){
+	$product_id = $_POST['product_id'];
+}
+
+if(!$settings->get_setting('products_active')){
 	header("HTTP/1.0 404 Not Found");
 	echo 'This feature is turned off';
 	exit();
 }
+
+if(!$product_id){
+	header("HTTP/1.0 404 Not Found");
+	echo 'Did not pass a product id';
+	exit();
+}
+
+
 	
 $session = SessionControl::get_instance();
 //$session->check_permission(0);
@@ -44,13 +56,11 @@ $display_empty_form = TRUE;
 if ($_POST || isset($_GET['cart'])) {
 	try {
 		list($form_data, $display_data) = $product->validate_form($_POST, $session);
-		
 	}	
 	catch (ProductRequirementException $e) {
 		$errorhandler = new ErrorHandler(TRUE);
 		$errorhandler->handle_general_error($e->getMessage());
 	}
-
 
 	try {
 		$cart = $session->get_shopping_cart();
