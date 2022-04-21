@@ -3,11 +3,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SystemClass.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	
-	$settings = Globalvars::get_instance();
-	$site_template = $settings->get_setting('site_template');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/PublicPageTW.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template.'/includes/FormWriterPublicTW.php');		
+	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));	
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');
 	
