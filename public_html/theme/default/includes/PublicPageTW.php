@@ -29,7 +29,7 @@ class PublicPageTW extends PublicPageMaster {
 	public static function BeginPage($title='', $options=array()) {
 		
 		$output = '';
-		$output .= '  <div class="py-10">
+		$output .= '  <div class="py-10 relative">
     <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">';
       $output .= '<main class="lg:col-span-9 xl:col-span-6">
         <div class="px-4 sm:px-0">';
@@ -251,7 +251,7 @@ class PublicPageTW extends PublicPageMaster {
 
 <!-- This example requires Tailwind CSS v2.0+ -->
 <div class="bg-gray-50">
-  <div class="relative bg-white">
+  <div class="relative bg-white z-10">
     <div class="max-w-7xl mx-auto px-4 sm:px-6">
       <div class="flex justify-between items-center py-6 md:justify-start md:space-x-10">
         <div class="flex justify-start lg:w-0 lg:flex-1">
