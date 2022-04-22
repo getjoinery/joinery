@@ -12,7 +12,8 @@
 
 	if (isset($_REQUEST['pac_page_content_id'])) {
 		$page_content = new PageContent($_REQUEST['pac_page_content_id'], TRUE);
-	} else {
+	} 
+	else {
 		$page_content = new PageContent(NULL);
 	}
 
@@ -28,7 +29,7 @@
 			$page_content->set($field, $_POST[$field]);
 		}
 		
-		if($_REQUEST['pac_is_published']){
+		if($_POST['pac_is_published']){
 			if(!$page_content->get('pac_published_time')){
 				$page_content->set('pac_published_time', 'NOW()');
 			}
@@ -99,9 +100,8 @@
 	
 	$validation_rules = array();
 	$validation_rules['pac_body']['required']['value'] = 'true';
-	if($_SESSION['permission'] == 10){
-		$validation_rules['pac_location_name']['required']['value'] = 'true';
-	}
+	$validation_rules['pac_link']['required']['value'] = 'true';
+	$validation_rules['pac_location_name']['required']['value'] = 'true';
 	$validation_rules['pac_body']['minlength']['value'] = 10;
 	echo $formwriter->set_validate($validation_rules);	
 
@@ -114,16 +114,10 @@
 		echo $formwriter->hiddeninput('action', 'edit');
 	}
 	
-	if($_SESSION['permission'] == 10){
-		echo $formwriter->textinput('Label', 'pac_location_name', NULL, 100, $page_content->get('pac_location_name'), '', 255, '');	
-		echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/page/', 'pac_link', NULL, 100, $page_content->get('pac_link'), '', 255, '');	
-	}
-	else{
-		echo $formwriter->hiddeninput('pac_location_name', $page_content->get('pac_location_name'));
-		echo $formwriter->hiddeninput('pac_link', $page_content->get('pac_link'));		
-	}
 	
-	
+	echo $formwriter->textinput('Label', 'pac_location_name', NULL, 100, $page_content->get('pac_location_name'), '', 255, '');	
+	echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/page/', 'pac_link', NULL, 100, $page_content->get('pac_link'), '', 255, '');	
+
 	
 	echo $formwriter->textinput('Script file (optional)', 'pac_script_filename', NULL, 100, $page_content->get('pac_script_filename'), '', 255, '');
 	
