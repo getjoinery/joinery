@@ -714,7 +714,7 @@ class FormWriterMaster {
 
 	}
 
-	function dropinput($label, $id, $class, &$optionvals, $input, $hint,$showdefault=TRUE, $forcestrict=TRUE, $ajaxendpoint=FALSE, $imagedropdown=FALSE) {
+	function dropinput($label, $id, $class, &$optionvals, $input, $hint,$showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE, $imagedropdown=FALSE) {
 		
 		$output = '';
 		
@@ -773,6 +773,7 @@ class FormWriterMaster {
 					}					
 				}
 				else{
+					
 					if ($input == $value) { 
 						$output .= '<option value="'. $value .'" selected="selected">' . $key . '</option>';
 					} 
