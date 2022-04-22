@@ -47,7 +47,10 @@ class PageContent extends SystemBase {
 		'pac_delete_time' => array('type'=>'timestamp(6)'),
 	);
 			 
-	public static $required_fields = array();
+	public static $required_fields = array(
+		'pac_link'=>'Page content link required', 
+		'pac_title'=>'Title required',
+	);
 
 	public static $field_constraints = array();	
 	
@@ -56,7 +59,10 @@ class PageContent extends SystemBase {
 	public static $initial_default_values = array(
 		'pac_create_time' => 'now()', 'pac_is_published' => FALSE
 		);
-		
+
+	function get_url() {
+		return '/page/' . $this->get('pac_link');
+	}	
 	
 	static function get_by_link($link){
 		$results = new MultiPageContent(array('link' => $link, 'deleted'=>false));
@@ -156,10 +162,10 @@ class PageContent extends SystemBase {
 class MultiPageContent extends SystemMultiBase {
 
 
-	function get_page_content_dropdown_array($include_new=FALSE) {
+	function get_dropdown_array_link($include_new=FALSE) {
 		$items = array();
 		foreach($this as $page_content) {
-			$items['('.$page_content->key.') '.$page_content->get('pac_title')] = $page_content->key;
+			$items[$page_content->get('pac_title')] = $page_content->get_url();
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
