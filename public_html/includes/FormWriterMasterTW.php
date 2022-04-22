@@ -802,7 +802,7 @@ class FormWriterMasterTW {
 
 	}
 
-	function dropinput($label, $id, $class, &$optionvals, $input, $hint,$showdefault=TRUE, $forcestrict=TRUE, $ajaxendpoint=FALSE, $imagedropdown=FALSE) {
+	function dropinput($label, $id, $class, &$optionvals, $input, $hint,$showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE, $imagedropdown=FALSE) {
 		
 		if(empty($class)){
 			$class='sm:col-span-6';
