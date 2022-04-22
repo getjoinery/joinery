@@ -4,6 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/public_menus_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
@@ -15,14 +16,19 @@
 	}
 
 	if($_POST){
-		$_POST['pmu_link'] = preg_replace("/[^a-zA-Z0-9-]/", "", $_POST['pmu_link']);
+		if($_POST['pmu_link_choose']){
+			$_POST['pmu_link'] = $_POST['pmu_link_choose'];
+		}
+		else{
+			$_POST['pmu_link'] = preg_replace("/[^a-zA-Z0-9-]/", "", $_POST['pmu_link']);
+		}
 		$public_menu->set('pmu_parent_menu_id', (int)$_REQUEST['pmu_parent_menu_id']);
 		$public_menu->set('pmu_order', (int)$_REQUEST['pmu_order']);
 		
 		$editable_fields = array('pmu_name', 'pmu_link');
 
 		foreach($editable_fields as $field) {
-			$public_menu->set($field, $_REQUEST[$field]);
+			$public_menu->set($field, $_POST[$field]);
 		}
 
 		$public_menu->prepare();
@@ -53,7 +59,7 @@
 	
 	$validation_rules = array();
 	$validation_rules['pmu_name']['required']['value'] = 'true';	
-	$validation_rules['pmu_link']['required']['value'] = 'true';
+	//$validation_rules['pmu_link']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 
 
@@ -67,10 +73,23 @@
 	
 	echo $formwriter->textinput('Menu name', 'pmu_name', NULL, 100, $public_menu->get('pmu_name'), '', 255, '');
 
+
+	$search_criteria = array();
+	$page_contents = new MultiPageContent(
+		NULL,
+		NULL,
+		NULL,
+		NULL);	
+	$numrecords = $page_contents->count_all();	
+	$page_contents->load();
+	$optionvals = $page_contents->get_dropdown_array_link();
+	echo $formwriter->dropinput("Link existing page", "pmu_link_choose", "ctrlHolder", $optionvals, $public_menu->get('pmu_link'), '', TRUE);	
+
+
 	$settings = Globalvars::get_instance();
 	$webDir = $settings->get_setting('webDir'); 
 	
-	echo $formwriter->textinput('Menu link ('.$webDir.')', 'pmu_link', NULL, 100, $public_menu->get('pmu_link'), '', 255, '');
+	echo $formwriter->textinput('Or type in a link ('.$webDir.')', 'pmu_link', NULL, 100, $public_menu->get('pmu_link'), '', 255, '');
 	
 	$menulist = new MultiPublicMenu(
 		array('has_no_parent_menu_id'=>true),
