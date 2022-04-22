@@ -19,7 +19,7 @@
 		$editable_fields = array('cmt_body', 'cmt_author_name', 'cmt_is_approved');
 
 		foreach($editable_fields as $field) {
-			$comment->set($field, $_REQUEST[$field]);
+			$comment->set($field, $_POST[$field]);
 		}
 				
 		

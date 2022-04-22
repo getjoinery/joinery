@@ -26,7 +26,7 @@
 		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission', 'amu_icon', 'amu_disable');
 
 		foreach($editable_fields as $field) {
-			$admin_menu->set($field, $_REQUEST[$field]);
+			$admin_menu->set($field, $_POST[$field]);
 		}
 
 		$admin_menu->prepare();

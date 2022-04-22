@@ -22,7 +22,7 @@
 		$editable_fields = array('stg_name', 'stg_value', 'stg_group_name');
 
 		foreach($editable_fields as $field) {
-			$setting->set($field, $_REQUEST[$field]);
+			$setting->set($field, $_POST[$field]);
 		}
 		
 		if(!$setting->key){

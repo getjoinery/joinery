@@ -48,8 +48,8 @@ class PageContent extends SystemBase {
 	);
 			 
 	public static $required_fields = array(
-		'pac_link'=>'Page content link required', 
-		'pac_title'=>'Title required',
+		'pac_link',
+		'pac_location_name',
 	);
 
 	public static $field_constraints = array();	

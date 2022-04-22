@@ -22,7 +22,7 @@
 		$editable_fields = array('emt_body', 'emt_name', 'emt_type');
 
 		foreach($editable_fields as $field) {
-			$email_template->set($field, $_REQUEST[$field]);
+			$email_template->set($field, $_POST[$field]);
 		}
 		
 		$email_template->prepare();

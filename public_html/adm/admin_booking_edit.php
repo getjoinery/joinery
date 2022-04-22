@@ -40,7 +40,7 @@
 		$editable_fields = array();
 
 		foreach($editable_fields as $field) {
-			$booking->set($field, $_REQUEST[$field]);
+			$booking->set($field, $_POST[$field]);
 		}
 		
 		if($_POST['bkn_start_time_date'] && $_POST['bkn_start_time_time']){

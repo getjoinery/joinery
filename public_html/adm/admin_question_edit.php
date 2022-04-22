@@ -43,7 +43,7 @@
 		$editable_fields = array('qst_type', 'qst_question', 'qst_is_published');
 
 		foreach($editable_fields as $field) {
-			$question->set($field, $_REQUEST[$field]);
+			$question->set($field, $_POST[$field]);
 		}
 		
 		if($_REQUEST['qst_is_published']){
