@@ -592,7 +592,6 @@ abstract class SystemBase {
 
 		//CHECK REQUIRED FIELDS
 		foreach (static::$required_fields as $required_field) {
-
 			if (gettype($required_field) == 'array') {
 				$one_true = FALSE;
 				foreach($required_field as $element) {

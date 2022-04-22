@@ -37,7 +37,7 @@
 		$editable_fields = array('url_redirect_file', 'url_type');
 
 		foreach($editable_fields as $field) {
-			$url->set($field, $_REQUEST[$field]);
+			$url->set($field, $_POST[$field]);
 		}
 
 		$url->prepare();

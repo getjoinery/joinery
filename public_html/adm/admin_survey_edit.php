@@ -18,7 +18,7 @@
 		$editable_fields = array('svy_name');
 
 		foreach($editable_fields as $field) {
-			$survey->set($field, $_REQUEST[$field]);
+			$survey->set($field, $_POST[$field]);
 		}
 		
 		$survey->prepare();

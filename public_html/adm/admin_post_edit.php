@@ -21,7 +21,7 @@
 		$editable_fields = array('pst_body', 'pst_title', 'pst_is_published', 'pst_link', 'pst_short_description');
 
 		foreach($editable_fields as $field) {
-			$post->set($field, $_REQUEST[$field]);
+			$post->set($field, $_POST[$field]);
 		}
 		
 		if($_REQUEST['pst_is_published']){

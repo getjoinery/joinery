@@ -26,7 +26,7 @@
 		$editable_fields = array('prd_num_used', 'prd_notes');
 
 		foreach($editable_fields as $field) {
-			$product_detail->set($field, $_REQUEST[$field]);
+			$product_detail->set($field, $_POST[$field]);
 		}
 
 		$product_detail->prepare();

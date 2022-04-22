@@ -79,7 +79,7 @@
 			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link');
 
 			foreach($editable_fields as $field) {
-				$product->set($field, $_REQUEST[$field]);
+				$product->set($field, $_POST[$field]);
 			}
 			
 			$product->prepare();

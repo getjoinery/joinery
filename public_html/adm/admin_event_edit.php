@@ -66,7 +66,7 @@
 		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id');
 
 		foreach($editable_fields as $field) {
-			$event->set($field, $_REQUEST[$field]);
+			$event->set($field, $_POST[$field]);
 		}
 		
 		if(!$event->get('evt_link')){

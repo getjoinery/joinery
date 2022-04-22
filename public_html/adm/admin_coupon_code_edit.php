@@ -54,7 +54,7 @@
 		$editable_fields = array('ccd_code', 'ccd_is_active');
 
 		foreach($editable_fields as $field) {
-			$coupon_code->set($field, $_REQUEST[$field]);
+			$coupon_code->set($field, $_POST[$field]);
 		}
 
 		$coupon_code->prepare();
