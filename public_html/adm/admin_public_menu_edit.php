@@ -74,9 +74,9 @@
 	echo $formwriter->textinput('Menu name', 'pmu_name', NULL, 100, $public_menu->get('pmu_name'), '', 255, '');
 
 
-	$search_criteria = array();
+	$search_criteria = array('deleted' => false);
 	$page_contents = new MultiPageContent(
-		NULL,
+		$search_criteria,
 		NULL,
 		NULL,
 		NULL);	
