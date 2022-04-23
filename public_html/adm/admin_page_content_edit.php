@@ -23,7 +23,9 @@
 		$_POST['pac_link'] = trim(strtolower($_POST['pac_link']));
 		$_POST['pac_link'] = preg_replace("/[^a-zA-Z0-9-]/", "", $_POST['pac_link']);
 		
-		$editable_fields = array('pac_body', 'pac_title', 'pac_is_published', 'pac_location_name', 'pac_link');
+		$page_content->set('pac_body', LibraryFunctions::ToUTF8($_POST['pac_body']));
+		
+		$editable_fields = array('pac_title', 'pac_is_published', 'pac_location_name', 'pac_link');
 
 		foreach($editable_fields as $field) {
 			$page_content->set($field, $_POST[$field]);
@@ -42,21 +44,6 @@
 			$page_content->set('pac_usr_user_id',$session->get_user_id());
 		}	
 				
-		
-		/*
-
-		if($_POST['pac_start_time_date'] && $_POST['pac_start_time_time']){
-			$time_combined = LibraryFunctions::datetoISO8601($_POST['pac_start_time_date']) . ' ' . LibraryFunctions::toDBTime($_POST['pac_start_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $page_content->get('pac_timezone'),  'UTC');
-			$page_content->set('pac_start_time', $utc_time);
-		}
-		
-		if($_POST['pac_end_time_date'] && $_POST['pac_end_time_time']){
-			$time_combined = LibraryFunctions::datetoISO8601($_POST['pac_end_time_date']) . ' ' . LibraryFunctions::toDBTime($_POST['pac_end_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $page_content->get('pac_timezone'),  'UTC', '%Y-%m-%d %H:%M:%S');
-			$page_content->set('pac_end_time', $utc_time);		
-		}
-		*/
 
 		$page_content->prepare();
 		$page_content->save();
