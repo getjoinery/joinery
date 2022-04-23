@@ -95,45 +95,9 @@ class PageContent extends SystemBase {
 			return $this->get('pac_body');
 		}
 	}	
-	
-	public function check_for_duplicate_link($link) {
-		if(!$link){
-			//EMPTY LINK IS OK
-			return false;
-		}
-		$results = new MultiPageContent(array('link' => $link));
-		$numresults = $results->count_all();
 
 
-		if($numresults > 1){
-			return true;	
-		}
-		else if($numresults == 1){
-			$results->load();
-			$result = $results->get(0); 
-			if($result->key == $this->key){
-				return false;
-			}
-			else{
-				return true;
-			}
-		}
-		else{
-			return false;
-		}
-	}	
 
-
-	
-	function prepare() {
-		
-		//CHECK FOR DUPLICATES
-		if($this->check_for_duplicate_link($this->get('pac_link'))){
-			throw new SystemAuthenticationError(
-					'This page link is a duplicate.');
-		}
-
-	}	
 	
 	
 	function authenticate_write($session, $other_data=NULL) {
@@ -149,6 +113,13 @@ class PageContent extends SystemBase {
 	}
 
 	function save() {
+		
+		//CHECK FOR DUPLICATES
+		if($this->check_for_duplicate('pac_link')){
+			throw new SystemAuthenticationError(
+					'This page link is a duplicate.');
+		}
+		
 		if ($this->key) {
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			ContentVersion::NewVersion(ContentVersion::TYPE_PAGE_CONTENT, $this->key, $this->get('pac_body'), $this->get('pac_title'), $this->get('pac_title'));			

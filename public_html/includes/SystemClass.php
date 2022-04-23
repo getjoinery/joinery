@@ -115,6 +115,84 @@ abstract class SystemBase {
 		}
 		return NULL;
 	}
+	
+	//TAKES A STRING OR AN ARRAY REPRESENTING NAMES OF FIELDS TO CHECK WITH CURRENT OBJECT
+	//WILL RETURN THE NUMBER OF DUPLICATES FOUND, SEPARATING FIELDS WITH 'AND' IN THE SQL
+	public function check_for_duplicate($fields) {
+		if(!isset($fields) || $fields == '' || $fields == NULL){
+			throw new SystemClassException('You must pass some fields to check for duplicates.');
+		}
+		
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();  
+		
+
+
+		$sql = 'SELECT count(*) as total from '.static::$tablename . ' WHERE ';
+		$whereclauses = array();
+		$param_string = ':param';
+		$counter = 0;
+		if(is_array($fields)){
+			foreach ($fields as $field){
+				$counter++;
+				$whereclauses[] = $field . '='.$param_string .$counter. ' ';
+			}
+		}
+		else{
+			$whereclauses[] = $fields . '= :param1 ';
+		}
+
+		$sql .= implode(' AND ', $whereclauses);
+
+		if($this->key){
+			$sql .= ' AND '.static::$pkey_column.' != '.$this->key;
+		}	
+
+		try{
+			$q = $dblink->prepare($sql);
+			$counter = 0;
+			if(is_array($fields)){
+				foreach ($fields as $field){
+					$field_type = static::$field_specifications[$field][type];
+					$counter++;
+					$param_name = $param_string . $counter;
+					if(str_contains($field_type, 'int')){
+						$q->bindParam($param_name, $this->get($field), PDO::PARAM_INT);
+					}
+					else if(str_contains($field_type, 'bool')){
+						$q->bindParam($param_name, $this->get($field), PDO::PARAM_BOOL);
+					} 
+					else{
+						$q->bindParam($param_name, $this->get($field), PDO::PARAM_STR);
+					}
+				}
+			}
+			else{
+				$field_type = static::$field_specifications[$fields][type];
+				if(str_contains($field_type, 'int')){
+					$q->bindParam(':param1', $this->get($fields), PDO::PARAM_INT);
+				}
+				else if(str_contains($field_type, 'bool')){
+					$q->bindParam(':param1', $this->get($fields), PDO::PARAM_BOOL);
+				} 
+				else{
+					$q->bindParam(':param1', $this->get($fields), PDO::PARAM_STR);
+				}
+			}
+			
+			
+			$q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		}
+		catch(PDOException $e){
+			$dbhelper->handle_query_error($e);
+		}	
+		
+		$count = $q->fetch();
+
+		return $count->total;
+
+	}	
 
 	function hash() {
 		if ($this->key) {

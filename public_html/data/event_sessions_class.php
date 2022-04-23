@@ -117,7 +117,7 @@ class EventSession extends SystemBase {
 	
 	function get_url() {
 		return '/event/' . $this->key . '/' . str_replace(' ', '-', $this->get('evs_name'));
-	}
+	} 
 		
 	
 	function get_start_time($tz='event', $format='M j, Y g:i a T') {
