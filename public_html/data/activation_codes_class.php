@@ -34,7 +34,7 @@ class ActivationCode extends SystemBase {
 	public static $field_specifications = array(
 		'act_activation_code_id' => array('type'=>'int8', 'serial'=>true),
 		'act_usr_email' => array('type'=>'varchar(128)'),
-		'act_code' => array('type'=>'character(12)'),
+		'act_code' => array('type'=>'varchar(64)'),
 		'act_expires_time' => array('type'=>'timestamp(6)'),
 		'act_usr_user_id' => array('type'=>'int4'),
 		'act_purpose' => array('type'=>'int2'),
