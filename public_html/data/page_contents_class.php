@@ -136,7 +136,7 @@ class MultiPageContent extends SystemMultiBase {
 	function get_dropdown_array_link($include_new=FALSE) {
 		$items = array();
 		foreach($this as $page_content) {
-			$items[$page_content->get('pac_title')] = $page_content->get_url();
+			$items[$page_content->get('pac_location_name')] = $page_content->get_url();
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

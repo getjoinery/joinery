@@ -16,16 +16,16 @@
 	}
 
 	if($_POST){
-		if($_POST['pmu_link_choose']){
-			$_POST['pmu_link'] = $_POST['pmu_link_choose'];
+		if(!empty($_POST['pmu_link_choose'])){
+			$public_menu->set('pmu_link', $_POST['pmu_link_choose']);
 		}
 		else{
-			$_POST['pmu_link'] = preg_replace("/[^a-zA-Z0-9-]/", "", $_POST['pmu_link']);
+			$public_menu->set('pmu_link', preg_replace("/[^a-zA-Z0-9-\/]/", "", $_POST['pmu_link']));
 		}
-		$public_menu->set('pmu_parent_menu_id', (int)$_REQUEST['pmu_parent_menu_id']);
-		$public_menu->set('pmu_order', (int)$_REQUEST['pmu_order']);
+		$public_menu->set('pmu_parent_menu_id', (int)$_POST['pmu_parent_menu_id']);
+		$public_menu->set('pmu_order', (int)$_POST['pmu_order']);
 		
-		$editable_fields = array('pmu_name', 'pmu_link');
+		$editable_fields = array('pmu_name');
 
 		foreach($editable_fields as $field) {
 			$public_menu->set($field, $_POST[$field]);
@@ -50,6 +50,30 @@
 	)
 	);	
 
+	?>
+	<script type="text/javascript">
+	
+		function set_pricing_choices(){
+			var value = $("#pmu_link_choose").val();
+			if(value == ''){  //ONE PRICE	
+				$("#pmu_link_container").show();
+			}	
+			else{  //MULTIPLE PRICES
+				$("#pmu_link_container").hide();				
+			}		
+		}
+		
+	
+		$(document).ready(function() {
+			set_pricing_choices();
+			$("#pmu_link_choose").change(function() {	
+				set_pricing_choices();
+			});	
+		});
+	
+		
+	</script>
+	<?php
 	
 	$pageoptions['title'] = "New Public Menu";
 	$page->begin_box($pageoptions);
