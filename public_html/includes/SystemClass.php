@@ -78,9 +78,19 @@ abstract class SystemBase {
 			throw new SystemClassException('To load a row using GetByColumn, you must pass a column and value.');
 		}
 
+		if(!isset(static::$field_specifications[$column])){
+			throw new SystemClassException('That column '.$column.' does not exist in '.static::$tablename);
+		}
 
-		$data = SingleRowFetch(static::$tablename, $column,
+		$field_type = static::$field_specifications[$column][type];
+		if(str_contains($field_type, 'int')){
+			$data = SingleRowFetch(static::$tablename, $column,
+			$value, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
+		}
+		else{
+			$data = SingleRowFetch(static::$tablename, $column,
 			$value, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
+		}
 
 		if ($data === NULL) {
 			return NULL;
