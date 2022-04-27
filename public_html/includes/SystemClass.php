@@ -72,6 +72,27 @@ abstract class SystemBase {
 		}
 	}
 
+	//THIS FUNCTION RETURNS ONLY ONE ROW AS AN OBJECT WHICH MATCHES THE COLUMN AND VALUE PROVIDED
+	public static function GetByColumn($column, $value) {
+		if(empty($column) || empty($value)){
+			throw new SystemClassException('To load a row using GetByColumn, you must pass a column and value.');
+		}
+
+
+		$data = SingleRowFetch(static::$tablename, $column,
+			$value, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
+
+		if ($data === NULL) {
+			return NULL;
+		}
+		$classname = get_called_class();
+		$pkey_column_name = $classname::$pkey_column;
+		$pkey_column_value = $data->$pkey_column_name;
+
+		$object = new $classname($pkey_column_value);
+		$object->load_from_data($data, array_keys($classname::$fields));
+		return $object;
+	}
 	
 	function set($key, $value, $check_existance=TRUE) {
 		if ($check_existance && !array_key_exists($key, static::$fields)) {
@@ -115,6 +136,7 @@ abstract class SystemBase {
 		}
 		return NULL;
 	}
+	
 	
 	//TAKES A STRING OR AN ARRAY REPRESENTING NAMES OF FIELDS TO CHECK WITH CURRENT OBJECT
 	//WILL RETURN THE NUMBER OF DUPLICATES FOUND, SEPARATING FIELDS WITH 'AND' IN THE SQL
