@@ -16,6 +16,11 @@
 	}
 
 	if($_POST){
+		if(empty($_POST['pmu_link_choose']) && empty($_POST['pmu_link'])){
+			throw new SystemDisplayableError('You must either choose a page from the drop down or type in a link.');
+			exit();
+		}
+		
 		if(!empty($_POST['pmu_link_choose'])){
 			$public_menu->set('pmu_link', $_POST['pmu_link_choose']);
 		}
