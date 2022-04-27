@@ -20,7 +20,7 @@
 		
 		
 		if($_POST['fil_description']){
-				$_POST['fil_description'] = LibraryFunctions::ToUTF8($_POST['fil_description']);
+				$_POST['fil_description'] = $_POST['fil_description'];
 		}
 		
 		if($_POST['fil_min_permission'] === NULL || $_POST['fil_min_permission'] === ''){

@@ -21,11 +21,11 @@
 		
 		
 		if($_POST['evt_short_description']){
-				$_POST['evt_short_description'] = LibraryFunctions::ToUTF8($_POST['evt_short_description']);
+				$_POST['evt_short_description'] = $_POST['evt_short_description'];
 		}
 		
 		if($_POST['evt_description']){
-				$_POST['evt_description'] = LibraryFunctions::ToUTF8($_POST['evt_description']);
+				$_POST['evt_description'] = $_POST['evt_description'];
 		}
 		
 		if($_POST['evt_fil_file_id']){
