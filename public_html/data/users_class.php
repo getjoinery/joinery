@@ -113,7 +113,8 @@ class User extends SystemBase {
 		'usr_contact_preference_last_changed' => 'last time contact preferences was changed',
 		'usr_organization_name' => 'Organization instead of person',
 		'usr_delete_time' => 'Time of deletion',
-		'usr_password_recovery_disabled' => 'When TRUE, password recovery is disabled.'
+		'usr_password_recovery_disabled' => 'When TRUE, password recovery is disabled.',
+		'usr_urbit_ship_name' => 'If using urbit login, this is the user ship name'
 	);
 
 	public static $field_specifications = array(
@@ -143,6 +144,7 @@ class User extends SystemBase {
 		'usr_organization_name' => array('type'=>'varchar(32)'),
 		'usr_delete_time' => array('type'=>'timestamp(6)'),
 		'usr_password_recovery_disabled' => array('type'=>'bool'),
+		'usr_urbit_ship_name' => array('type'=>'varchar(128)'),
 	);
 	
 	public static $timestamp_fields = array(
@@ -746,21 +748,6 @@ class User extends SystemBase {
 		return true;
 		
 	}
-
-
-	static function DefaultAddressForSession($session, $request) {
-		if ($session->get_user_id()) {
-			$address_id = Address::GetDefaultAddressForUser($session->get_user_id());
-			if ($address_id) {
-				return new Address($address_id, TRUE);
-			} else {
-				throw new SystemDisplayableUserException('No default address for this user', -1);
-			}
-		} else {
-			throw new UserException("Invalid session for this action.");
-		}
-	}
-	
 
 }
 
