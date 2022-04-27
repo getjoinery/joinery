@@ -245,8 +245,9 @@ if($params[0] == 'profile'){
 if($settings->get_setting('blog_active')){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/posts_class.php');
 	$blog_subdirectory = $settings->get_setting('blog_subdirectory');
+
 	if($params[0] == $blog_subdirectory){
-		$post = Post::get_by_link($params[1]);		
+		$post = Post::get_by_link($params[1]);	
 	}
 	else{
 		//CHECK BLOG URLS THAT ARE NOT UNDER /POST/
@@ -273,6 +274,9 @@ if($settings->get_setting('blog_active')){
 			exit();		
 		}		
 	}	
+	else{
+		LibraryFunctions::display_404_page();
+	}
 }
 
 //PAGE CONTENTS.  DEFAULT IS TO USE THE /PAGE/ SUBDIRECTORY
