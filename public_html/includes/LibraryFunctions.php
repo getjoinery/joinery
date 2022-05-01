@@ -1352,8 +1352,8 @@ class LibraryFunctions {
 				$returnval = array($pkeyname => $dblink->lastInsertId($seq));
 			}
 			else{
-				//RETURNS TRUE ON ADD IF THERE IS NO SERIAL VALUE PRESENT (THIS NEEDS TO BE ALTERED TO RETURN THE PKEY)
-				$returnval = TRUE;
+				//TODO THIS NEEDS TO BE ALTERED TO RETURN THE PKEY
+				throw new SystemClassException('Sequence '.$seq.' does not exist.');
 			}
 
 			if($use_transaction){
