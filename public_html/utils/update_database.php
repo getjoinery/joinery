@@ -119,7 +119,7 @@
 	
 	
 
-	function update_database(){
+	function update_database($verbose=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
@@ -365,7 +365,7 @@
 		return true;
 	}
 	
-	update_database();
+	update_database($verbose);
 	echo 'Database update complete'. "<br>\n";
 	return 0;
 
