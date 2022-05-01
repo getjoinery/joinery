@@ -289,9 +289,6 @@ if($settings->get_setting('blog_active')){
 			exit();		
 		}		
 	}	
-	else{
-		LibraryFunctions::display_404_page();
-	}
 }
 
 //PAGE CONTENTS.  DEFAULT IS TO USE THE /PAGE/ SUBDIRECTORY
