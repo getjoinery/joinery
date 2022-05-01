@@ -67,7 +67,7 @@
 		
 		$rowvalues = array();
 		if (strpos($file->get('fil_type'), 'image/') !== false) { 
-			array_push($rowvalues, '<img loading="lazy" src="/uploads/thumbnail/'.$file->get('fil_name').'">');
+			array_push($rowvalues, '<img loading="lazy" src="/uploads/lthumbnail/'.$file->get('fil_name').'">');
 		}
 		else if (strpos($file->get('fil_type'), 'application/pdf') !== false) { 
 			array_push($rowvalues, '<img loading="lazy" src="/adm/includes/images/pdf_icon_80px.png">');
