@@ -295,7 +295,11 @@ $("#admin_panel").toggle();
 					echo '<a class="uk-logo" href="/"><img class="custom-logo" src="'. $settings->get_setting('logo_link') .'" alt="'.$settings->get_setting('site_name').'"></a>';
 				}
 				else{
-					echo '<a class="uk-logo" href="/"><span style="font-size: 14px;">'.substr($settings->get_setting('site_name'), 0, 16) .'</span></a>';
+					$dots = '';
+					if(strlen($settings->get_setting('site_name')) > 20){
+						$dots = '...';
+					}
+					echo '<a class="uk-logo" href="/"><span style="font-size: 14px;">'.substr($settings->get_setting('site_name'), 0, 20).$dots .'</span></a>';
 				}
 				?>
 			</div>
