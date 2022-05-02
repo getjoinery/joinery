@@ -6,6 +6,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/smtpmailer.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
