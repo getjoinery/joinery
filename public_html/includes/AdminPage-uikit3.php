@@ -294,8 +294,8 @@ class AdminPage{
 								<li><a href="#"><span data-uk-icon="icon: settings"></span> Configuration</a></li>
 								<li class="uk-nav-divider"></li>
 								-->
-								<li class="uk-nav-divider"></li>
-								<li><a id="admintoggle" href="#"><span data-uk-icon="icon: image"></span> Debug Data</a></li>
+								<!--<li class="uk-nav-divider"></li>
+								<li><a id="admintoggle" href="#"><span data-uk-icon="icon: image"></span> Debug Data</a></li>-->
 								<!--<li class="uk-nav-divider"></li>
 								<li><a href="/logout"><span data-uk-icon="icon: sign-out"></span> Sign Out</a></li>-->
 					    </ul>
