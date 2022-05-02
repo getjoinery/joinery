@@ -16,8 +16,9 @@ if(!$settings->get_setting('register_active')){
 $settings = Globalvars::get_instance();
 
 if(!$url = $settings->get_setting('urbit_endpoint')){
-		throw new SystemDisplayableError(
-		'Urbit login is not activated.');
+		header("HTTP/1.0 404 Not Found");
+		echo 'Urbit Login is turned off';
+		exit();
 }
 
 if(!$urbit_auth = $settings->get_setting('urbit_endpoint_password')){
