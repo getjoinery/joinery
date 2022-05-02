@@ -14,8 +14,9 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/activation_codes_class.php');
 $settings = Globalvars::get_instance();
 
 if(!$url = $settings->get_setting('urbit_endpoint')){
-		throw new SystemDisplayableError(
-		'Urbit login is not activated.');
+		header("HTTP/1.0 404 Not Found");
+		echo 'Urbit Login is turned off';
+		exit();
 }
 
 if (empty($_POST['urbit_token']) || empty($_POST['urbit_ship'])) {
