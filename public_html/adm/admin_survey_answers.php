@@ -44,7 +44,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 35,
+		'menu-id'=> 39,
 		'page_title' => 'Add User',
 		'readable_title' => 'Add User',
 		'breadcrumbs' => array(
