@@ -13,6 +13,18 @@ if(!$settings->get_setting('register_active')){
 		exit();
 }
 
+$settings = Globalvars::get_instance();
+
+if(!$url = $settings->get_setting('urbit_endpoint')){
+		throw new SystemDisplayableError(
+		'Urbit login is not activated.');
+}
+
+if(!$urbit_auth = $settings->get_setting('urbit_endpoint_password')){
+		throw new SystemDisplayableError(
+		'There is no urbit endpoint password.');
+}
+
 $urbit_ship = LibraryFunctions::fetch_variable('urbit_ship', '', 1, '');
 
 $url = "https://planet.jeremytunnell.com/~initiateAuth"; 
@@ -23,7 +35,7 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, $urbit_ship);
 curl_setopt($ch, CURLOPT_HTTPHEADER, array(
 	'accept: application/json',
 	'content-type: application/json',
-    'auth: 0v2.nreph.3n52f.3arrj.n2si7.kk9pc'
+    'auth: '.$urbit_auth
 ));
 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
 curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);

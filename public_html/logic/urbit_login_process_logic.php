@@ -1,7 +1,6 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-$settings = Globalvars::get_instance();
 
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
@@ -11,6 +10,13 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/login_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/activation_codes_class.php');
+
+$settings = Globalvars::get_instance();
+
+if(!$url = $settings->get_setting('urbit_endpoint')){
+		throw new SystemDisplayableError(
+		'Urbit login is not activated.');
+}
 
 if (empty($_POST['urbit_token']) || empty($_POST['urbit_ship'])) {
 	throw new SystemDisplayableError('Please enter both a token and a ship name to login.');
