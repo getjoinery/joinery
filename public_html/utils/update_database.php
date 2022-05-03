@@ -4,6 +4,11 @@
 	ini_set('display_startup_errors', 1);
 	//error_reporting(E_ALL);
 	
+	//THIS SCRIPT ACCEPTS THREE POSSIBLE ARGUMENTS
+	//VERBOSE PRINTS MISMATCHES TO THE SCREEN
+	//UPGRADE FIXES MISMATCHES IN COLUMN TYPES
+	//CLEANUP DELETES SUPERFLUOUS COLUMNS
+	
 	if($_REQUEST['verbose']){
 		$verbose=$_REQUEST['verbose'];
 	}
@@ -11,6 +16,19 @@
 		$verbose=false;
 	}
 
+	if($_REQUEST['upgrade']){
+		$upgrade=$_REQUEST['upgrade'];
+	}
+	else{
+		$upgrade=false;
+	}
+	
+	if($_REQUEST['cleanup']){
+		$cleanup=$_REQUEST['cleanup'];
+	}
+	else{
+		$cleanup=false;
+	}
 
 	/*
 	THIS WILL CHECK THE SPECS IN THE $fields and $field_specifications VARIABLES AND CREATE AND/OR UPDATE THE TABELS AS NEEDED
@@ -119,7 +137,7 @@
 	
 	
 
-	function update_database($verbose=false){
+	function update_database($verbose=false, $upgrade=false, $cleanup=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
@@ -298,12 +316,14 @@
 				}
 				
 				if($found){
-					if($verbose){
+					if($verbose || $upgrade){
+						$upgrade_field = false;
 						//CHECK THE COLUMN SPECS
 						$field_length = extract_length_from_spec($field_specifications[$field][type]);
 						$field_without_length = preg_replace('/[^a-z ]/', '', $field_specifications[$field][type]);
 						if(translate_data_types($live_column_info[$field][data_type]) != $field_without_length){
 							echo 'NOTICE: Data types do not match on field '.$field.' (live: '. $live_column_info[$field][data_type] .'<->spec:'. $field_without_length .")<br>\n";
+							$upgrade_field = true;
 						}
 						
 						//CHECK THE LENGTH
@@ -313,8 +333,30 @@
 						}
 						if($live_column_info[$field][character_maximum_length]){
 							if($live_column_info[$field][character_maximum_length] != $field_length){
-								echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field][character_maximum_length] .'<->spec: '. $field_length .")<br>\n";						
+								echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field][character_maximum_length] .'<->spec: '. $field_length .")<br>\n";	
+								$upgrade_field = true;								
 							}
+						}
+						
+						if($upgrade && $upgrade_field){
+							//IF COLUMN LENGTH OR TYPE DOESN'T MATCH, UPGRADE IT
+
+							$sql = 'ALTER TABLE '.$table_name.'
+								ALTER COLUMN '.$field.' TYPE '.$field_specifications[$field][type];
+								
+							$sql .= ';';
+							echo $sql."<br>\n";
+							
+							try{
+								$q = $dblink->prepare($sql);
+								$q->execute();
+							}
+							catch(PDOException $e){
+								//DO NOT HALT THE PROGRAM, JUST NOTE IT
+								echo 'ERROR: Could not alter column '.$field.' ('.$sql.')'. "<br>\n";
+								//$dbhelper->handle_query_error($e);
+							}								
+							
 						}
 					}
 
@@ -345,6 +387,7 @@
 
 				}
 			}
+
 			
 			foreach($live_table_columns as $live_column){
 				$found=false;
@@ -354,18 +397,53 @@
 					}
 				}
 				if(!$found){
-					if($verbose){
+					if($verbose || $cleanup){
 						echo $live_column.' is in live table '.$table_name.' but not in class<br>';
+							
+						if($cleanup){
+							$sql = 'ALTER TABLE '.$table_name.' DROP COLUMN '.$live_column;
+								
+							$sql .= ';';
+							echo $sql."<br>\n";
+							
+							try{
+								$q = $dblink->prepare($sql);
+								$q->execute();
+							}
+							catch(PDOException $e){
+								$dbhelper->handle_query_error($e);
+							}							
+						}
 					}
 				}
 			}
 		}
+
+
+		//DATABASE MIGRATIONS
+		//NOTE!!  ALL MIGRATIONS HAVE TO BE WRITTEN SUCH THAT THEY CAN BE RUN REPEATEDLY AND OUT OF ORDER
+		$migrations = array();
+		//$migrations[] = 'ALTER TABLE vid_videos ADD COLUMN test_column varchar(255);';
 		
-		
-		return true;
-	}
+		foreach($migrations as $migration){
+
+			if($verbose){
+				echo $migration."<br>\n";
+			}
+			
+			try{
+				$q = $dblink->prepare($migration);
+				$q->execute();
+			}
+			catch(PDOException $e){
+				$dbhelper->handle_query_error($e);
+			}	
+		}
+			
+			return true;
+		}
 	
-	update_database($verbose);
+	update_database($verbose, $upgrade, $cleanup);
 	echo 'Database update complete'. "<br>\n";
 	return 0;
 
