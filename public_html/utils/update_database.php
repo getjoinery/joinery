@@ -199,7 +199,7 @@
 			$live_table_columns = $tables_and_columns[$table_name];
 			if(!$live_table_columns){
 				//THERE IS NO TABLE.  CREATE IT
-				$sequence_name = $table_name.'_'.$pkey_column;
+				$sequence_name = $table_name.'_'.$pkey_column.'_seq';
 				
 				$sql = 'CREATE SEQUENCE IF NOT EXISTS '.$sequence_name.'
 					INCREMENT BY 1
@@ -306,6 +306,86 @@
 				exit;
 			}
 			$field_specifications = $class::$field_specifications;
+			
+			
+			//MAKE SURE ALL OF THE SEQUENCE VALUES ARE CREATED AND ON THE RIGHT COLUMNS
+			foreach($class::$field_specifications as $field_name=>$field_specs){
+				if(isset($field_specs[serial]) && $field_specs[serial]){
+					$sequence_name = $table_name.'_'.$pkey_column.'_seq';
+					
+					$sql = 'SELECT COUNT(*) as schema_found
+						FROM information_schema.sequences 
+						WHERE sequence_name= \''.$sequence_name.'\'';
+
+					try{
+						$q = $dblink->prepare($sql);
+						$q->execute();
+					}
+					catch(PDOException $e){
+						$dbhelper->handle_query_error($e);
+					}	
+					$row = $q->fetch();
+
+					
+					if(!$row[schema_found]){
+						if($verbose){
+							echo 'NOTICE: '. $sequence_name ." is missing.<br>\n"; 
+						}
+
+						//GET MAXIMUM VALUE FOR SEQUENCE
+						$sql = 'SELECT MAX('.$field_name.') as max_val
+							FROM '.$table_name;
+							
+
+						try{
+							$q = $dblink->prepare($sql);
+							$q->execute();
+						}
+						catch(PDOException $e){
+							$dbhelper->handle_query_error($e);
+						}	
+						$row = $q->fetch();
+						$max_val = $row[max_val];
+						if(!$max_val){
+							$max_val = 1;
+						}
+						
+						//CREATE THE SEQUENCE
+						$sql = 'CREATE SEQUENCE IF NOT EXISTS '.$sequence_name.'
+							START WITH '.$max_val.'
+							INCREMENT BY 1
+							NO MAXVALUE
+							NO MINVALUE
+							CACHE 1;';
+						echo $sql."<br>\n";
+
+						try{
+							$q = $dblink->prepare($sql);
+							$q->execute();
+						}
+						catch(PDOException $e){
+							$dbhelper->handle_query_error($e);
+						}	
+
+						//ADD IT TO THE COLUMN
+						$sql = 'ALTER TABLE '.$table_name.' 
+							ALTER COLUMN '.$field_name.' SET DEFAULT nextval(\''.$sequence_name.'\'::regclass);';
+						echo $sql."<br>\n";
+
+						try{
+							$q = $dblink->prepare($sql);
+							$q->execute();
+						}
+						catch(PDOException $e){
+							$dbhelper->handle_query_error($e);
+						}							
+					
+						
+					}
+				}
+			}
+			
+			
 			
 			foreach($class::$fields as $field=>$description){
 				$found=false;
