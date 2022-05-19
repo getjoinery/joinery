@@ -133,7 +133,7 @@ passion is whole child development through the lens of social emotional learning
               Semper curabitur ullamcorper posuere nunc sed. Ornare iaculis bibendum malesuada faucibus lacinia porttitor. Pulvinar laoreet sagittis viverra duis. In venenatis sem arcu pretium pharetra at. Lectus viverra dui tellus ornare pharetra.
             </p>-->
             <div class="mt-6">
-              <a href="/contact" class="inline-flex px-4 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
+              <a href="/page/contact" class="inline-flex px-4 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
                 Contact Me
               </a>
             </div>
@@ -157,11 +157,11 @@ passion is whole child development through the lens of social emotional learning
     <dl class="space-y-10 lg:space-y-0 lg:grid lg:grid-cols-3 lg:gap-8">
       <div>
         <dt>
-          <div class="flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white">
+          <!--<div class="flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white">
             <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
             </svg>
-          </div>
+          </div>-->
           <p class="mt-5 text-lg leading-6 font-medium text-gray-900">Healthy Relationships</p>
         </dt>
         <dd class="mt-2 text-base text-gray-500">
@@ -171,11 +171,11 @@ passion is whole child development through the lens of social emotional learning
 
       <div>
         <dt>
-          <div class="flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white">
+          <!--<div class="flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white">
             <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
             </svg>
-          </div>
+          </div>-->
           <p class="mt-5 text-lg leading-6 font-medium text-gray-900">Effective Communication</p>
         </dt>
         <dd class="mt-2 text-base text-gray-500">
@@ -185,11 +185,11 @@ passion is whole child development through the lens of social emotional learning
 
       <div>
         <dt>
-          <div class="flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white">
+          <!--<div class="flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white">
             <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
-          </div>
+          </div>-->
           <p class="mt-5 text-lg leading-6 font-medium text-gray-900">Learn Boundaries</p>
         </dt>
         <dd class="mt-2 text-base text-gray-500">
@@ -283,7 +283,7 @@ passion is whole child development through the lens of social emotional learning
         <!--<label for="email-address" class="sr-only">Email address</label>
         <input id="email-address" name="email-address" type="email" autocomplete="email" required class="w-full px-5 py-3 border border-transparent placeholder-gray-500 focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white focus:border-white sm:max-w-xs rounded-md" placeholder="Enter your email">-->
         <div class="mt-3 rounded-md shadow sm:mt-0 sm:ml-3 sm:flex-shrink-0">
-          <a href="/contact"><button type="button" class="w-full flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-white bg-indigo-500 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-indigo-500">
+          <a href="/page/contact"><button type="button" class="w-full flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-white bg-indigo-500 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-indigo-500">
             Get in Touch
           </button></a>
         </div>
