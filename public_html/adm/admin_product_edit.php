@@ -25,49 +25,48 @@
 
 
 
-	if ($_POST || $_REQUEST['action']) {
+	if ($_POST || $_POST['action']) {
 		
-		if ($_REQUEST['action'] == 'add' || $_REQUEST['action'] == 'edit') {
-			$_REQUEST['pro_link'] = trim(strtolower($_REQUEST['pro_link']));
-			$_REQUEST['pro_link'] = preg_replace("/[^a-zA-Z0-9-]/", "", $_REQUEST['pro_link']);
+		if ($_POST['action'] == 'add' || $_POST['action'] == 'edit') {
+			$product->set('pro_link', preg_replace("/[^a-zA-Z0-9-]/", "", trim(strtolower($_POST['pro_link']))));
 			
 		
-			if($_REQUEST['pro_requirements']){
+			if($_POST['pro_requirements']){
 				$total_value = 0;
-				foreach ($_REQUEST['pro_requirements'] as $choice => $value){
-					$total_value += $value;			
+				foreach ($_POST['pro_requirements'] as $choice => $value){
+					$total_value += $value;		 	
 				}
 				$product->set('pro_requirements', $total_value);
 			}
 			
-			if($_REQUEST['pro_evt_event_id'] == '' || $_REQUEST['pro_evt_event_id'] == 0){
+			if($_POST['pro_evt_event_id'] == '' || $_POST['pro_evt_event_id'] == 0){
 				$product->set('pro_evt_event_id', NULL);
 
 			}
 			else{
-				$product->set('pro_evt_event_id', intval($_REQUEST['pro_evt_event_id']));
+				$product->set('pro_evt_event_id', intval($_POST['pro_evt_event_id']));
 			}
 			
 			//MUST BE INTEGER
-			$product->set('pro_expires', (int)$_REQUEST['pro_expires']);
-			$product->set('pro_prg_product_group_id', (int)$_REQUEST['pro_prg_product_group_id']);
+			$product->set('pro_expires', (int)$_POST['pro_expires']);
+			$product->set('pro_prg_product_group_id', (int)$_POST['pro_prg_product_group_id']);
 			
 			//PRICE MUST BE INTEGER
-			if($_REQUEST['pro_price']){
-				$_REQUEST['pro_price'] = (int)$_REQUEST['pro_price'];
+			if($_POST['pro_price']){
+				$_POST['pro_price'] = (int)$_POST['pro_price'];
 			}
 	
 			//PRICE MUST BE INTEGER
-			if($_REQUEST['pro_grp_group_id']){
-				$_REQUEST['pro_grp_group_id'] = (int)$_REQUEST['pro_grp_group_id'];
+			if($_POST['pro_grp_group_id']){
+				$_POST['pro_grp_group_id'] = (int)$_POST['pro_grp_group_id'];
 			}
 			else{
-				$_REQUEST['pro_grp_group_id'] = NULL;
+				$_POST['pro_grp_group_id'] = NULL;
 			}
 
 	
 			//SET RECURRING VALUE
-			if($_REQUEST['pro_recurring']){
+			if($_POST['pro_recurring']){
 				$product->set('pro_recurring', 'month');
 			}
 			else{
@@ -76,12 +75,12 @@
 			
 
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_link', 'pro_digital_link');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_POST[$field]);
 			}
-			
+
 			$product->prepare();
 			$product->save();
 			$product->load();
