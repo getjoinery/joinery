@@ -760,8 +760,10 @@ abstract class SystemBase {
 			unset($rowdata[static::$pkey_column]);
 		}
 
+
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
+		
 		$p_keys_return = LibraryFunctions::edit_table(
 			$dbhelper, $dblink, static::$tablename, $p_keys, $rowdata, FALSE, $debug);
 
