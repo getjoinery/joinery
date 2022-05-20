@@ -76,7 +76,6 @@
 	
 	$psearches = array();
 	$psearches['event_id'] = $event->key;
-	$psearches['past'] = 'now()';
 	$event_sessions = new MultiEventSessions($psearches,
 		array('start_time'=>'DESC'), $limit,
 	0);
