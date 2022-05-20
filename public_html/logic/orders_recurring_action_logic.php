@@ -35,7 +35,7 @@
 		$error = "We were unable to cancel that subscription.  Please contact the webmaster.";
 	}	
 	
-	if(!$order_item->get('odi_stripe_subscription_id')){
+	if(!$order_item->get('odi_subscription_cancelled_time')){
 		$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
 		if($stripe_subscription[status] == 'canceled'){
 			$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
