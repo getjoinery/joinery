@@ -175,7 +175,7 @@
                   </a>
                 </div>
                 <div class="mt-6 flex items-center">
-                                    <?php echo $formwriter->new_button('Schedule a Meeting', 'mailto:integralzenjanel@gmail.com'); ?>
+                                    <?php echo $formwriter->new_button('Schedule a Meeting', 'https://integralzen.as.me/?appointmentType=33836571'); ?>
                 </div>
               </div>
             </div>			
