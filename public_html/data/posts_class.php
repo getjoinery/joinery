@@ -257,7 +257,7 @@ class MultiPost extends SystemMultiBase {
 		}
 		
 		$group_members = new MultiGroupMember(
-			array('group_id' => $group->key),  //SEARCH CRITERIA
+			array('group_id' => $group->key, 'published'=>TRUE, 'deleted'=>FALSE),  //SEARCH CRITERIA
 			array('post_id'=>'desc'),
 			$numperpage,
 			$page_offset
@@ -289,6 +289,10 @@ class MultiPost extends SystemMultiBase {
 
 		if (array_key_exists('published', $this->options)) {
 		 	$where_clauses[] = 'pst_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');
+		}
+		
+		if (array_key_exists('listed', $this->options)) {
+		 	$where_clauses[] = 'pst_is_on_homepage = ' . ($this->options['listed'] ? 'TRUE' : 'FALSE');
 		}
 		
 		if (array_key_exists('deleted', $this->options)) {

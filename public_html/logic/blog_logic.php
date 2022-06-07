@@ -20,7 +20,7 @@
 	$page_sort = LibraryFunctions::fetch_variable('page_sort', 'post_id', 0, '');	
 	$page_direction = LibraryFunctions::fetch_variable('page_direction', 'DESC', 0, '');
 	
-	$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE);
+
 	
 	$params = explode("/", $_REQUEST['path']);
 	if($params[1] && $params[2]){
@@ -28,6 +28,7 @@
 		$title = 'Blog Posts with tag '.$params[2];
 	}
 	else{
+		$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE);
 		$posts = new MultiPost(
 			$search_criteria,
 			array($page_sort=>$page_direction),
