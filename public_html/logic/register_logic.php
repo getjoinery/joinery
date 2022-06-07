@@ -161,6 +161,7 @@ if ($_POST) {
 
 		$session->clear_formfields();
 		$session->store_session_variables($user);
+		$session->set_initial_user_id($user->key);
 		if ($fixed_fields['setcookie']) {
 			$session->save_user_to_cookie();
 		}

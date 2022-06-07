@@ -748,6 +748,39 @@ class User extends SystemBase {
 		return true;
 		
 	}
+	
+	//TESTS FOR THIS CLASS
+	static function test(){
+		$dbhelper = DbConnector::get_instance();
+		$dbhelper->set_test_mode();
+		$dblink = $dbhelper->get_db_link();		
+		
+		$email = LibraryFunctions::random_string(10).'@test.com';
+		//NEW USER
+		$user = User::CreateNewUser(LibraryFunctions::random_string(10), LibraryFunctions::random_string(10), $email , 'testpass', FALSE);
+		
+		$user = User::GetByEmail($email);
+		if(!$user){
+			$dbhelper->close_test_mode(); 
+			return false;
+		}
+		
+
+		$user->permanent_delete();
+		
+		
+		
+		$user = User::GetByEmail($email);
+		if($user){
+			$dbhelper->close_test_mode(); 
+			return false;
+		}
+		
+		$dbhelper->close_test_mode(); 
+
+		return true;
+			
+	}
 
 }
 

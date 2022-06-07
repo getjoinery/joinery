@@ -570,6 +570,11 @@ class SessionControl{
 		return NULL;
 	}
 
+	function set_initial_user_id($user_id) {
+		$_SESSION['initial_usr_user_id'] = $user_id;
+		return true;
+	}
+	
 	function get_initial_user_id() {
 		return isset($_SESSION['initial_usr_user_id']) ? $_SESSION['initial_usr_user_id'] : NULL;
 	}
