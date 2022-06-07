@@ -257,7 +257,7 @@ class MultiPost extends SystemMultiBase {
 		}
 		
 		$group_members = new MultiGroupMember(
-			array('group_id' => $group->key, 'published'=>TRUE, 'deleted'=>FALSE),  //SEARCH CRITERIA
+			array('group_id' => $group->key, 'published'=>TRUE, 'deleted'=>FALSE, 'listed'=>TRUE),  //SEARCH CRITERIA
 			array('post_id'=>'desc'),
 			$numperpage,
 			$page_offset

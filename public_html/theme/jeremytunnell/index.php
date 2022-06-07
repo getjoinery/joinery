@@ -42,10 +42,7 @@
 	<div class="section-content section-content-a">
 		<div class="typology-posts">
 	
-			<?php foreach ($posts as $post){  
-				if(!$post->get('pst_is_on_homepage')){
-					continue;
-				}	
+			<?php foreach ($posts as $post){  	
 				$author = new User($post->get('pst_usr_user_id'), TRUE);
 			?>
 
