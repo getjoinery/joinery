@@ -43,6 +43,9 @@
 		<div class="typology-posts">
 	
 			<?php foreach ($posts as $post){  
+				if(!$post->get('pst_is_on_homepage')){
+					continue;
+				}	
 				$author = new User($post->get('pst_usr_user_id'), TRUE);
 			?>
 
