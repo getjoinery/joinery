@@ -789,6 +789,8 @@ abstract class SystemBase {
 		}
 		return $json;
 	}
+	
+	static function test() {}
 
 }
 
