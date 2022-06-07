@@ -30,7 +30,7 @@
 		'readable_title' => 'Urls',
 		'breadcrumbs' => array(
 			'Urls'=>'/admin/admin_urls', 
-			'Url',
+			'Url' => '',
 		),
 		'session' => $session,
 	)
