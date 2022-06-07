@@ -63,7 +63,7 @@
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
 	
-	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$settings->get_setting('webDir_SSL').$post->get_url().'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$settings->get_setting('webDir_SSL').'/'.$post->get_url().'</a><br />';	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($post->get('pst_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 	echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description').'</p><br />';
 	
