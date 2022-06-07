@@ -29,7 +29,7 @@
 		$url->set('url_incoming', strtolower($url_incoming));
 
 		$url_redirect_url = $_POST['url_redirect_url'];
-		if($url_redirect_url[0] != '/' && !stristr($url_incoming, 'http')){
+		if($url_redirect_url[0] != '/' && !stristr($url_redirect_url, 'http')){
 			$url_redirect_url = '/'.$url_redirect_url;
 		}
 		$url->set('url_redirect_url', strtolower($url_redirect_url));		
