@@ -14,7 +14,7 @@
 	$direction = LibraryFunctions::fetch_variable('direction', 'DESC', 0, '');
 	
 	
-	$search_criteria = array('published'=>TRUE, 'deleted'=>false, 'is_on_homepage'=>true);
+	$search_criteria = array('published'=>TRUE, 'deleted'=>false, 'listed'=>true);
 
 	$posts = new MultiPost(
 		$search_criteria,
