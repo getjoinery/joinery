@@ -46,14 +46,14 @@
 	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($url->get('url_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
-	echo '<br /><strong>Incoming:</strong> '.$url->get('url_incoming') .'<br />';	
+	echo '<br /><strong>Incoming:</strong> <a href="'.$url->get('url_incoming') .'">'.$url->get('url_incoming').'</a><br />';	
 	echo '<strong>Redirect:</strong> ';
 	
 		if($url->get('url_redirect_url')){
-			echo $url->get('url_redirect_url');
+			echo '<a href="'.$url->get('url_redirect_url').'">'.$url->get('url_redirect_url').'</a>';
 		}
 		else{
-			echo $url->get('url_redirect_file');
+			echo '<a href="'.$url->get('url_redirect_file').'">'.$url->get('url_redirect_file').'</a>';
 		}	
 	echo '<br />';
 	

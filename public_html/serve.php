@@ -35,6 +35,7 @@ if($params[0] == 'robots.txt'){
 }
 
 if($settings->get_setting('urls_active')){
+
 	//CHECK REDIRECTS
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/urls_class.php');
 	$urls = new MultiUrl(
@@ -43,10 +44,13 @@ if($settings->get_setting('urls_active')){
 		1,
 		0,
 		'AND');		
-	$urls->load();	
-	if($urls->count()){
+			
+	if($urls->count_all()){
+		$urls->load();
 		$url = $urls->get(0);
+
 		if($url->get('url_redirect_url')){		
+
 			if($url->get('url_type') == 301){
 				header("HTTP/1.1 301 Moved Permanently");
 				header("Location: ".$url->get('url_redirect_url'));
