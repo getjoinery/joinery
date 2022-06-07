@@ -257,7 +257,7 @@ class MultiPost extends SystemMultiBase {
 		}
 		
 		$group_members = new MultiGroupMember(
-			array('group_id' => $group->key, 'published'=>TRUE, 'deleted'=>FALSE, 'listed'=>TRUE),  //SEARCH CRITERIA
+			array('group_id' => $group->key),  //SEARCH CRITERIA
 			array('post_id'=>'desc'),
 			$numperpage,
 			$page_offset
@@ -267,7 +267,9 @@ class MultiPost extends SystemMultiBase {
 		$posts = new MultiPost;
 		foreach ($group_members as $group_member){
 			$post = new Post($group_member->get('grm_pst_post_id'), TRUE);
-			$posts->add($post);
+			if(!$post->get('pst_delete_time') && $post->get('pst_is_on_homepage') && $post->get('pst_published_time')){ 
+				$posts->add($post);
+			}
 		}	
 
 		return $posts;

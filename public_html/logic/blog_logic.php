@@ -28,7 +28,7 @@
 		$title = 'Blog Posts with tag '.$params[2];
 	}
 	else{
-		$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE);
+		$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE, 'listed'=>TRUE);
 		$posts = new MultiPost(
 			$search_criteria,
 			array($page_sort=>$page_direction),
