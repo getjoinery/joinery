@@ -130,6 +130,11 @@ class EventRegistrant extends SystemBase {
 		$q->bindValue(1, $this->key, PDO::PARAM_INT);
 		
 		$success = $q->execute();
+
+		$q = $dblink->prepare('UPDATE odi_order_items SET odi_evr_event_registrant_id = NULL WHERE odi_evr_event_registrant_id = ?');
+		$q->bindValue(1, $this->key, PDO::PARAM_INT);
+		
+		$success = $q->execute();
 		
 		return $success;		
 	}	
@@ -291,7 +296,7 @@ class MultiEventRegistrant extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
-		$q = $this->_get_results();
+		$q = $this->_get_results(FALSE, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new EventRegistrant($row->evr_event_registrant_id);
 			$child->load_from_data($row, array_keys(EventRegistrant::$fields));
@@ -300,7 +305,7 @@ class MultiEventRegistrant extends SystemMultiBase {
 	}
 
 	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count;
 	}

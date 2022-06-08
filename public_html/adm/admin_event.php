@@ -38,7 +38,7 @@
 		exit();				
 	}
 
-	if($_POST['action'] == 'remove'){
+	if($_POST['action'] == 'remove_from_event'){
 
 		$eventregistrant = new EventRegistrant($_POST['evr_event_registrant_id'], TRUE);
 		$eventregistrant->remove();
@@ -247,7 +247,7 @@
 		
 		
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove" />
+		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
 		<input type="hidden" class="hidden" name="evr_event_registrant_id" id="evr_event_registrant_id" value="'.$event_registrant->key.'" />
 		<button class="uk-button" type="submit">Remove</button>
 		</form>';
