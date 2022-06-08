@@ -128,12 +128,16 @@
 	$optionvals = $products->get_dropdown_array();
 	echo $formwriter->dropinput("Product purchased", "odi_pro_product_id", "ctrlHolder", $optionvals, $order_item->get('odi_pro_product_id'), '', TRUE);	
 
-	if($order_item->get('odi_evr_event_registrant_id')){
-		$event_registrant = new EventRegistrant($order_item->get('odi_evr_event_registrant_id'), TRUE);
-		$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-		
-		echo 'Current event registration:<br>  '. $order_item_user->display_name(). ' - ' . $event->get('evt_name').'<br>';
+
+	$event_registrants = new MultiEventRegistrant(array('user_id' => $order_item->get('odi_usr_user_id')), array('event_id'=> 'DESC'));
+	$num_events = $event_registrants->count_all();
+	if($num_events){
+		$event_registrants->load();	
+		$optionvals = $event_registrants->get_dropdown_array();
+		echo $formwriter->dropinput("Event registration", "odi_evr_event_registrant_id", "ctrlHolder", $optionvals, $order_item->get('odi_evr_event_registrant_id'), '', TRUE);			
 	}
+			
+
 	
 	echo $formwriter->textinput('Comment/note', 'odi_comment', NULL, 100, $order_item->get('odi_comment'), '', 255, '');
 
