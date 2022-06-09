@@ -49,7 +49,7 @@ class GeneralError extends SystemBase {
 		'err_create_time' => array('type'=>'timestamp(6)'),
 	);
 			
-	public static $required_fields = array();
+	public static $required_fields = array('err_general_error_id');
 	
 	public static $field_constraints = array();
 	

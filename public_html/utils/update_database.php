@@ -43,6 +43,9 @@
 	
 
 	function update_database($classes, $verbose=false, $upgrade=false, $cleanup=false){
+		error_reporting(E_ERROR | E_PARSE);
+		ini_set('display_errors', 1);
+		ini_set('display_startup_errors', 1);
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
