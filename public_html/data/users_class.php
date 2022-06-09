@@ -151,14 +151,6 @@ class User extends SystemBase {
 		'usr_email_is_verified_time', 'usr_lastlogin_time', 'usr_admin_disabled_time',
 		'usr_signup_date');
 
-	public static $signup_type_to_description = array(
-		self::SIGNUP_TYPE_NON_SEARCH_WEB => 'Web Non Search',
-		self::SIGNUP_TYPE_SEND_TO_FRIEND => 'Send To Friend - Email Match',
-		self::SIGNUP_TYPE_NO_ENTRY => 'Unknown',
-		self::SIGNUP_TYPE_SEND_TO_FRIEND_DIFFERENT_EMAIL => 'Send To Friend - No Email Match',
-		self::SIGNUP_TYPE_DIRECT_TRAFFIC => 'Direct Traffic',
-	);
-
 
 	public static $required_fields = array(
 		'usr_first_name', 'usr_first_name', 'usr_email');
