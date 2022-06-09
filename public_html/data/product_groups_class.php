@@ -36,7 +36,7 @@ class ProductGroup extends SystemBase {
 		'prg_description' => array('type'=>'text'),
 	);
 
-	public static $required_fields = array();
+	public static $required_fields = array('prg_max_items');
 
 	public static $field_constraints = array();	
 	

@@ -37,7 +37,7 @@ class Message extends SystemBase {
 		'msg_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $required_fields = array();
+	public static $required_fields = array('msg_body', 'msg_sent_time');
 
 	public static $field_constraints = array();	
 	

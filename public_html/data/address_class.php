@@ -132,7 +132,7 @@ class Address extends SystemBase {
 	);
 
 
-	public static $required_fields = array();
+	public static $required_fields = array('usa_usr_user_id');
 	
 	public static $field_constraints = array();
 	
@@ -766,7 +766,7 @@ class Address extends SystemBase {
 		}
 	}
 
-	
+
 
 }
 

@@ -751,6 +751,7 @@ class User extends SystemBase {
 	
 	//TESTS FOR THIS CLASS
 	static function test(){
+		parent::test();
 		$dbhelper = DbConnector::get_instance();
 		$dbhelper->set_test_mode();
 		$dblink = $dbhelper->get_db_link();		

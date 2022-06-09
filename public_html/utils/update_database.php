@@ -1,4 +1,5 @@
 <?php
+	require_once( __DIR__ . '/class_list.php');
 	error_reporting(E_ERROR | E_PARSE);
 	ini_set('display_errors', 1);
 	ini_set('display_startup_errors', 1);
@@ -38,158 +39,13 @@
 	-IF CHARACTER LENGTH DOES NOT MATCH YOU WILL GET A WARNING BUT IT WILL NOT FIX
 	*/
 
-	require_once( __DIR__ . '/../includes/Globalvars.php');
-	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
-
-	require_once( __DIR__ . '/../data/activation_codes_class.php');	
-	require_once( __DIR__ . '/../data/address_class.php');
-	require_once( __DIR__ . '/../data/admin_menus_class.php');
-	require_once( __DIR__ . '/../data/bookings_class.php');
-	require_once( __DIR__ . '/../data/comments_class.php');
-	require_once( __DIR__ . '/../data/content_versions_class.php');
-	require_once( __DIR__ . '/../data/coupon_codes_class.php');
-	require_once( __DIR__ . '/../data/coupon_code_products_class.php');
-	require_once( __DIR__ . '/../data/debug_email_logs_class.php');
-	require_once( __DIR__ . '/../data/emails_class.php');
-	require_once( __DIR__ . '/../data/email_recipients_class.php');
-	require_once( __DIR__ . '/../data/email_templates_class.php');
-	require_once( __DIR__ . '/../data/events_class.php');
-	require_once( __DIR__ . '/../data/event_logs_class.php');
-	require_once( __DIR__ . '/../data/event_registrants_class.php');
-	require_once( __DIR__ . '/../data/event_sessions_class.php');
-	require_once( __DIR__ . '/../data/event_session_files_class.php');
-	require_once( __DIR__ . '/../data/session_analytics_class.php');
-	require_once( __DIR__ . '/../data/event_types_class.php');
-	require_once( __DIR__ . '/../data/files_class.php');
-	require_once( __DIR__ . '/../data/general_errors_class.php');
-	require_once( __DIR__ . '/../data/groups_class.php');
-	require_once( __DIR__ . '/../data/group_members_class.php');
-	require_once( __DIR__ . '/../data/log_form_errors_class.php');
-	require_once( __DIR__ . '/../data/messages_class.php');
-	require_once( __DIR__ . '/../data/orders_class.php');
-	require_once( __DIR__ . '/../data/order_items_class.php');
-	require_once( __DIR__ . '/../data/page_contents_class.php');
-	require_once( __DIR__ . '/../data/phone_number_class.php');
-	require_once( __DIR__ . '/../data/posts_class.php');
-	require_once( __DIR__ . '/../data/products_class.php');
-	require_once( __DIR__ . '/../data/product_versions_class.php');
-	require_once( __DIR__ . '/../data/product_details_class.php');
-	require_once( __DIR__ . '/../data/product_groups_class.php');
-	require_once( __DIR__ . '/../data/public_menus_class.php');
-	require_once( __DIR__ . '/../data/questions_class.php');
-	require_once( __DIR__ . '/../data/question_options_class.php');
-	require_once( __DIR__ . '/../data/queued_email_class.php');
-	//require_once( __DIR__ . '/../data/recurring_mailer_class.php');
-	require_once( __DIR__ . '/../data/settings_class.php');	
-	require_once( __DIR__ . '/../data/stripe_invoices_class.php');	
-	require_once( __DIR__ . '/../data/surveys_class.php');	
-	require_once( __DIR__ . '/../data/survey_answers_class.php');	
-	require_once( __DIR__ . '/../data/survey_questions_class.php');	
-	require_once( __DIR__ . '/../data/urls_class.php');	
-	require_once( __DIR__ . '/../data/users_class.php');
-	require_once( __DIR__ . '/../data/videos_class.php');	
-	require_once( __DIR__ . '/../data/visitor_events_class.php');	
-
-	
-	//TRANSLATES INTERNAL POSTGRES TYPES TO USER TYPES
-	function translate_data_types($data_type){
-		if($data_type == 'smallint'){
-			return 'int';
-		}
-		else if($data_type == 'integer'){
-			return 'int';
-		}
-		else if($data_type == 'bigint'){
-			return 'int';
-		}		
-		else if($data_type == 'character varying'){
-			return 'varchar';
-		}		
-		else if($data_type == 'boolean'){
-			return 'bool';
-		}		
-		else if($data_type == 'timestamp without time zone'){
-			return 'timestamp';
-		}
-		else if($data_type == 'text'){
-			return 'text';
-		}		
-		else if($data_type == 'numeric'){
-			return 'numeric';
-		}	
-		else if($data_type == 'date'){
-			return 'date';
-		}
-		else if($data_type == 'character'){
-			return 'character';
-		}
-		else{
-			echo 'ERROR: Unrecognized data type '.$data_type;
-		}					
-	}
-	
-	function extract_length_from_spec($data_type){
-	
-		preg_match_all('!\d+!', $data_type, $matches);
-		return $matches[0][0];
-	
-	}
 	
 	
 
-	function update_database($verbose=false, $upgrade=false, $cleanup=false){
+	function update_database($classes, $verbose=false, $upgrade=false, $cleanup=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
-		$classes = array(
-			'Address',
-			'AdminMenu', 
-			'Booking',
-			'Comment',
-			'ContentVersion',
-			'CouponCode',
-			'CouponCodeProduct',
-			'DebugEmailLog',
-			'Email',
-			'EmailRecipient',
-			'EmailTemplateStore',
-			'Event',
-			'EventLog',
-			'EventRegistrant',
-			'EventSession',
-			'EventSessionFile',
-			'SessionAnalytic',
-			'EventType',
-			'File',
-			'GeneralError',
-			'Group',
-			'GroupMember',
-			'FormError',
-			'Message',
-			'Order',
-			'OrderItem',
-			'PageContent',
-			'PhoneNumber',
-			'Post',
-			'Product',
-			'ProductVersion',
-			'ProductDetail',
-			'ProductGroup',
-			'PublicMenu',
-			'Question',
-			'QuestionOption',
-			'QueuedEmail',
-			'Setting',
-			'StripeInvoice',
-			'Survey',
-			'SurveyAnswer',
-			'SurveyQuestion',
-			'Url',
-			'User',
-			'ActivationCode',
-			'VisitorEvent',
-			'Video',
-		);		
 		
 		$tables_and_columns = LibraryFunctions::get_tables_and_columns();
 		
@@ -399,9 +255,9 @@
 					if($verbose || $upgrade){
 						$upgrade_field = false;
 						//CHECK THE COLUMN SPECS
-						$field_length = extract_length_from_spec($field_specifications[$field][type]);
+						$field_length = LibraryFunctions::extract_length_from_spec($field_specifications[$field][type]);
 						$field_without_length = preg_replace('/[^a-z ]/', '', $field_specifications[$field][type]);
-						if(translate_data_types($live_column_info[$field][data_type]) != $field_without_length){
+						if(LibraryFunctions::translate_data_types($live_column_info[$field][data_type]) != $field_without_length){
 							echo 'NOTICE: Data types do not match on field '.$field.' (live: '. $live_column_info[$field][data_type] .'<->spec:'. $field_without_length .")<br>\n";
 							$upgrade_field = true;
 						}
@@ -523,7 +379,7 @@
 			return true;
 		}
 	
-	update_database($verbose, $upgrade, $cleanup);
+	update_database($classes, $verbose, $upgrade, $cleanup);
 	echo 'Database update complete'. "<br>\n";
 	return 0;
 

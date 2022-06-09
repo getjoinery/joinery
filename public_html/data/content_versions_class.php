@@ -51,7 +51,7 @@ class ContentVersion extends SystemBase {
 		'cnv_delete_time' => array('type'=>'timestamp(6)'),
 	);
 			
-	public static $required_fields = array(
+	public static $required_fields = array('cnv_foreign_key_id'
 		);
 
 	public static $field_constraints = array();	
@@ -133,7 +133,8 @@ class ContentVersion extends SystemBase {
 
 	
 	function permanent_delete(){
-		
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();	
 		$dblink->beginTransaction();
 		
 		$next_version = $this->get_next_version();

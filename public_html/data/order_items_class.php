@@ -68,7 +68,7 @@ class OrderItem extends SystemBase {
 		'odi_stripe_foreign_invoice_id' => array('type'=>'varchar(64)'),
 	);
 
-	public static $required_fields = array();
+	public static $required_fields = array('odi_ord_order_id', 'odi_pro_product_id', 'odi_price');
 
 	public static $field_constraints = array();	
 	

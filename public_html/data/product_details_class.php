@@ -36,7 +36,7 @@ class ProductDetail extends SystemBase {
 		'prd_num_used' => array('type'=>'int4'),
 		'prd_notes' => array('type'=>'text'),
 	);	
-	public static $required_fields = array();
+	public static $required_fields = array('prd_usr_user_id', 'prd_num_used');
 
 	public static $field_constraints = array();	
 	

@@ -40,8 +40,7 @@ class QuestionOption extends SystemBase {
 		'qop_create_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $required_fields = array(
-		);
+	public static $required_fields = array('qop_qst_question_id');
 
 	public static $field_constraints = array();	
 	

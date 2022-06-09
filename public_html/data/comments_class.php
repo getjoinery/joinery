@@ -14,6 +14,9 @@ class Comment extends SystemBase {
 	public static $prefix = 'cmt';
 	public static $tablename = 'cmt_comments';
 	public static $pkey_column = 'cmt_comment_id';
+	public static $permanent_delete_actions = array(
+		'cmt_comment_id_parent' => 'null'
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
 		'cmt_comment_id' => 'Comment id',
@@ -46,7 +49,7 @@ class Comment extends SystemBase {
 
 
 	public static $required_fields = array(
-		'cmt_body');
+		'cmt_body', 'cmt_pst_post_id');
 
 	public static $field_constraints = array(
 
@@ -149,8 +152,7 @@ class Comment extends SystemBase {
 
 		return $comment;
 	}
-		
-
+	
 
 }
 

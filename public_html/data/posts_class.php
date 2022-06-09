@@ -52,7 +52,7 @@ class Post extends SystemBase {
 		'pst_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $required_fields = array();
+	public static $required_fields = array('pst_usr_user_id');
 
 	public static $field_constraints = array();	
 	
