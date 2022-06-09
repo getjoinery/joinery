@@ -17,6 +17,9 @@ class AdminMenu extends SystemBase {
 	public static $prefix = 'amu';
 	public static $tablename = 'amu_admin_menus';
 	public static $pkey_column = 'amu_admin_menu_id';
+	public static $permanent_delete_actions = array(
+		 
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
 		'amu_admin_menu_id' => 'ID of the admin_menu',
@@ -42,7 +45,7 @@ class AdminMenu extends SystemBase {
 
 
 	public static $required_fields = array(
-		'amu_menudisplay');
+		'amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission');
 
 	public static $field_constraints = array();	
 	

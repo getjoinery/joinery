@@ -63,7 +63,7 @@ class QueuedEmail extends SystemBase {
 		'equ_ers_recurring_email_log_id' => array('type'=>'int4'),
 	);
 
-	public static $required_fields = array();
+	public static $required_fields = array('equ_from_name', 'equ_from', 'equ_to', 'equ_to_name', 'equ_body', 'equ_subject');
 
 	public static $field_constraints = array();	
 	

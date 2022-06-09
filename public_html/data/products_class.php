@@ -651,7 +651,7 @@ class Product extends SystemBase {
 		'pro_link' => array('type'=>'varchar(255)'),
 	);
 			 
-	public static $required_fields = array('pro_link');
+	public static $required_fields = array('pro_link', 'pro_price', 'pro_name');
 
 	public static $field_constraints = array();	
 	

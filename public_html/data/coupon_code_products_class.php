@@ -34,7 +34,7 @@ class CouponCodeProduct extends SystemBase {
 		'ccp_pro_product_id' =>  array('type'=>'int4'),
 	);
 
-	public static $required_fields = array(
+	public static $required_fields = array('ccp_ccd_coupon_code_id'
 		);
 
 	public static $field_constraints = array();	

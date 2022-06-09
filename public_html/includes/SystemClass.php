@@ -471,11 +471,13 @@ abstract class SystemBase {
 		}
 		
 		//ABORT IF NO permanent_delete_actions SPECIFIED
-		if(!isset(static::$permanent_delete_actions) OR empty(static::$permanent_delete_actions)){
-			throw new SystemClassException('No permanent_delete_actions specified for  '.static::$tablename);
-			return false;
+
+		if(count($found_foreign_keys) > 1){
+			if(!isset(static::$permanent_delete_actions) OR empty(static::$permanent_delete_actions)){
+				throw new SystemClassException('No permanent_delete_actions specified for  '.static::$tablename);
+				return false;
+			}
 		}
-		
 
 		//CHECK FOR 'PREVENT' CONSTRAINT FIRST AND IF FOUND, THEN ABORT THE PERMANENT DELETE WITH AN ERROR
 		foreach($found_foreign_keys as $column=>$table_name){
@@ -790,7 +792,73 @@ abstract class SystemBase {
 		return $json;
 	}
 	
-	static function test() {}
+	//TESTS FOR THIS CLASS
+	static function test($debug=false){
+		$dbhelper = DbConnector::get_instance();
+		$dbhelper->set_test_mode();
+		$dblink = $dbhelper->get_db_link();		
+		
+		//NEW
+		$current_class = get_called_class();
+		echo '<b>TESTING CLASS: '. $current_class . "</b><br>\n";
+		$object = new $current_class(NULL);
+	
+		foreach(static::$required_fields as $field) {
+			
+			//print_r(static::$field_specifications);
+			if($debug){
+				echo "<br>\n<b>" . $field . '</b>';
+			}
+			$field_type = static::$field_specifications[$field][type];
+			if($debug){
+				print_r(' -' .$field_type. '- ');
+			}
+			$field_length = LibraryFunctions::extract_length_from_spec($field_type);
+			if($debug){
+				print_r(' -' .$field_length. '- ');
+			}
+			if(str_contains($field_type, 'int')){
+				$object->set($field, random_int(1, 32000));
+			}
+			else if(str_contains($field_type, 'numeric')){
+				$object->set($field, random_int(1, 32000));
+			} 
+			else if(str_contains($field_type, 'bool')){
+				$object->set($field, false);
+			} 
+			else if(str_contains($field_type, 'timestamp')){
+				$object->set($field, 'now()');
+			} 
+			else if(str_contains($field_type, 'text')){
+				$object->set($field, 'test text');
+			} 
+			else{
+				$object->set($field, LibraryFunctions::random_string($field_length));
+			}
+		}
+		$object->save();
+		$object->load();
+			
+		
+		if(!$current_class::check_if_exists($object->key)){
+			$dbhelper->close_test_mode(); 
+			return false;
+		}
+		
+		$object->permanent_delete();
+		
+		
+		
+		if($current_class::check_if_exists($object->key)){
+			$dbhelper->close_test_mode(); 
+			return false;
+		}
+		
+		$dbhelper->close_test_mode(); 
+
+		return true;
+			
+	}	
 
 }
 

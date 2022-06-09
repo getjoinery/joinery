@@ -44,7 +44,7 @@ class ActivationCode extends SystemBase {
 	);
 
 
-	public static $required_fields = array();
+	public static $required_fields = array('act_code');
 	
 	public static $field_constraints = array();
 	

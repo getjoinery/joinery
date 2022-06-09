@@ -45,7 +45,7 @@ class ProductVersion extends SystemBase {
 	);
 	
 	
-	public static $required_fields = array();
+	public static $required_fields = array('prv_pro_product_id', 'prv_version_name', 'prv_version_price', 'prv_status');
 	
 	public static $field_constraints = array();
 	

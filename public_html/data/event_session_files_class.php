@@ -31,7 +31,7 @@ class EventSessionFile extends SystemBase {
 		'esf_fil_file_id' => array('type'=>'int4'),
 	);
 			
-	public static $required_fields = array();
+	public static $required_fields = array('esf_evs_event_session_id', 'esf_fil_file_id');
 	
 	public static $field_constraints = array();
 	

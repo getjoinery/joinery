@@ -3,6 +3,54 @@ require_once('SystemClass.php');
 
 class LibraryFunctions {
 
+
+
+	//TRANSLATES INTERNAL POSTGRES TYPES TO USER TYPES
+	static function translate_data_types($data_type){
+		if($data_type == 'smallint'){
+			return 'int';
+		}
+		else if($data_type == 'integer'){
+			return 'int';
+		}
+		else if($data_type == 'bigint'){
+			return 'int';
+		}		
+		else if($data_type == 'character varying'){
+			return 'varchar';
+		}		
+		else if($data_type == 'boolean'){
+			return 'bool';
+		}		
+		else if($data_type == 'timestamp without time zone'){
+			return 'timestamp';
+		}
+		else if($data_type == 'text'){
+			return 'text';
+		}		
+		else if($data_type == 'numeric'){
+			return 'numeric';
+		}	
+		else if($data_type == 'date'){
+			return 'date';
+		}
+		else if($data_type == 'character'){
+			return 'character';
+		}
+		else{
+			echo 'ERROR: Unrecognized data type '.$data_type;
+		}					
+	}
+	
+	//EXTRACTS THE LENGTH FROM POSTGRES TYPES
+	static function extract_length_from_spec($data_type){
+	
+		preg_match_all('!\d+!', $data_type, $matches);
+		return $matches[0][0];
+	
+	}
+
+
 	/**
 	 * splits single name string into salutation, first, last, suffix
 	 * 
