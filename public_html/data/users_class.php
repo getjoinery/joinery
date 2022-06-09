@@ -283,35 +283,6 @@ class User extends SystemBase {
 	}
 
 
-	function lock_for_user($editor_id, $type) {
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		//CLEAR ANY LOCKS
-		$sql = "UPDATE usr_users SET $type=NULL WHERE $type=:editor";
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':editor', $editor_id, PDO::PARAM_INT);
-			$success = $q->execute();
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		//SET THE LOCK
-		$sql = "UPDATE usr_users SET $type=:editor WHERE usr_user_id=:usr_user_id";
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':editor', $editor_id, PDO::PARAM_INT);
-			$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
-			$success = $q->execute();
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
 
 	public function export_as_array() {
 		$user_data = parent::export_as_array();
