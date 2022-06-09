@@ -75,13 +75,6 @@ class User extends SystemBase {
 	// This needs to be updated if you add any new email types
 	const EMAIL_ALL_PREFERENCES = 15;
 
-	// Flags for usr_signup_source
-	const SIGNUP_TYPE_NON_SEARCH_WEB = 2;
-	const SIGNUP_TYPE_SEND_TO_FRIEND = 3;
-	const SIGNUP_TYPE_NO_ENTRY = 4;
-	const SIGNUP_TYPE_SEND_TO_FRIEND_DIFFERENT_EMAIL = 6;
-	const SIGNUP_TYPE_DIRECT_TRAFFIC = 9;
-
 	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;
