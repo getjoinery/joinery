@@ -288,12 +288,12 @@
 
 				<?php	
 				if($page_vars[pager]->is_valid_page('-1')){
-					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$pager->get_url('-1', '').'">Previous</a>';
+					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars[pager]->get_url('-1', '').'">Previous</a>';
 				}
 				?>
 				<?php	
 				if($page_vars[pager]->is_valid_page('+1')){
-					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$pager->get_url('+1', '').'">Next</a>';
+					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars[pager]->get_url('+1', '').'">Next</a>';
 				}
 				?>
 				
