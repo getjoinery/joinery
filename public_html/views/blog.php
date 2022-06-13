@@ -276,11 +276,11 @@
 			  <div class="hidden sm:block">
 				<p class="text-sm text-gray-700">
 				  Showing
-				  <span class="font-medium">1</span>
+				  <span class="font-medium"><?php echo $page_vars[pager]->current_record_start(); ?></span>
 				  to
-				  <span class="font-medium">10</span>
+				  <span class="font-medium"><?php echo $page_vars[pager]->current_record_end(); ?></span>
 				  of
-				  <span class="font-medium">20</span>
+				  <span class="font-medium"><?php echo $page_vars[pager]->num_records(); ?></span>
 				  results
 				</p>
 			  </div>
