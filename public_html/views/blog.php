@@ -5,15 +5,16 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('blog_logic.php'));
  	
+	$page_vars = blog_logic();
 
 	$page = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
-		'title' => 'Blog'
+		'title' => $page_vars[title]
 	);
 	$page->public_header($hoptions); 
 	
-	echo PublicPageTW::BeginPage($title);		
+	echo PublicPageTW::BeginPage($page_vars[title]);		
 ?>
 
 
@@ -29,7 +30,7 @@
             
 			
 		<?php
-		foreach ($posts as $post){  
+		foreach ($page_vars[posts] as $post){  
 			$author = new User($post->get('pst_usr_user_id'), TRUE);
 			$post_tags = $post->get_tags();
 			?>							
@@ -185,7 +186,7 @@
                 <h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Tags</h2>
                 <div class="flow-root mt-6">
 					<?php
-					foreach ($tags as $tag){
+					foreach ($page_vars[tags] as $tag){
 						echo '<a href="/blog/tag/'.urlencode($tag).'" class="inline-block p-1">
 						<span class="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">'.$tag.'</span>
 						</a>';			
@@ -269,7 +270,7 @@
         </div>
 		
 		<?php
-		if($pager->is_valid_page('-1') || $pager->is_valid_page('+1')){
+		if($page_vars[pager]->is_valid_page('-1') || $page_vars[pager]->is_valid_page('+1')){
 		?>
 			<nav class="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 sm:px-6 lg:col-span-2 rounded-lg" aria-label="Pagination">
 			  <div class="hidden sm:block">
@@ -286,12 +287,12 @@
 			  <div class="flex-1 flex justify-between sm:justify-end">
 
 				<?php	
-				if($pager->is_valid_page('-1')){
+				if($page_vars[pager]->is_valid_page('-1')){
 					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$pager->get_url('-1', '').'">Previous</a>';
 				}
 				?>
 				<?php	
-				if($pager->is_valid_page('+1')){
+				if($page_vars[pager]->is_valid_page('+1')){
 					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$pager->get_url('+1', '').'">Next</a>';
 				}
 				?>
