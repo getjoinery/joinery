@@ -137,11 +137,11 @@ class Pager{
 	}
 	
 	function current_record_start(){
-		return $this->currentpage * $this->numperpage;
+		return ($this->currentpage - 1) * $this->numperpage + 1;
 	}
 	
 	function current_record_end(){
-		return ($this->currentpage * $this->numperpage) + ($this->numperpage - 1);
+		return (($this->currentpage - 1) * $this->numperpage) + $this->numperpage;
 	}
 	
 	function get_url($page_string=NULL, $new_page=NULL){
