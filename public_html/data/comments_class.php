@@ -82,6 +82,8 @@ class Comment extends SystemBase {
 	}
 	
 
+	
+
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
 		if ($this->get('cmt_usr_user_id') != $current_user) {
@@ -138,6 +140,9 @@ class Comment extends SystemBase {
 		$safe_comment = strip_tags(iconv(mb_detect_encoding($data['cmt'], mb_detect_order(), true), "UTF-8", $data['cmt']));
 		$safe_name = strip_tags(iconv(mb_detect_encoding($data['name'], mb_detect_order(), true), "UTF-8", $data['name']));
 		
+		if(isset($data['cmt_comment_id_parent'])){
+			$comment->set('cmt_comment_id_parent', $data['cmt_comment_id_parent']);
+		}
 		$comment->set('cmt_pst_post_id', $post_id);
 		$comment->set('cmt_author_name', $safe_name);
 		$comment->set('cmt_body', $safe_comment);
@@ -180,7 +185,20 @@ class MultiComment extends SystemMultiBase {
 			$bind_params[] = array($this->options['post_id'], PDO::PARAM_INT);
 		}		
 				
-		
+		if (array_key_exists('parent_id', $this->options)) {
+			$where_clauses[] = 'cmt_comment_id_parent = ?';
+			$bind_params[] = array($this->options['parent_id'], PDO::PARAM_INT);		
+		}	
+	
+		if (array_key_exists('has_parent_id', $this->options)) {
+			if($this->options['has_parent_id']){
+				$where_clauses[] = 'cmt_comment_id_parent IS NOT NULL';
+			}
+			else{
+				$where_clauses[] = 'cmt_comment_id_parent IS NULL';
+			}
+		}		
+	
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
 		} else {
@@ -226,7 +244,7 @@ class MultiComment extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
-		$q = $this->_get_results();
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Comment($row->cmt_comment_id);
 			$child->load_from_data($row, array_keys(Comment::$fields));
@@ -235,7 +253,7 @@ class MultiComment extends SystemMultiBase {
 	}
 
 	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count;
 	}
