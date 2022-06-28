@@ -53,6 +53,8 @@
 
 	$page->begin_box($options);
 
+	echo '<strong>Title: </strong> '.$post->get('pst_title').'<br />';
+	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($post->get('pst_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 	if($post->get('pst_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($post->get('pst_delete_time'), 'UTC', $session->get_timezone()).'<br />';
 	}
@@ -63,12 +65,12 @@
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
 	
-	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$settings->get_setting('webDir_SSL').'/'.$post->get_url().'</a><br />';	
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($post->get('pst_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$settings->get_setting('webDir_SSL').$post->get_url().'</a><br />';	
+
 	echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description').'</p><br />';
 	
-	echo '<h2> '.$post->get('pst_title').'</h2>';
-	echo '<iframe src="/ajax/blog_post_preview_ajax?pst_post_id='.$post->key.'" width="100%" height="500" style="border:1px solid black;"></iframe>';
+
+	echo '<iframe src="'.$post->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
 
 	$page->end_box();		
 	

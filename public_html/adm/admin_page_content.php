@@ -50,7 +50,9 @@
 	}
 
 	$page->begin_box($options);
-
+	echo '<strong>Title:</strong> '.$page_content->get('pac_title').'<br />';
+	echo '<strong>Label:</strong> '.$page_content->get('pac_location_name').'<br />';	
+	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($page_content->get('pac_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 	if($page_content->get('pac_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($page_content->get('pac_delete_time'), 'UTC', $session->get_timezone()).'<br />';
 	}
@@ -61,18 +63,12 @@
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
 	
-	echo '<strong>Label:</strong> '.$page_content->get('pac_location_name').'<br />';	
 
-	echo '<strong>Link:</strong> <a href="page/'.$page_content->get('pac_link').'">'.$settings->get_setting('webDir_SSL').'/page/'.$page_content->get('pac_link').'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$page_content->get_url().'">'.$settings->get_setting('webDir_SSL'). $page_content->get_url().'</a><br />';	
 
-	//echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';	
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($page_content->get('pac_create_time'), 'UTC', $session->get_timezone()) .'<br />';
-	
-	echo '<h2> '.$page_content->get('pac_title').'</h2>';
-	
-	
-	echo '<iframe src="/ajax/page_content_preview_ajax?pac_page_content_id='.$page_content->key.'" width="100%" height="500" style="border:1px solid black;"></iframe>';
-	//echo '<strong>Content:</strong><br /> '.$page_content->get('pac_body').'<br />';	
+
+	echo '<iframe src="'.$page_content->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
+
 
 	$page->end_box();		
 	
