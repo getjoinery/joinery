@@ -546,7 +546,7 @@ class MultiEventSessions extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
-		$q = $this->_get_results();
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new EventSession($row->evs_event_session_id);
 			$child->load_from_data($row, array_keys(EventSession::$fields));
@@ -555,7 +555,7 @@ class MultiEventSessions extends SystemMultiBase {
 	}
 
 	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count_all;
 	}

@@ -320,7 +320,7 @@ function _get_results($only_count=FALSE, $debug = false) {
 	}
 
 	function load($debug = false) {
-		$q = $this->_get_results();
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Video($row->vid_video_id);
 			$child->load_from_data($row, array_keys(Video::$fields));
@@ -329,7 +329,7 @@ function _get_results($only_count=FALSE, $debug = false) {
 	}
 
 	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count;
 	}

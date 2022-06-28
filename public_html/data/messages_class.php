@@ -149,7 +149,7 @@ class MultiMessage extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
-		$q = $this->_get_results();
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Message($row->msg_message_id);
 			$child->load_from_data($row, array_keys(Message::$fields));
@@ -158,7 +158,7 @@ class MultiMessage extends SystemMultiBase {
 	}
 
 	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count;
 	}
