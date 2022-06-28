@@ -182,7 +182,7 @@ class MultiEmailTemplateStore extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
-		$q = $this->_get_results();
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new EmailTemplateStore($row->emt_email_template_id);
 			$child->load_from_data($row, array_keys(EmailTemplateStore::$fields));
@@ -191,7 +191,7 @@ class MultiEmailTemplateStore extends SystemMultiBase {
 	}
 
 	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count;
 	}

@@ -225,7 +225,7 @@ class MultiQueuedEmail extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
-		$q = $this->_get_results();
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new QueuedEmail($row->equ_queued_email_id);
 			$child->load_from_data($row, array_keys(QueuedEmail::$fields));
@@ -234,7 +234,7 @@ class MultiQueuedEmail extends SystemMultiBase {
 	}
 
 	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
+		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
 		return $counter->count_all;
 	}
