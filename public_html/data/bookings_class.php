@@ -168,6 +168,7 @@ class MultiBooking extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Booking($row->bkn_booking_id);
@@ -176,11 +177,6 @@ class MultiBooking extends SystemMultiBase {
 		}
 	}
 
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count;
-	}
 }
 
 

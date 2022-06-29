@@ -905,11 +905,6 @@ class MultiAddress extends SystemMultiBase {
 		}
 	}
 
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$row = $q->fetch();
-		return $row->total_count;
-	}
 
 	public static function AddressDropdown($user_id, $get_raw_options=FALSE) {
 		$address_book = new MultiAddress(array('user_id' => $user_id, 'deleted' => FALSE, 'bad' => FALSE));

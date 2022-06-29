@@ -362,6 +362,7 @@ class MultiQuestion extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Question($row->qst_question_id);
@@ -370,11 +371,6 @@ class MultiQuestion extends SystemMultiBase {
 		}
 	}
 
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count;
-	}
 }
 
 

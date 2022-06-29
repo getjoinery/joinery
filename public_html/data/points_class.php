@@ -179,6 +179,7 @@ class MultiPoint extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Point($row->pnt_point_id);
@@ -187,11 +188,6 @@ class MultiPoint extends SystemMultiBase {
 		}
 	}
 
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count;
-	}
 }
 
 

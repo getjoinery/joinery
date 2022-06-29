@@ -210,6 +210,7 @@ class MultiCouponCode extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new CouponCode($row->ccd_coupon_code_id);
@@ -218,11 +219,6 @@ class MultiCouponCode extends SystemMultiBase {
 		}
 	}
 
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count;
-	}
 }
 
 

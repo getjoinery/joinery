@@ -254,7 +254,7 @@ class MultiOrderItem extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
-		//parent::load();
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new OrderItem($row->odi_order_item_id);
@@ -263,11 +263,6 @@ class MultiOrderItem extends SystemMultiBase {
 		}
 	}
 
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count_all;
-	}
 }
 
 ?>

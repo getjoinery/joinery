@@ -192,6 +192,7 @@ class MultiSurveyAnswer extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new SurveyAnswer($row->sva_survey_answer_id);
@@ -200,11 +201,6 @@ class MultiSurveyAnswer extends SystemMultiBase {
 		}
 	}
 
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count;
-	}
 }
 
 

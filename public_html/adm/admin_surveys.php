@@ -17,13 +17,14 @@
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'survey_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
+	$search_criteria = array();
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
 
 
 	$surveys = new MultiSurvey(
-		NULL,  //SEARCH CRITERIA
+		$search_criteria,  //SEARCH CRITERIA
 		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 		$numperpage,  //NUM PER PAGE
 		$offset,  //OFFSET

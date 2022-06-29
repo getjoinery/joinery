@@ -80,7 +80,7 @@ class MultiPublicMenu extends SystemMultiBase {
 	static function get_sorted_array(){
 
 		$menus = new MultiPublicMenu(
-			NULL,  //SEARCH CRITERIA
+			array(),  //SEARCH CRITERIA
 			array('order'=>'ASC'),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 			100,  //NUM PER PAGE
 			0,  //OFFSET
@@ -189,18 +189,13 @@ class MultiPublicMenu extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new PublicMenu($row->pmu_public_menu_id);
 			$child->load_from_data($row, array_keys(PublicMenu::$fields));
 			$this->add($child);
 		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count;
 	}
 }
 

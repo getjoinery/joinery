@@ -564,7 +564,7 @@ class Multievent extends SystemMultiBase {
 
 	}
 
-	private function _get_results($only_count=FALSE, $debug = false) { 
+	protected function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -694,18 +694,13 @@ class Multievent extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Event($row->evt_event_id);
 			$child->load_from_data($row, array_keys(Event::$fields));
 			$this->add($child);
 		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count;
 	}
 
 }

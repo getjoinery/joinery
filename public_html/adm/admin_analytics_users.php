@@ -1,7 +1,7 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-require('../data/admin_analytics_users_data.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/admin_analytics_users_data.php');
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);

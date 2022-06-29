@@ -4,8 +4,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-
-require_once('../data/admin_analytics_activitybydate_data.php');
+	
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/admin_analytics_activitybydate_data.php');
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
