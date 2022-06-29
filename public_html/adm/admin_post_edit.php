@@ -105,6 +105,10 @@
 		
 		$post_tags = $post->get_tags();
 		$tags = implode(', ', $post_tags);
+		$pst_is_on_homepage = $post->get('pst_is_on_homepage');
+	}
+	else{
+		$pst_is_on_homepage = 1;
 	}
 	
 	echo $formwriter->textinput('Post title', 'pst_title', NULL, 100, $title, '', 255, '');	
@@ -122,7 +126,7 @@
 	echo $formwriter->dropinput("Published", "pst_is_published", "ctrlHolder", $optionvals, $post->get('pst_is_published'), '', FALSE);
 	
 	$optionvals = array("Yes"=>1, "No"=>0);
-	echo $formwriter->dropinput("Is listed and searchable?", "pst_is_on_homepage", "ctrlHolder", $optionvals, $post->get('pst_is_on_homepage'), '', FALSE);
+	echo $formwriter->dropinput("Is listed and searchable?", "pst_is_on_homepage", "ctrlHolder", $optionvals, $pst_is_on_homepage, '', FALSE);
 
 	echo $formwriter->textbox('Post content', 'pst_body', 'ctrlHolder', 5, 80, $content, '', 'yes');
 
