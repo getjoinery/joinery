@@ -102,18 +102,13 @@ class MultiEventType extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new EventType($row->ety_event_type_id);
 			$child->load_from_data($row, array_keys(EventType::$fields));
 			$this->add($child);
 		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count_all;
 	}
 }
 

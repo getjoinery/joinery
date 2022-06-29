@@ -17,7 +17,7 @@
 	$sort = LibraryFunctions::fetch_variable('sort', 'product_detail_id', 0, '');	
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	
-	$search_criteria = NULL;
+	$search_criteria = array();
 
 
 	$details = new MultiProductDetail(
@@ -29,7 +29,16 @@
 	$details->load();
 	
 	$page = new AdminPage();
-	$page->admin_header(4);
+	$page->admin_header(	
+		array(
+		'menu-id'=> 4,
+		'page_title' => 'Shadow Sessions',
+		'readable_title' => 'Shadow Sessions',
+		'breadcrumbs' => array(
+			'Products'=>''
+		),
+		'session' => $session,
+	));
 
 	echo '<h1>Shadow Sessions Orders</h1>';
 
@@ -69,6 +78,9 @@
 		//array_push($rowvalues, $status_to_html[$min_status ?: 1]);
 		$page->disprow($rowvalues);
 	}
-	$page->endtable($pager);		
+	$page->endtable($pager);
+
+
+	$page->admin_footer();	
 
 ?>

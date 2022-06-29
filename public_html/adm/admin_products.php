@@ -29,6 +29,7 @@
 		$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 		$sort = LibraryFunctions::fetch_variable('sort', 'product_id', 0, '');
 		$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
+		$search_criteria = array();
 
 		$products = new MultiProduct(
 			$search_criteria,

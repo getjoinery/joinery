@@ -756,7 +756,7 @@ class MultiUser extends SystemMultiBase {
 
 	}
 	
-	private function _get_results($only_count=FALSE, $debug = false) { 
+	protected function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -897,6 +897,7 @@ class MultiUser extends SystemMultiBase {
 	}
 
 	function load($debug = false) {
+		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new User($row->usr_user_id);
@@ -904,12 +905,6 @@ class MultiUser extends SystemMultiBase {
 			$this->add($child);
 		}
 	}
-
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE, $debug);
-		$counter = $q->fetch();
-		return $counter->count;
-	}	
 }
 
 ?>
