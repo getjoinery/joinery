@@ -19,9 +19,16 @@
 		require_once(LibraryFunctions::display_404_page());	
 	}
 	
-	if(!$page_content->get('pac_is_published')){
-		require_once(LibraryFunctions::display_404_page());	
+	if ($session->get_user_id() && $session->get_permission() > 0) {
+		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
+	else {
+		if(!$page_content->get('pac_is_published') || $page_content->get('pac_delete_time')){
+			require_once(LibraryFunctions::display_404_page());	
+		}
+	}	
+	
+	
 	
 	if(!$page_content->get('pac_link') && $page_content->get('pac_script_filename')){
 		//THIS IS A STANDALONE FILE
