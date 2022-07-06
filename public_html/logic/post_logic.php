@@ -4,6 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/comments_class.php');
 
+	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
 	if(!$settings->get_setting('blog_active')){
 		//TURNED OFF
@@ -12,9 +13,13 @@
 		exit();			
 	}
 
-
-	if(!$post || !$post->get('pst_is_published') || $post->get('pst_delete_time')){
-		require_once(LibraryFunctions::display_404_page());		
+	if ($session->get_user_id() && $session->get_permission() > 0) {
+		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
+	}
+	else {
+		if(!$post || !$post->get('pst_is_published') || $post->get('pst_delete_time')){
+			require_once(LibraryFunctions::display_404_page());		
+		}
 	}
 	
 	$settings = Globalvars::get_instance();
