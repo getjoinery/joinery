@@ -65,10 +65,11 @@
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
 	
-	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$settings->get_setting('webDir_SSL').$post->get_url().'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$settings->get_setting('webDir_SSL').'/'.$post->get_url().'</a><br />';	
 
-	echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description').'</p><br />';
-	
+	if($post->get('pst_short_description')){
+		echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description').'</p><br />';
+	}
 
 	echo '<iframe src="'.$post->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
 
