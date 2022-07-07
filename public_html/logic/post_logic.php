@@ -13,7 +13,7 @@
 		exit();			
 	}
 
-	if ($session->get_user_id() && $session->get_permission() > 0) {
+	if ($session->get_user_id() && $session->get_permission() > 4) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
