@@ -1043,7 +1043,7 @@ class MultiProduct extends SystemMultiBase {
 	}
 
 
-	protected function _get_results($only_count=FALSE, $debug = false) {
+	function _get_results($only_count=FALSE, $debug = false) {
 		$where_clauses = array();
 		$bind_params = array();
 

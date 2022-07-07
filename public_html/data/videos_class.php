@@ -256,7 +256,7 @@ class MultiVideo extends SystemMultiBase {
 
 	}
 
-function _get_results($only_count=FALSE, $debug = false) { 
+	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
 
@@ -318,6 +318,8 @@ function _get_results($only_count=FALSE, $debug = false) {
 
 		return $q;
 	}
+	
+
 
 	function load($debug = false) {
 		parent::load();
