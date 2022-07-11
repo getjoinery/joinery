@@ -11,12 +11,18 @@
 
 	require_once($siteDir.'/includes/SessionControl.php');
 	require_once($siteDir.'/includes/LibraryFunctions.php');
+
  
 	echo 'All classes loaded<br>';
+	
+	$verbose = false;
+	if($_GET['verbose']){
+		$verbose = true;
+	}
 
 
 	foreach($classes as $class){
-		if($class::test(true)){
+		if($class::test($verbose)){
 			echo $class .' success'. "<br>\n";
 		}
 		else{
