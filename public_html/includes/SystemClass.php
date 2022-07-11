@@ -815,7 +815,7 @@ abstract class SystemBase {
 			}
 			$field_length = LibraryFunctions::extract_length_from_spec($field_type);
 			if($debug){
-				print_r(' -' .$field_length. '- ');
+				print_r(' - Length: ' .$field_length. '- ');
 			}
 			if(str_contains($field_type, 'int')){
 				$object->set($field, random_int(1, 32000));
@@ -838,18 +838,27 @@ abstract class SystemBase {
 		}
 		$object->save();
 		$object->load();
+		
+		if($debug){
+			print_r($object);
+		}
 			
 		
 		if(!$current_class::check_if_exists($object->key)){
+			echo 'ERROR:  '.$object->key.' does not exist, and it should.'. "\n<br>";
 			$dbhelper->close_test_mode(); 
 			return false;
 		}
-		
+
+		if($debug){
+			print_r('Deleting row '. $object->key . "\n<br>");
+		}		
 		$object->permanent_delete();
 		
 		
 		
 		if($current_class::check_if_exists($object->key)){
+			echo 'ERROR:  '.$object->key.' exists, and it should not.'. "\n<br>";
 			$dbhelper->close_test_mode(); 
 			return false;
 		}

@@ -33,7 +33,7 @@ class SurveyAnswer extends SystemBase {
 	
 	public static $field_specifications = array(
 		'sva_survey_answer_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'sva_svy_survey_id' => array('type'=>'int4'),
+		'sva_svy_survey_id' => array('type'=>'int4', 'is_nullable'=>false),
 		'sva_qst_question_id' => array('type'=>'int4'),
 		'sva_usr_user_id' => array('type'=>'int4'),
 		'sva_answer' => array('type'=>'text'),

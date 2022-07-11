@@ -32,7 +32,7 @@ class SurveyQuestion extends SystemBase {
 
 	public static $field_specifications = array(
 		'srq_survey_question_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'srq_svy_survey_id' => array('type'=>'int4'),
+		'srq_svy_survey_id' => array('type'=>'int4', 'is_nullable'=>false),
 		'srq_qst_question_id' => array('type'=>'int4'),
 		'srq_order' => array('type'=>'int4'),
 		'srq_delete_time' => array('type'=>'timestamp(6)'),
