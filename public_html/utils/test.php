@@ -11,9 +11,12 @@
 
 	require_once($siteDir.'/includes/SessionControl.php');
 	require_once($siteDir.'/includes/LibraryFunctions.php');
+ 
+	echo 'All classes loaded<br>';
+
 
 	foreach($classes as $class){
-		if($class::test()){
+		if($class::test(true)){
 			echo $class .' success'. "<br>\n";
 		}
 		else{
