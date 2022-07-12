@@ -179,7 +179,7 @@ class EventRegistrant extends SystemBase {
 		}
 	}	
 	
-	function save() {
+	function save($debug=false) {
 		if(!$this->key){
 			$dbhelper = DbConnector::get_instance();
 			$dblink = $dbhelper->get_db_link();
@@ -200,7 +200,7 @@ class EventRegistrant extends SystemBase {
 				throw new DisplayableEventRegistrantException('You cannot register twice for the same event.');
 			}			
 		}
-		parent::save();
+		parent::save($debug);
 	}	
 
 
