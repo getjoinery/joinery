@@ -107,7 +107,7 @@ class MultiQuestionOption extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM qop_question_options ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM qop_question_options ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM qop_question_options

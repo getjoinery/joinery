@@ -846,7 +846,7 @@ class MultiUser extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM usr_users ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM usr_users ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM usr_users

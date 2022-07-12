@@ -82,7 +82,7 @@ class MultiVisitorEvent extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM vse_visitor_events ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM vse_visitor_events ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM vse_visitor_events

@@ -437,7 +437,7 @@ class MultiFile extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM fil_files ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM fil_files ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM fil_files

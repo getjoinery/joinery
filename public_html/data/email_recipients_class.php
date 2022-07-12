@@ -228,7 +228,7 @@ class MultiEmailRecipient extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM erc_email_recipients ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM erc_email_recipients ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM erc_email_recipients

@@ -140,7 +140,7 @@ class MultiPoint extends SystemMultiBase {
 
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM pnt_points ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM pnt_points ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM pnt_points
 				' . $where_clause . '

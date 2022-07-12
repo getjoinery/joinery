@@ -145,7 +145,7 @@ class MultiEmailTemplateStore extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM emt_email_templates ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM emt_email_templates ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM emt_email_templates
 				' . $where_clause . '

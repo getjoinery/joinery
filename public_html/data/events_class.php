@@ -635,7 +635,7 @@ class Multievent extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM evt_events ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM evt_events ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM evt_events

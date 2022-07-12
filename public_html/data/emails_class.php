@@ -306,7 +306,7 @@ class MultiEmail extends SystemMultiBase {
 		}			
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM eml_emails ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM eml_emails ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM eml_emails
 				' . $where_clause . '

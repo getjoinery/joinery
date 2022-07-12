@@ -68,7 +68,7 @@ class MultiSessionAnalytic extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM sev_session_analytics ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM sev_session_analytics ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM sev_session_analytics

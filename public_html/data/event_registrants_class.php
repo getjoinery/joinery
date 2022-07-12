@@ -254,7 +254,7 @@ class MultiEventRegistrant extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM evr_event_registrants ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM evr_event_registrants ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM evr_event_registrants

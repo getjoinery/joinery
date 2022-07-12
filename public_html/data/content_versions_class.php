@@ -213,7 +213,7 @@ class MultiContentVersion extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM cnv_content_versions ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM cnv_content_versions ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM cnv_content_versions

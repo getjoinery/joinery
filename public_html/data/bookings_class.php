@@ -129,7 +129,7 @@ class MultiBooking extends SystemMultiBase {
 
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM bkn_bookings ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM bkn_bookings ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM bkn_bookings
 				' . $where_clause . '

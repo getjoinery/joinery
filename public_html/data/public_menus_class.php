@@ -148,7 +148,7 @@ class MultiPublicMenu extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM pmu_public_menus ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM pmu_public_menus ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM pmu_public_menus
 				' . $where_clause . '

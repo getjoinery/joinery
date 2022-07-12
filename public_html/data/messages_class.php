@@ -110,7 +110,7 @@ class MultiMessage extends SystemMultiBase {
 
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM msg_messages ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM msg_messages ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM msg_messages
 				' . $where_clause . '

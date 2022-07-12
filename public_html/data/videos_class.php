@@ -282,7 +282,7 @@ class MultiVideo extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM vid_videos ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM vid_videos ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM vid_videos

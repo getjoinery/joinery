@@ -12,12 +12,16 @@
 		echo 'This setting is turned off';
 		exit();			
 	}
+	
 
-	if ($session->get_user_id() && $session->get_permission() > 4) {
+	if(!$post){
+		require_once(LibraryFunctions::display_404_page());	
+	}
+	else if ($post && $session->get_user_id() && $session->get_permission() > 4) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if(!$post || !$post->get('pst_is_published') || $post->get('pst_delete_time')){
+		if(!$post->get('pst_is_published') || $post->get('pst_delete_time')){
 			require_once(LibraryFunctions::display_404_page());		
 		}
 	}

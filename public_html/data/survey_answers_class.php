@@ -150,7 +150,7 @@ class MultiSurveyAnswer extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM sva_survey_answers ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM sva_survey_answers ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM sva_survey_answers
 				' . $where_clause . '

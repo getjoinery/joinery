@@ -324,7 +324,7 @@ class MultiQuestion extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM qst_questions ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM qst_questions ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM qst_questions

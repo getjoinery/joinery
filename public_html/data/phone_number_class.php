@@ -414,7 +414,7 @@ class MultiPhoneNumber extends SystemMultiBase {
 
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM phn_phone_numbers ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM phn_phone_numbers ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM phn_phone_numbers
 				' . $where_clause . '

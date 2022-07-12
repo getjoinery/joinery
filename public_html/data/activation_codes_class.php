@@ -75,7 +75,7 @@ class MultiActivationCode extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM act_activation_codes ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM act_activation_codes ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM act_activation_codes

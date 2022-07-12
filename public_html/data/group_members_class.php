@@ -197,7 +197,7 @@ class MultiGroupMember extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM grm_group_members ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM grm_group_members ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM grm_group_members
 				' . $where_clause . '
