@@ -141,7 +141,7 @@ class File extends SystemBase {
 		
 	}	
 
-	function permanent_delete(){
+	function permanent_delete($debug=false){
 		$settings = Globalvars::get_instance();
 		$upload_dir = $settings->get_setting('upload_dir');
 		
@@ -153,7 +153,7 @@ class File extends SystemBase {
 		
 		$this->delete_resized();
 		
-		parent::permanent_delete();
+		parent::permanent_delete($debug);
 		return true;		
 	}
 	

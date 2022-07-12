@@ -321,7 +321,9 @@ class Address extends SystemBase {
 		}
 		return $str;
 	}
-	public function check_for_duplicate() {
+	public function check_for_duplicate($fields=NULL) {
+		//FIELDS WILL BE UNUSED IN THIS FUNCTION, INCLUDED TO MATCH SYSTEMCLASS DECLARATION
+		
 		// See if there is a duplicate address to this one for this user already!
 		$address_count = new MultiAddress(array(
 			'address1_lower' => $this->get('usa_address1'),

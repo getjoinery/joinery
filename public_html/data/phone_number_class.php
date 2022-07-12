@@ -371,15 +371,11 @@ class MultiPhoneNumber extends SystemMultiBase {
 		return $dropdown_builder;
 	}
 
-	function load($debug = false) {
-		parent::load();
 
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
 
+	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
-
 
 		if (array_key_exists('user_id', $this->options)) {
 			$where_clauses[] = 'phn_usr_user_id = ?';
@@ -407,41 +403,60 @@ class MultiPhoneNumber extends SystemMultiBase {
 		if (array_key_exists('phone_number_like', $this->options)) {
 			$where_clauses[] = 'phn_phone_number LIKE ?';
 			$bind_params[] = array('%'.$this->options['phone_number_like'].'%', PDO::PARAM_STR);
-		}		
+		}	
+	
 		
 		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' AND ', $where_clauses) . ' ';
+			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
 		} else {
 			$where_clause = '';
 		}
 
-		//GET THE DATA
-		$sql = "
-			SELECT * FROM phn_phone_numbers
-			" . $where_clause . "
-			ORDER BY phn_phone_number_id DESC" . $this->generate_limit_and_offset();
 
-		try {
-			$q = $dblink->prepare($sql);
-
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
+		if ($only_count) {
+			$sql = 'SELECT COUNT(1) FROM phn_phone_numbers ' . $where_clause;
+		} else {
+			$sql = 'SELECT * FROM phn_phone_numbers
+				' . $where_clause . '
+				ORDER BY ';
+			
+			if (!$this->order_by) {
+				$sql .= " phn_phone_number_id ASC ";
 			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
+			else {
+				/*
+				if (array_key_exists('phone_number_id', $this->order_by)) {
+					$sql .= ' phn_phone_number_id ' . $this->order_by['phone_number_id'];
+				}	
+				*/				
 			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
+				
+			$sql .= ' '.$this->generate_limit_and_offset();	
+
+		}			
+		
+
+		$q = DbConnector::GetPreparedStatement($sql);
+
+		if($debug){
+			echo $sql. "<br>\n";
+			print_r($this->options);
 		}
 
-		// So now we have everything from this thread.
+		$total_params = count($bind_params);
+		for ($i=0; $i<$total_params; $i++) {
+			list($param, $type) = $bind_params[$i];
+			$q->bindValue($i+1, $param, $type);
+		}
+		$q->execute();
+		$q->setFetchMode(PDO::FETCH_OBJ);
+
+		return $q;
+	}
+
+	function load($debug = false) {
+		parent::load();
+		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new PhoneNumber($row->phn_phone_number_id);
 			$child->load_from_data($row, array_keys(PhoneNumber::$fields));
@@ -449,75 +464,7 @@ class MultiPhoneNumber extends SystemMultiBase {
 		}
 	}
 
-	function count_all($debug = false) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'phn_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('country_code', $this->options)) {
-			$where_clauses[] = 'phn_cco_country_code_id = ?';
-			$bind_params[] = array($this->options['country_code'], PDO::PARAM_INT);
-		}			
-
-		if (array_key_exists('verified', $this->options)) {
-			$where_clauses[] = 'phn_is_verified = ' . ($this->options['verified'] ? 'TRUE' : 'FALSE');
-		}
-
-		if (array_key_exists('private', $this->options)) {
-			$where_clauses[] = 'phn_is_private = ' . ($this->options['private'] ? 'TRUE' : 'FALSE');
-		}			
-		
-		if (array_key_exists('phone_number', $this->options)) {
-			$where_clauses[] = 'phn_phone_number = ?';
-			$bind_params[] = array($this->options['phone_number'], PDO::PARAM_STR);
-		}
-
-		if (array_key_exists('phone_number_like', $this->options)) {
-			$where_clauses[] = 'phn_phone_number LIKE ?';
-			$bind_params[] = array('%'.$this->options['phone_number_like'].'%', PDO::PARAM_STR);
-		}		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' AND ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		//GET THE DATA
-		$sql = "
-			SELECT COUNT(1) as total_count FROM phn_phone_numbers
-			" . $where_clause;
-
-		try {
-			$q = $dblink->prepare($sql);
-
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-	
-		$row = $q->fetch();	
-		return $row->total_count;
-	}
 }
 
 ?>

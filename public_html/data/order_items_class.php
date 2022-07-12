@@ -84,7 +84,7 @@ class OrderItem extends SystemBase {
 		return $order;
 	}
 	
-	function authenticate_write($session) {
+	function authenticate_write($session, $other_data=NULL) {
 		if ($session->get_permission() < 5 && $session->get_user_id() != $this->get('odi_usr_user_id')) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to perform this action.');

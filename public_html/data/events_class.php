@@ -515,14 +515,14 @@ class Event extends SystemBase {
 		}
 	}	
 	
-	function save() {
+	function save($debug=false) {
 		
 		if ($this->key) {
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			ContentVersion::NewVersion(ContentVersion::TYPE_EVENT, $this->key, $this->get('evt_description'), $this->get('evt_name'), $this->get('evt_name'));				
 		}
 		
-		parent::save();
+		parent::save($debug);
 
 	}	
 	

@@ -92,13 +92,13 @@ class EmailTemplateStore extends SystemBase {
 		}
 	}
 
-	function save() {
+	function save($debug=false) {
 		if($this->key){
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			ContentVersion::NewVersion(ContentVersion::TYPE_EMAIL_TEMPLATE, $this->key, $this->get('emt_body'), $this->get('emt_name'), $this->get('emt_name'));
 		}
 		
-		parent::save();
+		parent::save($debug);
 	}
 
 

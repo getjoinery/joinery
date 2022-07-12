@@ -100,13 +100,13 @@ class SurveyAnswer extends SystemBase {
 		}
 	}
 
-	function save() {
+	function save($debug=false) {
 		if(!$this->key){
 			if($this->check_for_duplicates()){
 				return FALSE;
 			}			
 		}
-		parent::save();
+		parent::save($debug);
 	}
 	
 }
