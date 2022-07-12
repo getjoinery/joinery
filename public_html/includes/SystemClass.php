@@ -1037,7 +1037,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	function count_all($debug = false) {
 		$q = $this->_get_results(TRUE, $debug);
 		$counter = $q->fetch();
-		return $counter->count;
+		return $counter->count_all;
 	}
 
 	function count() {
