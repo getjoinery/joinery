@@ -112,7 +112,7 @@ class PageContent extends SystemBase {
 		}
 	}
 
-	function save() {
+	function save($debug=false) {
 		
 		//CHECK FOR DUPLICATES
 		if($this->check_for_duplicate('pac_link')){
@@ -124,7 +124,7 @@ class PageContent extends SystemBase {
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			ContentVersion::NewVersion(ContentVersion::TYPE_PAGE_CONTENT, $this->key, $this->get('pac_body'), $this->get('pac_title'), $this->get('pac_title'));			
 		}
-		parent::save();
+		parent::save($debug);
 	}
 
 	

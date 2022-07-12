@@ -605,7 +605,7 @@ class User extends SystemBase {
 		return TRUE;
 	}
 
-	function authenticate_write($session) {
+	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
 		if ($this->key != $current_user) {
 			if ($session->get_permission() < 5) {
@@ -615,8 +615,8 @@ class User extends SystemBase {
 		}
 	}
 
-	function save() {
-		parent::save();
+	function save($debug=false) {
+		parent::save($debug);
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
@@ -706,8 +706,8 @@ class User extends SystemBase {
 	}
 	
 	//TESTS FOR THIS CLASS
-	static function test(){
-		parent::test();
+	static function test($debug=false){
+		parent::test($debug);
 		$dbhelper = DbConnector::get_instance();
 		$dbhelper->set_test_mode();
 		$dblink = $dbhelper->get_db_link();		

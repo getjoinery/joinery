@@ -150,7 +150,7 @@ abstract class SystemBase {
 	
 	//TAKES A STRING OR AN ARRAY REPRESENTING NAMES OF FIELDS TO CHECK WITH CURRENT OBJECT
 	//WILL RETURN THE NUMBER OF DUPLICATES FOUND, SEPARATING FIELDS WITH 'AND' IN THE SQL
-	public function check_for_duplicate($fields) {
+	public function check_for_duplicate($fields=NULL) {
 		if(!isset($fields) || $fields == '' || $fields == NULL){
 			throw new SystemClassException('You must pass some fields to check for duplicates.');
 		}

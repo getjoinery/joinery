@@ -206,12 +206,12 @@ class Post extends SystemBase {
 		}
 	}
 
-	function save() {
+	function save($debug=false) {
 		if ($this->key) {
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			ContentVersion::NewVersion(ContentVersion::TYPE_POST, $this->key, $this->get('pst_body'), $this->get('pst_title'), $this->get('pst_title'));			
 		}
-		parent::save();
+		parent::save($debug);
 	}
 	
 }

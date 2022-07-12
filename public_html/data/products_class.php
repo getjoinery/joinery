@@ -282,7 +282,7 @@ class AddressRequirement extends ProductRequirement {
 		);
 	}
 
-	function validate_form($data, $session) {
+	function validate_form($data, $session=NULL) {
 		if (empty($data['address'])) {
 			throw new ProductRequirementException('The address section must be filled out.');
 		}
@@ -331,7 +331,7 @@ class GDPRNoticeRequirement extends ProductRequirement {
 		echo '<label></label><input name="gdpr_terms" id="gdpr_terms" value="1" type="checkbox"  /><span onclick="$(\'#gdpr_terms\').attr(\'checked\', !$(\'#gdpr_terms\').attr(\'checked\')); return false;"> I have read and agree to the privacy policy.</span></div>';
 	}
 
-	function validate_form($data, $session) {
+	function validate_form($data, $session=NULL) {
 		if (empty($data['gdpr_terms'])) {
 			throw new ProductRequirementException('You must have read and agreed to the privacy policy in order to continue.');
 		}
@@ -369,7 +369,7 @@ class RecordConsentRequirement extends ProductRequirement {
 		echo '<input name="record_terms" id="record_terms" value="1" type="checkbox"  /><span onclick="$(\'#record_terms\').attr(\'checked\', !$(\'#record_terms\').attr(\'checked\')); return false;"> I am aware that the course/event may be recorded and consent to being recorded. </span></div>';
 	}
 
-	function validate_form($data, $session) {
+	function validate_form($data, $session=NULL) {
 		if (empty($data['record_terms'])) {
 			throw new ProductRequirementException('You must have read and agreed to the recording notice in order to continue.');
 		}
@@ -518,7 +518,7 @@ class NewsletterSignupRequirement extends ProductRequirement {
 
 	}
 
-	function validate_form($data, $session) {
+	function validate_form($data, $session=NULL) {
 		/*
 		if (empty($data['newsletter'])) {
 			throw new ProductRequirementException('You must have read and agreed to the recording notice in order to continue.');
