@@ -188,7 +188,7 @@ class MultiProductVersion extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM prv_product_versions ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM prv_product_versions ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM prv_product_versions

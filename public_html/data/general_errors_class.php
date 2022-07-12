@@ -111,7 +111,7 @@ class MultiGeneralError extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM err_general_errors ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM err_general_errors ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM err_general_errors

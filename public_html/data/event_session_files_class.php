@@ -62,7 +62,7 @@ class MultiEventSessionFile extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM esf_event_session_files ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM esf_event_session_files ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM esf_event_session_files

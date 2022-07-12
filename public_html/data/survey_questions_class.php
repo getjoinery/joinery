@@ -135,7 +135,7 @@ class MultiSurveyQuestion extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM srq_survey_questions ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM srq_survey_questions ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM srq_survey_questions
 				' . $where_clause . '

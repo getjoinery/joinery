@@ -91,7 +91,7 @@ class MultiUrl extends SystemMultiBase {
 
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM url_urls ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM url_urls ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM url_urls
 				' . $where_clause . '

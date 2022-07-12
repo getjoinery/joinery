@@ -70,7 +70,7 @@ class MultiDebugEmailLog extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM del_debug_email_logs ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM del_debug_email_logs ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM del_debug_email_logs

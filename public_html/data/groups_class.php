@@ -291,7 +291,7 @@ class MultiGroup extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM grp_groups ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM grp_groups ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM grp_groups
 				' . $where_clause . '

@@ -133,7 +133,7 @@ class MultiSetting extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM stg_settings ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM stg_settings ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM stg_settings
 				' . $where_clause . '

@@ -172,7 +172,7 @@ class MultiCouponCode extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM ccd_coupon_codes ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM ccd_coupon_codes ' . $where_clause;
 		} 
 		else {
 			$sql = 'SELECT * FROM ccd_coupon_codes

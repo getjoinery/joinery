@@ -863,7 +863,7 @@ class MultiAddress extends SystemMultiBase {
 		$dblink = $dbhelper->get_db_link();
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as total_count FROM usa_users_addrs ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM usa_users_addrs ' . $where_clause;
 		} else {
 			$sql = "
 				SELECT *

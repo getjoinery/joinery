@@ -185,7 +185,7 @@ class MultiAdminMenu extends SystemMultiBase {
 		}
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) FROM amu_admin_menus ' . $where_clause;
+			$sql = 'SELECT COUNT(1) as count_all FROM amu_admin_menus ' . $where_clause;
 		} else {
 			$sql = 'SELECT * FROM amu_admin_menus
 				' . $where_clause . '
