@@ -236,6 +236,10 @@ class MultiOrder extends SystemMultiBase {
 				if (array_key_exists('ord_order_id', $this->order_by)) {
 					$sort_clauses[] = 'ord_order_id ' . $this->order_by['ord_order_id'];
 				}
+				
+				if (array_key_exists('timestamp', $this->order_by)) {
+					$sort_clauses[] = 'ord_timestamp ' . $this->order_by['timestamp'];
+				}
 				$sql .= implode(',', $sort_clauses);
 			}
 			$sql .= $this->generate_limit_and_offset();

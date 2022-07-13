@@ -17,7 +17,7 @@
 
 	$numperpage = 60;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'ord_order_id', 0, '');	
+	$sort = LibraryFunctions::fetch_variable('sort', 'timestamp', 0, '');	
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	
 	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
