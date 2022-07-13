@@ -59,7 +59,7 @@ class AdminPage{
 
 		$session = $pagevars['session'];		
 		
-		if($session->get_user_id()){
+		if($session && $session->get_user_id()){
 			$user = new User($session->get_user_id(), TRUE);
 			$user_name = $user->display_name();
 		}
