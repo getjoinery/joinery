@@ -259,7 +259,7 @@ class AdminPage{
 				    	<ul class="uk-nav uk-dropdown-nav uk-text-left">
 
 						<?php
-						if($session->get_permission() >= 9) {
+						if($session && $session->get_permission() >= 9) {
 							if ($session->get_user_id() !== $session->get_initial_user_id()) {
 								echo '<div id="adminMenu" style="background: #FF7777;">';
 							} else {
@@ -422,7 +422,7 @@ class AdminPage{
 		$CDN = $settings->get_setting('CDN');
 		
 		$session = SessionControl::get_instance();
-		if($session->get_user_id()){
+		if($session && $session->get_user_id()){
 			$user = new User($session->get_user_id(), TRUE);
 			$user_name = $user->display_name();
 		}
