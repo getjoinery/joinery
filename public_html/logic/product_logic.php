@@ -12,10 +12,11 @@ $settings = Globalvars::get_instance();
 if($_POST['product_id']){
 	$product_id = (int)$_POST['product_id'];
 }
-else{
+
+if(!$product_id){
 	header("HTTP/1.0 404 Not Found");
 	echo 'Product does not exist.';
-	exit();
+	exit();	
 }
 
 if(!$settings->get_setting('products_active')){
