@@ -10,12 +10,12 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 
 $settings = Globalvars::get_instance();
 if($_POST['product_id']){
-	$product_id = $_POST['product_id'];
-	if(!is_int($product_id)){
-		header("HTTP/1.0 404 Not Found");
-		echo 'Product does not exist.';
-		exit();
-	}
+	$product_id = (int)$_POST['product_id'];
+}
+else{
+	header("HTTP/1.0 404 Not Found");
+	echo 'Product does not exist.';
+	exit();
 }
 
 if(!$settings->get_setting('products_active')){
