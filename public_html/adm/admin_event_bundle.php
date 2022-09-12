@@ -78,7 +78,7 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($group_members as $group_member){
-		$event = new Event($group_member->get('grm_evt_event_id'), TRUE);
+		$event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
 
 		$rowvalues = array();
 		array_push($rowvalues, $event->get('evt_name'));

@@ -193,13 +193,13 @@ class User extends SystemBase {
 	public function add_user_to_automatic_groups(){
 
 		if(!$group_all_users = Group::get_by_name("All users")){
-			$group_all_users = Group::add_group('All users', $this->key, Group::GROUP_TYPE_USER);
+			$group_all_users = Group::add_group('All users', $this->key, 'user');
 		}
 		if(!$group_us_users = Group::get_by_name("US users")){
-			$group_us_users = Group::add_group('US users', $this->key, Group::GROUP_TYPE_USER);
+			$group_us_users = Group::add_group('US users', $this->key, 'user');
 		}
 		if(!$group_nus_users = Group::get_by_name("Non-US users")){
-			$group_nus_users = Group::add_group('Non-US users', $this->key, Group::GROUP_TYPE_USER);
+			$group_nus_users = Group::add_group('Non-US users', $this->key, 'user');
 		} 
 		
 		$group_all_users->add_member($this->key);

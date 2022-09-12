@@ -433,11 +433,8 @@
 	$page->endtable(); 
 
 
-	$groupmembers = new MultiGroupMember(array(
-		'user_id' => $user->key,
-	));
-	$groupmembers->load();
-	
+	$groupids = Group::get_groups_for_member($user->key, 'user');
+
 	$headers = array("Group", "Action");
 	$altlinks = array();
 	$box_vars =	array(
@@ -446,8 +443,10 @@
 	);
 	$page->tableheader($headers, $box_vars);
 
-    foreach($groupmembers as $groupmember) {
-		$group = new Group($groupmember->get('grm_grp_group_id'), TRUE);
+    foreach($groupids as $groupid) {
+		$group = new Group($groupid, TRUE);
+		$groupmember = $group->is_member_in_group($user->key);
+		
 		$rowvalues = array();
 		array_push($rowvalues, $group->get('grp_name'));
 		$delform = '<form id="form4" class="form4" name="form4" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
@@ -468,7 +467,7 @@
 	echo $formwriter->begin_form('form5', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
 	
 	$groups = new MultiGroup(
-		array('type'=>Group::GROUP_TYPE_USER),  //SEARCH 
+		array('category'=>'user'),  //SEARCH 
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET

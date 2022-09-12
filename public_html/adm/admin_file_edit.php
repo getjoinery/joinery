@@ -95,7 +95,7 @@
 	echo $formwriter->dropinput("Permission level can access", "fil_min_permission", "ctrlHolder", $optionvals, $file->get('fil_min_permission'), '', FALSE, TRUE);
 	
 	$groups = new MultiGroup(
-		array('type'=>Group::GROUP_TYPE_USER),  //SEARCH 
+		array('category'=>'user'),  //SEARCH 
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET

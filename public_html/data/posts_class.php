@@ -114,12 +114,12 @@ class Post extends SystemBase {
 	function get_tags($return_type = 'name'){ 
 		$tags = array();
 		$group_members = new MultiGroupMember(
-			array('post_id' => $this->key),  //SEARCH CRITERIA
+			array('foreign_key_id' => $this->key, 'category' => 'post_tag'),  //SEARCH CRITERIA
 		);
 		$group_members->load();
 
 		foreach ($group_members as $group_member){
-			$group = new Group($group_member->get('grm_grp_group_id'), TRUE);
+			$group = new Group($group_member->get('grm_foreign_key_id'), TRUE);
 			if($return_type == 'name'){
 				$tags[] = $group->get('grp_name');
 			}
@@ -142,7 +142,7 @@ class Post extends SystemBase {
 		$post_tag_ids = $this->get_tags('id');
 		foreach ($post_tag_ids as $post_tag_id){
 			$group = new Group($post_tag_id, TRUE);
-			$group->remove_member(NULL, NULL, $this->key);
+			$group->remove_member($this->key);
 		}		
 		
 		//NEW TAGS
@@ -151,9 +151,9 @@ class Post extends SystemBase {
 			$tag = preg_replace("/[^A-Za-z0-9 -_]/", '', $tag);
 			
 			if(!$group = Group::get_by_name($tag)){
-				$group = Group::add_group($tag, $session->get_user_id(), Group::GROUP_TYPE_POST_TAG);
+				$group = Group::add_group($tag, $session->get_user_id(), 'post_tag');
 			}
-			$group->add_member(NULL, NULL, $this->key);
+			$group->add_member($this->key);
 		}		
 	}	
 
@@ -239,7 +239,7 @@ class MultiPost extends SystemMultiBase {
 		$group_members->load();
 
 		foreach ($group_members as $group_member){
-			$group = new Group($group_member->get('grm_grp_group_id'), TRUE);
+			$group = new Group($group_member->get('grm_foreign_key_id'), TRUE);
 			if($return_type == 'name'){
 				$tags[] = $group->get('grp_name');
 			}
@@ -266,7 +266,7 @@ class MultiPost extends SystemMultiBase {
 
 		$posts = new MultiPost;
 		foreach ($group_members as $group_member){
-			$post = new Post($group_member->get('grm_pst_post_id'), TRUE);
+			$post = new Post($group_member->get('grm_foreign_key_id'), TRUE);
 			if(!$post->get('pst_delete_time') && $post->get('pst_is_on_homepage') && $post->get('pst_published_time')){ 
 				$posts->add($post);
 			}

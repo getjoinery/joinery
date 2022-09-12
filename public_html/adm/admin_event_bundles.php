@@ -20,7 +20,7 @@
 
 
 	$groups = new MultiGroup(
-		array('type' => Group::GROUP_TYPE_EVENT),  //SEARCH CRITERIA
+		array('category'=>'event'),  //SEARCH CRITERIA
 		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 		$numperpage,  //NUM PER PAGE
 		$offset,  //OFFSET

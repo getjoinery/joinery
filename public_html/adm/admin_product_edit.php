@@ -253,7 +253,7 @@
 	echo $formwriter->dropinput("Event registration", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);	
 
 	$groups = new MultiGroup(
-		array('type' => Group::GROUP_TYPE_EVENT),  //SEARCH CRITERIA
+		array('category'=>'event'),  //SEARCH CRITERIA
 		NULL,  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 		NULL,  //NUM PER PAGE
 		NULL,  //OFFSET
