@@ -41,7 +41,7 @@
 		//REMOVE THE USER FROM ANY EVENTS ATTACHED TO BUNDLES WHERE THE BUNDLE NO LONGER CONTAINS THAT EVENT
 		if($event_registrant->get('evr_grp_group_id')){
 			$group = new Group($event_registrant->get('evr_grp_group_id'), TRUE);
-			if(!$group->is_member_in_group(NULL, $event_registrant->get('evr_evt_event_id'), NULL)){
+			if(!$group->is_member_in_group($event_registrant->get('evr_evt_event_id'))){
 				$event_registrant->remove();
 			}
 		}

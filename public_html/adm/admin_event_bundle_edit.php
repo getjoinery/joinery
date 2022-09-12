@@ -19,12 +19,12 @@
 			$group->remove_all_members();	
 		}
 		else{
-			$group = Group::add_group(strip_tags(trim($_POST['grp_name'])), $session->get_user_id(), Group::GROUP_TYPE_EVENT);
+			$group = Group::add_group(strip_tags(trim($_POST['grp_name'])), $session->get_user_id(), 'event');
 		}
 	
 
 		foreach ($_REQUEST['event_list'] as $event_id){
-			$group->add_member(NULL, $event_id, NULL);	
+			$group->add_member($event_id);	
 		}
 
 		LibraryFunctions::redirect('/admin/admin_event_bundle?grp_group_id='.$group->key);
@@ -84,7 +84,7 @@
 		$checkedvals = array();
 		$group_members = $group->get_member_list();
 		foreach ($group_members as $group_member){
-			$checkedvals[] = $group_member->get('grm_evt_event_id');
+			$checkedvals[] = $group_member->get('grm_foreign_key_id');
 		}
 	}
 	else{

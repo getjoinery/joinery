@@ -25,17 +25,13 @@ class GroupMember extends SystemBase {
 	public static $fields = array(
 		'grm_group_member_id' => 'ID of the group member',
 		'grm_grp_group_id' => 'group id',
-		'grm_usr_user_id' => 'User in group',
-		'grm_evt_event_id' => 'Event in group',
-		'grm_pst_post_id' => 'Post in group'
+		'grm_foreign_key_id' => 'Foreign key pointing to the member in this group',
 	);
 
 	public static $field_specifications = array(
 		'grm_group_member_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'grm_grp_group_id' => array('type'=>'int4'),
-		'grm_usr_user_id' => array('type'=>'int4'),
-		'grm_evt_event_id' => array('type'=>'int4'),
-		'grm_pst_post_id' => array('type'=>'int4'),
+		'grm_foreign_key_id' => array('type'=>'int8'),
 	);	
 
 	public static $required_fields = array('grm_grp_group_id');
@@ -52,9 +48,7 @@ class GroupMember extends SystemBase {
 		
 		$count = new MultiGroupMember(array(
 			'group_id' => $this->get('grm_grp_group_id'),
-			'user_id' => $this->get('grm_usr_user_id'),
-			'event_id' => $this->get('grm_evt_event_id'),
-			'post_id' => $this->get('grm_pst_post_id')
+			'foreign_key_id' => $this->get('grm_foreign_key_id'),
 		));
 		 
 		if ($count->count_all() > 0) {
@@ -78,21 +72,6 @@ class GroupMember extends SystemBase {
 	
 
 	function prepare() {	
-
-		//MAKE SURE THE RECORD HAS ONLY ONE FOREIGN KEY
-		$count = 0;
-		if($this->get('grm_usr_user_id')){
-			$count++;
-		}
-		if($this->get('grm_evt_event_id')){
-			$count++;
-		}
-		if($this->get('grm_pst_post_id')){
-			$count++;
-		}
-		if($count != 1){
-			throw new GroupMemberException('This GroupMember has more than one or zero foreign keys.');
-		}
 		
 		if(!$this->key){
 			if($this->_check_for_duplicates()){
@@ -130,29 +109,7 @@ class GroupMember extends SystemBase {
 }
 
 class MultiGroupMember extends SystemMultiBase {
-	function get_user_dropdown_array($include_new=FALSE) {
-		$items = array();
-		foreach($this as $item) {
-			$user = new User($item->get('grm_usr_user_id'), TRUE);
-			$items[$user->display_name()] = $user->key;
-		}
-		if ($include_new) {
-			$items['new'] = 'Enter New Below';
-		}
-		return $items;
-	}
 
-	function get_event_dropdown_array($include_new=FALSE) {
-		$items = array();
-		foreach($this as $item) {
-			$event = new Event($item->get('grm_evt_event_id'), TRUE);
-			$items[$event->get('evt_name')] = $event->key;
-		}
-		if ($include_new) {
-			$items['new'] = 'Enter New Below';
-		}
-		return $items;
-	}
 	
 	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
@@ -163,31 +120,9 @@ class MultiGroupMember extends SystemMultiBase {
 			$bind_params[] = array($this->options['group_id'], PDO::PARAM_INT);
 		}
 
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'grm_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}	
-
-		if (array_key_exists('event_id', $this->options)) {
-			$where_clauses[] = 'grm_evt_event_id = ?';
-			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}
-
-		if (array_key_exists('post_id', $this->options)) {
-			$where_clauses[] = 'grm_pst_post_id = ?';
-			$bind_params[] = array($this->options['post_id'], PDO::PARAM_INT);
-		}
-
-		if (array_key_exists('has_post_id', $this->options)) {
-			$where_clauses[] = 'grm_pst_post_id IS NOT NULL';
-		}		
-
-		if (array_key_exists('has_event_id', $this->options)) {
-			$where_clauses[] = 'grm_evt_event_id IS NOT NULL';
-		}	
-
-		if (array_key_exists('has_user_id', $this->options)) {
-			$where_clauses[] = 'grm_usr_user_id IS NOT NULL';
+		if (array_key_exists('foreign_key_id', $this->options)) {
+			$where_clauses[] = 'grm_foreign_key_id = ?';
+			$bind_params[] = array($this->options['foreign_key_id'], PDO::PARAM_INT);
 		}	
 		
 		if ($where_clauses) {

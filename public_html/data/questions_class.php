@@ -224,7 +224,7 @@ class Question extends SystemBase {
 		$group_members->load();
 
 		foreach ($group_members as $group_member){
-			$group = new Group($group_member->get('grm_grp_group_id'), TRUE);
+			$group = new Group($group_member->get('grm_foreign_key_id'), TRUE);
 			if($return_type == 'name'){
 				$tags[] = $group->get('grp_name');
 			}
@@ -246,7 +246,7 @@ class Question extends SystemBase {
 		$question_tag_ids = $this->get_tags('id');
 		foreach ($question_tag_ids as $question_tag_id){
 			$group = new Group($question_tag_id, TRUE);
-			$group->remove_member(NULL, NULL, $this->key);
+			$group->remove_member($this->key);
 		}		
 		
 		//NEW TAGS
@@ -255,9 +255,9 @@ class Question extends SystemBase {
 			$tag = preg_replace("/[^A-Za-z0-9 -_]/", '', $tag);
 			
 			if(!$group = Group::get_by_name($tag)){
-				$group = Group::add_group($tag, $session->get_user_id(), Group::GROUP_TYPE_POST_TAG);
+				$group = Group::add_group($tag, $session->get_user_id(), 'post_tag');
 			}
-			$group->add_member(NULL, NULL, $this->key);
+			$group->add_member($this->key);
 		}		
 	}	
 

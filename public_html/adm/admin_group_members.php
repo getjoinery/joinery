@@ -100,7 +100,7 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($group_members as $group_member){
-		$user = new User($group_member->get('grm_usr_user_id'), TRUE);
+		$user = new User($group_member->get('grm_foreign_key_id'), TRUE);
 
 		$rowvalues = array();
 /*

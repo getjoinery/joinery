@@ -298,7 +298,7 @@
 				$group_members = $group->get_member_list();
 				$event_list = array();
 				foreach ($group_members as $group_member){
-					$event = new Event($group_member->get('grm_evt_event_id'), TRUE);
+					$event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
 					$event_list[] = $event->get('evt_name');
 					//ADD THE USER TO THE EVENT, SUBSCRIPTIONS CANNOT BE TIME LIMITED
 					$event_registrant = $event->add_registrant($user->key, $order_item, $product->get('pro_grp_group_id'), NULL);
@@ -516,7 +516,7 @@
 				$group = new Group($product->get('pro_grp_group_id'), TRUE);
 				$group_members = $group->get_member_list();
 				foreach ($group_members as $group_member){
-					$event = new Event($group_member->get('grm_evt_event_id'), TRUE);
+					$event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
 					$event_registrant = $event->add_registrant($user->key, $order_item, NULL, $product->get('pro_expires'));
 
 					//THE RECORDING CONSENT BOX

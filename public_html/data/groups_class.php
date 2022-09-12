@@ -27,9 +27,6 @@ class Group extends SystemBase {
 		'fil_grp_group_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	const GROUP_TYPE_USER = 1;
-	const GROUP_TYPE_EVENT = 2;
-	const GROUP_TYPE_POST_TAG = 3;
 
 	public static $fields = array(
 		'grp_group_id' => 'ID of the group',
@@ -38,7 +35,8 @@ class Group extends SystemBase {
 		'grp_create_time' => 'Created',
 		'grp_update_time' => 'Updated',
 		'grp_delete_time' => 'Is this group deleted?',
-		'grp_type' => 'Type of group:  1-user, 2-event, 3-post'
+		//'grp_type' => 'Type of group:  1-user, 2-event, 3-post',
+		'grp_category' => 'Dynamic replacement for group type',
 	);
 
 	public static $field_specifications = array(
@@ -48,7 +46,8 @@ class Group extends SystemBase {
 		'grp_create_time' => array('type'=>'timestamp(6)'),
 		'grp_update_time' => array('type'=>'timestamp(6)'),
 		'grp_delete_time' => array('type'=>'timestamp(6)'),
-		'grp_type' => array('type'=>'int2'),
+		//'grp_type' => array('type'=>'int2'),
+		'grp_category' => array('type'=>'varchar(24)'),
 	);	
 
 	public static $required_fields = array(
@@ -89,7 +88,9 @@ class Group extends SystemBase {
 		return new Group($r->grp_group_id, TRUE);
 	}	
 	
-	public static function add_group($name, $user_id, $type){
+	public static function add_group($name, $user_id, $category){
+		
+		
 		if(!$name){
 			throw new GroupException('You cannot create a group without a name.');
 			exit();			
@@ -100,6 +101,11 @@ class Group extends SystemBase {
 			exit();	
 		}
 
+		if(strlen($category) > 24){
+			throw new GroupException('The group category "'.$category.'" is too long.');
+			exit();	
+		}
+		
 		if($group = Group::get_by_name($name)){
 			throw new GroupException('A group named "'.$name.'" already exists.');
 			exit();	
@@ -109,22 +115,65 @@ class Group extends SystemBase {
 			$group = new Group(NULL);
 			$group->set('grp_name', $name);
 			$group->set('grp_usr_user_id_created', $user_id);
-			$group->set('grp_type', $type);
+			//$group->set('grp_type', $type);
+			$group->set('grp_category', $category);
 			$group->prepare();
 			$group->save();
 			$group->load();
 			return $group;
 		}
 		
+	}
+
+	public static function get_groups_for_member($id, $category=NULL) { 
+		if(!$id){
+			throw new GroupException('To get groups for a group member an id is required.');
+			exit();	
+		}
+		
+
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+	
+		$sql = 'SELECT DISTINCT grp_group_id FROM grp_groups INNER JOIN grm_group_members ON grp_groups.grp_group_id=grm_group_members.grm_grp_group_id 
+				WHERE grm_foreign_key_id = :id';
+				
+		if($category){
+			$sql .= ' AND grp_category = :category ';
+		}
+
+		try{
+			$q = $dblink->prepare($sql);
+			$q->bindParam(':id', $id, PDO::PARAM_INT);
+			if($category){
+				$q->bindParam(':category', $category, PDO::PARAM_STR);
+			}
+
+
+			$q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		}
+		catch(PDOException $e){
+			$dbhelper->handle_query_error($e);
+		}
+
+
+		
+		$groups = $q->fetchAll();
+		$groups_out = array();
+		foreach($groups as $group){
+			$groups_out[] = $group->grp_group_id;
+		}
+		return $groups_out;
+
+		
 	}	
 	
-	function add_member($user_id=NULL, $event_id=NULL, $post_id=NULL){ 
+	function add_member($id){ 
 	
-		if(!$this->is_member_in_group($user_id, $event_id, $post_id)){
+		if(!$this->is_member_in_group($id)){
 			$groupmember = new GroupMember(NULL);
-			$groupmember->set('grm_usr_user_id', $user_id);	
-			$groupmember->set('grm_evt_event_id', $event_id);
-			$groupmember->set('grm_pst_post_id', $post_id);
+			$groupmember->set('grm_foreign_key_id', $id);	
 			$groupmember->set('grm_grp_group_id', $this->key);
 			$groupmember->prepare();
 			$groupmember->save();
@@ -134,22 +183,15 @@ class Group extends SystemBase {
 		}
 	}
 	
-	function remove_member($user_id=NULL, $event_id=NULL, $post_id=NULL){
+	function remove_member($id){
 
-		if(!$user_id && !$event_id && !$post_id){
-			throw new GroupException('To remove a group member, user_id, event_id, or post_id is required.');
+		if(!$id){
+			throw new GroupException('To remove a group member an id is required.');
 			exit();	
 		}
 		$searches = array('group_id' => $this->key);
-		if($user_id){
-			$searches['user_id'] = $user_id;
-		}
-		if($event_id){
-			$searches['event_id'] = $event_id;
-		}
-		if($post_id){
-			$searches['post_id'] = $post_id;
-		}		
+		$searches['foreign_key_id'] = $id;
+	
 		$group_members = new MultiGroupMember($searches);
 		$group_members->load();
 		$group_member = $group_members->get(0);
@@ -165,17 +207,12 @@ class Group extends SystemBase {
 		}
 	}	
 	
-	function is_member_in_group($user_id=NULL, $event_id=NULL, $post_id=NULL) { 
-		$searches = array('group_id' => $this->key);
-		if($user_id){
-			$searches['user_id'] = $user_id;
-		}
-		if($event_id){
-			$searches['event_id'] = $event_id;
-		}
-		if($post_id){
-			$searches['post_id'] = $post_id;
-		}		
+	function is_member_in_group($id) { 
+		$searches = array(
+		'group_id' => $this->key,
+		'foreign_key_id' => $id
+		);
+
 		$group_members = new MultiGroupMember($searches);
 		
 		if ($group_members->count_all() > 0) {
@@ -194,6 +231,8 @@ class Group extends SystemBase {
 		
 		return $group_members;
 	}	
+
+
 	
 	function get_member_count() {
 		$count = new MultiGroupMember(array(
@@ -279,9 +318,10 @@ class MultiGroup extends SystemMultiBase {
 			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		}		
 
-		if (array_key_exists('type', $this->options)) {
-			$where_clauses[] = 'grp_type = ?';
-			$bind_params[] = array($this->options['type'], PDO::PARAM_INT);
+
+		if (array_key_exists('category', $this->options)) {
+			$where_clauses[] = 'grp_category = ?';
+			$bind_params[] = array($this->options['category'], PDO::PARAM_STR);
 		}	
 		
 		if ($where_clauses) {

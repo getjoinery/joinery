@@ -186,7 +186,7 @@
 			
 			foreach ($group_members as $group_member){
 				
-				$recipient = new User($group_member->get('grm_usr_user_id'), TRUE);
+				$recipient = new User($group_member->get('grm_foreign_key_id'), TRUE);
 						
 				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
 				$email->add_recipient($recipient->get('usr_email'), $recipient->display_name());
