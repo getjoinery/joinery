@@ -63,7 +63,7 @@ class Group extends SystemBase {
 		);		
 	
 	//RETURNS A GROUP OBJECT WITH A SPECIFIED NAME
-	public static function get_by_name($name) {
+	public static function get_by_name($name, $return_deleted=false) {
 		if(!$name){
 			throw new GroupException('A name is required to get groups by name.');
 			exit();	
@@ -73,7 +73,7 @@ class Group extends SystemBase {
 		$dblink = $dbhelper->get_db_link();
 
 		$sql = "SELECT grp_group_id FROM grp_groups
-			WHERE grp_name = :grp_name";
+			WHERE grp_name = :grp_name AND grp_delete_time IS ".($return_deleted ? 'NOT NULL' : 'NULL');
 
 		try{
 			$q = $dblink->prepare($sql);
@@ -133,7 +133,7 @@ class Group extends SystemBase {
 	}
 	
 	//RETURNS A LIST OF GROUPS WITH THE SPECIFIED CATEGORY
-	public static function get_groups_in_category($category){
+	public static function get_groups_in_category($category, $return_deleted=false){
 		if(!$category){
 			throw new GroupException('A category is required to get groups in category.');
 			exit();	
@@ -141,6 +141,7 @@ class Group extends SystemBase {
 		
 		$groups = new MultiGroup(array(
 			'category' => $category,
+			'return_deleted' => $return_deleted
 		));
 		
 		if ($groups->count_all() > 0) {
@@ -151,7 +152,7 @@ class Group extends SystemBase {
 	}
 
 	//RETURNS A LIST OF GROUPS FOR A MEMBER WITH SPECIFIED CATEGORY
-	public static function get_groups_for_member($id, $category=NULL) { 
+	public static function get_groups_for_member($id, $category=NULL, $return_deleted=false) { 
 		if(!$id){
 			throw new GroupException('To get groups for a group member an id is required.');
 			exit();	
@@ -162,7 +163,7 @@ class Group extends SystemBase {
 		$dblink = $dbhelper->get_db_link();
 	
 		$sql = 'SELECT DISTINCT grp_group_id FROM grp_groups INNER JOIN grm_group_members ON grp_groups.grp_group_id=grm_group_members.grm_grp_group_id 
-				WHERE grm_foreign_key_id = :id';
+				WHERE grm_foreign_key_id = :id AND grp_delete_time IS '.($return_deleted ? 'NOT NULL' : 'NULL');
 				
 		if($category){
 			$sql .= ' AND grp_category = :category ';
@@ -170,9 +171,9 @@ class Group extends SystemBase {
 
 		try{
 			$q = $dblink->prepare($sql);
-			$q->bindParam(':id', $id, PDO::PARAM_INT);
+			$q->bindValue(':id', $id, PDO::PARAM_INT);
 			if($category){
-				$q->bindParam(':category', $category, PDO::PARAM_STR);
+				$q->bindValue(':category', $category, PDO::PARAM_STR);
 			}
 
 
@@ -368,6 +369,9 @@ class MultiGroup extends SystemMultiBase {
 			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		}		
 
+		if (array_key_exists('deleted', $this->options)) {
+			$where_clauses[] = 'grp_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}	 
 
 		if (array_key_exists('category', $this->options)) {
 			$where_clauses[] = 'grp_category = ?';
