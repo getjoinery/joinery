@@ -62,7 +62,13 @@ class Group extends SystemBase {
 		'grp_update_time' => 'now()'
 		);		
 	
+	//RETURNS A GROUP OBJECT WITH A SPECIFIED NAME
 	public static function get_by_name($name) {
+		if(!$name){
+			throw new GroupException('A name is required to get groups by name.');
+			exit();	
+		}
+
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
@@ -88,6 +94,7 @@ class Group extends SystemBase {
 		return new Group($r->grp_group_id, TRUE);
 	}	
 	
+	//CREATES A NEW GROUP
 	public static function add_group($name, $user_id, $category){
 		
 		
@@ -124,7 +131,26 @@ class Group extends SystemBase {
 		}
 		
 	}
+	
+	//RETURNS A LIST OF GROUPS WITH THE SPECIFIED CATEGORY
+	public static function get_groups_in_category($category){
+		if(!$category){
+			throw new GroupException('A category is required to get groups in category.');
+			exit();	
+		}
+		
+		$groups = new MultiGroup(array(
+			'category' => $category,
+		));
+		
+		if ($groups->count_all() > 0) {
+			$groups->load();
+			return $groups;
+		}
+		return NULL;		
+	}
 
+	//RETURNS A LIST OF GROUPS FOR A MEMBER WITH SPECIFIED CATEGORY
 	public static function get_groups_for_member($id, $category=NULL) { 
 		if(!$id){
 			throw new GroupException('To get groups for a group member an id is required.');
@@ -160,16 +186,22 @@ class Group extends SystemBase {
 
 		
 		$groups = $q->fetchAll();
-		$groups_out = array();
+		$groups_out = new MultiGroup();
 		foreach($groups as $group){
-			$groups_out[] = $group->grp_group_id;
+			$group_out = new Group($group->grp_group_id , TRUE);
+			$groups_out->add($group_out);
 		}
-		return $groups_out;
+		return $groups_out; //RETURNS A LIST OF GROUPS
 
 		
 	}	
 	
+	//ADD A MEMBER TO THIS GROUP
 	function add_member($id){ 
+		if(!$id){
+			throw new GroupException('To add a group member an id is required.');
+			exit();	
+		}
 	
 		if(!$this->is_member_in_group($id)){
 			$groupmember = new GroupMember(NULL);
@@ -183,6 +215,7 @@ class Group extends SystemBase {
 		}
 	}
 	
+	//REMOVE A MEMBER FROM THIS GROUP
 	function remove_member($id){
 
 		if(!$id){
@@ -193,11 +226,21 @@ class Group extends SystemBase {
 		$searches['foreign_key_id'] = $id;
 	
 		$group_members = new MultiGroupMember($searches);
-		$group_members->load();
-		$group_member = $group_members->get(0);
-		$group_member->remove();
+		$exists = $group_members->count_all();
+		
+		
+		if($exists){
+			$group_members->load();
+			$group_member = $group_members->get(0);
+			$group_member->remove();
+			return true;
+		}
+		else{
+			return false;
+		}
 	}	
 	
+	//REMOVE ALL MEMBERS FROM A GROUP
 	function remove_all_members(){
 		$searches = array('group_id' => $this->key);	
 		$group_members = new MultiGroupMember($searches);
@@ -207,7 +250,13 @@ class Group extends SystemBase {
 		}
 	}	
 	
+	//RETURN A GROUP MEMBER OBJECT IF A MEMBER IS IN A GROUP
 	function is_member_in_group($id) { 
+		if(!$id){
+			throw new GroupException('To check a group member an id is required.');
+			exit();	
+		}	
+	
 		$searches = array(
 		'group_id' => $this->key,
 		'foreign_key_id' => $id
@@ -219,9 +268,10 @@ class Group extends SystemBase {
 			$group_members->load();
 			return $group_members->get(0);
 		}
-		return NULL;
+		return false;
 	}	
 	
+	//RETURN A LIST OF GROUP MEMBERS IN A GROUP
 	function get_member_list() {
 		$group_members = new MultiGroupMember(array(
 			'group_id' => $this->key,

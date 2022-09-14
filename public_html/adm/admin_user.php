@@ -433,7 +433,7 @@
 	$page->endtable(); 
 
 
-	$groupids = Group::get_groups_for_member($user->key, 'user');
+	$groups = Group::get_groups_for_member($user->key, 'user');
 
 	$headers = array("Group", "Action");
 	$altlinks = array();
@@ -443,8 +443,7 @@
 	);
 	$page->tableheader($headers, $box_vars);
 
-    foreach($groupids as $groupid) {
-		$group = new Group($groupid, TRUE);
+    foreach($groups as $group) {
 		$groupmember = $group->is_member_in_group($user->key);
 		
 		$rowvalues = array();
