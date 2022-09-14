@@ -47,7 +47,7 @@ class User extends SystemBase {
 		'fil_usr_user_id' => User::USER_DELETED,
 		'msg_usr_user_id_recipient' => 'delete',
 		'msg_usr_user_id_sender' => User::USER_DELETED,
-		'grm_usr_user_id' => 'delete',
+		//'grm_usr_user_id' => 'delete',
 		'grp_usr_user_id_created' => User::USER_DELETED,
 		'bkn_usr_user_id_booked' => User::USER_DELETED,
 		'bkn_usr_user_id_client' => User::USER_DELETED,
@@ -693,6 +693,12 @@ class User extends SystemBase {
 		
 		if(!$debug){
 			$this->unsubscribe_from_mailing_list();
+		}
+		
+		//DELETE ANY GROUP MEMBERSHIPS
+		$groups = Group::get_groups_in_category('user');
+		foreach($groups as $group){
+			$group->remove_member($this->key);
 		}
 		
 		parent::permanent_delete($debug);
