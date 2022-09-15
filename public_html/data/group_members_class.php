@@ -109,7 +109,29 @@ class GroupMember extends SystemBase {
 }
 
 class MultiGroupMember extends SystemMultiBase {
+	function get_user_dropdown_array($include_new=FALSE) {
+		$items = array();
+		foreach($this as $item) {
+			$user = new User($item->get('grm_foreign_key_id'), TRUE);
+			$items[$user->display_name()] = $user->key;
+		}
+		if ($include_new) {
+			$items['new'] = 'Enter New Below';
+		}
+		return $items;
+	}
 
+	function get_event_dropdown_array($include_new=FALSE) {
+		$items = array();
+		foreach($this as $item) {
+			$event = new Event($item->get('grm_foreign_key_id'), TRUE);
+			$items[$event->get('evt_name')] = $event->key;
+		}
+		if ($include_new) {
+			$items['new'] = 'Enter New Below';
+		}
+		return $items;
+	}
 	
 	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
