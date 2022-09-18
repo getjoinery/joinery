@@ -214,6 +214,31 @@ class Post extends SystemBase {
 		parent::save($debug);
 	}
 	
+	function permanent_delete($debug=false){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+		
+		$this_transaction = false;
+		if(!$dblink->inTransaction()){
+			$dblink->beginTransaction();
+			$this_transaction = true;
+		}		
+		
+		//DELETE ANY GROUP MEMBERSHIPS
+		$groups = Group::get_groups_in_category('post_tag');
+		foreach($groups as $group){
+			$group->remove_member($this->key);
+		}
+		
+		parent::permanent_delete($debug);
+		
+		if($this_transaction){
+			$dblink->commit();
+		}	
+		
+		return true;
+	}
+	
 }
 
 class MultiPost extends SystemMultiBase {
