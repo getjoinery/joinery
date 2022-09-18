@@ -11,6 +11,7 @@ require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/data/event_registrants_class.php');
 require_once($siteDir . '/data/files_class.php');
 require_once($siteDir . '/data/content_versions_class.php');
+require_once($siteDir . '/data/groups_class.php');
 
 require_once($siteDir . '/includes/calendar-links/Link.php');
 require_once($siteDir . '/includes/calendar-links/Generator.php');
@@ -53,7 +54,6 @@ class Event extends SystemBase {
 		'evs_evt_event_id' => 'delete',	
 		'evr_evt_event_id' => 'prevent',
 		'erg_evt_event_id' => 'prevent',
-		'grm_evt_event_id' => 'prevent',
 		'msg_evt_event_id' => 'delete',
 		'pro_evt_event_id' => 'prevent',
 		'sev_evt_event_id' => 'delete',
@@ -525,6 +525,31 @@ class Event extends SystemBase {
 		parent::save($debug);
 
 	}	
+	
+	function permanent_delete($debug=false){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+		
+		$this_transaction = false;
+		if(!$dblink->inTransaction()){
+			$dblink->beginTransaction();
+			$this_transaction = true;
+		}		
+		
+		//DELETE ANY GROUP MEMBERSHIPS
+		$groups = Group::get_groups_in_category('event');
+		foreach($groups as $group){
+			$group->remove_member($this->key);
+		}
+		
+		parent::permanent_delete($debug);
+		
+		if($this_transaction){
+			$dblink->commit();
+		}	
+		
+		return true;
+	}
 	
 	
 	function copy() { 
