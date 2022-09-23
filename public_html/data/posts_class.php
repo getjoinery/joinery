@@ -258,13 +258,10 @@ class MultiPost extends SystemMultiBase {
 
 	static function get_all_tags($return_type = 'name'){ 
 		$tags = array();
-		$group_members = new MultiGroupMember(
-			array('has_post_id' => TRUE),  //SEARCH CRITERIA
-		);
-		$group_members->load();
+		$groups = Group::get_groups_in_category('post_tag');
+		$groups->load();
 
-		foreach ($group_members as $group_member){
-			$group = new Group($group_member->get('grm_foreign_key_id'), TRUE);
+		foreach ($groups as $group){
 			if($return_type == 'name'){
 				$tags[] = $group->get('grp_name');
 			}
