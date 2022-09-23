@@ -114,20 +114,22 @@ class Post extends SystemBase {
 	function get_tags($return_type = 'name'){ 
 		$tags = array();
 		$group_members = new MultiGroupMember(
-			array('foreign_key_id' => $this->key, 'category' => 'post_tag'),  //SEARCH CRITERIA
+			array('foreign_key_id' => $this->key),  //SEARCH CRITERIA
 		);
 		$group_members->load();
 
 		foreach ($group_members as $group_member){
-			$group = new Group($group_member->get('grm_foreign_key_id'), TRUE);
-			if($return_type == 'name'){
-				$tags[] = $group->get('grp_name');
-			}
+			$group = new Group($group_member->get('grm_grp_group_id'), TRUE);
+			if($group->get('grp_category') == 'post_tag'){
+				if($return_type == 'name'){
+					$tags[] = $group->get('grp_name');
+				}
 			else{
-				$tags[] = $group->key;
+					$tags[] = $group->key;
+				}
 			}
 		}	
-		return $tags;
+		return array_unique($tags);
 	}	
 
 	
