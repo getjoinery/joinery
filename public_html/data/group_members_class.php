@@ -166,9 +166,6 @@ class MultiGroupMember extends SystemMultiBase {
 			else {
 				if (array_key_exists('group_member_id', $this->order_by)) {
 					$sql .= ' grm_group_member_id ' . $this->order_by['group_member_id'];
-				}
-				if (array_key_exists('post_id', $this->order_by)) {
-					$sql .= ' grm_pst_post_id ' . $this->order_by['post_id'];
 				}				
 			}				
 

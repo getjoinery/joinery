@@ -276,13 +276,14 @@ class MultiPost extends SystemMultiBase {
 	
 	static function get_posts_for_tag($tag, $numperpage=NULL, $page_offset=NULL){ 
 		$group = Group::get_by_name($tag);
-		if(!$group){
+
+		if(!$group || $group->get('grp_category') != 'post_tag'){
 			return false;
 		}
 		
 		$group_members = new MultiGroupMember(
 			array('group_id' => $group->key),  //SEARCH CRITERIA
-			array('post_id'=>'desc'),
+			array('group_member_id'=>'desc'),
 			$numperpage,
 			$page_offset
 		);
