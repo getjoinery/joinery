@@ -30,6 +30,23 @@
             
 			
 		<?php
+		if(!$page_vars[posts]){
+			?>
+			<div class="rounded-lg bg-white overflow-hidden shadow mb-6">
+			  <div class="p-6">
+				<p class="text-xl font-semibold text-gray-900">No Results</p>
+		
+			  <div class="mt-3 prose">
+				<p>There are no posts matching that tag.</p>
+				</div>
+				
+				</div>
+			</div>	
+				<?php
+		}
+		
+		
+		
 		foreach ($page_vars[posts] as $post){  
 			$author = new User($post->get('pst_usr_user_id'), TRUE);
 			$post_tags = $post->get_tags();
