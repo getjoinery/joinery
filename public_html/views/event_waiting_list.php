@@ -12,11 +12,13 @@
 	);
 	$page->public_header($hoptions);
 	
-	echo PublicPageTW::BeginPage('Waiting list for '.$event->get('evt_name'), 'Add yourself to the waiting list, and we will notify you as soon as registration is available.');
+	$options = array();
+	$options['subtitle'] = 'Add yourself to the waiting list, and we will notify you as soon as registration is available.';
+	echo PublicPageTW::BeginPage('Waiting list for '.$event->get('evt_name'), $options);
 	echo PublicPageTW::BeginPanel();
 
 	if($display_message){
-		echo PublicPageTW::alert('Login warning', $display_message, $message_type);
+		echo PublicPageTW::alert('Success', $display_message, $message_type);
 	}
 	else{
 
@@ -38,28 +40,33 @@
 		
 		echo $formwriter->begin_form("", "post", "/event_waiting_list");
 		echo $formwriter->hiddeninput("event_id", $event->key);
-		echo $formwriter->textinput("First Name", "usr_first_name", NULL, 30, '', "", 32, "");
-		echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 30, '', "", 32, "");
-		
-		$settings = Globalvars::get_instance();
-		$nickname_display = $settings->get_setting('nickname_display_as');
-		if($nickname_display){
-			echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, NULL, "" , 32, "");
+		if($session->get_user_id()){
+			echo '<p>Click the button below to be added to this waiting list.</p>';
 		}
-		echo $formwriter->textinput("Email", "usr_email", NULL, 30, '', "", 64, "");
-		
-		$optionvals = Address::get_timezone_drop_array();
-		$default_timezone = $settings->get_setting('default_timezone');
-		echo $formwriter->dropinput("Your timezone", "usr_timezone", NULL, $optionvals, $default_timezone, '', FALSE);			
-		
-		echo $formwriter->antispam_question_input();
-		echo $formwriter->honeypot_hidden_input();
+		else{
+			echo $formwriter->textinput("First Name", "usr_first_name", NULL, 30, '', "", 32, "");
+			echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 30, '', "", 32, "");
+			
+			$settings = Globalvars::get_instance();
+			$nickname_display = $settings->get_setting('nickname_display_as');
+			if($nickname_display){
+				echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, NULL, "" , 32, "");
+			}
+			echo $formwriter->textinput("Email", "usr_email", NULL, 30, '', "", 64, "");
+			
+			$optionvals = Address::get_timezone_drop_array();
+			$default_timezone = $settings->get_setting('default_timezone');
+			echo $formwriter->dropinput("Your timezone", "usr_timezone", NULL, $optionvals, $default_timezone, '', FALSE);			
+			
+			echo $formwriter->antispam_question_input();
+			echo $formwriter->honeypot_hidden_input();
 
 
-		echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "checkbox", "left", NULL, 1, "");
-		echo $formwriter->checkboxinput("Add me to the newsletter", "newsletter", "checkbox", "left", NULL, 1, "");
-		if(!$session->get_user_id()){
-			echo $formwriter->captcha_hidden_input();
+			echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "checkbox", "left", NULL, 1, "");
+			echo $formwriter->checkboxinput("Add me to the newsletter", "newsletter", "checkbox", "left", NULL, 1, "");
+			if(!$session->get_user_id()){
+				echo $formwriter->captcha_hidden_input();
+			}
 		}
 
 		echo $formwriter->new_form_button('Add me to the waiting list');

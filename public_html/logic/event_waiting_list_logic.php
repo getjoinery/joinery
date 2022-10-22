@@ -65,8 +65,8 @@
 
 		//ADD TO WAITING LIST
 		$waiting_list_name = $event->get('evt_name'). ' ' . LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $event->get('evt_timezone'),'M j, Y') . ' waiting list';
-		if(!$group = Group::get_by_name($waiting_list_name)){
-			$waiting_list_name = substr($waiting_list_name,0,75);
+		$waiting_list_name = substr($waiting_list_name,0,75);
+		if(!$group = Group::get_by_name($waiting_list_name)){	
 			$group = Group::add_group($waiting_list_name, NULL, 'user');
 		}
 		$group->add_member($user->key);
