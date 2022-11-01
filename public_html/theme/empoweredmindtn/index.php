@@ -124,7 +124,7 @@
           </div>-->
           <div class="mt-6">
             <h2 class="text-3xl font-extrabold tracking-tight text-gray-900">
-              Hello! I’m Amanda Martin. I’ve been
+              Hello! I’m Amanda Tunnell. I’ve been
 teaching since 2008 and have been
 working with kids for over 20 years. My
 passion is whole child development through the lens of social emotional learning.
@@ -142,7 +142,7 @@ passion is whole child development through the lens of social emotional learning
       </div>
       <div class="mt-12 sm:mt-16 lg:mt-0 lg:col-start-1">
         <div class="pr-4 -ml-48 sm:pr-6 md:-ml-16 lg:px-0 lg:m-0 lg:relative lg:h-full">
-          <img class="w-full rounded-xl shadow-xl ring-1 ring-black ring-opacity-5 lg:absolute lg:right-0 lg:h-full lg:w-auto lg:max-w-none" src="/uploads/medium/AmandaMartinheadshot_wkhgv4r.jpg" alt="Amanda Martin">
+          <img class="w-full rounded-xl shadow-xl ring-1 ring-black ring-opacity-5 lg:absolute lg:right-0 lg:h-full lg:w-auto lg:max-w-none" src="/uploads/medium/AmandaMartinheadshot_wkhgv4r.jpg" alt="Amanda Tunnell">
         </div>
       </div>
     </div>
