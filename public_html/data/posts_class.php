@@ -106,7 +106,7 @@ class Post extends SystemBase {
 			return '/'.$blog_subdirectory.'/'.$this->get('pst_link');
 		}
 		else{
-			return $this->get('pst_link');
+			return '/'.$this->get('pst_link');
 		}
 		
 	}		
