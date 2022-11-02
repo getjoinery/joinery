@@ -132,7 +132,7 @@
 					echo '<b>Public but unlisted:</b> <a href="' . $event->get_url() . '">Public link</a><br />';
 				}		
 				
-				echo '<b>Sessions page:</b> <a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$settings->get_setting('webDir_SSL').'/profile/event_sessions_course?event_id='.$event->key.'</a><br />';
+				//echo '<b>Sessions page:</b> <a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$settings->get_setting('webDir_SSL').'/profile/event_sessions_course?event_id='.$event->key.'</a><br />';
 				?>
 				</p>
 			  <p class="text-center">
