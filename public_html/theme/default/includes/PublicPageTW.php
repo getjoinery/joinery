@@ -260,7 +260,7 @@ class PublicPageTW extends PublicPageMaster {
 			<?php 
 			echo '<span class="sr-only">'.$settings->get_setting('site_name').'</span>';
 			if($settings->get_setting('logo_link')){
-				echo '<a href="/"><img class="h-14 sm:h-10" src="'.$settings->get_setting('logo_link').'" alt=""></a>';
+				echo '<a href="/"><img style="max-height: 100px;" src="'.$settings->get_setting('logo_link').'" alt=""></a>';
 			}
 			else{
 				echo '<h3><a href="/">'.$settings->get_setting('site_name').'</a></h3>';
