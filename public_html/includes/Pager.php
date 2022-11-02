@@ -9,6 +9,7 @@ class Pager{
 	private $remaining_var_string = NULL;
 	private $offset = NULL;
 	private $sort = NULL;
+	private $filter = NULL;
 	private $sdirection = NULL;
 	private $searchterm = NULL;
 	private $numpagestotal = NULL;
@@ -46,6 +47,11 @@ class Pager{
 		if(isset($url_vars[$prefix . 'sort'])){
 			$this->sort = $url_vars[$prefix . 'sort'];
 			unset($url_vars[$prefix . 'sort']);
+		}
+
+		if(isset($url_vars[$prefix . 'filter'])){
+			$this->filter = $url_vars[$prefix . 'filter'];
+			unset($url_vars[$prefix . 'filter']);
 		}
 
 		if(isset($url_vars[$prefix . 'sdirection'])){
@@ -90,9 +96,13 @@ class Pager{
 		return $this->numrecords;
 	}
 	
-	function sort(){
+	function get_sort(){
 		return $this->sort;
 	}
+	
+	function get_filter(){
+		return $this->filter;
+	}	
 	
 	function sort_direction(){
 		return $this->sdirection;
@@ -166,6 +176,10 @@ class Pager{
 
 		if($this->sort){
 			$new_get_vars[] = $this->prefix.'sort='.$this->sort;
+		}
+
+		if($this->filter){
+			$new_get_vars[] = $this->prefix.'filter='.$this->filter;
 		}
 		
 		if($this->sdirection){

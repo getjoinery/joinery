@@ -12,6 +12,7 @@
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'file_id', 0, '');
+	$filter = LibraryFunctions::fetch_variable('filter', 'all', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
@@ -22,7 +23,16 @@
 	if($_SESSION['permission'] < 10){
 		$search_criteria['deleted'] = false;
 	}
-	$search_criteria['picture'] = false;
+	if($filter == 'files'){
+		$search_criteria['picture'] = false;
+	}
+	else if($filter == 'images'){
+		$search_criteria['picture'] = true;
+	}
+	else{
+		//nothing
+	}
+	
 	$files = new MultiFile(
 		$search_criteria,
 		array($sort=>$sdirection),
@@ -50,7 +60,7 @@
 	$title= 'Files';
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
-		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
+		'filteroptions'=>array("All files"=>"all", "Files only"=>"files", "Images only"=>"images"),
 		'altlinks' => $altlinks,
 		'title' => $title,
 		//'search_on' => TRUE
