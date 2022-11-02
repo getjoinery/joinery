@@ -628,6 +628,7 @@ class AdminPage{
 		}
 
 		$sortoptions= $options['sortoptions'];
+		$filteroptions= $options['filteroptions'];
 		$search_on = $options['search_on'];
 
 		if($sortoptions){
@@ -635,7 +636,7 @@ class AdminPage{
 			printf('<form method="get" ACTION="%s">', $_SERVER[REQUEST_URI]);
 			echo '<label for="'.$pager->prefix().'sort'.'">Sort: </label><select name="'.$pager->prefix().'sort'.'">';
 			foreach ($sortoptions as $key => $value) {
-				if($pager->sort() == $value){
+				if($pager->get_sort() == $value){
 					echo "<option value='$value' selected=selected>$key";
 				}
 				else{
@@ -667,6 +668,30 @@ class AdminPage{
 			echo '</div>';
 		}
 
+
+		if($filteroptions){
+			echo '<div class="uk-align-left">';
+			printf('<form method="get" ACTION="%s">', $_SERVER[REQUEST_URI]);
+			echo '<label for="'.$pager->prefix().'filter'.'">Show: </label><select name="'.$pager->prefix().'filter'.'">';
+			foreach ($filteroptions as $key => $value) {
+				if($pager->get_filter() == $value){
+					echo "<option value='$value' selected=selected>$key";
+				}
+				else{
+					echo "<option value='$value'>$key";
+				}
+			}
+			echo '</select>';
+
+						
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
+			}
+
+
+			echo '<input type="submit" value="submit" /></form>'; 
+			echo '</div>';
+		}
 
 		if($search_on){
 			
