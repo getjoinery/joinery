@@ -191,7 +191,7 @@
 			$new_name = str_replace('.', $rand_string, $thisfile->name);
 			$new_name = str_replace(' ', '_', $new_name);
 			// Removes special chars. 
-			$new_name = preg_replace('/[^A-Za-z0-9\-\_]/', '', $new_name); 
+			$new_name = preg_replace('/[^A-Za-z0-9\.\-\_]/', '', $new_name); 
 			// Replaces multiple hyphens with single one. 
 			$new_name = preg_replace('/_+/', '_', $new_name);
 			
