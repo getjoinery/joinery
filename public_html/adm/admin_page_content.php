@@ -23,7 +23,7 @@
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$page_content->authenticate_write($session);
-		$page_content->soft_delete();
+		$page_content->undelete();
 
 		header("Location: /admin/admin_page_contents");
 		exit();				
@@ -47,6 +47,9 @@
 	$options['altlinks'] += array('Delete Content' => '/admin/admin_page_content_permanent_delete?pac_page_content_id='.$page_content->key);
 	if(!$page_content->get('pac_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = '/admin/admin_page_content?action=delete&pac_page_content_id='.$page_content->key;
+	}
+	else if($_SESSION['permission'] >= 8){
+		$options['altlinks']['Restore Soft Delete'] = '/admin/admin_page_content?action=undelete&pac_page_content_id='.$page_content->key;
 	}
 
 	$page->begin_box($options);
