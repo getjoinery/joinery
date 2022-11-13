@@ -48,7 +48,7 @@ class CouponCode extends SystemBase {
 		'ccd_delete_time' => array('type'=>'timestamp(6)'),
 	);
 			
-	public static $required_fields = array('ccd_percent_discount', 'ccd_amount_discount');
+	public static $required_fields = array();
 
 	public static $field_constraints = array(
 		'ccd_code' => array(
