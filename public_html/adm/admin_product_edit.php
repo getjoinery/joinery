@@ -133,6 +133,7 @@
 	
 	$validation_rules = array();
 	$validation_rules['pro_name']['required']['value'] = 'true';
+	$validation_rules['pro_link']['required']['value'] = 'true';
 	$validation_rules['pro_max_cart_count']['required']['value'] = 'true';
 	$validation_rules['pro_max_purchase_count']['required']['value'] = 'true';
 	$validation_rules['pro_requirements']['required']['value'] = 'true';
