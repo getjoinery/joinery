@@ -114,12 +114,16 @@
 	if($coupon_code->key){
 		echo $formwriter->hiddeninput('ccd_coupon_code_id', $coupon_code->key);
 		echo $formwriter->hiddeninput('action', 'edit');
+		$is_active = $coupon_code->get('ccd_is_active');
+	}
+	else{
+		$is_active = 1;
 	}
 	
 	echo $formwriter->textinput('Coupon code', 'ccd_code', NULL, 100, $coupon_code->get('ccd_code'), '', 255, '');	
 	
 	$optionvals = array("Inactive"=>0, "Active"=>1);
-	echo $formwriter->dropinput("Active?", "ccd_is_active", "ctrlHolder", $optionvals, $coupon_code->get('ccd_is_active'), '', FALSE);
+	echo $formwriter->dropinput("Active?", "ccd_is_active", "ctrlHolder", $optionvals, $is_active, '', FALSE);
 
 	echo $formwriter->textinput('Amount of discount ('.$currency_symbol.')', 'ccd_amount_discount', NULL, 100, $coupon_code->get('ccd_amount_discount'), '', 255, '');
 	
