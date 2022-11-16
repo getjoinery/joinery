@@ -197,11 +197,7 @@
                       Transmuting Poisonous Emotions into Healing Medicines [1 hour]
                     </p>
                     <p class="mt-3 text-base text-gray-500">
-According to Daniel Goleman, the Dalai Lama said there is not a word in the Tibetan language that is equivalent to the English word “emotion.” The Sanskrit word kleshas is often translated into English as: poisons, negative emotions, vexations, afflictions, defilements, disturbing emotions, mind poisons, neurosis, and unwholesome roots. In Buddhism, these kleshas are considered to be the very roots of samsaric existence, and the poisons that cause great suffering. In our complex postmodern culture and personalities, it has become quite problematic to express these negative emotions in postmodern social groups. This has led to suppressing these negative emotions and pretending that one has gotten rid of them when they actually have just become unconscious and remain quite active. Two examples of such suppressed and unconscious poisons would be passive aggressiveness, and hidden resentment. We all know someone who is suffering from such a performative contradiction (shadow). The aggressiveness and resentment are only unseen by the individuals that have suppressed them. They are completely visible to everyone else. After returning from a meeting with the Dalai Lama, Daniel Goleman declared that “thoughts are private, and emotions are public.” Everyone can see and feel our suppressed poisonous emotions except the one who has suppressed them. Our emotions, including the so-called suppressed ones, are indeed public.
-
-
-
-These poisons are our conscious and unconscious biases for and against specific things that represent the apparent conflicts of the dualistic little mind, that can be discerned and witnessed by the nondual big mind. These apparent conflicts are what the poem big mind is pointing to as "the mind's disease," or "the 3 poisons." It is possible to cultivate the skillful means to transmute these poisons into medicine.
+The Sanskrit word kleshas, often translated into English as: poisons, negative emotions, vexations, afflictions, defilements, disturbing emotions, mind poisons, neurosis, and unwholesome roots.The very roots of  samsaric existence, these poisons are conscious and unconscious biases for and against specific things representing the conflicts of dualistic little mind, that can be discerned and witnessed by nondual big mind. It is possible to cultivate skillful means to transmute these poisons into medicine.
 
 
                     </p>
