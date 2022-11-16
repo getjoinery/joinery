@@ -183,7 +183,7 @@
 
             <div class="flex flex-col rounded-lg shadow-lg overflow-hidden">
               <div class="flex-shrink-0">
-                <img class="h-48 w-full object-cover" src="/uploads/medium/Janel_True_Face_Activity-23_p9828a1.JPEG" alt="">
+                <img class="h-48 w-full object-cover" src="/uploads/small/choan_na5w4n9q.jpg" alt="">
               </div>
               <div class="flex-1 bg-white p-6 flex flex-col justify-between">
                 <div class="flex-1">
