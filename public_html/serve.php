@@ -22,7 +22,7 @@ if(file_exists($template_file)){
 
 //ROBOTS.TXT
 if($params[0] == 'robots.txt'){
-	$template_file = $template_directory.'/robots.php';
+	//$template_file = $template_directory.'/robots.php';
 	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/views/robots.php';
 	if(file_exists($template_file)){
 		require_once($template_file);
