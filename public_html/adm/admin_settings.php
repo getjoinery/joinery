@@ -62,7 +62,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> -1,
 		'page_title' => 'Settings',
 		'readable_title' => 'Settings',
 		'breadcrumbs' => array(
@@ -126,6 +126,8 @@
 
 	$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout'); 
 	echo $formwriter->dropinput("Checkout Type", "checkout_type", "ctrlHolder", $optionvals, $settings->get_setting('checkout_type'), '', FALSE);	
+	
+	echo $formwriter->textbox('Robots.txt entry', 'robots_text', 'ctrlHolder', 10, 80, $settings->get_setting('robots_text'), '', 'no');
 	
 	$blog_active = $settings->get_setting('blog_active');
 	if($blog_active){
