@@ -72,7 +72,7 @@
 					$q->execute();
 				}
 				catch(PDOException $e){
-					$dbhelper->handle_query_error($e);
+					echo $e->getMessage();
 				}				
 					
 				$sql = '
@@ -102,7 +102,7 @@
 					$q->execute();
 				}
 				catch(PDOException $e){
-					$dbhelper->handle_query_error($e);
+					echo $e->getMessage();
 				}	
 				
 					
@@ -114,7 +114,7 @@
 					$q->execute();
 				}
 				catch(PDOException $e){
-					$dbhelper->handle_query_error($e);
+					echo $e->getMessage();
 				}	
 				
 				
@@ -146,7 +146,7 @@
 					$q->setFetchMode(PDO::FETCH_OBJ);
 				}
 				catch(PDOException $e){
-					$dbhelper->handle_query_error($e);
+					echo $e->getMessage();
 				}	
 				
 				
@@ -181,7 +181,7 @@
 						$q->execute();
 					}
 					catch(PDOException $e){
-						$dbhelper->handle_query_error($e);
+						echo $e->getMessage();
 					}	
 					$row = $q->fetch();
 
@@ -201,7 +201,7 @@
 							$q->execute();
 						}
 						catch(PDOException $e){
-							$dbhelper->handle_query_error($e);
+							echo $e->getMessage();
 						}	
 						$row = $q->fetch();
 						$max_val = $row[max_val];
@@ -223,7 +223,7 @@
 							$q->execute();
 						}
 						catch(PDOException $e){
-							$dbhelper->handle_query_error($e);
+							echo $e->getMessage();
 						}	
 
 						//ADD IT TO THE COLUMN
@@ -236,7 +236,7 @@
 							$q->execute();
 						}
 						catch(PDOException $e){
-							$dbhelper->handle_query_error($e);
+							echo $e->getMessage();
 						}							
 					
 						
@@ -293,7 +293,7 @@
 							catch(PDOException $e){
 								//DO NOT HALT THE PROGRAM, JUST NOTE IT
 								echo 'ERROR: Could not alter column '.$field.' ('.$sql.')'. "<br>\n";
-								//$dbhelper->handle_query_error($e);
+								//echo $e->getMessage();
 							}								
 							
 						}
@@ -321,7 +321,7 @@
 						$q->execute();
 					}
 					catch(PDOException $e){
-						$dbhelper->handle_query_error($e);
+						echo $e->getMessage();
 					}	
 
 				}
@@ -350,7 +350,7 @@
 								$q->execute();
 							}
 							catch(PDOException $e){
-								$dbhelper->handle_query_error($e);
+								echo $e->getMessage();
 							}							
 						}
 					}
@@ -375,7 +375,7 @@
 				$q->execute();
 			}
 			catch(PDOException $e){
-				$dbhelper->handle_query_error($e);
+				echo $e->getMessage();
 			}	
 		}
 			
