@@ -223,6 +223,7 @@ class AdminPage{
 							<li><a href="/admin/admin_help" data-uk-icon="icon: question" title="Help" data-uk-tooltip></a></li> 
 							<?php if($_SESSION['permission'] == 10){ ?>
 							<li><a href="/admin/admin_settings" data-uk-icon="icon: grid" title="Settings" data-uk-tooltip></a></li>
+							<li><a href="/admin/admin_utilities" data-uk-icon="icon: grid" title="Utilities" data-uk-tooltip></a></li>
 							<?php } ?>
 							<li><a href="/logout" data-uk-icon="icon:  sign-out" title="Sign Out" data-uk-tooltip></a></li>
 							<li><a class="uk-navbar-toggle" data-uk-toggle data-uk-navbar-toggle-icon href="#offcanvas-nav" title="Offcanvas" data-uk-tooltip></a></li>
