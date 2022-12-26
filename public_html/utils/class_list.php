@@ -51,6 +51,8 @@
 	require_once( __DIR__ . '/../data/users_class.php');
 	require_once( __DIR__ . '/../data/videos_class.php');	
 	require_once( __DIR__ . '/../data/visitor_events_class.php');	
+	require_once( __DIR__ . '/../data/pages_class.php');	
+	require_once( __DIR__ . '/../data/components_class.php');
 
 	$classes = array(
 			'Address',
@@ -100,6 +102,8 @@
 			'ActivationCode',
 			'VisitorEvent',
 			'Video',
+			'Page',
+			'Component'
 		);			
 
 	
