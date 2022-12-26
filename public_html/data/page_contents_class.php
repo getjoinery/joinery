@@ -21,6 +21,8 @@ class PageContent extends SystemBase {
 	
 	public static $fields = array(
 		'pac_page_content_id' => 'ID of the page_content',
+		'pac_pag_page_id' => 'ID of the page the content is part of',
+		'pac_com_component_id' => 'ID of the component that the page content is part of',
 		'pac_location_name' => 'Location of the content',
 		'pac_title' => 'PageContent Title',
 		'pac_link' => 'Link of the page_content, if it is a standalone page',
@@ -35,6 +37,8 @@ class PageContent extends SystemBase {
 
 	public static $field_specifications = array(
 		'pac_page_content_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'pac_pag_page_id' => array('type'=>'int4'),
+		'pac_com_component_id' => array('type'=>'int4'),
 		'pac_location_name' => array('type'=>'varchar(255)'),
 		'pac_title' => array('type'=>'varchar(255)'),
 		'pac_link' => array('type'=>'varchar(255)'),
