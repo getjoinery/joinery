@@ -298,9 +298,9 @@ if($settings->get_setting('blog_active')){
 //PAGE CONTENTS.  DEFAULT IS TO USE THE /PAGE/ SUBDIRECTORY
 if($params[0] == 'page'){
 	if($settings->get_setting('page_contents_active')){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/page_contents_class.php');
+		require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
 
-		$page_content = PageContent::get_by_link($params[1]);		
+		$page = Page::get_by_link($params[1]);		
 
 		$template_file = $template_directory.'/page.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
