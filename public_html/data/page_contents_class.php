@@ -158,6 +158,11 @@ class MultiPageContent extends SystemMultiBase {
 		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		} 
 		
+		if (array_key_exists('page_id', $this->options)) {
+		 	$where_clauses[] = 'pac_pag_page_id = ?';
+		 	$bind_params[] = array($this->options['page_id'], PDO::PARAM_INT);
+		} 
+		
 		if (array_key_exists('link', $this->options)) {
 			$where_clauses[] = 'pac_link = ?';
 			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);

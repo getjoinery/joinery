@@ -5,6 +5,7 @@
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/content_versions_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/pages_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -55,12 +56,21 @@
 
 	$title = $page_content->get('pac_title');
 	$content = $page_content->get('pac_body');
+	$page_link = $page_content->get('pac_link');
+	if(!$page_link){
+		if($_GET['pac_link']){
+			$page_link = $_GET['pac_link'];
+		}
+	}
+	
+	
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if($_GET['cnv_content_version_id']){
 		$content_version = new ContentVersion($_GET['cnv_content_version_id'], TRUE);
 		$content = $content_version->get('cnv_content');
 		$title = $content_version->get('cnv_title');
 	}
+	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -104,7 +114,15 @@
 	echo $formwriter->textinput('Name for this content', 'pac_location_name', NULL, 100, $page_content->get('pac_location_name'), '', 255, '');	
 	echo $formwriter->textinput('Page title (optional)', 'pac_title', NULL, 100, $page_content->get('pac_title'), '', 255, '');		
 
-	echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/page/', 'pac_link', NULL, 100, $page_content->get('pac_link'), '', 255, '');	
+
+	$pages = new MultiPage(
+		);
+	$pages->load();
+	$optionvals = $pages->get_dropdown_array();
+
+	echo $formwriter->dropinput('Content in page', 'pac_pag_page_id', 'ctrlHolder', $optionvals, $page_content->get('pac_pag_page_id'), '', TRUE);
+
+	//echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/page/', 'pac_link', NULL, 100, $page_link, '', 255, '');	
 
 	
 	echo $formwriter->textinput('Script file (optional)', 'pac_script_filename', NULL, 100, $page_content->get('pac_script_filename'), '', 255, '');
