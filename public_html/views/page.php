@@ -24,7 +24,7 @@
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if(!$page->get('pag_is_published') || $page->get('pag_delete_time')){
+		if(!$page->get('pag_published_time') || $page->get('pag_delete_time')){
 			require_once(LibraryFunctions::display_404_page());	
 		}
 	}	
