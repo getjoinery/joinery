@@ -54,7 +54,7 @@
 				$page_content->save();
 			} 
 			catch (Exception $e){
-				echo 'Skipping '. $page_content->get('pac_location_name'). '<br>';
+				echo 'Skipping '. $page_content->get('pac_location_name'). ': '. $e->getMessage() . '<br>';
 			}		
 		}
 		else{
