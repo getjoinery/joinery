@@ -6,8 +6,8 @@ class SQLBuilder {
 	function __construct($table, $primary_key, $limit, $offset, $operation, $write_lock) {
 		$this->table = $table;
 		$this->primary_key = $primary_key;
-		$this->limit = $limit;
-		$this->offset = $offset;
+		$this->limit = (int)$limit;
+		$this->offset = (int)$offset;
 		$this->operation = $operation;
 		$this->write_lock = $write_lock;
 
