@@ -9,6 +9,8 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
+require_once($siteDir . '/data/page_contents_class.php');
+
 class PageException extends SystemClassException {}
 
 class Page extends SystemBase {
@@ -83,11 +85,31 @@ class Page extends SystemBase {
 				$content_out = str_replace('{{'.$var.'}}', $val, $content_out);
 			}
 
-			return $content_out;
 		}
 		else{
-			return $this->get('pag_body');
+			$content_out = $this->get('pag_body');
 		}
+		
+		//LOOK FOR PAGE CONTENTS AND REPLACE
+		
+		$search_criteria = array();
+		$search_criteria['page_id'] = $this->key;
+		$page_contents = new MultiPageContent(
+			$search_criteria,
+			//array($sort=>$sdirection),
+			//$numperpage,
+			//$offset
+			);	
+		$numrecords = $page_contents->count_all();	
+		$page_contents->load();		
+
+		foreach($page_contents as $page_content){
+			if($temp_content = $page_content->get_content()){
+				$content_out = str_replace('*!**'.$page_content->get('pac_link').'**!*', $temp_content, $content_out);
+			}
+		}		
+		
+		return $content_out;
 	}
 	
 	function save($debug=false) {
