@@ -458,6 +458,7 @@ class FormWriterMaster {
 			<script src="/adm/includes/Trumbowyg-master/dist/trumbowyg.min.js"></script>
 			<link rel="stylesheet" href="/adm/includes/Trumbowyg-master/dist/ui/trumbowyg.min.css">
 			<script src="/adm/includes/Trumbowyg-master/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
+			<script src="/adm/includes/Trumbowyg-master/dist/plugins/preformatted/trumbowyg.preformatted.min.js"></script>
 			<script src="/adm/includes/Trumbowyg-master/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
 			<script type="text/javascript">';
 			$output .= "
