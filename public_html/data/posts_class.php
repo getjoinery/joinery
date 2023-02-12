@@ -134,6 +134,8 @@ class Post extends SystemBase {
 
 	
 	function save_tags($tags_array){
+		$tags_array = array_filter($tags_array);
+
 		if(empty($tags_array)){
 			return false;
 		}
