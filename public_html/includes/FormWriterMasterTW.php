@@ -547,6 +547,7 @@ class FormWriterMasterTW {
 								['superscript', 'subscript'],
 								['link'],
 								['insertImage'],
+								['preformatted'],
 								['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
 								['unorderedList', 'orderedList'],
 								['horizontalRule'],
