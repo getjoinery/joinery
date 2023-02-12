@@ -53,8 +53,8 @@
 	}
 
 	$page->begin_box($options);
-	echo '<strong>Title:</strong> '.$page_content->get('pac_title').'<br />';
 	echo '<strong>Label:</strong> '.$page_content->get('pac_location_name').'<br />';	
+	echo '<strong>Content Slug:</strong> '.$page_content->get('pac_link').' (*!**' . $page_content->get('pac_link') . '**!*) <br />';
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($page_content->get('pac_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 	if($page_content->get('pac_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($page_content->get('pac_delete_time'), 'UTC', $session->get_timezone()).'<br />';
@@ -66,12 +66,11 @@
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
 	
+	
 
-	echo '<strong>Link:</strong> <a href="'.$page_content->get_url().'">'.$settings->get_setting('webDir_SSL'). $page_content->get_url().'</a><br />';	
 
-
-	echo '<iframe src="'.$page_content->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
-
+	//echo '<iframe src="'.$page_content->get('pac_body').'" width="100%" height="500" style="border:1px solid black;"></iframe>';
+	echo $page_content->get('pac_body');
 
 	$page->end_box();		
 	

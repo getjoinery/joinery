@@ -63,10 +63,7 @@ class PageContent extends SystemBase {
 	public static $initial_default_values = array(
 		'pac_create_time' => 'now()', 'pac_is_published' => FALSE
 		);
-
-	function get_url() {
-		return '/page/' . $this->get('pac_link');
-	}	
+	
 	
 	static function get_by_link($link){
 		$results = new MultiPageContent(array('link' => $link, 'deleted'=>false));
@@ -80,6 +77,12 @@ class PageContent extends SystemBase {
 		}
 	}
 	
+	function get_content(){
+		if($this->get('pac_published_time') && !$this->get('pac_delete_time')){
+			return $this->get('pac_body');
+		}
+	}
+	
 	function get_filled_content(){
 
 		//LOOK FOR THE SCRIPT FILE AND REPLACE CONTENT PLACEHOLDERS {{}}
@@ -87,7 +90,7 @@ class PageContent extends SystemBase {
 			$logic_path = LibraryFunctions::get_logic_file_path($this->get('pac_script_filename'));
 			require_once ($logic_path);
 
-			$content_out = $this->get('pac_body');
+			$content_out = $this->get_content();
 			
 			foreach($replace_values as $var=>$val){
 				$content_out = str_replace('{{'.$var.'}}', $val, $content_out);

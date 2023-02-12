@@ -82,7 +82,7 @@
 
 	echo '<strong>Link:</strong> <a href="'.$page->get_url().'">'.$settings->get_setting('webDir_SSL'). $page->get_url().'</a><br />';	
 
-/*
+
 	$headers = array("Content",  "Published", "Creator", "Status");
 	$altlinks = array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
@@ -109,11 +109,11 @@
 		array_push($rowvalues, LibraryFunctions::convert_time($page_content->get('pac_published_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
-		if($page->get('pac_delete_time')) {
+		if($page_content->get('pac_delete_time')) {
 			$status = 'Deleted';
 		} 
 		else {
-			if($page->get('pac_published_time')) {
+			if($page_content->get('pac_published_time')) {
 				$status = 'Published';
 			}
 			else{
@@ -125,7 +125,7 @@
 		$paget->disprow($rowvalues);
 	}
 	$paget->endtable($pager);
-*/
+
 
 
 	echo '<h3>Preview</h3>';

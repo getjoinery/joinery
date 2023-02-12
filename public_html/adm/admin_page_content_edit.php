@@ -112,7 +112,7 @@
 	}
 	
 	echo $formwriter->textinput('Name for this content', 'pac_location_name', NULL, 100, $page_content->get('pac_location_name'), '', 255, '');	
-	echo $formwriter->textinput('Page title (optional)', 'pac_title', NULL, 100, $page_content->get('pac_title'), '', 255, '');		
+	//echo $formwriter->textinput('Page title (optional)', 'pac_title', NULL, 100, $page_content->get('pac_title'), '', 255, '');		
 
 
 	$pages = new MultiPage(
@@ -120,12 +120,12 @@
 	$pages->load();
 	$optionvals = $pages->get_dropdown_array();
 
-	echo $formwriter->dropinput('Content in page', 'pac_pag_page_id', 'ctrlHolder', $optionvals, $page_content->get('pac_pag_page_id'), '', TRUE);
+	echo $formwriter->dropinput('Page', 'pac_pag_page_id', 'ctrlHolder', $optionvals, $page_content->get('pac_pag_page_id'), '', TRUE);
 
-	//echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/page/', 'pac_link', NULL, 100, $page_link, '', 255, '');	
+	echo $formwriter->textinput('Content slug (no spaces):', 'pac_link', NULL, 100, $page_link, '', 255, '');	
 
 	
-	echo $formwriter->textinput('Script file (optional)', 'pac_script_filename', NULL, 100, $page_content->get('pac_script_filename'), '', 255, '');
+	//echo $formwriter->textinput('Script file (optional)', 'pac_script_filename', NULL, 100, $page_content->get('pac_script_filename'), '', 255, '');
 	
 
 
