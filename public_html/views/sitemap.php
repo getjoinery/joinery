@@ -5,17 +5,17 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/pages_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 
-	$page = new PublicPageTW();
+	$paged = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Sitemap',
 	
 	);
-	$page->public_header($hoptions);
+	$paged->public_header($hoptions);
 	echo PublicPageTW::BeginPage('Sitemap');
 	echo PublicPageTW::BeginPanel();
 			
@@ -25,13 +25,13 @@
 
 
 		$search_criteria = array('published' => TRUE, 'has_link' => TRUE);
-		$page_contents = new MultiPageContent(
+		$pages = new MultiPage(
 			$search_criteria);	
-		$page_contents->load();
+		$pages->load();
 
 		echo '<ul>';
-		foreach ($page_contents as $page_content){
-			echo '<li><a href="/page/'.$page_content->get('pac_link').'">'.$page_content->get('pac_location_name').'</a></li>';
+		foreach ($pages as $page){
+			echo '<li><a href="/page/'.$page->get('pag_link').'">'.$page->get('pag_title').'</a></li>';
 		}
 		echo '</ul>';
 	}
@@ -84,5 +84,5 @@
 
 	echo PublicPageTW::EndPanel();
 	echo PublicPageTW::EndPage();
-	$page->public_footer(array('track'=>TRUE, 'is_404'=> 1));
+	$paged->public_footer(array('track'=>TRUE, 'is_404'=> 1));
 ?>
