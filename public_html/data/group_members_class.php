@@ -85,13 +85,9 @@ class GroupMember extends SystemBase {
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();
-		if ($this->get('grm_usr_user_id') != $current_user) {
-			// If the user's ID doesn't match , we have to make
-			// sure they have admin access, otherwise denied.
-			if ($session->get_permission() < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this group_member.');
-			}
+		if ($session->get_permission() < 5) {
+			throw new SystemAuthenticationError(
+				'Current user does not have permission to edit this group_member.');
 		}
 	}
 

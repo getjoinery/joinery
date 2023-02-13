@@ -48,7 +48,7 @@
 		$members = $group->get_member_list();
 			
 		foreach($members as $member){
-			$user= new User($member->get('grm_usr_user_id'), TRUE);
+			$user= new User($member->get('grm_foreign_key_id'), TRUE);
 			
 			if($user->get('usr_contact_preferences') == 0 && $email->get('eml_type') == Email::TYPE_MARKETING){
 				echo '<font color="red">Unsubscribed: '.$user->display_name() .'</font><br>';

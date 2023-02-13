@@ -12,20 +12,6 @@
 	$session->check_permission(5);
 	$session->set_return();
 	
-	/*
-	if($_POST['action'] == 'add'){
-		$group_member = new GroupMember(NULL);
-		$group_member->set('grm_name', $_POST['grm_name']);
-		$group_member->set('grm_usr_user_id_created', $session->get_user_id()); 
-		$group_member->prepare();
-		if(!$group_member->check_for_duplicates()){
-			$group_member->save();
-		}
-		else{
-			throw new GroupMemberException('There is already a group_member with that name.');
-		}
-	}
-	*/
 	
 	if($_POST['action'] == 'add_to_group'){
 		//ADD THE USER TO A GROUP

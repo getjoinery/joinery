@@ -47,7 +47,6 @@ class User extends SystemBase {
 		'fil_usr_user_id' => User::USER_DELETED,
 		'msg_usr_user_id_recipient' => 'delete',
 		'msg_usr_user_id_sender' => User::USER_DELETED,
-		//'grm_usr_user_id' => 'delete',
 		'grp_usr_user_id_created' => User::USER_DELETED,
 		'bkn_usr_user_id_booked' => User::USER_DELETED,
 		'bkn_usr_user_id_client' => User::USER_DELETED,
@@ -201,7 +200,7 @@ class User extends SystemBase {
 		if(!$group_nus_users = Group::get_by_name("Non-US users")){
 			$group_nus_users = Group::add_group('Non-US users', $this->key, 'user');
 		} 
-		
+
 		$group_all_users->add_member($this->key);
 		
 		if($address = $this->address()){

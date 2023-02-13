@@ -108,7 +108,7 @@
 			$members = $group->get_member_list();
 			
 			foreach($members as $member){
-				$user= new User($member->get('grm_usr_user_id'), TRUE);
+				$user= new User($member->get('grm_foreign_key_id'), TRUE);
 				if($user->get('usr_contact_preferences') != 0){
 					$group_total++;
 					$recipient_list[] = $user->key;
