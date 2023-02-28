@@ -170,7 +170,14 @@
 			}
 		}
 		
+
+
 		$this_out .= ' | <a href="/admin/admin_order_item_edit?odi_order_item_id=' . $order_item->key . '">[edit]</a>';
+		
+		if($order_item->get('odi_stripe_subscription_id')){
+			$this_out .= ' | <a target=
+			_blank" href="https://dashboard.stripe.com/subscriptions/' . $order_item->get('odi_stripe_subscription_id') . '">[see '. $order_item->get('odi_stripe_subscription_id').' on stripe]</a>';
+		}
 	
 		$order_items_out[] = $this_out;
 
