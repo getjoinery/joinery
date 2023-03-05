@@ -2,7 +2,9 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';	
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');

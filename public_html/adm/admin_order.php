@@ -9,7 +9,9 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';	
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
