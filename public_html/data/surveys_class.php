@@ -9,6 +9,8 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
+require_once($siteDir.'/data/survey_answers_class.php');
+
 class SurveyException extends SystemClassException {}
 
 class Survey extends SystemBase {
@@ -49,6 +51,29 @@ class Survey extends SystemBase {
 	'svy_edited_time' => 'now()'
 	);	
 
+	function get_users_who_answered() {
+
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();	
+		$sql = 'SELECT count(*) as count, sva_usr_user_id FROM sva_survey_answers WHERE sva_svy_survey_id='.$this->key.' GROUP BY sva_usr_user_id';
+		$q = $dblink->prepare($sql);
+		$success = $q->execute();
+		$q->setFetchMode(PDO::FETCH_OBJ);
+
+		return $q;
+	}	
+
+	function get_num_users_who_answered() {
+
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();	
+		$sql = 'SELECT COUNT(DISTINCT sva_usr_user_id) as count FROM sva_survey_answers WHERE sva_svy_survey_id='.$this->key;
+		$q = $dblink->prepare($sql);
+		$success = $q->execute();
+		$q->setFetchMode(PDO::FETCH_OBJ);
+
+		return $q->fetch()->count;;
+	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
 		$current_user = $session->get_user_id();

@@ -63,7 +63,7 @@ class SurveyAnswer extends SystemBase {
 		}
 		return false;
 	}	
-	
+
 	static function get_answer($survey_id, $question_id, $user_id) {
 		
 		$answer = new MultiSurveyAnswer(array(

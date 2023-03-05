@@ -22,6 +22,7 @@
 		}
 	}
 
+	$validation_rules = array();
 	foreach ($survey_questions as $survey_question){
 		$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 		
@@ -41,13 +42,12 @@
 		}
 		
 		echo $formwriter->hiddeninput('survey_id', LibraryFunctions::encode($survey->key));
-		$validation_rules = array();
 		$validation_rules = $question->output_js_validation($validation_rules);
-		echo $formwriter->set_validate($validation_rules);
+
 		echo $question->output_question($formwriter,$answer_fill);
 	}
 
-
+	echo $formwriter->set_validate($validation_rules);
 	echo $formwriter->new_form_button('Submit');	
 	echo $formwriter->end_form();
   

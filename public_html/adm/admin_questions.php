@@ -15,7 +15,7 @@
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'question_id', 0, '');
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
+	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 	
 	
@@ -59,7 +59,7 @@
 		
 		
 		$rowvalues = array();
-		array_push($rowvalues, "Question ".$question->key.": <a href='/admin/admin_question?qst_question_id=$question->key'>".$question->get('qst_question')."</a>");	
+		array_push($rowvalues, "Question ".$question->key.": ".$question->get('qst_question')." <a href='/admin/admin_question?qst_question_id=$question->key'> [edit]</a>");	
 		array_push($rowvalues, $question->get('qst_type'));
 		array_push($rowvalues, LibraryFunctions::convert_time($question->get('qst_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($question->get('qst_published_time'), 'UTC', $session->get_timezone()));

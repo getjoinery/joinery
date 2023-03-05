@@ -9,6 +9,9 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/question_options_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/survey_answers_class.php');
+
 require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 class QuestionException extends SystemClassException {}
@@ -205,6 +208,51 @@ class Question extends SystemBase {
 			
 			$optionvals = $options->get_dropdown_array();
 			echo $formwriter->checkboxlist($this->get('qst_question'), $field_name, NULL, $optionvals, $value, '', TRUE);			
+		}
+	}
+
+	function get_answer_readable($sva_survey_answer_id){
+		$answer = new SurveyAnswer($sva_survey_answer_id, TRUE);
+		
+		if ($this->get('qst_type') == Question::TYPE_SHORT_TEXT){
+			return $answer->get('sva_answer');
+		}
+		else if ($this->get('qst_type') == Question::TYPE_LONG_TEXT){
+			return $answer->get('sva_answer');
+		}
+		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
+			$options = new MultiQuestionOption(
+				array('question_id'=> $this->key),
+				NULL,		//SORT BY => DIRECTION
+				NULL,  //NUM PER PAGE
+				NULL);  //OFFSET
+			$options->load();
+			
+			$answers_out = array();
+			$answers_readable = explode(',', $answer->get('sva_answer'));
+			foreach($answers_readable as $answer_readable){
+				foreach($options as $option){
+					if($answer_readable == $option->get('qop_question_option_value')){
+						$answers_out[] = $option->get('qop_question_option_label') . '('.$option->get('qop_question_option_value').')';
+					}
+				}
+			}
+
+			return implode(", ", $answers_out);
+		}
+		else {
+			$options = new MultiQuestionOption(
+				array('question_id'=> $this->key),
+				NULL,		//SORT BY => DIRECTION
+				NULL,  //NUM PER PAGE
+				NULL);  //OFFSET
+			$options->load();
+			
+			foreach($options as $option){
+				if($answer->get('sva_answer') == $option->get('qop_question_option_value')){
+					return $option->get('qop_question_option_label') . '('.$option->get('qop_question_option_value').')';
+				}
+			}
 		}
 	}
 	
