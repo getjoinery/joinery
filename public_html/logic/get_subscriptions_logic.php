@@ -5,8 +5,11 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));	
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
-
+	//require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';
+	
 	$session = SessionControl::get_instance();	
 	$session->check_permission(0);
 	

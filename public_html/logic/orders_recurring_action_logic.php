@@ -5,8 +5,11 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
-
+	//require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';
+	
 	$settings = Globalvars::get_instance();
 	if(!$settings->get_setting('products_active')){
 		header("HTTP/1.0 404 Not Found");

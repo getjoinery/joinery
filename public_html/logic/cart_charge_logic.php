@@ -1,5 +1,8 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/stripe-php/init.php');
+	//require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/stripe-php/init.php');
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
