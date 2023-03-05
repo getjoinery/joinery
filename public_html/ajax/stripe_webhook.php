@@ -1,6 +1,9 @@
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
-	require_once( __DIR__ . '/../includes/stripe-php/init.php');
+	//require_once( __DIR__ . '/../includes/stripe-php/init.php');
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';
 	require_once( __DIR__ . '/../data/events_class.php');
 	require_once( __DIR__ . '/../data/orders_class.php');
 
