@@ -2,7 +2,8 @@
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	
-	require_once($siteDir.'/includes/stripe-php/init.php');
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';	
 	require_once($siteDir.'/includes/Activation.php');
 	require_once($siteDir.'/includes/ShoppingCart.php');
 		require_once($siteDir . '/data/files_class.php');
@@ -18,7 +19,7 @@
 	
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require $composer_dir.'autoload.php';
+	require_once $composer_dir.'autoload.php';
 use MailchimpAPI\Mailchimp;
 
 echo 'turned off';

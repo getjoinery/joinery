@@ -9,8 +9,11 @@
 	require_once( __DIR__ . '/../data/event_registrants_class.php');
 	require_once( __DIR__ . '/../data/event_sessions_class.php');
 	
-	require_once( __DIR__ . '/../includes/stripe-php/init.php');
-
+	//require_once( __DIR__ . '/../includes/stripe-php/init.php');
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';	
+	
 	require_once( __DIR__ . '/../data/event_logs_class.php');
 	
 	$event_log = new EventLog(NULL);
@@ -71,8 +74,10 @@
 			$order_item = new OrderItem($event_registrant->get('evr_odi_order_item_id'), TRUE);
 			if($order_item->get('odi_is_subscription')){
 				//CHECK SUBSCRIPTION STATUS
-				require_once($siteDir.'/includes/stripe-php/init.php');
+				//require_once($siteDir.'/includes/stripe-php/init.php');
 				$settings = Globalvars::get_instance();
+				$composer_dir = $settings->get_setting('composerAutoLoad');	
+				require_once $composer_dir.'autoload.php';	
 				try{
 					if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 						$api_key = $settings->get_setting('stripe_api_key_test');

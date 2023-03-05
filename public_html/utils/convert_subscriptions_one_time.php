@@ -13,10 +13,11 @@
 	require_once($siteDir . '/data/events_class.php');
 	require_once($siteDir . '/data/order_items_class.php');
 
-	require_once($siteDir.'/includes/stripe-php/init.php');
-
+	//require_once($siteDir.'/includes/stripe-php/init.php');
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';	
+	
 	$session = SessionControl::get_instance();
-	$settings = Globalvars::get_instance();
 	
 	$session->check_permission(0);
 	$session->set_return();
