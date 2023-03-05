@@ -22,12 +22,12 @@
 	}
 	else if($_POST['action'] == 'removequestion'){
 		$survey_question = new SurveyQuestion($_REQUEST['srq_survey_question_id'], TRUE);
-		$survey_question->authenticate_write();
+		$survey_question->authenticate_write($session);
 		$survey_question->permanent_delete();
 	}
 	else if($_POST['action'] == 'removesurvey'){
 		$survey = new Survey($_REQUEST['svy_survey_id'], TRUE);
-		$survey->authenticate_write();
+		$survey->authenticate_write($session);
 		$survey->permanent_delete();
 	}
 	
@@ -121,8 +121,9 @@
 		array_push($rowvalues, '<a href="/admin/admin_survey_answers?survey_id='.$survey->key.'&question_id='.$survey_question->key.'">answers</a>');
 		
 		
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
+		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_survey">
 		<input type="hidden" class="hidden" name="action" id="action" value="removequestion" />
+		<input type="hidden" class="hidden" name="svy_survey_id" id="action" value="'.$survey->key.'"  />
 		<input type="hidden" class="hidden" name="srq_survey_question_id" value="'.$survey_question->key.'" />
 		<button type="submit">Remove</button>
 		</form>';

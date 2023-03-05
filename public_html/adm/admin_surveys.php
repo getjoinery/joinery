@@ -31,10 +31,7 @@
 		'OR');
 	$numrecords = $surveys->count_all();
 	$surveys->load();
-
-
-
-
+	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -77,11 +74,13 @@
 		$rowvalues = array();
 
 
-		array_push($rowvalues, "<a href='/admin/admin_survey?svy_survey_id=$survey->key'>".$survey->get('svy_name')."</a> ");
+		array_push($rowvalues, $survey->get('svy_name') ." <a href='/admin/admin_survey?svy_survey_id=$survey->key'>[edit]</a>");
 		
-		array_push($rowvalues, $num_questions);
+		array_push($rowvalues, $num_questions." questions</a> ");
 
-		array_push($rowvalues, LibraryFunctions::convert_time($survey->get('svy_update_time'), "UTC", $session->get_timezone(), 'M j, Y')); 
+		//array_push($rowvalues, LibraryFunctions::convert_time($survey->get('svy_update_time'), "UTC", $session->get_timezone(), 'M j, Y')); 
+		
+		array_push($rowvalues, '<a href="/admin/admin_survey_users?svy_survey_id='.$survey->key.'">'.$survey->get_num_users_who_answered().' answers</a>');
 
 		if($survey->get('svy_delete_time')){
 			array_push($rowvalues, '<b>Deleted</b>');
