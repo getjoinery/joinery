@@ -9,7 +9,10 @@
 	require_once( __DIR__ . '/../data/event_registrants_class.php');
 	require_once( __DIR__ . '/../data/event_sessions_class.php');
 	
-	require_once( __DIR__ . '/../includes/stripe-php/init.php');
+	//require_once( __DIR__ . '/../includes/stripe-php/init.php');
+	$settings = Globalvars::get_instance();
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';
 
 	$settings = Globalvars::get_instance();
 	
