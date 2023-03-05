@@ -107,7 +107,7 @@
 	echo $formwriter->dropinput("Group can access", "fil_grp_group_id", "ctrlHolder", $optionvals, $file->get('fil_grp_group_id'), '', FALSE, TRUE);
 
 	$events = new MultiEvent(
-		NULL,  //SEARCH 
+		array(),  //SEARCH 
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
