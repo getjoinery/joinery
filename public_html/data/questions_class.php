@@ -9,8 +9,8 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/question_options_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/survey_answers_class.php');
+require_once($siteDir . '/data/question_options_class.php');
+require_once($siteDir . '/data/survey_answers_class.php');
 
 require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
