@@ -244,10 +244,37 @@
 	$page->end_box();
 
 	if($question->key){
+		
+		?>
+		<script>
+		$(document).ready(function() {
+			
+				if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_SHORT_TEXT; ?>) {
+					$('#answersbox').hide();
+				}
+				else if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_LONG_TEXT; ?>) {
+					$('#answersbox').hide();
+				}
+				else $('#answersbox').show(); 
+			
+			
+			$('#qst_type').change(function () {
+				if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_SHORT_TEXT; ?>) {
+					$('#answersbox').hide();
+				}
+				else if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_LONG_TEXT; ?>) {
+					$('#answersbox').hide();
+				}
+				else $('#answersbox').show(); // hide div 
+			});
+		});
+		</script>
+		<?php		
+		
 		$pageoptions['title'] = "Edit Answers";
 		$pageoptions['width'] = 'uk-width-1-2';
 		$page->begin_box($pageoptions);
-
+		echo '<span id="answersbox">';
 		$question_options = $question->get_question_options();
 		if(!count($question_options)){
 			echo 'None';
@@ -276,8 +303,9 @@
 		echo $formwriter->end_buttons();
 		echo $formwriter->end_form();
 
-
-		$page->end_box();	
+		echo '</span>';
+		$page->end_box(); 
+		
 	}
 
 	$page->admin_footer();

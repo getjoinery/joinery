@@ -89,14 +89,8 @@
 	);
 
 
-	if($survey->get('svy_delete_time')){
-		echo 'Status: Deleted at '.LibraryFunctions::convert_time($survey->get('svy_delete_time'), 'UTC', $session->get_timezone()).'<br />';
-	}
-	else{
-		echo '<p>Link: <a href="/survey?survey_id='.LibraryFunctions::encode($survey->key).'">/survey?survey_id='.LibraryFunctions::encode($survey->key).'</a></p><br />';
-	}
 
-	$headers = array('Question', 'Answers', 'Action');
+	$headers = array('Question',  'Action');
 	$altlinks = array();
 	if(!$survey->get('svy_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = '/admin/admin_survey?action=delete&svy_survey_id='.$survey->key;
@@ -112,13 +106,21 @@
 	);
 	$page->tableheader($headers, $table_options, $pager);
 
+	if($survey->get('svy_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($survey->get('svy_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+	}
+	else{
+		echo '<p>Link: <a href="/survey?survey_id='.LibraryFunctions::encode($survey->key).'">/survey?survey_id='.LibraryFunctions::encode($survey->key).'</a></p><br />';
+	}
+
+
 	foreach ($survey_questions as $survey_question){
 		$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 
 		$rowvalues = array();
 		array_push($rowvalues, '<a href="/admin/admin_question?qst_question_id='.$survey_question->get('srq_qst_question_id').'">'.$question->get('qst_question').'</a>');
 
-		array_push($rowvalues, '<a href="/admin/admin_survey_answers?survey_id='.$survey->key.'&question_id='.$survey_question->key.'">answers</a>');
+		//array_push($rowvalues, '<a href="/admin/admin_survey_answers?survey_id='.$survey->key.'&question_id='.$survey_question->key.'">answers</a>');
 		
 		
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_survey">
