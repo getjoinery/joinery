@@ -409,8 +409,13 @@
 						<h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Sessions</h2>
 						<div class="flow-root mt-6 prose">
 						 <?php 
-						 foreach($event_sessions as $aevent_session){			
-							echo '<a href="/profile/event_sessions_course?session_number='.$aevent_session->get('evs_session_number').'&event_id='. $event->key.'">Session ' . $aevent_session->get('evs_session_number') . ' - '.$aevent_session->get('evs_title').'</a><br />';
+						 foreach($event_sessions as $aevent_session){	
+							if($aevent_session->get('evs_session_number')){
+								echo '<a href="/profile/event_sessions_course?session_number='.$aevent_session->get('evs_session_number').'&event_id='. $event->key.'">Session ' . $aevent_session->get('evs_session_number') . ' - '.$aevent_session->get('evs_title').'</a><br />';
+							}
+							else{
+								echo '<a href="/profile/event_sessions_course?event_id='. $event->key.'">'.$aevent_session->get('evs_title').'</a><br />';
+							}
 
 						}
 						?>

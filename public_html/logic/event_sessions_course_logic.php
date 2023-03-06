@@ -20,7 +20,7 @@
 	
 	$event_id = LibraryFunctions::fetch_variable('event_id', '', TRUE, '', TRUE, 'int');
 	$session_number = LibraryFunctions::fetch_variable('session_number', 0, False, '', TRUE, 'int');
-	
+
 	$event = new Event($event_id, TRUE);
 
 	if($event->get('evt_session_display_type') != 2){
