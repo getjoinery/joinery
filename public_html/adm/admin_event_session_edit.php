@@ -203,6 +203,7 @@
 	//$validation_rules['evs_start_time_date']['required']['value'] = 'true';
 	$validation_rules['evs_title']['required']['value'] = 'true';
 	$validation_rules['evs_session_number']['required']['value'] = 'true';
+	$validation_rules['evs_session_number']['digits']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 	
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_event_session_edit');
@@ -216,7 +217,34 @@
 		echo $formwriter->hiddeninput('evs_evt_event_id', $event->key);
 	}	
 	echo $formwriter->textinput('Title', 'evs_title', NULL, 100, @$event_session->get('evs_title'), '', 255, '');
-	echo $formwriter->textinput('Session number (number, for ordering)', 'evs_session_number', NULL, 100, @$event_session->get('evs_session_number'), '', 255, '');
+	
+	
+	//FILL IN A SESSION NUMBER IF IT'S BLANK
+	$event_session_fill = $event_session->get('evs_session_number');
+	if(!$event_session_fill){
+
+		//GET THE LOWEST SESSION NUMBER
+		$searches = array();
+		$searches['event_id'] = $event->key;
+		$event_sessions_search = new MultiEventSessions(
+			$searches,
+			array('session_number_then_title'=>'DESC'),
+			NULL,
+			NULL,
+			'AND'
+		);
+		
+		if(!$event_sessions_search->count_all()){	
+			echo 'There are no sessions.';
+			exit();
+		}
+		
+		$event_sessions_search->load();
+		$event_session_fill = $event_sessions_search->get(0)->get('evs_session_number') + 1;
+	}
+	
+	
+	echo $formwriter->textinput('Session number (number, for ordering)', 'evs_session_number', NULL, 100, @$event_session_fill, '', 255, '');
 	echo $formwriter->datetimeinput('Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_start_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
 	echo $formwriter->datetimeinput('Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_end_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
