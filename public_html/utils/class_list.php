@@ -53,6 +53,7 @@
 	require_once( __DIR__ . '/../data/visitor_events_class.php');	
 	require_once( __DIR__ . '/../data/pages_class.php');	
 	require_once( __DIR__ . '/../data/components_class.php');
+	require_once( __DIR__ . '/../data/product_requirements_class.php');
 
 	$classes = array(
 			'Address',
@@ -103,7 +104,8 @@
 			'VisitorEvent',
 			'Video',
 			'Page',
-			'Component'
+			'Component', 
+			'ProductRequirement'
 		);			
 
 	
