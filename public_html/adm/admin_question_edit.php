@@ -9,13 +9,17 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 
-	if (isset($_REQUEST['qst_question_id'])) {
+	if ($_REQUEST['qst_question_id']) {
 		$question = new Question($_REQUEST['qst_question_id'], TRUE);
 	} else {
 		$question = new Question(NULL);
 	}
 
 	if($_REQUEST['action'] == 'add_question_option'){
+		if(!isset($question->key)){
+			throw new SystemDisplayablePermanentError("You cannot add a question option when there is no question.  Submit your question first.");
+			exit();					
+		}
 		$question_option = new QuestionOption(NULL);
 		$question_option->set('qop_qst_question_id', $question->key);
 		$question_option->set('qop_question_option_label', $_REQUEST['qop_question_option_label']);
@@ -87,6 +91,10 @@
 		LibraryFunctions::redirect('/admin/admin_question?qst_question_id='. $question->key);
 		exit;		
 	}
+
+
+
+
 
 
 	$page = new AdminPage();
@@ -244,8 +252,8 @@
 	
 	$page->end_box();
 
-	if($question->key){
-		
+
+
 		?>
 		<script>
 		$(document).ready(function() {
@@ -288,6 +296,7 @@
 			
 		}
 		echo '</ul>';
+
 		if($question->key && $num_options >= 1 && $question->get('qst_type') == Question::TYPE_CHECKBOX){
 			//DON'T SHOW THE NEW QUESTION BOX
 		}
@@ -314,8 +323,8 @@
 			echo '</span>';
 			$page->end_box(); 
 		}
-		
-	}
+	
+	
 
 	$page->admin_footer();
 

@@ -21,7 +21,7 @@ class ProductRequirementInstance extends SystemBase {
 	public static $tablename = 'pri_product_requirement_instances';
 	public static $pkey_column = 'pri_product_requirement_instance_id';
 	public static $permanent_delete_actions = array(
-		'pri_product_requirement_submission_id' => 'delete',	
+		'pri_product_requirement_instance_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
