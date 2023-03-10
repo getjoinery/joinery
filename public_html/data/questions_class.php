@@ -48,7 +48,7 @@ class Question extends SystemBase {
 		'qst_is_published' => 'Is this question published?',
 		'qst_published_time' => 'Time published',
 		'qst_create_time' => 'Time Created',
-		'qst_delete_time' => 'Time deleted'
+		'qst_delete_time' => 'Time deleted',
 	);
 
 	public static $field_specifications = array(
@@ -113,6 +113,7 @@ class Question extends SystemBase {
 	
 	function validate_answers($answers){
 		$validation_options = unserialize($this->get('qst_validate')); 
+
 		if(array_key_exists('required', $validation_options)){
 			if($answers == '' || $answers === NULL || count($answers) == 0){
 				return 'You did not answer this question: '. $this->get('qst_question');
@@ -120,49 +121,50 @@ class Question extends SystemBase {
 		}
 		if(array_key_exists('integer', $validation_options)){
 			if(!is_integer($answers)){
-				return 'This answer to this question needs to be a number: '. $answers;
+				return 'This answer to this question "'.$this->get('qst_question').'" needs to be a number: '. $answers;
 			}			
 		}
 		if(array_key_exists('decimal', $validation_options)){
 			if(!preg_match('/^\d+\.\d+$/',$number)){
-				return 'This answer to this question needs to be a decimal number: '. $answers;
+				return 'This answer to this question "'.$this->get('qst_question').'" needs to be a decimal number: '. $answers;
 			}				
 		}
 		if(array_key_exists('max_length', $validation_options)){
 			if(strlen($answers) > $validation_options['max_length']){
-				return 'This answer to this question is too long: '. $answers;
+				return 'This answer to this question "'.$this->get('qst_question').'" is too long: '. $answers;
 			}
 		}	
 		if(array_key_exists('min_length', $validation_options)){
 			if(strlen($answers) < $validation_options['min_length']){
-				return 'This answer to this question is too short: '. $answers;
+				return 'This answer to this question "'.$this->get('qst_question').'" is too short: '. $answers;
 			}
 		}
 		if(array_key_exists('max_value', $validation_options)){
 			if($answers > $validation_options['max_value']){
-				return 'This answer to this question is too large: '. $answers;
+				return 'This answer to this question "'.$this->get('qst_question').'" is too large: '. $answers;
 			}
 		}
 		if(array_key_exists('min_value', $validation_options)){
 			if($answers < $validation_options['min_value']){
-				return 'This answer to this question is too small: '. $answers;
+				return 'This answer to this question "'.$this->get('qst_question').'" is too small: '. $answers;
 			}
 		}		
 		return 'valid';
 	}
 	
-	function output_question($formwriter, $value=NULL){
+	function output_question($formwriter, $value=NULL, $append_text=NULL){
 		$field_name = 'question_'.$this->key;
 		$field_max_length = 255;
+		$question_text = $this->get('qst_question') . $append_text;
 		if($this->get('max_length')){
 			$field_max_length = $this->get('max_length');
 		}
 		
 		if ($this->get('qst_type') == Question::TYPE_SHORT_TEXT){
-			return $formwriter->textinput($this->get('qst_question'), $field_name , NULL, 100, $value, '', $field_max_length, '');
+			return $formwriter->textinput($question_text, $field_name , NULL, 100, $value, '', $field_max_length, '');
 		}
 		else if ($this->get('qst_type') == Question::TYPE_LONG_TEXT){
-			return $formwriter->textbox($this->get('qst_question'), $field_name, NULL, 5, 80, $value, '', 'no');
+			return $formwriter->textbox($question_text, $field_name, NULL, 5, 80, $value, '', 'no');
 		}
 		else if ($this->get('qst_type') == Question::TYPE_DROPDOWN){
 			$options = new MultiQuestionOption(
@@ -173,7 +175,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->dropinput($this->get('qst_question'), $field_name, NULL, $optionvals, $value, '', TRUE);
+			echo $formwriter->dropinput($question_text, $field_name, NULL, $optionvals, $value, '', TRUE);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_RADIO){
 			$options = new MultiQuestionOption(
@@ -185,7 +187,7 @@ class Question extends SystemBase {
 
 			$checkedval = NULL;
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->radioinput($this->get('qst_question'), $field_name, "radioinput", $optionvals, $value, NULL, "", NULL);		
+			echo $formwriter->radioinput($question_text, $field_name, "radioinput", $optionvals, $value, NULL, "", NULL);		
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX){
 			$options = new MultiQuestionOption(
@@ -194,9 +196,11 @@ class Question extends SystemBase {
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
 			$options->load();
+
 			$truevalue = $options->get(0)->get('qop_question_option_value');
+			
 			//TODO ERROR CHECKING HERE 
-			echo $formwriter->checkboxinput($this->get('qst_question'), $field_name, NULL, NULL, $value, $truevalue, '');			
+			echo $formwriter->checkboxinput($question_text, $field_name, NULL, NULL, $truevalue, $value, '');			
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(
@@ -207,7 +211,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->checkboxlist($this->get('qst_question'), $field_name, NULL, $optionvals, $value, '', TRUE);			
+			echo $formwriter->checkboxlist($question_text, $field_name, NULL, $optionvals, $value, '', TRUE);			
 		}
 	}
 
@@ -311,7 +315,57 @@ class Question extends SystemBase {
 
 
 	function prepare() {
+		
+		//CHECK TO MAKE SURE WE HAVE AT LEAST ONE OPTION FOR QUESTION TYPES WITH OPTIONS
+		if ($this->get('qst_type') == Question::TYPE_DROPDOWN){
+			$options = new MultiQuestionOption(
+				array('deleted'=>false, 'question_id'=> $this->key),
+				NULL,		//SORT BY => DIRECTION
+				NULL,  //NUM PER PAGE
+				NULL);  //OFFSET
 
+			if(!$options->count_all()){
+				throw new QuestionException(
+				'This question "'.$this->get('qst_question').'" requires some answer options.');
+				exit;
+			}
+		}
+		else if ($this->get('qst_type') == Question::TYPE_RADIO){
+			$options = new MultiQuestionOption(
+				array('deleted'=>false, 'question_id'=> $this->key),
+				NULL,		//SORT BY => DIRECTION
+				NULL,  //NUM PER PAGE
+				NULL);  //OFFSET
+			if(!$options->count_all()){
+				throw new QuestionException(
+				'This question "'.$this->get('qst_question').'" requires some answer options.');
+				exit;
+			}		
+		}
+		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX){
+			$options = new MultiQuestionOption(
+				array('deleted'=>false, 'question_id'=> $this->key),
+				NULL,		//SORT BY => DIRECTION
+				NULL,  //NUM PER PAGE
+				NULL);  //OFFSET
+			if(!$options->count_all()){
+				throw new QuestionException(
+				'This question "'.$this->get('qst_question').'" requires some answer options.');
+				exit;
+			}			
+		}
+		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
+			$options = new MultiQuestionOption(
+				array('deleted'=>false, 'question_id'=> $this->key),
+				NULL,		//SORT BY => DIRECTION
+				NULL,  //NUM PER PAGE
+				NULL);  //OFFSET
+			if(!$options->count_all()){
+				throw new QuestionException(
+				'This question "'.$this->get('qst_question').'" requires some answer options.');
+				exit;
+			}			
+		}
 	}	
 	
 	
@@ -349,6 +403,16 @@ class MultiQuestion extends SystemMultiBase {
 		if (array_key_exists('user_id', $this->options)) {
 		 	$where_clauses[] = 'qst_usr_user_id = ?';
 		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
+		} 
+
+		if (array_key_exists('identifier', $this->options)) {
+		 	$where_clauses[] = 'qst_identifier = ?';
+		 	$bind_params[] = array($this->options['identifier'], PDO::PARAM_INT);
+		} 
+
+		if (array_key_exists('identifier_not', $this->options)) {
+		 	$where_clauses[] = '(qst_identifier != ? OR qst_identifier IS NULL)';
+		 	$bind_params[] = array($this->options['identifier_not'], PDO::PARAM_INT);
 		} 
 		
 		if (array_key_exists('link', $this->options)) {

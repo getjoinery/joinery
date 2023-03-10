@@ -174,18 +174,23 @@
 		
 
 
-		$this_out .= ' | <a href="/admin/admin_order_item_edit?odi_order_item_id=' . $order_item->key . '">[edit]</a>';
+		$this_out .= ' | <a href="/admin/admin_order_item_edit?odi_order_item_id=' . $order_item->key . '">[edit]</a><br>';
 		
 		if($order_item->get('odi_stripe_subscription_id')){
 			$this_out .= ' | <a target=
 			_blank" href="https://dashboard.stripe.com/subscriptions/' . $order_item->get('odi_stripe_subscription_id') . '">[see '. $order_item->get('odi_stripe_subscription_id').' on stripe]</a>';
+		}
+		
+		$order_data = $order_item->get_all_data();
+		foreach($order_data as $data){
+			$this_out .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'.htmlspecialchars($data->get('oir_label')) . ': '. htmlspecialchars($data->get('oir_answer')). '<br>';
 		}
 	
 		$order_items_out[] = $this_out;
 
 	}
 	echo implode('<br />', $order_items_out);
-
+	
 
 	if($_SESSION['permission'] == 10){
 		

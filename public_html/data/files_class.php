@@ -108,10 +108,17 @@ class File extends SystemBase {
 		}
 	}
 	
-	function get_url($size='standard') {
+	
+	//TAKES A SIZE ARGUMENT, AND ALSO EITHER 'SHORT' OR 'FULL'
+	function get_url($size='standard', $format='short') {
 		
 		$settings = Globalvars::get_instance();
+		
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
+		$url_append = '';
+		if($format == 'full'){
+			$url_append =$settings->get_setting('webDir_SSL');
+		}
 		
 		if($size == 'thumbnail'){
 			$file_path = $upload_web_dir.'/thumbnail/'.$this->get('fil_name');
@@ -133,11 +140,13 @@ class File extends SystemBase {
 		}		
 		//IF NO LEADING SLASH, ADD A SLASH
 		if($file_path[0] == '/'){
-			return $file_path;
+			$file_path = $file_path;
 		}
 		else{
-			return '/'.$file_path;
+			$file_path = '/'.$file_path;
 		}
+		
+		return $url_append . $file_path;
 		
 	}	
 

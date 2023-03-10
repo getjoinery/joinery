@@ -9,53 +9,43 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 
 require_once($siteDir . '/data/products_class.php');
-require_once($siteDir . '/data/files_class.php');
+require_once($siteDir . '/data/product_requirements_class.php');
 
-class ProductRequirementException extends SystemClassException {}
-class DisplayableProductRequirementException extends ProductRequirementException implements DisplayableErrorMessage {}
-class DisplayablePermanentProductRequirementException extends ProductRequirementException implements DisplayablePermanentErrorMessage {}
+class ProductRequirementInstanceException extends SystemClassException {}
+class DisplayableProductRequirementInstanceException extends ProductRequirementInstanceException implements DisplayableErrorMessage {}
+class DisplayablePermanentProductRequirementInstanceException extends ProductRequirementInstanceException implements DisplayablePermanentErrorMessage {}
 
 
-class ProductRequirement extends SystemBase {
-	public static $prefix = 'prq';
-	public static $tablename = 'prq_product_requirements';
-	public static $pkey_column = 'prq_product_requirement_id';
+class ProductRequirementInstance extends SystemBase {
+	public static $prefix = 'pri';
+	public static $tablename = 'pri_product_requirement_instances';
+	public static $pkey_column = 'pri_product_requirement_instance_id';
 	public static $permanent_delete_actions = array(
-		'prq_product_requirement_id' => 'delete',	
+		'pri_product_requirement_submission_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
-		'prq_product_requirement_id' => 'event session ID',
-		'prq_title' => 'Session title',
-		'prq_link' => 'link to something',
-		'prq_is_required' => 'Is this required upon registration/purchase?',
-		'prq_order' => 'sort order',
-		'prq_fil_file_id' => 'File attached to this requirement',
-		//'prq_srv_survey_id' => 'Survey attached to this requirement, for an entire survey',
-		'prq_qst_question_id' => 'Question that is attached to this requirement',
-		'prq_delete_time' => 'Time of deletion',
+		'pri_product_requirement_instance_id' => 'Product Requirement Instance ID',
+		'pri_pro_product_id' => 'Product it is attached to',
+		'pri_prq_product_requirement_id' => 'Product Requirement it is attached to',
+		'pri_delete_time' => 'Time deleted'
 		); 
 
 	public static $field_specifications = array(
-		'prq_product_requirement_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'prq_title' => array('type'=>'varchar(255)'),
-		'prq_link' => array('type'=>'varchar(255)'),
-		'prq_is_required' => array('type'=>'bool'),
-		'prq_order' => array('type'=>'int2'),
-		'prq_fil_file_id' => array('type'=>'int4'),
-		//'prq_srv_survey_id' => array('type'=>'int4'),
-		'prq_qst_question_id' => array('type'=>'int4'),
-		'prq_delete_time' => array('type'=>'timestamp(6)'),
+		'pri_product_requirement_instance_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'pri_pro_product_id' => array('type'=>'int4'),
+		'pri_prq_product_requirement_id' => array('type'=>'int4'),
+		'pri_delete_time' => array('type'=>'timestamp(6)'),
 		); 
 			 	
 	public static $required_fields = array(
-		'prq_title'
+		'pri_pro_product_id', 'pri_prq_product_requirement_id'
 	);
 	
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
-		'prq_is_required' => FALSE
+
 	);	
 
 	public static $field_constraints = array(
@@ -71,16 +61,7 @@ class ProductRequirement extends SystemBase {
 					*/
 		);
 		
-	function get_link_to_append(){
-		$settings = Globalvars::get_instance();
-		if($this->get('prq_link')){
-			return $this->get('prq_link');
-		}
-		else if($this->get('prq_fil_file_id')){
-			$file = new File($this->get('prq_fil_file_id'), TRUE);
-			return $file->get_url('standard', 'full');
-		}
-	}
+	
 
 
 	function authenticate_write($session, $other_data=NULL) {
@@ -94,7 +75,7 @@ class ProductRequirement extends SystemBase {
 
 }
 
-class MultiProductRequirement extends SystemMultiBase {
+class MultiProductRequirementInstance extends SystemMultiBase {
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -117,13 +98,14 @@ class MultiProductRequirement extends SystemMultiBase {
 		$bind_params = array();
 
 		if (array_key_exists('product_id', $this->options)) {
-			$where_clauses[] = 'prq_pro_product_id = ?';
+			$where_clauses[] = 'pri_pro_product_id = ?';
 			$bind_params[] = array($this->options['product_id'], PDO::PARAM_INT);
 		}
 		
 
-		if (array_key_exists('required', $this->options)) {
-			$where_clauses[] = 'prq_is_required = ' . ($this->options['required'] ? 'TRUE' : 'FALSE');
+		if (array_key_exists('product_requirement_id', $this->options)) {
+			$where_clauses[] = 'pri_prq_product_requirement_id = ?';
+			$bind_params[] = array($this->options['product_requirement_id'], PDO::PARAM_INT);
 		}
 		
 			
@@ -137,24 +119,21 @@ class MultiProductRequirement extends SystemMultiBase {
 		$dblink = $dbhelper->get_db_link();
 
 		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM prq_product_requirements
+			$sql = 'SELECT COUNT(1) as count_all FROM pri_product_requirement_instances
 				' . $where_clause;
 		} else {
-			$sql = 'SELECT * FROM prq_product_requirements
+			$sql = 'SELECT * FROM pri_product_requirement_instances
 				' . $where_clause . ' ORDER BY ';
 
 			if ($this->order_by === NULL) {
-				$sql .= 'prq_product_requirement_id DESC';
+				$sql .= 'pri_product_requirement_instance_id DESC';
 			} else {
 				$sort_clauses = array();
 
-				if (array_key_exists('product_requirement_id', $this->order_by)) {
-					$sort_clauses[] = 'prq_product_requirement_id ' . $this->order_by['product_requirement_id'];
+				if (array_key_exists('product_requirement_instance_id', $this->order_by)) {
+					$sort_clauses[] = 'pri_product_requirement_instance_id ' . $this->order_by['product_requirement_instance_id'];
 				}	
-				
-				if (array_key_exists('title', $this->order_by)) {
-					$sort_clauses[] = 'prq_title ' . $this->order_by['title'];
-				}							
+							
 				
 				$sql .= implode(',', $sort_clauses);
 			}
@@ -188,8 +167,8 @@ class MultiProductRequirement extends SystemMultiBase {
 		parent::load();
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
-			$child = new ProductRequirement($row->prq_product_requirement_id);
-			$child->load_from_data($row, array_keys(ProductRequirement::$fields));
+			$child = new ProductRequirementInstance($row->pri_product_requirement_instance_id);
+			$child->load_from_data($row, array_keys(ProductRequirementInstance::$fields));
 			$this->add($child);
 		}
 	}

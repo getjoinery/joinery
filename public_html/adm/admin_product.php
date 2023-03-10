@@ -11,6 +11,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_groups_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirement_instances_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -99,6 +100,15 @@
 
 		$requirements = implode(', ', $product->get_requirement_info());
 		echo 'Product info collected at purchase: <b>'. $requirements.'</b><br>';
+	
+		$instances = $product->get_requirement_instances();
+		echo 'Additional product info collected at purchase: ';
+
+		foreach($instances as $instance){
+			$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
+			echo '<b>'.$requirement->get('prq_title').'</b>, ';
+		}
+		echo '<br>';
 		
 		//echo 'After purchase message: <b>'. $product->get('pro_after_purchase_message').'</b><br>';
 
