@@ -54,6 +54,8 @@
 	require_once( __DIR__ . '/../data/pages_class.php');	
 	require_once( __DIR__ . '/../data/components_class.php');
 	require_once( __DIR__ . '/../data/product_requirements_class.php');
+	require_once( __DIR__ . '/../data/product_requirement_instances_class.php');
+	require_once( __DIR__ . '/../data/order_item_requirements_class.php');
 
 	$classes = array(
 			'Address',
@@ -105,7 +107,9 @@
 			'Video',
 			'Page',
 			'Component', 
-			'ProductRequirement'
+			'ProductRequirement',
+			'ProductRequirementInstance',
+			'OrderItemRequirement',
 		);			
 
 	

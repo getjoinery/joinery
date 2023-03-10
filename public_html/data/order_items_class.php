@@ -10,6 +10,7 @@ require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
 require_once($siteDir . '/data/address_class.php');
+require_once($siteDir . '/data/order_item_requirements_class.php');
 
 class OrderItemException extends SystemClassException {}
 
@@ -119,6 +120,53 @@ class OrderItem extends SystemBase {
 			$clean_data[$key] = htmlspecialchars($value);
 		}
 		return $clean_data;
+	}
+	
+	//THIS WILL RETURN THE DATA STORED IN THE DATABASE FOR THIS ORDER ITEM
+	function get_all_data() {
+		
+		$order_requirements = new MultiOrderItemRequirement(
+			array('order_item_id'=>$this->key),
+			NULL,
+			NULL,
+			NULL);
+		$numrecords = $order_requirements->count_all();
+		$order_requirements->load();		
+		
+		return $order_requirements;
+	}	
+	
+	function save_cart_data($data_items){
+		
+		if(empty($data_items)){
+			return true;
+		}
+		
+		foreach ($data_items as $name=>$info){
+			$order_item_requirement = new OrderItemRequirement(NULL);
+			$order_item_requirement->set('oir_odi_order_item_id', $this->key);
+			
+			if(is_array($info)){
+				$order_item_requirement->set('oir_label', $info['question']);
+				$order_item_requirement->set('oir_answer', $info['answer']);
+			}
+			else{
+				$order_item_requirement->set('oir_label', $name);
+				$order_item_requirement->set('oir_answer', $info);
+			}
+
+			if(isset($info['question_id'])){
+				$order_item_requirement->set('oir_qst_question_id', $info['question_id']);
+			}
+	
+			if(isset($info['requirement_id'])){
+				$order_item_requirement->set('oir_prq_product_requirement_id', $info['requirement_id']);
+			}	
+			
+			$order_item_requirement->prepare();
+			$order_item_requirement->save();
+		}
+		return true;
 	}
 
 	function get_raw_data() {

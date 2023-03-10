@@ -6,7 +6,10 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/questions_class.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirements_class.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirement_instances_class.php');
 
 $settings = Globalvars::get_instance();
 if($_POST['product_id']){
@@ -63,9 +66,26 @@ if ($_POST || isset($_GET['cart'])) {
 	try {
 		list($form_data, $display_data) = $product->validate_form($_POST, $session);
 	}	
-	catch (ProductRequirementException $e) {
+	catch (BasicProductRequirementException $e) {
 		$errorhandler = new ErrorHandler(TRUE);
 		$errorhandler->handle_general_error($e->getMessage());
+	}
+
+	//NOW VALIDATE THE ADDITIONAL PRODUCT REQUIREMENTS
+	$instances = $product->get_requirement_instances();
+	foreach($instances as $instance){
+		$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
+		$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
+		$valid = $question->validate_answers($_REQUEST['question_'.$question->key]);
+		if($valid == 'valid'){
+			$question_info = array('name' => 'question_'.$question->key, 'requirement_id' => $instance->get('pri_prq_product_requirement_id'), 'question_id' => $question->key, 'question' => $question->get('qst_question'), 'answer' => $_REQUEST['question_'.$question->key]);
+			$form_data['question_'.$question->key] = $question_info;
+		}
+		else{
+			$errorhandler = new ErrorHandler(TRUE);
+			$errorhandler->handle_general_error($valid);
+			exit();
+		}
 	}
 
 	try {

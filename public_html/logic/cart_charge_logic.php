@@ -169,7 +169,11 @@
 			}			
 			$order_item->set('odi_status', OrderItem::STATUS_UNPAID);
 			$order_item->set('odi_status_change_time', 'NOW');
-			$order_item->save();				
+			$order_item->save();	
+			$order_item->load();
+			
+			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
+			$order_item->save_cart_data($data);
 
 			if($settings->get_setting('checkout_type') == 'stripe_regular'){
 				//CHECK FOR EXISTING PLAN
@@ -471,7 +475,10 @@
 			$order_item->set('odi_status', OrderItem::STATUS_PAID);
 			$order_item->set('odi_status_change_time', 'NOW');
 			$order_item->save();				
-
+			$order_item->load();
+			
+			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
+			$order_item->save_cart_data($data);
 
 			
 			//ATTACH USERS TO THE RIGHT EVENTS/COURSES

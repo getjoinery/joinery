@@ -16,9 +16,9 @@ require_once($siteDir . '/data/product_versions_class.php');
 
 class ProductException extends SystemClassException {}
 
-class ProductRequirementException extends SystemClassException {}
+class BasicProductRequirementException extends SystemClassException {}
 
-abstract class ProductRequirement {
+abstract class BasicProductRequirement {
 
 	public static $REQUIREMENT_IDS = array(
 		1 => 'FullNameRequirement',
@@ -51,7 +51,7 @@ abstract class ProductRequirement {
 	public function get_validation_info() { return NULL; }
 }
 
-class FullNameRequirement extends ProductRequirement {
+class FullNameRequirement extends BasicProductRequirement {
 	const ID = 1;
 	const LABEL = 'Name';
 	
@@ -70,10 +70,10 @@ class FullNameRequirement extends ProductRequirement {
 	public function validate_form($data, $session=NULL) {
 
 		if (empty($data['full_name_first'])) {
-			throw new ProductRequirementException('First Name is Required');
+			throw new BasicProductRequirementException('First Name is Required');
 		}
 		if (empty($data['full_name_last'])) {
-			throw new ProductRequirementException('Last Name is Required');
+			throw new BasicProductRequirementException('Last Name is Required');
 		}
 		
 		$return_array = array(
@@ -98,7 +98,7 @@ class FullNameRequirement extends ProductRequirement {
 	}
 }
 
-class PhoneNumberRequirement extends ProductRequirement {
+class PhoneNumberRequirement extends BasicProductRequirement {
 	const ID = 2;
 	const LABEL = 'Phone Number';
 	
@@ -123,7 +123,7 @@ class PhoneNumberRequirement extends ProductRequirement {
 
 	public function validate_form($data, $session=NULL) {
 		//if (empty($data['phone']) || !preg_match('/^[0-9]{3}[- \.]?[0-9]{2}[- \.]?[0-9]{4}$/', $data['ssn'])) {
-		//	throw new ProductRequirementException('Phone Number is not valid, must be XXX-XXX-XXXX');
+		//	throw new BasicProductRequirementException('Phone Number is not valid, must be XXX-XXX-XXXX');
 		//}
 
 		return array(
@@ -132,7 +132,7 @@ class PhoneNumberRequirement extends ProductRequirement {
 	}
 }
 
-class DOBRequirement extends ProductRequirement {
+class DOBRequirement extends BasicProductRequirement {
 	const ID = 4;
 	const LABEL = 'Date of Birth';
 	
@@ -188,11 +188,11 @@ class DOBRequirement extends ProductRequirement {
 
 	public function validate_form($data, $session=NULL) {
 		if (empty($data['dob_month']) || empty($data['dob_day']) || empty($data['dob_year'])) {
-			throw new ProductRequirementException('Date of Birth must be fully filled out.');
+			throw new BasicProductRequirementException('Date of Birth must be fully filled out.');
 		}
 
 		if (!is_numeric($data['dob_month']) || !is_numeric($data['dob_day']) || !is_numeric($data['dob_year'])) {
-			throw new ProductRequirementException('Date of Birth is invalid.');
+			throw new BasicProductRequirementException('Date of Birth is invalid.');
 		}
 
 		$day = intval($data['dob_day']);
@@ -200,7 +200,7 @@ class DOBRequirement extends ProductRequirement {
 		$year = intval($data['dob_year']);
 
 		if ($day < 1 || $day > 31 || $month < 1 || $month > 12 || $year < 1900 || $year > 2020) {
-			throw new ProductRequirementException('Date of Birth is invalid.');
+			throw new BasicProductRequirementException('Date of Birth is invalid.');
 		}
 
 		return array(
@@ -216,7 +216,7 @@ class DOBRequirement extends ProductRequirement {
 	}
 }
 
-class AddressRequirement extends ProductRequirement {
+class AddressRequirement extends BasicProductRequirement {
 	const ID = 8;
 	const LABEL = 'Address';
 	
@@ -284,7 +284,7 @@ class AddressRequirement extends ProductRequirement {
 
 	function validate_form($data, $session=NULL) {
 		if (empty($data['address'])) {
-			throw new ProductRequirementException('The address section must be filled out.');
+			throw new BasicProductRequirementException('The address section must be filled out.');
 		}
 
 		if ($data['address'] === 'new') {
@@ -295,12 +295,12 @@ class AddressRequirement extends ProductRequirement {
 					array('Address' => $address->get_address_string(', '))
 				);
 			}	catch (AddressException $e) {
-				throw new ProductRequirementException('Your address was invalid: ' . $e->getMessage());
+				throw new BasicProductRequirementException('Your address was invalid: ' . $e->getMessage());
 			}
 		} else {
 			$address_key = LibraryFunctions::decode($data['address']);
 			if ($address_key === FALSE) {
-				throw new ProductRequirementException('You have selected an invalid address, please try again.');
+				throw new BasicProductRequirementException('You have selected an invalid address, please try again.');
 			}
 			$address = new Address($address_key, TRUE);
 			$address->authenticate_write($session);
@@ -313,7 +313,7 @@ class AddressRequirement extends ProductRequirement {
 }
 
 
-class GDPRNoticeRequirement extends ProductRequirement {
+class GDPRNoticeRequirement extends BasicProductRequirement {
 	const ID = 16;
 	const LABEL = 'GDPR Notice';
 	
@@ -333,7 +333,7 @@ class GDPRNoticeRequirement extends ProductRequirement {
 
 	function validate_form($data, $session=NULL) {
 		if (empty($data['gdpr_terms'])) {
-			throw new ProductRequirementException('You must have read and agreed to the privacy policy in order to continue.');
+			throw new BasicProductRequirementException('You must have read and agreed to the privacy policy in order to continue.');
 		}
 		
 		if($data['gdpr_terms']){
@@ -352,7 +352,7 @@ class GDPRNoticeRequirement extends ProductRequirement {
 	}
 }
 
-class RecordConsentRequirement extends ProductRequirement {
+class RecordConsentRequirement extends BasicProductRequirement {
 	const ID = 32;
 	const LABEL = 'Consent to Record';
 	
@@ -371,7 +371,7 @@ class RecordConsentRequirement extends ProductRequirement {
 
 	function validate_form($data, $session=NULL) {
 		if (empty($data['record_terms'])) {
-			throw new ProductRequirementException('You must have read and agreed to the recording notice in order to continue.');
+			throw new BasicProductRequirementException('You must have read and agreed to the recording notice in order to continue.');
 		}
 		
 		if($data['record_terms']){
@@ -392,7 +392,7 @@ class RecordConsentRequirement extends ProductRequirement {
 	}
 }
 
-class EmailRequirement extends ProductRequirement {
+class EmailRequirement extends BasicProductRequirement {
 	const ID = 64;
 	const LABEL = 'Email';
 	
@@ -410,12 +410,12 @@ class EmailRequirement extends ProductRequirement {
 
 	public function validate_form($data, $session=NULL) {
 		if (empty($data['email'])) {
-			throw new ProductRequirementException('Email is Required');
+			throw new BasicProductRequirementException('Email is Required');
 		}
 		
 		if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
 			$error = "Email address '".$data['email']."' is not valid.\n";
-			throw new ProductRequirementException($error);
+			throw new BasicProductRequirementException($error);
 		}		
 
 		$return_array = array(
@@ -437,7 +437,7 @@ class EmailRequirement extends ProductRequirement {
 	}
 }
 
-class UserPriceRequirement extends ProductRequirement {
+class UserPriceRequirement extends BasicProductRequirement {
 	const ID = 128;
 	const LABEL = 'User chooses price';
 	
@@ -455,7 +455,7 @@ class UserPriceRequirement extends ProductRequirement {
 
 	public function validate_form($data, $session=NULL) {
 		/*if (empty($data['user_price'])) {
-			throw new ProductRequirementException('Donation amount is required');
+			throw new BasicProductRequirementException('Donation amount is required');
 		}*/
 
 		
@@ -466,11 +466,11 @@ class UserPriceRequirement extends ProductRequirement {
 		
 		/*
 		if ($data['user_price'] == 0 || $data['user_price'] == '0.00') {
-			throw new ProductRequirementException('Donation amount must be greater than zero.');
+			throw new BasicProductRequirementException('Donation amount must be greater than zero.');
 		}
 		*/
 		if ($data['user_price'] < 0) {
-			throw new ProductRequirementException('Donation amount must be zero or more.');
+			throw new BasicProductRequirementException('Donation amount must be zero or more.');
 		}
 
 
@@ -493,7 +493,7 @@ class UserPriceRequirement extends ProductRequirement {
 	}
 }
 
-class NewsletterSignupRequirement extends ProductRequirement {
+class NewsletterSignupRequirement extends BasicProductRequirement {
 	const ID = 256;
 	const LABEL = 'Newsletter Signup';
 	
@@ -542,7 +542,7 @@ class NewsletterSignupRequirement extends ProductRequirement {
 	}
 }
 
-class CommentRequirement extends ProductRequirement {
+class CommentRequirement extends BasicProductRequirement {
 	const ID = 512;
 	const LABEL = 'Comment';
 	
@@ -684,6 +684,79 @@ class Product extends SystemBase {
 		return $requirements_out;
 	}	
 	
+	//GET ALL OF THE ADDITIONAL PRODUCT REQUIREMENTS FOR THIS PRODUCT
+	function get_requirement_instances(){
+		$pri_lists = new MultiProductRequirementInstance(
+		array('product_id'=>$this->key),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+		$pri_lists->load();	
+		return $pri_lists;
+	}
+
+
+	//SAVE THE SET OF NEW REQUIREMENT INSTANCES
+	function save_requirement_instances($requirements){
+		$requirements = array_filter($requirements);
+
+		if(empty($requirements)){
+			return false;
+		}
+		
+		//FIRST GET A LIST OF THE CURRENT REQUIREMENT INSTANCES
+		$pri_lists = $this->get_requirement_instances();
+		$to_process = array();
+		foreach($pri_lists as $pri_list){
+			$to_process[] = $pri_list->get('pri_prq_product_requirement_id');
+		}
+		
+		foreach ($requirements as $choice => $value){
+			//THEN CYCLE THROUGH THE NEW ONES, ADD IF IT'S NOT THERE
+			if(in_array($value, $to_process)){
+				//ITS ALREADY THERE, JUST REMOVE IT FROM THE LIST
+				unset($to_process[$choice]);
+			}
+			else{
+				//ADD THE NEW ONE
+				$pri = new ProductRequirementInstance(NULL);
+				$pri->set('pri_pro_product_id', $this->key);
+				$pri->set('pri_prq_product_requirement_id', $value);
+				$pri->prepare();
+				$pri->save();
+				//NOW REMOVE IT FROM THE LIST
+				unset($to_process[$choice]);
+			}
+		}
+		
+		print_r($to_process);
+		//IF ANY ARE LEFT, SET THEM TO DELETED
+		//WE ARE NOT ALLOWING FULL DELETION IN CASE THERE ARE REFERENCES IN THE DATABASE
+		foreach($pri_lists as $pri_list){
+			if(in_array($to_process, $pri_list->get('pri_prq_product_requirement_id'))){
+				$pri = new ProductRequirementInstance($pri_list->key, TRUE);
+				$pri->set('pri_delete_time', 'now()');
+				$pri->save();
+			}
+		}
+	}	
+	
+	function get_requirement_validation(){
+		//GET EXTRA PRODUCT REQUIREMENTS, HERE WE OUTPUT THE FORM.  THE VALIDATION HAPPENS ELSEWHERE
+		$instances = $this->get_requirement_instances();
+
+		foreach($instances as $instance){
+			$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
+			if($requirement->get('prq_qst_question_id')){
+				$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
+				$validation_rules = array();
+				$validation_rules[] = $question->output_js_validation($validation_rules);
+				//echo $formwriter->set_validate($validation_rules);	
+			}
+		}
+		return $validation_rules;
+	}
+	
 	
 	public function get_price($product_version, $data){
 
@@ -790,12 +863,12 @@ class Product extends SystemBase {
 		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE)); 
 		if ($versions) {
 			if (!array_key_exists('product_version', $form_data)) {
-				throw new ProductRequirementException(
+				throw new BasicProductRequirementException(
 					'Sorry, one of the products in your cart is invalid.  Please clear your cart and try again.');
 			}
 			$version = $this->get_product_version_details(intval($form_data['product_version']));
 			if (!$version) {
-				throw new ProductRequirementException(
+				throw new BasicProductRequirementException(
 					'Sorry, one of the products in your cart is invalid.  Please clear your cart and try again.');
 			}
 			return $version;
@@ -837,7 +910,7 @@ class Product extends SystemBase {
 
 	
 	function get_product_requirements() {
-		return ProductRequirement::GetRequirements($this->get('pro_requirements'));
+		return BasicProductRequirement::GetRequirements($this->get('pro_requirements'));
 	}
 
 	function clean_variables($data) {
@@ -855,13 +928,13 @@ class Product extends SystemBase {
 		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
 		if ($versions) {
 			if (!isset($data['product_version']) || !is_numeric($data['product_version'])) {
-				throw new ProductRequirementException(
+				throw new BasicProductRequirementException(
 					'You must select which version of the product you would like to purchase.');
 			}
 
 			$version = $this->get_product_version_details(intval($data['product_version']));
 			if ($version === NULL) {
-				throw new ProductRequirementException(
+				throw new BasicProductRequirementException(
 					'Sorry, the product you have selected is not valid.  Please go back and try again.');
 			}
 
@@ -890,7 +963,7 @@ class Product extends SystemBase {
 			}
 		}
 		if ($errors) {
-			throw new ProductRequirementException(
+			throw new BasicProductRequirementException(
 				implode('<br>', $errors));
 		}
 		*/
@@ -930,6 +1003,17 @@ class Product extends SystemBase {
 					}
 				}
 			}
+			
+			//ADD IN THE PRODUCT REQUIREMENT INSTANCES
+			$instances_validations = $this->get_requirement_validation();
+			foreach($instances_validations as $instance_validation){
+				foreach($instance_validation as $field=>$valuearray){
+						$value = $valuearray[required];
+						$rules[$field] = array(key($valuearray)=>$value['value']);
+					
+				}
+			}
+
 
 			//ADD IN EXTRA DATA 
 			if(count($extra_data)){
@@ -1000,6 +1084,24 @@ class Product extends SystemBase {
 		$form_javascript = array();
 		foreach ($this->get_product_requirements() as $product_requirement) {
 			$product_requirement->get_form($formwriter, $user);	
+		}
+
+		
+		//GET EXTRA PRODUCT REQUIREMENTS, HERE WE OUTPUT THE FORM.  THE VALIDATION HAPPENS ELSEWHERE
+		$instances = $this->get_requirement_instances();
+
+		foreach($instances as $instance){
+			$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
+			if($requirement->get('prq_qst_question_id')){
+				$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
+				//$validation_rules = array();
+				//$validation_rules = $question->output_js_validation($validation_rules);
+				//echo $formwriter->set_validate($validation_rules);
+				if($link_append = $requirement->get_link_to_append()){
+					$link_append = ' (<a target="_blank" href="'.$link_append.'">'.$link_append.'</a>)';
+				}
+				echo $question->output_question($formwriter, NULL, $link_append);		
+			}
 		}
 		
 		return TRUE;

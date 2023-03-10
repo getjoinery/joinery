@@ -6,6 +6,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_groups_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirements_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirement_instances_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 
@@ -38,6 +40,11 @@
 				}
 				$product->set('pro_requirements', $total_value);
 			}
+
+			if($_POST['additional_pro_requirements']){
+				$product->save_requirement_instances($_POST['additional_pro_requirements']);
+			}
+
 			
 			if($_POST['pro_evt_event_id'] == '' || $_POST['pro_evt_event_id'] == 0){
 				$product->set('pro_evt_event_id', NULL);
@@ -317,6 +324,39 @@
 	$disabledvals = array();
 	
 	echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+
+
+	$product_requirements = new MultiProductRequirement(
+		array('deleted'=>false),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	if($product_requirements->count_all()){
+		$product_requirements->load();
+		$optionvals = $product_requirements->get_dropdown_array();
+		/*
+		if ($product->key) {
+			//FILL THE CHECKED VALUES AND DECLARE EMAIL AND NAME READ ONLY
+			$checkedvals = $product->get_requirement_info('ids');
+			$checkedvals[] = 1;
+			$checkedvals[] = 64;
+			$readonlyvals = array(1, 64); //DEFAULT
+		}
+		else{
+			$checkedvals = array(1, 64);
+			$readonlyvals = array(1, 64); //DEFAULT
+		}
+		*/
+		$readonlyvals = array(); 
+		$checkedvals = array();
+		$disabledvals = array();
+		foreach ($product_requirements as $product_requirement){
+			if($product_requirement->get('prq_is_default_checked')){
+				$checkedvals[] = $product_requirement->key;
+			}
+		}
+		echo $formwriter->checkboxList("Additional Info to collect at purchase", 'additional_pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+	}
 
 
 

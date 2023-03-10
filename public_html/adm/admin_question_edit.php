@@ -195,6 +195,7 @@
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_question_edit');
 
+		
 	if($question->key){
 		echo $formwriter->hiddeninput('qst_question_id', $question->key);
 		echo $formwriter->hiddeninput('action', 'edit');
@@ -280,31 +281,39 @@
 			echo 'None';
 		}
 		echo '<ul>';
+		$num_options = 0;
 		foreach ($question_options as $question_option) {
+			$num_options++;
 			echo $question_option->get('qop_question_option_label') . ' - '.  $question_option->get('qop_question_option_value').' (<a href="/admin/admin_question_edit?qop_question_option_id='. $question_option->key .'&qst_question_id='. $question->key .'&action=remove_question_option">delete</a>)<br>'; 
 			
 		}
 		echo '</ul>';
-		echo '<h4>Add New Question Option</h4>';
-		$formwriter = new FormWriterMaster('form2');
-		
-		$validation_rules = array();
-		$validation_rules['qop_question_option_label']['required']['value'] = 'true';
-		$validation_rules['qop_question_option_value']['required']['value'] = 'true';
-		echo $formwriter->set_validate($validation_rules);				
-		
-		echo $formwriter->begin_form('form2', 'POST', '/admin/admin_question_edit');
-		echo $formwriter->hiddeninput('qst_question_id', $question->key);
-		echo $formwriter->hiddeninput('action', 'add_question_option');
-		echo $formwriter->textinput('Label', 'qop_question_option_label', NULL, 100, '', '', 255, '');
-		echo $formwriter->textinput('Value', 'qop_question_option_value', 'ctrlHolder', 100, '', '', 255, '');
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
-		echo $formwriter->end_form();
+		if($question->key && $num_options >= 1 && $question->get('qst_type') == Question::TYPE_CHECKBOX){
+			//DON'T SHOW THE NEW QUESTION BOX
+		}
+		else{
+			echo '<h4>Add New Question Option</h4>';
+			$formwriter = new FormWriterMaster('form2');
+			
+			$validation_rules = array();
+			$validation_rules['qop_question_option_label']['required']['value'] = 'true';
+			$validation_rules['qop_question_option_value']['required']['value'] = 'true';
+			echo $formwriter->set_validate($validation_rules);				
+			
+			echo $formwriter->begin_form('form2', 'POST', '/admin/admin_question_edit');
 
-		echo '</span>';
-		$page->end_box(); 
+			echo $formwriter->hiddeninput('qst_question_id', $question->key);
+			echo $formwriter->hiddeninput('action', 'add_question_option');
+			echo $formwriter->textinput('Label', 'qop_question_option_label', NULL, 100, '', '', 255, '');
+			echo $formwriter->textinput('Value', 'qop_question_option_value', 'ctrlHolder', 100, '', '', 255, '');
+			echo $formwriter->start_buttons();
+			echo $formwriter->new_form_button('Submit');
+			echo $formwriter->end_buttons();
+			echo $formwriter->end_form();
+
+			echo '</span>';
+			$page->end_box(); 
+		}
 		
 	}
 
