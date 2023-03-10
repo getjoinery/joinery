@@ -26,6 +26,7 @@ class Question extends SystemBase {
 		'qst_question_id' => 'delete', 
 		'srq_qst_question_id' => 'prevent',
 		'sva_qst_question_id' => 'prevent',
+		'oir_qst_question_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	const LANGUAGE_ENGLISH = 1;
@@ -317,6 +318,7 @@ class Question extends SystemBase {
 	function prepare() {
 		
 		//CHECK TO MAKE SURE WE HAVE AT LEAST ONE OPTION FOR QUESTION TYPES WITH OPTIONS
+		/*
 		if ($this->get('qst_type') == Question::TYPE_DROPDOWN){
 			$options = new MultiQuestionOption(
 				array('deleted'=>false, 'question_id'=> $this->key),
@@ -365,7 +367,7 @@ class Question extends SystemBase {
 				'This question "'.$this->get('qst_question').'" requires some answer options.');
 				exit;
 			}			
-		}
+		}*/
 	}	
 	
 	

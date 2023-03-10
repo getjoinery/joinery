@@ -22,6 +22,7 @@ class ProductRequirement extends SystemBase {
 	public static $pkey_column = 'prq_product_requirement_id';
 	public static $permanent_delete_actions = array(
 		'prq_product_requirement_id' => 'delete',	
+		'pri_prq_product_requirement_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
