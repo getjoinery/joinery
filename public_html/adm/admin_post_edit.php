@@ -131,8 +131,8 @@
 	$optionvals = array("Yes"=>1, "No"=>0);
 	echo $formwriter->dropinput("Is listed and searchable?", "pst_is_on_homepage", "ctrlHolder", $optionvals, $pst_is_on_homepage, '', FALSE);
 
+	
 	echo $formwriter->textbox('Post content', 'pst_body', 'ctrlHolder', 5, 80, $content, '', 'yes');
-
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
