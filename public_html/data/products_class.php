@@ -365,7 +365,7 @@ class RecordConsentRequirement extends BasicProductRequirement {
 	
 	public function get_form($formwriter, $user=NULL) {
 		echo '<div id="record_terms_container" class=NULL>';
-		echo '<label for="record_terms">Recording Notice</label>';
+		//echo '<label for="record_terms">Recording Notice</label>';
 		echo '<input name="record_terms" id="record_terms" value="1" type="checkbox"  /><span onclick="$(\'#record_terms\').attr(\'checked\', !$(\'#record_terms\').attr(\'checked\')); return false;"> I am aware that the course/event may be recorded and consent to being recorded. </span></div>';
 	}
 
