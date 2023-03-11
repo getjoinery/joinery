@@ -496,12 +496,10 @@ class FormWriterMaster {
 			</script>
 			
 			<style>
-				
-			.trumbowyg-box{
-				max-width:800px;
-			}
+
 			
 			.trumbowyg-editor {
+				max-width:700px;
 				max-height: 500px;
 			}
 			</style>
