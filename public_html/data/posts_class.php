@@ -33,6 +33,7 @@ class Post extends SystemBase {
 		'pst_is_published' => 'Is this post published?',
 		'pst_published_time' => 'Time published',
 		'pst_is_on_homepage' => 'On homepage',
+		'pst_is_pinned' => 'On homepage',
 		'pst_create_time' => 'Time Created',
 		'pst_short_description' => 'Short description, no html, max 255 chars',
 		'pst_delete_time' => 'Time of deletion',
@@ -47,6 +48,7 @@ class Post extends SystemBase {
 		'pst_is_published' => array('type'=>'bool'),
 		'pst_published_time' => array('type'=>'timestamp(6)'),
 		'pst_is_on_homepage' => array('type'=>'bool'),
+		'pst_is_pinned' => array('type'=>'bool'),
 		'pst_create_time' => array('type'=>'timestamp(6)'),
 		'pst_short_description' => array('type'=>'varchar(255)'),
 		'pst_delete_time' => array('type'=>'timestamp(6)'),
@@ -319,7 +321,11 @@ class MultiPost extends SystemMultiBase {
 		if (array_key_exists('published', $this->options)) {
 		 	$where_clauses[] = 'pst_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');
 		}
-		
+	
+		if (array_key_exists('pinned', $this->options)) {
+		 	$where_clauses[] = 'pst_is_pinned = ' . ($this->options['pinned'] ? 'TRUE' : 'FALSE');
+		}
+	
 		if (array_key_exists('listed', $this->options)) {
 		 	$where_clauses[] = 'pst_is_on_homepage = ' . ($this->options['listed'] ? 'TRUE' : 'FALSE');
 		}

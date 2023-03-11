@@ -18,7 +18,7 @@
 
 	if($_POST){
 		
-		$editable_fields = array('pst_body', 'pst_title', 'pst_is_published', 'pst_link', 'pst_short_description', 'pst_is_on_homepage');
+		$editable_fields = array('pst_body', 'pst_title', 'pst_is_published', 'pst_link', 'pst_short_description', 'pst_is_on_homepage','pst_is_pinned');
 
 		foreach($editable_fields as $field) {
 			$post->set($field, $_POST[$field]);
@@ -124,6 +124,9 @@
 	
 	$optionvals = array("No"=>0, "Yes"=>1);
 	echo $formwriter->dropinput("Published", "pst_is_published", "ctrlHolder", $optionvals, $post->get('pst_is_published'), '', FALSE);
+
+	$optionvals = array("No"=>0, "Yes"=>1);
+	echo $formwriter->dropinput("Pinned", "pst_is_pinned", "ctrlHolder", $optionvals, $post->get('pst_is_pinned'), '', FALSE);
 	
 	$optionvals = array("Yes"=>1, "No"=>0);
 	echo $formwriter->dropinput("Is listed and searchable?", "pst_is_on_homepage", "ctrlHolder", $optionvals, $pst_is_on_homepage, '', FALSE);
