@@ -78,7 +78,7 @@ if ($_POST || isset($_GET['cart'])) {
 		$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
 		$valid = $question->validate_answers($_REQUEST['question_'.$question->key]);
 		if($valid == 'valid'){
-			$question_info = array('name' => 'question_'.$question->key, 'requirement_id' => $instance->get('pri_prq_product_requirement_id'), 'question_id' => $question->key, 'question' => $question->get('qst_question'), 'answer' => $question->get_answer_readable($_REQUEST['question_'.$question->key]));
+			$question_info = array('name' => 'question_'.$question->key, 'requirement_id' => $instance->get('pri_prq_product_requirement_id'), 'question_id' => $question->key, 'question' => $question->get('qst_question'), 'answer' => $question->get_answer_readable($_REQUEST['question_'.$question->key], false));
 			$form_data['question_'.$question->key] = $question_info;
 		}
 		else{
