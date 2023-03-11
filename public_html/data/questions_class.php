@@ -216,14 +216,14 @@ class Question extends SystemBase {
 		}
 	}
 
-	function get_answer_readable($sva_survey_answer_id){
-		$answer = new SurveyAnswer($sva_survey_answer_id, TRUE);
-		
+	//TAKES AN ANSWER AS INPUT AND RETURNS A HUMAN READABLE ANSWER, RETURN_SAFE OPTIONALLY ADDS ESCAPING
+	function get_answer_readable($answer, $return_safe=true){
+		$return_string = '';
 		if ($this->get('qst_type') == Question::TYPE_SHORT_TEXT){
-			return $answer->get('sva_answer');
+			$return_string = $answer;
 		}
 		else if ($this->get('qst_type') == Question::TYPE_LONG_TEXT){
-			return $answer->get('sva_answer');
+			$return_string = $answer;
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(
@@ -234,7 +234,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$answers_out = array();
-			$answers_readable = explode(',', $answer->get('sva_answer'));
+			$answers_readable = explode(',', $answer);
 			foreach($answers_readable as $answer_readable){
 				foreach($options as $option){
 					if($answer_readable == $option->get('qop_question_option_value')){
@@ -243,7 +243,7 @@ class Question extends SystemBase {
 				}
 			}
 
-			return implode(", ", $answers_out);
+			$return_string =  implode(", ", $answers_out);
 		}
 		else {
 			$options = new MultiQuestionOption(
@@ -254,10 +254,17 @@ class Question extends SystemBase {
 			$options->load();
 			
 			foreach($options as $option){
-				if($answer->get('sva_answer') == $option->get('qop_question_option_value')){
-					return $option->get('qop_question_option_label') . '('.$option->get('qop_question_option_value').')';
+				if($answer == $option->get('qop_question_option_value')){
+					$return_string =  $option->get('qop_question_option_label') . '('.$option->get('qop_question_option_value').')';
 				}
 			}
+		}
+		
+		if($return_safe){
+			return htmlspecialchars($return_string);
+		}
+		else{
+			return $return_string;
 		}
 	}
 	

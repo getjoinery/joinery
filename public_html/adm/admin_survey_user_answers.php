@@ -76,7 +76,7 @@
 		$rowvalues = array();
 
 		array_push($rowvalues, $question->get('qst_question'));
-		array_push($rowvalues, $question->get_answer_readable($answer->key));
+		array_push($rowvalues, $question->get_answer_readable($answer->get('sva_answer')));
 
 		array_push($rowvalues, LibraryFunctions::convert_time($answer->get('sva_create_time'), "UTC", $session->get_timezone(), 'M j, Y')); 
 		

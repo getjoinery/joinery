@@ -64,8 +64,7 @@
 		'readable_title' => 'Product Requirements',
 		'breadcrumbs' => array(
 			'Products'=>'/admin/admin_products', 
-			$breadcrumb => '',
-			'Product Requirement Edit'=>'',
+			$breadcrumb =>'',
 		),
 		'session' => $session,
 	)
@@ -77,8 +76,8 @@
 	$formwriter = new FormWriterMaster('form1');
 	
 	$validation_rules = array();
-	$validation_rules['pro_title']['required']['value'] = 'true';
-	$validation_rules['prq_text']['required']['value'] = 'true';
+	$validation_rules['prq_title']['required']['value'] = 'true';
+	$validation_rules['prq_qst_question_id']['required']['value'] = 'true';
 	
 	echo $formwriter->set_validate($validation_rules);			
 
@@ -98,6 +97,18 @@
 
 	
 	echo $formwriter->textinput('Name for this requirement', 'prq_title', NULL, 100, $product_requirement->get('prq_title'), '', 255, '');
+
+	$questions = new MultiQuestion(
+		array('deleted'=>false),
+		array('question_id'=>'DESC'),		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$questions->load();
+	$optionvals = $questions->get_dropdown_array();
+	echo $formwriter->dropinput("Question", "prq_qst_question_id", "ctrlHolder", $optionvals, $product_requirement->get('prq_qst_question_id'), '', TRUE);		
+	
+	
+	echo $formwriter->textinput('Link (optional):', 'prq_link', NULL, 100, $product_requirement->get('prq_link'), '', 255, '');	
 
 	/*
 	echo $formwriter->textbox('Product Requirement Text', 'prq_text', 'ctrlHolder', 5, 80, $product_requirement->get('prq_text'), '', 'no');
@@ -121,15 +132,7 @@
 	}
 	echo $formwriter->dropinput("Checked by default?", "prq_is_default_checked", "ctrlHolder", $optionvals, $recurring, '', FALSE);	
 	*/
-	$questions = new MultiQuestion(
-		array('deleted'=>false),
-		array('question_id'=>'DESC'),		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$questions->load();
-	$optionvals = $questions->get_dropdown_array();
-	echo $formwriter->dropinput("Question", "prq_qst_question_id", "ctrlHolder", $optionvals, $product_requirement->get('prq_qst_question_id'), '', TRUE);		
-	
+
 	$files = new MultiFile(
 		array('deleted'=>false, 'past'=>false),
 		array('file_id'=>'DESC'),		//SORT BY => DIRECTION
@@ -137,7 +140,7 @@
 		NULL);  //OFFSET
 	$files->load();
 	$optionvals = $files->get_file_dropdown_array();
-	echo $formwriter->dropinput("Attach a file", "prq_fil_file_id", "ctrlHolder", $optionvals, $product_requirement->get('prq_fil_file_id'), '', TRUE);	
+	echo $formwriter->dropinput("Attach a file (optional)", "prq_fil_file_id", "ctrlHolder", $optionvals, $product_requirement->get('prq_fil_file_id'), '', TRUE);	
 /*
 	$groups = new MultiGroup(
 		array('category'=>'event'),  //SEARCH CRITERIA
@@ -155,8 +158,6 @@
 	$optionvals = array("One price"=>1, 'Multiple pricing levels' => 2, 'User chooses price'=>3);
 	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product_requirement->get('pro_price_type'), '', FALSE);
 */
-
-	echo $formwriter->textinput('Link (no spaces):', 'prq_link', NULL, 100, $product_requirement->get('prq_link'), '', 255, '');	
 
 
 	echo $formwriter->start_buttons();
