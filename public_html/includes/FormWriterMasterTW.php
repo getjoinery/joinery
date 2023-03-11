@@ -540,6 +540,8 @@ class FormWriterMasterTW {
 			$output .= "
 				$(document).ready(function() {
 						$('.html_editable').trumbowyg({
+							autogrow: false,
+							autogrowOnEnter: false,
 							btns: [
 								['viewHTML'],
 								['undo', 'redo'], // Only supported in Blink browsers
@@ -552,7 +554,7 @@ class FormWriterMasterTW {
 								['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
 								['unorderedList', 'orderedList'],
 								['horizontalRule'],
-								/*['removeformat'], */
+								['removeformat'], 
 								['fullscreen']
 							],
 							 semantic:{
@@ -568,20 +570,28 @@ class FormWriterMasterTW {
 
 				});
 			</script>
+				
+			<style>
+			.trumbowyg-editor {
+				max-height: 500px;
+			}
+			</style>
+
 			";
-			$htmlmode_text = 'html_editable';
+			$output .= '<div id="'.$id.'_container" class="errorplacement">
+				<label class="'.$this->textbox_label_class.'" for="'.$id.'">'.$label.'</label>
+					<div class="mt-1">
+					<textarea name="'.$id.'" id="'.$id.'" class="html_editable" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea></div>';
 		}
 		else{
-			$htmlmode_text = '';
-		}
-
-		$output .= '<div id="'.$id.'_container" class="'.$class.' errorplacement">
-			<label class="'.$this->textbox_label_class.'" for="'.$id.'">'.$label.'</label>
-				<div class="mt-1">
-				<textarea name="'.$id.'" id="'.$id.'" class="'.$this->textbox_textarea_class.' '.$htmlmode_text.'" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea></div>';
-				
-		if($formhint){
-			$output .= '<div id="'.$id.'_hint"><small>'.$formhint.'</small></div>';
+			$output .= '<div id="'.$id.'_container" class="'.$class.' errorplacement">
+				<label class="'.$this->textbox_label_class.'" for="'.$id.'">'.$label.'</label>
+					<div class="mt-1">
+					<textarea name="'.$id.'" id="'.$id.'" class="'.$this->textbox_textarea_class.'" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea></div>';
+					
+			if($formhint){
+				$output .= '<div id="'.$id.'_hint"><small>'.$formhint.'</small></div>';
+			}
 		}
 
 		$output .= '

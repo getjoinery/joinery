@@ -464,6 +464,8 @@ class FormWriterMaster {
 			$output .= "
 				$(document).ready(function() {
 						$('.html_editable').trumbowyg({
+							autogrow: false,
+							autogrowOnEnter: false,
 							btns: [
 								['viewHTML'],
 								['undo', 'redo'], // Only supported in Blink browsers
@@ -476,7 +478,7 @@ class FormWriterMaster {
 								['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
 								['unorderedList', 'orderedList'],
 								['horizontalRule'],
-								/*['removeformat'], */
+								['removeformat'], 
 								['fullscreen']
 							],
 							 semantic:{
@@ -492,17 +494,25 @@ class FormWriterMaster {
 
 				});
 			</script>
+			
+			<style>
+			.trumbowyg-editor {
+				max-height: 500px;
+			}
+			</style>
 			";
-			$htmlmode_text = 'html_editable';
-		}
-		else{
-			$htmlmode_text = '';
-		}
-
-		$output .= '<div id="'.$id.'_container" class="'.$this->textbox_container_class.' errorplacement">
+			
+			$output .= '<div id="'.$id.'_container" class=" errorplacement">
 			<label for="'.$id.'">'.$label.'</label>
 			
-				<textarea name="'.$id.'" id="'.$id.'" class="'.$this->textbox_textarea_class.' '.$htmlmode_text.'" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea>';
+				<textarea name="'.$id.'" id="'.$id.'" class="html_editable" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea>';
+		}
+		else{
+			$output .= '<div id="'.$id.'_container" class="'.$this->textbox_container_class.' errorplacement">
+				<label for="'.$id.'">'.$label.'</label>
+				
+					<textarea name="'.$id.'" id="'.$id.'" class="'.$this->textbox_textarea_class.'" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea>';
+		}
 				
 		if($formhint){
 			$output .= '<div id="'.$id.'_hint"><small>'.$formhint.'</small></div>';
