@@ -44,6 +44,18 @@
 			$page_vars[title] = 'Blog';
 		}
 		
+		$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE, 'listed'=>TRUE, 'pinned'=>TRUE);
+		$pinned_posts = new MultiPost(
+			$search_criteria,
+			array($page_sort=>$page_direction),
+			$numperpage,
+			$page_offset,
+			'AND');	
+		$page_vars[num_pinned_posts] = $pinned_posts->count_all();	
+		$pinned_posts->load();	
+		$page_vars[pinned_posts] = $pinned_posts;		
+		
+		
 		$page_vars[tags] = MultiPost::get_all_tags();
 
 		$page_vars[pager] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
