@@ -364,13 +364,41 @@
 		//IT BAILS ON ERROR AND STOPS MIGRATIONS, IN CASE SOME LATER ONES ARE DEPENDENT ON EARLIER ONES
 		//IF THERE IS A TEST SQL AND IF IT RETURNS == 0, THEN WE RUN THE MIGRATION
 		//IF THERE IS NO TEST SQL, IT IS ASSUMED THAT WE ALWAYS RUN THE MIGRATION
+		//ALSO UPDATES LAST SYSTEM VERSION
 		$migrations = array();
-		$migrations[1][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_product_requirements'";
-		$migrations[1][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Product Requirements\', 5, \'admin_product_requirements\', 5, 8, 0, \'\');';
-
+		$migrations[0][system_version] = '0.5';
+		$migrations[0][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_product_requirements'";
+		$migrations[0][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Product Requirements\', 5, \'admin_product_requirements\', 5, 8, 0, \'\');';
+		$migrations[1][system_version] = '0.5';
+		$migrations[1][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'system_version'";
+		$migrations[1][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'system_version\', \'0.5\', 1, \'now()\', \'now()\', \'general\');';
+		$migrations[2][system_version] = '0.5';
+		$migrations[2][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'db_migration_version'";
+		$migrations[2][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'db_migration_version\', \'1\', 1, \'now()\', \'now()\', \'general\');';
+		
 		echo "-----MIGRATIONS-----<br>\n";
+
+		//GET THE LAST MIGRATION STOPPING POINT
+		
+		$sql = "SELECT * FROM stg_settings WHERE stg_name='db_migration_version'";
+		$q = $dblink->prepare($sql);
+		$q->execute();
+		$row = $q->fetch();
+		
+		$end_row=0;
+		if($row['stg_value']){
+			$start_row = $row['stg_value']+1;
+		}
+		else{
+			$start_row = 0;
+		}
+
 		
 		foreach($migrations as $key=>$migration){
+			
+			if($start_row > $key){
+				continue;
+			}
 
 			if($verbose){
 				echo 'Checking Migration ' . $key . "<br>\n";
@@ -421,7 +449,22 @@
 				}
 			}
 			
+			//UPDATE THE LAST DB MIGRATION POINT
+			$sql = "UPDATE stg_settings set stg_value=".$key." WHERE stg_name='db_migration_version'";
+			$q = $dblink->prepare($sql);
+			$q->execute();
+			
+			$end_row = $key;
 		}
+		
+		//UPDATE THE SYSTEM VERSION
+		$sql = "UPDATE stg_settings set stg_value=".$migrations[$end_row][system_version]." WHERE stg_name='system_version'";
+		$q = $dblink->prepare($sql);
+		$q->execute();	
+		echo 'System version now '.$migrations[$end_row][system_version]."<br>\n";
+	
+		
+		echo 'Database migration complete.'. "<br>\n";
 			
 		return true;
 	}
