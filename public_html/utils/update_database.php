@@ -360,27 +360,71 @@
 
 
 		//DATABASE MIGRATIONS
-		//NOTE!!  ALL MIGRATIONS HAVE TO BE WRITTEN SUCH THAT THEY CAN BE RUN REPEATEDLY AND OUT OF ORDER
+		//NOTE!!  ALL MIGRATIONS HAVE TO BE WRITTEN SUCH THAT THEY CAN BE RUN REPEATEDLY
+		//IT BAILS ON ERROR AND STOPS MIGRATIONS, IN CASE SOME LATER ONES ARE DEPENDENT ON EARLIER ONES
+		//IF THERE IS A TEST SQL AND IF IT RETURNS == 0, THEN WE RUN THE MIGRATION
+		//IF THERE IS NO TEST SQL, IT IS ASSUMED THAT WE ALWAYS RUN THE MIGRATION
 		$migrations = array();
-		//$migrations[] = 'ALTER TABLE vid_videos ADD COLUMN test_column varchar(255);';
+		$migrations[1][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_product_requirements'";
+		$migrations[1][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Product Requirements\', 5, \'admin_product_requirements\', 5, 8, 0, \'\');';
+
+		echo "-----MIGRATIONS-----<br>\n";
 		
-		foreach($migrations as $migration){
+		foreach($migrations as $key=>$migration){
 
 			if($verbose){
-				echo $migration."<br>\n";
+				echo 'Checking Migration ' . $key . "<br>\n";
 			}
 			
-			try{
-				$q = $dblink->prepare($migration);
-				$q->execute();
+			$run = false;
+			if($migration[test]){
+				if($verbose){
+					echo 'Test: '.$migration[test]. "<br>\n";
+				}
+				
+				try{
+					$q = $dblink->prepare($migration[test]);
+					$q->execute();
+					$row = $q->fetch();
+				}
+				catch(PDOException $e){
+					echo $e->getMessage();
+					
+				}	
+
+				if($row[count] == 0){
+					$run = true;
+				}
+				else{
+					$run = false;
+				}
 			}
-			catch(PDOException $e){
-				echo $e->getMessage();
-			}	
+			else{
+				$run = true;
+			}
+			
+			
+			if($run){
+				try{
+					$q = $dblink->prepare($migration[migration_sql]);
+					$q->execute();
+					echo 'Run: '.$migration[migration_sql]. "<br>\n";
+				}
+				catch(PDOException $e){
+					echo $e->getMessage();
+					echo 'ABORTING MIGRATIONS'. "<br>\n";
+				}			
+			}
+			else{
+				if($verbose){
+					echo 'Skipping: '.$migration[migration_sql]. "<br>\n";
+				}
+			}
+			
 		}
 			
-			return true;
-		}
+		return true;
+	}
 	
 	update_database($classes, $verbose, $upgrade, $cleanup);
 	echo 'Database update complete'. "<br>\n";
