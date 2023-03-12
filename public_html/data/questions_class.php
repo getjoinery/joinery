@@ -234,16 +234,22 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$answers_out = array();
-			$answers_readable = explode(',', $answer);
-			foreach($answers_readable as $answer_readable){
+			$answers_pieces = explode(',', $answer);
+			foreach($answers_pieces as $answers_piece){
 				foreach($options as $option){
-					if($answer_readable == $option->get('qop_question_option_value')){
+					if($answers_piece == $option->get('qop_question_option_value')){
 						$answers_out[] = $option->get('qop_question_option_label') . '('.$option->get('qop_question_option_value').')';
 					}
 				}
 			}
-
-			$return_string =  implode(", ", $answers_out);
+			
+			//IF WE CAN'T FIND THAT QUESTION OPTION (MAYBE IT WAS DELETED), JUST RETURN THE ANSWER TEXT
+			if(empty($answers_out)){
+				$return_string = implode(", ", $answers_pieces);
+			}
+			else{
+				$return_string =  implode(", ", $answers_out);
+			}
 		}
 		else {
 			$options = new MultiQuestionOption(
@@ -258,6 +264,12 @@ class Question extends SystemBase {
 					$return_string =  $option->get('qop_question_option_label') . '('.$option->get('qop_question_option_value').')';
 				}
 			}
+			
+			//IF WE CAN'T FIND THAT QUESTION OPTION (MAYBE IT WAS DELETED), JUST RETURN THE ANSWER TEXT
+			if(empty($return_string)){
+				$return_string = $answer;
+			}
+
 		}
 		
 		if($return_safe){
