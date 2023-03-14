@@ -440,7 +440,7 @@
 				}
 				catch(PDOException $e){
 					echo $e->getMessage();
-					echo 'ABORTING MIGRATIONS'. "<br>\n";
+					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
 					break;
 				}			
 			}
