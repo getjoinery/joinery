@@ -441,6 +441,7 @@
 				catch(PDOException $e){
 					echo $e->getMessage();
 					echo 'ABORTING MIGRATIONS'. "<br>\n";
+					break;
 				}			
 			}
 			else{
