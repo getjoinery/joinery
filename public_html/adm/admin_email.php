@@ -8,20 +8,24 @@
 
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipient_groups_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
-	
+
 	$email = new Email($_REQUEST['eml_email_id'], TRUE);
 	
-	$recipient_groups = $email->get_recipient_groups();
+	$recipient_groups = $email->get_recipient_groups(); 
+
 	
 
 	if($_REQUEST['action'] == 'delete'){
 		$email->authenticate_write($session);
+		//REMOVE THE RECIPIENTS
+		EmailRecipient::DeleteAll($email->key);
 		$email->soft_delete();
 
 		header("Location: /admin/admin_emails");
@@ -29,13 +33,23 @@
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$email->authenticate_write($session);
-		$email->soft_delete();
+		$email->undelete();
+
+		header("Location: /admin/admin_emails");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'unqueue'){
+		$email->set('eml_status', Email::EMAIL_CREATED);
+		$email->authenticate_write($session);
+		$email->save();
+		//REMOVE THE RECIPIENTS
+		EmailRecipient::DeleteAll($email->key);
 
 		header("Location: /admin/admin_emails");
 		exit();				
 	}
  
-	if($_REQUEST['action'] == 'add'){
+	if($_REQUEST['action'] == 'addgroup'){
 		//ADD GROUP TO EMAIL
 		$email->add_recipient_group(NULL, $_POST['grp_group_id']);
 		$returnurl = $session->get_return();
@@ -43,13 +57,20 @@
 		exit();			
 	}
 	else if($_REQUEST['action'] == 'remove'){
-		$email->remove_recipient_group($_POST['erg_email_recipient_group_id']);
+		$email_recipient_group = new EmailRecipientGroup($_POST['erg_email_recipient_group_id'], TRUE);
+		$email_recipient_group->permanent_delete();
 		$returnurl = $session->get_return();		
 		header("Location: $returnurl");
 		exit();				
 	}
-	
-	
+	else if($_REQUEST['action'] == 'addevent'){
+		//ADD GROUP TO EMAIL
+		$email->add_recipient_group($_POST['evt_event_id'], NULL);
+		$returnurl = $session->get_return();
+		header("Location: $returnurl");
+		exit();			
+	}	
+
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -68,7 +89,7 @@
 	if($email->get('eml_status') != Email::EMAIL_SENT && $email->get('eml_status') != Email::EMAIL_QUEUED){
 
 		$pageoptions['title'] = 'Email: '.$email->get('eml_subject');
-		$altlinks = array('View'=>'/admin/admin_emails_test?eml_email_id='.$email->key,
+		$altlinks = array(
 		'Edit'=>'/admin/admin_email_edit?eml_email_id='.$email->key,		
 		'Send test'=> '/admin/admin_emails_test?sendtest=1&eml_email_id='.$email->key);
 		
@@ -85,12 +106,14 @@
 		echo '<iframe src="/ajax/email_preview_ajax?eml_email_id='.$email->key.'" width="100%" height="300" style="border:1px solid gray;"></iframe>';			 
 		$page->end_box(); 
 
-		$headers = array("Recipient Groups", "Recipients", "Action");
+		$headers = array("Recipients", "Count", "Action");
 
 
+		$altlinks = array('Add Groups'=>'/admin/admin_email_recipients_modify?eml_email_id='.$email->key,
+		'Exclude Groups'=>'/admin/admin_email_recipients_modify?op=remove&eml_email_id='.$email->key);
 		 $box_vars =	array(
-			'altlinks' => '',
-			'title' => "Recipients for ". $email->get('eml_description')
+			'altlinks' => $altlinks,
+			'title' => 'Recipients for "'. $email->get('eml_description'). '"'
 		);
 		$page->tableheader($headers, $box_vars);
 		
@@ -104,11 +127,29 @@
 			$group_unsubscribed = 0;
 			$rowvalues=array();
 
-			$group = new Group($recipient_group->erg_grp_group_id, TRUE);
-			$members = $group->get_member_list();
+			$add_user_list = array();
+			if($recipient_group->get('erg_grp_group_id')){
+				$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
+				$members = $group->get_member_list();
+				foreach($members as $member){
+					$add_user_list[] = $member->get('grm_foreign_key_id');
+				}
+				$label = $group->get('grp_name');
+			}
+			else if($recipient_group->get('erg_evt_event_id')){
+				$event = new Event($recipient_group->get('erg_evt_event_id'), TRUE);
+				$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id')), NULL);
+				//$numregistrants = $event_registrants->count_all();
+				$event_registrants->load();
+				foreach($event_registrants as $event_registrant){
+					$add_user_list[] = $event_registrant->get('evr_usr_user_id');
+				}
+				$label = $event->get('evt_name');
+			}
 			
-			foreach($members as $member){
-				$user= new User($member->get('grm_foreign_key_id'), TRUE);
+			$num_total = 0;
+			foreach($add_user_list as $user_id){
+				$user= new User($user_id, TRUE);
 				if($user->get('usr_contact_preferences') != 0){
 					$group_total++;
 					$recipient_list[] = $user->key;
@@ -116,52 +157,35 @@
 				else{
 					$group_unsubscribed++;
 				}
+				$num_total++;
 			}
 			$total += $nummembers;
-			array_push($rowvalues, $group->get('grp_name'));
-			array_push($rowvalues, 'Subscribed: '.$group_total . ' Unsubscribed: '.$group_unsubscribed);
 			
+			if($recipient_group->get('erg_operation') == 'add'){
+				array_push($rowvalues, 'Add: '. $label);
+				array_push($rowvalues, 'Users subscribed: '.$group_total . ', unsubscribed: '.$group_unsubscribed);
+			}
+			else{
+				array_push($rowvalues, 'Excluded: '. $label);
+				array_push($rowvalues, 'Users to exclude: '. $num_total);
+			}
 			
 
-			
 			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_email?eml_email_id='.$email->key.'">
 			<input type="hidden" class="hidden" name="action" id="action" value="remove" />
-			<input type="hidden" class="hidden" name="erg_email_recipient_group_id" id="erg_email_recipient_group_id" value="'.$recipient_group->erg_email_recipient_group_id.'" />
+			<input type="hidden" class="hidden" name="erg_email_recipient_group_id" id="erg_email_recipient_group_id" value="'.$recipient_group->key.'" />
 			<button type="submit">Delete</button>
 			</form>';	
 			array_push($rowvalues, $delform);			
 			
 			$page->disprow($rowvalues);
-			$total += $group_total;
-			$total_unsubscribed += $group_unsubscribed;
-			$num_recipients_before_dup = count($recipient_list);
-			$recipient_list = array_unique($recipient_list);
-			$numrecipients = count($recipient_list);
+
 		}
 		
-		echo '<tr><td colspan="3">';
-		$formwriter = new FormWriterMaster('form3');
-		echo $formwriter->begin_form('form3', 'POST', '/admin/admin_email?eml_email_id='. $email->key);
 
-		
-		$groups = new MultiGroup(
-			array('category'=>'user', 'deleted'=>false),
-			NULL,		//SORT BY => DIRECTION
-			NULL,  //NUM PER PAGE
-			NULL);  //OFFSET
-		$groups->load();
-		
-		$optionvals = $groups->get_dropdown_array();
-		echo $formwriter->hiddeninput('action', 'add');
-		echo $formwriter->hiddeninput('eml_email_id', $email->key);
-		echo $formwriter->dropinput("Add group members", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-		echo $formwriter->new_form_button('Add group');
-		
-
-		echo '</td></tr>';
 		
 		$page->endtable();
-		echo $formwriter->end_form();		
+				
 	}
 	else{
 		$numperpage = 50;
@@ -179,6 +203,12 @@
 			$offset);
 		$numrecords = $recipients->count_all();
 		$recipients->load();
+
+		if($email->get('eml_status') == Email::EMAIL_QUEUED){	
+			$pageoptions['altlinks'] = array(
+				'Remove From Queue'=>'/admin/admin_email?action=unqueue&eml_email_id='.$email->key
+				);
+		}
 			 
 		
 		$pageoptions['title'] = 'Email: '.$email->get('eml_subject');
@@ -198,9 +228,8 @@
 		$page->end_box(); 
 		
 		$headers = array("Recipient", "Recipient Email", "Status");
-		//$altlinks = array('View'=>'/admin/admin_emails_test?eml_email_id='.$email->key);
+		
 		$altlinks = array();
-
 
 		$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 		$table_options = array(
