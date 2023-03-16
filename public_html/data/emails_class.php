@@ -6,6 +6,7 @@ require_once($siteDir . '/includes/LibraryFunctions.php');
 require_once($siteDir . '/includes/SystemClass.php');
 
 require_once($siteDir . '/data/email_recipients_class.php');	
+require_once($siteDir . '/data/email_recipient_groups_class.php');	
 require_once($siteDir . '/data/users_class.php');	
 
 class EmailException extends SystemClassException {}
@@ -97,69 +98,50 @@ class Email extends SystemBase {
 	}
 	
 	
-	function add_recipient_group($evt_event_id, $grp_group_id){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
+	//THIS ADDS AN ENTRY TO THE RECIPIENT GROUPS TABLE WITH THE EVENT OR GROUP TO ADD
+	//THE OP FIELD TELLS THE MAILER WHETHER TO ADD THESE RECIPIENTS TO THE EMAIL OR SUBTRACT THEM WHEN IT'S TIME TO QUEUE THE EMAIL
+	function add_recipient_group($evt_event_id, $grp_group_id, $op='add'){
 		
-		if($evt_event_id){
-			$q = $dblink->prepare('SELECT erg_email_recipient_group_id FROM erg_email_recipient_groups WHERE erg_eml_email_id=? AND erg_evt_event_id=?');
-			$q->bindValue(1, $this->key, PDO::PARAM_INT);
-			$q->bindValue(2, $evt_event_id, PDO::PARAM_INT);
+		//MAKE SURE THERE'S ONLY TWO OPERATIONS
+		if($op == 'remove'){
+			$op == 'remove';
 		}
 		else{
-			$q = $dblink->prepare('SELECT erg_email_recipient_group_id FROM erg_email_recipient_groups WHERE erg_eml_email_id=? AND erg_grp_group_id=?');
-			$q->bindValue(1, $this->key, PDO::PARAM_INT);
-			$q->bindValue(2, $grp_group_id, PDO::PARAM_INT);			
+			$op == 'add';
 		}
-		$q->execute();
-		$results = $q->fetchAll();
 		
-		if($results){
-			//DON'T DO IT TWICE
-			return false;
+		$email_recipient_group = new EmailRecipientGroup(NULL);
+		$email_recipient_group->set('erg_eml_email_id', $this->key);
+		$email_recipient_group->set('erg_evt_event_id', $evt_event_id);
+		$email_recipient_group->set('erg_grp_group_id', $grp_group_id);
+		$email_recipient_group->set('erg_operation', $op);
+		
+		//DON'T ADD IT AGAIN IF IT'S ALREADY THERE
+		if(!$email_recipient_group->check_for_duplicates()){
+			$email_recipient_group->prepare();
+			$email_recipient_group->save();
 		}
-		else{
-			if($evt_event_id){
-				$q = $dblink->prepare('INSERT INTO erg_email_recipient_groups (erg_eml_email_id, erg_evt_event_id) VALUES (?, ?)');
-				$q->bindValue(1, $this->key, PDO::PARAM_INT);
-				$q->bindValue(2, $evt_event_id, PDO::PARAM_INT);
-			}
-			else{
-				$q = $dblink->prepare('INSERT INTO erg_email_recipient_groups (erg_eml_email_id, erg_grp_group_id) VALUES (?, ?)');
-				$q->bindValue(1, $this->key, PDO::PARAM_INT);
-				$q->bindValue(2, $grp_group_id, PDO::PARAM_INT);			
-			}			
-			
-			
-			$q->execute();			
-		}
+		
 		return true;
 	}
 	
-	function get_recipient_groups(){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
+	function get_recipient_groups($op=NULL){
+
+		$searches = array(
+			'email_id' => $this->key,
+		);
 		
-		$q = $dblink->prepare('SELECT * FROM erg_email_recipient_groups WHERE erg_eml_email_id=?');
-		$q->bindValue(1, $this->key, PDO::PARAM_INT);
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-		$results = $q->fetchAll();
-		return $results;
+		//MAKE SURE THERE'S ONLY TWO OPERATIONS
+		if($op == 'remove' || $op == 'add'){
+			$searches['operation'] = $op;
+		}
+
+		$email_recipient_groups = new MultiEmailRecipientGroup($searches);
+		
+		$email_recipient_groups->load();
+		return $email_recipient_groups;
 		
 	}	
-	
-	
-	function remove_recipient_group($erg_email_recipient_group_id){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		$q = $dblink->prepare('DELETE FROM erg_email_recipient_groups WHERE erg_email_recipient_group_id=?');
-		$q->bindValue(1, $erg_email_recipient_group_id, PDO::PARAM_INT);
-		$success = $q->execute();
-		
-		return $success;
-	}		
 	
 
 	

@@ -397,7 +397,10 @@ class MultiGroup extends SystemMultiBase {
 			else {
 				if (array_key_exists('group_id', $this->order_by)) {
 					$sql .= ' grp_group_id ' . $this->order_by['group_id'];
-				}		
+				}	
+				if (array_key_exists('group_name', $this->order_by)) {
+					$sql .= ' grp_name ' . $this->order_by['group_name'];
+				}						
 			}				
 
 			$sql .= ' '.$this->generate_limit_and_offset();				
