@@ -57,6 +57,7 @@
 	require_once( __DIR__ . '/../data/product_requirement_instances_class.php');
 	require_once( __DIR__ . '/../data/order_item_requirements_class.php');
 	require_once( __DIR__ . '/../data/email_recipient_groups_class.php');
+	require_once( __DIR__ . '/../data/contact_types_class.php');
 
 	$classes = array(
 			'Address',
@@ -112,6 +113,7 @@
 			'ProductRequirementInstance',
 			'OrderItemRequirement',
 			'EmailRecipientGroup',
+			'ContactType',
 		);			
 
 	

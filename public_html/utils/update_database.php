@@ -375,6 +375,12 @@
 		$migrations[2][system_version] = '0.5';
 		$migrations[2][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'db_migration_version'";
 		$migrations[2][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'db_migration_version\', \'1\', 1, \'now()\', \'now()\', \'general\');';
+
+		$migrations[3][system_version] = '0.5.1';
+		$migrations[3][test] = NULL;
+		$migrations[3][migration_sql] = 'UPDATE usr_users SET usr_contact_type_unsubscribes=\'[1]\' WHERE usr_contact_preferences = \'0\'';		
+		
+		
 		
 		echo "-----MIGRATIONS-----<br>\n";
 
@@ -384,6 +390,10 @@
 		$q = $dblink->prepare($sql);
 		$q->execute();
 		$row = $q->fetch();
+		
+		if($verbose){
+			echo 'Last Migration ' . $row['stg_value'] . "<br>\n";
+		}
 		
 		$end_row=0;
 		if($row['stg_value']){
@@ -459,7 +469,7 @@
 		}
 		
 		//UPDATE THE SYSTEM VERSION
-		$sql = "UPDATE stg_settings set stg_value=".$migrations[$end_row][system_version]." WHERE stg_name='system_version'";
+		$sql = "UPDATE stg_settings set stg_value='".$migrations[$end_row][system_version]."' WHERE stg_name='system_version'";
 		$q = $dblink->prepare($sql);
 		$q->execute();	
 		echo 'System version now '.$migrations[$end_row][system_version]."<br>\n";
