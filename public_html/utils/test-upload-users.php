@@ -53,7 +53,6 @@ if (($handle = fopen("/var/www/html/uploads/temp/unsubscribed_members_export_343
 		}		
 		
 		$user->set('usr_signup_date', $data[7]);
-		$user->set('usr_contact_preferences', 0);
 		$user->set('usr_email_is_verified', 1);
 		$user->set('usr_email_is_verified_time', $data[7]);
 	

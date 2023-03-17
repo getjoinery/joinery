@@ -5,7 +5,8 @@
 
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/contact_types_class.php');
+	
 	$session = SessionControl::get_instance();
 	
 	if($_REQUEST['hash']){
@@ -22,72 +23,67 @@
 	}
 
 
-
-	$email_type_to_name = array(
-		User::NEWSLETTER => 'Newsletter',
-	);
-	
-	/*
-	$email_type_to_name = array(
-		User::NEWSLETTER => 'Community tips',
-		User::EMAIL_OFFERS => 'Special offers',
-		User::EMAIL_UPDATES => 'Announcements',
-		User::EMAIL_USER_FEEDBACK => 'Feedback Inquries',
-	);
-	*/
-
 	$announce_message = NULL;
 	if($_REQUEST){
-		/*
-		$options_to_values = array(
-			'newsletter' => User::NEWSLETTER,
-			'offers' => User::EMAIL_OFFERS,
-			'updates' => User::EMAIL_UPDATES,
-			'user_feedback' => User::EMAIL_USER_FEEDBACK,
-		);
-		*/
-		$options_to_values = array(
-			'newsletter' => User::NEWSLETTER,
-		);
-		
 		
 		if (isset($_REQUEST['zone'])) {
 			if ($_REQUEST['zone'] == 'ocu') {
 				// One click unsubscribe
-				
-				$user->unsubscribe_from_mailing_list();
-
-				$announce_message = 'You have been unsubscribed from ' . $email_type_to_name[$options_to_values[$type_to_remove]] . ' emails.  If you unsubscribed by mistake, you can choose "Subscribe" below and press the "Submit" button.';
-				/*
-				if (isset($_REQUEST['type'])) {
-					$type_to_remove = $_REQUEST['type'];
-					if (array_key_exists($type_to_remove, $options_to_values)) {
-
-						$user->set('usr_contact_preferences', $user->get('usr_contact_preferences') & (~$options_to_values[$type_to_remove]));
-						$user->save();
-						$announce_message = 'You have been unsubscribed from ' . $email_type_to_name[$options_to_values[$type_to_remove]] . ' emails.';
-					}
-				}
-				*/
-			} else if ($_REQUEST['zone'] == 'optional') {
-				// Handle changes to the optional zone
-				$new_prefs = 0;
-
-				foreach($options_to_values as $option => $value) {
-					if (isset($option) && $_POST[$option] == '1') {
-						$new_prefs |= $value;
-					}
-				}
-
-				
-				if($new_prefs){
-					$user->resubscribe_to_mailing_list();
-					$announce_message = 'Your contact preferences have been updated.  You are now SUBSCRIBED.';
+				//IF WE DON'T HAVE A CONTACT TYPE, ASSUME IT'S AN UNSUBSCRIBE FROM NEWSLETTERS
+				if($_REQUEST['contact_type_id']){
+					$contact_type_id = $_REQUEST['contact_type_id'];
 				}
 				else{
-					$user->unsubscribe_from_mailing_list();
-					$announce_message = 'Your contact preferences have been updated. You are now UNSUBSCRIBED.';
+					$contact_type_id = User::NEWSLETTER;
 				}
+				$user->unsubscribe_from_contact_type($contact_type);
+				
+				$announce_message = 'You have been unsubscribed from ' . ContactType::ToReadable($contact_type_id) . ' emails.  If you unsubscribed by mistake, you can choose "Subscribe" below and press the "Submit" button.';
+
+			} 
+			else if ($_REQUEST['zone'] == 'optional') {
+
+				//GET THE OLD UNSUBSCRIBES
+				$old_unsubscribes = $user->get_contact_type_unsubscribes();
+
+				//COMPARE WITH THE NEW UNSUBSCRIBES
+				if(empty($_REQUEST['unsubscribes_list'])){
+					$new_unsubscribes = array();
+				}
+				else{
+					$new_unsubscribes = $_REQUEST['unsubscribes_list'];
+				}
+				
+
+				$change_to_subscribe = array_diff($old_unsubscribes, $new_unsubscribes);
+				
+				$change_to_unsubscribe = array_diff($new_unsubscribes, $old_unsubscribes);
+
+				$announce_message = 'Your contact preferences have been updated. ';
+				$subscribed_readable = array();
+				foreach ($change_to_subscribe as $contact_type_id){
+					$user->subscribe_to_contact_type($contact_type_id);
+					$subscribed_readable[] = ContactType::ToReadable($contact_type_id);
+				}
+				if(!empty($subscribed_readable)){
+					$announce_message = 'You are now SUBSCRIBED to the following content: '. implode(', ', $subscribed_readable) .'. ';
+				}
+				
+				
+				foreach ($change_to_unsubscribe as $contact_type_id){
+					$user->unsubscribe_from_contact_type($contact_type_id);
+				}
+				
+				//FOR THE READOUT, LETS SHOW WHAT IS ACTUALLY THE CASE INSTEAD OF WHAT CHANGED
+				$unsubscribed_readable = array();
+				foreach ($new_unsubscribes as $contact_type_id){
+					$unsubscribed_readable[] = ContactType::ToReadable($contact_type_id);
+				}
+				
+				
+				if(!empty($unsubscribed_readable)){
+					$announce_message = 'You are now UNSUBSCRIBED from the following content: '. implode(', ', $unsubscribed_readable) .'. ';
+				}					
 				
 			}
 		}

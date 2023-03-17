@@ -40,13 +40,27 @@ if ($_POST){
 		}
 	}
 
-	if($user->get('usr_contact_preferences') != $_POST['usr_contact_preferences']){
-		if($_POST['usr_contact_preferences']){
-			$user->resubscribe_to_mailing_list();
-		}
-		else{
-			$user->unsubscribe_from_mailing_list();
-		}
+
+	//GET THE OLD UNSUBSCRIBES
+	$old_unsubscribes = $user->get_contact_type_unsubscribes();
+
+	//COMPARE WITH THE NEW UNSUBSCRIBES
+	if(empty($_REQUEST['unsubscribes_list'])){
+		$new_unsubscribes = array();
+	}
+	else{
+		$new_unsubscribes = $_REQUEST['unsubscribes_list'];
+	}
+
+	$change_to_subscribe = array_diff($old_unsubscribes, $new_unsubscribes);
+	$change_to_unsubscribe = array_diff($new_unsubscribes, $old_unsubscribes);
+
+	foreach ($change_to_subscribe as $contact_type_id){
+		$user->subscribe_to_contact_type($contact_type_id);
+	}
+
+	foreach ($change_to_unsubscribe as $contact_type_id){
+		$user->unsubscribe_from_contact_type($contact_type_id);
 	}
 	
 	$user->set('usr_timezone', $_POST['usr_timezone']);
@@ -112,8 +126,21 @@ else{
 		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, $user->get('usr_nickname'), "" , 255, "");
 	}
 	
-	$optionvals = array("Subscribed"=>1, "Unsubscribed"=>0);
-	echo $formwriter->dropinput("Newsletter subscription", "usr_contact_preferences", "ctrlHolder", $optionvals, $user->get('usr_contact_preferences'), '', FALSE);
+	$searches = array('deleted' => false);
+	$sort = LibraryFunctions::fetch_variable('sort', 'contact_type_id', 0, '');
+	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '');
+	$contact_types = new MultiContactType(
+		$searches,
+		array($sort=>$sdirection));
+	$contact_types->load();
+	$optionvals = $contact_types->get_dropdown_array();	
+
+
+	$checkedvals = $user->get_contact_type_unsubscribes();
+	$readonlyvals = array(2); //DEFAULT
+	$disabledvals = array();
+
+	echo $formwriter->checkboxList("Check the box to unsubscribe:", 'unsubscribes_list', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 
 	$optionvals = array("On"=>0, "Off"=>1);
 	echo $formwriter->dropinput("Password recovery", "usr_password_recovery_disabled", "ctrlHolder", $optionvals, $user->get('usr_password_recovery_disabled'), '', FALSE);

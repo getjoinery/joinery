@@ -21,7 +21,7 @@
 	echo PublicPageTW::tab_menu($tab_menus);
 	
              
-	echo '<p>You can opt-out of newsletter emails, but course emails cannot be disabled.  If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p>';
+	echo '<p>You can opt-out of newsletter emails, but course emails cannot be disabled.  If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p><br>';
 
     if($announce_message) {
 		echo '<div class="status_announcement"><p>'.$announce_message.'</p></div>';
@@ -30,18 +30,25 @@
 	if(!$_REQUEST['type'] == 'ocu'){		
 		$formwriter = new FormWriterPublicTW("form1");
 		echo $formwriter->begin_form("", "post", "/profile/contact_preferences");
-		$contact_prefs = $user->get('usr_contact_preferences');
-		if ($contact_prefs === NULL) {
-			list($newsletter, $offers, $updates, $user_feedback) = array(TRUE, TRUE, TRUE, TRUE);
-		} 
-		else {
-			$newsletter = ($contact_prefs & User::NEWSLETTER) ? 1 : 0;
-		}
+		
+		$searches = array('deleted' => false);
+		$sort = LibraryFunctions::fetch_variable('sort', 'contact_type_id', 0, '');
+		$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '');
+		$contact_types = new MultiContactType(
+			$searches,
+			array($sort=>$sdirection));
+		$contact_types->load();
+		$optionvals = $contact_types->get_dropdown_array();	
+	
+
+		$checkedvals = $user->get_contact_type_unsubscribes();
+		$readonlyvals = array(2); //DEFAULT
+		$disabledvals = array();
+	
+		echo $formwriter->checkboxList("Check the box to unsubscribe:", 'unsubscribes_list', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+		
 
 		echo $formwriter->hiddeninput('zone', 'optional');
-		$optionvals = array("Subscribed"=>1, "Unsubscribed"=>0);
-		echo $formwriter->dropinput("Newsletters and updates", "newsletter", NULL, $optionvals, $newsletter, '', FALSE);
-							
 		echo '<a href="/profile/account_edit">Cancel</a> ';
 		echo $formwriter->new_form_button('Submit');
 		echo $formwriter->end_form();

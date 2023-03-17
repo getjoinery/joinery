@@ -101,7 +101,7 @@
 		$user= new User($final_recipient, TRUE);
 		
 		//DON'T LOAD UNSUBSCRIBED USERS
-		if($user->get('usr_contact_preferences') == 0 && $email->get('eml_type') == Email::TYPE_MARKETING){
+		if($user->is_unsubscribed_to_contact_type($email->get('eml_ctt_contact_type_id'))){
 			echo '<font color="red">Unsubscribed: '.$user->display_name() .'</font><br>';
 		}
 		else{	

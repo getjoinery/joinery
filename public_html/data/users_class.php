@@ -69,11 +69,7 @@ class User extends SystemBase {
 	
 	// Constants for contact preferences
 	const NEWSLETTER = 1; 
-	//const EMAIL_OFFERS = 2;
-	//const EMAIL_UPDATES = 4;
-	//const EMAIL_USER_FEEDBACK = 8;
-	// This needs to be updated if you add any new email types
-	const EMAIL_ALL_PREFERENCES = 15;
+	const EVENTS = 2;
 
 	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;
@@ -169,7 +165,6 @@ class User extends SystemBase {
 		'usr_is_activated' => FALSE,
 		'usr_is_disabled' => FALSE,
 		'usr_email_is_verified' => FALSE,
-		'usr_contact_preferences' => 0,
 		'usr_signup_date' => 'now()',
 		'usr_lastlogin_time' => 'now()',
 	);
@@ -195,6 +190,17 @@ class User extends SystemBase {
 		return json_decode($this->get('usr_contact_type_unsubscribes'));
 	}
 	
+	//WILL RETURN TRUE IF THE USER IS UNSUBSCRIBED FROM THAT CONTACT TYPE
+	public function is_unsubscribed_to_contact_type($contact_type_id){
+		$unsubscribes = json_decode($this->get('usr_contact_type_unsubscribes'));
+		if(in_array($contact_type_id, $unsubscribes)){
+			return true;
+		}
+		else{
+			return false;
+		}
+	}
+	
 	//ADDS AN ENTRY TO usr_contact_type_unsubscribes
 	public function unsubscribe_from_contact_type($contact_type_id){
 		$unsubscribes = json_decode($this->get('usr_contact_type_unsubscribes'));
@@ -204,7 +210,13 @@ class User extends SystemBase {
 		$this->set('usr_contact_type_unsubscribes', json_encode($unsubscribes));
 		$this->set('usr_contact_preference_last_changed', 'NOW()');
 		$this->save();
-		return true;
+		
+		$status = true;
+		if($contact_type_id == User::NEWSLETTER){
+			$status = $this->unsubscribe_from_mailchimp_list();
+		}
+		
+		return $status;	
 	}
 	
 	//REMOVES THE AN ENTRY FROM usr_contact_type_unsubscribes
@@ -216,7 +228,12 @@ class User extends SystemBase {
 		$this->set('usr_contact_type_unsubscribes', json_encode($unsubscribes));
 		$this->set('usr_contact_preference_last_changed', 'NOW()');
 		$this->save();
-		return true;		
+		
+		$status = true;
+		if($contact_type_id == User::NEWSLETTER){
+			$status = $this->add_to_mailchimp_list();
+		}
+		return $status;		
 	}
 
 
@@ -314,11 +331,9 @@ class User extends SystemBase {
 
 		$user_data['user_activation_key_qs'] = 'uak=' . $user_data['user_activation_key'];
 
-		if ($this->get('usr_contact_preferences') === NULL) {
-			$user_data['contact_preferences'] = User::EMAIL_ALL_PREFERENCES;
-		} else {
-			$user_data['contact_preferences'] = $this->get('usr_contact_preferences');
-		}
+		
+		$user_data['contact_preferences'] = $this->get_contact_type_unsubscribes();
+		
 
 		$phone = $this->phone();
 		$user_data['phone'] = $phone ? $phone->export_as_array() : NULL;
@@ -447,23 +462,36 @@ class User extends SystemBase {
 	}
 	
 	
-	function add_to_mailing_list() {
+	function add_to_mailchimp_list($contact_type_id) {
 
+		if(!$contact_type_id){
+			$contact_type_id = User::NEWSLETTER;
+		}
+		
+		$contact_type = new ContactType($contact_type_id, TRUE);
+		
+		if(!$contact_type->get('ctt_mailchimp_list_id')){
+			throw new SystemDisplayableError('There is no mailchimp list id for this contact type:'. $contact_type->get('ctt_name'));
+			exit;
+		}
 		
 		//TODO NEED TO HANDLE ALL CONTACT PREFERENCE POSSIBILITIES
-		$this->set('usr_contact_preferences', 1);
 		if($this->get('usr_contact_preference_last_changed') != 1){
 			$this->set('usr_contact_preference_last_changed', 'NOW()');
 		}
 		
-		//CONTACT TYPE 1 IS NEWSLETTER/UPDATES
-		$this->subscribe_to_contact_type(User::NEWSLETTER);
 		
 		//NOW ADD THE USER TO MAILCHIMP
 		try {
 		$settings = Globalvars::get_instance();
 			if($settings->get_setting('mailchimp_api_key')){
 				$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
+				
+				//IF WE HAVE A MAILCHIMP ID STORED, THEN LOOK THE USER UP, DON'T ADD HIM
+				$user_to_update = NULL;
+				if($this->get('usr_mailchimp_user_id')){
+					$user_to_update = md5($this->get('usr_email'));
+				}
 
 				$merge_values = [
 					"FNAME" => $this->get('usr_first_name'),
@@ -477,11 +505,10 @@ class User extends SystemBase {
 					"email_type" => "html", 
 					"merge_fields" => $merge_values,
 				];
-
-				
+		
 				$return = $mailchimp 
-					->lists($settings->get_setting('mailchimp_list_id'))
-					->members()
+					->lists($contact_type->get('ctt_mailchimp_list_id'))
+					->members($user_to_update)
 					->post($post_params);
 
 						
@@ -502,6 +529,7 @@ class User extends SystemBase {
 
 	}	
 
+	/*
 	function resubscribe_to_mailing_list() {
 
 		//TODO NEED TO HANDLE ALL CONTACT PREFERENCE POSSIBILITIES
@@ -541,16 +569,27 @@ class User extends SystemBase {
 		$this->save();
 		return TRUE;
 	}
+	*/
 
 
-	function unsubscribe_from_mailing_list() {
+	function unsubscribe_from_mailchimp_list($contact_type_id = NULL) {
+		
+		if(!$contact_type_id){
+			$contact_type_id = User::NEWSLETTER;
+		}
+		
+		$contact_type = new ContactType($contact_type_id, TRUE);
+
+		if(!$contact_type->get('ctt_mailchimp_list_id')){
+			throw new SystemDisplayableError('There is no mailchimp list id for this contact type:'. $contact_type->get('ctt_name'));
+			exit;
+		}
 
 		//TODO NEED TO HANDLE ALL CONTACT PREFERENCE POSSIBILITIES
-		$this->set('usr_contact_preferences', 0);
 		if($this->get('usr_contact_preference_last_changed') != 1){
 			$this->set('usr_contact_preference_last_changed', 'NOW()');
 		}
-		$this->unsubscribe_from_contact_type(User::NEWSLETTER);
+
 		
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('mailchimp_api_key')){
@@ -563,7 +602,7 @@ class User extends SystemBase {
 
 			try {
 				$return = $mailchimp 
-					->lists($settings->get_setting('mailchimp_list_id'))
+					->lists($contact_type->get('ctt_mailchimp_list_id'))
 					->members(md5($this->get('usr_email')))
 					->patch($post_params);
 			} catch (Exception $e) {
@@ -727,8 +766,20 @@ class User extends SystemBase {
 			$this_transaction = true;
 		}		
 		
+		//REMOVE FROM ANY MAILING LISTS
 		if(!$debug){
-			$this->unsubscribe_from_mailing_list();
+			//GET LIST OF CONTACT TYPES
+			$contact_types = new MultiContactType(
+				array('deleted'=>false),
+				NULL,		//SORT BY => DIRECTION
+				NULL,  //NUM PER PAGE
+				NULL);  //OFFSET
+			$contact_types->load();
+			foreach($contact_types as $contact_type){
+				if($mailchimp_list_id = $contact_type->get('ctt_mailchimp_list_id')){
+					$this->unsubscribe_from_mailchimp_list($contact_type->key);
+				}
+			}
 		}
 		
 		//DELETE ANY GROUP MEMBERSHIPS

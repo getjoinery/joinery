@@ -129,12 +129,29 @@
         </dt>
         <dd class="mt-1 text-sm text-gray-900">
           <?php 
-								if($user->get('usr_contact_preferences')) {
-									echo 'Subscribed';
-								}
-								else{
-									echo 'Not Subscribed';
-								}
+				$subscribed_text = array();
+				$unsubscribed_text = array();
+				$contact_types = new MultiContactType(
+				array('deleted' => false),
+				array('contact_type_id'=>'ASC'));		
+				$contact_types->load();
+				$unsubscribe_list = $user->get_contact_type_unsubscribes();
+				foreach ($contact_types as $contact_type){
+					if(in_array($contact_type->key, $unsubscribe_list)){
+
+						$unsubscribed_text[] = ContactType::ToReadable($contact_type->key);
+					}
+					else{ 
+						$subscribed_text[] = ContactType::ToReadable($contact_type->key);
+					}
+				}
+				echo '<br>';
+				if(!empty($subscribed_text)){
+					echo 'This user is subscribed to the following: '.implode(', ', $subscribed_text).'<br>';
+				}
+				if(!empty($unsubscribed_text)){
+					echo 'This user is unsubscribed from the following: '.implode(', ', $unsubscribed_text).'<br>';
+				}
 								?>
         </dd>
       </div>

@@ -4,6 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/contact_types_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -68,6 +69,7 @@
 	$validation_rules['eml_description']['minlength']['value'] = 10;
 	$validation_rules['eml_subject']['required']['value'] = 'true';
 	$validation_rules['eml_subject']['minlength']['value'] = 10;
+	$validation_rules['eml_ctt_contact_type_id']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);		
 	
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_email_edit');
@@ -78,6 +80,16 @@
 
 	echo $formwriter->textinput('Description', 'eml_description', NULL, 100, $email->get('eml_description'), '', 255, '');
 	echo $formwriter->textinput('Subject', 'eml_subject', NULL, 100, $email->get('eml_subject'), '', 255, '');	
+	
+	$contact_types = new MultiContactType(
+		array('deleted'=>false),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$contact_types->load();
+	$optionvals = $contact_types->get_dropdown_array();
+	echo $formwriter->dropinput("Email content type (for unsubscribes)", "eml_ctt_contact_type_id", "ctrlHolder", $optionvals, $email->get('eml_ctt_contact_type_id'), '', TRUE);		
+	
 	echo $formwriter->textinput('Preview text', 'eml_preview_text', NULL, 100, $email->get('eml_preview_text'), '', 255, '');
 	
 	$optionvals = array($defaultemail=>$defaultemail);
