@@ -142,7 +142,7 @@ if ($_POST) {
 		
 		//ADD TO THE MAILING LIST IF CHOSEN
 		if($_REQUEST['mailing_list']){
-			$status = $user->add_to_mailing_list();		
+			$status = $user->subscribe_to_contact_type(User::NEWSLETTER);	
 		} 
 
 		

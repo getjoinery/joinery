@@ -174,11 +174,11 @@ exit();
 			$user = User::GetByEmail($result->email_address);
 			if($user){
 				if($result->status == 'subscribed'){
-					$user->set('usr_contact_preferences', 1);
+					
 					$user->save();
 				}
 				else{
-					$user->set('usr_contact_preferences', 0);
+					
 					$user->save();			
 				}
 			}
@@ -197,13 +197,7 @@ exit();
 	$billing_users->load();
 	
 	
-	
-	foreach ($billing_users as $billing_user){
-		if($billing_user->get('usr_contact_preferences') == 0){
-			$billing_user->unsubscribe_from_mailing_list();
-			echo 'updated '.$billing_user->key. '<br />';
-		}
-	}
+
 	
 	
 

@@ -51,7 +51,7 @@
 		foreach ($recipients as $recipient){
 			$user = new User($recipient->get('erc_usr_user_id'), TRUE);
 			//TODO MORE GRANULAR OPT OUT PREFERENCES
-			if($user->get('usr_contact_preferences') == 0 && $email->get('eml_type') == Email::TYPE_MARKETING){
+			if($user->is_unsubscribed_to_contact_type($email->get('eml_ctt_contact_type_id'))){
 				$recipient->set('erc_status', EmailRecipient::UNSUBSCRIBED);
 				$recipient->save();	
 				echo 'Skipping '. $user->display_name(). ', not subscribed<br>';

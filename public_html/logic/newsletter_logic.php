@@ -50,13 +50,13 @@
 		$user->prepare();
 		$user->save();
 			
-		if($user->get('usr_contact_preferences')){
+		if(!$user->is_unsubscribed_to_contact_type(User::NEWSLETTER)){
 			$message_type = 'warn';
 			$message_title = 'Already subscribed';
 			$message = '<p>You are already subscribed to our newsletter.  If you would like to unsubscribe, visit <a href="/profile">the My Profile page</a></p>';
 		}
 		else{
-			$status = $user->add_to_mailing_list();		
+			$status = $user->subscribe_to_contact_type(User::NEWSLETTER);
 
 			if(!$status){
 				$message_type = 'error';

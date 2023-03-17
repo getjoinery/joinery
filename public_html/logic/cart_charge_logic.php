@@ -148,7 +148,7 @@
 			
 			//ADD TO THE MAILING LIST IF CHOSEN
 			if(isset($data['newsletter']) && $data['newsletter']){
-				$status = $user->add_to_mailing_list();		
+				$status = $user->subscribe_to_contact_type(User::NEWSLETTER);
 			}
 			
 			
@@ -451,7 +451,7 @@
 			
 			//ADD TO THE MAILING LIST IF CHOSEN
 			if(isset($data['newsletter']) && $data['newsletter']){
-				$status = $user->add_to_mailing_list();		
+				$status = $user->subscribe_to_contact_type(User::NEWSLETTER);
 			}
 			
 			

@@ -26,6 +26,7 @@ class ContactType extends SystemBase {
 		'ctt_description' => 'Description of this contact type',
 		'ctt_is_frozen' => 'Whether this contact type is not editable/deletable',
 		'ctt_delete_time' => 'Time of deletion',
+		'ctt_mailchimp_list_id' => 'If mailchimp integration, the list id of the list.',
 	);
 
 	public static $field_specifications = array(
@@ -34,6 +35,7 @@ class ContactType extends SystemBase {
 		'ctt_description' => array('type'=>'varchar(255)'),
 		'ctt_is_frozen' => array('type'=>'varchar(255)'),
 		'ctt_delete_time' => array('type'=>'timestamp(6)'),
+		'ctt_mailchimp_list_id' => array('type'=>'varchar(255)'),
 	);
 	
 	public static $required_fields = array('ctt_name'
@@ -46,6 +48,11 @@ class ContactType extends SystemBase {
 	public static $initial_default_values = array(
 
 	);	
+	
+	public static function ToReadable($ctt_contact_type_id){
+		$contact_type = ContactType::GetByColumn('ctt_contact_type_id', (int)$ctt_contact_type_id);
+		return $contact_type->get('ctt_name');
+	}
 
 	function authenticate_write($session, $other_data=NULL) {
 		if ($session->get_permission() < 5) {

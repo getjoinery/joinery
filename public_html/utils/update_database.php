@@ -369,9 +369,11 @@
 		$migrations[0][system_version] = '0.5';
 		$migrations[0][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_product_requirements'";
 		$migrations[0][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Product Requirements\', 5, \'admin_product_requirements\', 5, 8, 0, \'\');';
+		
 		$migrations[1][system_version] = '0.5';
 		$migrations[1][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'system_version'";
 		$migrations[1][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'system_version\', \'0.5\', 1, \'now()\', \'now()\', \'general\');';
+		
 		$migrations[2][system_version] = '0.5';
 		$migrations[2][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'db_migration_version'";
 		$migrations[2][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'db_migration_version\', \'1\', 1, \'now()\', \'now()\', \'general\');';
@@ -379,8 +381,14 @@
 		$migrations[3][system_version] = '0.5.1';
 		$migrations[3][test] = NULL;
 		$migrations[3][migration_sql] = 'UPDATE usr_users SET usr_contact_type_unsubscribes=\'[1]\' WHERE usr_contact_preferences = \'0\'';		
-		
-		
+
+		$migrations[4][system_version] = '0.5.2';
+		$migrations[4][test] = "SELECT count(1) as count FROM ctt_contact_types WHERE ctt_name = 'Newsletter'";
+		$migrations[4][migration_sql] = 'INSERT INTO "public"."ctt_contact_types"("ctt_name", "ctt_description", "ctt_is_frozen", "ctt_delete_time") VALUES (\'Newsletter\', \'The newsletter and other updates.\', \'1\', NULL);';				
+
+		$migrations[5][system_version] = '0.5.2';
+		$migrations[5][test] = "SELECT count(1) as count FROM ctt_contact_types WHERE ctt_name = 'Events'";
+		$migrations[5][migration_sql] = 'INSERT INTO "public"."ctt_contact_types"("ctt_name", "ctt_description", "ctt_is_frozen", "ctt_delete_time") VALUES (\'Events\', \'Emails sent to event and course registrants.\', \'1\', NULL);';			
 		
 		echo "-----MIGRATIONS-----<br>\n";
 

@@ -150,7 +150,7 @@
 			$num_total = 0;
 			foreach($add_user_list as $user_id){
 				$user= new User($user_id, TRUE);
-				if($user->get('usr_contact_preferences') != 0){
+				if(!$user->is_unsubscribed_to_contact_type($email->get('eml_ctt_contact_type_id'))){
 					$group_total++;
 					$recipient_list[] = $user->key;
 				}
