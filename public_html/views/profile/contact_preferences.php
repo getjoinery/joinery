@@ -21,7 +21,7 @@
 	echo PublicPageTW::tab_menu($tab_menus);
 	
              
-	echo '<p>You can opt-out of newsletter emails, but course emails cannot be disabled.  If you want to stop receiving course emails, <a href="/profile">withdraw from the course</a></p>';
+	echo '<p>You can opt-out of newsletter emails, but course emails cannot be disabled.  If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p>';
 
     if($announce_message) {
 		echo '<div class="status_announcement"><p>'.$announce_message.'</p></div>';

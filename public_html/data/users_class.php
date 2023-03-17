@@ -13,6 +13,7 @@ require_once($siteDir . '/data/address_class.php');
 require_once($siteDir . '/data/phone_number_class.php'); 
 require_once($siteDir . '/data/activation_codes_class.php'); 
 require_once($siteDir . '/data/visitor_events_class.php');
+require_once($siteDir . '/data/contact_types_class.php');
 
 $settings = Globalvars::get_instance();
 $composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -95,7 +96,7 @@ class User extends SystemBase {
 		'usr_lastlogin_time' => 'Time of last login',
 		'usr_pic_picture_id' => 'Profile picture ID',
 		'usr_phn_phone_number_id' => 'Default phone number',
-		'usr_contact_preferences' => 'User\'s contact preferences',
+		'usr_contact_preferences' => 'User\'s contact preferences',  //THIS IS SOON DEPRECATED
 		'usr_disabled_time' => 'When user disabled',
 		'usr_nickname' => 'Nickname if exists',
 		'usr_authhash' => 'first 8 characters of sha256 hash of user id and a salt, used for one click unsubscribe',
@@ -106,7 +107,8 @@ class User extends SystemBase {
 		'usr_organization_name' => 'Organization instead of person',
 		'usr_delete_time' => 'Time of deletion',
 		'usr_password_recovery_disabled' => 'When TRUE, password recovery is disabled.',
-		'usr_urbit_ship_name' => 'If using urbit login, this is the user ship name'
+		'usr_urbit_ship_name' => 'If using urbit login, this is the user ship name',
+		'usr_contact_type_unsubscribes' => 'Contains a serialized array of contact types that the user has unsubscribed from',
 	);
 
 	public static $field_specifications = array(
@@ -137,6 +139,7 @@ class User extends SystemBase {
 		'usr_delete_time' => array('type'=>'timestamp(6)'),
 		'usr_password_recovery_disabled' => array('type'=>'bool'),
 		'usr_urbit_ship_name' => array('type'=>'varchar(128)'),
+		'usr_contact_type_unsubscribes' => array('type'=>'varchar(255)'),
 	);
 	
 	public static $timestamp_fields = array(
@@ -185,6 +188,35 @@ class User extends SystemBase {
 		    }
 		}
 	    return $string;
+	}
+	
+	//RETURNS AN ARRAY OF CONTACT TYPES THE USER HAS UNSUBSCRIBED FROM
+	public function get_contact_type_unsubscribes(){
+		return json_decode($this->get('usr_contact_type_unsubscribes'));
+	}
+	
+	//ADDS AN ENTRY TO usr_contact_type_unsubscribes
+	public function unsubscribe_from_contact_type($contact_type_id){
+		$unsubscribes = json_decode($this->get('usr_contact_type_unsubscribes'));
+		if(!in_array($contact_type_id, $unsubscribes)){
+			$unsubscribes[] = $contact_type_id;
+		}
+		$this->set('usr_contact_type_unsubscribes', json_encode($unsubscribes));
+		$this->set('usr_contact_preference_last_changed', 'NOW()');
+		$this->save();
+		return true;
+	}
+	
+	//REMOVES THE AN ENTRY FROM usr_contact_type_unsubscribes
+	public function subscribe_to_contact_type($contact_type_id){
+		$unsubscribes = json_decode($this->get('usr_contact_type_unsubscribes'));
+		if(($key = array_search($contact_type_id, $unsubscribes)) !== false){
+			unset($unsubscribes[$key]);
+		}		
+		$this->set('usr_contact_type_unsubscribes', json_encode($unsubscribes));
+		$this->set('usr_contact_preference_last_changed', 'NOW()');
+		$this->save();
+		return true;		
 	}
 
 
@@ -424,6 +456,9 @@ class User extends SystemBase {
 			$this->set('usr_contact_preference_last_changed', 'NOW()');
 		}
 		
+		//CONTACT TYPE 1 IS NEWSLETTER/UPDATES
+		$this->subscribe_to_contact_type(User::NEWSLETTER);
+		
 		//NOW ADD THE USER TO MAILCHIMP
 		try {
 		$settings = Globalvars::get_instance();
@@ -474,6 +509,7 @@ class User extends SystemBase {
 		if($this->get('usr_contact_preference_last_changed') != 1){
 			$this->set('usr_contact_preference_last_changed', 'NOW()');
 		}
+		$this->subscribe_to_contact_type(User::NEWSLETTER);
 
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('mailchimp_api_key')){
@@ -514,6 +550,7 @@ class User extends SystemBase {
 		if($this->get('usr_contact_preference_last_changed') != 1){
 			$this->set('usr_contact_preference_last_changed', 'NOW()');
 		}
+		$this->unsubscribe_from_contact_type(User::NEWSLETTER);
 		
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('mailchimp_api_key')){
