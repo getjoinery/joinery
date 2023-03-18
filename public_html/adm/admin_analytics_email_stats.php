@@ -55,7 +55,7 @@ $dblink = $dbhelper->get_db_link();
 
 
 $today = date("m-d-Y");
-$startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 years")), 0, '');
+$startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 months")), 0, '');
 $enddate = LibraryFunctions::fetch_variable('enddate', $today, 0, '');
 $interval = LibraryFunctions::fetch_variable('interval', 0, 0, ''); // 0 = daily, 1 = weekly, 2 = monthly (default), 3 = quarterly, 4 = yearly
 $usrdisabled = LibraryFunctions::fetch_variable("usr_is_disabled", 0, 0, '');
@@ -83,7 +83,7 @@ switch ($interval)
 }
 
 $formwriter = new FormWriterMaster("form1");
-echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_stats");
+echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_email_stats");
 echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);
 echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $enddate, "", 10);
 /*
@@ -99,105 +99,16 @@ echo $formwriter->end_form();
 
 echo '<br />';
 
-//Get Data
-$sql = "SELECT 
-date_part('day', vse_visitor_events.vse_timestamp) as day,
-date_part('month', vse_visitor_events.vse_timestamp) as month,
-date_part('year', vse_visitor_events.vse_timestamp) as year,
-count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount
-FROM vse_visitor_events 
-WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate GROUP BY day, month, year ORDER BY year, month, day ASC";
 
 
-try
-{
-	$q = $dblink->prepare($sql);
-	$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
-	$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
-	$success = $q->execute();
-	$q->setFetchMode(PDO::FETCH_OBJ);
-}
-catch(PDOException $e)
-{
-	$dbhelper->handle_query_error($e);
-	exit();
-}
-
-$unique_visitors = $q->fetchAll();
-$yvals = array();
-$xvals = array();
-$c=0;
-foreach($unique_visitors as $unique_visitor => $values){
-	$datedisp = $values->year. '-'.$values->month.'-'.$values->day;
-	$yvals[$c] = $values->visitorcount;
-	$xvals[$c] = $datedisp;
-	$c++;
-}
- 
-/*
-?>
-<div id="chartContainer" style="height: 370px; width: 100%;"></div>
-<script>
-window.onload = function () {
- 
-var chart = new CanvasJS.Chart("chartContainer", {
-	title: {
-		text: "Daily Unique Visitors"
-	},
-	axisY: {
-		title: "Unique Visitors"
-	},
-	data: [{
-		type: "line",
-		dataPoints: <?php echo json_encode($datapoints, JSON_NUMERIC_CHECK); ?>
-	}]
-});
-chart.render();
- 
-}
-</script>
-<?php
-*/
-
-?>
-<div style="width: 1000px; height: 500px;">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@2.8.0"></script>
-<canvas id="myChart" ></canvas>
-</div>
-<script>
-var ctx = document.getElementById('myChart').getContext('2d');
-var chart = new Chart(ctx, {
-    // The type of chart we want to create
-    type: 'line',
-
-    // The data for our dataset
-    data: {
-        labels: <?php echo json_encode($xvals); ?>,
-        datasets: [{
-            label: 'Daily Unique Visitors',
-            backgroundColor: 'rgb(51, 153, 255)',
-            borderColor: 'rgb(0, 0, 204)',
-            data: <?php echo json_encode($yvals); ?>
-        }]
-    },
-
-    // Configuration options go here
-    options: {}
-});
-</script>
-
-<?php
 
 
+//CONTENT
 $sql = "SELECT 
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
-vse_visitor_events.vse_page as page
+vse_visitor_events.vse_content as content
 FROM vse_visitor_events 
-WHERE 
-vse_visitor_events.vse_timestamp >= :startdate AND 
-vse_visitor_events.vse_timestamp <= :enddate AND 
-(vse_visitor_events.vse_is_404 != TRUE OR vse_visitor_events.vse_is_404 IS NULL)
-GROUP BY page ORDER BY visitorcount DESC";
+WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_content IS NOT NULL GROUP BY vse_visitor_events.vse_content ORDER BY visitorcount DESC";
 
 
 $dbhelper = DbConnector::get_instance();
@@ -217,18 +128,31 @@ catch(PDOException $e)
 	exit();
 }
 
-$page_visitors = $q->fetchAll();
+$email_content_stats = $q->fetchAll();
+$headers = array("Email", "Visits");
+$box_vars =	array(
+	'altlinks' => $altlinks,
+	'title' => 'Email Content',
+);
+$page->tableheader($headers, $box_vars);
+$rowtotals = array("<b>Totals</b>", 0);
+foreach ($email_content_stats as $email_stats => $values){		
 
+	$rowvalues = array();
+	array_push($rowvalues, $values->content);
+	array_push($rowvalues, $values->visitorcount);
+	$rowtotals[1] += $values->visitorcount;
+	$page->disprow($rowvalues);
+}
+$page->disprow($rowtotals);
+$page->endtable();
 
+//MEDIUM
 $sql = "SELECT 
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
-vse_visitor_events.vse_page as page
+vse_visitor_events.vse_medium as content
 FROM vse_visitor_events 
-WHERE 
-vse_visitor_events.vse_timestamp >= :startdate AND 
-vse_visitor_events.vse_timestamp <= :enddate AND 
-vse_visitor_events.vse_is_404 = TRUE 
-GROUP BY page ORDER BY visitorcount DESC";
+WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_medium IS NOT NULL GROUP BY vse_visitor_events.vse_medium ORDER BY visitorcount DESC";
 
 
 $dbhelper = DbConnector::get_instance();
@@ -248,108 +172,115 @@ catch(PDOException $e)
 	exit();
 }
 
-$t404_pages = $q->fetchAll();
-
-
-
-
-/*
-$headers = array("Date Range: " . $grouping[$interval], "Unique Visitors");
+$email_medium_stats = $q->fetchAll();
+$headers = array("Email", "Visits");
 $box_vars =	array(
 	'altlinks' => $altlinks,
-	'title' => 'Visitors',
+	'title' => 'Email Mediums',
 );
 $page->tableheader($headers, $box_vars);
-
 $rowtotals = array("<b>Totals</b>", 0);
+foreach ($email_medium_stats as $email_stats => $values){		
 
-foreach ($unique_visitors as $unique_visitor => $values)
-{		
 	$rowvalues = array();
-	
-	array_push($rowvalues, $values->year. '-'.$values->month.'-'.$values->day);
+	array_push($rowvalues, $values->content);
 	array_push($rowvalues, $values->visitorcount);
-	
 	$rowtotals[1] += $values->visitorcount;
-
 	$page->disprow($rowvalues);
 }
-
 $page->disprow($rowtotals);
 $page->endtable();
-*/
+
+//CAMPAIGN
+
+$sql = "SELECT 
+count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
+vse_visitor_events.vse_campaign as content
+FROM vse_visitor_events 
+WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_campaign IS NOT NULL GROUP BY vse_visitor_events.vse_campaign ORDER BY visitorcount DESC";
 
 
+$dbhelper = DbConnector::get_instance();
+$dblink = $dbhelper->get_db_link();
 
+try
+{
+	$q = $dblink->prepare($sql);
+	$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
+	$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+	$success = $q->execute();
+	$q->setFetchMode(PDO::FETCH_OBJ);
+}
+catch(PDOException $e)
+{
+	$dbhelper->handle_query_error($e);
+	exit();
+}
 
-
-
-
-
-
-$headers = array("Page", "Visits");
+$email_campaign_stats = $q->fetchAll();
+$headers = array("Email", "Visits");
 $box_vars =	array(
 	'altlinks' => $altlinks,
-	'title' => 'Top Pages',
+	'title' => 'Email Campaigns',
 );
 $page->tableheader($headers, $box_vars);
-
 $rowtotals = array("<b>Totals</b>", 0);
+foreach ($email_campaign_stats as $email_stats => $values){		
 
-
-foreach ($page_visitors as $page_visitor => $values)
-{		
-	if($values->visitorcount <= 10){
-		break;
-	}
 	$rowvalues = array();
-	
-
-	array_push($rowvalues, $values->page);
+	array_push($rowvalues, $values->content);
 	array_push($rowvalues, $values->visitorcount);
-	
 	$rowtotals[1] += $values->visitorcount;
-
-
 	$page->disprow($rowvalues);
 }
-
 $page->disprow($rowtotals);
-
 $page->endtable();
+//SOURCE
+
+$sql = "SELECT 
+count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
+vse_visitor_events.vse_source as content
+FROM vse_visitor_events 
+WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_source IS NOT NULL GROUP BY vse_visitor_events.vse_source ORDER BY visitorcount DESC";
 
 
+$dbhelper = DbConnector::get_instance();
+$dblink = $dbhelper->get_db_link();
 
+try
+{
+	$q = $dblink->prepare($sql);
+	$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
+	$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+	$success = $q->execute();
+	$q->setFetchMode(PDO::FETCH_OBJ);
+}
+catch(PDOException $e)
+{
+	$dbhelper->handle_query_error($e);
+	exit();
+}
 
-$headers = array("404 Pages", "Tries");
+$email_source_stats = $q->fetchAll();
+$headers = array("Email", "Visits");
 $box_vars =	array(
 	'altlinks' => $altlinks,
-	'title' => '404 Pages',
+	'title' => 'Email Sources',
 );
 $page->tableheader($headers, $box_vars);
-
 $rowtotals = array("<b>Totals</b>", 0);
+foreach ($email_source_stats as $email_stats => $values){		
 
-
-foreach ($t404_pages as $t404_page => $values)
-{		
 	$rowvalues = array();
-	if($values->visitorcount <= 5){
-		break;
-	}
-
-	array_push($rowvalues, $values->page);
+	array_push($rowvalues, $values->content);
 	array_push($rowvalues, $values->visitorcount);
-	
 	$rowtotals[1] += $values->visitorcount;
-
-
 	$page->disprow($rowvalues);
 }
-
 $page->disprow($rowtotals);
-
 $page->endtable();
+
+
 
 
 

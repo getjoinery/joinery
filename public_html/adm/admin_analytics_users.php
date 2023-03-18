@@ -46,7 +46,7 @@ $mintotal = 2;
 <?php
 
 $formwriter = new FormWriterMaster("form1");
-echo $formwriter->begin_form("uniForm", "post", "admin_analytics_users");
+echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_users");
 
 echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);
 echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $enddate, "", 10);
