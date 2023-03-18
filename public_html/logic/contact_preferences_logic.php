@@ -27,7 +27,7 @@
 	if($_REQUEST){
 		
 		if (isset($_REQUEST['zone'])) {
-			if ($_REQUEST['zone'] == 'ocu') {
+			if ($_REQUEST['action'] == 'ocu') {
 				// One click unsubscribe
 				//IF WE DON'T HAVE A CONTACT TYPE, ASSUME IT'S AN UNSUBSCRIBE FROM NEWSLETTERS
 				if($_REQUEST['contact_type_id']){
@@ -36,9 +36,11 @@
 				else{
 					$contact_type_id = User::NEWSLETTER;
 				}
+
 				$user->unsubscribe_from_contact_type($contact_type);
 				
 				$announce_message = 'You have been unsubscribed from ' . ContactType::ToReadable($contact_type_id) . ' emails.  If you unsubscribed by mistake, you can choose "Subscribe" below and press the "Submit" button.';
+
 
 			} 
 			else if ($_REQUEST['zone'] == 'optional') {

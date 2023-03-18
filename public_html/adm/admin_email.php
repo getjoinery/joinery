@@ -91,7 +91,7 @@
 		$pageoptions['title'] = 'Email: '.$email->get('eml_subject');
 		$altlinks = array(
 		'Edit'=>'/admin/admin_email_edit?eml_email_id='.$email->key,		
-		'Send test'=> '/admin/admin_emails_test?sendtest=1&eml_email_id='.$email->key);
+		'Send test'=> '/admin/admin_emails_send?send_test=1&eml_email_id='.$email->key);
 		
 		if($email->get('eml_status') >= 3){
 			$altlinks['Add to Send Queue'] = '/admin/admin_emails_queue?eml_email_id='.$email->key;

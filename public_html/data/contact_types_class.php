@@ -24,7 +24,6 @@ class ContactType extends SystemBase {
 		'ctt_contact_type_id' => 'ID of the contact_type',
 		'ctt_name' => 'The contact_type',
 		'ctt_description' => 'Description of this contact type',
-		'ctt_is_frozen' => 'Whether this contact type is not editable/deletable',
 		'ctt_delete_time' => 'Time of deletion',
 		'ctt_mailchimp_list_id' => 'If mailchimp integration, the list id of the list.',
 	);
@@ -33,7 +32,6 @@ class ContactType extends SystemBase {
 		'ctt_contact_type_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'ctt_name' => array('type'=>'varchar(255)'),
 		'ctt_description' => array('type'=>'varchar(255)'),
-		'ctt_is_frozen' => array('type'=>'varchar(255)'),
 		'ctt_delete_time' => array('type'=>'timestamp(6)'),
 		'ctt_mailchimp_list_id' => array('type'=>'varchar(255)'),
 	);
