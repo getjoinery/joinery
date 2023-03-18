@@ -328,7 +328,7 @@ class SessionControl{
 		$medium = NULL;
 		$content = NULL;
 		if($_SERVER['QUERY_STRING']){
-			parse_str($_SERVER['QUERY_STRING'], $qvars);
+			parse_str($_SERVER['QUERY_STRING'], $qvars); 
 			foreach ($qvars as $qvar=>$qval){
 				if($qvar == 'vs' || $qvar == 'utm_source'){
 					$source = $qval;

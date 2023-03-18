@@ -19,7 +19,10 @@
 			'subject' => $email->get('eml_subject'),
 			'preview_text' => $email->get('eml_preview_text'),
 			'body' => $email->get('eml_message_html'),
-			'utm_source' => urlencode($email->get('eml_subject')), 
+			//'utm_source' => 'email', //use defaults
+			//'utm_medium' => 'email', //use defaults
+			'utm_campaign' => ContactType::ToReadable($email->get('eml_ctt_contact_type_id')), 
+			'utm_content' => urlencode($email->get('eml_subject')), 
 			'content_type' => $email->get('eml_ctt_contact_type_id'),
 			'content_type_string' => ContactType::ToReadable($email->get('eml_ctt_contact_type_id')),
 	));

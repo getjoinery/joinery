@@ -99,7 +99,10 @@
 			$email->fill_template(array(
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
-				'utm_source' => urlencode($_POST['eml_subject']),
+				//'utm_source' => 'email', //use defaults
+				//'utm_medium' => 'email', //use defaults
+				'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+				'utm_content' => urlencode($_POST['eml_subject']), 	
 				'content_type' => User::TRANSACTIONAL,
 				'content_type_string' => 'transactional email'),
 			));	
@@ -146,6 +149,10 @@
 				$email->fill_template(array(
 					'subject' => 'COPY: '.$_POST['eml_subject'],
 					'body' => $_POST['eml_message'],
+					//'utm_source' => 'email', //use defaults
+					//'utm_medium' => 'email', //use defaults
+					'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+					'utm_content' => urlencode($_POST['eml_subject']), 	
 					'content_type' => User::TRANSACTIONAL,
 					'content_type_string' => 'transactional email'),
 				));
@@ -181,11 +188,13 @@
 			$email_footer_template = $settings->get_setting('group_email_footer_template');
 
 			$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);			
-			//$email = new EmailTemplate('blank_template.html');
 			$email->fill_template(array(
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
-				'utm_source' => urlencode($_POST['eml_subject']),	
+				//'utm_source' => 'email', //use defaults
+				//'utm_medium' => 'email', //use defaults
+				'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+				'utm_content' => urlencode($_POST['eml_subject']), 	
 				'content_type' => User::TRANSACTIONAL,
 				'content_type_string' => 'transactional email'),
 			));
@@ -231,10 +240,13 @@
 			$settings = Globalvars::get_instance();
 			$email_inner_template = $settings->get_setting('individual_email_inner_template');
 			$email = new EmailTemplate($email_inner_template, $recipient);
-			//$email = new EmailTemplate('blank_template.html', $recipient);
 			$email->fill_template(array(
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
+				//'utm_source' => 'email', //use defaults
+				//'utm_medium' => 'email', //use defaults
+				'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+				'utm_content' => urlencode($_POST['eml_subject']), 	
 				'content_type' => User::TRANSACTIONAL,
 				'content_type_string' => 'transactional email'),
 			));
@@ -276,10 +288,13 @@
 		$settings = Globalvars::get_instance();
 		$email_inner_template = $settings->get_setting('individual_email_inner_template');
 		$email = new EmailTemplate($email_inner_template, $sender);
-		//$email = new EmailTemplate('blank_template.html', $sender);
 		$email->fill_template(array(
 			'subject' => 'COPY: '.$_POST['eml_subject'],
 			'body' => $_POST['eml_message'],
+			//'utm_source' => 'email', //use defaults
+			//'utm_medium' => 'email', //use defaults
+			'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+			'utm_content' => urlencode($_POST['eml_subject']), 	
 			'content_type' => User::TRANSACTIONAL,
 			'content_type_string' => 'transactional email'),
 		));

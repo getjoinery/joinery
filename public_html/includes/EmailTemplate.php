@@ -135,8 +135,12 @@ class EmailTemplate {
 			$this->template_name = $tmp_template_name[count($tmp_template_name) - 2];
 		}
 
-		// Default utm_source
-		$this->utm_source = 'bulk_email';
+		// Default tracking values
+		$this->utm_source = 'email';
+		$this->utm_medium = 'email';
+		$this->utm_content = 'email';
+		//$this->utm_campaign = date('Y-m-d');
+		$this->utm_campaign = '';
 
 		$this->template_values = array(
 			'template_name' => $this->template_name,
@@ -161,14 +165,15 @@ class EmailTemplate {
 	}
 
 	protected function _generate_email_vars() {
-		return 'utm_source=' . $this->utm_source . '&amp;utm_medium=email&amp;utm_content=email' . $this->key .
-			'&amp;utm_campaign=' . date('Ymd') . '&amp;ers=0';
+		return 'utm_source=' . $this->utm_source . '&amp;utm_medium=' . $this->utm_medium . '&amp;utm_content=' . $this->utm_content . '&amp;utm_campaign=' . $this->utm_campaign;
 	}
-
+	
+	/*
 	protected function _generate_tracking_code($id) {
 		$code = 'ers=' . LibraryFunctions::EncodeWithChecksum($id);
 		$this->email_html = str_replace('ers=0', $code, str_replace('email_footer.png', 'email_footer.png?' . $code, $this->email_html));
 	}
+	*/
 	
 	protected function _add_tracking_to_links($email_body){
 		
@@ -536,12 +541,22 @@ class EmailTemplate {
 	function fill_template($values) {
 		$settings = Globalvars::get_instance();
 		
+		//OVERRIDE THE TRACKING VALUES HERE
 		if($values['utm_source']){
-			//REDO THE TEMPLATE VALUES
 			$this->utm_source = $values['utm_source'];
-			$this->template_values['email_vars'] = $this->_generate_email_vars();
+			
 		}
-
+		if($values['utm_medium']){
+			$this->utm_medium = $values['utm_medium'];
+		}
+		if($values['utm_campaign']){
+			$this->utm_campaign = $values['utm_campaign'];
+		}
+		if($values['utm_content']){
+			$this->utm_content = $values['utm_content'];
+		}
+		$this->template_values['email_vars'] = $this->_generate_email_vars();
+		
 		// Merge in the values from the constructor
 		$values = array_merge($values, $this->template_values);
 		$set_values = array();
@@ -792,7 +807,7 @@ class EmailTemplate {
 
 	function save_email_as_queued($log_entry_id=NULL, $status=QueuedEmail::QUEUED) {
 		
-		$this->_generate_tracking_code($log_entry_id);
+		//$this->_generate_tracking_code($log_entry_id);
 		$queued_email = new QueuedEmail(NULL);
 		$queued_email->set('equ_from_name', $this->email_from_name);
 		$queued_email->set('equ_from', $this->email_from);
