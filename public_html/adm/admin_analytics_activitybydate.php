@@ -50,7 +50,7 @@ $session->check_permission(10);
 
 
 $formwriter = new FormWriterMaster("form1");
-echo $formwriter->begin_form("uniForm", "post", "admin_analytics_activitybydate");
+echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_activitybydate");
 
 echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);
 echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $enddate, "", 10);

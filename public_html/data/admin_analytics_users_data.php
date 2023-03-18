@@ -1,7 +1,7 @@
 <?php
 
 $today = date("m-d-Y");
-$startdate = LibraryFunctions::fetch_variable('startdate', '01-01-2000', 0, '');
+$startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 years")), 0, '');
 $enddate = LibraryFunctions::fetch_variable('enddate', $today, 0, '');
 $mintotal = (int)LibraryFunctions::fetch_variable('mintotal', 0, 0, '');
 $disabled = LibraryFunctions::fetch_variable("usr_is_disabled", 1, 0, '');

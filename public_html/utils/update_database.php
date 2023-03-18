@@ -406,7 +406,9 @@
 <br/>
 <br/>\' WHERE emt_name=\'default_footer\';';				
 		
-
+		$migrations[8][system_version] = '0.5.4';
+		$migrations[8][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_analytics_email_stats'";
+		$migrations[8][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Email Statistics\', 12, \'admin_analytics_email_stats\', 2, 5, 0, \'\');';	
 
 		
 		
