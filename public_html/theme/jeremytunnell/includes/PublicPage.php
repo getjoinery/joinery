@@ -386,14 +386,6 @@ var typology_js_settings = {"rtl_mode":"","header_sticky":"1","logo":"https:\/\/
 	private function configure_footer_options($options) {
 		$options = array_merge(self::$footer_defaults, $options);
 
-		if (!isset($_SESSION['ie_popup']) && isset($_SERVER['HTTP_USER_AGENT']) && strpos($_SERVER['HTTP_USER_AGENT'], 'MSIE 6.0') !== FALSE) {
-			// If the user might be using MSIE 6, lets make the light box to show it
-			// However, this is triggered by the specific javascript above, so it will
-			// not hit any false positives
-			$_SESSION['ie_popup'] = TRUE;
-			$options['ie6'] = TRUE;
-		}
-
 		if ($this->debug) {
 			$options['track'] = FALSE;
 		}

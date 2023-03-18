@@ -237,7 +237,7 @@
 						$email = new EmailTemplate($email_inner_template, $notify_user);
 						$email->fill_template(array(
 							'subject' => 'New Subscription',
-							'body' => $body,
+							'body' => $body,	
 						));	
 						$result = $email->send();
 					}					
