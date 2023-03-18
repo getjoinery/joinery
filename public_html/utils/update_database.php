@@ -394,6 +394,22 @@
 		$migrations[6][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_contact_types'";
 		$migrations[6][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Contact Types\', 11, \'admin_contact_types\', 7, 8, 0, \'\');';		
 		
+		$migrations[7][system_version] = '0.5.4';
+		$migrations[7][test] = NULL;
+		$migrations[7][migration_sql] = 'UPDATE emt_email_templates SET emt_body=\'<br/>----
+<br/>
+<small>
+	{content_type}This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end} because you are subscribed to receive the email type <i>*content_type_string*</i>.  Please <a href="*web_dir*/profile/contact_preferences?content_type_id=*content_type*&user=*recipient->key*&hash=*recipient->usr_authhash*&zone=ocu&*email_vars*">click here</a> to stop receiving <i>*content_type_string*</i> emails or <a href="*web_dir*/profile/contact_preferences?*email_vars*">click here</a> to manage all your contact preferences.  {end content_type}
+
+{~content_type}This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end} because you are subscribed to receive email from us.  Please <a href="*web_dir*/profile/contact_preferences?*email_vars*">click here</a> to manage your contact preferences.  {end ~content_type}
+</small>
+<br/>
+<br/>\' WHERE emt_name=\'default_footer\';';				
+		
+
+
+		
+		
 		echo "-----MIGRATIONS-----<br>\n";
 
 		//GET THE LAST MIGRATION STOPPING POINT
