@@ -99,7 +99,9 @@
 			$email->fill_template(array(
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
-				'utm_source' => urlencode($_POST['eml_subject']), 
+				'utm_source' => urlencode($_POST['eml_subject']),
+				'content_type' => User::TRANSACTIONAL,
+				'content_type_string' => 'transactional email'),
 			));	
 			
 			foreach ($event_registrants as $event_registrant){
@@ -144,6 +146,8 @@
 				$email->fill_template(array(
 					'subject' => 'COPY: '.$_POST['eml_subject'],
 					'body' => $_POST['eml_message'],
+					'content_type' => User::TRANSACTIONAL,
+					'content_type_string' => 'transactional email'),
 				));
 				$result = $email->send();
 			}				
@@ -181,7 +185,9 @@
 			$email->fill_template(array(
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
-				'utm_source' => urlencode($_POST['eml_subject']),			
+				'utm_source' => urlencode($_POST['eml_subject']),	
+				'content_type' => User::TRANSACTIONAL,
+				'content_type_string' => 'transactional email'),
 			));
 			
 			foreach ($group_members as $group_member){
@@ -229,6 +235,8 @@
 			$email->fill_template(array(
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
+				'content_type' => User::TRANSACTIONAL,
+				'content_type_string' => 'transactional email'),
 			));
 			$result = $email->send();
 			if($result){
@@ -272,6 +280,8 @@
 		$email->fill_template(array(
 			'subject' => 'COPY: '.$_POST['eml_subject'],
 			'body' => $_POST['eml_message'],
+			'content_type' => User::TRANSACTIONAL,
+			'content_type_string' => 'transactional email'),
 		));
 		$result = $email->send();		
 		

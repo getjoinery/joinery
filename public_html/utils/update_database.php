@@ -388,7 +388,11 @@
 
 		$migrations[5][system_version] = '0.5.2';
 		$migrations[5][test] = "SELECT count(1) as count FROM ctt_contact_types WHERE ctt_name = 'Events'";
-		$migrations[5][migration_sql] = 'INSERT INTO "public"."ctt_contact_types"("ctt_name", "ctt_description", "ctt_is_frozen", "ctt_delete_time") VALUES (\'Events\', \'Emails sent to event and course registrants.\', \'1\', NULL);';			
+		$migrations[5][migration_sql] = 'INSERT INTO "public"."ctt_contact_types"("ctt_name", "ctt_description", "ctt_is_frozen", "ctt_delete_time") VALUES (\'Transactional\', \'Emails related to purchases or registrations.\', \'1\', NULL);';			
+	
+		$migrations[6][system_version] = '0.5.3';
+		$migrations[6][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_contact_types'";
+		$migrations[6][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Contact Types\', 11, \'admin_contact_types\', 7, 8, 0, \'\');';		
 		
 		echo "-----MIGRATIONS-----<br>\n";
 

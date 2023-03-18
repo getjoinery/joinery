@@ -69,7 +69,7 @@ class User extends SystemBase {
 	
 	// Constants for contact preferences
 	const NEWSLETTER = 1; 
-	const EVENTS = 2;
+	const TRANSACTIONAL = 2;
 
 	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;
@@ -475,11 +475,6 @@ class User extends SystemBase {
 			exit;
 		}
 		
-		//TODO NEED TO HANDLE ALL CONTACT PREFERENCE POSSIBILITIES
-		if($this->get('usr_contact_preference_last_changed') != 1){
-			$this->set('usr_contact_preference_last_changed', 'NOW()');
-		}
-		
 		
 		//NOW ADD THE USER TO MAILCHIMP
 		try {
@@ -583,11 +578,6 @@ class User extends SystemBase {
 		if(!$contact_type->get('ctt_mailchimp_list_id')){
 			throw new SystemDisplayableError('There is no mailchimp list id for this contact type:'. $contact_type->get('ctt_name'));
 			exit;
-		}
-
-		//TODO NEED TO HANDLE ALL CONTACT PREFERENCE POSSIBILITIES
-		if($this->get('usr_contact_preference_last_changed') != 1){
-			$this->set('usr_contact_preference_last_changed', 'NOW()');
 		}
 
 		

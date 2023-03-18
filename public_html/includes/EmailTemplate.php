@@ -142,7 +142,6 @@ class EmailTemplate {
 			'template_name' => $this->template_name,
 			'web_dir' => $settings->get_setting('webDir'),
 			'email_vars' => $this->_generate_email_vars(),
-			'email_type' => NULL,
 		);
 
 		$this->inner_html = NULL;
@@ -151,7 +150,8 @@ class EmailTemplate {
 		if ($recipient_user) {
 			$this->template_values['recipient'] = $recipient_user->export_as_array();
 			$this->add_recipient($recipient_user->get('usr_email'), $recipient_user->get('usr_first_name') . ' ' . $recipient_user->get('usr_last_name'));
-		} else {
+		} 
+		else {
 			$this->template_values['recipient'] = NULL;
 		}
 
@@ -548,7 +548,7 @@ class EmailTemplate {
 
 		list($email_body, $set_values) = $this->_process_conditionals($values, $this->inner_template);
 		$values = array_merge($values, $set_values);
-
+		
 
 		if ($this->footer) {
 			list($footer_string, $footer_set_values) = $this->_process_conditionals($values, $this->footer);
@@ -653,6 +653,7 @@ class EmailTemplate {
 		return $this->email_has_content;
 	}
 
+	//RETURNS TRUE ON SUCCESS, AND A POSITIVE INTEGER IF EMAIL SENDING HAS BEEN TURNED OFF
 	function send($check_session=TRUE, $other_host=NULL) {
 		$settings = Globalvars::get_instance();
 
@@ -663,15 +664,16 @@ class EmailTemplate {
 
 		if ($check_session) {
 			$session = SessionControl::get_instance();
-
+			
 			if(!$session->send_emails()) {
 				//STORE THE EMAIL IN A LOG
 				$debug_log = new DebugEmailLog(NULL);
 				$debug_log->set('del_subject', $this->email_subject);
 				$debug_log->set('del_body', $this->email_html);
-				$debug_log->save();				
+				$debug_log->save();	
+				$debug_log->load();					
 				
-				return FALSE;
+				return false;
 			}
 		}
 

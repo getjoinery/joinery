@@ -17,7 +17,7 @@
 
 	if($_POST){
 
-		$editable_fields = array('eml_description', 'eml_subject', 'eml_from_address', 'eml_from_name', 'eml_message_html', 'eml_preview_text');
+		$editable_fields = array('eml_description', 'eml_subject', 'eml_from_address', 'eml_from_name', 'eml_message_html', 'eml_preview_text', 'eml_ctt_contact_type_id');
 
 		foreach($editable_fields as $field) {
 			$email->set($field, $_POST[$field]);
