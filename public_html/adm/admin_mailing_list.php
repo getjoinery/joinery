@@ -42,6 +42,17 @@
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
+	$search_criteria = array(
+		'deleted' => false,
+		'mailing_list_id' => $mailing_list->key);
+	$registrants = new MultiMailingListRegistrant(
+		$search_criteria,
+		array($sort=>$sdirection),
+		$numperpage,
+		$offset);		
+	$registrants->load();
+	$numrecords = $registrants->count_all();	
+
 	$session->set_return();
 
 
@@ -107,15 +118,7 @@
 	);
 	$page->tableheader($headers, $box_vars, $pager);
 	
-	$search_criteria = array(
-		'deleted' => false,
-		'mailing_list_id' => $mailing_list->key);
-	$registrants = new MultiMailingListRegistrant(
-		$search_criteria,
-		array($sort=>$sdirection),
-		$numperpage,
-		$offset);		
-	$registrants->load();
+
 	foreach($registrants as $registrant){
 		$user = new User($registrant->get('mlr_usr_user_id'), TRUE);
 		$rowvalues=array();
