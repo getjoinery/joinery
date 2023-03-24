@@ -95,7 +95,23 @@
 	}
 	else{
 		echo 'Status: Active'.'<br />';
+		
+		
+		if($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC_UNLISTED){
+			echo 'Visibility: Public, Unlisted (<a href="'. $mailing_list->get_link(). '">'. $mailing_list->get_link(). '</a>)<br />';
+		}
+		else if ($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC){
+			echo 'Visibility: Public (<a href="'. $mailing_list->get_link(). '">'. $mailing_list->get_link(). '</a>)<br />';
+		}
+		else{
+			echo 'Visibility: Hidden<br>';
+		}
+		echo 'Subscribed users: '. $numusers = $mailing_list->count_subscribed_users(). '<br />';
+		
 	}
+	
+	
+	
 	
 	if($mailing_list->get('mlt_mailchimp_list_id')){
 		echo 'Mailchimp integration active.  Mailchimp ID: '.$mailing_list->get('mlt_mailchimp_list_id').'<br />';
