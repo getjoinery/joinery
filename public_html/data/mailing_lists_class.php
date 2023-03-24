@@ -11,6 +11,12 @@ require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/data/mailing_list_registrants_class.php');
 require_once($siteDir . '/data/users_class.php');
 
+$settings = Globalvars::get_instance();
+
+$composer_dir = $settings->get_setting('composerAutoLoad');	
+require $composer_dir.'autoload.php';
+use MailchimpAPI\Mailchimp;
+
 class MailingListException extends SystemClassException {}
 class DisplayableMailingListException extends MailingListException implements DisplayableErrorMessage {}
 class DisplayablePermanentMailingListException extends MailingListException implements DisplayablePermanentErrorMessage {}
