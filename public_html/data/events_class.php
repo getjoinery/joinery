@@ -157,7 +157,7 @@ class Event extends SystemBase {
 		
 
 	
-	static function get_by_link($link){
+	static function get_by_link($link, $search_deleted=false){
 		$params = explode("/", $link);
 		if($params[0] == 'event'){
 			$lookup = $params[1];
@@ -165,7 +165,15 @@ class Event extends SystemBase {
 		else{
 			$lookup = $params[0];
 		}
-		$results = new MultiEvent(array('link' => $lookup, 'deleted'=>false));
+		
+		if($search_deleted){
+			$results = new MultiEvent(array('link' => $lookup));
+		}
+		else{
+			$results = new MultiEvent(array('link' => $lookup, 'deleted'=>false));
+		}
+		
+		
 		$results->load();
 	
 		if($results->count()){	
@@ -239,7 +247,7 @@ class Event extends SystemBase {
 		//NO DUPLICATES
 		$increment=1;
 		$tmp_orig = $tmp;
-		while(Event::get_by_link($tmp)){
+		while(Event::get_by_link($tmp, true)){
 			$tmp = $tmp_orig . $increment;
 			$increment++;
 		}
@@ -484,8 +492,6 @@ class Event extends SystemBase {
 		if ($this->data === NULL) {
 			throw new eventException('This request has no data.');
 		}
-
-		$this->check_field_constraints();
 		
 		//TODO MAKE SURE PRODUCT IS ATTACHED BEFORE REGISTRATION
 		

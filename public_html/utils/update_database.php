@@ -380,28 +380,28 @@
 
 		$migrations[3][system_version] = '0.5.1';
 		$migrations[3][test] = NULL;
-		$migrations[3][migration_sql] = 'UPDATE usr_users SET usr_contact_type_unsubscribes=\'[1]\' WHERE usr_contact_preferences = \'0\'';		
+		$migrations[3][migration_sql] = NULL;		
 
 		$migrations[4][system_version] = '0.5.2';
-		$migrations[4][test] = "SELECT count(1) as count FROM ctt_contact_types WHERE ctt_name = 'Newsletter'";
-		$migrations[4][migration_sql] = 'INSERT INTO "public"."ctt_contact_types"("ctt_name", "ctt_description", "ctt_is_frozen", "ctt_delete_time") VALUES (\'Newsletter\', \'The newsletter and other updates.\', \'1\', NULL);';				
+		$migrations[4][test] = NULL;
+		$migrations[4][migration_sql] = NULL;				
 
 		$migrations[5][system_version] = '0.5.2';
-		$migrations[5][test] = "SELECT count(1) as count FROM ctt_contact_types WHERE ctt_name = 'Events'";
-		$migrations[5][migration_sql] = 'INSERT INTO "public"."ctt_contact_types"("ctt_name", "ctt_description", "ctt_is_frozen", "ctt_delete_time") VALUES (\'Transactional\', \'Emails related to purchases or registrations.\', \'1\', NULL);';			
+		$migrations[5][test] = NULL;
+		$migrations[5][migration_sql] = NULL;			
 	
 		$migrations[6][system_version] = '0.5.3';
-		$migrations[6][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_contact_types'";
-		$migrations[6][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Contact Types\', 11, \'admin_contact_types\', 7, 8, 0, \'\');';		
+		$migrations[6][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_mailing_lists'";
+		$migrations[6][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Mailing Lists\', 11, \'admin_mailing_lists\', 7, 8, 0, \'\');';		
 		
 		$migrations[7][system_version] = '0.5.4';
 		$migrations[7][test] = NULL;
 		$migrations[7][migration_sql] = 'UPDATE emt_email_templates SET emt_body=\'<br/>----
 <br/>
 <small>
-	{content_type}This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end} because you are subscribed to receive the email type <i>*content_type_string*</i>.  Please <a href="*web_dir*/profile/contact_preferences?content_type_id=*content_type*&user=*recipient->key*&hash=*recipient->usr_authhash*&zone=ocu&*email_vars*">click here</a> to stop receiving <i>*content_type_string*</i> emails or <a href="*web_dir*/profile/contact_preferences?*email_vars*">click here</a> to manage all your contact preferences.  {end content_type}
+	{mailing_list_id}This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end} because you are subscribed to the list <i>*mailing_list_string*</i>.  Please <a href="*web_dir*/profile/mailing_lists_preferences?mailing_list_id=*mailing_list_id*&user=*recipient->key*&hash=*recipient->usr_authhash*&zone=ocu&*email_vars*">click here</a> to stop receiving <i>*mailing_list_string*</i> emails.  {end mailing_list_id}
 
-{~content_type}This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end} because you are subscribed to receive email from us.  Please <a href="*web_dir*/profile/contact_preferences?*email_vars*">click here</a> to manage your contact preferences.  {end ~content_type}
+{~mailing_list_id}This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end} because you are registered on our site.  Please <a href="*web_dir*/profile">click here</a> to manage your preferences.  {end ~mailing_list_id}
 </small>
 <br/>
 <br/>\' WHERE emt_name=\'default_footer\';';				
@@ -425,18 +425,18 @@
 			echo 'Last Migration ' . $row['stg_value'] . "<br>\n";
 		}
 		
-		$end_row=0;
+		$next_row = 0;
 		if($row['stg_value']){
-			$start_row = $row['stg_value']+1;
-		}
-		else{
-			$start_row = 0;
+			$next_row = $row['stg_value'];
+			if($verbose){
+				echo 'Starting Migration  at ' . $next_row . "<br>\n";
+			}
 		}
 
 		
 		foreach($migrations as $key=>$migration){
 			
-			if($start_row > $key){
+			if($next_row > $key){
 				continue;
 			}
 
@@ -444,7 +444,7 @@
 				echo 'Checking Migration ' . $key . "<br>\n";
 			}
 			
-			$run = false;
+			$run = true;
 			if($migration[test]){
 				if($verbose){
 					echo 'Test: '.$migration[test]. "<br>\n";
@@ -457,7 +457,8 @@
 				}
 				catch(PDOException $e){
 					echo $e->getMessage();
-					
+					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
+					exit;					
 				}	
 
 				if($row[count] == 0){
@@ -467,12 +468,9 @@
 					$run = false;
 				}
 			}
-			else{
-				$run = true;
-			}
+
 			
-			
-			if($run){
+			if($run && $migration[migration_sql]){
 				try{
 					$q = $dblink->prepare($migration[migration_sql]);
 					$q->execute();
@@ -481,7 +479,7 @@
 				catch(PDOException $e){
 					echo $e->getMessage();
 					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
-					break;
+					exit;
 				}			
 			}
 			else{
@@ -489,23 +487,49 @@
 					echo 'Skipping: '.$migration[migration_sql]. "<br>\n";
 				}
 			}
+
+			//UPDATE THE SYSTEM VERSION
+			$sql = "UPDATE stg_settings set stg_value='".$migrations[$key][system_version]."' WHERE stg_name='system_version'";
+			try{
+				$q = $dblink->prepare($sql);
+				$q->execute();
+				if($verbose){
+					echo 'System version now '.$migrations[$key][system_version]."<br>\n";
+				}
+				
+			}
+			catch(PDOException $e){
+				echo $e->getMessage();
+				echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $migrations[$key][system_version] ."<br>\n";
+				exit;
+			}	
+				
+			
+			$next_row = $key+1;
 			
 			//UPDATE THE LAST DB MIGRATION POINT
-			$sql = "UPDATE stg_settings set stg_value=".$key." WHERE stg_name='db_migration_version'";
-			$q = $dblink->prepare($sql);
-			$q->execute();
-			
-			$end_row = $key;
-		}
-		
-		//UPDATE THE SYSTEM VERSION
-		$sql = "UPDATE stg_settings set stg_value='".$migrations[$end_row][system_version]."' WHERE stg_name='system_version'";
-		$q = $dblink->prepare($sql);
-		$q->execute();	
-		echo 'System version now '.$migrations[$end_row][system_version]."<br>\n";
+			$sql = "UPDATE stg_settings set stg_value=".$next_row." WHERE stg_name='db_migration_version'";
+			try{
+				$q = $dblink->prepare($sql);
+				$q->execute();
+				if($verbose){
+					echo 'Updating next migration to : '.$next_row. "<br>\n";
+				}
+			}
+			catch(PDOException $e){
+				echo $e->getMessage();
+				echo 'ABORTING MIGRATIONS.  Failed to set next row: '. $key ."<br>\n";
+				exit;
+			}				
 	
-		
-		echo 'Database migration complete.'. "<br>\n";
+		}
+
+
+		$sql = "SELECT * FROM stg_settings WHERE stg_name='system_version'";
+		$q = $dblink->prepare($sql);
+		$q->execute();
+		$row = $q->fetch();		
+		echo 'Database migration complete.  System version: '.$row['stg_value']. "<br>\n";
 			
 		return true;
 	}

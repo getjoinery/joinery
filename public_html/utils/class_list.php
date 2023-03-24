@@ -58,6 +58,8 @@
 	require_once( __DIR__ . '/../data/order_item_requirements_class.php');
 	require_once( __DIR__ . '/../data/email_recipient_groups_class.php');
 	require_once( __DIR__ . '/../data/contact_types_class.php');
+	require_once( __DIR__ . '/../data/mailing_lists_class.php');
+	require_once( __DIR__ . '/../data/mailing_list_registrants_class.php');
 
 	$classes = array(
 			'Address',
@@ -114,6 +116,8 @@
 			'OrderItemRequirement',
 			'EmailRecipientGroup',
 			'ContactType',
+			'MailingList',
+			'MailingListRegistrant'
 		);			
 
 	

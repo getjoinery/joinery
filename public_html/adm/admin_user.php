@@ -23,7 +23,7 @@
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_members_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/contact_types_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
 	
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -291,33 +291,29 @@
 					echo ' Unverified';
 				}	
 
-				$subscribed_text = array();
-				$unsubscribed_text = array();
-				$contact_types = new MultiContactType(
-				array('deleted' => false),
-				array('contact_type_id'=>'ASC'));		
-				$contact_types->load();
-				$unsubscribe_list = $user->get_contact_type_unsubscribes();
-				foreach ($contact_types as $contact_type){
-					if(in_array($contact_type->key, $unsubscribe_list)){
 
-						$unsubscribed_text[] = ContactType::ToReadable($contact_type->key);
-					}
-					else{ 
-						$subscribed_text[] = ContactType::ToReadable($contact_type->key);
-					}
-				}
+
+				$user_subscribed_list = array();
+				$search_criteria = array('deleted' => false, 'user_id' => $user->key);
+				$user_lists = new MultiMailingListRegistrant(
+					$search_criteria);	
+				$user_lists->load();
+				
+				foreach ($user_lists as $user_list){
+					$mailing_list = new MailingList($user_list->get('mlr_mlt_mailing_list_id'), TRUE);
+					$user_subscribed_list[] = $mailing_list->get('mlt_name');
+				}	
+
 				echo '<br>';
-				if(!empty($subscribed_text)){
-					echo 'This user is subscribed to the following: '.implode(', ', $subscribed_text).'<br>';
-				}
-				if(!empty($unsubscribed_text)){
-					echo 'This user is unsubscribed from the following: '.implode(', ', $unsubscribed_text).'<br>';
+				if(!empty($user_subscribed_list)){
+					echo 'This user is subscribed to the following lists: '.implode(', ', $user_subscribed_list).'<br>';
 				}
 
+				/*
 				if($user->get('usr_contact_preferences_last_changed')) {
 					echo ', last change:  '. LibraryFunctions::convert_time($event_registration->get('usr_contact_preferences_last_changed'), 'UTC', $session->get_timezone());
-				}						
+				}	
+				*/				
 				?>
 				</p>
 

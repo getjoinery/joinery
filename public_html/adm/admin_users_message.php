@@ -101,10 +101,8 @@
 				'body' => $_POST['eml_message'],
 				//'utm_source' => 'email', //use defaults
 				//'utm_medium' => 'email', //use defaults
-				'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+				//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
 				'utm_content' => urlencode($_POST['eml_subject']), 	
-				'content_type' => User::TRANSACTIONAL,
-				'content_type_string' => 'transactional email'),
 			));	
 			
 			foreach ($event_registrants as $event_registrant){
@@ -151,10 +149,9 @@
 					'body' => $_POST['eml_message'],
 					//'utm_source' => 'email', //use defaults
 					//'utm_medium' => 'email', //use defaults
-					'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+					//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
 					'utm_content' => urlencode($_POST['eml_subject']), 	
-					'content_type' => User::TRANSACTIONAL,
-					'content_type_string' => 'transactional email'),
+
 				));
 				$result = $email->send();
 			}				
@@ -193,10 +190,8 @@
 				'body' => $_POST['eml_message'],
 				//'utm_source' => 'email', //use defaults
 				//'utm_medium' => 'email', //use defaults
-				'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+				//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
 				'utm_content' => urlencode($_POST['eml_subject']), 	
-				'content_type' => User::TRANSACTIONAL,
-				'content_type_string' => 'transactional email'),
 			));
 			
 			foreach ($group_members as $group_member){
@@ -245,10 +240,8 @@
 				'body' => $_POST['eml_message'],
 				//'utm_source' => 'email', //use defaults
 				//'utm_medium' => 'email', //use defaults
-				'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+				//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
 				'utm_content' => urlencode($_POST['eml_subject']), 	
-				'content_type' => User::TRANSACTIONAL,
-				'content_type_string' => 'transactional email'),
 			));
 			$result = $email->send();
 			if($result){
@@ -293,10 +286,8 @@
 			'body' => $_POST['eml_message'],
 			//'utm_source' => 'email', //use defaults
 			//'utm_medium' => 'email', //use defaults
-			'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+			//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
 			'utm_content' => urlencode($_POST['eml_subject']), 	
-			'content_type' => User::TRANSACTIONAL,
-			'content_type_string' => 'transactional email'),
 		));
 		$result = $email->send();		
 		
