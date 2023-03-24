@@ -10,39 +10,32 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 	$session->set_return();
-
-	$numperpage = 30;
-	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'user_id', 0, '');
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-	
 	
 	$search_criteria = array('deleted' => false);
 
 	$items = new MultiUser(
 		$search_criteria,
-		array($sort=>$sdirection),
-		$numperpage,
-		$offset);		
+		);		
 	$items->load();
 
-	$mailing_list = new MailingList(1, TRUE);
+	
 
 	foreach ($items as $item){
 		
 		if($item->get('usr_contact_preferences') == 1){
-			try{
-				$mailing_list->add_registrant($item->key);
-				echo 'Subscribe '. $item->display_name(). '<br>';
+			if(!MailingListRegistrant::CheckIfExists($user->key, 1)){
+				$mlr = new MailingListRegistrant(NULL);
+				$mlr->set('mlr_usr_user_id', $this->key);
+				$mlr->set('mlr_mlt_mailing_list_id', 1);
+				$mlr->set('mlr_change_time', $this->get('usr_contact_preference_last_changed'));
+				$mlr->set('mlr_delete_time', NULL);
+				$mlr->prepare();
+				$mlr->save();	
+				echo 'Subscribe '. $item->key. '<br>';				
 			}
-			catch (MailingListException $e){
-				echo 'Already subscribed '. $item->display_name(). '<br>';
-			}
-			
 		}
 		else{
-			echo 'Unsubscribe '. $item->display_name(). '<br>';
+			echo 'Unsubscribe '. $item->key. '<br>';
 		}
 		
 		
