@@ -1,11 +1,10 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_list_recipients_class.php');
 
 	$session = SessionControl::get_instance();
@@ -19,7 +18,7 @@
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 	
 	
-	$search_criteria = array();
+	$search_criteria = array('deleted' => false);
 
 	$items = new MultiUser(
 		$search_criteria,
