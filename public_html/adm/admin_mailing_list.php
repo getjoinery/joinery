@@ -38,7 +38,7 @@
 
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'user_id', 0, '');
+	$sort = LibraryFunctions::fetch_variable('sort', 'mailing_list_registrant_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
@@ -139,7 +139,7 @@
 		
 
 		
-		$page->endtable();
+		$page->endtable($pager);
 
 	$page->admin_footer();
 ?>
