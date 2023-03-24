@@ -36,6 +36,12 @@
 	}
 
 
+	$numperpage = 30;
+	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
+	$sort = LibraryFunctions::fetch_variable('sort', 'user_id', 0, '');
+	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
+	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
+
 	$session->set_return();
 
 
@@ -93,18 +99,22 @@
 	$headers = array("Users",  "Action");
 
 
+	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$altlinks = array();
 	 $box_vars =	array(
 		'altlinks' => $altlinks,
 		'title' => 'Users in '. $mailing_list->get('mlt_name')
 	);
-	$page->tableheader($headers, $box_vars);
+	$page->tableheader($headers, $box_vars, $pager);
 	
 	$search_criteria = array(
 		'deleted' => false,
 		'mailing_list_id' => $mailing_list->key);
 	$registrants = new MultiMailingListRegistrant(
-		$search_criteria);		
+		$search_criteria,
+		array($sort=>$sdirection),
+		$numperpage,
+		$offset);		
 	$registrants->load();
 	foreach($registrants as $registrant){
 		$user = new User($registrant->get('mlr_usr_user_id'), TRUE);

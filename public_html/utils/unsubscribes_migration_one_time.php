@@ -9,10 +9,11 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
-	$session->set_return();
+	
+	echo 'turned off';
+	exit;
 	
 	$search_criteria = array('deleted' => false);
-
 	$items = new MultiUser(
 		$search_criteria,
 		);		
@@ -23,16 +24,15 @@
 	foreach ($items as $item){
 		
 		if($item->get('usr_contact_preferences') == 1){
-			if(!MailingListRegistrant::CheckIfExists($user->key, 1)){
-				$mlr = new MailingListRegistrant(NULL);
-				$mlr->set('mlr_usr_user_id', $this->key);
-				$mlr->set('mlr_mlt_mailing_list_id', 1);
-				$mlr->set('mlr_change_time', $this->get('usr_contact_preference_last_changed'));
-				$mlr->set('mlr_delete_time', NULL);
-				$mlr->prepare();
-				$mlr->save();	
-				echo 'Subscribe '. $item->key. '<br>';				
-			}
+			
+			$mlr = new MailingListRegistrant(NULL);
+			$mlr->set('mlr_usr_user_id', $item->key);
+			$mlr->set('mlr_mlt_mailing_list_id', 1);
+			$mlr->set('mlr_change_time', $item->get('usr_contact_preference_last_changed'));
+			$mlr->set('mlr_delete_time', NULL);
+			$mlr->save();	
+			echo 'Subscribe '. $item->key. '<br>';				
+			
 		}
 		else{
 			echo 'Unsubscribe '. $item->key. '<br>';

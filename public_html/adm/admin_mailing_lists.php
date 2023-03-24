@@ -42,7 +42,7 @@
 	);
 		
 
-	$headers = array("Mailing List",  "Description", "Deleted");
+	$headers = array("Mailing List",  "Description", "# Registrants", "Deleted");
 	$altlinks = array('New Mailing List' => '/admin/admin_mailing_list_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));	
 	$table_options = array(
@@ -61,6 +61,9 @@
 		array_push($rowvalues, $mailing_list->get('mlt_description'));	
 		//array_push($rowvalues, LibraryFunctions::convert_time($mailing_list->get('mlt_delete_time'), 'UTC', $session->get_timezone()));
 		//array_push($rowvalues, '('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
+
+		$numusers = $mailing_list->count_subscribed_users();
+		array_push($rowvalues, $numusers. ' registrants');
 
 		$status = 'Active';
 		if($mailing_list->get('mlt_delete_time')) {
