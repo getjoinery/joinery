@@ -29,6 +29,11 @@
 		$params = explode("/", $_REQUEST['path']);
 		if($params[1] && $params[2]){
 			$page_vars[posts] = MultiPost::get_posts_for_tag($params[2], $numperpage, $page_offset);
+			if(empty($page_vars[posts])){
+				header("HTTP/1.0 404 Not Found");
+				LibraryFunctions::display_404_page();
+				exit();					
+			}
 			$page_vars[title] = 'Blog Posts with tag '.$params[2];
 		}
 		else{

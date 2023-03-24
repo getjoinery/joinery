@@ -6,14 +6,11 @@
 
 	$settings = Globalvars::get_instance();
 
-
-	/*
-	if(!$settings->get_setting('newsletter_active')){
+	if(!$settings->get_setting('mailing_lists_active')){
 		header("HTTP/1.0 404 Not Found");
 		echo 'This feature is turned off';
 		exit();
 	}
-	*/
 
 	$session = SessionControl::get_instance();
 	$session->set_return();

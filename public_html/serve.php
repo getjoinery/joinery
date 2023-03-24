@@ -265,6 +265,21 @@ if($settings->get_setting('blog_active')){
 			exit();		
 		}
 	}
+	else if($params[0] == $blog_subdirectory && $params[1] == 'tag'){
+		$template_file = $template_directory.'/blog.php';
+		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+		
+		$is_valid_page = true; 
+
+		if(file_exists($template_file)){
+			require_once($template_file);
+			exit();
+		}
+		else if(file_exists($base_file)){
+			require_once($base_file); 
+			exit();		
+		}		
+	}
 	if($params[0] == $blog_subdirectory){
 		$post = Post::get_by_link($params[1]);	
 	}
@@ -292,7 +307,8 @@ if($settings->get_setting('blog_active')){
 			require_once($base_file); 
 			exit();		
 		}		
-	}	
+	}
+
 }
 
 //PAGE CONTENTS.  DEFAULT IS TO USE THE /PAGE/ SUBDIRECTORY

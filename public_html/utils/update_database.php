@@ -410,7 +410,9 @@
 		$migrations[8][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_analytics_email_stats'";
 		$migrations[8][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Email Statistics\', 12, \'admin_analytics_email_stats\', 2, 5, 0, \'\');';	
 
-		
+		$migrations[9][system_version] = '0.5.5';
+		$migrations[9][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailing_lists_active'";
+		$migrations[9][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailing_lists_active\', 1, 1, \'now()\', \'now()\', \'general\');';		
 		
 		echo "-----MIGRATIONS-----<br>\n";
 
