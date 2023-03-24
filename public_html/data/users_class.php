@@ -14,11 +14,7 @@ require_once($siteDir . '/data/phone_number_class.php');
 require_once($siteDir . '/data/activation_codes_class.php'); 
 require_once($siteDir . '/data/visitor_events_class.php');
 require_once($siteDir . '/data/contact_types_class.php');
-
-$settings = Globalvars::get_instance();
-$composer_dir = $settings->get_setting('composerAutoLoad');	
-require $composer_dir.'autoload.php';
-use MailchimpAPI\Mailchimp;
+require_once($siteDir . '/data/mailing_lists_class.php');
 
 class UserException extends SystemClassException {}
 class DisplayableUserException extends UserException implements DisplayableErrorMessage {}
@@ -64,6 +60,7 @@ class User extends SystemBase {
 		'sva_usr_user_id' => User::USER_DELETED,
 		'vse_usr_user_id' => User::USER_DELETED,
 		'prd_usr_user_id' => User::USER_DELETED,
+		'mlr_usr_user_id' => 'delete'
 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
@@ -605,15 +602,15 @@ class User extends SystemBase {
 		//REMOVE FROM ANY MAILING LISTS
 		if(!$debug){
 			//GET LIST OF CONTACT TYPES
-			$contact_types = new MultiContactType(
-				array('deleted'=>false),
+			$mailing_lists = new MultiMailingList(
+				array(),
 				NULL,		//SORT BY => DIRECTION
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
-			$contact_types->load();
-			foreach($contact_types as $contact_type){
-				if($mailchimp_list_id = $contact_type->get('ctt_mailchimp_list_id')){
-					$this->unsubscribe_from_mailchimp_list($contact_type->key);
+			$mailing_lists->load();
+			foreach($mailing_lists as $mailing_lists){
+				if($mailing_list->is_user_in_list($this->key, false)){
+					$mailing_list->remove_registrant($this->key);
 				}
 			}
 		}
@@ -624,6 +621,7 @@ class User extends SystemBase {
 			$group->remove_member($this->key);
 		}
 		
+		//DO ANY PREP ABOVE THIS LINE
 		parent::permanent_delete($debug);
 		
 		if($this_transaction){
