@@ -56,7 +56,8 @@ class Email extends SystemBase {
 		'eml_scheduled_time' => 'Scheduled time to send',
 		'eml_type' => 'Type of email for opt out purposes',
 		'eml_delete_time' => 'Time of deletion',
-		'eml_ctt_contact_type_id' => 'The contact type of this email for unsubscribes',
+		'eml_ctt_contact_type_id' => 'The contact type of this email for unsubscribes',  //NOT USED YET
+		'eml_mlt_mailing_list_id' => 'The mailing list for this email, null for custom',
 	);
 
 	public static $field_specifications = array(
@@ -78,6 +79,7 @@ class Email extends SystemBase {
 		'eml_type' => array('type'=>'int2'),
 		'eml_delete_time' => array('type'=>'timestamp(6)'),
 		'eml_ctt_contact_type_id' => array('type'=>'int4'),
+		'eml_mlt_mailing_list_id' => array('type'=>'int4'),
 	);
 			
 	public static $required_fields = array();

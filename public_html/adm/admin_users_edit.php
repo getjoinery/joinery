@@ -6,12 +6,20 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_list_registrants_class.php');
 
 	$settings = Globalvars::get_instance();
 	$user = new User($_REQUEST['usr_user_id'], TRUE);
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
+	
+	$search_criteria = array('deleted' => false, 'active' => true);
+	$mailing_lists = new MultiMailingList(
+		$search_criteria,
+		array('name'=>'ASC'));	
+	$mailing_lists->load();
 
 if ($_POST){
 
@@ -40,28 +48,65 @@ if ($_POST){
 		}
 	}
 
+	//HANDLE THE USERS'S MAILING LISTS
+	$messages = array();
+	$thismessage = array();
+	foreach ($mailing_lists as $mailing_list){
+		if(empty($_POST['new_list_subscribes'])){
+			$new_list_subscribes = array();
+		}
+		else{
+			$new_list_subscribes = $_POST['new_list_subscribes'];
+		}
+		
+		//IF IT IS A CHOICE AND SELECTED
+		if(in_array($mailing_list->key, $_POST['new_list_subscribes'])){
 
-	//GET THE OLD UNSUBSCRIBES
-	$old_unsubscribes = $user->get_contact_type_unsubscribes();
-
-	//COMPARE WITH THE NEW UNSUBSCRIBES
-	if(empty($_REQUEST['unsubscribes_list'])){
-		$new_unsubscribes = array();
+			if($mailing_list->is_user_in_list($user->key)){
+				//IF USER IS ALREADY SUBSCRIBED
+				$thismessage['message_type'] = 'warn';
+				$thismessage['message_title'] = 'Notice';
+				$thismessage['message'] = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+				$messages[] = $thismessage;
+			}
+			else{
+				//IF USER IS NOT SUBSCRIBED
+				$status = $mailing_list->add_registrant($user->key);
+				if($status){
+					$thismessage['message_type'] = 'success';
+					$thismessage['message_title'] = 'Success';
+					$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+					$messages[] = $thismessage;
+				}
+				else{
+					$thismessage['message_type'] = 'error';
+					$thismessage['message_title'] = 'Error';
+					$thismessage['message'] = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
+					$messages[] = $thismessage;
+				}
+			}
+		}
+		else{
+			//IF IT IS A CHOICE AND NOT SELECTED
+			if($mailing_list->is_user_in_list($user->key)){
+				//IF USER IS SUBSCRIBED
+				$status = $mailing_list->remove_registrant($user->key);
+				if($status){
+					$thismessage['message_type'] = 'success';
+					$thismessage['message_title'] = 'Success';
+					$thismessage['message'] = 'You are UNSUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+					$messages[] = $thismessage;
+				}
+				else{
+					$thismessage['message_type'] = 'error';
+					$thismessage['message_title'] = 'Error';
+					$thismessage['message'] = 'There was an error removing you from the following lists: ' . $mailing_list->get('mlt_name');
+					$messages[] = $thismessage;
+				}
+			}	
+		}				
 	}
-	else{
-		$new_unsubscribes = $_REQUEST['unsubscribes_list'];
-	}
 
-	$change_to_subscribe = array_diff($old_unsubscribes, $new_unsubscribes);
-	$change_to_unsubscribe = array_diff($new_unsubscribes, $old_unsubscribes);
-
-	foreach ($change_to_subscribe as $contact_type_id){
-		$user->subscribe_to_contact_type($contact_type_id);
-	}
-
-	foreach ($change_to_unsubscribe as $contact_type_id){
-		$user->unsubscribe_from_contact_type($contact_type_id);
-	}
 	
 	$user->set('usr_timezone', $_POST['usr_timezone']);
 	
@@ -125,22 +170,24 @@ else{
 	if($nickname_display){
 		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, $user->get('usr_nickname'), "" , 255, "");
 	}
+
+
+
+	$user_subscribed_list = array();
+	$search_criteria = array('deleted' => false, 'user_id' => $user->key);
+	$user_lists = new MultiMailingListRegistrant(
+		$search_criteria);	
+	$user_lists->load();
 	
-	$searches = array('deleted' => false);
-	$sort = LibraryFunctions::fetch_variable('sort', 'contact_type_id', 0, '');
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '');
-	$contact_types = new MultiContactType(
-		$searches,
-		array($sort=>$sdirection));
-	$contact_types->load();
-	$optionvals = $contact_types->get_dropdown_array();	
-
-
-	$checkedvals = $user->get_contact_type_unsubscribes();
-	$readonlyvals = array(2); //DEFAULT
+	foreach ($user_lists as $user_list){
+		$user_subscribed_list[] = $user_list->get('mlr_mlt_mailing_list_id');
+	}	
+	$optionvals = $mailing_lists->get_dropdown_array();	
+	$checkedvals = $user_subscribed_list;
+	$readonlyvals = array(); //DEFAULT
 	$disabledvals = array();
 
-	echo $formwriter->checkboxList("Check the box to unsubscribe:", 'unsubscribes_list', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+	echo $formwriter->checkboxList("Mailing list subscriptions:", 'new_list_subscribes', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);	
 
 	$optionvals = array("On"=>0, "Off"=>1);
 	echo $formwriter->dropinput("Password recovery", "usr_password_recovery_disabled", "ctrlHolder", $optionvals, $user->get('usr_password_recovery_disabled'), '', FALSE);

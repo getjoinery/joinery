@@ -5,7 +5,7 @@
 
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/contact_types_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
 	
 	$session = SessionControl::get_instance();
 	
@@ -22,6 +22,11 @@
 		$user = new User($session->get_user_id(), TRUE);
 	}
 
+	$search_criteria = array('deleted' => false, 'active' => true);
+	$mailing_lists = new MultiMailingList(
+		$search_criteria,
+		array('name'=>'ASC'));	
+	$mailing_lists->load();
 
 	$announce_message = NULL;
 	if($_REQUEST){
@@ -30,65 +35,95 @@
 			if ($_REQUEST['action'] == 'ocu') {
 				// One click unsubscribe
 				//IF WE DON'T HAVE A CONTACT TYPE, ASSUME IT'S AN UNSUBSCRIBE FROM NEWSLETTERS
-				if($_REQUEST['contact_type_id']){
-					$contact_type_id = $_REQUEST['contact_type_id'];
+				if($_REQUEST['mailing_list_id']){
+					$mailing_list_id = $_REQUEST['mailing_list_id'];
+					$mailing_list = new MailingList($mailing_list_id, TRUE);
 				}
 				else{
-					$contact_type_id = User::NEWSLETTER;
+					throw new SystemDisplayableError('You must pass a mailing list to unsubscribe.');
+					exit;
 				}
 
-				$user->unsubscribe_from_contact_type($contact_type);
+				$mailing_list->remove_registrant($user->key);
 				
-				$announce_message = 'You have been unsubscribed from ' . ContactType::ToReadable($contact_type_id) . ' emails.  If you unsubscribed by mistake, you can choose "Subscribe" below and press the "Submit" button.';
+				$announce_message = 'You have been unsubscribed from ' . $mailing_list->get('mlt_name') . ' emails.  If you unsubscribed by mistake, you can choose "Subscribe" below and press the "Submit" button.';
 
 
 			} 
 			else if ($_REQUEST['zone'] == 'optional') {
 
-				//GET THE OLD UNSUBSCRIBES
-				$old_unsubscribes = $user->get_contact_type_unsubscribes();
+				//HANDLE THE USERS'S MAILING LISTS
+				$messages = array();
+				$thismessage = array();
+				foreach ($mailing_lists as $mailing_list){
+					if(empty($_POST['new_list_subscribes'])){
+						$new_list_subscribes = array();
+					}
+					else{
+						$new_list_subscribes = $_POST['new_list_subscribes'];
+					}
+					
+					//IF IT IS A CHOICE AND SELECTED
+					if(in_array($mailing_list->key, $_POST['new_list_subscribes'])){
 
-				//COMPARE WITH THE NEW UNSUBSCRIBES
-				if(empty($_REQUEST['unsubscribes_list'])){
-					$new_unsubscribes = array();
+						if($mailing_list->is_user_in_list($user->key)){
+							//IF USER IS ALREADY SUBSCRIBED
+							$thismessage['message_type'] = 'warn';
+							$thismessage['message_title'] = 'Notice';
+							$thismessage['message'] = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+							$messages[] = $thismessage;
+						}
+						else{
+							//IF USER IS NOT SUBSCRIBED
+							$status = $mailing_list->add_registrant($user->key);
+							if($status){
+								$thismessage['message_type'] = 'success';
+								$thismessage['message_title'] = 'Success';
+								$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+								$messages[] = $thismessage;
+							}
+							else{
+								$thismessage['message_type'] = 'error';
+								$thismessage['message_title'] = 'Error';
+								$thismessage['message'] = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
+								$messages[] = $thismessage;
+							}
+						}
+					}
+					else{
+						//IF IT IS A CHOICE AND NOT SELECTED
+						if($mailing_list->is_user_in_list($user->key)){
+							//IF USER IS SUBSCRIBED
+							$status = $mailing_list->remove_registrant($user->key);
+							if($status){
+								$thismessage['message_type'] = 'success';
+								$thismessage['message_title'] = 'Success';
+								$thismessage['message'] = 'You are UNSUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+								$messages[] = $thismessage;
+							}
+							else{
+								$thismessage['message_type'] = 'error';
+								$thismessage['message_title'] = 'Error';
+								$thismessage['message'] = 'There was an error removing you from the following lists: ' . $mailing_list->get('mlt_name');
+								$messages[] = $thismessage;
+							}
+						}	
+					}				
 				}
-				else{
-					$new_unsubscribes = $_REQUEST['unsubscribes_list'];
-				}
-				
-
-				$change_to_subscribe = array_diff($old_unsubscribes, $new_unsubscribes);
-				
-				$change_to_unsubscribe = array_diff($new_unsubscribes, $old_unsubscribes);
-
-				$announce_message = 'Your contact preferences have been updated. ';
-				$subscribed_readable = array();
-				foreach ($change_to_subscribe as $contact_type_id){
-					$user->subscribe_to_contact_type($contact_type_id);
-					$subscribed_readable[] = ContactType::ToReadable($contact_type_id);
-				}
-				if(!empty($subscribed_readable)){
-					$announce_message = 'You are now SUBSCRIBED to the following content: '. implode(', ', $subscribed_readable) .'. ';
-				}
-				
-				
-				foreach ($change_to_unsubscribe as $contact_type_id){
-					$user->unsubscribe_from_contact_type($contact_type_id);
-				}
-				
-				//FOR THE READOUT, LETS SHOW WHAT IS ACTUALLY THE CASE INSTEAD OF WHAT CHANGED
-				$unsubscribed_readable = array();
-				foreach ($new_unsubscribes as $contact_type_id){
-					$unsubscribed_readable[] = ContactType::ToReadable($contact_type_id);
-				}
-				
-				
-				if(!empty($unsubscribed_readable)){
-					$announce_message = 'You are now UNSUBSCRIBED from the following content: '. implode(', ', $unsubscribed_readable) .'. ';
-				}					
 				
 			}
 		}
+	}
+
+
+	$user_subscribed_list = array();
+	$search_criteria = array('deleted' => false, 'user_id' => $user->key);
+	$user_lists = new MultiMailingListRegistrant(
+		$search_criteria);	
+	$user_lists->load();
+	
+	foreach ($user_lists as $user_list){
+		$user_subscribed_list[] = $user_list->get('mlr_mlt_mailing_list_id');
 	}
 	
 	$tab_menus = array(

@@ -104,7 +104,7 @@ class User extends SystemBase {
 		'usr_delete_time' => 'Time of deletion',
 		'usr_password_recovery_disabled' => 'When TRUE, password recovery is disabled.',
 		'usr_urbit_ship_name' => 'If using urbit login, this is the user ship name',
-		'usr_contact_type_unsubscribes' => 'Contains a serialized array of contact types that the user has unsubscribed from',
+		//'usr_contact_type_unsubscribes' => 'Contains a serialized array of contact types that the user has unsubscribed from',
 	);
 
 	public static $field_specifications = array(
@@ -135,7 +135,7 @@ class User extends SystemBase {
 		'usr_delete_time' => array('type'=>'timestamp(6)'),
 		'usr_password_recovery_disabled' => array('type'=>'bool'),
 		'usr_urbit_ship_name' => array('type'=>'varchar(128)'),
-		'usr_contact_type_unsubscribes' => array('type'=>'varchar(255)'),
+		//'usr_contact_type_unsubscribes' => array('type'=>'varchar(255)'),
 	);
 	
 	public static $timestamp_fields = array(
@@ -211,12 +211,7 @@ class User extends SystemBase {
 		$this->set('usr_contact_preference_last_changed', 'NOW()');
 		$this->save();
 		
-		$status = true;
-		if($contact_type_id == User::NEWSLETTER){
-			$status = $this->unsubscribe_from_mailchimp_list();
-		}
-		
-		return $status;	
+		return true;
 	}
 	
 	//REMOVES THE AN ENTRY FROM usr_contact_type_unsubscribes
@@ -229,11 +224,7 @@ class User extends SystemBase {
 		$this->set('usr_contact_preference_last_changed', 'NOW()');
 		$this->save();
 		
-		$status = true;
-		if($contact_type_id == User::NEWSLETTER){
-			$status = $this->add_to_mailchimp_list();
-		}
-		return $status;		
+		return true;
 	}
 
 
@@ -460,151 +451,6 @@ class User extends SystemBase {
 			DbConnector::Commit();
 		}
 	}
-	
-	
-	function add_to_mailchimp_list($contact_type_id) {
-
-		if(!$contact_type_id){
-			$contact_type_id = User::NEWSLETTER;
-		}
-		
-		$contact_type = new ContactType($contact_type_id, TRUE);
-		
-		if(!$contact_type->get('ctt_mailchimp_list_id')){
-			throw new SystemDisplayableError('There is no mailchimp list id for this contact type:'. $contact_type->get('ctt_name'));
-			exit;
-		}
-		
-		
-		//NOW ADD THE USER TO MAILCHIMP
-		try {
-		$settings = Globalvars::get_instance();
-			if($settings->get_setting('mailchimp_api_key')){
-				$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
-				
-				//IF WE HAVE A MAILCHIMP ID STORED, THEN LOOK THE USER UP, DON'T ADD HIM
-				$user_to_update = NULL;
-				if($this->get('usr_mailchimp_user_id')){
-					$user_to_update = md5($this->get('usr_email'));
-				}
-
-				$merge_values = [
-					"FNAME" => $this->get('usr_first_name'),
-					"LNAME" => $this->get('usr_last_name'),
-					"MMERGE3" => 'Yes',
-				];
-
-				$post_params = [
-					"email_address" => $this->get('usr_email'),
-					"status" => "subscribed", 
-					"email_type" => "html", 
-					"merge_fields" => $merge_values,
-				];
-		
-				$return = $mailchimp 
-					->lists($contact_type->get('ctt_mailchimp_list_id'))
-					->members($user_to_update)
-					->post($post_params);
-
-						
-				$status = $return->deserialize();
-				
-				$mailchimp_user_id = $status->id;
-				$this->set('usr_mailchimp_user_id', $mailchimp_user_id);
-				$this->save();
-				
-				return $status;
-			}
-		} 
-		catch (Exception $e) {
-			$this->save();
-			return FALSE;
-		}
-		return TRUE;
-
-	}	
-
-	/*
-	function resubscribe_to_mailing_list() {
-
-		//TODO NEED TO HANDLE ALL CONTACT PREFERENCE POSSIBILITIES
-		$this->set('usr_contact_preferences', 1);
-		if($this->get('usr_contact_preference_last_changed') != 1){
-			$this->set('usr_contact_preference_last_changed', 'NOW()');
-		}
-		$this->subscribe_to_contact_type(User::NEWSLETTER);
-
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('mailchimp_api_key')){
-			$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
-
-			$merge_values = [
-				"FNAME" => $this->get('usr_first_name'),
-				"LNAME" => $this->get('usr_last_name'),
-				"MMERGE3" => 'Yes',
-			];
-
-			$post_params = [
-				"status" => "subscribed", 
-				"merge_fields" => $merge_values,
-			];
-
-			try {
-				$return = $mailchimp 
-					->lists($settings->get_setting('mailchimp_list_id'))
-					->members(md5($this->get('usr_email')))
-					->patch($post_params);
-			} catch (Exception $e) {
-				throw new SystemDisplayablePermanentError(
-				'There was an error and we were unable to update your contact preferences.');
-				exit();	
-			}	
-		
-		}
-		$this->save();
-		return TRUE;
-	}
-	*/
-
-
-	function unsubscribe_from_mailchimp_list($contact_type_id = NULL) {
-		
-		if(!$contact_type_id){
-			$contact_type_id = User::NEWSLETTER;
-		}
-		
-		$contact_type = new ContactType($contact_type_id, TRUE);
-
-		if(!$contact_type->get('ctt_mailchimp_list_id')){
-			throw new SystemDisplayableError('There is no mailchimp list id for this contact type:'. $contact_type->get('ctt_name'));
-			exit;
-		}
-
-		
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('mailchimp_api_key')){
-			$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
-
-
-			$post_params = [
-				"status" => "unsubscribed", 
-			];
-
-			try {
-				$return = $mailchimp 
-					->lists($contact_type->get('ctt_mailchimp_list_id'))
-					->members(md5($this->get('usr_email')))
-					->patch($post_params);
-			} catch (Exception $e) {
-				throw new SystemDisplayablePermanentError(
-				'There was an error and we were unable to update your contact preferences.');
-				exit();	
-			}			
-
-			$this->save();
-			return TRUE;
-		}
-	}	
 
 
 	function email_unverify_bouncing_user($use_transaction=TRUE) {

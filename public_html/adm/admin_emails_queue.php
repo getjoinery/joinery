@@ -35,92 +35,95 @@
 	$pageoptions['title'] = "New Email";
 	$page->begin_box($pageoptions);
 	
-	//GET THE RECIPIENTS
-	$recipient_groups = $email->get_recipient_groups('add');
-
-	//ADD THE *ADD* LISTS TOGETHER
-	$queued_recipients = array();
-	foreach($recipient_groups as $recipient_group){
+	if($email->get('eml_mlt_mailing_list_id')){
+		//MAILING LIST
+		$mailing_list = new MailingList($email->get('eml_mlt_mailing_list_id'), TRUE);
+		$final_recipients = $mailing_list->get_subscribed_users('array');
+	}
+	else{
+		//CUSTOM EMAIL
 		
-		if($recipient_group->get('erg_grp_group_id')){
-			$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
-			$members = $group->get_member_list();
-			foreach($members as $member){
-				$user= new User($member->get('grm_foreign_key_id'), TRUE);
-				$queued_recipients[] = $user->key;
-			}
-		}
-		else{
-			$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id')), NULL);
-			//$numregistrants = $event_registrants->count_all();
-			$event_registrants->load();
-			foreach($event_registrants as $event_registrant){
-				$queued_recipients[] = $event_registrant->get('evr_usr_user_id');
-			}			
-		}
+		//GET THE RECIPIENTS
+		$recipient_groups = $email->get_recipient_groups('add');
+
+		//ADD THE *ADD* LISTS TOGETHER
+		$queued_recipients = array();
+		foreach($recipient_groups as $recipient_group){
 			
+			if($recipient_group->get('erg_grp_group_id')){
+				$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
+				$members = $group->get_member_list();
+				foreach($members as $member){
+					$user= new User($member->get('grm_foreign_key_id'), TRUE);
+					$queued_recipients[] = $user->key;
+				}
+			}
+			else{
+				$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id')), NULL);
+				//$numregistrants = $event_registrants->count_all();
+				$event_registrants->load();
+				foreach($event_registrants as $event_registrant){
+					$queued_recipients[] = $event_registrant->get('evr_usr_user_id');
+				}			
+			}
+				
+		}
+
+		
+		//NOW REMOVE THE RECIPIENTS WHO NEED TO BE REMOVED
+		$recipient_groups = $email->get_recipient_groups('remove');
+		
+		$removal_list = array();
+		foreach($recipient_groups as $recipient_group){
+
+			if($recipient_group->get('erg_grp_group_id')){
+				$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
+				$members = $group->get_member_list();
+				foreach($members as $member){
+					$user= new User($member->get('grm_foreign_key_id'), TRUE);
+					$removal_list[] = $user->key;
+				}
+			}
+			else{
+				$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id')), NULL);
+				//$numregistrants = $event_registrants->count_all();
+				$event_registrants->load();
+				foreach($event_registrants as $event_registrant){
+					$removal_list[] = $event_registrant->get('evr_usr_user_id');
+				}			
+			}
+				
+		}	
+		
+		//REMOVE DUPLICATES
+		$queued_recipients = array_unique($queued_recipients);
+		$removal_list = array_unique($removal_list);
+		
+		//SUBTRACT THE REMOVAL LIST AND REMOVE DUPLICATES
+		$final_recipients = array_diff($queued_recipients, $removal_list);
 	}
 	
-	
-	//NOW REMOVE THE RECIPIENTS WHO NEED TO BE REMOVED
-	$recipient_groups = $email->get_recipient_groups('remove');
-	
-	$removal_list = array();
-	foreach($recipient_groups as $recipient_group){
-
-		if($recipient_group->get('erg_grp_group_id')){
-			$group = new Group($recipient_group->get('erg_grp_group_id'), TRUE);
-			$members = $group->get_member_list();
-			foreach($members as $member){
-				$user= new User($member->get('grm_foreign_key_id'), TRUE);
-				$removal_list[] = $user->key;
-			}
-		}
-		else{
-			$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id')), NULL);
-			//$numregistrants = $event_registrants->count_all();
-			$event_registrants->load();
-			foreach($event_registrants as $event_registrant){
-				$removal_list[] = $event_registrant->get('evr_usr_user_id');
-			}			
-		}
-			
-	}	
-	
-	//REMOVE DUPLICATES
-	$queued_recipients = array_unique($queued_recipients);
-	$removal_list = array_unique($removal_list);
-	
-	//SUBTRACT THE REMOVAL LIST AND REMOVE DUPLICATES
-	$final_recipients = array_diff($queued_recipients, $removal_list);
 
 	
 	//LOAD THE RECIPIENTS INTO THE QUEUE
 	$total_num_queued = 0;
 	foreach($final_recipients as $final_recipient){
 		$user= new User($final_recipient, TRUE);
-		
-		//DON'T LOAD UNSUBSCRIBED USERS
-		if($user->is_unsubscribed_to_contact_type($email->get('eml_ctt_contact_type_id'))){
-			echo '<font color="red">Unsubscribed: '.$user->display_name() .'</font><br>';
-		}
-		else{	
 				
-			if (!EmailRecipient::CheckIfExists($email->key, $user->get('usr_email'))){
-				$recipient = new EmailRecipient(NULL);
-				$recipient->set('erc_email', $user->get('usr_email'));
-				$recipient->set('erc_usr_user_id', $user->key);
-				$recipient->set('erc_name', $user->display_name());
-				$recipient->set('erc_eml_email_id', $email->key);
-				$recipient->prepare();
-				$recipient->save();
-				echo 'Recipient added: '.$user->display_name() .'<br>';	
-				$total_num_queued++;
-			}
-			else{
-				echo 'Recipient already added, skipping: '.$user->display_name() .'<br>';
-				$total_num_queued++;
-			}
+		if (!EmailRecipient::CheckIfExists($email->key, $user->get('usr_email'))){
+			$recipient = new EmailRecipient(NULL);
+			$recipient->set('erc_email', $user->get('usr_email'));
+			$recipient->set('erc_usr_user_id', $user->key);
+			$recipient->set('erc_name', $user->display_name());
+			$recipient->set('erc_eml_email_id', $email->key);
+			$recipient->prepare();
+			$recipient->save();
+			echo 'Recipient added: '.$user->display_name() .'<br>';	
+			$total_num_queued++;
+		}
+		else{
+			echo 'Recipient already added, skipping: '.$user->display_name() .'<br>';
+			$total_num_queued++;
 		}			
 
 	}

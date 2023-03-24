@@ -22,15 +22,15 @@
 	$settings = Globalvars::get_instance();
 
 	//GET LIST OF CONTACT TYPES
-	$contact_types = new MultiContactType(
+	$mailing_lists = new MultiMailingList(
 		array('deleted'=>false),
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
-	$contact_types->load();
+	$mailing_lists->load();
 	
-	foreach($contact_types as $contact_type){
-		if($mailchimp_list_id = $contact_type->get('ctt_mailchimp_list_id')){
+	foreach($mailing_lists as $mailing_list){
+		if($mailchimp_list_id = $mailing_list->get('mlt_mailchimp_list_id')){
 			for ($x=0; $x<=10000; $x+=1000){
 				echo $x."<br>\n";
 				$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
@@ -49,26 +49,30 @@
 					$user = User::GetByEmail($result->email_address);
 					if($user){
 
-
+						$registrant_in_list = $mailing_list->is_user_in_list($user->key);
+						$local_change_time = NULL;
+						if($registrant_in_list){
+							$local_change_time = $registrant_in_list->get('mlr_change_time');
+						}
+						
 						
 						echo $user->key. ': '.$result->last_changed . ' -- '. $user->get('usr_contact_preference_last_changed');
 						
-						if($result->status == 'subscribed' && !$user->is_unsubscribed_to_contact_type($contact_type->key)){
+						if($result->status == 'subscribed' && $registrant_in_list){
 							//NO CHANGE	
 							echo ' S';
 						}
-						else if($result->status == 'unsubscribed' && $user->is_unsubscribed_to_contact_type($contact_type->key)){
+						else if($result->status == 'unsubscribed' && !$registrant_in_list){
 							//NO CHANGE
 							echo ' U';
 						}
-						else if($result->status == 'subscribed' && $user->is_unsubscribed_to_contact_type($contact_type->key)){
-							if(!$user->get('usr_contact_preference_last_changed') || $user->get('usr_contact_preference_last_changed') < $result->last_changed){
+						else if($result->status == 'subscribed' && !$registrant_in_list){
+							if(!$local_change_time || $local_change_time < $result->last_changed){
 								//MAILCHIMP IS MOST RECENT.  UPDATE LOCALLY
 								echo ' subscribe locally ';
-								$user->subscribe_to_contact_type($contact_type->key);
-								$user->set('usr_contact_preference_last_changed', $result->last_changed);
+								$mailing_list->add_registrant($user->key);
 							}
-							else if ($user->get('usr_contact_preference_last_changed') >= $result->last_changed){
+							else if ($local_change_time >= $result->last_changed){
 								//LOCAL IS MOST RECENT.  UPDATE MAILCHIMP
 								$merge_values = [
 									"FNAME" => $user->get('usr_first_name'),
@@ -89,14 +93,13 @@
 								echo ' set mailchimp to unsubscribed';
 							}
 						}
-						else if($result->status == 'unsubscribed' && !$user->is_unsubscribed_to_contact_type($contact_type->key)){
-							if(!$user->get('usr_contact_preference_last_changed') || $user->get('usr_contact_preference_last_changed') < $result->last_changed){
+						else if($result->status == 'unsubscribed' && $registrant_in_list){
+							if(!$local_change_time || $local_change_time < $result->last_changed){
 								//MAILCHIMP IS MOST RECENT.  UPDATE LOCALLY
-								$user->unsubscribe_from_contact_type($contact_type->key);
-								$user->set('usr_contact_preference_last_changed', $result->last_changed);
+								$mailing_list->remove_registrant($user->key);
 								echo ' unsubscribe locally ';
 							}
-							else if($user->get('usr_contact_preference_last_changed') >= $result->last_changed){
+							else if($local_change_time >= $result->last_changed){
 								//LOCAL IS MOST RECENT.  UPDATE MAILCHIMP
 								$merge_values = [
 									"FNAME" => $user->get('usr_first_name'),

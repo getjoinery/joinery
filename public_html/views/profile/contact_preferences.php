@@ -21,36 +21,45 @@
 	echo PublicPageTW::tab_menu($tab_menus);
 	
              
-	echo '<p>You can opt-out of newsletter emails, but course emails cannot be disabled.  If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p><br>';
+	echo '<p>You can opt-out of mailing lists, but course or event emails cannot be disabled.  If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p><br>';
 
-    if($announce_message) {
-		echo '<div class="status_announcement"><p>'.$announce_message.'</p></div>';
-    }     
+	if(!empty($messages)){
+		foreach ($messages as $message){
+			echo PublicPageTW::alert($message['message_title'], $message['message'], $message['message_type']);
+		}
+	}    
 
 	if(!$_REQUEST['type'] == 'ocu'){		
 		$formwriter = new FormWriterPublicTW("form1");
 		echo $formwriter->begin_form("", "post", "/profile/contact_preferences");
 		
-		$searches = array('deleted' => false);
-		$sort = LibraryFunctions::fetch_variable('sort', 'contact_type_id', 0, '');
-		$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '');
-		$contact_types = new MultiContactType(
-			$searches,
-			array($sort=>$sdirection));
-		$contact_types->load();
-		$optionvals = $contact_types->get_dropdown_array();	
-	
+		$optionvals = $mailing_lists->get_dropdown_array();	
+		//REMOVE ALL OF THE PRIVATE AND UNLISTED LISTS THE USER IS NOT SUBSCRIBED TO
+		foreach($optionvals as $key=>$value){
+			$mailing_list = new MailingList($value, TRUE);
+			if($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PRIVATE || $mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC_UNLISTED){
+				if(!in_array($value, $user_subscribed_list)){
+					unset($optionvals[$key]);
+				}
+			}
+		}
 
-		$checkedvals = $user->get_contact_type_unsubscribes();
-		$readonlyvals = array(2); //DEFAULT
+		$checkedvals = $user_subscribed_list;
+		$readonlyvals = array(); //DEFAULT
 		$disabledvals = array();
-	
-		echo $formwriter->checkboxList("Check the box to unsubscribe:", 'unsubscribes_list', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 		
+		if(empty($optionvals)){
+			echo '<p>You are currently not subscribed to any newsletters.</p>';
+		}
+		else{
 
-		echo $formwriter->hiddeninput('zone', 'optional');
-		echo '<a href="/profile/account_edit">Cancel</a> ';
-		echo $formwriter->new_form_button('Submit');
+			echo $formwriter->checkboxList("Check the box to subscribe:", 'new_list_subscribes', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);	
+			
+
+			echo $formwriter->hiddeninput('zone', 'optional');
+			echo '<a href="/profile/account_edit">Cancel</a> ';
+			echo $formwriter->new_form_button('Submit');
+		}
 		echo $formwriter->end_form();
 	}
 

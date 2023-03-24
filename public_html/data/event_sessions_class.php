@@ -211,8 +211,6 @@ class EventSession extends SystemBase {
 		if ($this->data === NULL) {
 			throw new eventException('This request has no data.');
 		}
-
-		$this->check_field_constraints();
 		
 		//TODO MAKE SURE PRODUCT IS ATTACHED BEFORE REGISTRATION
 		

@@ -653,29 +653,6 @@ abstract class SystemBase {
 		}
 	}
 
-	function check_field_constraints() {
-		/*
-		//MOVED TO THE SAVE FUNCTION
-		CheckRequiredFields($this, static::$required, static::$fields);
-
-		foreach (static::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = static::$fields[$field];
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
-					}
-					call_user_func_array($constraint[0], $params);
-				} else {
-					call_user_func($constraint, static::$fields[$field], $this->get($field));
-				}
-			}
-		}
-		*/
-	}
-
 	// To prepare it is without error
 	function prepare() {}
 	

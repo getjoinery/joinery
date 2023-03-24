@@ -4,7 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/contact_types_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -17,7 +17,7 @@
 
 	if($_POST){
 
-		$editable_fields = array('eml_description', 'eml_subject', 'eml_from_address', 'eml_from_name', 'eml_message_html', 'eml_preview_text', 'eml_ctt_contact_type_id');
+		$editable_fields = array('eml_description', 'eml_subject', 'eml_from_address', 'eml_from_name', 'eml_message_html', 'eml_preview_text', 'eml_ctt_contact_type_id', 'eml_mlt_mailing_list_id');
 
 		foreach($editable_fields as $field) {
 			$email->set($field, $_POST[$field]);
@@ -81,6 +81,7 @@
 	echo $formwriter->textinput('Description', 'eml_description', NULL, 100, $email->get('eml_description'), '', 255, '');
 	echo $formwriter->textinput('Subject', 'eml_subject', NULL, 100, $email->get('eml_subject'), '', 255, '');	
 	
+	/*
 	$contact_types = new MultiContactType(
 		array('deleted'=>false),
 		NULL,		//SORT BY => DIRECTION
@@ -88,7 +89,18 @@
 		NULL);  //OFFSET
 	$contact_types->load();
 	$optionvals = $contact_types->get_dropdown_array();
-	echo $formwriter->dropinput("Email content type (for unsubscribes)", "eml_ctt_contact_type_id", "ctrlHolder", $optionvals, $email->get('eml_ctt_contact_type_id'), '', TRUE);		
+	echo $formwriter->dropinput("Email content type (for unsubscribes)", "eml_ctt_contact_type_id", "ctrlHolder", $optionvals, $email->get('eml_ctt_contact_type_id'), '', TRUE);	
+	*/	
+
+	$mailing_lists = new MultiMailingList(
+		array('deleted'=>false, 'active'=> true),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$mailing_lists->load();
+	$optionvals = $mailing_lists->get_dropdown_array();
+	$optionvals['Custom'] = NULL;
+	echo $formwriter->dropinput("Mailing list or custom list", "eml_mlt_mailing_list_id", "ctrlHolder", $optionvals, $email->get('eml_mlt_mailing_list_id'), '', FALSE);
 	
 	echo $formwriter->textinput('Preview text', 'eml_preview_text', NULL, 100, $email->get('eml_preview_text'), '', 255, '');
 	

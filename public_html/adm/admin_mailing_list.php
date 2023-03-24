@@ -1,0 +1,132 @@
+<?php
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
+
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_list_registrants_class.php');
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(8);
+
+	$mailing_list = new MailingList($_REQUEST['mlt_mailing_list_id'], TRUE);
+
+	if($_REQUEST['action'] == 'delete'){
+		$mailing_list->authenticate_write($session);		
+		$mailing_list->soft_delete();
+
+		header("Location: /admin/admin_mailing_lists");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$mailing_list->authenticate_write($session);		
+		$mailing_list->undelete();
+
+		header("Location: /admin/admin_mailing_lists");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'removeregistrant'){
+		$registrant = new MailingListRegistrant($_REQUEST['mlr_mailing_list_registrant_id'], TRUE);
+		$mailing_list->remove_registrant($registrant->get('mlr_usr_user_id'));
+		header("Location: /admin/admin_mailing_list?mlt_mailing_list_id=".$mailing_list->key);
+		exit();				
+	}
+
+
+	$session->set_return();
+
+
+	$page = new AdminPage();
+	$page->admin_header(	
+	array(
+		'menu-id'=> 11,
+		'breadcrumbs' => array(
+			'Emails'=>'/admin/admin_emails', 
+			'Mailing Lists'=>'/admin/admin_mailing_lists', 
+			'Mailing List: '.$mailing_list->get('mlt_name') => '',
+		),
+		'session' => $session,
+	)
+	);	
+
+
+	$options['title'] = 'Mailing List: '.$mailing_list->get('mlt_name');
+	$options['altlinks'] = array();
+	if(!$mailing_list->get('mlt_delete_time')) {
+		$options['altlinks'] += array('Edit Mailing List' => '/admin/admin_mailing_list_edit?mlt_mailing_list_id='.$mailing_list->key);
+	}
+	
+	if($_SESSION['permission'] >= 8){
+		if($mailing_list->get('mlt_delete_time')) {
+			$options['altlinks']['Undelete'] = '/admin/admin_mailing_list?action=undelete&mlt_mailing_list_id='.$mailing_list->key;
+		}
+		else {
+			$options['altlinks']['Soft Delete'] = '/admin/admin_mailing_list?action=delete&mlt_mailing_list_id='.$mailing_list->key;
+		}
+	}
+		
+	$page->begin_box($options);
+	
+	echo '<h3>'.$mailing_list->get('mlt_name').'</h3>'; 
+	echo '<p>'.$mailing_list->get('mlt_description').'</p>';  
+	
+	if($mailing_list->get('mlt_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($mailing_list->get('mlt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+	}
+	else{
+		echo 'Status: Active'.'<br />';
+	}
+	
+	if($mailing_list->get('mlt_mailchimp_list_id')){
+		echo 'Mailchimp integration active.  Mailchimp ID: '.$mailing_list->get('mlt_mailchimp_list_id').'<br />';
+	}
+	else{
+		echo 'Mailchimp integration inactive.';
+	}
+	echo '<br><br>';
+	
+	$page->end_box();
+	
+	$headers = array("Users",  "Action");
+
+
+	$altlinks = array();
+	 $box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => 'Users in '. $mailing_list->get('mlt_name')
+	);
+	$page->tableheader($headers, $box_vars);
+	
+	$search_criteria = array(
+		'deleted' => false,
+		'mailing_list_id' => $mailing_list->key);
+	$registrants = new MultiMailingListRegistrant(
+		$search_criteria);		
+	$registrants->load();
+	foreach($registrants as $registrant){
+		$user = new User($registrant->get('mlr_usr_user_id'), TRUE);
+		$rowvalues=array();
+		
+		array_push($rowvalues, $user->display_name());
+	
+
+		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_mailing_list?mlt_mailing_list_id='.$mailing_list->key.'">
+		<input type="hidden" class="hidden" name="action" id="action" value="removeregistrant" />
+		<input type="hidden" class="hidden" name="mlr_mailing_list_registrant_id" id="mlr_mailing_list_registrant_id" value="'.$registrant->key.'" />
+		<button type="submit">Delete</button>
+		</form>';	
+		array_push($rowvalues, $delform);			
+		
+		$page->disprow($rowvalues);
+
+	}
+		
+
+		
+		$page->endtable();
+
+	$page->admin_footer();
+?>
