@@ -402,7 +402,7 @@ class MultiMailingList extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $entry) {
-			$option_display = $entry->get('mlt_name'); 
+			$option_display = $entry->get('mlt_name') . ' - ' . $entry->get('mlt_description'); 
 			$items[$option_display] = $entry->key;
 		}
 		if ($include_new) {
