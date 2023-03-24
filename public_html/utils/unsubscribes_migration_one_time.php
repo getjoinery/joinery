@@ -32,8 +32,14 @@
 	foreach ($items as $item){
 		
 		if($item->get('usr_contact_preferences') == 1){
-			$mailing_list->add_registrant($item->key);
-			echo 'Subscribe '. $item->display_name(). '<br>';
+			try{
+				$mailing_list->add_registrant($item->key);
+				echo 'Subscribe '. $item->display_name(). '<br>';
+			}
+			catch (MailingListException $e){
+				echo 'Already subscribed '. $item->display_name(). '<br>';
+			}
+			
 		}
 		else{
 			echo 'Unsubscribe '. $item->display_name(). '<br>';
