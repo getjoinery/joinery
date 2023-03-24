@@ -63,6 +63,10 @@ class PageContent extends SystemBase {
 	public static $initial_default_values = array(
 		'pac_create_time' => 'now()', 'pac_is_published' => FALSE
 		);
+		
+	function get_url() {
+		return '/page/' . $this->get('pac_link');
+	}	
 	
 	
 	static function get_by_link($link){
