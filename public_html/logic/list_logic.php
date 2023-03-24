@@ -6,13 +6,13 @@
 
 	$settings = Globalvars::get_instance();
 
-	/*
+	
 	if(!$settings->get_setting('mailing_lists_active')){
 		header("HTTP/1.0 404 Not Found");
 		echo 'This feature is turned off';
 		exit();
 	}
-	*/
+	
 	
 	$mailing_list = MailingList::get_by_link($static_routes_path);
 	if(!$mailing_list || !$mailing_list->get('mlt_is_active') || $mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PRIVATE){

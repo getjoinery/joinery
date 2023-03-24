@@ -265,7 +265,6 @@ class MultiPost extends SystemMultiBase {
 	static function get_all_tags($return_type = 'name'){ 
 		$tags = array();
 		$groups = Group::get_groups_in_category('post_tag');
-		$groups->load();
 
 		foreach ($groups as $group){
 			if($return_type == 'name'){
