@@ -5,7 +5,7 @@
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_list_recipients_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_list_registrants_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
