@@ -69,7 +69,7 @@ class GeneralError extends SystemBase {
 		$session_obj = SessionControl::get_instance();
 	
 		$error_context = $e->getTraceAsString(). "\r\n \r\n REQUEST_URI: ". $_SERVER['REQUEST_URI']. "\r\n \r\n $_SESSION: " . print_r($session, true). ' $_REQUEST: '.print_r($request, true);
-		$error_context = '<pre>'.htmlentities($error_context). print_r(debug_backtrace(), TRUE)).'</pre>';
+		$error_context = '<pre>'.htmlentities($error_context). print_r(debug_backtrace(), TRUE).'</pre>';
 	
 
 		$error = new GeneralError(NULL);
