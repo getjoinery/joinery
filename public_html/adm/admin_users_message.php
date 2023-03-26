@@ -95,17 +95,19 @@
 			$email_outer_template = $settings->get_setting('event_email_outer_template');
 			$email_footer_template = $settings->get_setting('event_email_footer_template');
 
-			$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);	
-			$email->fill_template(array(
-				'subject' => $_POST['eml_subject'],
-				'body' => $_POST['eml_message'],
-				//'utm_source' => 'email', //use defaults
-				//'utm_medium' => 'email', //use defaults
-				//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-				'utm_content' => urlencode($_POST['eml_subject']), 	
-			));	
+	
 			
 			foreach ($event_registrants as $event_registrant){
+				$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);	
+				$email->fill_template(array(
+					'subject' => $_POST['eml_subject'],
+					'body' => $_POST['eml_message'],
+					//'utm_source' => 'email', //use defaults
+					//'utm_medium' => 'email', //use defaults
+					//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+					'utm_content' => urlencode($_POST['eml_subject']),
+					'evr_event_registrant_id' => $event_registrant->key,			
+				));
 				
 				$recipient = new User($event_registrant->get('evr_usr_user_id'), TRUE);
 						
@@ -131,9 +133,10 @@
 				$recipient_email->set('erc_status', 1);
 				$recipient_email->save();							
 				$numrecipients++;
+				$result = $email->send();
 
 			}
-			$result = $email->send();
+			
 			if($result){
 				$email_record->mark_all_recipients_sent();
 				$email_record->set('eml_status', 10);
