@@ -55,7 +55,7 @@ $dblink = $dbhelper->get_db_link();
 
 
 $today = date("m-d-Y");
-$startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 years")), 0, '');
+$startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 months")), 0, '');
 $enddate = LibraryFunctions::fetch_variable('enddate', $today, 0, '');
 $interval = LibraryFunctions::fetch_variable('interval', 0, 0, ''); // 0 = daily, 1 = weekly, 2 = monthly (default), 3 = quarterly, 4 = yearly
 $usrdisabled = LibraryFunctions::fetch_variable("usr_is_disabled", 0, 0, '');
