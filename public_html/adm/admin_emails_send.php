@@ -107,7 +107,7 @@
 				//MAKE SURE WE DON'T SEND IF ANOTHER THREAD HAS ALREADY DONE IT
 				$recipient_check = new EmailRecipient($recipient->key, TRUE);
 				if(!$recipient_check->is_sent()){
-					$result = $email_template->send(FALSE);
+					$result = $email_template->send(TRUE);
 					if($result){
 						$recipient->set('erc_sent_time', 'now()');
 						$recipient->set('erc_status', EmailRecipient::EMAIL_SENT);

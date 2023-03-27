@@ -670,7 +670,7 @@ class EmailTemplate {
 		return $this->email_has_content;
 	}
 
-	//RETURNS TRUE ON SUCCESS, AND A POSITIVE INTEGER IF EMAIL SENDING HAS BEEN TURNED OFF
+	//RETURNS TRUE ON SUCCESS
 	function send($check_session=TRUE, $other_host=NULL) {
 		$settings = Globalvars::get_instance();
 
@@ -679,9 +679,10 @@ class EmailTemplate {
 			return FALSE;
 		}
 
+		//IF WE HAVE EMAIL SENDING TURNED OFF FOR THE CURRENT USER, LOG IT INSTEAD
+		//BUT RETURN TRUE, AS IF THE SENDING WAS SUCCESSFUL
 		if ($check_session) {
 			$session = SessionControl::get_instance();
-			
 			if(!$session->send_emails()) {
 				//STORE THE EMAIL IN A LOG
 				$debug_log = new DebugEmailLog(NULL);
@@ -690,7 +691,7 @@ class EmailTemplate {
 				$debug_log->save();	
 				$debug_log->load();					
 				
-				return false;
+				return true;
 			}
 		}
 
@@ -714,7 +715,8 @@ class EmailTemplate {
 			if (!$this->mailer->Send()) {
 				// Oops, email didn't send.  Save it and move on.
 				$this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR);
-			}				
+			}	
+			return true;
 		}
 		else if($settings->get_setting('mailgun_api_key') && $settings->get_setting('mailgun_domain')) {
 
@@ -780,8 +782,7 @@ class EmailTemplate {
 				
 			}
 			//TODO: ERROR CHECKING ON RETURN RESULT
-			return true;
-						
+			return true;			
 		}
 		
 	}
@@ -809,12 +810,10 @@ class EmailTemplate {
 
 	function save_email_as_queued($log_entry_id=NULL, $status=QueuedEmail::QUEUED) {
 		
-		//$this->_generate_tracking_code($log_entry_id);
 		$queued_email = new QueuedEmail(NULL);
 		$queued_email->set('equ_from_name', $this->email_from_name);
 		$queued_email->set('equ_from', $this->email_from);
 		$to_address_list = $this->email_recipients;
-		//list($to, $to_name) = $to_address_list[0];
 		$queued_email->set('equ_to', $to_address_list[0]['email']);
 		$queued_email->set('equ_to_name', $to_address_list[0]['name']);
 		$queued_email->set('equ_body', $this->email_html);

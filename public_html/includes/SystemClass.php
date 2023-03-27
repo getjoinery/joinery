@@ -1145,7 +1145,17 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 				else{
 					$errorhandler->handle_general_error($e->getMessage(), ErrorHandler::INPUT_ERROR);
 				}				
-			} 
+			}
+			else if ($e instanceof DisplayablePermanentErrorMessage) {
+				error_log('EXCEPTION: (DISPLAYABLE PERMANENT ERROR) ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
+				GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
+				if($errorpage == 'admin'){
+					$errorhandler->handle_admin_error($e->getMessage(), ErrorHandler::PERMANENT_ERROR);
+				}
+				else{
+					$errorhandler->handle_general_error($e->getMessage(), ErrorHandler::PERMANENT_ERROR);
+				}	
+			} 			
 			else if ($e instanceof DisplayablePermanentErrorMessageNoLog) {
 				//error_log('EXCEPTION: (DISPLAYABLE PERMANENT ERROR) ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
 				//GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
@@ -1164,16 +1174,6 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 				else{
 					$errorhandler->handle_general_error($e->getMessage(), ErrorHandler::INPUT_ERROR);
 				}				
-			} 
-			else if ($e instanceof DisplayablePermanentErrorMessage) {
-				error_log('EXCEPTION: (DISPLAYABLE PERMANENT ERROR) ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
-				GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
-				if($errorpage == 'admin'){
-					$errorhandler->handle_admin_error($e->getMessage(), ErrorHandler::PERMANENT_ERROR);
-				}
-				else{
-					$errorhandler->handle_general_error($e->getMessage(), ErrorHandler::PERMANENT_ERROR);
-				}	
 			} 
 			else {
 				error_log('EXCEPTION: ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
