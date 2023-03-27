@@ -608,7 +608,7 @@ class User extends SystemBase {
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
 			$mailing_lists->load();
-			foreach($mailing_lists as $mailing_lists){
+			foreach($mailing_lists as $mailing_list){
 				if($mailing_list->is_user_in_list($this->key, false)){
 					$mailing_list->remove_registrant($this->key);
 				}
