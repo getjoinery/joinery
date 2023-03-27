@@ -128,37 +128,37 @@
 		//IF THERE IS NO TEST SQL, IT IS ASSUMED THAT WE ALWAYS RUN THE MIGRATION
 		//ALSO UPDATES LAST SYSTEM VERSION
 		$migrations = array();
-		$migrations[0][system_version] = '0.5';
-		$migrations[0][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_product_requirements'";
-		$migrations[0][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Product Requirements\', 5, \'admin_product_requirements\', 5, 8, 0, \'\');';
+		$migrations[0]['system_version'] = '0.5';
+		$migrations[0]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_product_requirements'";
+		$migrations[0]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Product Requirements\', 5, \'admin_product_requirements\', 5, 8, 0, \'\');';
 		
-		$migrations[1][system_version] = '0.5';
-		$migrations[1][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'system_version'";
-		$migrations[1][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'system_version\', \'0.5\', 1, \'now()\', \'now()\', \'general\');';
+		$migrations[1]['system_version'] = '0.5';
+		$migrations[1]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'system_version'";
+		$migrations[1]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'system_version\', \'0.5\', 1, \'now()\', \'now()\', \'general\');';
 		
-		$migrations[2][system_version] = '0.5';
-		$migrations[2][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'db_migration_version'";
-		$migrations[2][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'db_migration_version\', \'1\', 1, \'now()\', \'now()\', \'general\');';
+		$migrations[2]['system_version'] = '0.5';
+		$migrations[2]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'db_migration_version'";
+		$migrations[2]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'db_migration_version\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 
-		$migrations[3][system_version] = '0.5.1';
-		$migrations[3][test] = NULL;
-		$migrations[3][migration_sql] = NULL;		
+		$migrations[3]['system_version'] = '0.5.1';
+		$migrations[3]['test'] = NULL;
+		$migrations[3]['migration_sql'] = NULL;		
 
-		$migrations[4][system_version] = '0.5.2';
-		$migrations[4][test] = NULL;
-		$migrations[4][migration_sql] = NULL;				
+		$migrations[4]['system_version'] = '0.5.2';
+		$migrations[4]['test'] = NULL;
+		$migrations[4]['migration_sql'] = NULL;				
 
-		$migrations[5][system_version] = '0.5.2';
-		$migrations[5][test] = NULL;
-		$migrations[5][migration_sql] = NULL;			
+		$migrations[5]['system_version'] = '0.5.2';
+		$migrations[5]['test'] = NULL;
+		$migrations[5]['migration_sql'] = NULL;			
 	
-		$migrations[6][system_version] = '0.5.3';
-		$migrations[6][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_mailing_lists'";
-		$migrations[6][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Mailing Lists\', 11, \'admin_mailing_lists\', 7, 8, 0, \'\');';		
+		$migrations[6]['system_version'] = '0.5.3';
+		$migrations[6]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_mailing_lists'";
+		$migrations[6]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Mailing Lists\', 11, \'admin_mailing_lists\', 7, 8, 0, \'\');';		
 		
-		$migrations[7][system_version] = '0.5.4';
-		$migrations[7][test] = NULL;
-		$migrations[7][migration_sql] = 'UPDATE emt_email_templates SET emt_body=\'<br/>----
+		$migrations[7]['system_version'] = '0.5.4';
+		$migrations[7]['test'] = NULL;
+		$migrations[7]['migration_sql'] = 'UPDATE emt_email_templates SET emt_body=\'<br/>----
 <br/>
 <small>
 	{mailing_list_id}This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end} because you are subscribed to the list <i>*mailing_list_string*</i>.  Please <a href="*web_dir*/profile/mailing_lists_preferences?mailing_list_id=*mailing_list_id*&user=*recipient->key*&hash=*recipient->usr_authhash*&zone=ocu&*email_vars*">click here</a> to stop receiving <i>*mailing_list_string*</i> emails.  {end mailing_list_id}
@@ -168,17 +168,17 @@
 <br/>
 <br/>\' WHERE emt_name=\'default_footer\';';				
 		
-		$migrations[8][system_version] = '0.5.4';
-		$migrations[8][test] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_analytics_email_stats'";
-		$migrations[8][migration_sql] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Email Statistics\', 12, \'admin_analytics_email_stats\', 2, 5, 0, \'\');';	
+		$migrations[8]['system_version'] = '0.5.4';
+		$migrations[8]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_analytics_email_stats'";
+		$migrations[8]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Email Statistics\', 12, \'admin_analytics_email_stats\', 2, 5, 0, \'\');';	
 
-		$migrations[9][system_version] = '0.5.5';
-		$migrations[9][test] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailing_lists_active'";
-		$migrations[9][migration_sql] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailing_lists_active\', 1, 1, \'now()\', \'now()\', \'general\');';		
+		$migrations[9]['system_version'] = '0.5.5';
+		$migrations[9]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailing_lists_active'";
+		$migrations[9]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailing_lists_active\', 1, 1, \'now()\', \'now()\', \'general\');';		
 
-		$migrations[10][system_version] = '0.5.6';
-		$migrations[10][test] = NULL;
-		$migrations[10][migration_sql] = 'UPDATE "public"."emt_email_templates" SET "emt_body" = \'<br/>----
+		$migrations[10]['system_version'] = '0.5.6';
+		$migrations[10]['test'] = NULL;
+		$migrations[10]['migration_sql'] = 'UPDATE "public"."emt_email_templates" SET "emt_body" = \'<br/>----
 <br/>
 <small>
 {mailing_list_id}This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end} because you are subscribed to the list <i>*mailing_list_string*</i>.  Please <a href="*web_dir*/profile/mailing_lists_preferences?mailing_list_id=*mailing_list_id*&user=*recipient->key*&hash=*recipient->usr_authhash*&zone=ocu&*email_vars*">click here</a> to stop receiving <i>*mailing_list_string*</i> emails.  {end mailing_list_id}
@@ -193,11 +193,11 @@ This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end
 <br/>
 <br/>\', "emt_create_time" = \'2020-12-19 20:03:41.97081\', "emt_update_time" = \'2020-12-19 20:03:41.97081\', "emt_delete_time" = NULL WHERE emt_name=\'default_footer\';
 ';
-		$migrations[10][migration_file] = NULL;	
+		$migrations[10]['migration_file'] = NULL;	
 		
-		$migrations[10][system_version] = '0.5.7';
-		$migrations[10][test] = NULL;
-		$migrations[10][migration_sql] = NULL;
-		$migrations[10][migration_file] = 'test_migration.php';	
+		$migrations[10]['system_version'] = '0.5.7';
+		$migrations[10]['test'] = NULL;
+		$migrations[10]['migration_sql'] = NULL;
+		$migrations[10]['migration_file'] = 'test_migration.php';	
 ?>
 
