@@ -858,11 +858,21 @@ class FormWriterMasterTW {
 
 
 			if($showdefault){
-				if(is_null($input)){
-					$output .=  '<option value="" selected="selected">Choose One';
+				if($showdefault === true){
+					if(is_null($input)){
+						$output .=  '<option value="" selected="selected">Choose One';
+					}
+					else{
+						$output .= '<option value="">Choose One';
+					}
 				}
 				else{
-					$output .= '<option value="">Choose One';
+					if(is_null($input)){
+						$output .=  '<option value="" selected="selected">'.$showdefault;
+					}
+					else{
+						$output .= '<option value="">'.$showdefault;
+					}						
 				}
 			}
 

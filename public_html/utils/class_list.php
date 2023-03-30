@@ -195,9 +195,21 @@ This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end
 ';
 		$migrations[10]['migration_file'] = NULL;	
 		
-		$migrations[10]['system_version'] = '0.5.7';
-		$migrations[10]['test'] = NULL;
-		$migrations[10]['migration_sql'] = NULL;
-		$migrations[10]['migration_file'] = 'test_migration.php';	
+		$migrations[11]['system_version'] = '0.5.7';
+		$migrations[11]['test'] = NULL;
+		$migrations[11]['migration_sql'] = NULL;
+		$migrations[11]['migration_file'] = 'test_migration.php';	
+		
+		$migrations[12]['system_version'] = '0.5.8';
+		$migrations[12]['test'] = 'SELECT count(1) as count FROM emt_email_templates WHERE emt_name = \'mailing_list_subscribe\'';
+		$migrations[12]['migration_sql'] = 'INSERT INTO "public"."emt_email_templates"("emt_name", "emt_type", "emt_body", "emt_create_time", "emt_update_time", "emt_delete_time") VALUES (\'mailing_list_subscribe\', 2, \'This is your confirmation that you are subscribed to the *mailing_list_string* mailing list.  
+
+Welcome!
+
+\', \'2023-03-30 16:12:22.701562\', \'2023-03-30 16:12:22.701562\', NULL)';
+		$migrations[12]['migration_file'] = NULL;	
+		
+		
+
 ?>
 

@@ -4,6 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -18,12 +19,20 @@
 
 		$editable_fields = array('mlt_name', 'mlt_description', 'mlt_mailchimp_list_id', 'mlt_is_active', 'mlt_visibility');
 
-		if(!$mailing_list->get('mlt_link')){
-			$mailing_list->set('mlt_link', $mailing_list->create_url());
+		if($mailing_list->get('mlt_fil_file_id')){
+			$mailing_list->set('mlt_fil_file_id', $_POST['mlt_fil_file_id']);
 		}
-		
+
+		if($mailing_list->get('mlt_emt_email_template_id')){
+			$mailing_list->set('mlt_emt_email_template_id', $_POST['mlt_emt_email_template_id']);
+		}
+	
 		foreach($editable_fields as $field) {
 			$mailing_list->set($field, $_POST[$field]);
+		}
+		
+		if(!$mailing_list->get('mlt_link')){
+			$mailing_list->set('mlt_link', $mailing_list->create_url());
 		}
 		
 		$mailing_list->prepare();
@@ -71,6 +80,24 @@
 	echo $formwriter->dropinput("Active?", "mlt_is_active", "ctrlHolder", $optionvals, $mailing_list->get('mlt_is_active'), '', FALSE);
 	$optionvals = array("Hidden (Only admins can add people)"=>0, "Public (Open for registration and listed)"=>1, "Public but unlisted (Can only register with the link)"=>2);
 	echo $formwriter->dropinput("Visibility", "mlt_visibility", "ctrlHolder", $optionvals, $mailing_list->get('mlt_visibility'), '', FALSE);
+
+	$templates = new MultiEmailTemplateStore(
+		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_INNER),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$templates->load();
+	$optionvals = $templates->get_dropdown_array();
+	echo $formwriter->dropinput("Welcome email template", "mlt_emt_email_template_id", "ctrlHolder", $optionvals, $mailing_list->get('mlt_emt_email_template_id'), '', "No welcome email");	
+	
+	$files = new MultiFile(
+			array('deleted'=>false),
+			array('file_id' => 'DESC'),		//SORT BY => DIRECTION
+			NULL,  //NUM PER PAGE
+			NULL);  //OFFSET
+	$files->load();
+	$optionvals = $files->get_file_dropdown_array();
+	echo $formwriter->dropinput("File to include in welcome email", "mlt_fil_file_id", "ctrlHolder", $optionvals, $mailing_list->get('mlt_fil_file_id'), '', "No file included", TRUE, FALSE, TRUE);
 	echo $formwriter->textinput('Mailchimp List ID', 'mlt_mailchimp_list_id', NULL, 100, $mailing_list->get('mlt_mailchimp_list_id'), '', 255, '');	
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

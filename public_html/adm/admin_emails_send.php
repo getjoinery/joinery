@@ -46,9 +46,6 @@
 	 
 
 	$settings = Globalvars::get_instance();
-	$email_outer_template = $settings->get_setting('bulk_outer_template');
-	$email_footer_template = $settings->get_setting('bulk_footer');	
-
 
 	foreach($emails as $email){
 		if($email->get('eml_mlt_mailing_list_id')){
@@ -88,7 +85,7 @@
 				
 						
 				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-				$email_template = new EmailTemplate($email->get('eml_message_template_html'), $user, $email_outer_template, $email_footer_template);	
+				$email_template = new EmailTemplate($email->get('eml_message_template_html'), $user);	
 				$email_template->fill_template(array(
 					'subject' => $email->get('eml_subject'),
 					'preview_text' => $email->get('eml_preview_text'),
