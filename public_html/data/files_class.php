@@ -21,6 +21,7 @@ class File extends SystemBase {
 		'fil_file_id' => 'delete',	
 		'esf_fil_file_id' => 'prevent',
 		'evt_fil_file_id' => 'prevent',
+		'mlt_fil_file_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(

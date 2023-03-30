@@ -10,6 +10,7 @@ require_once($siteDir . '/includes/SystemClass.php');
 
 require_once($siteDir . '/data/mailing_list_registrants_class.php');
 require_once($siteDir . '/data/users_class.php');
+require_once($siteDir . '/data/files_class.php');
 
 $settings = Globalvars::get_instance();
 
@@ -46,6 +47,8 @@ class MailingList extends SystemBase {
 		'mlt_link' => 'Link for the list',
 		'mlt_create_time' => 'Time of creation',
 		'mlt_delete_time' => 'Time of deletion',
+		'mlt_emt_email_template_id' => 'Email template if the user gets a welcome email',
+		'mlt_fil_file_id' => 'File to be sent upon subscription',
 	); 
 
 	public static $field_specifications = array(
@@ -58,6 +61,8 @@ class MailingList extends SystemBase {
 		'mlt_link' => array('type'=>'varchar(255)'),
 		'mlt_create_time' => array('type'=>'timestamp(6)'),
 		'mlt_delete_time' => array('type'=>'timestamp(6)'),
+		'mlt_emt_email_template_id' => array('type'=>'int4'),
+		'mlt_fil_file_id' => array('type'=>'int4'),
 	); 
 			
 	public static $required_fields = array(
@@ -106,7 +111,6 @@ class MailingList extends SystemBase {
 		$tmp = strtolower(str_replace(' ', '-', $this->get('mlt_name')));
 		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
 		$tmp = preg_replace('/-{2,}/', '-', $tmp);
-		$result = MailingList::get_by_link($tmp, true);
 
 		//NO DUPLICATES
 		$increment=1;
@@ -115,6 +119,7 @@ class MailingList extends SystemBase {
 			$tmp = $tmp_orig . $increment;
 			$increment++;
 		}
+			
 		return $tmp;
 	}
 	
@@ -212,6 +217,31 @@ class MailingList extends SystemBase {
 			$registrant->save();
 			$registrant->load();
 			
+			if($this->get('mlt_send_welcome_email')){
+				//SEND WELCOME EMAIL
+				$user = new User($usr_user_id, TRUE);
+				$welcome_email = new EmailTemplate('mailing_list_subscribe', $user);
+				
+				
+				$email_fill = array(
+					'subject' => 'Welcome to our mailing list',
+					//'utm_source' => 'email', //use defaults
+					'utm_medium' => 'email', //use defaults
+					'utm_campaign' => $mailing_list_string, 
+					'utm_content' => urlencode($email->get('eml_subject')), 
+					'mailing_list_id' => $mailing_list_id,
+					'mailing_list_string' => $mailing_list_string,
+				);
+				//CHECK TO SEE IF THE USER GETS A FREE GIFT
+				if($this->get('mlt_fil_file_id')){
+					$file = new File($this->get('mlt_fil_file_id'), TRUE);
+					$email_fill['file_link'] = $settings->get_setting('webDir_SSL').'/uploads/'.$file->get('fil_name');
+					$email_fill['file_name'] = $file->get('fil_name');
+				}
+
+				$welcome_email->fill_template($email_fill);
+				$welcome_email->send();	
+			}
 			
 			$status = true;
 			if($this->get('mlt_mailchimp_list_id')){
