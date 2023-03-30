@@ -66,7 +66,7 @@ class MailingList extends SystemBase {
 	); 
 			
 	public static $required_fields = array(
-		'mlt_name'
+		'mlt_name', 'mlt_link'
 	);
 
 	public static $zero_variables = array();

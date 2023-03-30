@@ -6,6 +6,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
 
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_list_registrants_class.php');
 
@@ -110,7 +111,18 @@
 		
 	}
 	
-	
+	if($mailing_list->get('mlt_emt_email_template_id')){
+		if($mailing_list->get('mlt_fil_file_id')){
+			$file = new File($mailing_list->get('mlt_fil_file_id'), true);
+			echo 'Welcome emails active.  File attached: '.$mailing_list->get('mlt_mailchimp_list_id').'<br />';
+		}
+		else{
+			echo 'Welcome emails active.<br />';
+		}
+	}
+	else{
+		echo 'Welcome emails are inactive.<br />';
+	}	
 	
 	
 	if($mailing_list->get('mlt_mailchimp_list_id')){
