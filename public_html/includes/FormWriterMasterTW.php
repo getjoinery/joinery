@@ -572,7 +572,7 @@ class FormWriterMasterTW {
 			</script>
 				
 			<style>
-			.trumbowyg-editor {
+			.trumbowyg-box {
 				max-height: 500px;
 			}
 			</style>
