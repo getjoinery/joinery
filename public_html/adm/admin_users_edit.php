@@ -94,7 +94,7 @@ if ($_POST){
 				if($status){
 					$thismessage['message_type'] = 'success';
 					$thismessage['message_title'] = 'Success';
-					$thismessage['message'] = 'You are UNSUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+					$thismessage['message'] = 'You are UNSUBSCRIBED from the following lists: ' . $mailing_list->get('mlt_name');
 					$messages[] = $thismessage;
 				}
 				else{
