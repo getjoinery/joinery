@@ -4,10 +4,11 @@
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('profile_logic.php'));
 
+	$page_vars = profile_logic($_GET, $_POST);
 	
 	$page = new PublicPageTW();
 	$hoptions = array(
-		'is_valid_page' => $is_valid_page,
+		'is_valid_page' => true,
 		'title' => 'My Profile', 
 		'breadcrumbs' => array (
 			'My Profile' => '',
@@ -18,27 +19,26 @@
 	echo PublicPageTW::BeginPage('My Profile', $hoptions);
 	
 
-		$display_messages = $session->get_messages($_SERVER['REQUEST_URI']);
-		foreach($display_messages AS $display_message) {
-			if($display_message->identifier == 'userbox') {			
-				echo '<div class="'.$display_message->get_message_class().'">'.$display_message->message.'</div>';
-			}
-		}	
+	foreach($page_vars['display_messages'] AS $display_message) {
+		if($display_message->identifier == 'profilebox') {	
+			echo PublicPageTW::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+		}
+	}	
 		
-		if($settings->get_setting('events_active')){
-			//DISPLAY REGISTER FINISH LINKS
-			foreach($event_registrants as $event_registrant){
-				if(!$event_registrant->get('evr_extra_info_completed')){
-					$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-					if($event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
-						$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-						$line = 'Your registration for <strong>'.$event->get('evt_name').'</strong> needs some additional information. <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">click here to add the information</a>';
-						echo '<div class="status_warning">'.$line.'</div><br /><br />';
-					}
+	if($page_vars['settings']->get_setting('events_active')){
+		//DISPLAY REGISTER FINISH LINKS
+		foreach($event_registrants as $event_registrant){
+			if(!$event_registrant->get('evr_extra_info_completed')){
+				$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
+				if($event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
+					$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
+					$line = 'Your registration for <strong>'.$event->get('evt_name').'</strong> needs some additional information. <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">click here to add the information</a>';
+					echo '<div class="status_warning">'.$line.'</div><br /><br />';
 				}
-			}			
-		} 
-		?>
+			}
+		}			
+	} 
+	?>
 
 
 
@@ -72,8 +72,8 @@
 	
 					
                     <div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
-                      <p class="text-xl font-bold text-gray-900 sm:text-2xl"><?php echo htmlspecialchars($user->display_name()); ?></p>
-                      <!--<p class="text-sm font-medium text-gray-600"><?php echo htmlspecialchars($user->get('usr_email')); ?></p>-->
+                      <p class="text-xl font-bold text-gray-900 sm:text-2xl"><?php echo htmlspecialchars($page_vars['user']->display_name()); ?></p>
+                      <!--<p class="text-sm font-medium text-gray-600"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>-->
 					  
 
                     </div>
@@ -95,7 +95,7 @@
           Email
         </dt>
         <dd class="mt-1 text-sm text-gray-900">
-          <?php echo htmlspecialchars($user->get('usr_email')); ?>
+          <?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?>
         </dd>
       </div>
       <div class="sm:col-span-1">
@@ -103,7 +103,7 @@
           Phone
         </dt>
         <dd class="mt-1 text-sm text-gray-900">
-          <?php echo $phone_number->get_phone_string(); ?>
+          <?php echo $page_vars['phone_number']->get_phone_string(); ?>
         </dd>
       </div>
       <div class="sm:col-span-1">
@@ -111,7 +111,7 @@
           Address
         </dt>
         <dd class="mt-1 text-sm text-gray-900">
-          <?php echo $address->get_address_string(', '); ?>
+          <?php echo $page_vars['address']->get_address_string(', '); ?>
         </dd>
       </div>
       <div class="sm:col-span-1">
@@ -119,40 +119,24 @@
           Timezone
         </dt>
         <dd class="mt-1 text-sm text-gray-900">
-          <?php echo $user->get('usr_timezone'); ?>
+          <?php echo $page_vars['user']->get('usr_timezone'); ?>
         </dd>
       </div>
 	  
       <div class="sm:col-span-2">
         <dt class="text-sm font-medium text-gray-500">
-          Newsletter Subscription
+          Mailing List Subscriptions
         </dt>
         <dd class="mt-1 text-sm text-gray-900">
           <?php 
-				$subscribed_text = array();
-				$unsubscribed_text = array();
-				$contact_types = new MultiContactType(
-				array('deleted' => false),
-				array('contact_type_id'=>'ASC'));		
-				$contact_types->load();
-				$unsubscribe_list = $user->get_contact_type_unsubscribes();
-				foreach ($contact_types as $contact_type){
-					if(in_array($contact_type->key, $unsubscribe_list)){
-
-						$unsubscribed_text[] = ContactType::ToReadable($contact_type->key);
-					}
-					else{ 
-						$subscribed_text[] = ContactType::ToReadable($contact_type->key);
-					}
-				}
-				echo '<br>';
-				if(!empty($subscribed_text)){
-					echo 'This user is subscribed to the following: '.implode(', ', $subscribed_text).'<br>';
-				}
-				if(!empty($unsubscribed_text)){
-					echo 'This user is unsubscribed from the following: '.implode(', ', $unsubscribed_text).'<br>';
-				}
-								?>
+			echo '<br>';
+			if(empty($page_vars['user_subscribed_list'])){
+				echo 'You are not subscribed to any mailing lists.<br>';
+			}
+			else{
+				echo 'You are subscribed to the following lists: '.implode(', ', $page_vars['user_subscribed_list']).'<br>';
+			}
+			?>
         </dd>
       </div>
       
@@ -230,32 +214,36 @@
 
 	<?php
 
-							if(!$num_events){
+							if(!$page_vars['num_events']){
 									echo '<p class="mt-6 px-4 py-5 ">You have no event registrations.</p>';						
 							}
 							else{
-								foreach($event_registrants as $event_registrant){
+								foreach($page_vars['event_registrants'] as $event_registrant){
 									$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
 									$next_session = $event->get_next_session();
 
 									
-									$time = NULL;
+									$time = '';
 									$tz = $event->get('evt_timezone');
 									if($next_session){
 										$time = '<b>Next session: ';
-										$time .= $next_session->get_time_string($tz);
 										
-										if($event->get('evt_timezone') != $session->get_timezone()){
-											$time .= ' (Your local time: '. $next_session->get_time_string($session->get_timezone()). ')';
+										if($event->get('evt_timezone') != $page_vars['session']->get_timezone()){
+											$time .= $next_session->get_time_string($page_vars['session']->get_timezone());
+										}
+										else{
+											$time .= $next_session->get_time_string($tz);
 										}
 										$time .= '</b>';
 									}
 									else if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-
-										$time = $event->get_time_string($tz);		
-										if($event->get('evt_timezone') != $session->get_timezone()){
-											$time .= ' (Your local time: '. $event->get_time_string($session->get_timezone()). ')';			
-										}				
+		
+										if($event->get('evt_timezone') != $page_vars['session']->get_timezone()){
+											$time .= $event->get_time_string($page_vars['session']->get_timezone());			
+										}
+										else{
+											$time .= $event->get_time_string($tz);
+										}
 									}
 									
 									$calendar_text = '';
@@ -283,7 +271,7 @@
 									}
 
 									if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
-										//$actions .= '<a class="button-circle button-circle-md button-circle-grey" href="/profile/event_withdraw?evr_event_registrant_id='.$event_registrant->key.'" alt="Withdraw from course"><i class="ti-close"></i>';
+										$actions .= '<a class="button-circle button-circle-md button-circle-grey" href="/profile/event_withdraw?evr_event_registrant_id='.$event_registrant->key.'" alt="Withdraw from course"><i class="ti-close"></i>';
 									}	
 									
 									?>			
@@ -426,7 +414,7 @@
 
           <!-- Subscriptions -->
 		  <?php
-			if($settings->get_setting('products_active') && $settings->get_setting('subscriptions_active')){
+			if($page_vars['settings']->get_setting('products_active') && $page_vars['settings']->get_setting('subscriptions_active')){
 			?>
           <section aria-labelledby="recent-hires-title">
             <div class="rounded-lg bg-white overflow-hidden shadow">
@@ -436,10 +424,10 @@
                   <ul role="list" class="-my-5 divide-y divide-gray-200">
 				  
 					<?php
-						foreach($subscriptions as $subscription){	
+						foreach($page_vars['subscriptions'] as $subscription){	
 								
 							if($subscription->get('odi_subscription_cancelled_time')){
-								$status = ' canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
+								$status = ' canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $page_vars['session']->get_timezone());
 								$action = '';
 							}
 							else{
@@ -508,7 +496,7 @@
 			
           <!-- Order History -->
 		  <?php
-			if($settings->get_setting('products_active')){
+			if($page_vars['settings']->get_setting('products_active')){
 				?>
 				<section aria-labelledby="recent-hires-title">
 					<div class="rounded-lg bg-white overflow-hidden shadow">
@@ -519,7 +507,7 @@
 						  <?php
 				
 				
-				foreach($orders as $order) {
+				foreach($page_vars['orders'] as $order) {
 					?>
 					<li class="py-4">
 					  <div class="flex items-center space-x-4">
@@ -534,7 +522,7 @@
 						  </p>
 						  
 						  <p class="text-sm text-gray-500 truncate">
-							<?php echo  LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'M d, Y'); ?>
+							<?php echo  LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?>
 						  </p>
 						  
 						</div>
@@ -558,9 +546,11 @@
                   </ul>
                 </div>
                 <div class="mt-6">
+				<!--
 					<a href="/product/recurring-donation" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
 						See All Orders
 					  </a>
+					  -->
                 </div>
               </div>
             </div>
@@ -595,7 +585,7 @@
 			*/
 
 		/*
-		if($settings->get_setting('messages_active')){
+		if($page_vars['settings']->get_setting('messages_active')){
 		?>
 		<div class="sidebar-box">
 			<h6 class="font-small font-weight-normal uppercase">Your Messages</h6>
@@ -608,7 +598,7 @@
 					break;
 				}
 				?>
-				<li><a href="/profile/messages"><strong><?php echo trim(str_replace('<br />', ' ', substr(strip_tags($message->get('msg_body')), 0, 50). '...')); ?></strong> <?php echo LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $session->get_timezone()); ?></a></li>								
+				<li><a href="/profile/messages"><strong><?php echo trim(str_replace('<br />', ' ', substr(strip_tags($message->get('msg_body')), 0, 50). '...')); ?></strong> <?php echo LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $page_vars['session']->get_timezone()); ?></a></li>								
 				<?php
 			}
 			?>	
