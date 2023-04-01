@@ -99,7 +99,7 @@ if($_POST){
 
 
 	$msgtxt = 'Your information for this event has been updated.';
-	$message = new DisplayMessage($msgtxt, '/\/profile\/profile.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+	$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/profile.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
 	$session->save_message($message);	
 	//NOW REDIRECT
 	if($_SESSION['permission']){

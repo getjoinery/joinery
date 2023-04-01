@@ -1131,7 +1131,7 @@ class LibraryFunctions {
 	}
 
 	/*********************************************************************
-	//FETCH A VARIABLE FROM $_GET, $_POST, OR LOCAL SCOPE
+	//FETCH A VARIABLE FROM $_GET, $_POST, OR REQUEST
 	$varname - Name of var to fetch.
 	$defaultvalue - If not found, will be returned as variable value.
 	$required - 1 or 0.  If 1, error will be thrown if variable not found.
