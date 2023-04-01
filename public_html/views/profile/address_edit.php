@@ -5,6 +5,7 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('address_edit_logic.php'));
 	
+	$page_vars = address_edit_logic($_GET, $_POST);
 		
 
 	$page = new PublicPageTW();
@@ -19,7 +20,7 @@
 	echo PublicPageTW::BeginPage('Edit Address', $hoptions);
 
 
-	echo PublicPageTW::tab_menu($tab_menus);
+	echo PublicPageTW::tab_menu($page_vars['tab_menus']);
 	
 	$formwriter = new FormWriterPublicTW("form1");
 	
@@ -32,20 +33,14 @@
 	
 	echo $formwriter->begin_form("", "post", "/profile/address_edit");
 
-	/*
-	if ($address->key) {
-		// Don't put the existing address if we are adding a new one
-		echo $formwriter->hiddeninput("a", LibraryFunctions::encode($address->key));
-	}
-	*/
 
-	foreach($display_messages AS $display_message) {
-		if($display_message->identifier == 'addressbox') {			
-			echo '<div class="'.$display_message->get_message_class().'">'.$display_message->message.'</div>';
+	foreach($page_vars['display_messages'] AS $display_message) {
+		if($display_message->identifier == 'addressbox') {	
+			echo PublicPageTW::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}	
 
-	Address::PlainForm($formwriter, $address);
+	Address::PlainForm($formwriter, $page_vars['address']);
 
 	echo '<a href="/profile/account_edit">Cancel</a> ';
 	echo $formwriter->new_form_button('Submit');

@@ -31,7 +31,7 @@ if ($_POST){
 		$event_registrant->remove();
 		
 		$msgtxt = 'You have now withdrawn from '.$event->get('evt_name').'.';
-		$message = new DisplayMessage($msgtxt, '/\/profile\/account/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+		$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/account/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
 		$session->save_message($message);	
 
 		header("Location: /profile");

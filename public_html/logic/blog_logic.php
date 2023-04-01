@@ -45,8 +45,8 @@
 				$page_offset);	
 			$numrecords = $posts->count_all();	
 			$posts->load();	
-			$page_vars[posts] = $posts;
-			$page_vars[title] = 'Blog';
+			$page_vars['posts'] = $posts;
+			$page_vars['title'] = 'Blog';
 		}
 		
 		$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE, 'listed'=>TRUE, 'pinned'=>TRUE);

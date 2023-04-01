@@ -21,14 +21,16 @@ class DisplayMessage {
 	const MESSAGE_DISPLAY_IN_PAGE = 2;
 
 	public $message; // message text
+	public $message_title; // message text
 	public $page_regex;  // NULL for any,	DEFAULT NULL
 	public $display_type; // MESSAGE_ANNOUNCEMENT, MESSAGE_WARNING, MESSAGE_ERROR, DEFAULT ANNOUNCEMENT
 	public $display_location; // MESSAGE_DISPLAY_GLOBAL, MESSAGE_DISPLAY_IN_PAGE, DEFAULT IN PAGE
 	public $identifier; // OPTIONAL, FOR INDICATING WHERE THE ERROR IS TO DISPLAY ON THE PAGE, DEFAULT NULL
 	public $clearable; // OPTIONAL,(T/F), DEFAULT TRUE
 
-	function __construct($message, $page_regex=NULL, $display_type=DisplayMessage::MESSAGE_ANNOUNCEMENT, $display_location=DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, $identifier=NULL, $clearable=TRUE) {
+	function __construct($message, $message_title, $page_regex=NULL, $display_type=DisplayMessage::MESSAGE_ANNOUNCEMENT, $display_location=DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, $identifier=NULL, $clearable=TRUE) {
 		$this->message = $message;
+		$this->message_title = $message_title;
 		$this->page_regex = $page_regex;
 		$this->display_type = $display_type;
 		$this->display_location = $display_location;
@@ -38,11 +40,11 @@ class DisplayMessage {
 
 	function get_message_class() {
 		if($this->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
-			return 'status_announcement';
+			return 'success';
 		} else if($this->display_type == DisplayMessage::MESSAGE_WARNING) {
-			return 'status_warning';
+			return 'warn';
 		} else if($this->display_type == DisplayMessage::MESSAGE_ERROR) {
-			return 'status_error';
+			return 'error';
 		}
 	}
 }
