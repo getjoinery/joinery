@@ -21,8 +21,8 @@ function event_sessions_course_logic($get_vars, $post_vars){
 		exit();
 	}
 	
-	if($get_vars['event_id']){
-		$event = new Event($get_vars['event_id'], TRUE);
+	if($get_vars['evt_event_id']){
+		$event = new Event($get_vars['evt_event_id'], TRUE);
 		$event->remove_expired_registrants();
 		$page_vars['event'] = $event;
 		if($event->get('evt_session_display_type') != 2){
