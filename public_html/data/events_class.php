@@ -190,6 +190,25 @@ class Event extends SystemBase {
 			}
 		}
 	}	
+
+	public function remove_expired_registrants(){
+		//CHECK THAT THE USER IS A VALID REGISTRANT
+		$searches['event_id'] = $event->key;
+		$event_registrants = new MultiEventRegistrant(
+			$searches,
+			NULL, //array('event_id'=>'DESC'),
+			NULL,
+			NULL);	
+
+		$event_registrants->load();
+		foreach($event_registrants as $event_registrant){
+			if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+				$event_registrant->remove();
+			}
+		}
+		return true;
+	}
+
 	
 	function get_leader() {
 		if($this->get('evt_usr_user_id_leader')){
@@ -315,6 +334,31 @@ class Event extends SystemBase {
 		else{
 			return false;
 		}
+	}
+	
+	function get_number_of_sessions(){
+		$searches = array();
+		$searches['event_id'] = $this->key;
+		$searches['deleted'] = false;
+		$event_sessions = new MultiEventSessions($searches);
+		return $event_sessions->count_all();
+	}
+
+	
+	function get_lowest_session_number(){
+		$searches = array();
+		$searches['event_id'] = $this->key;
+		$searches['deleted'] = false;
+		$event_sessions = new MultiEventSessions($searches,
+			array('session_number_then_title'=>'ASC'));
+		$num_sessions = $event_sessions->count_all();
+		$event_sessions->load();	
+		if($num_sessions){
+			return $event_sessions->get(0)->get('evs_session_number');
+		}
+		else{
+			return false;
+		}				
 	}
 	
 	function add_registrant($usr_user_id, $order_item=NULL, $bundle_id=NULL, $days_until_expire=NULL){

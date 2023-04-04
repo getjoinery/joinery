@@ -1,4 +1,6 @@
 <?php
+
+function event_sessions_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
@@ -13,6 +15,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
 
 	$settings = Globalvars::get_instance();
+	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('events_active')){
 		header("HTTP/1.0 404 Not Found");
 		echo 'This feature is turned off';
@@ -20,66 +23,59 @@
 	}
 	
 	$session = SessionControl::get_instance();
+	$page_vars['session'] = $session;
 	$session->check_permission(0);
 	$session->set_return();
 	
-	$event_id = LibraryFunctions::fetch_variable('evt_event_id', '', TRUE);
-	$show_all = LibraryFunctions::fetch_variable('show_all', 0, FALSE);
-	if($show_all){
-		$limit = NULL;
+	if($get_vars['event_id']){
+		$event = new Event($get_vars['event_id'], TRUE);
+		$event->remove_expired_registrants();
+		$page_vars['event'] = $event;
+		if($event->get('evt_session_display_type') == 2){
+			//REDIRECT
+			LibraryFunctions::redirect('/profile/event_sessions_course?event_id='.$event->key);						
+			exit();
+		}
 	}
 	else{
-		$limit = 5;
+		throw new SystemDisplayablePermanentError("This event does not exist.");
+		exit;
 	}
 	
 
 	
 	$user = new User($session->get_user_id(), TRUE);
-	$event = new Event($event_id, TRUE);
-	
-	if($event->get('evt_session_display_type') == 2){
-		//REDIRECT
-		LibraryFunctions::redirect('/profile/event_sessions_course?event_id='.$event->key);						
-		exit();
-	}
-	
-	//CHECK THAT THE USER IS A REGISTRANT
-	$searches['user_id'] = $user->key;
-	$searches['event_id'] = $event_id;
-	$event_registrations = new MultiEventRegistrant(
-		$searches,
-		NULL, //array('event_id'=>'DESC'),
-		NULL,
-		NULL);	
+	$page_vars['user'] = $user;
 
-	$event_registrations->load();
-	foreach($event_registrations as $event_registrant){
-		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
-			$event_registrant->remove();
-			//REFRESH THE PAGE
-			LibraryFunctions::Redirect($_SERVER['REQUEST_URI']); 
-		}
-	}		
-		
-	if(!$event_registrations->count_all()){
-		
-		$error_message = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
-		
-		<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>
-		
+	
+
+	
+	if(!$page_vars['event_registrant'] = EventRegistrant::check_if_registrant_exists($user->key, $event->key)){	
+		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
+		<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>	
 		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
-		
 	} 
 
 
 	$next_session = $event->get_next_session();
+	$page_vars['next_session'] = $next_session;
 	
 	$psearches = array();
 	$psearches['event_id'] = $event->key;
+	if($get_vars['show_all']){
+		$limit = NULL;
+	}
+	else{
+		$limit = 5;
+	}
 	$event_sessions = new MultiEventSessions($psearches,
 		array('start_time'=>'DESC'), $limit,
 	0);
 	$num_sessions = $event_sessions->count_all();
 	$event_sessions->load();	
+	$page_vars['num_sessions'] = $num_sessions;
+	$page_vars['event_sessions'] = $event_sessions;
 		
+	return $page_vars;
+}
 ?>
