@@ -258,7 +258,7 @@
 									}
 									
 									if($event->get('evt_session_display_type')==2){
-										$course_link = '/profile/event_sessions_course?event_id='.$event->key;
+										$course_link = '/profile/event_sessions_course?evt_event_id='.$event->key;
 									}
 									else{
 										$course_link = '/profile/event_sessions?evt_event_id='.$event->key;
