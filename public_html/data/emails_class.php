@@ -89,7 +89,7 @@ class Email extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
-	'del_create_time'=> 'now()',);	
+	);	
 	
 	public function __construct($key, $load=FALSE) { 
 		parent::__construct($key, $load);

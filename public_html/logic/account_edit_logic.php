@@ -25,13 +25,6 @@ function account_edit_logic($get_vars, $post_vars){
 					'The following required fields were not set: first name, last name, timezone');
 		}	
 		
-
-		//RESET NAME STATUS FIELD
-		if(trim($post_vars['usr_first_name']) != $user->get('usr_first_name') || trim($post_vars['usr_last_name']) != $user->get('usr_last_name')) {
-			$user->set('usr_name_is_bad', NULL);
-			$user->set('usr_name_checked_by', NULL);
-			$user->set('usr_name_checked_time', NULL);
-		}	
 		
 		$user->set('usr_first_name', trim($post_vars['usr_first_name']));
 		$user->set('usr_last_name', trim($post_vars['usr_last_name']));
