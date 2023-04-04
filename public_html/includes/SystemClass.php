@@ -74,7 +74,7 @@ abstract class SystemBase {
 
 	//THIS FUNCTION RETURNS ONLY ONE ROW AS AN OBJECT WHICH MATCHES THE COLUMN AND VALUE PROVIDED
 	public static function GetByColumn($column, $value) {
-		if(empty($column) || empty($value)){
+		if(empty($column) || (empty($value) && $value !== 0)){
 			throw new SystemClassException('To load a row using GetByColumn, you must pass a column and value.');
 		}
 

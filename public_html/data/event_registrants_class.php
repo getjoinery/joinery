@@ -121,7 +121,7 @@ class EventRegistrant extends SystemBase {
 			return FALSE;
 		}
 	}
-	
+
 	function remove(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();

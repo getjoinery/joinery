@@ -4,8 +4,9 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('event_sessions_logic.php'));	
 
+	$page_vars = event_sessions_logic($_GET, $_POST);
 
-	if($error_message){
+	if($page_vars['error_message']){
 		PublicPageTW::OutputGenericPublicPage('Not Registered', 'Not Registered', $error_message);
 		exit();
 	}	
@@ -32,23 +33,19 @@
  <header class="relative z-20 flex items-center justify-between pb-4 px-4 sm:px-6 lg:flex-none">
 	<div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
 		<h1 class="text-xl font-bold text-gray-900 sm:text-2xl">
-			<?php echo htmlspecialchars($event->get('evt_name')); ?>
+			<?php echo htmlspecialchars($page_vars['event']->get('evt_name')); ?>
 		</h1>
 		<p class="text-sm font-medium text-gray-600">
 		  <?php 	
-		  $time_string = $event->get_time_string();
-			if($event->get('evt_timezone') != $session->get_timezone()){
-				if($local_string = $event->get_time_string($session->get_timezone())){
-					$time_string .= ' ('. $local_string . ')';
-				}
-			}	
-			echo $time_string;
+		  
+			echo $page_vars['event']->get_time_string($page_vars['session']->get_timezone());
+
 			?>
 		</p>
 		<?php
 		$calendar_text = '';
-		if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-			$calendar_links = $event->get_add_to_calendar_links();
+		if($page_vars['event']->get('evt_status') != 2 && $page_vars['event']->get('evt_status') != 3){
+			$calendar_links = $page_vars['event']->get_add_to_calendar_links();
 			if($calendar_links){
 				$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
 				$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
@@ -62,8 +59,8 @@
 	
 	
 	<?php 
-	if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
-		$options = array('Withdraw from Course'=> '/profile/event_withdraw?evr_event_registrant_id='.$event_registrant->key);
+	if($page_vars['event']->get('evt_end_time') > date('Y-m-d H:i:s')){
+		$options = array('Withdraw from Course'=> '/profile/event_withdraw?evr_event_registrant_id='.$page_vars['event_registrant']->key);
 	}
 	else{
 		$options = array();
@@ -102,7 +99,7 @@
                   </div> 
 				  
                   <div class="mt-5 flex justify-center sm:mt-0 min-w-200">
-                    <a href="<?php echo $event->get_url(); ?>" class="flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    <a href="<?php echo $page_vars['event']->get_url(); ?>" class="flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
                       <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
 </svg>
@@ -113,7 +110,7 @@
 
 
   <div class="px-4 py-5 sm:px-6">
-    <?php echo $event->get('evt_short_description'); ?>
+    <?php echo $page_vars['event']->get('evt_short_description'); ?>
   </div>
 
 <!--
@@ -155,23 +152,20 @@
   </div>
 -->
 	<?php
-	if($next_session){
-		if($next_session->get('evs_title')){
-			$session_name = $next_session->get('evs_title');
+	if($page_vars['next_session']){
+		if($page_vars['next_session']->get('evs_title')){
+			$session_name = $page_vars['next_session']->get('evs_title');
 		}
 		else{
-			$session_name = 'Session '.$next_session->get('evs_session_number');
+			$session_name = 'Session '.$page_vars['next_session']->get('evs_session_number');
 		}
 		
-		if($event->get('evt_timezone') == $session->get_timezone()){
-			$time_string = $next_session->get_time_string($event->get('evt_timezone'));				
-		}
-		else{
-			$time_string = $next_session->get_time_string($event->get('evt_timezone')) . ' (Your time: ' . $next_session->get_time_string($session->get_timezone()). ')';
-		}
+		
+		$time_string = $page_vars['next_session']->get_time_string($page_vars['session']->get_timezone());
+		
 		
 		$calendar_text = '';
-		$calendar_links = $next_session->get_add_to_calendar_links();
+		$calendar_links = $page_vars['next_session']->get_add_to_calendar_links();
 		if($calendar_links){
 			$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
 			$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
@@ -189,13 +183,13 @@
 											  
 												<?php
 												/*
-												if($event->get('evt_status') == Event::STATUS_ACTIVE){
+												if($page_vars['event']->get('evt_status') == Event::STATUS_ACTIVE){
 													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Upcoming</p>';
 												} 
-												else if($event->get('evt_status') == Event::STATUS_CANCELED){
+												else if($page_vars['event']->get('evt_status') == Event::STATUS_CANCELED){
 													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Canceled</p>';
 												}
-												else if($event->get('evt_status') == Event::STATUS_COMPLETED){
+												else if($page_vars['event']->get('evt_status') == Event::STATUS_COMPLETED){
 													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Completed</p>';
 												}
 												*/
@@ -232,7 +226,7 @@
 											  </p>
 											</div>
 										  </div>
-										  <p class="prose"><?php echo $next_session->get('evs_content'); ?></p>
+										  <p class="prose"><?php echo $page_vars['next_session']->get('evs_content'); ?></p>
 										</div>		
 		
 
@@ -310,7 +304,7 @@
 	<?php
 
 
-								foreach($event_sessions as $event_session){
+								foreach($page_vars['event_sessions'] as $event_session){
 									if($event_session->get('evs_vid_video_id')){
 										$video = new Video($event_session->get('evs_vid_video_id'), TRUE);
 									}
@@ -318,28 +312,28 @@
 										$video = new Video(NULL);
 									}	
 
-									$session_name = '';
+									$page_vars['session_name'] = '';
 									if($event_session->get('evs_session_number')){
-										$session_name .= 'Session '.$event_session->get('evs_session_number'). ' - ';
+										$page_vars['session_name'] .= 'Session '.$event_session->get('evs_session_number'). ' - ';
 									}
 									if($event_session->get('evs_title')){
-										$session_name .= $event_session->get('evs_title');
+										$page_vars['session_name'] .= $event_session->get('evs_title');
 									}
 									else{
-										$session_name .= 'Session '.$event_session->get('evs_session_number');
+										$page_vars['session_name'] .= 'Session '.$event_session->get('evs_session_number');
 									}
 									
-									if($event->get('evt_timezone') == $session->get_timezone()){
-										$time_string = $event_session->get_time_string($event->get('evt_timezone'));				
+									if($page_vars['event']->get('evt_timezone') == $page_vars['session']->get_timezone()){
+										$time_string = $event_session->get_time_string($page_vars['event']->get('evt_timezone'));				
 									}
 									else{
-										$time_string = $event_session->get_time_string($event->get('evt_timezone')) . ' (Your time: ' . $event_session->get_time_string($session->get_timezone()). ')';
+										$time_string = $event_session->get_time_string($page_vars['event']->get('evt_timezone')) . ' (Your time: ' . $event_session->get_time_string($page_vars['session']->get_timezone()). ')';
 									}	
 									
 									/*
 									$calendar_text = '';
-									if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-										$calendar_links = $event->get_add_to_calendar_links();
+									if($page_vars['event']->get('evt_status') != 2 && $page_vars['event']->get('evt_status') != 3){
+										$calendar_links = $page_vars['event']->get_add_to_calendar_links();
 										if($calendar_links){
 											$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
 											$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
@@ -355,19 +349,19 @@
 										<div class="px-4 py-4 sm:px-6">
 										  <div class="flex items-center justify-between">
 											<p class="text-sm font-medium text-indigo-600 truncate">
-											  <?php echo $session_name; ?>
+											  <?php echo $page_vars['session_name']; ?>
 											</p>
 											<div class="ml-2 flex-shrink-0 flex">
 											  
 												<?php
 												/*
-												if($event->get('evt_status') == Event::STATUS_ACTIVE){
+												if($page_vars['event']->get('evt_status') == Event::STATUS_ACTIVE){
 													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Upcoming</p>';
 												} 
-												else if($event->get('evt_status') == Event::STATUS_CANCELED){
+												else if($page_vars['event']->get('evt_status') == Event::STATUS_CANCELED){
 													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Canceled</p>';
 												}
-												else if($event->get('evt_status') == Event::STATUS_COMPLETED){
+												else if($page_vars['event']->get('evt_status') == Event::STATUS_COMPLETED){
 													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Completed</p>';
 												}
 												*/
@@ -445,7 +439,7 @@
 	
 								if($num_sessions > 5){
 									echo '            <div>
-									  <a href="/profile/event_sessions?show_all=1&evt_event_id='. $event->key .'" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">See all '.$num_sessions.' sessions</a>
+									  <a href="/profile/event_sessions?show_all=1&event_id='. $page_vars['event']->key .'" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">See all '.$num_sessions.' sessions</a>
 									</div>';
 									
 								}								
@@ -535,14 +529,14 @@
 			
           <!-- Private Info -->
 		  <?php
-			if($event->get('evt_private_info')){
+			if($page_vars['event']->get('evt_private_info')){
 				?>
 				<section aria-labelledby="recent-hires-title">
 					<div class="rounded-lg bg-white overflow-hidden shadow">
 					  <div class="p-6">
 						<h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Registrant Info</h2>
 						<div class="flow-root mt-6 prose">
-						 <?php echo $event->get('evt_private_info'); ?>
+						 <?php echo $page_vars['event']->get('evt_private_info'); ?>
                 </div>
                 
               </div>
@@ -567,13 +561,13 @@
 	
 	//DISPLAY REGISTER FINISH LINKS FOR ANY EVENTS
 	/*
-	if($event->get('evt_collect_extra_info')){
-		$event_registrants = new MultiEventRegistrant(array('user_id' => $session->get_user_id(), 'event_id' => $event->key), NULL);
-		$event_registrants->load();
-		foreach($event_registrants as $event_registrant){
-			if(!$event_registrant->get('evr_extra_info_completed')){
+	if($page_vars['event']->get('evt_collect_extra_info')){
+		$page_vars['event_registrant']s = new MultiEventRegistrant(array('user_id' => $page_vars['session']->get_user_id(), 'event_id' => $page_vars['event']->key), NULL);
+		$page_vars['event_registrant']s->load();
+		foreach($page_vars['event_registrant']s as $page_vars['event_registrant']){
+			if(!$page_vars['event_registrant']->get('evr_extra_info_completed')){
 				$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-				$line = 'Your registration for <strong>'.$event->get('evt_name').'</strong> needs some additional information. <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">click here to add the information</a>';
+				$line = 'Your registration for <strong>'.$page_vars['event']->get('evt_name').'</strong> needs some additional information. <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$page_vars['event_registrant']->key.'">click here to add the information</a>';
 				echo '<div class="status_warning">'.$line.'</div><br /><br />';
 			}
 		}

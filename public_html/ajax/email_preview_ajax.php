@@ -26,7 +26,7 @@
 		$mailing_list_string = NULL;			
 	}
 	
-	$email_template = new EmailTemplate($email->get('eml_message_template_html'), $recipient, $email_outer_template, $email_footer_template);	
+	$email_template = new EmailTemplate($email->get('eml_message_template_html'), $recipient);	
 	$email_template->fill_template(array(
 		'subject' => 'COPY: '.$email->get('eml_subject'),
 		'preview_text' => $email->get('eml_preview_text'),

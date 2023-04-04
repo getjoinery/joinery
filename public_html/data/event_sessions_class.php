@@ -114,6 +114,17 @@ class EventSession extends SystemBase {
 		);
 
 
+	public static function GetBySessionNumber($event_id, $session_number){
+		$results = new MultiEventSessions(array('event_id' => $event_id, 'session_number' => $session_number));
+		$results->load();
+
+		if(count($results)){	
+			return $results->get(0);	
+		}
+		else{
+			return false;
+		}		
+	}
 	
 	function get_url() {
 		return '/event/' . $this->key . '/' . str_replace(' ', '-', $this->get('evs_name'));

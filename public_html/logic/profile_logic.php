@@ -53,12 +53,12 @@ function profile_logic($get_vars, $post_vars){
 	$event_registrants_future = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => false), array('event_id'=> 'DESC'));
 	$num_future_events = $event_registrants_future->count_all();
 	$event_registrants_future->load();
-	$page_vars['event_registrants'] = $event_registrants_future;
+	$page_vars['event_registrants_future'] = $event_registrants_future;
 
 	$event_registrants_past = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => true), array('event_id'=> 'DESC'));
 	$num_past_events = $event_registrants_future->count_all();
 	$event_registrants_past->load();
-	$page_vars['event_registrants'] = $event_registrants_past;
+	$page_vars['event_registrants_past'] = $event_registrants_past;
 	
 	//END COMPATIBILITY WITH OLD TEMPLATE
 

@@ -267,12 +267,9 @@
 									$actions = '';
 									if(!$event_registrant->get('evr_extra_info_completed') && $event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
 										$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-										$actions .= '<a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">Additional information needed</a>';
+										$actions .= '<a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">Additional information needed</a> ';
 									}
 
-									if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
-										$actions .= '<a class="button-circle button-circle-md button-circle-grey" href="/profile/event_withdraw?evr_event_registrant_id='.$event_registrant->key.'" alt="Withdraw from course"><i class="ti-close"></i>';
-									}	
 									
 									?>			
 									<li>
