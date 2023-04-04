@@ -45,6 +45,11 @@
 		exit();				
 	}
 	
+	$settings = Globalvars::get_instance();
+	$email_inner_template = $settings->get_setting('event_email_inner_template');
+	$email_outer_template = $settings->get_setting('event_email_outer_template');
+	$email_footer_template = $settings->get_setting('event_email_footer_template');
+	
 	$numrecipients = 0;
 	
 	if($_POST){
@@ -63,7 +68,6 @@
 		$email_record->set('eml_from_name', $fromname);
 		$email_record->set('eml_subject', $_POST['eml_subject']);
 		$email_record->set('eml_reply_to', $fromaddress);
-		$email_record->set('eml_message_template_html', 'plain_html2.html');
 		//$email_record->set('eml_message_template_plain', NULL); 
 		$email_record->set('eml_message_html', $_POST['eml_message']);
 		$email_record->set('eml_message_plain', LibraryFunctions::htmlToText($_POST['eml_message']));
@@ -95,7 +99,9 @@
 			$email_outer_template = $settings->get_setting('event_email_outer_template');
 			$email_footer_template = $settings->get_setting('event_email_footer_template');
 
-	
+			//SAVE THE TEMPLATE
+			$email_record->set('eml_message_template_html', $email_inner_template);
+			$email_record->save();
 			
 			foreach ($event_registrants as $event_registrant){
 				$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);	
@@ -186,6 +192,10 @@
 			$email_inner_template = $settings->get_setting('group_email_inner_template');
 			$email_outer_template = $settings->get_setting('group_email_outer_template');
 			$email_footer_template = $settings->get_setting('group_email_footer_template');
+
+			//SAVE THE TEMPLATE
+			$email_record->set('eml_message_template_html', $email_inner_template);
+			$email_record->save();
 
 			$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);			
 			$email->fill_template(array(

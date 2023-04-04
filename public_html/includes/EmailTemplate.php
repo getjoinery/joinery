@@ -49,7 +49,9 @@ class EmailTemplate {
 			$templates = new MultiEmailTemplateStore(
 			array('email_template_name'=>'default_outer_template'));
 			$templates->load();
-			if($this_template = $templates->get(0)){
+			$count = $templates->count_all();
+			if($count){
+				$this_template = $templates->get(0);
 				$this->outer_template = $this_template->get('emt_body');
 			}
 			else{
@@ -62,7 +64,9 @@ class EmailTemplate {
 			$templates = new MultiEmailTemplateStore(
 			array('email_template_name'=>'default_footer'));
 			$templates->load();
-			if($this_template = $templates->get(0)){
+			$count = $templates->count_all();
+			if($count){
+				$this_template = $templates->get(0);
 				$this->footer = $this_template->get('emt_body');
 			}
 			else{
@@ -76,7 +80,9 @@ class EmailTemplate {
 			$templates = new MultiEmailTemplateStore(
 			array('email_template_name'=>$inner_template));
 			$templates->load();
-			if($this_template = $templates->get(0)){
+			$count = $templates->count_all();
+			if($count){
+				$this_template = $templates->get(0);
 				$this->inner_template = $this_template->get('emt_body');
 			}
 			else{
@@ -89,7 +95,9 @@ class EmailTemplate {
 			$templates = new MultiEmailTemplateStore(
 			array('email_template_name'=>$outer_template));
 			$templates->load();
-			if($this_template = $templates->get(0)){
+			$count = $templates->count_all();
+			if($count){
+				$this_template = $templates->get(0);
 				$this->outer_template = $this_template->get('emt_body');
 			}
 			else{
@@ -102,7 +110,9 @@ class EmailTemplate {
 			$templates = new MultiEmailTemplateStore(
 			array('email_template_name'=>$footer));
 			$templates->load();
-			if($this_template = $templates->get(0)){
+			$count = $templates->count_all();
+			if($count){
+				$this_template = $templates->get(0);
 				$this->footer = $this_template->get('emt_body');
 			}
 			else{
