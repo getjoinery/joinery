@@ -8,7 +8,7 @@
 	
 	$page = new PublicPageTW();
 	$hoptions = array(
-		'is_valid_page' => true,
+		'is_valid_page' => $is_valid_page,
 		'title' => 'My Profile', 
 		'breadcrumbs' => array (
 			'My Profile' => '',

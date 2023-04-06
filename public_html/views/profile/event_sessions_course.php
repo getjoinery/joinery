@@ -14,7 +14,7 @@
 
 	$page = new PublicPageTW();
 	$hoptions = array(
-		'is_valid_page' => true,
+		'is_valid_page' => $is_valid_page,
 		'title' => 'Sessions', 
 		'breadcrumbs' => array(
 			'My Profile' => '/profile/profile',
