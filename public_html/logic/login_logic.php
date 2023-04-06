@@ -2,6 +2,14 @@
 
 function login_logic($get_vars, $post_vars){
 	
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/login_class.php');
+	
 	//HANDLE ACTIVATION FIRST IF PRESENT
 	if ($get_vars['act_code']) {
 		$act_code = $get_vars['act_code'];
@@ -76,13 +84,7 @@ function login_logic($get_vars, $post_vars){
 		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AjaxErrorHandler.php');
 	}
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/login_class.php');
 	if($post_vars){
 		if ((empty($post_vars['email']) && empty($post_vars['lbx_email'])) ||
 			(empty($post_vars['password']) && empty($post_vars['lbx_password']))) {
