@@ -1,30 +1,34 @@
 <?php
+
+function event_waiting_list_logic($get_vars, $post_vars, $event_id){
+	
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
+	
+	$session = SessionControl::get_instance();
+	$page_vars['session'] = $session;
 	
 	$settings = Globalvars::get_instance();
+	$page_vars['settings'] = $settings;
+	
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require $composer_dir.'autoload.php';
 	use MailchimpAPI\Mailchimp;
 	
-	$settings = Globalvars::get_instance();
 	if(!$settings->get_setting('events_active')){
 		header("HTTP/1.0 404 Not Found");
 		echo 'This feature is turned off';
 		exit();
 	}
 	
-	$event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.', TRUE, 'int');
-	$event = new Event($event_id, TRUE);
-
-	$session = SessionControl::get_instance();
-	//$session->set_return();
-
 	
-	if($_POST){
+	$event = new Event($event_id, TRUE);
+	$page_vars['event'] = $event;
+	
+	if($post_vars){
 		
 		$user = NULL;
 		if($session->get_user_id()){
@@ -32,33 +36,33 @@
 		}
 		else{
 	
-			if(!FormWriterPublicTW::honeypot_check($_POST)){
+			if(!FormWriterPublicTW::honeypot_check($post_vars)){
 				throw new SystemDisplayableError(
 					'Please leave the "Extra email" field blank.');			
 			}
 			
-			if(!FormWriterPublicTW::antispam_question_check($_POST)){
+			if(!FormWriterPublicTW::antispam_question_check($post_vars)){
 				throw new SystemDisplayableError(
 					'Please type the correct value into the anti-spam field.');			
 			}		
 		
 	
-			$captcha_success = FormWriterPublicTW::captcha_check($_POST);
+			$captcha_success = FormWriterPublicTW::captcha_check($post_vars);
 			if (!$captcha_success) {
-				$errormsg = 'Sorry, '.strip_tags($_POST['usr_first_name']).' '.strip_tags($_POST['usr_last_name']).', you must click the CAPTCHA to submit the form.';
+				$errormsg = 'Sorry, '.strip_tags($post_vars['usr_first_name']).' '.strip_tags($post_vars['usr_last_name']).', you must click the CAPTCHA to submit the form.';
 				throw new SystemDisplayableError($errormsg);	
 			}	
 			
-			if(!$user = User::GetByEmail($_POST['usr_email'])){
-				$user = User::CreateNewUser($_POST['usr_first_name'], $_POST['usr_last_name'], $_POST['usr_email'], NULL, TRUE);
+			if(!$user = User::GetByEmail($post_vars['usr_email'])){
+				$user = User::CreateNewUser($post_vars['usr_first_name'], $post_vars['usr_last_name'], $post_vars['usr_email'], NULL, TRUE);
 				
 			}	
 
-			if($_POST['usr_nickname']){
-				$user->set('usr_nickname', $_POST['usr_nickname']);
+			if($post_vars['usr_nickname']){
+				$user->set('usr_nickname', $post_vars['usr_nickname']);
 			}
 
-			$user->set('usr_timezone', $_POST['usr_timezone']);
+			$user->set('usr_timezone', $post_vars['usr_timezone']);
 			$user->prepare();
 			$user->save();			
 		}			
@@ -70,13 +74,15 @@
 			$group = Group::add_group($waiting_list_name, NULL, 'user');
 		}
 		$group->add_member($user->key);
-		$display_message = 'You have been added to the '.$event->get('evt_name').' waiting list.';
-		$message_type = 'success';	
+		$page_vars['display_message'] = 'You have been added to the '.$event->get('evt_name').' waiting list.';
+		$page_vars['message_type'] = 'success';	
 
-		if($_POST['newsletter']){
+		if($post_vars['newsletter']){
 			$status = $user->subscribe_to_contact_type(User::NEWSLETTER);
 		}				
 				
 	}
 	
+	return $page_vars;
+}
 ?>

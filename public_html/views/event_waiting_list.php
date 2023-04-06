@@ -4,6 +4,10 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('event_waiting_list_logic.php'));
 	
+	$event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.', TRUE, 'int');
+	$page_vars = event_waiting_list_logic($_GET, $_POST, $event_id);
+	$event = $page_vars['event'];
+	
 	$page = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
@@ -17,8 +21,8 @@
 	echo PublicPageTW::BeginPage('Waiting list for '.$event->get('evt_name'), $options);
 	echo PublicPageTW::BeginPanel();
 
-	if($display_message){
-		echo PublicPageTW::alert('Success', $display_message, $message_type);
+	if($page_vars['display_message']){
+		echo PublicPageTW::alert('Success', $page_vars['display_message'], $page_vars['message_type']);
 	}
 	else{
 
@@ -47,15 +51,14 @@
 			echo $formwriter->textinput("First Name", "usr_first_name", NULL, 30, '', "", 32, "");
 			echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 30, '', "", 32, "");
 			
-			$settings = Globalvars::get_instance();
-			$nickname_display = $settings->get_setting('nickname_display_as');
+			$nickname_display = $page_vars['settings']->get_setting('nickname_display_as');
 			if($nickname_display){
 				echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, NULL, "" , 32, "");
 			}
 			echo $formwriter->textinput("Email", "usr_email", NULL, 30, '', "", 64, "");
 			
 			$optionvals = Address::get_timezone_drop_array();
-			$default_timezone = $settings->get_setting('default_timezone');
+			$default_timezone = $page_vars['settings']->get_setting('default_timezone');
 			echo $formwriter->dropinput("Your timezone", "usr_timezone", NULL, $optionvals, $default_timezone, '', FALSE);			
 			
 			echo $formwriter->antispam_question_input();
