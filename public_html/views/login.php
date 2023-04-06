@@ -5,6 +5,8 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('login_logic.php'));
 	
+	$page_vars = login_logic($_GET, $_POST);
+	
 	if ($email) {
 		$forgot_link = '/password-reset-1?e=' . rawurlencode(htmlspecialchars($email));
 	} else {
@@ -35,15 +37,12 @@
 <div class="w-full flex flex-col sm:justify-center items-center ">
   <div class="w-full sm:max-w-md p-5 mx-auto">
 	<?php 
-		if(isset($_GET['msgtext'])){
-			if (array_key_exists($_GET['msgtext'], $LOGIN_MESSAGES)) {
-				echo PublicPageTW::alert('Login warning', htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]), 'warn');
+
+		foreach($page_vars['display_messages'] AS $display_message) {
+			if($display_message->identifier == 'loginbox') {	
+				echo PublicPageTW::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 			}
-		}
-		if(isset($_GET['retry'])){
-			echo PublicPageTW::alert('Login warning', 'Your username or password was incorrect.  Please try again below, or sign up if you don\'t have an account.  If you forgot your password, <a href="' . $forgot_link . '">click here</a> and we\'ll send you a new one.', 'warn');
-		}
-		
+		}   		
 		
 		$formwriter = new FormWriterPublicTW("form1", TRUE, TRUE);
 
@@ -51,10 +50,10 @@
 		$validation_rules['email']['required']['value'] = 'true';
 		$validation_rules['password']['required']['value'] = 'true';
 		echo $formwriter->set_validate($validation_rules);	
-		echo $formwriter->begin_form('form1', 'POST', '/login_process');
+		echo $formwriter->begin_form('form1', 'POST', '/login');
 	?>
       <div class="mb-4">
-		<?php echo $formwriter->textinput("Email", "email", NULL , 20, htmlspecialchars($email), '',255, ''); ?>
+		<?php echo $formwriter->textinput("Email", "email", NULL , 20, htmlspecialchars($page_vars['email']), '',255, ''); ?>
 
       </div>
       <div class="mb-4">

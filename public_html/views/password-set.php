@@ -29,7 +29,7 @@
 		$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
 		echo $formwriter->set_validate($validation_rules);	
 
-		echo $formwriter->begin_form("uniForm", "post", "/password-set", true);
+		echo $formwriter->begin_form("form1", "post", "/password-set", true);
 
 		echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
 		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", NULL, 20, "" , "", 255,"");
