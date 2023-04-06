@@ -42,7 +42,6 @@ if ($_POST) {
 	}
 	
 	if($user->get('usr_password_recovery_disabled')){
-			header("HTTP/1.0 404 Not Found");
 			echo 'This feature is turned off for this user.  Please email us to recover your password.';
 			exit();
 	}
