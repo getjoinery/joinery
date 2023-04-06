@@ -20,21 +20,28 @@ function event_sessions_course_logic($get_vars, $post_vars){
 		echo 'This feature is turned off';
 		exit();
 	}
-	
-	if($get_vars['evt_event_id']){
-		$event = new Event($get_vars['evt_event_id'], TRUE);
-		$event->remove_expired_registrants();
-		$page_vars['event'] = $event;
-		if($event->get('evt_session_display_type') != 2){
-			//REDIRECT
-			LibraryFunctions::redirect('/profile/event_sessions?evt_event_id='. $event->key);						
-			exit();
-		}
+
+	//ACCEPT EITHER VARIABLE
+	if($get_vars['evt_event_id']){	
+		$event_id = $get_vars['evt_event_id'];
+	}
+	else if ($get_vars['event_id']){
+		$event_id = $get_vars['event_id'];
 	}
 	else{
 		throw new SystemDisplayablePermanentError("This event does not exist.");
 		exit;
 	}
+			
+	$event = new Event($get_vars['evt_event_id'], TRUE);
+	$event->remove_expired_registrants();
+	$page_vars['event'] = $event;
+	if($event->get('evt_session_display_type') != 2){
+		//REDIRECT
+		LibraryFunctions::redirect('/profile/event_sessions?evt_event_id='. $event->key);						
+		exit();
+	}
+
 
 	if(isset($get_vars['session_number'])){
 		$session_number = (int)$get_vars['session_number'];

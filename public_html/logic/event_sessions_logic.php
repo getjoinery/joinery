@@ -27,20 +27,28 @@ function event_sessions_logic($get_vars, $post_vars){
 	$session->check_permission(0);
 	$session->set_return();
 	
-	if($get_vars['evt_event_id']){
-		$event = new Event($get_vars['evt_event_id'], TRUE);
-		$event->remove_expired_registrants();
-		$page_vars['event'] = $event;
-		if($event->get('evt_session_display_type') == 2){
-			//REDIRECT
-			LibraryFunctions::redirect('/profile/event_sessions_course?event_id='.$event->key);						
-			exit();
-		}
+	//ACCEPT EITHER VARIABLE
+	if($get_vars['evt_event_id']){	
+		$event_id = $get_vars['evt_event_id'];
+	}
+	else if ($get_vars['event_id']){
+		$event_id = $get_vars['event_id'];
 	}
 	else{
 		throw new SystemDisplayablePermanentError("This event does not exist.");
 		exit;
 	}
+			
+	$event = new Event($get_vars['evt_event_id'], TRUE);
+	$event->remove_expired_registrants();
+	$page_vars['event'] = $event;
+	if($event->get('evt_session_display_type') == 2){
+		//REDIRECT
+		LibraryFunctions::redirect('/profile/event_sessions_course?event_id='.$event->key);						
+		exit();
+	}
+
+
 	
 
 	

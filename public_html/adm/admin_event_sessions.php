@@ -83,7 +83,7 @@
 				else{
 					echo '<b>Public but unlisted</b> - <a href="' . $event->get_url() . '">Public link</a><br />';
 				}		
-				echo '<a href="/profile/event_sessions_course?event_id='. $event->key .'">Sessions link</a><br />';
+				echo '<a href="/profile/event_sessions_course?evt_event_id='. $event->key .'">Sessions link</a><br />';
 				?>
 				</p>
 			  <p class="text-center">
