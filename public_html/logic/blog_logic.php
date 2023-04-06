@@ -8,6 +8,7 @@
 		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');   	
 		
 		$settings = Globalvars::get_instance();
+		$page_vars['settings'] = $settings;
 		if(!$settings->get_setting('blog_active')){
 			//TURNED OFF
 			header("HTTP/1.0 404 Not Found");
@@ -16,6 +17,7 @@
 		}
 
 		$session = SessionControl::get_instance();
+		$page_vars['session'] = $session;
 		$session->set_return();
 		
 		
