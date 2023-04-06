@@ -14,9 +14,6 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require $composer_dir.'autoload.php';
-	use MailchimpAPI\Mailchimp;
 	
 	if(!$settings->get_setting('events_active')){
 		header("HTTP/1.0 404 Not Found");
@@ -64,22 +61,26 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 
 			$user->set('usr_timezone', $post_vars['usr_timezone']);
 			$user->prepare();
-			$user->save();			
+			$user->save();		
+
+			if($post_vars['newsletter']){
+				$status = $user->subscribe_to_contact_type(User::NEWSLETTER);
+			}				
 		}			
 
 		//ADD TO WAITING LIST
-		$waiting_list_name = $event->get('evt_name'). ' ' . LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $event->get('evt_timezone'),'M j, Y') . ' waiting list';
-		$waiting_list_name = substr($waiting_list_name,0,75);
-		if(!$group = Group::get_by_name($waiting_list_name)){	
-			$group = Group::add_group($waiting_list_name, NULL, 'user');
+		$group = $event->get_waiting_list_group();
+			
+		if($group->is_member_in_group($user->key)){
+			$page_vars['display_message'] = 'You are already on the '.$event->get('evt_name').' waiting list.';
+			$page_vars['message_type'] = 'success';	
 		}
-		$group->add_member($user->key);
-		$page_vars['display_message'] = 'You have been added to the '.$event->get('evt_name').' waiting list.';
-		$page_vars['message_type'] = 'success';	
-
-		if($post_vars['newsletter']){
-			$status = $user->subscribe_to_contact_type(User::NEWSLETTER);
-		}				
+		else{
+			$group->add_member($user->key);
+			$page_vars['display_message'] = 'You have been added to the '.$event->get('evt_name').' waiting list.';
+			$page_vars['message_type'] = 'success';	
+		}
+	
 				
 	}
 	

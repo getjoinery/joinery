@@ -344,6 +344,18 @@ class Event extends SystemBase {
 		return $event_sessions->count_all();
 	}
 
+
+	function get_waiting_list_group(){
+		$waiting_list_name = $this->get('evt_name'). ' ' . LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $this->get('evt_timezone'),'M j, Y') . ' waiting list';
+		$waiting_list_name = substr($waiting_list_name,0,75);
+		if($group = Group::get_by_name($waiting_list_name)){
+			return $group;
+		}	
+		else{
+			$group = Group::add_group($waiting_list_name, NULL, 'user');
+			return $group;
+		}
+	}
 	
 	function get_lowest_session_number(){
 		$searches = array();

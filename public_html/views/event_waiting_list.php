@@ -44,7 +44,7 @@
 		
 		echo $formwriter->begin_form("", "post", "/event_waiting_list");
 		echo $formwriter->hiddeninput("event_id", $event->key);
-		if($session->get_user_id()){
+		if($page_vars['session']->get_user_id()){
 			echo '<p>Click the button below to be added to this waiting list.</p>';
 		}
 		else{

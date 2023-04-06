@@ -63,6 +63,7 @@
 			}
 		}
 		
+		
 		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id');
 
 		foreach($editable_fields as $field) {
@@ -90,6 +91,11 @@
 		$event->prepare();
 		$event->save();
 		$event->load();
+				
+		//CREATE THE WAITING LIST
+		if($_POST['evt_allow_waiting_list']){
+			$group = $event->get_waiting_list_group();
+		}
 		
 		LibraryFunctions::redirect('/admin/admin_event?evt_event_id='.$event->key);
 		exit;
