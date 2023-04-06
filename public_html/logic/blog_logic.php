@@ -1,6 +1,6 @@
 <?php
 
-	function blog_logic () {
+	function blog_logic ($get_vars, $post_vars) {
 		$page_vars = array();
 		
 		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
