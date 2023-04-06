@@ -39,7 +39,7 @@ function event_sessions_logic($get_vars, $post_vars){
 		exit;
 	}
 			
-	$event = new Event($get_vars['evt_event_id'], TRUE);
+	$event = new Event($event_id, TRUE);
 	$event->remove_expired_registrants();
 	$page_vars['event'] = $event;
 	if($event->get('evt_session_display_type') == 2){
