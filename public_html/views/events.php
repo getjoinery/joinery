@@ -4,6 +4,8 @@
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
+	$page_vars = events_logic($_GET, $_POST);
+	
 	$page = new PublicPageTW(TRUE);
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
@@ -20,7 +22,7 @@
 	 $(document).ready(function() {	
 		$('#tab_select').change(function() { 
 			<?php
-			foreach($tab_menus as $id => $name){
+			foreach($page_vars['tab_menus'] as $id => $name){
 				?>
 				if($('#tab_select').val() == "<?php echo $name; ?>"){
 					$(location).attr("href","/events?type=<?php echo $id; ?>");
@@ -37,7 +39,7 @@
     <!-- Use an "onChange" listener to redirect the user to the selected tab URL. -->
     <select id="tab_select" name="tab_select" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
 			<?php
-			foreach($tab_menus as $id => $name){
+			foreach($page_vars['tab_menus'] as $id => $name){
 				if($id == $_REQUEST['type']){
 				  echo '<option selected>'.$name.'</option>';					
 				}
@@ -54,7 +56,7 @@
       <nav class="-mb-px flex space-x-8" aria-label="Tabs">
         <!-- Current: "border-indigo-500 text-indigo-600", Default: "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" -->
 			<?php
-			foreach($tab_menus as $id => $name){
+			foreach($page_vars['$tab_menus'] as $id => $name){
 				if($id == $_REQUEST['type']){
 				  echo '<a class="border-indigo-500 text-indigo-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" aria-current="page" href="/events?type='.$id.'">'.$name.'</a>';					
 				}
@@ -76,7 +78,7 @@
 
 
 
-	foreach ($events as $event){
+	foreach ($page_vars['events'] as $event){
 		$now = LibraryFunctions::get_current_time_obj('UTC');
 		$event_time = LibraryFunctions::get_time_obj($event->get('evt_start_time'), 'UTC');
 		?>

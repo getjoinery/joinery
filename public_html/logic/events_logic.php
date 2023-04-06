@@ -1,20 +1,21 @@
 <?php
+
+function events_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_types_class.php');
 
 	$session = SessionControl::get_instance();
+	$page_vars['session'] = $session;
 
 	$numperpage = 30;
 	$swaoffset = 0;
 	$swasort = 'start_time';
 	$swasdirection = 'ASC';
-	$searchterm = LibraryFunctions::fetch_variable('searchterm', NULL, 0, '');
-	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
+	$searchterm = $get_vars['searchterm'];
+	$user_id = $get_vars['u'];
 	
 	$searches = array();
 	$searches['deleted'] = FALSE;
@@ -22,19 +23,19 @@
 	$swasdirection = 'DESC';	
 	
 	//SEE IF WE ARE ON A TAB
-	if(!isset($_REQUEST['type']) || $_REQUEST['type'] == 'future'){
+	if(!isset($get_vars['type']) || $get_vars['type'] == 'future'){
 		//ASSUME WE'RE JUST LISTING FUTURE EVENTS
 		$searches['past'] = FALSE;
 		$searches['status'] = Event::STATUS_ACTIVE;
 	}	
-	else if($_REQUEST['type'] == 'past'){
+	else if($get_vars['type'] == 'past'){
 		$searches['past'] = TRUE;		
 	}
 	else{
 		$searches['past'] = FALSE;
 		$searches['status'] = Event::STATUS_ACTIVE;
-		if($_REQUEST['type']){
-			$searches['type'] = (int)$_REQUEST['type'];
+		if($get_vars['type']){
+			$searches['type'] = (int)$get_vars['type'];
 		}
 		
 	}
@@ -46,7 +47,9 @@
 		$swaoffset,
 		'AND');
 	$events->load();	
-	$numeventsrecords = $events->count_all();		
+	$page_vars['events'] = $events;
+	$numeventsrecords = $events->count_all();
+	$page_vars['numeventsrecords'] = $numeventsrecords;	
 	
 	
 	//GET ALL OF THE TYPES
@@ -59,6 +62,8 @@
 	}
 	$tab_menus['past'] = 'Past Events';
 
-  
+	$page_vars['$tab_menus'] = $tab_menus;
+	return $page_vars;
+}
 ?>
 

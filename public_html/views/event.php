@@ -4,7 +4,9 @@
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	
-	$formwriter = new FormWriterPublicTW("form1", TRUE, TRUE);
+	$page_vars = event_logic($_GET, $_POST, $static_routes_path);
+	$event = $page_vars['event'];
+	
 	
 	$page = new PublicPageTW(TRUE);
 	$page_options = array(
@@ -107,8 +109,8 @@
 					  ?>
 					  
 					  <?php
-						if($event->get('evt_timezone') != $session->get_timezone()){
-							echo '<p class="text-xl font-medium text-gray-600">'.$event->get_time_string($session->get_timezone()).'</p>';
+						if($event->get('evt_timezone') != $page_vars['session']->get_timezone()){
+							echo '<p class="text-xl font-medium text-gray-600">'.$event->get_time_string($page_vars['session']->get_timezone()).'</p>';
 						}	
 					  ?>
 					  <?php
@@ -192,19 +194,21 @@
                         <p class="mt-1 text-sm text-gray-600 line-clamp-2">
                           <?php
 			
-							if($registration_message){
-								echo '<p>'.$registration_message.'</p>';
+							if($page_vars['registration_message']){
+								echo '<p>'.$page_vars['registration_message'].'</p>';
 							}
 
 
-							foreach($register_urls as $register_url){
+							foreach($page_vars['register_urls'] as $register_url){
+								$formwriter = new FormWriterPublicTW("form1", TRUE, TRUE);
 								echo $formwriter->new_button($register_url['label'], $register_url['link'], 'primary', 'full');	
+								echo $formwriter->end_form();
 							}			
 							
 
 							
-							if($if_registered_message){
-								echo '<p>'.$if_registered_message.'</p>';
+							if($page_vars['if_registered_message']){
+								echo '<p>'.$page_vars['if_registered_message'].'</p>';
 							}
 
 							?>
@@ -238,9 +242,9 @@
 
 <?php
 	//CHECK FOR SESSIONS
-	if($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $numsessions > 0){
+	if($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $page_vars['numsessions'] > 0){
 
-		foreach($event_sessions as $event_session){	
+		foreach($page_vars['event_sessions'] as $event_session){	
 			if($event_session->get('evs_session_number')){
 				?>
  
@@ -270,9 +274,9 @@
 		$page->endtable();	
 	}
 	else{	
-		if($future_numsessions > 0){
+		if($page_vars['future_numsessions'] > 0){
 
-			foreach($future_event_sessions as $event_session){	
+			foreach($page_vars['future_event_sessions'] as $event_session){	
 				if($time_string = $event_session->get_time_string($tz)){
 					$time_string = ' -  ' . $time_string;
 				}
@@ -288,10 +292,10 @@
 		}
 
 
-		if($past_numsessions > 0){
+		if($page_vars['past_numsessions'] > 0){
 			echo '<h3>Past Sessions</h3>';
 
-			foreach($past_event_sessions as $event_session){
+			foreach($page_vars['past_event_sessions'] as $event_session){
 				if($time_string = $event_session->get_time_string($tz)){
 					$time_string = ' -  ' . $time_string;
 				}

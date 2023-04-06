@@ -1,38 +1,22 @@
 <?php
+
+function event_logic($get_vars, $post_vars, $static_routes_path){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_registrants_class.php');
 
 	$session = SessionControl::get_instance();
+	$page_vars['session'] = $session;
 	
 	$event = Event::get_by_link($static_routes_path);
+	$page_vars['event'] = $event;
 	if(!$event || !$event->get('evt_visibility')){
 		require_once(LibraryFunctions::display_404_page());				
 	}
-	
-	$time = NULL;
-	$tz = $event->get('evt_timezone');
-	if($event->get_event_start_time($tz)){
-		$time = $event->get_event_start_time($tz);
-	}
-	if($event->get_event_end_time($tz)){
-		$time .= ' - ' . $event->get_event_end_time($tz);
-	}
-		
-	$time_user = NULL;
-	if($event->get('evt_timezone') != $session->get_timezone()){
-		if($event->get_event_start_time($session->get_timezone())){
-			$time_user = $event->get_event_start_time($session->get_timezone());
-		}
-		if($event->get_event_end_time($session->get_timezone())){
-			$time_user .= ' - ' . $event->get_event_end_time($session->get_timezone());
-		}
-	}			
+
 		
 	//FIGURE OUT WHETHER THE USER CAN REGISTER OR NOT, WHAT ARE THE OPTIONS
 	$registrants = new MultiEventRegistrant(
@@ -92,7 +76,14 @@
 			}
 		}
 	}
-
+	
+	$page_vars['registration_message'] = $registration_message;
+	$page_vars['view_course_link'] = $view_course_link;
+	$page_vars['register_link'] = $register_link;
+	$page_vars['waiting_list_link'] = $waiting_list_link;
+	$page_vars['if_registered_message'] = $if_registered_message;
+	$page_vars['is_registered'] = $is_registered;
+	$page_vars['register_urls'] = $register_urls;
 
 	//CHECK FOR SESSIONS
 	if($event->get('evt_session_display_type')== Event::DISPLAY_SEPARATE){
@@ -101,7 +92,9 @@
 		$event_sessions = new MultiEventSessions($searches,
 			array('time_then_session_number'=>'ASC')); 
 		$event_sessions->load();	
+		$page_vars['event_sessions'] = $event_sessions;
 		$numsessions = $event_sessions->count_all();
+		$page_vars['numsessions'] = $numsessions;
 
 	}
 	else{
@@ -112,7 +105,9 @@
 		$future_event_sessions = new MultiEventSessions($searches,
 			array('time_then_session_number'=>'ASC')); 
 		$future_event_sessions->load();	
+		$page_vars['future_event_sessions'] = $future_event_sessions;
 		$future_numsessions = $future_event_sessions->count_all();
+		$page_vars['future_numsessions'] = $future_numsessions;
 	
 		$searches = array();
 		$searches['event_id'] = $event->key;
@@ -120,8 +115,12 @@
 		$past_event_sessions = new MultiEventSessions($searches,
 			array('time_then_session_number'=>'DESC'));
 		$past_numsessions = $past_event_sessions->count_all();
-		$past_event_sessions->load();	
+		$page_vars['past_numsessions'] = $past_numsessions;
+		$past_event_sessions->load();
+		$page_vars['past_event_sessions'] = $past_event_sessions;		
 	}
 
+	return $page_vars;
+}
 ?>
 
