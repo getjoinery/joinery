@@ -101,6 +101,7 @@ class User extends SystemBase {
 		'usr_delete_time' => 'Time of deletion',
 		'usr_password_recovery_disabled' => 'When TRUE, password recovery is disabled.',
 		'usr_urbit_ship_name' => 'If using urbit login, this is the user ship name',
+		'usr_calendly_uri' => 'Uri for user for calendly integration',
 		//'usr_contact_type_unsubscribes' => 'Contains a serialized array of contact types that the user has unsubscribed from',
 	);
 
@@ -132,6 +133,7 @@ class User extends SystemBase {
 		'usr_delete_time' => array('type'=>'timestamp(6)'),
 		'usr_password_recovery_disabled' => array('type'=>'bool'),
 		'usr_urbit_ship_name' => array('type'=>'varchar(128)'),
+		'usr_calendly_uri' => array('type'=>'varchar(255)'),
 		//'usr_contact_type_unsubscribes' => array('type'=>'varchar(255)'),
 	);
 	
@@ -405,6 +407,19 @@ class User extends SystemBase {
 	public static function GetByStripeCustomerId($id) {
 		$data = SingleRowFetch('usr_users', 'usr_stripe_customer_id',
 			$id, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
+
+		if ($data === NULL) {
+			return NULL;
+		}
+
+		$user = new User($data->usr_user_id);
+		$user->load_from_data($data, array_keys(User::$fields));
+		return $user;
+	}
+
+	public static function GetByCalendlyUri($uri) {
+		$data = SingleRowFetch('usr_users', 'usr_calendly_uri',
+			$uri, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
 
 		if ($data === NULL) {
 			return NULL;

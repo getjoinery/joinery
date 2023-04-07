@@ -24,23 +24,27 @@ class AdminMenu extends SystemBase {
 	public static $fields = array(
 		'amu_admin_menu_id' => 'ID of the admin_menu',
 		'amu_menudisplay' => 'Display Name', 
+		'amu_slug' => 'Display Name', 
 		'amu_parent_menu_id' => 'amu_admin_menu_id of parent if a subitem', 
 		'amu_defaultpage' => 'link to the page, just the filename',
 		'amu_order' => 'The order',
 		'amu_min_permission' => 'Min permission 1-10',
 		'amu_disable' => 'If disabled',
-		'amu_icon' => 'Icon for the menu item'
+		'amu_icon' => 'Icon for the menu item',
+		'amu_setting_activate' => 'Setting that will turn this on',
 	);
 
 	public static $field_specifications = array(
 		'amu_admin_menu_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false), 
 		'amu_menudisplay' => array('type'=>'varchar(32)'),
+		'amu_slug' => array('type'=>'varchar(32)'),
 		'amu_parent_menu_id' => array('type'=>'int4'),
 		'amu_defaultpage' => array('type'=>'varchar(64)'),
 		'amu_order' => array('type'=>'int2'),
 		'amu_min_permission' => array('type'=>'int4'),
 		'amu_disable' => array('type'=>'int2'),
 		'amu_icon' => array('type'=>'varchar(16)'),
+		'amu_setting_activate' => array('type'=>'varchar(64)'),
 	);
 
 
@@ -84,15 +88,17 @@ class MultiAdminMenu extends SystemMultiBase {
 	}
 	
 	static function getadminmenu($user_permission, $current_menuid, $get_all=false){
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+		$settings = Globalvars::get_instance();
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
 		//TOP MENU
 		if($get_all){
-			$sql = "SELECT amu_admin_menu_id, amu_icon,amu_menudisplay, amu_defaultpage,amu_parent_menu_id FROM amu_admin_menus WHERE true ORDER BY amu_admin_menus.amu_order ASC";
+			$sql = "SELECT * FROM amu_admin_menus WHERE true ORDER BY amu_admin_menus.amu_order ASC";
 		}
 		else{
-			$sql = "SELECT amu_admin_menu_id, amu_icon,amu_menudisplay, amu_defaultpage,amu_parent_menu_id FROM amu_admin_menus WHERE amu_min_permission <= :currpermission AND amu_disable=0 ORDER BY amu_admin_menus.amu_order ASC";
+			$sql = "SELECT * FROM amu_admin_menus WHERE amu_min_permission <= :currpermission AND amu_disable=0 ORDER BY amu_admin_menus.amu_order ASC";
 		}
 		
 		try{
@@ -131,6 +137,12 @@ class MultiAdminMenu extends SystemMultiBase {
 	
 		$finalmenu = array();
 		foreach ($entries as $entry){
+			//IF THE SETTING IS OFF, SKIP IT 
+			if($entry->amu_setting_activate && !$settings->get_setting($entry->amu_setting_activate)){
+				//DO NOT DISPLAY IT
+				continue;
+			}
+			
 			$has_subs = FALSE;
 			foreach ($entries2 as $entry2){
 				if($entry2->amu_parent_menu_id == $entry->amu_admin_menu_id){
