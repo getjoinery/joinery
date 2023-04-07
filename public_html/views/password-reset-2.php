@@ -4,6 +4,8 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('password-reset-2_logic.php'));
 
+	$page_vars = password_reset-2_logic($_GET, $_POST);
+	
 	$page = new PublicPageTW(TRUE);
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
@@ -14,7 +16,7 @@
 	echo PublicPageTW::BeginPanel();
 		
 	if($message){
-		echo PublicPageTW::alert($message_title, $message, $message_type);
+		echo PublicPageTW::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
 	}
 	else{
 		$formwriter = new FormWriterPublicTW("form1", TRUE, TRUE);
