@@ -18,13 +18,24 @@ function password_reset_2_logic($get_vars, $post_vars){
 			exit();
 	}
 
+	$act_code = $get_vars['act_code'];
+	if(!$act_code){
+		$act_code = $post_vars['act_code'];
+	}
 
 	if ($post_vars) {
 			
-			if(!isset($post_vars['usr_password']) || !isset($post_vars['usr_password_again'])){
-				throw new SystemDisplayableError(
-					'The following required fields were not set: passwords');
-			}
+		$success = Activation::checkTempCode($act_code, 2);
+
+		if(!$success){
+			throw new SystemDisplayableError(
+				'Sorry, this code has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');
+		}
+		
+		if(!isset($post_vars['usr_password']) || !isset($post_vars['usr_password_again'])){
+			throw new SystemDisplayableError(
+				'The following required fields were not set: passwords');
+		}
 		
 		
 
@@ -55,18 +66,7 @@ function password_reset_2_logic($get_vars, $post_vars){
 		$page_vars['message_title'] = 'Password reset';
 		$page_vars['message'] = 'Your password has been reset. <a href="/login">Click here to log in</a>.';
 	} 
-	else{
-		$act_code = $get_vars['act_code'];
-		if(!$act_code){
-			$act_code = $post_vars['act_code'];
-		}
-		$success = Activation::checkTempCode($act_code, 2);
 
-		if(!$success){
-			throw new SystemDisplayableError(
-				'Sorry, this code has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');
-		}
-	}
 	return $page_vars;
 }
 ?>
