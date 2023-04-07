@@ -15,7 +15,7 @@
 	echo PublicPageTW::BeginPage('Password Reset');
 	echo PublicPageTW::BeginPanel();
 		
-	if($message){
+	if($page_vars['message']){
 		echo PublicPageTW::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
 	}
 	else{
