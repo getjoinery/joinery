@@ -22,6 +22,7 @@ function password_reset_2_logic($get_vars, $post_vars){
 	if(!$act_code){
 		$act_code = $post_vars['act_code'];
 	}
+	$page_vars['act_code'] = $act_code;
 
 	if ($post_vars) {
 			
