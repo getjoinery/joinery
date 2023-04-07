@@ -4,6 +4,8 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
 
+	$page_vars = post_logic($_GET, $_POST, $post);
+	$post = $page_vars['post'];
 
 	$page = new PublicPageTW();
 	$hoptions = array(
@@ -23,12 +25,12 @@
         <span class="mt-2 mb-4 block text-3xl text-center leading-8 font-extrabold tracking-tight text-gray-900 sm:text-4xl"><?php echo $post->get('pst_title'); ?></span>
       </h1>
 				<p class="text-base text-gray-500 text-center">
-					<?php echo $author->display_name().' at '; ?>
+					<?php echo $page_vars['author']->display_name().' at '; ?>
 				  <time datetime="2020-03-16"><?php echo LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'); ?></time>
 				</p>
 	<div class="flow-root text-center">
 		<?php
-		foreach ($tags as $tag){
+		foreach ($page_vars['tags'] as $tag){
 			echo '<a href="/blog/tag/'.urlencode($tag).'" class="inline-block p-1">
 			<span class="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">'.$tag.'</span>
 			</a>';			
@@ -47,8 +49,8 @@
 
 		<?php
 
-	if($settings->get_setting('comments_active')){
-		if($settings->get_setting('comments_unregistered_users') || $session->get_user_id()){
+	if($page_vars['settings']->get_setting('comments_active')){
+		if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
 		
 		?>
 
@@ -72,7 +74,7 @@
 								//echo $formwriter->textinput("Email", "usr_email", NULL, 20, '', "" , 255, "");
 								echo $formwriter->textbox('Comment', 'cmt', NULL, 3, 80, NULL, '', '');
 								
-								if(!$session->get_user_id()){
+								if(!$page_vars['session']->get_user_id()){
 									echo $formwriter->antispam_question_input('blog');
 									echo $formwriter->honeypot_hidden_input();	
 									echo $formwriter->honeypot_hidden_input('Comment', 'comment');	
@@ -91,17 +93,10 @@
 		}
 
 
-		if($settings->get_setting('show_comments')){			
-			$comments = new MultiComment(
-				array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'has_parent_id'=>false),
-				array('comment_id'=>'DESC'),
-				NULL,
-				NULL);	
-			$numcomments = $comments->count_all();		
+		if($page_vars['settings']->get_setting('show_comments')){			
 						
 
-			if($numcomments){
-				$comments->load();
+			if($page_vars['numcomments']){
 				?>
 				<script>
 				$(document).ready(function(){
@@ -119,7 +114,7 @@
 				  <ul role="list" class="-mb-8">
 								
 					<?php
-					foreach($comments as $comment){ 	
+					foreach($page_vars['comments'] as $comment){ 	
 						echo '
 						<li>
 						  <div class="relative pb-8 mt-4">
@@ -147,7 +142,7 @@
 								  <br /><br /><button id="comment'.$comment->key.'" class="commentbutton">Reply to this comment >></button>';
 								  
 							
-									if($settings->get_setting('comments_unregistered_users') || $session->get_user_id()){
+									if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
 											echo '<div id="comment'.$comment->key.'container" style="display:none;">';
 											$formwriter = new FormWriterPublicTW('form'.$comment->key);
 											$validation_rules = array();
@@ -167,7 +162,7 @@
 											//echo $formwriter->textinput("Email", "usr_email", NULL, 20, '', "" , 255, "");
 											echo $formwriter->textbox('Your reply', 'cmt', NULL, 3, 80, NULL, '', '');
 											
-											if(!$session->get_user_id()){
+											if(!$page_vars['session']->get_user_id()){
 												echo $formwriter->antispam_question_input('blog');
 												echo $formwriter->honeypot_hidden_input();	
 												echo $formwriter->honeypot_hidden_input('Comment', 'comment');	

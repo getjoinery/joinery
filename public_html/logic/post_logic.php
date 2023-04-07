@@ -1,11 +1,17 @@
 <?php
+
+function post_logic($get_vars, $post_vars, $post){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/comments_class.php');
 
 	$session = SessionControl::get_instance();
+	$page_vars['session'] = $session;
+
+
 	$settings = Globalvars::get_instance();
+	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('blog_active')){
 		//TURNED OFF
 		header("HTTP/1.0 404 Not Found");
@@ -13,6 +19,7 @@
 		exit();			
 	}
 	
+	$page_vars['post'] = $post;
 
 	if(!$post){
 		require_once(LibraryFunctions::display_404_page());	
@@ -26,34 +33,18 @@
 		}
 	}
 	
-	$settings = Globalvars::get_instance();
 	$site_template = $settings->get_setting('site_template');
 	
 	//GET AUTHOR
 	$author = new User($post->get('pst_usr_user_id'), TRUE);
+	$page_vars['author'] = $author;
 	$tags = $post->get_tags();
-	
-	//GET OTHER POSTS
-	/*
-	$numperpage = 3;
-	$page_offset = LibraryFunctions::fetch_variable('page_offset', 0, 0, '');
-	$page_sort = LibraryFunctions::fetch_variable('page_sort', 'post_id', 0, '');	
-	$page_direction = LibraryFunctions::fetch_variable('page_direction', 'DESC', 0, '');
-	$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE);
-	$posts = new MultiPost(
-		$search_criteria,
-		array($page_sort=>$page_direction),
-		$numperpage,
-		$page_offset);	
-	$numrecords = $posts->count_all();	
-	$posts->load();	
-	*/
-
-	$session = SessionControl::get_instance();
-
-	if($_POST){
+	$page_vars['tags'] = $tags;
 		
-		$new_comment = Comment::add_comment($post->key, $session, $_POST);
+
+	if($post_vars){
+		
+		$new_comment = Comment::add_comment($post->key, $session, $post_vars);
 
 		//IF AUTHOR IS COMMENTER
 		if($author->key == $new_comment->get('cmt_usr_user_id')){
@@ -87,5 +78,19 @@
 		header('Location: '.$_SERVER['REQUEST_URI']);
 		exit();
 	}
-
+	
+	//TODO: HANDLE COMMENT THREADING
+	$comments = new MultiComment(
+		array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'has_parent_id'=>false),
+		array('comment_id'=>'DESC'),
+		NULL,
+		NULL);	
+	$comments->load();
+	$page_vars['comments'] = $comments;
+	$numcomments = $comments->count_all();		
+	$page_vars['numcomments'] = $numcomments;	
+	
+	
+	return $page_vars;
+}
 ?>

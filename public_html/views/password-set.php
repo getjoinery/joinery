@@ -4,6 +4,7 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('password-set_logic.php'));
 
+	$page_vars = password_set_logic($_GET, $_POST);
 
 	$page = new PublicPageTW(TRUE);
 	$hoptions=array(
@@ -15,7 +16,7 @@
 	echo PublicPageTW::BeginPage('Set a Password');
 	echo PublicPageTW::BeginPanel();
 	if($message){
-		echo PublicPageTW::alert($message_title, $message, $message_type);
+		echo PublicPageTW::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
 	}
 	else{
 		$formwriter = new FormWriterPublicTW("form1", TRUE, TRUE);
@@ -33,8 +34,6 @@
 
 		echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
 		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", NULL, 20, "" , "", 255,"");
-
-		echo $formwriter->hiddeninput('token',$token);
 
 		echo $formwriter->start_buttons();
 		echo $formwriter->new_form_button('Submit');
