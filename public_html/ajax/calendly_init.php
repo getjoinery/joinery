@@ -5,6 +5,10 @@
 	require_once( __DIR__ . '/../data/orders_class.php');
 	require_once( __DIR__ . '/../data/product_details_class.php');
 
+	header("HTTP/1.0 404 Not Found");
+	echo 'Feature turned off';
+	exit;
+
 	//https://github.com/leadthread/php-calendly
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	

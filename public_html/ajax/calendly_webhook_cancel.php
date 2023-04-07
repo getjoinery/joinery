@@ -5,6 +5,9 @@
 	require_once( __DIR__ . '/../data/orders_class.php');
 	require_once( __DIR__ . '/../data/product_details_class.php');
 
+	header("HTTP/1.0 404 Not Found");
+	echo 'Feature turned off';
+	exit;
 
 $payload = @file_get_contents('php://input');
 $return = json_decode($payload, true);

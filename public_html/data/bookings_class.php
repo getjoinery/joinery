@@ -20,11 +20,12 @@ class Booking extends SystemBase {
 
 	public static $fields = array(
 		'bkn_booking_id' => 'Booking id',
-		'bkn_calendly_event_uuid' => 'Calendly uuid',
+		'bkn_calendly_event_uri' => 'Calendly uuid',
 		'bkn_usr_user_id_booked' => 'Person being booked',
 		'bkn_usr_user_id_client' => 'Person booking',
 		'bkn_pro_product_id' => 'Product booked',
-		'bkn_type' => 'Type of booking',
+		'bkn_bkt_booking_type_id' => 'Foreign key to the booking type table',
+		'bkn_type' => 'Type of booking from calendly',
 		'bkn_notes' => 'Notes',
 		'bkn_start_time' => 'Start time of booking',
 		'bkn_end_time' => 'End time of booking',
@@ -34,15 +35,17 @@ class Booking extends SystemBase {
 		'bkn_location' => 'Location of meeting (zoom link or something)',
 		'bkn_create_time' => 'Time created',
 		'bkn_delete_time' => 'Time of deletion',
+		'bkn_update_time' => 'Time updated',
 	);
 
 	public static $field_specifications = array(
 		'bkn_booking_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'bkn_calendly_event_uuid' => array('type'=>'varchar(36)'),
+		'bkn_calendly_event_uri' => array('type'=>'varchar(255)'),
 		'bkn_usr_user_id_booked' => array('type'=>'int4'),
 		'bkn_usr_user_id_client' => array('type'=>'int4'),
 		'bkn_pro_product_id' => array('type'=>'int4'),
-		'bkn_type' => array('type'=>'int4'),
+		'bkn_bkt_booking_type_id' => array('type'=>'varchar(255)'),
+		'bkn_type' => array('type'=>'varchar(255)'),
 		'bkn_notes' => array('type'=>'varchar(255)'),
 		'bkn_start_time' => array('type'=>'timestamp(6)'),
 		'bkn_end_time' => array('type'=>'timestamp(6)'),
@@ -52,6 +55,7 @@ class Booking extends SystemBase {
 		'bkn_location' => array('type'=>'varchar(255)'),
 		'bkn_create_time' => array('type'=>'timestamp(6)'),
 		'bkn_delete_time' => array('type'=>'timestamp(6)'),
+		'bkn_update_time' => array('type'=>'timestamp(6)'),
 	);
 
 
@@ -63,8 +67,8 @@ class Booking extends SystemBase {
 
 	public static $initial_default_values = array('bkn_create_time' => 'now()');	
 
-	static function get_by_calendly_uuid($calendly_uuid){
-		$results = new MultiBooking(array('calendly_uuid' => $calendly_uuid));
+	static function get_by_calendly_uri($calendly_uri){
+		$results = new MultiBooking(array('calendly_uri' => $calendly_uri));
 		$results->load();
 
 		if(count($results)){	
@@ -112,9 +116,9 @@ class MultiBooking extends SystemMultiBase {
 			$bind_params[] = array($this->options['product_id'], PDO::PARAM_INT);
 		}	
 
-		if (array_key_exists('calendly_uuid', $this->options)) {
-			$where_clauses[] = 'bkn_calendly_event_uuid = ?';
-			$bind_params[] = array($this->options['calendly_uuid'], PDO::PARAM_STR);
+		if (array_key_exists('calendly_uri', $this->options)) {
+			$where_clauses[] = 'bkn_calendly_event_uri = ?';
+			$bind_params[] = array($this->options['calendly_uri'], PDO::PARAM_STR);
 		}
 		
 		if (array_key_exists('deleted', $this->options)) {

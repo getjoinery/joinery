@@ -23,6 +23,7 @@
 
 if ($_POST){
 
+	$user->set('usr_calendly_uri', trim($_POST['usr_calendly_uri']));
 	$user->set('usr_first_name', trim($_POST['usr_first_name']));
 	$user->set('usr_last_name', trim($_POST['usr_last_name']));
 	$user->set('usr_password_recovery_disabled', (bool)$_POST['usr_password_recovery_disabled']);
@@ -204,6 +205,8 @@ else{
 		$optionvals = array('Regular User (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
 		echo $formwriter->dropinput("Permission level", "usr_permission", "ctrlHolder", $optionvals, $user->get('usr_permission'), FALSE);
 	}
+	
+	echo $formwriter->textinput("Calendly User URI (for calendly integration)", "usr_calendly_uri", "ctrlHolder", 20, $user->get('usr_calendly_uri'), "" , 255, "");
 	
 	echo $formwriter->hiddeninput("usr_user_id", $user->key);
 

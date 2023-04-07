@@ -202,6 +202,14 @@
 	echo $formwriter->textinput("Reddit link", "social_reddit_link", "ctrlHolder", 20, $settings->get_setting('social_reddit_link'), "" , 255, "");
 	echo $formwriter->textinput("Whatsapp link", "social_whatsapp_link", "ctrlHolder", 20, $settings->get_setting('social_whatsapp_link'), "" , 255, "");
 	echo $formwriter->textinput("Twitch link", "social_twitch_link", "ctrlHolder", 20, $settings->get_setting('social_twitch_link'), "" , 255, "");
+
+	echo '<h3>Booking Settings</h3>';
+
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+		echo $formwriter->dropinput("Bookings active", "bookings_active", "ctrlHolder", $optionvals, $settings->get_setting('bookings_active'), '', FALSE);
+
+	echo $formwriter->textinput("Calendly api token", "calendly_api_token", "ctrlHolder", 20, $settings->get_setting('calendly_api_token'), "" , 255, "");
+	echo $formwriter->textinput("Calendly organization uri", "calendly_organization_uri", "ctrlHolder", 20, $settings->get_setting('calendly_organization_uri'), "" , 255, "");
 	
  	echo '<h3>Product Settings</h3>';
 

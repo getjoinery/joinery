@@ -315,7 +315,6 @@ class AdminPage{
 				$iterate_menu = $admin_menu;
 				
 				foreach ($admin_menu as $menu_id=>$menu_info){	
-					
 					if(!$menu_info['parent']){
 						if($menu_info['currentmain']){
 							if($menu_info['has_subs']){
