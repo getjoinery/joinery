@@ -67,7 +67,7 @@
 
 			echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "checkbox", "left", NULL, 1, "");
 			echo $formwriter->checkboxinput("Add me to the newsletter", "newsletter", "checkbox", "left", NULL, 1, "");
-			if(!$session->get_user_id()){
+			if(!$page_vars['session']->get_user_id()){
 				echo $formwriter->captcha_hidden_input();
 			}
 		}
