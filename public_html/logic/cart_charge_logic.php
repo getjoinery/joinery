@@ -1,8 +1,6 @@
 <?php
-	//require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/stripe-php/init.php');
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';
+function cart_charge_logic($get_vars, $post_vars){
+
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
@@ -13,16 +11,25 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php'); 
 
+	$page_vars = array();
+	
 	$session = SessionControl::get_instance();
+	$page_vars['session'] = $session;
+
 	$settings = Globalvars::get_instance();
+	$page_vars['settings'] = $settings;
+	
+	$composer_dir = $settings->get_setting('composerAutoLoad');	
+	require_once $composer_dir.'autoload.php';
+	
 	if(!$settings->get_setting('products_active')){
 		header("HTTP/1.0 404 Not Found");
 		echo 'This feature is turned off';
 		exit();
 	}
 	
-	$currency_code = $settings->get_setting('site_currency');
-	$currency_symbol = Product::$currency_symbols[$currency_code];
+	$page_vars['currency_code'] = $settings->get_setting('site_currency');
+	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 	if($_SESSION['test_mode']){
 		$api_key = $settings->get_setting('stripe_api_key_test');
@@ -37,10 +44,14 @@
 		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
 		exit();			
 	}
-
+	
+	$page_vars['api_key'] = $api_key;
+	$page_vars['api_secret_key'] = $api_secret_key;
+	
 	\Stripe\Stripe::setApiKey($api_key);
 
 	$cart = $session->get_shopping_cart();
+	$page_vars['cart'] = $cart;
 	$charge_total = $cart->get_total();
 
 	$receipts = array();
@@ -593,8 +604,8 @@
 	$cart->last_receipt = $receipts;
 	$cart->clear_cart();
 	
-	
-	//NOW REDIRECT TO CONFIRMATION PAGE
-	LibraryFunctions::Redirect('/cart_confirm'); 
+	 
+	return $page_vars;
+}
 
 ?>
