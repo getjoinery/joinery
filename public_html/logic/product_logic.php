@@ -23,9 +23,12 @@ function product_logic($get_vars, $post_vars, $product){
 		exit();
 	}	
 	
-	
-	$page_vars['product'] = $product;
-
+	if($product){
+		$page_vars['product'] = $product;
+	}
+	else{
+		$product = new Product($post_vars['product_id'], TRUE);
+	}
 	//IF NO ITEMS REMAINING, SHOW ERROR
 	if($product->get('pro_max_purchase_count') > 0){
 		$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
