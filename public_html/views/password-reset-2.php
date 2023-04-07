@@ -32,7 +32,7 @@
 		echo $formwriter->begin_form("", "post", "/password-reset-2", true);
 		echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
 		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", NULL, 20, "" , "", 255,"");
-		echo $formwriter->hiddeninput('act_code',$act_code);
+		//echo $formwriter->hiddeninput('act_code',$act_code);
 		echo $formwriter->new_form_button('Submit');
 		echo $formwriter->end_form();
 
