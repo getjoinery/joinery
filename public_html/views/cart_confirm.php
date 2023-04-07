@@ -7,7 +7,6 @@
 
 
 	$session = SessionControl::get_instance();
-	//$session->check_permission(0);
 	$session_id = $_GET['session_id']; 
 
 	$settings = Globalvars::get_instance();
