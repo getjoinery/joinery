@@ -28,8 +28,10 @@ function cart_charge_logic($get_vars, $post_vars){
 		exit();
 	}
 	
-	$page_vars['currency_code'] = $settings->get_setting('site_currency');
-	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')];
+	$currency_code = $settings->get_setting('site_currency');
+	$page_vars['currency_code'] = $currency_code;
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+	$page_vars['currency_symbol'] = $currency_symbol;
 
 	if($_SESSION['test_mode']){
 		$api_key = $settings->get_setting('stripe_api_key_test');
