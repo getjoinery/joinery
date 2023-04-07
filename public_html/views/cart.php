@@ -4,11 +4,10 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('cart_logic.php'));
 
-	if (count($cart->get_items()) === 0) {
-		// Cart is empty, can't checkout!
-		PublicPageTW::OutputGenericPublicPage('Cart Empty', NULL, '<p>Your shopping cart is currently empty.</p>');
-		exit();
-	} 	
+	$page_vars = cart_logic($_GET, $_POST);
+	$cart = $page_vars['cart'];
+	$currency_symbol = $page_vars['currency_symbol'];
+	$page_vars['currency_code'] = $currency_code;
 
 	$page = new PublicPageTW(TRUE);
 	$page->public_header(array(
@@ -249,103 +248,16 @@
 		
 		if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
 
-			if($settings->get_setting('checkout_type') == 'stripe_checkout'){
-
-				$stripe_item_list = array();
-				foreach($cart->get_detailed_items() as $cart_item) {
-
-					if($cart_item['recurring']){
-						
-						//CHECK FOR EXISTING PLAN
-						try{
-							$plan_name = 'recurring_donation-' . (int)($cart_item['price'] - $cart_item['discount']);
-							$plan = \Stripe\Plan::retrieve($plan_name);
-						}
-						catch (Exception $e) {
-							//CREATE NEW PLAN
-							$plan = \Stripe\Plan::create([
-							  "amount" => (int)($cart_item['price'] - $cart_item['discount']) * 100,
-							  "interval" => "month",
-							  "product" => [
-								"name" => 'Recurring donation $' . (int)($cart_item['price'] - $cart_item['discount']),
-							  ],
-							  "currency" => $currency_code,
-							  "id" => 'recurring_donation-' . (int)($cart_item['price'] - $cart_item['discount']),
-							]); 							
-						}
-
-						$plan_items = array(
-							'plan' => $plan['id'],
-						);
-						
-						$plan_items_wrap = array($plan_items);
-						
-						$stripe_subscription_item = array(
-							'items' => $plan_items_wrap,
-						);
-						
-					}
-					else{
-						//ASSEMBLE THE STRIPE PRODUCT ARRAY
-						//'images' => ['https://example.com/t-shirt.png'],
-
-														
-						$stripe_current_item = array(
-							'name' => $cart_item['name'],
-							'description' => $cart_item['name'].' ',			
-							'amount' => (int)($cart_item['price'] - $cart_item['discount']) * 100,
-							'currency' => $currency_code,
-							'quantity' => $cart_item['quantity'],
-						);
-						
-						//TODO add description "metadata" => ["order_id" => "6735"],
-						if($cart_item['price'] > 0){
-							array_push($stripe_item_list, $stripe_current_item);		
-						}							
-					}
-				}
-
-				$create_list = array(
-					'billing_address_collection' => 'auto',
-					'payment_method_types' => ['card'],
-					'success_url' => $settings->get_setting('webDir_SSL'). '/cart_charge?session_id={CHECKOUT_SESSION_ID}',
-					'cancel_url' => $settings->get_setting('webDir_SSL'). '/cart',
-				);
-				
-				if($stripe_item_list){
-					$create_list['line_items'] = $stripe_item_list;
-				}
-				
-				if($stripe_subscription_item){
-					$create_list['subscription_data'] = $stripe_subscription_item;
-				}			
-
-				if($billing_user){
-					$create_list['client_reference_id'] = $billing_user->key;
-				
-					if($billing_user->get('usr_stripe_customer_id') && !$_SESSION['test_mode']){
-						$create_list['customer'] = $billing_user->get('usr_stripe_customer_id');
-					}
-					
-					if($billing_user->get('usr_email')){
-						$create_list['customer_email'] = $billing_user->get('usr_email');		
-					}				
-				}
-				else{
-					$create_list['customer_email'] = $billing_user['billing_email'];
-				}
-											
-
-				$stripe_session = \Stripe\Checkout\Session::create($create_list);					
+			if($settings->get_setting('checkout_type') == 'stripe_checkout'){					
 		
 				?>
 				<script src="https://js.stripe.com/v3/"></script>
 				<script language="javascript">
-				var stripe = Stripe('<?php echo $api_secret_key; ?>');
+				var stripe = Stripe('<?php echo $page_vars['api_secret_key']; ?>');
 
 				function ToCheckout() {
 					stripe.redirectToCheckout({
-					  sessionId: '<?php echo $stripe_session->id; ?>'
+					  sessionId: '<?php echo $page_vars['stripe_session']->id; ?>'
 					}).then(function (result) {
 					  // If `redirectToCheckout` fails due to a browser or network
 					  // error, display the localized error message to your customer
