@@ -4,8 +4,9 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('register_logic.php'));
 
+	$page_vars = register_logic($_GET, $_POST);
 
-	$settings = Globalvars::get_instance();
+
 	$page = new PublicPageTW(TRUE);
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
@@ -22,7 +23,7 @@
 
 			
 	if(isset($_GET['msgtext'])){
-		if (array_key_exists($_GET['msgtext'], $LOGIN_MESSAGES)) {
+		if (array_key_exists($_GET['msgtext'], $page_vars['LOGIN_MESSAGES'])) {
 			echo PublicPageTW::alert('Login warning', htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]), 'warn');
 		}
 	}		
