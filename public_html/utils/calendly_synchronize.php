@@ -25,11 +25,11 @@
 	//HANDLE THE EVENT TYPES
 	$event_types = get_event_types_info();
 	foreach($event_types as $event_type){
-		print_r($event_type);
+		//print_r($event_type);
 		echo $event_type->name.'<br>';
 		echo $event_type->uri.'<br>';
 		
-		if(!$new_booking = BookingType::get_by_calendly_uri($event_type->uri)){
+		if(!$new_booking = BookingType::GetByCalendlyUri($event_type->uri)){
 			$new_booking = new BookingType(NULL);
 			$new_booking->set('bkt_calendly_event_type_uri', $event_type->uri);
 		}
@@ -43,7 +43,7 @@
 		$new_booking->set('bkt_description_html', $event_type->description_html);
 		$new_booking->set('bkt_description_plain', $event_type->description_plain);
 		$new_booking->set('bkt_schedule_link', $event_type->scheduling_url);
-		
+		$new_booking->set('bkt_slug', $event_type->slug);
 		
 		if($event_type->active == 1){
 			$new_booking->set('bkt_status', BookingType::BOOKING_STATUS_ACTIVE);
@@ -79,11 +79,11 @@
 	else{
 		$bookings = get_booking_info(NULL, $min_start_time, NULL);
 		foreach($bookings as $booking){
-			print_r($booking);
+			//print_r($booking);
 			echo $booking->name.'<br>';
 			echo $booking->uri.'<br>';
 			
-			if(!$new_booking = Booking::get_by_calendly_uri($booking->uri)){
+			if(!$new_booking = Booking::GetByCalendlyUri($booking->uri)){
 				$new_booking = new Booking(NULL);
 				$new_booking->set('bkn_calendly_event_uri', $booking->uri);
 			}
@@ -100,9 +100,13 @@
 			$new_booking->set('bkn_location', $booking->location->location);
 			
 			$new_booking->set('bkn_type', $booking->event_type);
-			$booking_type = BookingType::get_by_calendly_uri($booking->event_type);
+			$booking_type = BookingType::GetByCalendlyUri($booking->event_type);
 			$new_booking->set('bkn_bkt_booking_type_id', $booking_type->key);
-			
+
+			if($user = User::GetByCalendlyUri($booking->event_memberships[0]->user)){
+				$new_booking->set('bkn_usr_user_id_booked', $user->key);
+			}
+		
 			
 			
 			if($booking->status == 'canceled'){
@@ -113,7 +117,13 @@
 			}
 			echo $booking->status.'<br>';
 
-			$invitees = get_booking_invitees(basename($booking->uri));
+			if($booking->status == 'active'){
+				$invitees = get_booking_invitees(basename($booking->uri), 'active');
+			}
+			else{
+				$invitees = get_booking_invitees(basename($booking->uri), 'canceled');
+			}
+		
 			//TODO: HANDLE MORE THAN ONE INVITEE
 			foreach($invitees as $invitee){
 				echo $invitee->name.'<br>';
@@ -128,7 +138,8 @@
 					$new_booking->set('bkn_usr_user_id_client', $invitee->tracking->salesforce_uuid);
 				}
 				else{
-					//TODO: DECIDE WHETHER TO CREATE NEW USERS
+					//CREATE NEW USER
+					$user = User::CreateNewUser($invitee->first_name, $invitee->last_name, $invitee->email, NULL, FALSE);	//DO NOT SEND WELCOME EMAIL	
 				}
 			}
 			$new_booking->prepare();

@@ -57,7 +57,7 @@ class BookingType extends SystemBase {
 
 	public static $initial_default_values = array('bkt_create_time' => 'now()');	
 
-	static function get_by_calendly_uri($calendly_uri){
+	static function GetByCalendlyUri($calendly_uri){
 		$results = new MultiBookingType(array('calendly_uri' => $calendly_uri));
 		$results->load();
 

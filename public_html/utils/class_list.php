@@ -356,6 +356,12 @@ Welcome!
 		$migrations[55]['test'] = NULL;
 		$migrations[55]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'surveys_active\' WHERE amu_menudisplay= \'Survey questions\'';
 
+		$migrations[56]['system_version'] = '0.5.11';
+		$migrations[56]['test'] = NULL;
+		$migrations[56]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'files-parent\' WHERE amu_icon= \'file-pdf\'';
 
+		$migrations[57]['system_version'] = '0.5.11';
+		$migrations[57]['test'] = NULL;
+		$migrations[57]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'surveys-parent\' WHERE amu_icon= \'list\'';
 ?>
 
