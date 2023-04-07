@@ -4,6 +4,8 @@
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
+	$page_vars = survey_logic($_GET, $_POST);
+	$survey = $page_vars['survey'];
 
 	$page = new PublicPageTW(TRUE);
 	$page->public_header(array(
@@ -23,10 +25,10 @@
 	}
 
 	$validation_rules = array();
-	foreach ($survey_questions as $survey_question){
+	foreach ($page_vars['survey_questions'] as $survey_question){
 		$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 		
-		foreach ($survey_answers as $survey_answer){
+		foreach ($page_vars['survey_answers'] as $survey_answer){
 			$answer_fill = NULL;
 			if($survey_answer->get('sva_qst_question_id') == $question->key){
 				if($question->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
