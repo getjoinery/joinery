@@ -4,9 +4,11 @@ require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/include
 require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
+	$page_vars = product_logic($_GET, $_POST, $product);
+	$product = $page_vars['product'];
 
-$page = new PublicPageTW(TRUE);
-$page->public_header(array(
+	$page = new PublicPageTW(TRUE);
+	$page->public_header(array(
 	'is_valid_page' => $is_valid_page,
 	'title' => $product->get('pro_name')
 	));
@@ -18,7 +20,7 @@ $page->public_header(array(
 	
 	echo PublicPageTW::BeginPage('Add to Cart');
 	
-	if (!$display_empty_form) {
+	if (!$page_vars['display_empty_form']) {
 		echo '<p>Is everything correct?</p>';
 		$formwriter = new FormWriterPublicTW("product_form", TRUE);
 		echo $formwriter->begin_form("", "POST", "/product"); 
@@ -26,7 +28,7 @@ $page->public_header(array(
 		echo $formwriter->hiddeninput('product_id', $product_id);
 		echo $formwriter->hiddeninput('product_key', $form_key);
 
-		foreach($display_data as $key => $value) {
+		foreach($page_vars['display_data'] as $key => $value) {
 			echo $formwriter->text('<strong>' . $key . '</strong>', $value, 'ctrlHolder');
 		}
 
@@ -51,7 +53,7 @@ $page->public_header(array(
 				echo '<p>Sorry, this item is currently sold out.</p>';		
 			}
 			else if(!$product->num_versions() && $product->get('pro_price_type') != Product::PRICE_TYPE_USER_CHOOSE){
-				echo $currency_symbol.$product->get('pro_price');
+				echo $page_vars['currency_symbol'].$product->get('pro_price');
 			} 
 			?>
           </p>
@@ -113,7 +115,7 @@ $page->public_header(array(
 						$validation_rules['user_price_override']['required']['value'] = 'true';
 						echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
 					}
-					if ($product->output_product_form($formwriter, $user, $extra_data)) {
+					if ($product->output_product_form($formwriter, $page_vars['user'], null)) {
 						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
 					}
 					echo $formwriter->end_form();

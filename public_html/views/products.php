@@ -4,6 +4,8 @@
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
+	$page_vars = products_logic($_GET, $_POST);
+	
 	$page = new PublicPageTW(TRUE);
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
@@ -16,7 +18,7 @@
     <h2 class="sr-only">Products</h2>
 	<div class="grid grid-cols-1 gap-y-4 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-10 lg:grid-cols-3 lg:gap-x-8">
 
-	<?php foreach ($products as $product){ ?>
+	<?php foreach ($page_vars['products'] as $product){ ?>
 
     
       <div class="group relative bg-white border border-gray-200 rounded-lg flex flex-col overflow-hidden">
@@ -41,7 +43,7 @@
             <p class="text-base font-medium text-gray-900">
 			<?php 
 			if(!$product->num_versions() && $product->get('pro_price_type') != Product::PRICE_TYPE_USER_CHOOSE){
-				echo $currency_symbol.$product->get('pro_price');
+				echo $page_vars['currency_symbol'].$product->get('pro_price');
 			} 			
 			?></p>
           </div>
@@ -55,23 +57,23 @@
   <div class="hidden sm:block">
     <p class="text-sm text-gray-700">
       Showing
-      <span class="font-medium"><?php echo $offsetdisp; ?></span>
+      <span class="font-medium"><?php echo $page_vars['offsetdisp']; ?></span>
       to
-      <span class="font-medium"><?php echo $numperpage + $offset; ?></span>
+      <span class="font-medium"><?php echo $page_vars['numperpage'] + $page_vars['offset']; ?></span>
       of
-      <span class="font-medium"><?php echo $numrecords; ?></span>
+      <span class="font-medium"><?php echo $page_vars['numrecords']; ?></span>
       results
     </p>
   </div>
   <div class="flex-1 flex justify-between sm:justify-end">
 	<?php	
-	if($pager->is_valid_page('-1')){
-		echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$pager->get_url('-1', '').'">Previous</a>';
+	if($page_vars['pager']->is_valid_page('-1')){
+		echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars['pager']->get_url('-1', '').'">Previous</a>';
 	}
 	?>
 	<?php	
-	if($pager->is_valid_page('+1')){
-		echo '<a class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$pager->get_url('+1', '').'">Next</a>';
+	if($page_vars['pager']->is_valid_page('+1')){
+		echo '<a class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars['pager']->get_url('+1', '').'">Next</a>';
 	}
 	?>
   </div>
