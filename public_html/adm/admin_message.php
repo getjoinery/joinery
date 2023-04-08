@@ -43,7 +43,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'emails',
 		'page_title' => 'Messages',
 		'readable_title' => 'Messages',
 		'breadcrumbs' => NULL,

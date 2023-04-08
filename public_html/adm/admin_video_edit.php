@@ -70,7 +70,7 @@
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(
-			'menu-id'=> 3,
+			'menu-id'=> 'videos',
 			'page_title' => 'Videos',
 			'readable_title' => 'Videos',
 			'breadcrumbs' => array(

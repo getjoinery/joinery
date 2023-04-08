@@ -24,7 +24,7 @@
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(
-			'menu-id'=> 1,
+			'menu-id'=> 'emails-list',
 			'page_title' => 'User',
 			'readable_title' => 'User',
 			'breadcrumbs' => array(

@@ -93,7 +93,7 @@
 		$page = new AdminPage();
 		$page->admin_header(
 		array(
-			'menu-id'=> 4,
+			'menu-id'=> 'stripe-payments',
 			'page_title' => 'Stripe invoices',
 			'readable_title' => 'Stripe invoices',
 		'breadcrumbs' => array(

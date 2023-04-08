@@ -25,7 +25,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> 'groups',
 		'breadcrumbs' => array(
 			'Groups'=>'/admin/admin_groups', 
 			'New Group' => '',

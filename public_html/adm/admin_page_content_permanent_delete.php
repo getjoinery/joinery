@@ -40,7 +40,7 @@ else{
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
+		'menu-id'=> 'pages',
 		'page_title' => 'Delete Page Content',
 		'readable_title' => 'Delete Page Content',
 		'breadcrumbs' => array(

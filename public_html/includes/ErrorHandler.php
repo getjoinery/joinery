@@ -79,7 +79,7 @@ class ErrorHandler{
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(
-			'menu-id'=> 0,
+			'menu-id'=> NULL,
 			'page_title' => self::$ERROR_TYPE_TITLES[$error_type],
 			'readable_title' => self::$ERROR_TYPE_TITLES[$error_type],
 			'breadcrumbs' => NULL,

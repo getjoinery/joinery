@@ -32,7 +32,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> 'contact-types',
 		'breadcrumbs' => array(
 			'Emails'=>'/admin/admin_emails', 
 			'Contact Types' => '',

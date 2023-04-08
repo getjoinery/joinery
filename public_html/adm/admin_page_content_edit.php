@@ -75,7 +75,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> 'pages',
 		'breadcrumbs' => array(
 			'Page Contents'=>'/admin/admin_page_contents', 
 			'Edit Page Content' => '',

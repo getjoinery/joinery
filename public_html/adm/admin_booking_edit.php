@@ -89,7 +89,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'bookings',
 		'page_title' => 'Edit Booking',
 		'readable_title' => 'Edit Booking',
 		'breadcrumbs' => $breadcrumbs,

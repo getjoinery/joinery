@@ -55,7 +55,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
+		'menu-id'=> 'groups',
 		'page_title' => 'Users in Group',
 		'readable_title' => 'Users in Group',
 		'breadcrumbs' => array(

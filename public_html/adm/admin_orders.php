@@ -60,7 +60,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 4,
+		'menu-id'=> 'orders-list',
 		'breadcrumbs' => array(
 			'Orders'=>'', 
 		),

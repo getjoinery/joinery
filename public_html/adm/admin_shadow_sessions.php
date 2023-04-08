@@ -31,7 +31,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 		array(
-		'menu-id'=> 4,
+		'menu-id'=> 'shadow-sessions',
 		'page_title' => 'Shadow Sessions',
 		'readable_title' => 'Shadow Sessions',
 		'breadcrumbs' => array(

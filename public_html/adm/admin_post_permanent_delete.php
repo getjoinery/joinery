@@ -39,7 +39,7 @@ else{
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
+		'menu-id'=> 'blog-posts',
 		'page_title' => 'Post',
 		'readable_title' => 'Delete Post',
 		'breadcrumbs' => array(

@@ -45,7 +45,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 9,
+		'menu-id'=> 'files',
 		'page_title' => 'Files',
 		'readable_title' => 'Files',
 		'breadcrumbs' => array(

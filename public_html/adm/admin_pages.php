@@ -32,7 +32,7 @@
 	$paget = new AdminPage();
 	$paget->admin_header(	
 	array(
-		'menu-id'=> 24,
+		'menu-id'=> 'pages',
 		'breadcrumbs' => array(
 			'Pages'=>'', 
 		),

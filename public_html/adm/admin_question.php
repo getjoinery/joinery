@@ -33,7 +33,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 35,
+		'menu-id'=> 'survey-questions',
 		'breadcrumbs' => array(
 			'Surveys'=>'/admin/admin_surveys', 
 			'Questions'=>'/admin/admin_questions', 

@@ -32,7 +32,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 24,
+		'menu-id'=> 'pages',
 		'breadcrumbs' => array(
 			'Page Contents'=>'', 
 		),

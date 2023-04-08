@@ -12,7 +12,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 5,
+		'menu-id'=> 'product-groups',
 		'page_title' => 'Product Groups',
 		'readable_title' => 'Product Groups',
 		'breadcrumbs' => array(

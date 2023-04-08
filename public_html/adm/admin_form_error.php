@@ -24,7 +24,7 @@
 
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
+		'menu-id'=> null,
 		'page_title' => 'Error',
 		'readable_title' => 'Error',
 		'breadcrumbs' => NULL,

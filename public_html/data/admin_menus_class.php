@@ -87,7 +87,7 @@ class MultiAdminMenu extends SystemMultiBase {
 
 	}
 	
-	static function getadminmenu($user_permission, $current_menuid, $get_all=false){
+	static function getadminmenu($user_permission, $current_menu_slug, $get_all=false){
 		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 		$settings = Globalvars::get_instance();
 		$dbhelper = DbConnector::get_instance();
@@ -114,28 +114,10 @@ class MultiAdminMenu extends SystemMultiBase {
 		}
 		$entries = $q->fetchAll();
 		$entries2 = $entries;
-	   
-
-	   //FIND OUT WHICH SUBTAB WE ARE ON BY GETTING THE CURRENT FILE
-	   $thisfile = basename($_SERVER['PHP_SELF']);
-
-		$firsttime=0;
-		while(current($_GET)){
-			$thisgetvar = key($_GET);
-			$thisgetval = current($_GET);
-
-			if($firsttime == 0){
-				$thisfile .= "?$thisgetvar=$thisgetval";
-				$firsttime=1;
-			}
-			else{
-				$thisfile .= "&$thisgetvar=$thisgetval";
-			}
-			next($_GET);
-		}
 
 	
 		$finalmenu = array();
+		$current_parent_menu = null;
 		foreach ($entries as $entry){
 			//IF THE SETTING IS OFF, SKIP IT 
 			if($entry->amu_setting_activate && !$settings->get_setting($entry->amu_setting_activate)){
@@ -152,15 +134,18 @@ class MultiAdminMenu extends SystemMultiBase {
 			
 			
 			$finalmenu[$entry->amu_admin_menu_id] = array('parent'=>$entry->amu_parent_menu_id, 'currentmain'=>FALSE, 'currentsub'=>FALSE, 'defaultpage'=>$entry->amu_defaultpage, 'display'=>$entry->amu_menudisplay, 'icon'=>$entry->amu_icon, 'has_subs'=>$has_subs);
-
-			if($current_menuid == $entry->amu_admin_menu_id){
-				$finalmenu[$entry->amu_admin_menu_id]['currentmain'] = 1;
-			}
-			else if($thisfile == $entry->amu_defaultpage){
+		
+		
+			if($current_menu_slug == $entry->amu_slug){
 				$finalmenu[$entry->amu_admin_menu_id]['currentsub'] = 1;
+				$current_parent_menu = $entry->amu_parent_menu_id;	
 			}
 		}
 		
+		if($current_parent_menu){
+			$finalmenu[$current_parent_menu]['currentmain'] = 1;	
+		}
+
 		return $finalmenu;
 	}
 

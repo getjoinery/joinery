@@ -19,7 +19,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 12,
+		'menu-id'=> 'email-debug-logs',
 		'page_title' => 'Users',
 		'readable_title' => 'Users',
 		'breadcrumbs' => array(

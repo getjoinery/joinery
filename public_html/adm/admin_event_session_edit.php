@@ -183,7 +183,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'events',
 		'page_title' => 'Event session edit',
 		'readable_title' => 'Event session edit',
 		'breadcrumbs' => array('Events'=>'/admin/admin_events', $event->get('evt_name')=>'/admin/admin_event_sessions?evt_event_id='.$event->key,'Add Session'=> ''),

@@ -39,7 +39,7 @@ else{
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
+		'menu-id'=> 'groups',
 		'page_title' => 'Group',
 		'readable_title' => 'Delete Group',
 		'breadcrumbs' => array(
