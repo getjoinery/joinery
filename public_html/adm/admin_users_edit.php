@@ -130,7 +130,7 @@ else{
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 'users',
+		'menu-id'=> 'users-list',
 		'page_title' => 'User Edit',
 		'readable_title' => 'User Edit',
 		'breadcrumbs' => array(

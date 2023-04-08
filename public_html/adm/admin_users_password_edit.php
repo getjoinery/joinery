@@ -36,7 +36,7 @@
 
 	$page->admin_header(	
 	array(
-		'menu-id'=> 'users',
+		'menu-id'=> 'users-list',
 		'page_title' => 'Change Password',
 		'readable_title' => 'Change Password',
 		'breadcrumbs' => array(

@@ -138,7 +138,12 @@ class MultiAdminMenu extends SystemMultiBase {
 		
 			if($current_menu_slug == $entry->amu_slug){
 				$finalmenu[$entry->amu_admin_menu_id]['currentsub'] = 1;
-				$current_parent_menu = $entry->amu_parent_menu_id;	
+				if($entry->amu_parent_menu_id){
+					$current_parent_menu = $entry->amu_parent_menu_id;	
+				}
+				else{
+					$finalmenu[$entry->amu_admin_menu_id]['currentmain'] = 1;
+				}
 			}
 		}
 		
