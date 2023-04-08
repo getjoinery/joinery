@@ -16,7 +16,7 @@ $dblink = $dbhelper->get_db_link();
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 12,
+		'menu-id'=> 'web-statistics',
 		'breadcrumbs' => array(
 			'Statistics'=>'', 
 		),

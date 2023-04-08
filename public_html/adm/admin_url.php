@@ -25,7 +25,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 32,
+		'menu-id'=> 'urls',
 		'page_title' => 'Urls',
 		'readable_title' => 'Urls',
 		'breadcrumbs' => array(

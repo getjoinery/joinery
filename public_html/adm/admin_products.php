@@ -15,7 +15,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 5,
+		'menu-id'=> 'products-list',
 		'page_title' => 'Products',
 		'readable_title' => 'Products',
 		'breadcrumbs' => array(

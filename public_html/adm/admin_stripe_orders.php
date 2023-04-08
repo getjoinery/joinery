@@ -100,7 +100,7 @@
 		$page = new AdminPage();
 		$page->admin_header(
 		array(
-			'menu-id'=> 4,
+			'menu-id'=> 'stripe-payments',
 			'page_title' => 'Stripe orders',
 			'readable_title' => 'Stripe orders',
 		'breadcrumbs' => array(

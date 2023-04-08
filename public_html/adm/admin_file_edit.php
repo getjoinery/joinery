@@ -66,7 +66,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 9,
+		'menu-id'=> 'files-parent',
 		'page_title' => 'File Edit',
 		'readable_title' => 'File Edit',
 		'breadcrumbs' => NULL,

@@ -60,7 +60,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'all-events',
 		'page_title' => 'Events',
 		'readable_title' => 'Events',
 		'breadcrumbs' => $breadcrumb_array,

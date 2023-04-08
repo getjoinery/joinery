@@ -33,7 +33,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
+		'menu-id'=> 'orders-list',
 		'page_title' => 'Order Refunds',
 		'readable_title' => 'Order Refunds',
 		'breadcrumbs' => array(

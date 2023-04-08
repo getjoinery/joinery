@@ -35,7 +35,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'event-bundles',
 		'breadcrumbs' => array(
 			'Events'=>'/admin/admin_events', 
 			'Event Bundles'=>'/admin/admin_event_bundles',

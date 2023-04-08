@@ -12,7 +12,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'events',
 		'page_title' => 'Event Types',
 		'readable_title' => 'Event Types',
 		'breadcrumbs' => array(

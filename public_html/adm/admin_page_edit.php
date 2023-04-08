@@ -68,7 +68,7 @@
 	$paget = new AdminPage();
 	$paget->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> 'pages',
 		'breadcrumbs' => array(
 			'Pages'=>'/admin/admin_pages', 
 			'Edit Page' => '',

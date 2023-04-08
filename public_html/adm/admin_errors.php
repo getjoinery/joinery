@@ -34,7 +34,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 12,
+		'menu-id'=> 'errors',
 		'page_title' => 'Errors',
 		'readable_title' => 'Errors',
 		'breadcrumbs' => NULL,

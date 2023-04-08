@@ -63,7 +63,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 26,
+		'menu-id'=> 'blog-posts',
 		'breadcrumbs' => array(
 			'Posts'=>'/admin/admin_posts', 
 			'Edit Post' => '',

@@ -11,7 +11,7 @@ $mintotal = 2;
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 12,
+		'menu-id'=> 'email-deliverability',
 		'breadcrumbs' => array(
 			'Statistics'=>'/admin/admin_analytics_stats',
 			'Email Deliverability' => ''

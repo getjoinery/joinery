@@ -39,7 +39,7 @@ else{
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
+		'menu-id'=> 'email-templates',
 		'page_title' => 'EmailTemplate',
 		'readable_title' => 'Delete EmailTemplate',
 		'breadcrumbs' => array(

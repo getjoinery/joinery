@@ -54,7 +54,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> 'emails-list',
 		'breadcrumbs' => array(
 			'Emails'=>'/admin/admin_emails', 
 			$email->get('eml_description')=>'/admin/admin_email?eml_email_id='.$email->key, 

@@ -77,7 +77,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 35,
+		'menu-id'=> 'surveys',
 		'page_title' => 'Users in Survey',
 		'readable_title' => 'Users in Survey',
 		'breadcrumbs' => array(

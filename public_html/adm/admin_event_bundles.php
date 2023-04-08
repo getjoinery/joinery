@@ -32,7 +32,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'event-bundles',
 		'page_title' => 'Event Bundles',
 		'readable_title' => 'Event Bundles',
 		'breadcrumbs' => array(

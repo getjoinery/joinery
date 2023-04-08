@@ -18,7 +18,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 12,
+		'menu-id'=> 'email-debug-logs',
 		'breadcrumbs' => array(
 			'DebugEmailLogs'=>'/admin/admin_debug_email_logs', 
 			$debug_email_log->get('del_subject') => '',

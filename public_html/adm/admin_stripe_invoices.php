@@ -41,7 +41,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 4,
+		'menu-id'=> 'stripe-payments',
 		'breadcrumbs' => array(
 			'Orders'=>'/admin/admin_orders', 
 			'Stripe Invoices' => ''

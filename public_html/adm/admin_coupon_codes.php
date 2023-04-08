@@ -31,7 +31,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 35,
+		'menu-id'=> 'coupon-codes',
 		'breadcrumbs' => array(
 			'Products'=>'/admin/admin_products', 
 			'Coupon Codes'=>'', 

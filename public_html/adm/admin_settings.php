@@ -62,7 +62,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> -1,
+		'menu-id'=> NULL,
 		'page_title' => 'Settings',
 		'readable_title' => 'Settings',
 		'breadcrumbs' => array(

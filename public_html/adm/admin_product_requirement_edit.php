@@ -59,7 +59,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 5,
+		'menu-id'=> 'product-requirements',
 		'page_title' => 'Product Requirements',
 		'readable_title' => 'Product Requirements',
 		'breadcrumbs' => array(

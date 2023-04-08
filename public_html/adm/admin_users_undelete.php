@@ -54,7 +54,7 @@ else{
 
 	$page->admin_header(	
 	array(
-		'menu-id'=> 1,
+		'menu-id'=> 'users',
 		'page_title' => 'Undelete',
 		'readable_title' => 'Undelete',
 		'breadcrumbs' => array(

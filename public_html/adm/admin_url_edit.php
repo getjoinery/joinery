@@ -63,7 +63,7 @@
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(
-			'menu-id'=> 3,
+			'menu-id'=> 'urls',
 			'page_title' => 'Urls',
 			'readable_title' => 'Urls',
 			'breadcrumbs' => $breadcrumbs,

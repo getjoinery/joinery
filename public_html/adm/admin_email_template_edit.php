@@ -46,7 +46,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> 'email-templates',
 		'breadcrumbs' => array(
 			'Email Templates'=>'/admin/admin_email_templates', 
 			'Edit Email Template' => '',

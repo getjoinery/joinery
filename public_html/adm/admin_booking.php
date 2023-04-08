@@ -41,7 +41,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 26,
+		'menu-id'=> 'bookings',
 		'breadcrumbs' => array(
 			'Bookings'=>'/admin/admin_bookings', 
 			'Booking '.$booking->key =>'',

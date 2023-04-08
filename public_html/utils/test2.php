@@ -491,7 +491,7 @@ exit();
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> NULL,
 		'page_title' => 'Edit Event',
 		'readable_title' => 'Edit Event',
 		'session' => $session,

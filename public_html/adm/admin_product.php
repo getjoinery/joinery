@@ -40,7 +40,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 11,
+		'menu-id'=> 'products-list',
 		'breadcrumbs' => array(
 			'Products'=>'/admin/admin_products', 
 			$product->get('pro_name')=>'',

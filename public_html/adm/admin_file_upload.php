@@ -19,7 +19,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 9,
+		'menu-id'=> 'files-parent',
 		'page_title' => 'File Upload',
 		'readable_title' => 'File Upload',
 		'breadcrumbs' => array(

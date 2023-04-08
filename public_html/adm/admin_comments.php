@@ -32,7 +32,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 26,
+		'menu-id'=> 'comments',
 		'page_title' => 'Comments',
 		'readable_title' => 'Comments',
 		'breadcrumbs' => array(

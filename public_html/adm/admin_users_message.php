@@ -309,7 +309,7 @@
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(
-			'menu-id'=> 2,
+			'menu-id'=> 'users',
 			'page_title' => 'Email Users',
 			'readable_title' => 'Email Users',
 			'breadcrumbs' => NULL,
@@ -348,7 +348,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'users',
 		'page_title' => 'Email Users',
 		'readable_title' => $title,
 		'breadcrumbs' => NULL,

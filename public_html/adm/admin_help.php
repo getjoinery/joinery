@@ -14,7 +14,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 32,
+		'menu-id'=> null,
 		'page_title' => 'Help',
 		'readable_title' => 'Help',
 		'breadcrumbs' => array(

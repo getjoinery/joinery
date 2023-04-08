@@ -440,7 +440,10 @@ Welcome!
 			 \', 1, \'2020-12-23 19:44:22.427349\', \'2022-12-27 18:21:48.785528\', NULL, NULL);';
 		$migrations[] = $migration;
 
-
+		$migration['system_version'] = '0.5.13';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'signups-by-date\' WHERE amu_icon= \'signups-by date\'';
+		$migrations[] = $migration;
 
 
 

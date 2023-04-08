@@ -78,7 +78,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'events',
 		'page_title' => 'Event',
 		'readable_title' => 'Event',
 		'breadcrumbs' => array(

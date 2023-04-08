@@ -48,7 +48,7 @@
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
-		'menu-id'=> 2,
+		'menu-id'=> 'orders-list',
 		'page_title' => 'Edit Order',
 		'readable_title' => 'Edit Order',
 		'breadcrumbs' => $breadcrumbs,
