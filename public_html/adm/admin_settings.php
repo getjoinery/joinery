@@ -136,7 +136,7 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Blog module active", "blog_active", "ctrlHolder", $optionvals, $settings->get_setting('blog_active'), '', FALSE);
 
-	$optionvals = array("/"=>'', '/blog' => '/blog');
+	$optionvals = array("/"=>'/', '/post' => '/post');
 	echo $formwriter->dropinput("Default blog subdirectory", "blog_subdirectory", "ctrlHolder", $optionvals, $settings->get_setting('blog_subdirectory'), '', FALSE);
 
 
