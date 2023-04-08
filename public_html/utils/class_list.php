@@ -415,7 +415,30 @@ Welcome!
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'tracking\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
+		$migration['system_version'] = '0.5.13';
+		$migration['test'] = "SELECT count(1) as count FROM pag_pages WHERE pag_link = 'register-thanks'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."pag_pages"("pag_title", "pag_link", "pag_body", "pag_usr_user_id", "pag_published_time", "pag_create_time", "pag_script_filename", "pag_delete_time") VALUES (\'Registration Welcome Page\', \'register-thanks\', \'			<h2>Thanks for signing up!</h2>
 
+			<p>You will receive an email within 5 minutes to activate your account.</p>
+
+			<ul>
+			<li>Click on the link in the email to activate.</li>
+			<li><strong>If you do not receive this email, please check your email spam folder.</strong></li></ul>
+\', 1, \'2020-12-23 19:46:30.894481\', \'2022-12-27 18:21:48.775604\', NULL, NULL);';
+		$migrations[] = $migration;
+		
+		$migration['system_version'] = '0.5.13';
+		$migration['test'] = "SELECT count(1) as count FROM pag_pages WHERE pag_link = 'verify-email-confirm'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."pag_pages"("pag_title", "pag_link", "pag_body", "pag_usr_user_id", "pag_published_time", "pag_create_time", "pag_script_filename", "pag_delete_time") VALUES (\'Verify Email Confirm\', \'verify-email-confirm\', \'<h2>Congratulations! Your email address is now verified.</h2> 
+				<p>Your email has been verified. </p> 
+				<p></p><hr><p></p> 
+				<h2>What Next?</h2> 
+<p>
+						<a href="/events">Check out upcoming retreats and events</a>.&nbsp; 
+						We have retreats happening all around the world and online courses if you can''t travel.</p>				
+					
+			 \', 1, \'2020-12-23 19:44:22.427349\', \'2022-12-27 18:21:48.785528\', NULL, NULL);';
+		$migrations[] = $migration;
 
 
 
