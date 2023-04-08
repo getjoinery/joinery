@@ -84,10 +84,10 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 		}
 		?>
 		
-		<script type="text/javascript" src="/theme/jeremytunnell/includes/jquery-3.4.1.min.js"></script>
+		<script type="text/javascript" src="/theme/default/includes/jquery-3.4.1.min.js"></script>
 		
 		<!-- jQuery validate -->
-		<script type="text/javascript" src="/theme/jeremytunnell/includes/jquery.validate-1.9.1.js"></script>				
+		<script type="text/javascript" src="/theme/default/includes/jquery.validate-1.9.1.js"></script>				
 		
 <script type="text/javascript" src="/theme/jeremytunnell/includes/wp-includes/js/jquery/jquery-migrate.min.js"></script>
 
