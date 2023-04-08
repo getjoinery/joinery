@@ -248,7 +248,7 @@ if($params[0] == 'profile'){
 //BLOG.  DEFAULT IS TO USE THE /POST/ SUBDIRECTORY
 if($settings->get_setting('blog_active')){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/posts_class.php');
-	$blog_subdirectory = $settings->get_setting('blog_subdirectory');
+	$blog_subdirectory = ltrim($settings->get_setting('blog_subdirectory'), '/');
 
 	if($params[0] == $blog_subdirectory && !$params[1]){
 		$template_file = $template_directory.'/blog.php';
