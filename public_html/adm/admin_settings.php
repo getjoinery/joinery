@@ -98,9 +98,11 @@
 	
 	echo $formwriter->textinput("Preview image (for facebook, google, etc)", 'preview_image', "ctrlHolder", 20, $settings->get_setting('preview_image'), "" , 255, "");
 
-	if($settings->get_setting('tracking')){
-		echo $formwriter->textinput("Tracking code", "tracking_code", "ctrlHolder", 20, $settings->get_setting('tracking_code'), "" , 255, "");	
-	}
+
+	$optionvals = array("Use built in tracking"=>'internal', 'Use custom tracking' => 'custom');
+	echo $formwriter->dropinput("Visit tracking", "register_active", "ctrlHolder", $optionvals, $settings->get_setting('register_active'), '', FALSE);	
+	echo $formwriter->textinput("Tracking code", "tracking_code", "ctrlHolder", 20, $settings->get_setting('tracking_code'), "" , 255, "");	
+	
 	
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Registration active", "register_active", "ctrlHolder", $optionvals, $settings->get_setting('register_active'), '', FALSE);	
@@ -129,30 +131,35 @@
 	
 	echo $formwriter->textbox('Robots.txt entry', 'robots_text', 'ctrlHolder', 10, 80, $settings->get_setting('robots_text'), '', 'no');
 	
-	$blog_active = $settings->get_setting('blog_active');
-	if($blog_active){
-		echo '<h3>Blog Settings</h3>';
 
-		$optionvals = array("Yes"=>'1', 'No' => '0');
-		echo $formwriter->dropinput("Show comments", "show_comments", "ctrlHolder", $optionvals, $settings->get_setting('show_comments'), '', FALSE);	
+	echo '<h3>Blog Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Blog module active", "blog_active", "ctrlHolder", $optionvals, $settings->get_setting('blog_active'), '', FALSE);
 
-		$optionvals = array("Yes"=>'1', 'No' => '0');
-		echo $formwriter->dropinput("Allow comments", "comments_active", "ctrlHolder", $optionvals, $settings->get_setting('comments_active'), '', FALSE);	
+	$optionvals = array("/"=>'', '/blog' => '/blog');
+	echo $formwriter->dropinput("Default blog subdirectory", "blog_subdirectory", "ctrlHolder", $optionvals, $settings->get_setting('blog_subdirectory'), '', FALSE);
 
-		$optionvals = array("Yes"=>'1', 'No' => '0');
-		echo $formwriter->dropinput("Allow comments from unregistered users", "comments_unregistered_users", "ctrlHolder", $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
 
-		$optionvals = array("Approved"=>'approved', 'Unapproved' => 'unapproved');
-		echo $formwriter->dropinput("Default comment status", "default_comment_status", "ctrlHolder", $optionvals, $settings->get_setting('default_comment_status'), '', FALSE);
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Show comments", "show_comments", "ctrlHolder", $optionvals, $settings->get_setting('show_comments'), '', FALSE);	
 
-		echo $formwriter->textinput("Emails to receive comment notifications (separate with comma)", "comment_notification_emails", "ctrlHolder", 20, $settings->get_setting('comment_notification_emails'), "" , 255, "");		
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Allow comments", "comments_active", "ctrlHolder", $optionvals, $settings->get_setting('comments_active'), '', FALSE);	
 
-		echo $formwriter->textinput("Comment anti spam word (blank for none)", "anti_spam_answer_comments", "ctrlHolder", 20, $settings->get_setting('anti_spam_answer'), "" , 255, "");
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Allow comments from unregistered users", "comments_unregistered_users", "ctrlHolder", $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
 
-		$optionvals = array("Yes"=>'1', 'No' => '0');
-		echo $formwriter->dropinput("Use captcha on comments", "use_captcha_comments", "ctrlHolder", $optionvals, $settings->get_setting('use_captcha_comments'), '', FALSE);	
+	$optionvals = array("Approved"=>'approved', 'Unapproved' => 'unapproved');
+	echo $formwriter->dropinput("Default comment status", "default_comment_status", "ctrlHolder", $optionvals, $settings->get_setting('default_comment_status'), '', FALSE);
+
+	echo $formwriter->textinput("Emails to receive comment notifications (separate with comma)", "comment_notification_emails", "ctrlHolder", 20, $settings->get_setting('comment_notification_emails'), "" , 255, "");		
+
+	echo $formwriter->textinput("Comment anti spam word (blank for none)", "anti_spam_answer_comments", "ctrlHolder", 20, $settings->get_setting('anti_spam_answer'), "" , 255, "");
+
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Use captcha on comments", "use_captcha_comments", "ctrlHolder", $optionvals, $settings->get_setting('use_captcha_comments'), '', FALSE);	
+
 	
-	}
  
 	echo '<hr>';
  
@@ -206,12 +213,21 @@
 	echo '<h3>Booking Settings</h3>';
 
 	$optionvals = array("Yes"=>'1', 'No' => '0');
-		echo $formwriter->dropinput("Bookings active", "bookings_active", "ctrlHolder", $optionvals, $settings->get_setting('bookings_active'), '', FALSE);
+	echo $formwriter->dropinput("Booking module active", "bookings_active", "ctrlHolder", $optionvals, $settings->get_setting('bookings_active'), '', FALSE);
 
 	echo $formwriter->textinput("Calendly api token", "calendly_api_token", "ctrlHolder", 20, $settings->get_setting('calendly_api_token'), "" , 255, "");
 	echo $formwriter->textinput("Calendly organization uri", "calendly_organization_uri", "ctrlHolder", 20, $settings->get_setting('calendly_organization_uri'), "" , 255, "");
+
+ 	echo '<h3>Events Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Event module active", "events_active", "ctrlHolder", $optionvals, $settings->get_setting('events_active'), '', FALSE);
+
+
 	
  	echo '<h3>Product Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Product module active", "products_active", "ctrlHolder", $optionvals, $settings->get_setting('products_active'), '', FALSE);
+
 
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("List regular products on product index", "products_list_items_active", "ctrlHolder", $optionvals, $settings->get_setting('products_list_items_active'), '', FALSE);	
@@ -224,7 +240,27 @@
 	
 	echo '<hr>';
 
+	echo '<h3>File Hosting Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("File hosting module active", "files_active", "ctrlHolder", $optionvals, $settings->get_setting('files_active'), '', FALSE);	
+
+	echo '<h3>Video Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Video module active", "videos_active", "ctrlHolder", $optionvals, $settings->get_setting('videos_active'), '', FALSE);
+
+	echo '<h3>CMS Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("CMS module active", "page_contents_active", "ctrlHolder", $optionvals, $settings->get_setting('page_contents_active'), '', FALSE);
+
+	echo '<h3>Url Rewrite Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Url rewrite module active", "urls_active", "ctrlHolder", $optionvals, $settings->get_setting('urls_active'), '', FALSE);
+
+
 	echo '<h3>Email Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Email module active", "emails_active", "ctrlHolder", $optionvals, $settings->get_setting('emails_active'), '', FALSE);	
+
 	$templates = new MultiEmailTemplateStore(
 		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_OUTER),
 		NULL,		//SORT BY => DIRECTION
