@@ -435,7 +435,7 @@ Welcome!
 				<h2>What Next?</h2> 
 <p>
 						<a href="/events">Check out upcoming retreats and events</a>.&nbsp; 
-						We have retreats happening all around the world and online courses if you can''t travel.</p>				
+						We have retreats happening all around the world and online courses if you can not travel.</p>				
 					
 			 \', 1, \'2020-12-23 19:44:22.427349\', \'2022-12-27 18:21:48.785528\', NULL, NULL);';
 		$migrations[] = $migration;
