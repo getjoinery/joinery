@@ -25,7 +25,7 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
           <div class="relative shadow-xl sm:rounded-2xl sm:overflow-hidden">
             <div class="absolute inset-0">
-              <img class="h-full w-full object-cover" src="https://integralzen.org/uploads/large/DOshin-5_tqjplrca.jpg" alt="People working on laptops">
+              <img class="h-full w-full object-cover" src="https://integralzen.org/uploads/large/DOshin-5_tqjplrca.jpg" alt="Doshin Roshi">
              
             </div>
             <div class="relative px-4 py-16 sm:px-6 sm:py-24 lg:py-32 lg:px-8">
