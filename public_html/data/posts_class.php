@@ -105,12 +105,19 @@ class Post extends SystemBase {
 		$settings = Globalvars::get_instance();
 		$blog_subdirectory = $settings->get_setting('blog_subdirectory');
 		if($blog_subdirectory){
-			return '/'.$blog_subdirectory.'/'.$this->get('pst_link');
+			$url = $blog_subdirectory.'/'.$this->get('pst_link');
 		}
 		else{
-			return '/'.$this->get('pst_link');
+			$url = '/'.$this->get('pst_link');
 		}
 		
+		//ADD LEADING SLASH IF NEEDED
+		if(substr($url, 0, 1) == "/"){
+			return $url;
+		}
+		else{
+			return '/'.$url;
+		} 
 	}		
 	
 	function get_tags($return_type = 'name'){ 
