@@ -108,7 +108,7 @@ class Post extends SystemBase {
 			$url = $blog_subdirectory.'/'.$this->get('pst_link');
 		}
 		else{
-			$url = '/'.$this->get('pst_link');
+			$url = $this->get('pst_link');
 		}
 		
 		//ADD LEADING SLASH IF NEEDED
