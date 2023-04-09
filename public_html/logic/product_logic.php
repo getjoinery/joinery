@@ -26,6 +26,9 @@ function product_logic($get_vars, $post_vars, $product){
 	if($product){
 		$page_vars['product'] = $product;
 	}
+	else if($getvars['product_id']){
+		$product = new Product($get_vars['product_id'], TRUE);
+	}
 	else{
 		$product = new Product($post_vars['product_id'], TRUE);
 	}
