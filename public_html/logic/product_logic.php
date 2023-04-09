@@ -35,7 +35,7 @@ function product_logic($get_vars, $post_vars, $product){
 	else{
 		throw new SystemDisplayableError('There is no product present.');
 	}
-	
+	$page_vars['product'] = $product;
 	
 	
 	//IF NO ITEMS REMAINING, SHOW ERROR
