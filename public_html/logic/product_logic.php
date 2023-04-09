@@ -26,12 +26,18 @@ function product_logic($get_vars, $post_vars, $product){
 	if($product){
 		$page_vars['product'] = $product;
 	}
-	else if($getvars['product_id']){
+	else if($get_vars['product_id']){
 		$product = new Product($get_vars['product_id'], TRUE);
 	}
-	else{
+	else if($post_vars['product_id']){
 		$product = new Product($post_vars['product_id'], TRUE);
 	}
+	else{
+		throw new SystemDisplayableError('There is no product present.');
+	}
+	
+	
+	
 	//IF NO ITEMS REMAINING, SHOW ERROR
 	if($product->get('pro_max_purchase_count') > 0){
 		$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
