@@ -1,7 +1,7 @@
 <?php
 
 function event_waiting_list_logic($get_vars, $post_vars, $event_id){
-	
+	$event_id = LibraryFunctions::fetch_variable_local($event_id, 'sdirection', NULL, 'required', '', 'safemode', 'int');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');

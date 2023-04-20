@@ -22,9 +22,9 @@
 		
 		
 		$numperpage = 10;
-		$page_offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-		$page_sort = LibraryFunctions::fetch_variable('sort', 'post_id', 0, '');	
-		$page_direction = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
+		$page_offset = LibraryFunctions::fetch_variable_local($get_vars, 'offset', 0, 'notrequired', '', 'safemode', 'int');
+		$page_sort = LibraryFunctions::fetch_variable_local($get_vars, 'sort', 'post_id', 0, 'notrequired', 'safemode', 'int');	
+		$page_direction = LibraryFunctions::fetch_variable_local($get_vars, 'sdirection', 'DESC', 'notrequired', '', 'safemode', 'string');
 		
 
 		
