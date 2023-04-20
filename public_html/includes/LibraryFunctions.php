@@ -1137,6 +1137,8 @@ class LibraryFunctions {
 	$required - 1 or 0.  If 1, error will be thrown if variable not found.
 	$errortext - Text of error if $required.
 	$require_type - Require that the input be a certain type.  Error if not.
+	$safemode - Returns the variable with stripped tags
+	$require_type - if 'int', will validate the variable as an integer
 
 	*********************************************************************/
 	static function fetch_variable($varname, $defaultvalue, $required=FALSE, $errortext='Some information needed for this page is not present.', $safemode=TRUE, $require_type=FALSE){
@@ -1191,7 +1193,7 @@ class LibraryFunctions {
 			}
 			
 		}
-		else if ($required==1){
+		else if ($required==1 || $required == 'required'){
 			throw new SystemDisplayablePermanentErrorNoLog($errortext);
 		}
 
@@ -1207,14 +1209,63 @@ class LibraryFunctions {
 	$defaultvalue - If not found, will be returned as variable value.
 	$required - 1 or 0.  If 1, error will be thrown if variable not found.
 	$errortext - Text of error if $required.
+	$safemode - Returns the variable with stripped tags
+	$require_type - if 'int', will validate the variable as an integer
 
 	*********************************************************************/
-	static function fetch_variable_local($source, $varname, $defaultvalue, $required=FALSE, $errortext=''){
-		if(isset($source[$varname])){
-			return $source[$varname];
+	static function fetch_variable_local($source, $varname, $defaultvalue, $required=FALSE, $errortext='This variable is required', $safemode=TRUE, $require_type=FALSE){
+		
+		$foundvar = NULL;
+		if(is_array($source)){
+			if(isset($source[$varname])){
+				$foundvar = $source[$varname];
+
+				if($require_type == 'int'){
+					if(!is_numeric($foundvar)){
+						header("HTTP/1.0 404 Not Found");
+						throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+					}
+
+					$foundvar = $foundvar + 0;
+					if(!is_int($foundvar)){
+						header("HTTP/1.0 404 Not Found");
+						throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+					}
+				}
+
+				if($safemode){
+					return strip_tags($foundvar);
+				}
+				else{
+					return $foundvar;
+				}			
+			}
+		}
+		else{
+			$foundvar = $source;
+
+			if($require_type == 'int'){
+				if(!is_numeric($foundvar)){
+					header("HTTP/1.0 404 Not Found");
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+				}
+
+				$foundvar = $foundvar + 0;
+				if(!is_int($foundvar)){
+					header("HTTP/1.0 404 Not Found");
+					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+				}
+			}
+
+			if($safemode){
+				return strip_tags($foundvar);
+			}
+			else{
+				return $foundvar;
+			}			
 		}
 
-		if ($required==1) {
+		if ($required==1 || $required == 'required') {
 			throw new SystemDisplayableError($errortext);
 		}
 
