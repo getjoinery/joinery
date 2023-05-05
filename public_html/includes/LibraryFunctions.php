@@ -1264,7 +1264,6 @@ class LibraryFunctions {
 				return $foundvar;
 			}			
 		}
-
 		else if ($required===1 || $required === 'required' || $required === TRUE){
 			throw new SystemDisplayableError($errortext . ' Var: '. $varname);
 		}
