@@ -39,7 +39,7 @@ class Pager{
 		$this->prefix = $prefix;
 
 		$url_pieces = parse_url($url);
-		parse_str($url_pieces[query], $url_vars);
+		parse_str($url_pieces['query'], $url_vars);
 		
 		$this->currentfile = $url_pieces['path'];
 

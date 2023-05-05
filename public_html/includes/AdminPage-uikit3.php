@@ -771,7 +771,7 @@ class AdminPage{
 				}
 			}
 			
-			echo '<a class="current" href="'.$pager->get_url().'"><strong>'.$pager->current_page().'</strong></a> ';
+			echo '<strong>'.$pager->current_page().'</strong> ';
 			
 			for($x=1; $x<=4;$x++){
 				if($page_number = $pager->is_valid_page('+'.$x)){
