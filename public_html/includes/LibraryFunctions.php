@@ -1194,7 +1194,7 @@ class LibraryFunctions {
 			
 		}
 		else if ($required==1 || $required == 'required'){
-			throw new SystemDisplayablePermanentErrorNoLog($errortext);
+			throw new SystemDisplayablePermanentErrorNoLog($errortext . ' Var: '. $varname);
 		}
 
 		return $defaultvalue;
@@ -1266,7 +1266,7 @@ class LibraryFunctions {
 		}
 
 		if ($required==1 || $required == 'required') {
-			throw new SystemDisplayableError($errortext);
+			throw new SystemDisplayableError($errortext . ' Var: '. $varname);
 		}
 
 		return $defaultvalue;

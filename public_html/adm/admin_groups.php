@@ -13,7 +13,7 @@
 
 	$numperpage = 30; 
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'group_id', 0, '');
+	$sort = LibraryFunctions::fetch_variable('sort', 'grp_update_time', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
