@@ -1193,7 +1193,7 @@ class LibraryFunctions {
 			}
 			
 		}
-		else if ($required==1 || $required == 'required'){
+		else if ($required===1 || $required === 'required' || $required === TRUE){
 			throw new SystemDisplayablePermanentErrorNoLog($errortext . ' Var: '. $varname);
 		}
 
@@ -1265,7 +1265,7 @@ class LibraryFunctions {
 			}			
 		}
 
-		if ($required==1 || $required == 'required') {
+		else if ($required===1 || $required === 'required' || $required === TRUE){
 			throw new SystemDisplayableError($errortext . ' Var: '. $varname);
 		}
 
