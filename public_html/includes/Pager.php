@@ -31,9 +31,6 @@ class Pager{
 			$this->numperpage = 30;
 		}
 		
-		if(!isset($options['numrecords'])){
-			throw new SystemDisplayablePermanentErrorNoLog('Data not provided for creating page numbers: numrecords');
-		}
 
 		$this->numrecords = $options['numrecords'];
 		$this->prefix = $prefix;
