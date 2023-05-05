@@ -130,7 +130,10 @@
 	echo $formwriter->dropinput("Checkout Type", "checkout_type", "ctrlHolder", $optionvals, $settings->get_setting('checkout_type'), '', FALSE);	
 	
 	echo $formwriter->textbox('Robots.txt entry', 'robots_text', 'ctrlHolder', 10, 80, $settings->get_setting('robots_text'), '', 'no');
-	
+
+	echo '<h3>Survey Settings</h3>';
+	$optionvals = array("Yes"=>'1', 'No' => '0');
+	echo $formwriter->dropinput("Survey module active", "surveys_active", "ctrlHolder", $optionvals, $settings->get_setting('surveys_active'), '', FALSE);	
 
 	echo '<h3>Blog Settings</h3>';
 	$optionvals = array("Yes"=>'1', 'No' => '0');
