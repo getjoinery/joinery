@@ -401,6 +401,9 @@ class MultiGroup extends SystemMultiBase {
 				if (array_key_exists('group_name', $this->order_by)) {
 					$sql .= ' grp_name ' . $this->order_by['group_name'];
 				}						
+				if (array_key_exists('grp_update_time', $this->order_by)) {
+					$sql .= ' grp_update_time ' . $this->order_by['grp_update_time'];
+				}
 			}				
 
 			$sql .= ' '.$this->generate_limit_and_offset();				
