@@ -19,19 +19,23 @@ class Pager{
 
 	function __construct($options=array(), $prefix=''){
 		
-		$url = $_SERVER[REQUEST_URI];
-		if($options[getvars]){
-			$url = $options[getvars];
+		$url = $_SERVER['REQUEST_URI'];
+		if($options['getvars']){
+			$url = $options['getvars'];
 		}
 
-		if($options[numperpage]){
-			$this->numperpage = $options[numperpage];
+		if($options['numperpage']){
+			$this->numperpage = $options['numperpage'];
 		}
 		else{
 			$this->numperpage = 30;
 		}
+		
+		if(!isset($options['numrecords'])){
+			throw new SystemDisplayablePermanentErrorNoLog('Data not provided for creating page numbers: numrecords');
+		}
 
-		$this->numrecords = $options[numrecords];
+		$this->numrecords = $options['numrecords'];
 		$this->prefix = $prefix;
 
 		$url_pieces = parse_url($url);
