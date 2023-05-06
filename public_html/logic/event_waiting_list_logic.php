@@ -6,7 +6,7 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_waiting_lists_class.php');
 	
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
@@ -69,14 +69,16 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 		}			
 
 		//ADD TO WAITING LIST
-		$group = $event->get_waiting_list_group();
-			
-		if($group->is_member_in_group($user->key)){
+		$waiting_list = new WaitingList(NULL);
+		$waiting_list->set('ewl_usr_user_id', $user->key);
+		$waiting_list->set('ewl_evt_event_id', $event->key);
+		$result = WaitingList::CheckIfExists($waiting_list->get('ewl_usr_user_id'), $waiting_list->get('ewl_evt_event_id'));
+		if($result){
 			$page_vars['display_message'] = 'You are already on the '.$event->get('evt_name').' waiting list.';
 			$page_vars['message_type'] = 'success';	
 		}
 		else{
-			$group->add_member($user->key);
+			$waiting_list->save();
 			$page_vars['display_message'] = 'You have been added to the '.$event->get('evt_name').' waiting list.';
 			$page_vars['message_type'] = 'success';	
 		}

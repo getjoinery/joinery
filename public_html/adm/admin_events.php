@@ -8,6 +8,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_waiting_lists_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -22,7 +23,7 @@
 	
 	$searches = array();
 	
-	if($_REQUEST['showpast'] == 'all'){
+	if($_REQUEST['filter'] == 'all'){
 		$breadcrumb_array = array('Events'=>'All Events');
 		$sort = 'event_id';
 	}
@@ -71,11 +72,12 @@
 
 
 
-	$headers = array("Event", "Start time", "Published", "Registration", "Registrants", "Sessions");
+	$headers = array("Event", "Start time", "Published", "Registration", "Registrants", "Waiting List", "Sessions");
 	$altlinks = array('New Event'=>'/admin/admin_event_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));	
 	$table_options = array(
-		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
+		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name"),
+		'filteroptions'=>array("Future Events"=>"future", "All Events"=>"all"),
 		'altlinks' => $altlinks,
 		'title' => 'Events',
 		//'search_on' => TRUE
@@ -94,6 +96,10 @@
 		);
 		$numregistrants = $registrants->count_all();
 
+		$waiting_lists = new MultiWaitingList(
+			array('event_id'=>$event->key)
+		);
+		$numwaitinglists = $waiting_lists->count_all();
 		//$user = new User($events->get('evt_usr_user_id'),TRUE);
 
 		$rowvalues = array();
@@ -125,14 +131,15 @@
 			array_push($rowvalues, '<b>Private</b>');
 		} 
 		else if($event->get('evt_visibility') == 1){
-			array_push($rowvalues, '<b>Public</b> - <a href="' . $event->get_url() . '">Public link</a>');
+			array_push($rowvalues, '<a href="' . $event->get_url() . '">Public</a>');
 		}
 		else{
-			array_push($rowvalues, '<b>Public but unlisted</b> - <a href="' . $event->get_url() . '">Public link</a>');
+			array_push($rowvalues, '<a href="' . $event->get_url() . '">Public but unlisted</a>');
 		}			
 		
 		array_push($rowvalues, $event->get('evt_is_accepting_signups') ? 'Open' : 'Closed');
 		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numregistrants.' registered</a>');
+		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numwaitinglists.' on waiting list</a>');
 
 
 		array_push($rowvalues, $numsessions . ' sessions');

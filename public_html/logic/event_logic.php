@@ -7,6 +7,7 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_registrants_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_waiting_lists_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
@@ -31,7 +32,7 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 	$if_registered_message ='';
 	$is_registered = 0;
 	$register_urls = array();
-	$waiting_list_group = $event->get_waiting_list_group();
+	$on_waiting_list = WaitingList::CheckIfExists($session->get_user_id(), $event->key);
 	if($session->get_user_id()){
 		$is_registered = EventRegistrant::check_if_registrant_exists($session->get_user_id(), $event->key);
 	}
@@ -49,7 +50,7 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 		}						
 		else if($event->get('evt_is_accepting_signups') && $event->get_register_url()){	
 			if($event->get('evt_allow_waiting_list') && ($event->get('evt_max_signups') && $numregistrants >= $event->get('evt_max_signups'))){
-				if($session->get_user_id() && $waiting_list_group->is_member_in_group($session->get_user_id())){
+				if($session->get_user_id() && $on_waiting_list){
 					$registration_message = 'You are on the waiting list.';			
 				}
 				else{
@@ -65,7 +66,7 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 			}
 		}
 		else if($event->get('evt_allow_waiting_list')){
-				if($session->get_user_id() && $waiting_list_group->is_member_in_group($session->get_user_id())){
+				if($session->get_user_id() && $on_waiting_list){
 					$registration_message = 'You are on the waiting list.';			
 				}
 				else{

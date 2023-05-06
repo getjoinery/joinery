@@ -61,6 +61,7 @@
 	require_once( __DIR__ . '/../data/mailing_lists_class.php');
 	require_once( __DIR__ . '/../data/mailing_list_registrants_class.php');
 	require_once( __DIR__ . '/../data/booking_types_class.php');
+	require_once( __DIR__ . '/../data/event_waiting_lists_class.php');
 
 	$classes = array(
 			'Address',
@@ -119,7 +120,8 @@
 			'ContactType',
 			'MailingList',
 			'MailingListRegistrant',
-			'BookingType'
+			'BookingType',
+			'WaitingList'
 		);			
 
 
@@ -445,7 +447,10 @@ Welcome!
 		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'signups-by-date\' WHERE amu_icon= \'signups-by date\'';
 		$migrations[] = $migration;
 
-
+		$migration['system_version'] = '0.5.14';
+		$migration['test'] = NULL;
+		$migration['migration_file'] = 'groups_to_waiting_list_migration.php';
+		$migrations[] = $migration;
 
 
 
