@@ -5,6 +5,12 @@ class Pager{
 	private $numperpage = NULL;
 	private $numrecords = NULL;
 	private $prefix = NULL;
+	private $numpagestotal = NULL;
+	private $currentpage = NULL;
+	private $base_url = NULL;
+	
+	private $url_vars = array();	
+
 	private $remaining_url_vars = NULL;
 	private $remaining_var_string = NULL;
 	private $offset = NULL;
@@ -12,10 +18,6 @@ class Pager{
 	private $filter = NULL;
 	private $sdirection = NULL;
 	private $searchterm = NULL;
-	private $numpagestotal = NULL;
-	private $currentpage = NULL;
-	private $base_url = NULL;
-	private $url_vars = array();
 	
 
 	function __construct($options=array(), $prefix=''){
@@ -41,39 +43,80 @@ class Pager{
 		$this->url_vars = $url_vars;
 		$this->base_url = $url_pieces['path'];
 
-		if(isset($url_vars[$prefix . 'offset'])){
-			$this->offset = $url_vars[$prefix . 'offset'];
+		if($options['offset']){
+			$this->offset = $options['offset'];
+			$this->url_vars['offset'] = $options['offset'];
 			unset($url_vars[$prefix . 'offset']);
 		}
+		else{
+			if(isset($url_vars[$prefix . 'offset'])){
+				$this->offset = $url_vars[$prefix . 'offset'];
+				unset($url_vars[$prefix . 'offset']);
+			}
+		}
 
-		if(isset($url_vars[$prefix . 'sort'])){
-			$this->sort = $url_vars[$prefix . 'sort'];
+		if($options['sort']){
+			$this->sort = $options['sort'];
+			$this->url_vars['sort'] = $options['sort'];
 			unset($url_vars[$prefix . 'sort']);
 		}
-
-		if(isset($url_vars[$prefix . 'filter'])){
-			$this->filter = $url_vars[$prefix . 'filter'];
-			unset($url_vars[$prefix . 'filter']);
-		}
-
-		if(isset($url_vars[$prefix . 'sdirection'])){
-			$this->sdirection = $url_vars[$prefix . 'sdirection'];
-			unset($url_vars[$prefix . 'sdirection']);
+		else{
+			if(isset($url_vars[$prefix . 'sort'])){
+				$this->sort = $url_vars[$prefix . 'sort'];
+				unset($url_vars[$prefix . 'sort']);
+			}
 		}
 		
-		if(isset($url_vars[$prefix . 'searchterm'])){
-			$this->searchterm = $url_vars[$prefix . 'searchterm'];
-			unset($url_vars[$prefix . 'searchterm']);
+		if($options['filter']){
+			$this->filter = $options['filter'];
+			$this->url_vars['filter'] = $options['filter'];	
+			unset($url_vars[$prefix . 'filter']);			
 		}
+		else{
+			if(isset($url_vars[$prefix . 'filter'])){
+				$this->filter = $url_vars[$prefix . 'filter'];
+				unset($url_vars[$prefix . 'filter']);
+			}
+		}
+
+		if($options['sdirection']){
+			$this->sdirection = $options['sdirection'];
+			$this->url_vars['sdirection'] = $options['sdirection'];
+			unset($url_vars[$prefix . 'sdirection']);	
+		}
+		else{
+			if(isset($url_vars[$prefix . 'sdirection'])){
+				$this->sdirection = $url_vars[$prefix . 'sdirection'];
+				unset($url_vars[$prefix . 'sdirection']);
+			}
+		}
+		
+		if($options['searchterm']){
+			$this->searchterm = $options['searchterm'];
+			$this->url_vars['searchterm'] = $options['searchterm'];
+			unset($url_vars[$prefix . 'searchterm']);	
+		}
+		else{
+			if(isset($url_vars[$prefix . 'searchterm'])){
+				$this->searchterm = $url_vars[$prefix . 'searchterm'];
+				unset($url_vars[$prefix . 'searchterm']);
+			}
+		}
+		
 		$this->remaining_url_vars = $url_vars;
 		
 		foreach($url_vars as $key => $value){
 			$this->remaining_var_string .= '&'. $key.'='.$value;
 		}
+		
+		if(is_null($this->offset)){
+			$this->offset = 0;
+		}
 
-		$self = $_SERVER['PHP_SELF'];
-
-		$this->numpagestotal = ceil($this->numrecords/$this->numperpage);	
+		if($this->numrecords){
+			$this->numpagestotal = ceil($this->numrecords/$this->numperpage);	
+		}
+		
 		$this->currentpage = floor($this->offset / $this->numperpage)+1;
 	}	
 
@@ -81,20 +124,16 @@ class Pager{
 		return $this->prefix;
 	}
 	
+	function base_url(){
+		return $this->base_url;
+	}
+	
 	function url_vars(){
 		return $this->remaining_url_vars;
 	}
 	
-	function num_per_page(){
-		return $this->numperpage;
-	}
-	
 	function search_term(){
 		return $this->searchterm;
-	}
-	
-	function num_records(){
-		return $this->numrecords;
 	}
 	
 	function get_sort(){
@@ -108,12 +147,35 @@ class Pager{
 	function sort_direction(){
 		return $this->sdirection;
 	}
+	
+	function num_per_page(){
+		if(is_null($this->numperpage)){
+			throw new SystemDisplayablePermanentError("Numperpage is not set for paging.");
+		}
+		return $this->numperpage;
+	}
+	
+	function num_records(){
+		return $this->numrecords;
+	}
+	
 
 	function total_pages(){
+		if(is_null($this->numpagestotal)){
+			throw new SystemDisplayablePermanentError("Numpagestotal is not set for paging.");
+		}
 		return $this->numpagestotal;
 	}		
 	
 	function is_valid_page($page_string){
+		if(is_null($this->currentpage)){
+			throw new SystemDisplayablePermanentError("Current page is not set for paging.");
+		}
+
+		if(is_null($this->numpagestotal)){
+			throw new SystemDisplayablePermanentError("Numpagestotal is not set for paging.");
+		}
+		
 		if($page_string[0] == '+'){
 			$page_add = substr($page_string, 1);
 			$page_number = $this->currentpage + $page_add;
@@ -140,12 +202,12 @@ class Pager{
 	}
 	
 	function current_page(){
+		if(is_null($this->currentpage)){
+			throw new SystemDisplayablePermanentError("Currentpage is not set for paging.");
+		}
 		return $this->currentpage;
 	}
 	
-	function base_url(){
-		return $this->base_url;
-	}
 	
 	function url_vars_as_hidden_input($exclude=array()){
 		
@@ -204,14 +266,33 @@ class Pager{
 	}
 	
 	function records_per_page(){
+		if(is_null($this->numperpage)){
+			throw new SystemDisplayablePermanentError("Numperpage is not set for paging.");
+		}
 		return $this->numperpage;
 	}
 	
 	function current_record_start(){
+		if(is_null($this->numperpage)){
+			throw new SystemDisplayablePermanentError("Numperpage is not set for paging.");
+		}
+		
+		if(is_null($this->currentpage)){
+			throw new SystemDisplayablePermanentError("Currentpage is not set for paging.");
+		}
+		
 		return ($this->currentpage - 1) * $this->numperpage + 1;
 	}
 	
 	function current_record_end(){
+		if(is_null($this->numperpage)){
+			throw new SystemDisplayablePermanentError("Numperpage is not set for paging.");
+		}
+		
+		if(is_null($this->currentpage)){
+			throw new SystemDisplayablePermanentError("Currentpage is not set for paging.");
+		}
+		
 		return (($this->currentpage - 1) * $this->numperpage) + $this->numperpage;
 	}
 	

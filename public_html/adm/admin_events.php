@@ -16,7 +16,7 @@
 
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'event_id', 0, '');
+	$sort = LibraryFunctions::fetch_variable('sort', 'start_time', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 
 
@@ -25,7 +25,6 @@
 	
 	if($_REQUEST['filter'] == 'all'){
 		$breadcrumb_array = array('Events'=>'All Events');
-		$sort = 'event_id';
 	}
 	else{
 		$breadcrumb_array = array('Events'=>'/admin/admin_events', 'Future Events'=>'');
@@ -72,11 +71,23 @@
 
 
 
-	$headers = array("Event", "Start time", "Published", "Registration", "Registrants", "Waiting List", "Sessions");
+	$headers = array("Start time", "Event",  "Published", "Registration", "Registrants", "Waiting List", "Sessions");
 	$altlinks = array('New Event'=>'/admin/admin_event_edit');
-	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));	
+	
+	$pager = new Pager(
+		array(
+			'numrecords'=>$numrecords, 
+			'numperpage'=> $numperpage, 
+			'offset'=>$offset,
+			'sort'=>$sort,  
+			'sdirection'=>$sdirection, 
+			'filter' => $filter
+		)
+	);	
+	
+	
 	$table_options = array(
-		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name"),
+		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name", 'Start Time'=>'start_time'),
 		'filteroptions'=>array("Future Events"=>"future", "All Events"=>"all"),
 		'altlinks' => $altlinks,
 		'title' => 'Events',
@@ -104,26 +115,10 @@
 
 		$rowvalues = array();
 
-		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->get('evt_name'). '</strong></a>');
-
-/*
-		$rowvalues[] = $bids->jobs_count(5, 5);
-		$rowvalues[] = $bids->jobs_count(15, 50);
-		$rowvalues[] = $bids->jobs_count(NULL, 0);
-		$rowvalues[] = $bids->jobs_count(20, 50);
-
-		// Figure out how many estimates were viewed!
-		$viewed_job_items = 0;
-		foreach($bids->all_job_items() as $job_item) {
-			$viewed_job_items += $job_item->get('jbi_buyer_last_seen_time') ? 1 : 0;
-		}
-		$rowvalues[] = $viewed_job_items;
-		*/
-
-		//array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$event->get('evt_usr_user_id').'">user</a>');
-		//array_push($rowvalues, $event->get_event_start_time());
 		array_push($rowvalues, LibraryFunctions::convert_time($event->get('evt_start_time_local'), $session->get_timezone(), $session->get_timezone(), 'M j, Y'));
 		 
+		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->get('evt_name'). '</strong></a>');
+
 		if($event->get('evt_delete_time')){
 			array_push($rowvalues, '<b>Deleted</b>');
 		}
