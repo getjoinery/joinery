@@ -8,6 +8,7 @@ require_once($siteDir . '/includes/Pager.php');
 
 require_once($siteDir . '/data/admin_menus_class.php');
 
+
 class AdminPage{
 
 	private $rowcount;
@@ -52,6 +53,7 @@ class AdminPage{
 
 	function admin_header($pagevars, $display=TRUE) 
 	{
+
 
 		$_GLOBALS['page_header_loaded'] = true;
 		
@@ -633,7 +635,8 @@ class AdminPage{
 
 		if($sortoptions){
 			echo '<div class="uk-align-left">';
-			printf('<form method="get" ACTION="%s">', $_SERVER[REQUEST_URI]);
+			printf('<form method="get" ACTION="%s">', $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('sort', 'sdirection'));
 			echo '<label for="'.$pager->prefix().'sort'.'">Sort: </label><select name="'.$pager->prefix().'sort'.'">';
 			foreach ($sortoptions as $key => $value) {
 				if($pager->get_sort() == $value){
@@ -647,7 +650,7 @@ class AdminPage{
 
 
 			echo '<label for="'.$pager->prefix().'sdirection'.'"> </label><select name="'.$pager->prefix().'sdirection'.'">';
-			$diroptions = array('Ascending'=>'ASC', 'Descending'=>'DESC');
+			$diroptions = array('Descending'=>'DESC', 'Ascending'=>'ASC');
 			foreach ($diroptions as $key => $value) {
 				if($pager->sort_direction() == $value){
 					echo "<option value='$value' selected=selected>$key";
@@ -671,7 +674,8 @@ class AdminPage{
 
 		if($filteroptions){
 			echo '<div class="uk-align-left">';
-			printf('<form method="get" ACTION="%s">', $_SERVER[REQUEST_URI]);
+			printf('<form method="get" ACTION="%s">', $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('filter'));
 			echo '<label for="'.$pager->prefix().'filter'.'">Show: </label><select name="'.$pager->prefix().'filter'.'">';
 			foreach ($filteroptions as $key => $value) {
 				if($pager->get_filter() == $value){
@@ -697,8 +701,8 @@ class AdminPage{
 			
 			echo '<div id="example1_filter" class="uk-align-right">';
 			$formwriter = new FormWriterMaster("search_form");
-			echo $formwriter->begin_form("search_form", "get", $_SERVER[REQUEST_URI]);
-			
+			echo $formwriter->begin_form("search_form", "get", $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('searchterm'));
 			echo '<label for="searchterm">Search: </label>
 						  <input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.$pager->search_term().'" size="20" type="text" class="textInput" maxlength="">';	
 			
