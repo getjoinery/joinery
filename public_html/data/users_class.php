@@ -60,7 +60,8 @@ class User extends SystemBase {
 		'sva_usr_user_id' => User::USER_DELETED,
 		'vse_usr_user_id' => User::USER_DELETED,
 		'prd_usr_user_id' => User::USER_DELETED,
-		'mlr_usr_user_id' => 'delete'
+		'mlr_usr_user_id' => 'delete',
+		'ewl_usr_user_id' => 'delete'
 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
