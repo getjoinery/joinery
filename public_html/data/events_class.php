@@ -12,6 +12,7 @@ require_once($siteDir . '/data/event_registrants_class.php');
 require_once($siteDir . '/data/files_class.php');
 require_once($siteDir . '/data/content_versions_class.php');
 require_once($siteDir . '/data/groups_class.php');
+require_once($siteDir . '/data/event_waiting_lists_class.php');
 
 require_once($siteDir . '/includes/calendar-links/Link.php');
 require_once($siteDir . '/includes/calendar-links/Generator.php');
@@ -599,11 +600,19 @@ class Event extends SystemBase {
 			$this_transaction = true;
 		}		
 		
-		//DELETE ANY GROUP MEMBERSHIPS
-		$groups = Group::get_groups_in_category('event');
-		foreach($groups as $group){
-			$group->remove_member($this->key);
-		}
+		//DELETE ANY REGISTRATIONS
+		$event_registrants = new MultiEventRegistrant(array('event_id' => $this->key), NULL);
+		$event_registrants->load();
+		foreach($event_registrants as $event_registrant){
+			$event_registrant->remove();
+		}	
+		
+		//DELETE WAITING LIST
+		$event_registrants = new MultiMailingList(array('event_id' => $this->key), NULL);
+		$event_registrants->load();
+		foreach($event_registrants as $event_registrant){
+			$event_registrant->remove();
+		}	
 		
 		parent::permanent_delete($debug);
 		
