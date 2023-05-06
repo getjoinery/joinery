@@ -374,7 +374,7 @@
 						if($numaddressrecords){
 							foreach($addresses as $address) {
 
-								echo 'Address:  ('.$address->key.') '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit.php?usa_address_id='. $address->key .'">edit</a>]<br />' ;
+								echo 'Address: '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit.php?usa_address_id='. $address->key .'">edit</a>]<br />' ;
 
 
 								$page->disprow($rowvalues);

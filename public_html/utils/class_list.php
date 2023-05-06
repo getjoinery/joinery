@@ -472,5 +472,12 @@ Welcome!
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
+		$migration['system_version'] = '0.5.17';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = 'ALTER TABLE usa_users_addrs ALTER COLUMN usa_usr_user_id drop not null;';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;		
+		
+
 ?>
 

@@ -110,25 +110,32 @@ class PhoneNumberRequirement extends BasicProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Phone Number", "phone", NULL, 11, '', "Example: 123-456-6789", 17, "");
+		//echo $formwriter->textinput("Phone Number", "phone", NULL, 11, '', "Example: 123-456-6789", 17, "");
+		PhoneNumber::PlainForm($formwriter, NULL);
 	}
 
 	public function get_validation_info() {
 		return array(
-			'phone' => array(
+			'phn_phone_number' => array(
 				'required' => array('true', 'Phone number is required'),
-				'regex' => array('\'^[0-9]{3}[- \.]?[0-9]{3}[- \.]?[0-9]{4}$\'', 'Phone Number should be in this form: XXX-XXX-XXXX')
+				//'regex' => array('\'^[0-9]{3}[- \.]?[0-9]{3}[- \.]?[0-9]{4}$\'', 'Phone Number should be in this form: XXX-XXX-XXXX')
 			));
 	}
 
 	public function validate_form($data, $session=NULL) {
+		/*
 		if (empty($data['phone']) || !preg_match('/^[0-9]{3}[- \.]?[0-9]{3}[- \.]?[0-9]{4}$/', $data['phone'])) {
 			throw new BasicProductRequirementException('Phone Number is not valid, must be XXX-XXX-XXXX');
 		}
+		*/
+		if (empty($data['phn_phone_number'])) {
+			throw new BasicProductRequirementException('Phone Number is not valid');
+		}
+
 
 		return array(
-			array('phone' => $data['phone']),
-			array('Phone Number' => $data['phone']));
+			array('phn_phone_number' => $data['phn_phone_number']),
+			array('Phone Number' => $data['phn_phone_number']));
 	}
 }
 
@@ -163,7 +170,7 @@ class DOBRequirement extends BasicProductRequirement {
 				<select style="width: 100px;" name="dob_year" id="dob_year" class="mt-1 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
 				<option value="" selected></option>
 				<?php
-				foreach(range(intval(date('Y') - 17), 1900, -1) as $year) {
+				foreach(range(intval(date('Y') - 0), 1900, -1) as $year) {
 					echo "<option value=\"$year\">$year</option>";
 				}
 				?>
@@ -199,7 +206,7 @@ class DOBRequirement extends BasicProductRequirement {
 		$month = intval($data['dob_month']);
 		$year = intval($data['dob_year']);
 
-		if ($day < 1 || $day > 31 || $month < 1 || $month > 12 || $year < 1900 || $year > 2020) {
+		if ($day < 1 || $day > 31 || $month < 1 || $month > 12 || $year < 1900 || $year > 2030) {
 			throw new BasicProductRequirementException('Date of Birth is invalid.');
 		}
 
@@ -246,11 +253,16 @@ class AddressRequirement extends BasicProductRequirement {
 				echo '<div id="new_address_block" style="display:none;">';
 				Address::PlainForm($formwriter, NULL, array('privacy' => 1, 'usa_type' => 'HM'));
 				echo '</div>';
-			} else {
+			} 
+			else {
 				echo $formwriter->hiddeninput('address', 'new');
 				Address::PlainForm($formwriter, NULL, array('privacy' => 1, 'usa_type' => 'HM'));
 			}
-		} 
+		}
+		else{
+			echo $formwriter->hiddeninput('address', 'new');
+			Address::PlainForm($formwriter, NULL, array('privacy' => 1, 'usa_type' => 'HM'));			
+		}
 	}
 
 	function get_javascript() {
@@ -277,8 +289,8 @@ class AddressRequirement extends BasicProductRequirement {
 				'required' => array('is_new_address', 'City must be set.')),
 			'usa_zip_code_id' => array(
 				'required' => array('is_new_address', 'Zip/Postcode must be set.')),
-			/*'usa_state' => array(
-				'required' => array('is_new_address', 'State must be set.')),*/
+			'usa_state' => array(
+				'required' => array('is_new_address', 'State must be set.')),
 		);
 	}
 
@@ -289,7 +301,11 @@ class AddressRequirement extends BasicProductRequirement {
 
 		if ($data['address'] === 'new') {
 			try {
-				$address = Address::CreateAddressFromForm($data, $session->get_user_id());
+				$user_id = NULL;
+				if($session->get_user_id()){
+					$user_id = $session->get_user_id();
+				}
+				$address = Address::CreateAddressFromForm($data, $user_id);
 				return array(
 					array('address' => $address),
 					array('Address' => $address->get_address_string(', '))
@@ -685,12 +701,22 @@ class Product extends SystemBase {
 	}	
 	
 	//GET ALL OF THE ADDITIONAL PRODUCT REQUIREMENTS FOR THIS PRODUCT
-	function get_requirement_instances(){
-		$pri_lists = new MultiProductRequirementInstance(
-		array('product_id'=>$this->key),
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
+	function get_requirement_instances($deleted=false){
+		if(!$deleted){
+			$pri_lists = new MultiProductRequirementInstance(
+			array('product_id'=>$this->key, 'deleted' => false),
+			NULL,		//SORT BY => DIRECTION
+			NULL,  //NUM PER PAGE
+			NULL);  //OFFSET			
+		}
+		else{
+			$pri_lists = new MultiProductRequirementInstance(
+			array('product_id'=>$this->key),
+			NULL,		//SORT BY => DIRECTION
+			NULL,  //NUM PER PAGE
+			NULL);  //OFFSET			
+		}
+
 		$pri_lists->load();	
 		return $pri_lists;
 	}
@@ -698,23 +724,32 @@ class Product extends SystemBase {
 
 	//SAVE THE SET OF NEW REQUIREMENT INSTANCES
 	function save_requirement_instances($requirements){
+		if(empty($requirements)){
+			$requirements = array();
+		}
 		$requirements = array_filter($requirements);
 
-		if(empty($requirements)){
-			return false;
-		}
 		
 		//FIRST GET A LIST OF THE CURRENT REQUIREMENT INSTANCES
-		$pri_lists = $this->get_requirement_instances();
+		
+		$pri_lists = $this->get_requirement_instances(true);
 		$to_process = array();
 		foreach($pri_lists as $pri_list){
 			$to_process[] = $pri_list->get('pri_prq_product_requirement_id');
 		}
+
 		
 		foreach ($requirements as $choice => $value){
 			//THEN CYCLE THROUGH THE NEW ONES, ADD IF IT'S NOT THERE
 			if(in_array($value, $to_process)){
-				//ITS ALREADY THERE, JUST REMOVE IT FROM THE LIST
+				//ITS ALREADY THERE, UNDELETE(IF NEEDED) AND REMOVE IT FROM THE LIST
+				$product_requirement_instances = new MultiProductRequirementInstance(array('product_id' => $this->key, 'product_requirement_id' => $value));  	
+				$product_requirement_instances->load();	
+				foreach($product_requirement_instances as $product_requirement_instance){
+					$product_requirement_instance->set('pri_delete_time', NULL);
+					$product_requirement_instance->save();
+				}
+				
 				unset($to_process[$choice]);
 			}
 			else{
@@ -729,16 +764,17 @@ class Product extends SystemBase {
 			}
 		}
 		
-		print_r($to_process);
+
 		//IF ANY ARE LEFT, SET THEM TO DELETED
 		//WE ARE NOT ALLOWING FULL DELETION IN CASE THERE ARE REFERENCES IN THE DATABASE
 		foreach($pri_lists as $pri_list){
-			if(in_array($to_process, $pri_list->get('pri_prq_product_requirement_id'))){
+			if(in_array($pri_list->get('pri_prq_product_requirement_id'), $to_process)){
 				$pri = new ProductRequirementInstance($pri_list->key, TRUE);
 				$pri->set('pri_delete_time', 'now()');
 				$pri->save();
 			}
 		}
+
 	}	
 	
 	function get_requirement_validation(){

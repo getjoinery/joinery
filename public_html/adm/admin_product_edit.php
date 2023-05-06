@@ -41,9 +41,10 @@
 				$product->set('pro_requirements', $total_value);
 			}
 
-			if($_POST['additional_pro_requirements']){
-				$product->save_requirement_instances($_POST['additional_pro_requirements']);
-			}
+
+
+			$product->save_requirement_instances($_POST['additional_pro_requirements']);
+			
 
 			
 			if($_POST['pro_evt_event_id'] == '' || $_POST['pro_evt_event_id'] == 0){
@@ -332,6 +333,8 @@
 	echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 
 
+	$instances = $product->get_requirement_instances(false);
+
 	$product_requirements = new MultiProductRequirement(
 		array('deleted'=>false),
 		NULL,		//SORT BY => DIRECTION
@@ -340,19 +343,7 @@
 	if($product_requirements->count_all()){
 		$product_requirements->load();
 		$optionvals = $product_requirements->get_dropdown_array();
-		/*
-		if ($product->key) {
-			//FILL THE CHECKED VALUES AND DECLARE EMAIL AND NAME READ ONLY
-			$checkedvals = $product->get_requirement_info('ids');
-			$checkedvals[] = 1;
-			$checkedvals[] = 64;
-			$readonlyvals = array(1, 64); //DEFAULT
-		}
-		else{
-			$checkedvals = array(1, 64);
-			$readonlyvals = array(1, 64); //DEFAULT
-		}
-		*/
+		
 		$readonlyvals = array(); 
 		$checkedvals = array();
 		$disabledvals = array();
@@ -360,7 +351,15 @@
 			if($product_requirement->get('prq_is_default_checked')){
 				$checkedvals[] = $product_requirement->key;
 			}
+			
+			foreach($instances as $instance){
+				if($product_requirement->key == $instance->get('pri_prq_product_requirement_id')){
+					$checkedvals[] = $instance->get('pri_prq_product_requirement_id');
+				}
+			}
 		}
+		
+		
 		echo $formwriter->checkboxList("Additional Info to collect at purchase", 'additional_pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 	}
 
