@@ -445,18 +445,32 @@ Welcome!
 		$migration['system_version'] = '0.5.13';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'signups-by-date\' WHERE amu_icon= \'signups-by date\'';
+		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
 		$migration['system_version'] = '0.5.14';
 		$migration['test'] = NULL;
+		$migration['migration_sql'] = NULL;
 		$migration['migration_file'] = 'groups_to_waiting_list_migration.php';
 		$migrations[] = $migration;
 
+		$migration['system_version'] = '0.5.15';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = NULL;
+		$migration['migration_file'] = 'groups_to_waiting_list_migration.php';
+		$migrations[] = $migration;
 
+		$migration['system_version'] = '0.5.16';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_menudisplay= \'Events List\' and amu_slug=\'events-list\' WHERE amu_menudisplay= \'Future Events\'';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
 
-
-
-
+		$migration['system_version'] = '0.5.16';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = 'DELETE FROM amu_admin_menus WHERE amu_menudisplay= \'All Events\'';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
 
 ?>
 
