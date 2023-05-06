@@ -134,7 +134,7 @@
 			array_push($rowvalues, '<a href="' . $event->get_url() . '">Public</a>');
 		}
 		else{
-			array_push($rowvalues, '<a href="' . $event->get_url() . '">Public but unlisted</a>');
+			array_push($rowvalues, '<a href="' . $event->get_url() . '">Unlisted</a>');
 		}			
 		
 		array_push($rowvalues, $event->get('evt_is_accepting_signups') ? 'Open' : 'Closed');
