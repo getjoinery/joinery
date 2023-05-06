@@ -14,7 +14,8 @@ class Pager{
 	private $searchterm = NULL;
 	private $numpagestotal = NULL;
 	private $currentpage = NULL;
-	private $currentfile = NULL;
+	private $base_url = NULL;
+	private $url_vars = array();
 	
 
 	function __construct($options=array(), $prefix=''){
@@ -37,8 +38,8 @@ class Pager{
 
 		$url_pieces = parse_url($url);
 		parse_str($url_pieces['query'], $url_vars);
-		
-		$this->currentfile = $url_pieces['path'];
+		$this->url_vars = $url_vars;
+		$this->base_url = $url_pieces['path'];
 
 		if(isset($url_vars[$prefix . 'offset'])){
 			$this->offset = $url_vars[$prefix . 'offset'];
@@ -64,7 +65,6 @@ class Pager{
 			$this->searchterm = $url_vars[$prefix . 'searchterm'];
 			unset($url_vars[$prefix . 'searchterm']);
 		}
-		
 		$this->remaining_url_vars = $url_vars;
 		
 		foreach($url_vars as $key => $value){
@@ -143,6 +143,66 @@ class Pager{
 		return $this->currentpage;
 	}
 	
+	function base_url(){
+		return $this->base_url;
+	}
+	
+	function url_vars_as_hidden_input($exclude=array()){
+		
+		$out_string = '';
+		
+		foreach($this->url_vars as $name=>$value){
+			if(!in_array($name, $exclude)){
+				$out_string .= '<input type="hidden"  name="'.$prefix . $name.'" value="'.$value.'">';
+			}
+		}
+		return $out_string;
+	}
+	
+	function current_url($exclude=array()){
+		$base_url = $this->base_url;
+		$prefix = $this->prefix;
+		
+		$url_vars = array();
+		if(isset($this->offset)){
+			if(in_array('offset', $exclude)){
+				$url_vars[$prefix . 'offset'] = $this->offset;
+			}
+		}
+
+		if(isset($this->sort)){
+			if(in_array('sort', $exclude)){
+				$url_vars[$prefix . 'sort'] = $this->sort;
+			}
+		}
+		
+		if(isset($this->filter)){
+			if(in_array('filter', $exclude)){
+				$url_vars[$prefix . 'filter'] = $this->filter;
+			}
+		}
+		
+		if(isset($this->sdirection)){
+			if(in_array('sdirection', $exclude)){
+				$url_vars[$prefix . 'sdirection'] = $this->sdirection;
+			}
+		}
+		
+		if(isset($this->searchterm)){
+			if(in_array('searchterm', $exclude)){
+				$url_vars[$prefix . 'searchterm'] = $this->searchterm;
+			}
+		}
+		
+		$url_pieces = array();
+		foreach ($url_vars as $name=>$value){
+			$url_pieces[] = $prefix . $name.'='.$value;
+		}
+		$url_string = $base_url .'?'. implode('&', $url_pieces). $this->remaining_var_string;
+		return $url_string;
+		
+	}
+	
 	function records_per_page(){
 		return $this->numperpage;
 	}
@@ -161,7 +221,7 @@ class Pager{
 		}
 		
 		if(!$new_page){
-			$new_page = $this->currentfile;
+			$new_page = $this->base_url;
 		}		
 		
 		if(!$page_number = $this->is_valid_page($page_string)){
