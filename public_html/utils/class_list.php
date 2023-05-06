@@ -462,7 +462,7 @@ Welcome!
 
 		$migration['system_version'] = '0.5.16';
 		$migration['test'] = NULL;
-		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_menudisplay= \'Events List\' and amu_slug=\'events-list\' WHERE amu_menudisplay= \'Future Events\'';
+		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_menudisplay= \'Events List\', amu_slug=\'events-list\' WHERE amu_menudisplay= \'Future Events\'';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
