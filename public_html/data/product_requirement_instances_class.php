@@ -107,7 +107,10 @@ class MultiProductRequirementInstance extends SystemMultiBase {
 			$where_clauses[] = 'pri_prq_product_requirement_id = ?';
 			$bind_params[] = array($this->options['product_requirement_id'], PDO::PARAM_INT);
 		}
-		
+
+		if (array_key_exists('deleted', $this->options)) {
+			$where_clauses[] = 'pri_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}		
 			
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';

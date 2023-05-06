@@ -66,7 +66,7 @@ class PhoneNumber extends SystemBase {
 	public static $zero_variables = array();
 
 	public static $initial_default_values = array(
-		'phn_create_time' => 'now()');	
+		'phn_create_time' => 'now()', 'phn_cco_country_code_id' => 1);	
 	
 	public static $phone_carriers = array(
 		'Alltel'=>'message.alltel.com',
@@ -92,10 +92,14 @@ class PhoneNumber extends SystemBase {
 		}
 		
 		$phone_number->set('phn_phone_number', preg_replace('/[^0-9]/', '', $form_data['phn_phone_number']));
-		$phone_number->set('phn_is_private', $form_data['phn_is_private']);
-
-		$phone_number->set('phn_cco_country_code_id', $form_data['phn_cco_country_code_id']);
-
+		
+		if($form_data['phn_is_private']){
+			$phone_number->set('phn_is_private', $form_data['phn_is_private']);
+		}
+		
+		if($form_data['phn_cco_country_code_id']){
+			$phone_number->set('phn_cco_country_code_id', $form_data['phn_cco_country_code_id']);
+		}
 
 		// If they have already entered this phone number, just return that
 		$duplicate_number = $phone_number->check_for_duplicates();

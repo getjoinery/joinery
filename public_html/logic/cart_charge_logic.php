@@ -7,10 +7,12 @@ function cart_charge_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php'); 
-
+			
 	$page_vars = array();
 	
 	$session = SessionControl::get_instance();
@@ -33,29 +35,34 @@ function cart_charge_logic($get_vars, $post_vars){
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 	$page_vars['currency_symbol'] = $currency_symbol;
 
-	if($_SESSION['test_mode']){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
+	
 
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-	
-	$page_vars['api_key'] = $api_key;
-	$page_vars['api_secret_key'] = $api_secret_key;
-	
-	\Stripe\Stripe::setApiKey($api_key);
 
 	$cart = $session->get_shopping_cart();
 	$page_vars['cart'] = $cart;
 	$charge_total = $cart->get_total();
 
+	if($charge_total){
+		if($_SESSION['test_mode']){
+			$api_key = $settings->get_setting('stripe_api_key_test');
+			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+		}
+		else{
+			$api_key = $settings->get_setting('stripe_api_key');
+			$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+		}
+
+		if(!$api_key || !$api_secret_key){
+			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+			exit();			
+		}
+		
+		$page_vars['api_key'] = $api_key;
+		$page_vars['api_secret_key'] = $api_secret_key;
+		
+		\Stripe\Stripe::setApiKey($api_key);
+	}
+	
 	$receipts = array();
 	
 	
@@ -187,6 +194,20 @@ function cart_charge_logic($get_vars, $post_vars){
 			
 			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
 			$order_item->save_cart_data($data);
+
+			//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
+			if(!$user->phone() && $data['phn_phone_number']){
+				$phone_number = PhoneNumber::CreateFromForm($data, $user->key, NULL, FALSE);
+			}
+			
+			//IF THE USER ENTERED AN ADDRESS, SAVE THAT
+			if(!$user->address() && $data['address']){
+				$address = $data['address'];
+				if(!$address->get('usa_usr_user_id')){
+					$address->set('usa_usr_user_id', $user->key);
+					$address->save();
+				}
+			}
 
 			if($settings->get_setting('checkout_type') == 'stripe_regular'){
 				//CHECK FOR EXISTING PLAN
@@ -492,7 +513,20 @@ function cart_charge_logic($get_vars, $post_vars){
 			
 			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
 			$order_item->save_cart_data($data);
-
+			
+			//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
+			if(!$user->phone() && $data['phn_phone_number']){
+				$phone_number = PhoneNumber::CreateFromForm($data, $user->key, NULL, FALSE);
+			}
+			
+			//IF THE USER ENTERED AN ADDRESS, SAVE THAT
+			if(!$user->address() && $data['address']){
+				$address = $data['address'];
+				if(!$address->get('usa_usr_user_id')){
+					$address->set('usa_usr_user_id', $user->key);
+					$address->save();
+				}
+			}
 			
 			//ATTACH USERS TO THE RIGHT EVENTS/COURSES
 			if($product->get('pro_evt_event_id')){

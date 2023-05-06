@@ -132,7 +132,7 @@ class Address extends SystemBase {
 	);
 
 
-	public static $required_fields = array('usa_usr_user_id');
+	public static $required_fields = array();
 	
 	public static $field_constraints = array();
 	
@@ -292,7 +292,7 @@ class Address extends SystemBase {
 
 			// So now the user has entered a new address.  If this address is valid and their
 			// default is not, lets swap it and delete the default one
-			if (!$address->get('usa_is_bad')) {
+			if ($address->get('usa_usr_user_id') && !$address->get('usa_is_bad')) {
 				$user = new User($user_id, TRUE);
 				if($default_address_id = $user->get_default_address()){
 					$default_address = new Address($default_address_id, TRUE);
