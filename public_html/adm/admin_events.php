@@ -71,7 +71,7 @@
 
 
 
-	$headers = array("Start time", "Event",  "Published", "Registration", "Registrants", "Waiting List", "Sessions");
+	$headers = array("Start time", "Event",  "Published", "Registration", "Registrants", "Waiting List");
 	$altlinks = array('New Event'=>'/admin/admin_event_edit');
 	
 	$pager = new Pager(
@@ -97,10 +97,7 @@
 
 	foreach ($events as $event){
 		$searches = array();
-		$searches['event_id'] = $event->key;
-		$event_sessions = new MultiEventSessions(
-			$searches);
-		$numsessions = $event_sessions->count_all();			
+		$searches['event_id'] = $event->key;			
 		
 		$registrants = new MultiEventRegistrant(
 			array('event_id'=>$event->key)
@@ -137,7 +134,6 @@
 		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numwaitinglists.' on waiting list</a>');
 
 
-		array_push($rowvalues, $numsessions . ' sessions');
 		
 		
 		$page->disprow($rowvalues);
