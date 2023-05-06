@@ -633,6 +633,7 @@ class AdminPage{
 		$filteroptions= $options['filteroptions'];
 		$search_on = $options['search_on'];
 
+
 		if($sortoptions){
 			echo '<div class="uk-align-left">';
 			printf('<form method="get" ACTION="%s">', $pager->base_url());
