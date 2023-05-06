@@ -7,12 +7,11 @@
 	require_once($siteDir . '/data/users_class.php');
 
 	if($_REQUEST['password'] != 'testemail'){
-		echo 'bad password';
+		echo 'please enter the password for this utility';
 		exit;
 	}
 	
-	echo 'feature turned off';
-	exit;
+
 
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -35,8 +34,7 @@
 		}
 		else{
 			$mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
-		}
-						
+		}						
 	}
 	$domain = $settings->get_setting('mailgun_domain');		
 
@@ -72,6 +70,6 @@
 	$email_template->email_from = $settings->get_setting('defaultemail');
 	$result = $email_template->send(FALSE);
 
-	echo 'emailTemplate email sent';
+	echo 'Template email sent';
 
 ?>
