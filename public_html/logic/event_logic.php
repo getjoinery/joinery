@@ -15,7 +15,9 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 	$event = Event::get_by_link($static_routes_path);
 	$page_vars['event'] = $event;
 	if(!$event || !$event->get('evt_visibility')){
-		require_once(LibraryFunctions::display_404_page());				
+		if($session->get_permission() < 5){
+			require_once(LibraryFunctions::display_404_page());	
+		}			
 	}
 
 		
