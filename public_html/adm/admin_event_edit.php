@@ -92,10 +92,6 @@
 		$event->save();
 		$event->load();
 				
-		//CREATE THE WAITING LIST
-		if($_POST['evt_allow_waiting_list']){
-			$group = $event->get_waiting_list_group();
-		}
 		
 		LibraryFunctions::redirect('/admin/admin_event?evt_event_id='.$event->key);
 		exit;

@@ -8,8 +8,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/messages_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_waiting_lists_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	
 
 	$session = SessionControl::get_instance();
 	//$session->set_return();
@@ -89,10 +89,16 @@
 			$message->set('msg_sent_time', 'now()');
 			$message->save();			
 			
-			//REGISTRANTS
-			$event_registrants = new MultiEventRegistrant(array('event_id' => $event->key), NULL);
-			//$numregistrants = $event_registrants->count_all();
-			$event_registrants->load();
+			//REGISTRANTS OR WAITING LIST
+			if($_REQUEST['waiting_list']){
+				$event_registrants = new MultiWaitingList(array('event_id' => $event->key), NULL);
+				$event_registrants->load();				
+			}
+			else{
+				$event_registrants = new MultiEventRegistrant(array('event_id' => $event->key), NULL);
+				//$numregistrants = $event_registrants->count_all();
+				$event_registrants->load();
+			}
 			
 			$settings = Globalvars::get_instance();
 			$email_inner_template = $settings->get_setting('event_email_inner_template');
@@ -104,18 +110,34 @@
 			$email_record->save();
 			
 			foreach ($event_registrants as $event_registrant){
-				$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);	
-				$email->fill_template(array(
-					'subject' => $_POST['eml_subject'],
-					'body' => $_POST['eml_message'],
-					//'utm_source' => 'email', //use defaults
-					//'utm_medium' => 'email', //use defaults
-					//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-					'utm_content' => urlencode($_POST['eml_subject']),
-					'evr_event_registrant_id' => $event_registrant->key,			
-				));
+				$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);
 				
-				$recipient = new User($event_registrant->get('evr_usr_user_id'), TRUE);
+				
+				if($_REQUEST['waiting_list']){
+					$recipient = new User($event_registrant->get('ewl_usr_user_id'), TRUE);
+					$email->fill_template(array(
+						'subject' => $_POST['eml_subject'],
+						'body' => $_POST['eml_message'],
+						//'utm_source' => 'email', //use defaults
+						//'utm_medium' => 'email', //use defaults
+						//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+						'utm_content' => urlencode($_POST['eml_subject']),			
+					));
+				}
+				else{
+					$recipient = new User($event_registrant->get('evr_usr_user_id'), TRUE);
+					$email->fill_template(array(
+						'subject' => $_POST['eml_subject'],
+						'body' => $_POST['eml_message'],
+						//'utm_source' => 'email', //use defaults
+						//'utm_medium' => 'email', //use defaults
+						//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+						'utm_content' => urlencode($_POST['eml_subject']),
+						'evr_event_registrant_id' => $event_registrant->key,			
+					));
+				}
+				
+
 						
 				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
 				$email->add_recipient($recipient->get('usr_email'), $recipient->display_name());
@@ -150,19 +172,21 @@
 			}
 			
 			//SEND ONE TO LEADER
-			if($event->get('evt_usr_user_id_leader')){
-				$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
-				$email = new EmailTemplate($email_inner_template, $leader, $email_outer_template, $email_footer_template);
-				$email->fill_template(array(
-					'subject' => 'COPY: '.$_POST['eml_subject'],
-					'body' => $_POST['eml_message'],
-					//'utm_source' => 'email', //use defaults
-					//'utm_medium' => 'email', //use defaults
-					//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-					'utm_content' => urlencode($_POST['eml_subject']), 	
+			if(!$_REQUEST['waiting_list']){
+				if($event->get('evt_usr_user_id_leader')){
+					$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
+					$email = new EmailTemplate($email_inner_template, $leader, $email_outer_template, $email_footer_template);
+					$email->fill_template(array(
+						'subject' => 'COPY: '.$_POST['eml_subject'],
+						'body' => $_POST['eml_message'],
+						//'utm_source' => 'email', //use defaults
+						//'utm_medium' => 'email', //use defaults
+						//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
+						'utm_content' => urlencode($_POST['eml_subject']), 	
 
-				));
-				$result = $email->send();
+					));
+					$result = $email->send();
+				}	
 			}				
 			
 		}
@@ -383,6 +407,10 @@
 	
 	echo $formwriter->textbox('Message', 'eml_message', 'ctrlHolder', 10, 80, '', '', 'yes');
 
+	if($_REQUEST['waiting_list']){
+		echo $formwriter->hiddeninput('waiting_list', 1);
+	}
+	
 	if($event){
 		echo $formwriter->hiddeninput('evt_event_id', $event->key);
 	}

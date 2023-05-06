@@ -16,6 +16,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_logs_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/messages_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_waiting_lists_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -48,6 +49,15 @@
 		exit();				
 	}
 
+	if($_POST['action'] == 'remove_from_waiting_list'){
+
+		$waiting_list = new WaitingList($_POST['ewl_waiting_list_id'], TRUE);
+		$waiting_list->remove();
+
+		$returnurl = $session->get_return();
+		header("Location: $returnurl");
+		exit();				
+	}
 /*
 	$form_errors = new MultiFormError(
 		array('event_id'=>$event->key),
@@ -75,6 +85,11 @@
 	$numregistrants = $event_registrants->count_all();
 	$event_registrants->load();
 
+	//WAITING LIST
+	$waiting_lists = new MultiWaitingList(array('event_id' => $event->key), NULL);
+	$numwaitinglist = $waiting_lists->count_all();
+	$waiting_lists->load();
+	
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -257,6 +272,45 @@
 	}
 
 	$page->endtable();
+	
+	if($numwaitinglist){
+		
+		$headers = array("User", "Registered on", "Action");
+		$altlinks = array();
+		if(!$event->get('evt_delete_time')) {
+			if($_SESSION['permission'] >= 8){
+				$altlinks +=  array('Email waiting list' => '/admin/admin_users_message?waiting_list=1&evt_event_id='.$event->key);
+				//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';
+			}
+		}
+		$box_vars =	array(
+			'altlinks' => $altlinks,
+			'title' => "Waiting List (".$numwaitinglist.')'
+		);
+		$page->tableheader($headers, $box_vars);
+		
+		foreach($waiting_lists as $waiting_list){
+
+			$registrant = new User($waiting_list->get('ewl_usr_user_id'), TRUE);
+
+			$rowvalues=array();
+			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
+			array_push($rowvalues, LibraryFunctions::convert_time($waiting_list->get('ewl_create_time'), 'UTC', $session->get_timezone()));
+
+			
+			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
+			<input type="hidden" class="hidden" name="action" id="action" value="remove_from_waiting_list" />
+			<input type="hidden" class="hidden" name="ewl_waiting_list_id" id="ewl_waiting_list_id" value="'.$waiting_list->key.'" />
+			<button class="uk-button" type="submit">Remove</button>
+			</form>';
+			array_push($rowvalues, $delform);			
+
+			$page->disprow($rowvalues);
+		}
+
+		$page->endtable();	
+	}
+	
 	
 	//MESSAGES
 	$messages = new MultiMessage(array('event_id_only' => $event->key), NULL);
