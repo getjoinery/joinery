@@ -140,7 +140,7 @@
 		NULL);  //OFFSET
 	$files->load();
 	$optionvals = $files->get_file_dropdown_array();
-	echo $formwriter->dropinput("Attach a file (optional)", "prq_fil_file_id", "ctrlHolder", $optionvals, $product_requirement->get('prq_fil_file_id'), '', TRUE);	
+	echo $formwriter->dropinput("Attach a file (optional)", "prq_fil_file_id", "ctrlHolder", $optionvals, $product_requirement->get('prq_fil_file_id'), '', 'None');	
 /*
 	$groups = new MultiGroup(
 		array('category'=>'event'),  //SEARCH CRITERIA
