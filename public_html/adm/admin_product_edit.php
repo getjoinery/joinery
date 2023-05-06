@@ -163,6 +163,8 @@
 			}			
 		}
 		
+		<?php 
+		/*
 		function set_type_choices(){
 			var value = $("#pro_type").val();
 			if(value == 1){  //EVENT TICKET	
@@ -174,6 +176,8 @@
 				$("#pro_digital_link").show();			
 			}		
 		}
+		*/
+		?>
 	
 		function set_expire_choices(){
 			var value = $("#pro_recurring").val(); 
@@ -197,10 +201,10 @@
 				set_expire_choices();
 			});
 			
-			set_type_choices();
-			$("#pro_type").change(function() {	
-				set_type_choices();
-			});	
+			//set_type_choices();
+			//$("#pro_type").change(function() {	
+			//	set_type_choices();
+			//});	
 		});
 	
 		
@@ -227,6 +231,7 @@
 	echo $formwriter->dropinput("Active?", "pro_is_active", "ctrlHolder", $optionvals, $product_status, '', FALSE);
 	echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
 
+	/*
 	if($product->key && $product->get('pro_type') == 0){
 		$optionvals = array('System (do not change)' => 0);
 		echo $formwriter->dropinput("Product type", "pro_type", "ctrlHolder", $optionvals, $product->get('pro_type'), '', FALSE);	
@@ -235,6 +240,7 @@
 		$optionvals = array("Event ticket"=>Product::PRODUCT_TYPE_EVENT, 'Other Item' => Product::PRODUCT_TYPE_ITEM);	
 		echo $formwriter->dropinput("Product type", "pro_type", "ctrlHolder", $optionvals, $product->get('pro_type'), '', FALSE);			
 	}
+	*/
 
 
 	//echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
