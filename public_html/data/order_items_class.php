@@ -143,28 +143,34 @@ class OrderItem extends SystemBase {
 		}
 		
 		foreach ($data_items as $name=>$info){
+			
 			$order_item_requirement = new OrderItemRequirement(NULL);
 			$order_item_requirement->set('oir_odi_order_item_id', $this->key);
 			
 			if(is_array($info)){
 				$order_item_requirement->set('oir_label', $info['question']);
 				$order_item_requirement->set('oir_answer', $info['answer']);
+				
+				if(isset($info['question_id'])){
+					$order_item_requirement->set('oir_qst_question_id', $info['question_id']);
+				}
+		
+				if(isset($info['requirement_id'])){
+					$order_item_requirement->set('oir_prq_product_requirement_id', $info['requirement_id']);
+				}	
 			}
+			else if(is_object($info)){
+				$order_item_requirement->set('oir_label', $name);
+				$order_item_requirement->set('oir_answer', $info->get_address_string(' '));
+			}		
 			else{
 				$order_item_requirement->set('oir_label', $name);
 				$order_item_requirement->set('oir_answer', $info);
 			}
 
-			if(isset($info['question_id'])){
-				$order_item_requirement->set('oir_qst_question_id', $info['question_id']);
-			}
-	
-			if(isset($info['requirement_id'])){
-				$order_item_requirement->set('oir_prq_product_requirement_id', $info['requirement_id']);
-			}	
-			
 			$order_item_requirement->prepare();
 			$order_item_requirement->save();
+			
 		}
 		return true;
 	}

@@ -110,21 +110,21 @@ class PhoneNumberRequirement extends BasicProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Phone Number", "phone", NULL, 11, '', "Example: (+1) 123-456-6789", 17, "");
+		echo $formwriter->textinput("Phone Number", "phone", NULL, 11, '', "Example: 123-456-6789", 17, "");
 	}
 
 	public function get_validation_info() {
 		return array(
 			'phone' => array(
-				'required' => array('true', 'Social security number is required'),
-				'regex' => array('\'^[0-9]{3}[- \.]?[0-9]{2}[- \.]?[0-9]{4}$\'', 'Phone Number should be in this form: +X XXX-XX-XXXX')
+				'required' => array('true', 'Phone number is required'),
+				'regex' => array('\'^[0-9]{3}[- \.]?[0-9]{3}[- \.]?[0-9]{4}$\'', 'Phone Number should be in this form: XXX-XXX-XXXX')
 			));
 	}
 
 	public function validate_form($data, $session=NULL) {
-		//if (empty($data['phone']) || !preg_match('/^[0-9]{3}[- \.]?[0-9]{2}[- \.]?[0-9]{4}$/', $data['ssn'])) {
-		//	throw new BasicProductRequirementException('Phone Number is not valid, must be XXX-XXX-XXXX');
-		//}
+		if (empty($data['phone']) || !preg_match('/^[0-9]{3}[- \.]?[0-9]{3}[- \.]?[0-9]{4}$/', $data['phone'])) {
+			throw new BasicProductRequirementException('Phone Number is not valid, must be XXX-XXX-XXXX');
+		}
 
 		return array(
 			array('phone' => $data['phone']),
@@ -146,12 +146,12 @@ class DOBRequirement extends BasicProductRequirement {
 	public function get_form($formwriter, $user=NULL) {
 ?>
 			<div id="dob_container" class="errorplacement">
-				<label for="dob_date">Date of Birth</label>
+				<label for="dob_date" class="block text-sm font-medium text-gray-700">Date of Birth</label>
 
-				<select style="width: 125px" name="dob_month" id="dob_month">
+				<select style="width: 175px" name="dob_month" id="dob_month" class="mt-1 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
 				<option value="" selected></option><option value="01">01 - January</option><option value="02">02 - February</option><option value="03">03 - March</option><option value="04">04 - April</option><option value="05">05 - May</option><option value="06">06 - June</option><option value="07">07 - July</option><option value="08">08 - August</option><option value="09">09 - September</option><option value="10">10 - October</option><option value="11">11 - November</option><option value="12">12 - December</option></select>
 
-				<select style="width: 50px; margin-left: 15px;" name="dob_day" id="dob_day">
+				<select style="width: 75px;" class="mt-1  text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" name="dob_day" id="dob_day">
 				<option value="" selected></option>
 				<?php
 				foreach(range(1, 31) as $day) {
@@ -160,7 +160,7 @@ class DOBRequirement extends BasicProductRequirement {
 				?>
 				</select>
 
-				<select style="width: 75px; margin-left: 15px;" name="dob_year" id="dob_year">
+				<select style="width: 100px;" name="dob_year" id="dob_year" class="mt-1 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
 				<option value="" selected></option>
 				<?php
 				foreach(range(intval(date('Y') - 17), 1900, -1) as $year) {
@@ -238,8 +238,8 @@ class AddressRequirement extends BasicProductRequirement {
 
 			if (count($address_dropdown_builder) > 1) {
 				echo '<div id="address_container" class=NULL>
-					<label for="address">Address</label>
-					<select name="address" id="address">'
+					<label for="address" class="block text-sm font-medium text-gray-700">Address</label>
+					<select name="address" id="address" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">'
 					. implode('', $address_dropdown_builder) .
 					'</select></div>';
 				$new_address_display = false;
