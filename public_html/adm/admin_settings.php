@@ -218,7 +218,8 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Booking module active", "bookings_active", "ctrlHolder", $optionvals, $settings->get_setting('bookings_active'), '', FALSE);
 
-	echo $formwriter->textinput("Calendly api token", "calendly_api_token", "ctrlHolder", 20, $settings->get_setting('calendly_api_token'), "" , 255, "");
+	echo $formwriter->textbox('Calendly api token', 'calendly_api_token', 'ctrlHolder', 10, 80, $settings->get_setting('calendly_api_token'), '', 'no');
+
 	echo $formwriter->textinput("Calendly organization uri", "calendly_organization_uri", "ctrlHolder", 20, $settings->get_setting('calendly_organization_uri'), "" , 255, "");
 
  	echo '<h3>Events Settings</h3>';
