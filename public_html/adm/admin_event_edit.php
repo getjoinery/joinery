@@ -7,6 +7,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_types_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/surveys_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -64,7 +65,7 @@
 		}
 		
 		
-		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id');
+		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_survey_required');
 
 		foreach($editable_fields as $field) {
 			$event->set($field, $_POST[$field]);
@@ -182,7 +183,7 @@
 	$users->load();
 	$optionvals = $users->get_user_dropdown_array();
 
-	echo $formwriter->dropinput('Led by', 'evt_usr_user_id_leader', 'ctrlHolder', $optionvals, $event->get('evt_usr_user_id_leader'), '', TRUE);
+	echo $formwriter->dropinput('Led by', 'evt_usr_user_id_leader', 'ctrlHolder', $optionvals, $event->get('evt_usr_user_id_leader'), '', 'None');
 	
 	$optionvals = Address::get_timezone_drop_array();
 	echo $formwriter->dropinput("Event Time Zone", "evt_timezone", "ctrlHolder", $optionvals, $event->get('evt_timezone'), '', FALSE);	
@@ -214,9 +215,41 @@
 	echo $formwriter->dropinput("Show calendar link", "evt_show_add_to_calendar_link", "ctrlHolder", $optionvals, $event->get('evt_show_add_to_calendar_link'), '', FALSE);
 	
 	/*
-	$optionvals = array("On"=>1, "Off"=>0);
-	echo $formwriter->dropinput("Pre event survey", "evt_collect_extra_info", "ctrlHolder", $optionvals, $event->get('evt_collect_extra_info'), '', FALSE);
-	*/
+	$surveys = new MultiSurvey(
+		array('deleted'=>false));
+	$surveys->load();
+	$optionvals = $surveys->get_survey_dropdown_array();
+	echo $formwriter->dropinput("Event survey", "evt_svy_survey_id", "ctrlHolder", $optionvals, $event->get('evt_svy_survey_id'), '', 'No Survey');
+
+	$optionvals = array("Required"=>1, "Not Required"=>0);
+	echo $formwriter->dropinput("Event survey required before registration", "evt_survey_required", "ctrlHolder", $optionvals, $event->get('evt_survey_required'), '', FALSE);
+	 
+	 ?>
+	<script type="text/javascript">
+
+
+		function set_survey_choices(){
+			var value = $("#evt_svy_survey_id").val();
+			if(value == ''){ 	
+				$("#evt_survey_required_container").hide();
+			}	
+			else {  
+				$("#evt_survey_required_container").show();				
+			}			
+		}
+		
+	
+		$(document).ready(function() {
+			set_survey_choices();
+			$("#evt_svy_survey_id").change(function() {	
+				set_survey_choices();
+			});	
+			
+		});
+		
+	</script>	 
+	 <?php
+	 */
 	echo $formwriter->hiddeninput('evt_collect_extra_info', '0');
 	
 	$optionvals = array("Condensed (all on one page)"=>1, "Separate (separate pages for each session)"=>2);

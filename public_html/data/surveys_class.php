@@ -21,6 +21,7 @@ class Survey extends SystemBase {
 		'svy_survey_id' => 'delete',	
 		'srq_svy_survey_id' => 'prevent',
 		'sva_svy_survey_id' => 'prevent',
+		'evt_svy_survey_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
@@ -95,7 +96,7 @@ class MultiSurvey extends SystemMultiBase {
 	function get_survey_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $survey) {
-			$items['('.$survey->key.') '.$survey->get('svy_title')] = $survey->key;
+			$items[$survey->get('svy_name')] = $survey->key;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

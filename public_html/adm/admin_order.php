@@ -183,7 +183,7 @@
 		
 		$order_data = $order_item->get_all_data();
 		foreach($order_data as $data){
-			$this_out .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'.htmlspecialchars($data->get('oir_label')) . ': '. htmlspecialchars($data->get('oir_answer')). '<br>';
+			$this_out .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'.htmlspecialchars($data->get('oir_label')) . ': <b>'. htmlspecialchars($data->get('oir_answer')). '</b><br>';
 		}
 	
 		$order_items_out[] = $this_out;

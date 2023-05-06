@@ -178,7 +178,7 @@
 
 
 
-	$headers = array("Registrant", "Registered on", "Order", "Email Verified", "Extra Info", "Action");
+	$headers = array("Registrant", "Registered on", "Order", "Email Verified",  "Action");
 	$altlinks = array();
 	if(!$event->get('evt_delete_time')) {
 		if($_SESSION['permission'] >= 8){
@@ -229,7 +229,7 @@
 		$evr_verified = LibraryFunctions::bool_to_english($registrant->get('usr_email_is_verified'),"Verified", "Unverified");
 		array_push($rowvalues, $evr_verified);	
 
-
+/*
 		$reginfo = '';
 		if($event_registrant->get('evr_recording_consent')){
 			$reginfo .= 'Recording consent: '.LibraryFunctions::bool_to_english($event_registrant->get('evr_recording_consent'),"Yes", "No"). '<br />';
@@ -259,7 +259,7 @@
 			}
 			array_push($rowvalues, $line);
 		}
-		
+	*/	
 		
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />

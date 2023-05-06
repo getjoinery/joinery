@@ -102,6 +102,8 @@ class Event extends SystemBase {
 		'evt_show_add_to_calendar_link' => 'Whether to show the calendar link',
 		'evt_ety_event_type_id' => 'Type of event',
 		'evt_delete_time' => 'Time of deletion',
+		'evt_svy_survey_id'=> 'Survey, if attached',
+		'evt_survey_required' => 'Is the survey required before registration?'
 	); 
 
 	public static $field_specifications = array(
@@ -133,6 +135,8 @@ class Event extends SystemBase {
 		'evt_show_add_to_calendar_link' => array('type'=>'bool'),
 		'evt_ety_event_type_id' => array('type'=>'int4'),
 		'evt_delete_time' => array('type'=>'timestamp(6)'),
+		'evt_svy_survey_id' => array('type'=>'int4'),
+		'evt_survey_required' => array('type'=>'int2'),
 	); 
 			
 	public static $required_fields = array(

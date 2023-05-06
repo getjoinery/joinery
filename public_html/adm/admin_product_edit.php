@@ -301,9 +301,9 @@
 	$optionvals = array(
 		'Name' => 1, 
 		'Email' => 64,
-		//'Phone Number' => 2,
-		//'Date of Birth' => 4,
-		//'Address' => 8,
+		'Phone Number' => 2,
+		'Date of Birth' => 4,
+		'Address' => 8,
 		//'GDPR Notice' => 16,
 		'Consent to record' => 32,
 		'Optional One-time Donation' => 128,
