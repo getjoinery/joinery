@@ -425,9 +425,13 @@ class PublicPageTW extends PublicPageMaster {
           <a href="/login" class="whitespace-nowrap text-base font-medium text-gray-500 hover:text-gray-900">
             Sign in
           </a>
+		  <?php
+		  if(!$settings->get_setting('register_active')){
+			?>
           <a href="/register" class="whitespace-nowrap bg-blue-100 border border-transparent rounded-md py-2 px-4 inline-flex items-center justify-center text-base font-medium text-blue-700 hover:bg-blue-200">
             Sign up
           </a>
+		  <?php } ?>
 		<?php } ?>
         </div>
       </div>
