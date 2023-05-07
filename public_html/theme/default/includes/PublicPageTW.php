@@ -147,6 +147,7 @@ class PublicPageTW extends PublicPageMaster {
 		$session = SessionControl::get_instance();
 		$options = parent::public_header_common($options);
 	
+	
 		$profile_menu = array();
 		$logged_out_menu = array();
 		if ($session->get_user_id()){ 
@@ -157,9 +158,11 @@ class PublicPageTW extends PublicPageMaster {
 			$profile_menu['Settings'] = '/profile/account_edit';
 			$profile_menu['Sign out'] = '/logout';
 		}
-		else{ 
-			$logged_out_menu['Sign in'] = '/login';
-			$logged_out_menu['Sign up'] = '/register';	
+		else{ 		
+			$logged_out_menu['Sign in'] = '/login';			
+			if(!$settings->get_setting('register_active')){
+				$logged_out_menu['Sign up'] = '/register';	
+			}
 		}	
 
 		$cart = $session->get_shopping_cart();
