@@ -11,6 +11,8 @@ function product_logic($get_vars, $post_vars, $product){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirements_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirement_instances_class.php');
 
+
+
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 
@@ -27,10 +29,12 @@ function product_logic($get_vars, $post_vars, $product){
 		$page_vars['product'] = $product;
 	}
 	else if($get_vars['product_id']){
-		$product = new Product($get_vars['product_id'], TRUE);
+		$product_id = LibraryFunctions::fetch_variable_local($get_vars, 'product_id', NULL, TRUE, 'Product ID is required', TRUE, 'int');
+		$product = new Product($product_id, TRUE);
 	}
 	else if($post_vars['product_id']){
-		$product = new Product($post_vars['product_id'], TRUE);
+		$product_id = LibraryFunctions::fetch_variable_local($post_vars, 'product_id', NULL, TRUE, 'Product ID is required', TRUE, 'int');
+		$product = new Product($product_id, TRUE);
 	}
 	else{
 		throw new SystemDisplayableError('There is no product present.');
