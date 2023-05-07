@@ -6,6 +6,7 @@
 
 
 	$session = SessionControl::get_instance();
+	$session->check_permission(8);
 		
 	$page = new PublicPageTW(TRUE);
 	$hoptions=array(
