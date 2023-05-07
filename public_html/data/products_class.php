@@ -152,7 +152,7 @@ class DOBRequirement extends BasicProductRequirement {
 	
 	public function get_form($formwriter, $user=NULL) {
 ?>
-			<div id="dob_container" class="errorplacement">
+			<div id="dob_container" class="errorplacement sm:col-span-6">
 				<label for="dob_date" class="block text-sm font-medium text-gray-700">Date of Birth</label>
 
 				<select style="width: 175px" name="dob_month" id="dob_month" class="mt-1 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
@@ -244,13 +244,13 @@ class AddressRequirement extends BasicProductRequirement {
 			$new_address_display = true;
 
 			if (count($address_dropdown_builder) > 1) {
-				echo '<div id="address_container" class=NULL>
+				echo '<div id="address_container" class="sm:col-span-6 errorplacement">
 					<label for="address" class="block text-sm font-medium text-gray-700">Address</label>
 					<select name="address" id="address" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">'
 					. implode('', $address_dropdown_builder) .
 					'</select></div>';
 				$new_address_display = false;
-				echo '<div id="new_address_block" style="display:none;">';
+				echo '<div id="new_address_block" class="sm:col-span-6" style="display:none;">';
 				Address::PlainForm($formwriter, NULL, array('privacy' => 1, 'usa_type' => 'HM'));
 				echo '</div>';
 			} 
@@ -380,9 +380,10 @@ class RecordConsentRequirement extends BasicProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo '<div id="record_terms_container" class=NULL>';
+		echo $formwriter->checkboxinput("I am aware that the course/event may be recorded and consent to being recorded.", "record_terms", "sm:col-span-6", "normal", NULL, "yes", '');
+		//echo '<div id="record_terms_container" class=NULL>';
 		//echo '<label for="record_terms">Recording Notice</label>';
-		echo '<input name="record_terms" id="record_terms" value="1" type="checkbox"  /><span onclick="$(\'#record_terms\').attr(\'checked\', !$(\'#record_terms\').attr(\'checked\')); return false;"> I am aware that the course/event may be recorded and consent to being recorded. </span></div>';
+		//echo '<input name="record_terms" id="record_terms" value="1" type="checkbox"  /><span onclick="$(\'#record_terms\').attr(\'checked\', !$(\'#record_terms\').attr(\'checked\')); return false;"> I am aware that the course/event may be recorded and consent to being recorded. </span></div>';
 	}
 
 	function validate_form($data, $session=NULL) {
@@ -1075,19 +1076,24 @@ class Product extends SystemBase {
 					);
 
 					$('#product_form').validate({
-						errorElement: 'p',
 							rules: " . str_replace('"', '', json_encode($rules)) . ",
-							messages: " . str_replace('"', '', json_encode($messages)) . ",
-					errorClass: 'errorField',
-					highlight: function(element, errorClass) {
-						$('#' + error_message_array[element.name]).addClass('error');
-					},
-					unhighlight: function(element, errorClass) {
-						$('#' + error_message_array[element.name]).removeClass('error');
-					},
-					errorPlacement: function(error, element) {
-						error.prependTo(element.parents('.errorplacement').eq(0));
-					}
+							messages: " . str_replace('"', '', json_encode($messages)) . ",";
+					echo 'errorElement: "span",
+							errorClass: "text-red-500",
+							highlight: function(element, errorClass) {
+								//REMOVE BRACKETS FOR CHECKBOX LISTS
+								var name = element.name.replace(/[\[\]]/gi, "");
+								$("#"+name).addClass("border-red-500 focus:border-red-500");
+							  },
+							  unhighlight: function(element, errorClass) {
+								//REMOVE BRACKETS FOR CHECKBOX LISTS
+								var name = element.name.replace(/[\[\]]/gi, "");
+								  $("#"+name).removeClass("border-red-500 focus:border-red-500");
+							  },
+							errorPlacement: function(error, element) {
+								error.appendTo(element.parents(".errorplacement").eq(0));
+							}';
+					echo "
 					});
 			});
 			";

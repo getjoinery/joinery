@@ -15,9 +15,9 @@
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPageTW::BeginPage('Log In');
-
 	
-	$formwriter = new FormWriterMasterTW('form1');
+	
+	$formwriter = new FormWriterPublicTW('form1', true);
 	
 	
 	?>

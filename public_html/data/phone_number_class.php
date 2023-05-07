@@ -330,8 +330,8 @@ class PhoneNumber extends SystemBase {
 			echo $formwriter->hiddeninput('phn_phone_number_id', $phone_number->key);
 		}
 		$optionvals = PhoneNumber::get_country_code_drop_array();
-		echo $formwriter->dropinput("Country code", "phn_cco_country_code_id", "ctrlHolder", $optionvals, ($phone_number ? $phone_number->get('phn_cco_country_code_id') : ''), '', FALSE);
-		echo $formwriter->textinput("Phone Number*", "phn_phone_number", "ctrlHolder", 20, ($phone_number ? $phone_number->get('phn_phone_number') : ''), NULL , 20, "");
+		echo $formwriter->dropinput("Country code", "phn_cco_country_code_id", "", $optionvals, ($phone_number ? $phone_number->get('phn_cco_country_code_id') : ''), '', FALSE);
+		echo $formwriter->textinput("Phone Number", "phn_phone_number", "", 20, ($phone_number ? $phone_number->get('phn_phone_number') : ''), NULL , 20, "");
 	}
 	
 	

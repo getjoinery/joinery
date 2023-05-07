@@ -162,10 +162,10 @@ class Question extends SystemBase {
 		}
 		
 		if ($this->get('qst_type') == Question::TYPE_SHORT_TEXT){
-			return $formwriter->textinput($question_text, $field_name , NULL, 100, $value, '', $field_max_length, '');
+			return $formwriter->textinput($question_text, $field_name , 'sm:col-span-6', 100, $value, '', $field_max_length, '');
 		}
 		else if ($this->get('qst_type') == Question::TYPE_LONG_TEXT){
-			return $formwriter->textbox($question_text, $field_name, NULL, 5, 80, $value, '', 'no');
+			return $formwriter->textbox($question_text, $field_name, 'sm:col-span-6', 5, 80, $value, '', 'no');
 		}
 		else if ($this->get('qst_type') == Question::TYPE_DROPDOWN){
 			$options = new MultiQuestionOption(
@@ -176,7 +176,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->dropinput($question_text, $field_name, NULL, $optionvals, $value, '', TRUE);
+			echo $formwriter->dropinput($question_text, $field_name, 'sm:col-span-6', $optionvals, $value, '', TRUE);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_RADIO){
 			$options = new MultiQuestionOption(
@@ -188,7 +188,7 @@ class Question extends SystemBase {
 
 			$checkedval = NULL;
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->radioinput($question_text, $field_name, "radioinput", $optionvals, $value, NULL, "", NULL);		
+			echo $formwriter->radioinput($question_text, $field_name, "radioinput sm:col-span-6", $optionvals, $value, NULL, "", NULL);		
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX){
 			$options = new MultiQuestionOption(
@@ -201,7 +201,7 @@ class Question extends SystemBase {
 			$truevalue = $options->get(0)->get('qop_question_option_value');
 			
 			//TODO ERROR CHECKING HERE 
-			echo $formwriter->checkboxinput($question_text, $field_name, NULL, NULL, $truevalue, $value, '');			
+			echo $formwriter->checkboxinput($question_text, $field_name, 'sm:col-span-6', NULL, $truevalue, $value, '');			
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(
@@ -212,7 +212,7 @@ class Question extends SystemBase {
 			$options->load();
 			
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->checkboxlist($question_text, $field_name, NULL, $optionvals, $value, '', TRUE);			
+			echo $formwriter->checkboxlist($question_text, $field_name, 'sm:col-span-6', $optionvals, $value, '', TRUE);			
 		}
 	}
 

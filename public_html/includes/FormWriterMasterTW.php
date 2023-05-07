@@ -345,7 +345,7 @@ class FormWriterMasterTW {
 		}
 
 		if($width == 'full'){
-			$class = 'w-full '. $class;
+			$class = 'w-full sm:col-span-6 '. $class;
 		}		
 		
 		$output = '<button type="submit" class="'.$class.'"';
