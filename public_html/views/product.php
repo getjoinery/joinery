@@ -42,7 +42,8 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 	?>
 	<main class="mt-8 max-w-2xl mx-auto pb-16 px-4 sm:pb-24 sm:px-6 lg:max-w-7xl lg:px-8">
     <div class="lg:grid lg:grid-cols-12 lg:auto-rows-min lg:gap-x-8">
-      <div class="mb-4 lg:col-start-8 lg:col-span-5">
+      
+	  <div class="mb-4 lg:col-start-8 lg:col-span-5">
         <div class="flex justify-between">
           <h1 class="mb-4 text-xl font-medium text-gray-900">
             <?php echo $product->get('pro_name'); ?>
@@ -108,7 +109,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 				if(!$product->is_sold_out()){
 
 					$formwriter = new FormWriterPublicTW("product_form", TRUE);
-					echo $formwriter->begin_form("product-quantity m-3", "POST", "/product"); 
+					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 					echo $formwriter->hiddeninput('product_id', $product_id);
 					if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 						$validation_rules = array();
@@ -118,7 +119,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 					if ($product->output_product_form($formwriter, $page_vars['user'], null)) {
 						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
 					}
-					echo $formwriter->end_form();
+					echo $formwriter->end_form(true);
 					$product->output_javascript($validation_rules);
 				}
 				?>	 		
