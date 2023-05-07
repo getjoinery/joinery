@@ -8,6 +8,7 @@ class FormWriterMasterTW {
 
 	public static $tab_count = 0;
 
+	protected $use_grid;
 	protected $formid;
 	protected $captcha_public;
 	protected $captcha_private;
@@ -285,16 +286,17 @@ class FormWriterMasterTW {
 	}	
 
 	function begin_form($class, $method, $action, $use_grid = false, $charset = 'UTF-8'){
+		$this->use_grid = $use_grid;
 		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'">';
 		
-		if($use_grid){
+		if($this->use_grid){
 			$output .= '<div class="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">';
 		}
 		return $output;
 	}
 
-	function end_form($use_grid = NULL){
-		if($use_grid){
+	function end_form(){
+		if($this->use_grid){
 			return '</div></form>';
 		}
 		else{
