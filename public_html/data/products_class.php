@@ -8,6 +8,7 @@ require_once($siteDir . '/includes/SessionControl.php');
 require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
+require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 require_once($siteDir . '/data/order_items_class.php');
 require_once($siteDir . '/data/coupon_codes_class.php');
@@ -1078,7 +1079,10 @@ class Product extends SystemBase {
 					$('#product_form').validate({
 							rules: " . str_replace('"', '', json_encode($rules)) . ",
 							messages: " . str_replace('"', '', json_encode($messages)) . ",";
-					echo 'errorElement: "span",
+					
+					$formwriter = new FormWriterPublicTW('form1', true);
+					echo $formwriter->validate_style_info;
+					/*echo 'errorElement: "span",
 							errorClass: "text-red-500",
 							highlight: function(element, errorClass) {
 								//REMOVE BRACKETS FOR CHECKBOX LISTS
@@ -1092,7 +1096,7 @@ class Product extends SystemBase {
 							  },
 							errorPlacement: function(error, element) {
 								error.appendTo(element.parents(".errorplacement").eq(0));
-							}';
+							}';*/
 					echo "
 					});
 			});

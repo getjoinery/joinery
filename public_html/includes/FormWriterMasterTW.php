@@ -11,7 +11,7 @@ class FormWriterMasterTW {
 	protected $formid;
 	protected $captcha_public;
 	protected $captcha_private;
-	protected $validate_style_info = 'errorElement: "span",
+	public $validate_style_info = 'errorElement: "span",
 							errorClass: "text-red-500",
 							highlight: function(element, errorClass) {
 								//REMOVE BRACKETS FOR CHECKBOX LISTS
