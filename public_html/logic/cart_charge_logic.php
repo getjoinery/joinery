@@ -315,16 +315,9 @@ function cart_charge_logic($get_vars, $post_vars){
 					$email_fill['more_info_required'] = true;	
 				}
 				$email_fill['event_registrant_id'] = $event_registrant->key;
-				$is_deposit = FALSE;
-				if($product_version){
-					$is_deposit = $product_version->prv_is_deposit;
-				}
-				if($is_deposit){
-					$template = 'event_deposit_reciept_content';
-				}
-				else{
-					$template = 'event_reciept_content';
-				}
+
+				$template = 'event_reciept_content';
+				
 				$final_fill = array_merge($default_fill, $email_fill);
 				$activation_email = new EmailTemplate($template, $user);
 				$activation_email->fill_template($final_fill);
@@ -551,16 +544,9 @@ function cart_charge_logic($get_vars, $post_vars){
 					$email_fill['more_info_required'] = true;	
 				}
 				$email_fill['event_registrant_id'] = $event_registrant->key;
-				$is_deposit = FALSE;
-				if($product_version){
-					$is_deposit = $product_version->prv_is_deposit;
-				}
-				if($is_deposit){
-					$template = 'event_deposit_reciept_content';
-				}
-				else{
-					$template = 'event_reciept_content';
-				}
+
+				$template = 'event_reciept_content';
+				
 				$final_fill = array_merge($default_fill, $email_fill);
 				$activation_email = new EmailTemplate($template, $user);
 				$activation_email->fill_template($final_fill);

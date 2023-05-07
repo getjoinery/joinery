@@ -120,17 +120,14 @@
 			}
 			echo '<ul>';
 			foreach ($versions as $version) {
-				$deposit_text = '';
-				if($version->prv_is_deposit){
-					$deposit_text = ' (deposit)';
-				}
+
 				if ($version->prv_status == ProductVersion::ACTIVE) {
-					echo '<li>' . $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price . $deposit_text .
+					echo '<li>' . $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price . 
 						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
 						'&action=remove_version">[Make Inactive]</a>' .
 						'</li>';
 				} else {
-					echo '<li style="text-decoration: line-through;">' . $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price . $deposit_text .
+					echo '<li style="text-decoration: line-through;">' . $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price . 
 						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
 						'&action=activate_version">[Make Active]</a>' .
 						'</li>';
