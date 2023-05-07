@@ -53,12 +53,12 @@ class ProductVersion extends SystemBase {
 	
 	public static $initial_default_values = array();
 	
-	public static function StoreProductVersion($product_id, $version_name, $version_price, $state, $is_deposit=FALSE) {
+	public static function StoreProductVersion($product_id, $version_name, $version_price, $state) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
 		$sql = 'INSERT INTO prv_product_versions ' .
-			'(prv_pro_product_id, prv_version_name, prv_version_price, prv_status, prv_is_deposit)
+			'(prv_pro_product_id, prv_version_name, prv_version_price, prv_status)
 				VALUES (?, ?, ?, ?, ?)';
 
 		try {
@@ -66,8 +66,7 @@ class ProductVersion extends SystemBase {
 			$q->bindValue(1, $product_id, PDO::PARAM_INT);
 			$q->bindValue(2, $version_name, PDO::PARAM_STR);
 			$q->bindValue(3, $version_price, PDO::PARAM_STR);	
-			$q->bindValue(4, $state, PDO::PARAM_INT);	
-			$q->bindValue(5, $is_deposit, PDO::PARAM_BOOL);			
+			$q->bindValue(4, $state, PDO::PARAM_INT);				
 			
 			$q->execute();
 		} catch(PDOException $e) {
