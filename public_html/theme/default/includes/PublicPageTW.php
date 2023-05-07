@@ -160,7 +160,7 @@ class PublicPageTW extends PublicPageMaster {
 		}
 		else{ 		
 			$logged_out_menu['Sign in'] = '/login';			
-			if(!$settings->get_setting('register_active')){
+			if($settings->get_setting('register_active')){
 				$logged_out_menu['Sign up'] = '/register';	
 			}
 		}	
@@ -426,7 +426,7 @@ class PublicPageTW extends PublicPageMaster {
             Sign in
           </a>
 		  <?php
-		  if(!$settings->get_setting('register_active')){
+		  if($settings->get_setting('register_active')){
 			?>
           <a href="/register" class="whitespace-nowrap bg-blue-100 border border-transparent rounded-md py-2 px-4 inline-flex items-center justify-center text-base font-medium text-blue-700 hover:bg-blue-200">
             Sign up
@@ -552,10 +552,13 @@ class PublicPageTW extends PublicPageMaster {
 			
           </div>
 		  <?php if(!empty($logged_out_menu)){ ?>
+
           <div>
+			<?php if($settings->get_setting('register_active')){ ?>
             <a href="/register" class="w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-blue-600 hover:bg-blue-700">
               Sign up
             </a>
+			<?php } ?>
             <p class="mt-6 text-center text-base font-medium text-gray-500">
               Existing user?
               <a href="/login" class="text-blue-600 hover:text-blue-500">
