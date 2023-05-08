@@ -5,6 +5,7 @@
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/settings_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
@@ -265,6 +266,15 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Email module active", "emails_active", "ctrlHolder", $optionvals, $settings->get_setting('emails_active'), '', FALSE);	
 
+	$templates = new MultiMailingList(
+		array('deleted' => false),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$templates->load();
+	$outer_optionvals = $templates->get_dropdown_array();
+	echo $formwriter->dropinput("Default mailing list", "default_mailing_list", "ctrlHolder", $outer_optionvals, $settings->get_setting('default_mailing_list'), '', TRUE);	
+	
 	$templates = new MultiEmailTemplateStore(
 		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_OUTER),
 		NULL,		//SORT BY => DIRECTION

@@ -64,7 +64,9 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 			$user->save();		
 
 			if($post_vars['newsletter']){
-				$status = $user->subscribe_to_contact_type(User::NEWSLETTER);
+				if($settings->get_setting('default_mailing_list')){
+					$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
+				}
 			}				
 		}			
 

@@ -141,7 +141,9 @@ function register_logic($get_vars, $post_vars){
 			
 			//ADD TO THE MAILING LIST IF CHOSEN
 			if($post_vars['mailing_list']){
-				$status = $user->subscribe_to_contact_type(User::NEWSLETTER);	
+				if($settings->get_setting('default_mailing_list')){
+					$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
+				}
 			} 
 
 			

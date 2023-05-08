@@ -65,9 +65,6 @@ class User extends SystemBase {
 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
-	// Constants for contact preferences
-	const NEWSLETTER = 1; 
-	const TRANSACTIONAL = 2;
 
 	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;

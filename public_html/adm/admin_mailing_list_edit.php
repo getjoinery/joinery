@@ -74,7 +74,7 @@
 		echo $formwriter->hiddeninput('action', 'edit');
 	}
 	
-	echo $formwriter->textinput('Description', 'mlt_name', NULL, 100, $mailing_list->get('mlt_name'), '', 255, '');
+	echo $formwriter->textinput('Name', 'mlt_name', NULL, 100, $mailing_list->get('mlt_name'), '', 255, '');
 	echo $formwriter->textinput('Description', 'mlt_description', NULL, 100, $mailing_list->get('mlt_description'), '', 255, '');
 	$optionvals = array("Active"=>1, "Disabled"=>0 );
 	echo $formwriter->dropinput("Active?", "mlt_is_active", "ctrlHolder", $optionvals, $mailing_list->get('mlt_is_active'), '', FALSE);
