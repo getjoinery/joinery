@@ -132,6 +132,12 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 		$past_event_sessions->load();
 		$page_vars['past_event_sessions'] = $past_event_sessions;		
 	}
+	
+	$page_vars['show_sessions_block'] = false;
+	if(($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $numsessions > 0) || $future_numsessions || $past_numsessions){
+		$page_vars['show_sessions_block'] = true;
+	}
+	
 
 	return $page_vars;
 }
