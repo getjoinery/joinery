@@ -333,7 +333,7 @@ class User extends SystemBase {
 		//$user_data['picture_50_src'] = ($picture && $picture->src(Picture::SIZE_50)) ? $picture->src(Picture::SIZE_50) : NULL;
 		//$user_data['picture_91_src'] = $picture ? $picture->src(Picture::SIZE_91) : NULL;
 
-		$user_data['NEWSLETTER'] = self::NEWSLETTER;
+		//$user_data['NEWSLETTER'] = self::NEWSLETTER;
 		//$user_data['EMAIL_OFFERS'] = self::EMAIL_OFFERS;
 		//$user_data['EMAIL_UPDATES'] = self::EMAIL_UPDATES;
 		//$user_data['EMAIL_USER_FEEDBACK'] = self::EMAIL_USER_FEEDBACK;
