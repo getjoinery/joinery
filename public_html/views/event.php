@@ -230,14 +230,18 @@
           </section>		
 		
 		
-		
+		<?php
+		if(($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $page_vars['numsessions'] > 0) || $page_vars['future_numsessions'] || $page_vars['past_numsessions']){
+		?>
           <!-- Sessions -->
           <section aria-labelledby="announcements-title">
             <div class="rounded-lg bg-white overflow-hidden shadow">
               <div class="p-6">
                 <h2 class="text-base font-medium text-gray-900" id="announcements-title">Sessions</h2>
                 <div class="flow-root mt-6">
-				
+		<?php
+		}
+		?>
 	
 
 <?php
@@ -314,7 +318,9 @@
 	}
 	?>
 
-
+		<?php
+		if(($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $page_vars['numsessions'] > 0) || $page_vars['future_numsessions'] || $page_vars['past_numsessions']){
+		?>
                 </div>
 				<!--
                 <div class="mt-6">
@@ -326,6 +332,10 @@
               </div>
             </div>
           </section>
+		  
+		  <?php
+		}
+		?>
 
           <!-- Recent Hires -->
 		  <!--
