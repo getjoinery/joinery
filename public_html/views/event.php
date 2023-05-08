@@ -231,7 +231,7 @@
 		
 		
 		<?php
-		if(($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $page_vars['numsessions'] > 0) || $page_vars['future_numsessions'] || $page_vars['past_numsessions']){
+		if($page_vars['show_sessions_block']){
 		?>
           <!-- Sessions -->
           <section aria-labelledby="announcements-title">
@@ -319,7 +319,7 @@
 	?>
 
 		<?php
-		if(($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $page_vars['numsessions'] > 0) || $page_vars['future_numsessions'] || $page_vars['past_numsessions']){
+		if($page_vars['show_sessions_block']){
 		?>
                 </div>
 				<!--
