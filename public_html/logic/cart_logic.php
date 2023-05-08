@@ -39,25 +39,26 @@ function cart_logic($get_vars, $post_vars){
 		$cart->remove_item(intval($_REQUEST['r']));
 	}
 	
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+	if($cart->get_total() > 0){
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			$api_key = $settings->get_setting('stripe_api_key_test');
+			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+		}
+		else{
+			$api_key = $settings->get_setting('stripe_api_key');
+			$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+		}
+		
+		if(!$api_key || !$api_secret_key){
+			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+			exit();			
+		}
+		
+		$page_vars['api_key'] = $api_key;
+		$page_vars['api_secret_key'] = $api_secret_key;
+		
+		\Stripe\Stripe::setApiKey($api_key);
 	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
-	
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-	
-	$page_vars['api_key'] = $api_key;
-	$page_vars['api_secret_key'] = $api_secret_key;
-	
-	\Stripe\Stripe::setApiKey($api_key);
-	
 	
 	$currency_code = $settings->get_setting('site_currency');
 	$page_vars['currency_code'] = $currency_code;
