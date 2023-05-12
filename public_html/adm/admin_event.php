@@ -178,7 +178,7 @@
 
 
 
-	$headers = array("Registrant", "Registered on", "Order", "Email Verified",  "Action");
+	$headers = array("Registrant", "Registered on", "Order", "Email Verified",  "Expires", "Action");
 	$altlinks = array();
 	if(!$event->get('evt_delete_time')) {
 		if($_SESSION['permission'] >= 8){
@@ -228,7 +228,13 @@
 		
 		$evr_verified = LibraryFunctions::bool_to_english($registrant->get('usr_email_is_verified'),"Verified", "Unverified");
 		array_push($rowvalues, $evr_verified);	
-
+		
+		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+			array_push($rowvalues, 'Expired: '.LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
+		}
+		else{
+			array_push($rowvalues, LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
+		}
 /*
 		$reginfo = '';
 		if($event_registrant->get('evr_recording_consent')){

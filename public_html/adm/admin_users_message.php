@@ -95,7 +95,7 @@
 				$event_registrants->load();				
 			}
 			else{
-				$event_registrants = new MultiEventRegistrant(array('event_id' => $event->key), NULL);
+				$event_registrants = new MultiEventRegistrant(array('event_id' => $event->key, 'expired' => false), NULL);
 				//$numregistrants = $event_registrants->count_all();
 				$event_registrants->load();
 			}

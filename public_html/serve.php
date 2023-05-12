@@ -153,6 +153,7 @@ if($settings->get_setting('files_active')){
 						//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
 						$searches['user_id'] = $session->get_user_id();
 						$searches['event_id'] = $event_id;
+						$searches['expired'] = false;
 						$event_registrations = new MultiEventRegistrant(
 							$searches,
 							NULL, //array('event_id'=>'DESC'),

@@ -245,7 +245,15 @@ class MultiEventRegistrant extends SystemMultiBase {
 		if (array_key_exists('deleted', $this->options)) {
 			$where_clauses[] = 'evr_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
 		}	
-				
+
+		if (array_key_exists('expired', $this->options)) {
+			if($this->options['expired'] == true){
+				$where_clauses[] = 'evr_expires_time < now() ';
+			}
+			else{
+				$where_clauses[] = 'evr_expires_time >= now() ';
+			}
+		}				
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';

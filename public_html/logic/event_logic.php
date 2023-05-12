@@ -23,7 +23,7 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 		
 	//FIGURE OUT WHETHER THE USER CAN REGISTER OR NOT, WHAT ARE THE OPTIONS
 	$registrants = new MultiEventRegistrant(
-		array('event_id'=>$event->key)
+		array('event_id'=>$event->key, 'expired' => false)
 	);
 	$numregistrants = $registrants->count_all();
 	

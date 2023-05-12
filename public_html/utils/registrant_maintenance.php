@@ -33,6 +33,7 @@
 	$event_registrants->load();
 	foreach($event_registrants as $event_registrant){
 		//REMOVE USER FROM ANY EVENTS THAT ARE EXPIRED
+		/*
 		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
 			$event_registrant->remove();
 						
@@ -40,6 +41,7 @@
 			$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
 			$event_registrants->load();
 		}
+		*/
 		
 		//REMOVE THE USER FROM ANY EVENTS ATTACHED TO BUNDLES WHERE THE BUNDLE NO LONGER CONTAINS THAT EVENT
 		if($event_registrant->get('evr_grp_group_id')){

@@ -398,7 +398,7 @@
 	<?php $page->end_box(); ?>
 <?php
 
-	$headers = array("Event", "Registered");
+	$headers = array("Event", "Added", "Expires", "Action");
 	$altlinks = array();
 	$box_vars =	array(
 		'altlinks' => $altlinks,
@@ -414,7 +414,7 @@
 		array_push($rowvalues, '('.$event->key.') <a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->getString('evt_name', 50). '</strong> '. $event->get('evt_location').'</a>');
 
 		array_push($rowvalues, LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone()));
-
+		array_push($rowvalues, LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone()));
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='.$user->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
 		<input type="hidden" class="hidden" name="evt_event_id" id="evt_event_id" value="'.$event->key.'" />
@@ -425,7 +425,7 @@
 		$page->disprow($rowvalues);
 	}
 	
-	echo '<tr><td colspan="3">';
+	echo '<tr><td colspan="4">';
 	$formwriter = new FormWriterMaster('form3');
 	$validation_rules = array();
 	$validation_rules['evt_event_id']['required']['value'] = 'true';

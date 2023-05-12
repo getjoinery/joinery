@@ -65,7 +65,6 @@
 			
 		
 		echo '<p>Product Link - <a href="'.$product->get_url() . '">' . $settings->get_setting('webDir_SSL').$product->get_url() . '</a><br />';
-		echo 'Product Description: <b>'. $product->get('pro_description').'</b><br>';
 
 		if($product->get('pro_price_type') == Product::PRICE_TYPE_ONE){
 			echo 'Price: <b>'.$currency_symbol. $product->get('pro_price').'</b><br>';
@@ -76,10 +75,16 @@
 		
 		if($product->get('pro_max_purchase_count') > 0){
 			$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
-			echo 'Total items: <b>'. $product->get('pro_max_purchase_count').' ('. $remaining .' remaining)</b><br>';
+			echo 'Total items available: <b>'. $product->get('pro_max_purchase_count').' ('. $remaining .' remaining)</b><br>';
 		}
 		
 		echo 'Max that can be added to cart: <b>'. $product->get('pro_max_cart_count').'</b><br>';
+		if($product->get('pro_expires')){
+			echo 'Purchases expire after: <b>'. $product->get('pro_expires').' days</b><br>';
+		}
+		else{
+			echo 'Purchases expire after: <b>Unlimited days</b><br>';
+		}
 		if($product->get('pro_evt_event_id')){
 			$event = new Event($product->get('pro_evt_event_id'), TRUE);
 			$event_date = '';
@@ -103,6 +108,8 @@
 	
 		$instances = $product->get_requirement_instances();
 		echo 'Additional product info collected at purchase: ';
+		
+		echo 'Product Description: <b>'. $product->get('pro_description').'</b><br>';
 
 		foreach($instances as $instance){
 			$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
