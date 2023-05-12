@@ -7,7 +7,7 @@
 	$page_vars = event_sessions_logic($_GET, $_POST);
 
 	if($page_vars['error_message']){
-		PublicPageTW::OutputGenericPublicPage('Not Registered', 'Not Registered', $error_message);
+		PublicPageTW::OutputGenericPublicPage('Not Registered', 'Not Registered', $page_vars['error_message']);
 		exit();
 	}	
 
