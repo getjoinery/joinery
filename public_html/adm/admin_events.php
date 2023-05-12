@@ -100,7 +100,7 @@
 		$searches['event_id'] = $event->key;			
 		
 		$registrants = new MultiEventRegistrant(
-			array('event_id'=>$event->key)
+			array('event_id'=>$event->key, 'expired' => false)
 		);
 		$numregistrants = $registrants->count_all();
 

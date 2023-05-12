@@ -161,7 +161,7 @@
 				}
 				else if($recipient_group->get('erg_evt_event_id')){
 					$event = new Event($recipient_group->get('erg_evt_event_id'), TRUE);
-					$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id')), NULL);
+					$event_registrants = new MultiEventRegistrant(array('event_id' => $recipient_group->get('erg_evt_event_id'), 'expired' => false), NULL);
 					//$numregistrants = $event_registrants->count_all();
 					$event_registrants->load();
 					foreach($event_registrants as $event_registrant){

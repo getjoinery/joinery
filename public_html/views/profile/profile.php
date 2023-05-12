@@ -282,14 +282,24 @@
 											<div class="ml-2 flex-shrink-0 flex">
 											  
 												<?php
-												if($event->get('evt_status') == Event::STATUS_ACTIVE){
-													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Upcoming</p>';
+												if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Expired</p>';
 												} 
-												else if($event->get('evt_status') == Event::STATUS_CANCELED){
-													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Canceled</p>';
-												}
-												else if($event->get('evt_status') == Event::STATUS_COMPLETED){
-													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Completed</p>';
+												else{
+													if($event->get('evt_status') == Event::STATUS_ACTIVE){
+														if($event_registrant->get('evr_expires_time')){
+															echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Expires '.LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $page_vars['session']->get_timezone()).'</p>';
+														}
+														else{
+															echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</p>';
+														}
+													} 
+													else if($event->get('evt_status') == Event::STATUS_CANCELED){
+														echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Canceled</p>';
+													}
+													else if($event->get('evt_status') == Event::STATUS_COMPLETED){
+														echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Completed</p>';
+													}
 												}
 												?>
 											  

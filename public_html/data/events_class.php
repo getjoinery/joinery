@@ -195,7 +195,7 @@ class Event extends SystemBase {
 			}
 		}
 	}	
-
+	/*
 	public function remove_expired_registrants(){
 		//CHECK THAT THE USER IS A VALID REGISTRANT
 		$searches['event_id'] = $event->key;
@@ -213,7 +213,7 @@ class Event extends SystemBase {
 		}
 		return true;
 	}
-
+	*/
 	
 	function get_leader() {
 		if($this->get('evt_usr_user_id_leader')){
@@ -392,8 +392,22 @@ class Event extends SystemBase {
 				$event_registrant->set('evr_ord_order_id', $order->key);
 				$event_registrant->set('evr_odi_order_item_id', $order_item->key);
 				$event_registrant->set('evr_grp_group_id', NULL);
-				$event_registrant->save();
 			}
+			
+			//IF THE REGISTRANT HAD EXPIRED, SET A NEW EXPIRATION DATE OR REMOVE EXPIRATION DATE
+			if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+				if($days_until_expire){
+					$date = new DateTime();
+					$date->add(new DateInterval('P'.$days_until_expire.'D'));
+					$event_registrant->set('evr_expires_time', $date->format('Y-m-d g:i:s'));	
+				}
+				else{
+					$event_registrant->set('evr_expires_time', NULL);
+				}
+			}
+			
+			$event_registrant->set('evr_ord_order_id', $order->key);
+			$event_registrant->save();
 			return $event_registrant;
 		}
 		else{

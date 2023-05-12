@@ -34,7 +34,6 @@ function event_sessions_course_logic($get_vars, $post_vars){
 	}
 			
 	$event = new Event($event_id, TRUE);
-	$event->remove_expired_registrants();
 	$page_vars['event'] = $event;
 	if($event->get('evt_session_display_type') != 2){
 		//REDIRECT
@@ -86,12 +85,18 @@ function event_sessions_course_logic($get_vars, $post_vars){
 	$page_vars['numsessions'] = $numsessions;	
 	
 
-
+	
+	$event_registrant = EventRegistrant::check_if_registrant_exists($user->key, $event->key);
 		
-	if($_SESSION['permission'] < 5 && !$page_vars['event_registrant'] = EventRegistrant::check_if_registrant_exists($user->key, $event->key)){
+	if($_SESSION['permission'] < 5 && !$event_registrant){
 		$error_message = '<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>	
 		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
-	} 
+	}
+	else if($_SESSION['permission'] < 5 && $event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
+		<p><strong>Your registration has expired, so you cannot access the event materials.</strong></p>	
+		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
+	}
 	else{
 		$event_session->record_analytic($session->get_user_id());
 	}
