@@ -81,6 +81,7 @@
 				$product->set('pro_recurring', NULL);
 			}
 			
+			$_POST['pro_link'] = $product->create_url($_POST['pro_link']);
 
 			
 			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_link', 'pro_digital_link');
@@ -291,7 +292,7 @@
 	echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
 	
 
-	echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/product/', 'pro_link', NULL, 100, $product->get('pro_link'), '', 255, '');	
+	echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir_SSL').'/product/', 'pro_link', NULL, 100, $product->get('pro_link'), '', 255, '');	
 
 	
 

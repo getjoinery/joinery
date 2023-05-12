@@ -940,7 +940,28 @@ class Product extends SystemBase {
 			return $product;
 
 	}
-	
+
+	function create_url($input_url) {
+		if($input_url){
+			$tmp = $input_url;
+		}
+		else{
+			$tmp = $this->get('pro_name');
+		}
+		$tmp = strtolower(str_replace(' ', '-', $tmp));
+		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
+		$tmp = preg_replace('/-{2,}/', '-', $tmp);
+		
+		//NO DUPLICATES
+		$increment=1;
+		$tmp_orig = $tmp;
+		while(Event::get_by_link($tmp, true)){
+			$tmp = $tmp_orig . $increment;
+			$increment++;
+		}
+		return $tmp;
+	}
+		
 
 	function get_url() {
 		return '/product/'.$this->get('pro_link');
