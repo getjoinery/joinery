@@ -32,26 +32,21 @@
 	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), NULL);
 	$event_registrants->load();
 	foreach($event_registrants as $event_registrant){
-		//REMOVE USER FROM ANY EVENTS THAT ARE EXPIRED
-		/*
-		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
-			$event_registrant->remove();
-						
-			//RELOAD EVENT REGISTRANTS
-			$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
-			$event_registrants->load();
-		}
-		*/
+		
+		//NOTE: THESE WERE REMOVED BECUASE THE USER SHOULD GET WHAT HE/SHE BOUGHT ORIGINALLY
 		
 		//REMOVE THE USER FROM ANY EVENTS ATTACHED TO BUNDLES WHERE THE BUNDLE NO LONGER CONTAINS THAT EVENT
+		/*
 		if($event_registrant->get('evr_grp_group_id')){
 			$group = new Group($event_registrant->get('evr_grp_group_id'), TRUE);
 			if(!$group->is_member_in_group($event_registrant->get('evr_evt_event_id'))){
 				$event_registrant->remove();
 			}
 		}
+		*/
 
 		//ADD THE USER TO ANY EVENTS ATTACHED TO BUNDLES RECENTLY
+		/*
 		if($event_registrant->get('evr_grp_group_id')){
 			$group = new Group($event_registrant->get('evr_grp_group_id'), TRUE);
 			$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
@@ -61,17 +56,12 @@
 				$event_registrant = $event->add_registrant($user->key, NULL, $event_registrant->get('evr_grp_group_id'), NULL);
 				
 				//TODO: THE RECORDING CONSENT BOX
-				/*
-				if(isset($data['record_terms'])){ 
-					$event_registrant->set('evr_recording_consent', TRUE);	
-				}
-				
-				$event_registrant->save();
-				*/								
+											
 			}
 		}
+		*/
 		
-		//REMOVE THE USER FROM ANY EVENTS WHERE THE SUBSCRIPTION IS NO LONGER ACTIVE
+		//SET EXPIRED USER ANY EVENTS WHERE THE SUBSCRIPTION IS NO LONGER ACTIVE
 		if($event_registrant->get('evr_odi_order_item_id')){
 			$order_item = new OrderItem($event_registrant->get('evr_odi_order_item_id'), TRUE);
 			if($order_item->get('odi_is_subscription')){
@@ -103,7 +93,8 @@
 
 						$order_item->set('odi_subscription_cancelled_time', $canceled_at);
 						$order_item->save();
-						$event_registrant->remove();
+						$event_registrant->set('evr_expired_time', $canceled_at);
+						$event_registrant->save();
 
 					}
 				}
