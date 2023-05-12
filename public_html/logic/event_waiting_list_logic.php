@@ -8,6 +8,8 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_waiting_lists_class.php');
 	
+	$event_id = LibraryFunctions::fetch_variable_local($event_id, '', 1, 'Event id is missing', '', 'safemode', 'int');
+	
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	
