@@ -93,10 +93,12 @@
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings');
 	
+	
+	
 	echo '<h3>General Settings</h3>';
 	
 	echo $formwriter->textbox('Custom CSS', 'custom_css', 'ctrlHolder', 10, 80, $settings->get_setting('custom_css'), '', 'no');
-	
+
 	echo $formwriter->textinput("Preview image (for facebook, google, etc)", 'preview_image', "ctrlHolder", 20, $settings->get_setting('preview_image'), "" , 255, "");
 
 
@@ -219,7 +221,7 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Booking module active", "bookings_active", "ctrlHolder", $optionvals, $settings->get_setting('bookings_active'), '', FALSE);
 
-	echo $formwriter->textbox('Calendly api token', 'calendly_api_token', 'ctrlHolder', 10, 80, $settings->get_setting('calendly_api_token'), '', 'no');
+	echo $formwriter->textbox('Calendly api token', 'calendly_api_token', 'ctrlHolder', 5, 80, $settings->get_setting('calendly_api_token'), '', 'no');
 
 	echo $formwriter->textinput("Calendly organization uri", "calendly_organization_uri", "ctrlHolder", 20, $settings->get_setting('calendly_organization_uri'), "" , 255, "");
 
@@ -272,8 +274,19 @@
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$templates->load();
+	$numtemplates = $templates->count_all();
 	$outer_optionvals = $templates->get_dropdown_array();
-	echo $formwriter->dropinput("Default mailing list", "default_mailing_list", "ctrlHolder", $outer_optionvals, $settings->get_setting('default_mailing_list'), '', TRUE);	
+	
+	if($settings->get_setting('default_mailing_list')){
+		echo $formwriter->dropinput("Default mailing list", "default_mailing_list", "ctrlHolder", $outer_optionvals, $settings->get_setting('default_mailing_list'), '', TRUE);	
+	}
+	else if($numtemplates){
+		$first_template = $templates->get(0);
+		echo $formwriter->dropinput("Default mailing list", "default_mailing_list", "ctrlHolder", $outer_optionvals, $first_template, '', TRUE);			
+	}
+	else{
+		echo $formwriter->dropinput("Default mailing list", "default_mailing_list", "ctrlHolder", $outer_optionvals, $settings->get_setting('default_mailing_list'), '', TRUE);			
+	}
 	
 	$templates = new MultiEmailTemplateStore(
 		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_OUTER),
@@ -317,6 +330,8 @@
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
+	
+
 	
 	$page->end_box();
 
