@@ -116,6 +116,9 @@ class Pager{
 		if($this->numrecords){
 			$this->numpagestotal = ceil($this->numrecords/$this->numperpage);	
 		}
+		else{
+			$this->numpagestotal = 1;	
+		}
 		
 		$this->currentpage = floor($this->offset / $this->numperpage)+1;
 	}	
