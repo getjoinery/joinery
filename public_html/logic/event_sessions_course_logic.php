@@ -23,10 +23,10 @@ function event_sessions_course_logic($get_vars, $post_vars){
 
 	//ACCEPT EITHER VARIABLE
 	if($get_vars['evt_event_id']){	
-		$event_id = $get_vars['evt_event_id'];
+		$event_id = LibraryFunctions::fetch_variable_local($get_vars, 'evt_event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
 	else if ($get_vars['event_id']){
-		$event_id = $get_vars['event_id'];
+		$event_id = LibraryFunctions::fetch_variable_local($get_vars, 'event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
 	else{
 		throw new SystemDisplayablePermanentError("This event does not exist.");
