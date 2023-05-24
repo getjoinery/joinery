@@ -17,6 +17,7 @@ function address_edit_logic($get_vars, $post_vars){
 
 	if(!empty($post_vars)){
 		$address_id = $_POST['usa_address_id'];
+		$page_vars['usa_address_id'] = $address_id;
 
 		if ($address_id == FALSE) {
 			throw new SystemInvalidFormError('The address edit form is invalid.');

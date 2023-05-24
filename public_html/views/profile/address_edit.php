@@ -6,7 +6,7 @@
 	require_once(LibraryFunctions::get_logic_file_path('address_edit_logic.php'));
 	
 	$page_vars = address_edit_logic($_GET, $_POST);
-		
+	$address_id = $page_vars['usa_address_id'];
 
 	$page = new PublicPageTW();
 	$hoptions=array(
