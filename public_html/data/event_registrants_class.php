@@ -251,7 +251,7 @@ class MultiEventRegistrant extends SystemMultiBase {
 				$where_clauses[] = 'evr_expires_time < now() ';
 			}
 			else{
-				$where_clauses[] = 'evr_expires_time >= now() ';
+				$where_clauses[] = '(evr_expires_time >= now() or evr_expires_time IS NULL) ';
 			}
 		}				
 		
