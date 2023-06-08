@@ -18,8 +18,15 @@
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'start_time', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-
-
+	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
+	if($searchterm) {
+		if(is_numeric($searchterm)) {
+			$searches['event_id'] = $searchterm;
+		}
+		else {
+			$searches['name_like'] = $searchterm;
+		}
+	}
 	
 	$searches = array();
 	
@@ -36,17 +43,10 @@
 	if($user_id) {
 		$searches['user_id'] = $user_id;
 	}
-	
-	
-	if($searchterm) {
-		if(is_numeric($searchterm)) {
-			$searches['event_id'] = $searchterm;
-		}
-		else {
-			$searches['name'] = $searchterm;
-		}
-	}
 	*/
+	
+	
+	
 
 	$events = new MultiEvent(
 		$searches,
@@ -91,7 +91,7 @@
 		'filteroptions'=>array("Future Events"=>"future", "All Events"=>"all"),
 		'altlinks' => $altlinks,
 		'title' => 'Events',
-		//'search_on' => TRUE
+		'search_on' => TRUE
 	);
 	$page->tableheader($headers, $table_options, $pager);
 

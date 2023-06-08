@@ -24,15 +24,34 @@
 		'session' => $session,
 	)
 	);
-	
+
+		$searches = array();	
 		$numperpage = 30;
 		$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 		$sort = LibraryFunctions::fetch_variable('sort', 'product_id', 0, '');
 		$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-		$search_criteria = array();
+		$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
+		if($searchterm) {
+			if(is_numeric($searchterm)) {
+				$searches['product_id'] = $searchterm;
+			}
+			else {
+				$searches['name_like'] = $searchterm;
+			}
+		}
+
+		if($_REQUEST['filter'] == 'all'){
+			$breadcrumb_array = array('Products'=>'All Products');
+		}
+		else{
+			$breadcrumb_array = array('Products'=>'/admin/admin_products', 'Active Products'=>'');
+			$searches['is_active'] = true;
+		}
+
+
 
 		$products = new MultiProduct(
-			$search_criteria,
+			$searches,
 			array($sort=>$sdirection),
 			$numperpage,
 			$offset,
@@ -50,10 +69,11 @@
 		}
 		$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 		$table_options = array(
-			//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
+			'sortoptions'=>array("Product ID"=>"product_id", "Product Name"=>"name"),
+			'filteroptions'=>array("Active"=>"active", "All Products"=>"all"),
 			'altlinks' => $altlinks,
 			'title' => 'Products',
-			//'search_on' => TRUE
+			'search_on' => TRUE
 		);
 		$page->tableheader($headers, $table_options, $pager);
 

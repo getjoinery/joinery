@@ -154,8 +154,6 @@
 			echo $formwriter->hiddeninput('action', 'new_version');
 			echo $formwriter->textinput('Label', 'version_name', NULL, 100, '', '', 255, '');
 			echo $formwriter->textinput('Price ('.$currency_symbol.')', 'version_price', 'ctrlHolder', 100, '', '', 255, '');
-			$optionvals = array("Yes"=>'1', 'No' => '0');
-			echo $formwriter->dropinput("Is it a deposit or installment payment?", "version_deposit", "ctrlHolder", $optionvals, 0, '', FALSE);	
 			echo $formwriter->start_buttons();
 			echo $formwriter->new_form_button('Submit');
 			echo $formwriter->end_buttons();

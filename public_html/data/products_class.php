@@ -1226,6 +1226,11 @@ class MultiProduct extends SystemMultiBase {
 			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
 		}	
 
+		if (array_key_exists('name_like', $this->options)) {
+			$where_clauses[] = 'pro_name ILIKE ?';
+			$bind_params[] = array('%'.$this->options['name_like'].'%', PDO::PARAM_STR);
+		}		
+		
 		if (array_key_exists('is_active', $this->options)) {
 			$where_clauses[] = 'pro_is_active = ?';
 			$bind_params[] = array($this->options['is_active'], PDO::PARAM_BOOL);
@@ -1271,7 +1276,11 @@ class MultiProduct extends SystemMultiBase {
 			
 			if (array_key_exists('price_high', $this->order_by)) {
 				$order_by_string = ' pro_price DESC';
-			}					
+			}	
+
+			if (array_key_exists('Name', $this->order_by)) {
+				$order_by_string = ' pro_name ASC';
+			}			
 		}
 		else {
 			$order_by_string = ' pro_product_id '. $this->order_by['product_id'];
