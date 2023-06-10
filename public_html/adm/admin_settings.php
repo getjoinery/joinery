@@ -129,7 +129,7 @@
 	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur'); 
 	echo $formwriter->dropinput("Site Currency", "site_currency", "ctrlHolder", $optionvals, $settings->get_setting('site_currency'), '', FALSE);	
 
-	$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout'); 
+	$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', /* 'Paypal Checkout' => 'paypal_checkout' */ ); 
 	echo $formwriter->dropinput("Checkout Type", "checkout_type", "ctrlHolder", $optionvals, $settings->get_setting('checkout_type'), '', FALSE);	
 	
 	echo $formwriter->textbox('Robots.txt entry', 'robots_text', 'ctrlHolder', 10, 80, $settings->get_setting('robots_text'), '', 'no');
