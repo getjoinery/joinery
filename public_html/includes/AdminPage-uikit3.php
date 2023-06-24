@@ -40,7 +40,6 @@ class AdminPage{
 		*/
 
 		$this->prefix = $this->secure ? 'https://' : 'http://';
-		$this->cdn = $settings->get_setting($this->secure ? 'CDN_SSL' : 'CDN');
 		$this->secure_prefix = ($debug == 0) ? $settings->get_setting('webDir_SSL') : $settings->get_setting('webDir');
 	}	
 	
@@ -421,7 +420,6 @@ class AdminPage{
 
 	function admin_footer() {
 		$settings = Globalvars::get_instance();
-		$CDN = $settings->get_setting('CDN');
 		
 		$session = SessionControl::get_instance();
 		if($session && $session->get_user_id()){

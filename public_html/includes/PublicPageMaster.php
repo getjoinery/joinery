@@ -53,7 +53,6 @@ class PublicPageMaster {
 		}
 		*/
 
-		$this->cdn = $settings->get_setting($this->secure ? 'CDN_SSL' : 'CDN');
 		$this->protocol = $this->secure ? 'https://' : 'http://';
 		$this->secure_prefix = ($this->debug == 0) ? $settings->get_setting('webDir_SSL') : $settings->get_setting('webDir');
 

@@ -61,11 +61,6 @@ class FormWriterMasterTW {
 		$this->formid = $formid;
 
 		$settings = Globalvars::get_instance();
-		if ($secure) {
-			$this->cdn = $settings->get_setting('CDN_SSL');
-		} else {
-			$this->cdn = $settings->get_setting('CDN');
-		}
 
 		$this->use_tabindex = $use_tabindex;
 	}
