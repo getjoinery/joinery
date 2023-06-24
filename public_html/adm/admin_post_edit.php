@@ -118,7 +118,7 @@
 	echo $formwriter->textinput('Tags (optional, separate with comma)', 'tags', NULL, 100, $tags, '', 255, '');	
 	
 	if($_SESSION['permission'] == 10){
-		echo $formwriter->textinput('Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir_SSL').'/blog/', 'pst_link', NULL, 100, $post->get('pst_link'), '', 255, '');	
+		echo $formwriter->textinput('Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir').'/blog/', 'pst_link', NULL, 100, $post->get('pst_link'), '', 255, '');	
 	}	
 	
 	

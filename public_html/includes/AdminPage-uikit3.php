@@ -40,7 +40,7 @@ class AdminPage{
 		*/
 
 		$this->prefix = $this->secure ? 'https://' : 'http://';
-		$this->secure_prefix = ($debug == 0) ? $settings->get_setting('webDir_SSL') : $settings->get_setting('webDir');
+		$this->secure_prefix = ($debug == 0) ? $settings->get_setting('webDir') : $settings->get_setting('webDir');
 	}	
 	
 

@@ -64,7 +64,7 @@
 		
 			
 		
-		echo '<p>Product Link - <a href="'.$product->get_url() . '">' . $settings->get_setting('webDir_SSL').$product->get_url() . '</a><br />';
+		echo '<p>Product Link - <a href="'.$product->get_url() . '">' . $settings->get_setting('webDir').$product->get_url() . '</a><br />';
 
 		if($product->get('pro_price_type') == Product::PRICE_TYPE_ONE){
 			echo 'Price: <b>'.$currency_symbol. $product->get('pro_price').'</b><br>';

@@ -292,7 +292,7 @@
 	echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
 	
 
-	echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir_SSL').'/product/', 'pro_link', NULL, 100, $product->get('pro_link'), '', 255, '');	
+	echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir').'/product/', 'pro_link', NULL, 100, $product->get('pro_link'), '', 255, '');	
 
 	
 

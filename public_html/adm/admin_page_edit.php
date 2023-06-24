@@ -110,7 +110,7 @@
 	
 	echo $formwriter->textinput('Page title', 'pag_title', NULL, 100, $title, '', 255, '');		
 
-	echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir_SSL').'/page/', 'pag_link', NULL, 100, $page->get('pag_link'), '', 255, '');	
+	echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir').'/page/', 'pag_link', NULL, 100, $page->get('pag_link'), '', 255, '');	
 
 
 	$optionvals = array("No"=>0, "Yes"=>1);
