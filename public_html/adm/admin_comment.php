@@ -67,9 +67,6 @@
 	)
 	);	
 
-	$settings = Globalvars::get_instance();
-	$webDir = $settings->get_setting('webDir');
-
 
 
 	$options['title'] = substr($comment->get('cmt_body'), 0, 40). '...';

@@ -44,9 +44,6 @@
 	)
 	);	
 
-	$settings = Globalvars::get_instance();
-	$webDir = $settings->get_setting('webDir');
-
 
 
 	$options['title'] = 'Contact Type: '.$contact_type->get('ctt_name');

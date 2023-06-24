@@ -18,9 +18,6 @@
 	
 	$page = new AdminPage();
 
-	$settings = Globalvars::get_instance();
-	$webDir = $settings->get_setting('webDir');
-
 	$page->admin_header(	
 	array(
 		'menu-id'=> null,
