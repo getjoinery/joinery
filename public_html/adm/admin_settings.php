@@ -8,7 +8,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
+	$session->check_permission(8);
 
 	$settings = Globalvars::get_instance();
 
@@ -93,6 +93,71 @@
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings');
 	
+	if($_SESSION['permission'] == 10){
+		echo '<h3>System Settings</h3>';
+
+		$optionvals = array("Yes"=>'1', 'No' => '0');
+		echo $formwriter->dropinput("Force HTTPS", "force_https", "ctrlHolder", $optionvals, $settings->get_setting('force_https'), '', FALSE);	
+
+		$optionvals = array("Yes"=>'1', 'No' => '0');
+		echo $formwriter->dropinput("Debug Mode", "debug", "ctrlHolder", $optionvals, $settings->get_setting('debug'), '', FALSE);
+
+		echo $formwriter->textinput("Base Path", 'baseDir', "ctrlHolder", 20, $settings->get_setting('baseDir'), "" , 255, "");
+		echo $formwriter->textinput("Site Template", 'site_template', "ctrlHolder", 20, $settings->get_setting('site_template'), "" , 255, "");
+		echo $formwriter->textinput("Web URL (Example: https://jeremytunnell.net)", 'webDir', "ctrlHolder", 20, $settings->get_setting('webDir'), "" , 255, "");
+		echo $formwriter->textinput("Site Path (Example: /var/www/html/test/public_html) ", 'siteDir', "ctrlHolder", 20, $settings->get_setting('siteDir'), "" , 255, "");
+		echo $formwriter->textinput("Static Files Path (Example: /var/www/html/test/static_files)", 'static_files_dir', "ctrlHolder", 20, $settings->get_setting('static_files_dir'), "" , 255, "");
+		echo $formwriter->textinput("Upload Path (Example: /var/www/html/test/uploads)", 'upload_dir', "ctrlHolder", 20, $settings->get_setting('upload_dir'), "" , 255, "");
+		echo $formwriter->textinput("Upload Web URL (Example: uploads)", 'upload_web_dir', "ctrlHolder", 20, $settings->get_setting('upload_web_dir'), "" , 255, "");
+		echo $formwriter->textinput("Static Files Path", 'static_files_dir', "ctrlHolder", 20, $settings->get_setting('static_files_dir'), "" , 255, "");
+
+		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', "ctrlHolder", 20, $settings->get_setting('webmaster_email'), "" , 255, "");
+		echo $formwriter->textinput("Default Email", 'defaultemail', "ctrlHolder", 20, $settings->get_setting('defaultemail'), "" , 255, "");
+		echo $formwriter->textinput("Default Email Name", 'defaultemailname', "ctrlHolder", 20, $settings->get_setting('defaultemailname'), "" , 255, "");
+
+		echo $formwriter->textinput("Site Name", 'site_name', "ctrlHolder", 20, $settings->get_setting('site_name'), "" , 255, "");
+		echo $formwriter->textinput("Site Description", 'site_description', "ctrlHolder", 20, $settings->get_setting('site_description'), "" , 255, "");
+		echo $formwriter->textinput("Link to Logo", 'logo_link', "ctrlHolder", 20, $settings->get_setting('logo_link'), "" , 255, "");
+		
+		
+		echo $formwriter->textinput("Node Path (Example: /var/www/html/test/node)", 'node_dir', "ctrlHolder", 20, $settings->get_setting('node_dir'), "" , 255, "");
+		echo $formwriter->textinput("Composer Path (Example: /home/user1/vendor/)", 'composerAutoLoad', "ctrlHolder", 20, $settings->get_setting('composerAutoLoad'), "" , 255, "");
+		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/test/public_html/logs/error.log)", 'apache_error_log', "ctrlHolder", 20, $settings->get_setting('apache_error_log'), "" , 255, "");
+		
+		echo $formwriter->textinput("Standard Error Message", 'standard_error', "ctrlHolder", 20, $settings->get_setting('standard_error'), "" , 255, "");
+		
+		echo $formwriter->textinput("HCaptcha Public Key", 'hcaptcha_public', "ctrlHolder", 20, $settings->get_setting('hcaptcha_public'), "" , 255, "");
+		echo $formwriter->textinput("HCaptcha Private Key", 'hcaptcha_private', "ctrlHolder", 20, $settings->get_setting('hcaptcha_private'), "" , 255, "");
+		
+		echo $formwriter->textinput("Google Captcha Public Key", 'captcha_public', "ctrlHolder", 20, $settings->get_setting('captcha_public'), "" , 255, "");
+		echo $formwriter->textinput("Google Captcha Private Key", 'captcha_private', "ctrlHolder", 20, $settings->get_setting('captcha_private'), "" , 255, "");
+
+		echo $formwriter->textinput("Mailchimp API Key", 'mailchimp_api_key', "ctrlHolder", 20, $settings->get_setting('mailchimp_api_key'), "" , 255, "");
+		echo $formwriter->textinput("Mailchimp List ID (Example: 9ed43f9abf)", 'mailchimp_list_id', "ctrlHolder", 20, $settings->get_setting('mailchimp_list_id'), "" , 255, "");
+
+		echo $formwriter->textinput("Urbit Endpoint", 'urbit_endpoint', "ctrlHolder", 20, $settings->get_setting('urbit_endpoint'), "" , 255, "");
+		echo $formwriter->textinput("Urbit Endpoint Password", 'urbit_endpoint_password', "ctrlHolder", 20, $settings->get_setting('urbit_endpoint_password'), "" , 255, "");
+
+
+		echo $formwriter->textinput("Acuity API Key (Example: 7d97bfea536935sgd8b14d266b105ab1)", 'acuity_api_key', "ctrlHolder", 20, $settings->get_setting('acuity_api_key'), "" , 255, "");
+		echo $formwriter->textinput("Acuity User ID (Example: 18623423)", 'acuity_user_id', "ctrlHolder", 20, $settings->get_setting('acuity_user_id'), "" , 255, "");
+
+		echo $formwriter->textinput("Stripe API Key (Example: sk_live_xxxx)", 'stripe_api_key', "ctrlHolder", 20, $settings->get_setting('stripe_api_key'), "" , 255, "");
+		echo $formwriter->textinput("Stripe API Private Key (Example: pk_live_xxxx)", 'stripe_api_pkey', "ctrlHolder", 20, $settings->get_setting('stripe_api_pkey'), "" , 255, "");
+		echo $formwriter->textinput("Test Stripe API Key (Example: sk_test_xxxx)", 'stripe_api_key_test', "ctrlHolder", 20, $settings->get_setting('stripe_api_key_test'), "" , 255, "");
+		echo $formwriter->textinput("Test Stripe API Key (Example: pk_test_xxxx)", 'stripe_api_pkey_test', "ctrlHolder", 20, $settings->get_setting('stripe_api_pkey_test'), "" , 255, "");
+		echo $formwriter->textinput("Stripe Endpoint Secret (Example: whsec_xxxx)", 'stripe_endpoint_secret', "ctrlHolder", 20, $settings->get_setting('stripe_endpoint_secret'), "" , 255, "");
+		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', /* 'Paypal Checkout' => 'paypal_checkout' */ ); 
+		echo $formwriter->dropinput("Checkout Type", "checkout_type", "ctrlHolder", $optionvals, $settings->get_setting('checkout_type'), '', FALSE);
+
+		$optionvals = array("Version 2.X"=>'1', 'Version 3.X' => '2');
+		echo $formwriter->dropinput("Mailgun Version", "mailgun_version", "ctrlHolder", $optionvals, $settings->get_setting('mailgun_version'), '', FALSE);	
+		echo $formwriter->textinput("Mailgun API Key (Example: key-6eac34eed3afb3df055f81aa20d878e4)", 'mailgun_api_key', "ctrlHolder", 20, $settings->get_setting('mailgun_api_key'), "" , 255, "");
+		echo $formwriter->textinput("Mailgun Domain (Example: mg.domain.net)", 'mailgun_domain', "ctrlHolder", 20, $settings->get_setting('mailgun_domain'), "" , 255, "");
+		echo $formwriter->textinput("Mailgun EU API Link (Example: https://api.eu.mailgun.net)", 'mailgun_eu_api_link', "ctrlHolder", 20, $settings->get_setting('mailgun_eu_api_link'), "" , 255, "");
+
+	}
+	
 	
 	
 	echo '<h3>General Settings</h3>';
@@ -103,7 +168,7 @@
 
 
 	$optionvals = array("Use built in tracking"=>'internal', 'Use custom tracking' => 'custom');
-	echo $formwriter->dropinput("Visit tracking", "register_active", "ctrlHolder", $optionvals, $settings->get_setting('register_active'), '', FALSE);	
+	echo $formwriter->dropinput("Visit tracking", "tracking", "ctrlHolder", $optionvals, $settings->get_setting('tracking'), '', FALSE);	
 	echo $formwriter->textinput("Tracking code", "tracking_code", "ctrlHolder", 20, $settings->get_setting('tracking_code'), "" , 255, "");	
 	
 	
@@ -128,9 +193,7 @@
 
 	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur'); 
 	echo $formwriter->dropinput("Site Currency", "site_currency", "ctrlHolder", $optionvals, $settings->get_setting('site_currency'), '', FALSE);	
-
-	$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', /* 'Paypal Checkout' => 'paypal_checkout' */ ); 
-	echo $formwriter->dropinput("Checkout Type", "checkout_type", "ctrlHolder", $optionvals, $settings->get_setting('checkout_type'), '', FALSE);	
+	
 	
 	echo $formwriter->textbox('Robots.txt entry', 'robots_text', 'ctrlHolder', 10, 80, $settings->get_setting('robots_text'), '', 'no');
 
@@ -221,9 +284,11 @@
 	$optionvals = array("Yes"=>'1', 'No' => '0');
 	echo $formwriter->dropinput("Booking module active", "bookings_active", "ctrlHolder", $optionvals, $settings->get_setting('bookings_active'), '', FALSE);
 
-	echo $formwriter->textbox('Calendly api token', 'calendly_api_token', 'ctrlHolder', 5, 80, $settings->get_setting('calendly_api_token'), '', 'no');
+	echo $formwriter->textinput("Calendly Organization URI (Example: https://api.calendly.com/organizations/EHDBUSLIPJFCKXAE)", 'calendly_organization_uri', "ctrlHolder", 20, $settings->get_setting('calendly_organization_uri'), "" , 255, "");
+	echo $formwriter->textinput("Calendly Organization Name (Example: test-organization)", 'calendly_organization_name', "ctrlHolder", 20, $settings->get_setting('calendly_organization_name'), "" , 255, "");
+	echo $formwriter->textinput("Calendly API Key (Example: INEEMNBGGN53553SDFGBESNICRDW74)", 'calendly_api_key', "ctrlHolder", 20, $settings->get_setting('calendly_api_key'), "" , 255, "");
+	echo $formwriter->textbox('Calendly API Token (Example: eyJraWQiOiIxY2UxZT...ZWJjY)', 'calendly_api_token', 'ctrlHolder', 10, 80, $settings->get_setting('calendly_api_token'), '', 'no');
 
-	echo $formwriter->textinput("Calendly organization uri", "calendly_organization_uri", "ctrlHolder", 20, $settings->get_setting('calendly_organization_uri'), "" , 255, "");
 
  	echo '<h3>Events Settings</h3>';
 	$optionvals = array("Yes"=>'1', 'No' => '0');

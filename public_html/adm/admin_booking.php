@@ -93,7 +93,7 @@
 		echo '<strong>Canceled</strong><br>';
 	} 	
 	
-	//echo '<strong>Link:</strong> <a href="'.$booking->get_url().'">'.$settings->get_setting('webDir_SSL').$booking->get_url().'</a><br />';	
+	//echo '<strong>Link:</strong> <a href="'.$booking->get_url().'">'.$settings->get_setting('webDir').$booking->get_url().'</a><br />';	
 
 
 
