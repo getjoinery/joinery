@@ -118,7 +118,7 @@ class File extends SystemBase {
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
 		$url_append = '';
 		if($format == 'full'){
-			$url_append =$settings->get_setting('webDir_SSL');
+			$url_append =$settings->get_setting('webDir');
 		}
 		
 		if($size == 'thumbnail'){

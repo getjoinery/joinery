@@ -54,7 +54,7 @@ class PublicPageMaster {
 		*/
 
 		$this->protocol = $this->secure ? 'https://' : 'http://';
-		$this->secure_prefix = ($this->debug == 0) ? $settings->get_setting('webDir_SSL') : $settings->get_setting('webDir');
+		$this->secure_prefix = ($this->debug == 0) ? $settings->get_setting('webDir') : $settings->get_setting('webDir');
 
 		
 		$this->location_data = $session->get_location_data();

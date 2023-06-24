@@ -247,7 +247,7 @@ class Activation {
 			'act_code' => $act_code,
 			'usr_email' => $user->get('usr_email'),
 			'usr_first_name' => $user->get('usr_first_name'),
-			'web_dir' => $settings->get_setting('webDir_SSL'),
+			'web_dir' => $settings->get_setting('webDir'),
 		));
 		$activation_email->email_from = $settings->get_setting('defaultemail');
 		$activation_email->email_from_name = $settings->get_setting('defaultemailname'); 
@@ -268,7 +268,7 @@ class Activation {
 			'act_code' => $act_code,
 			'new_email' => $new_email,
 			'usr_first_name' => $user->get('usr_first_name'),
-			'web_dir' => $settings->get_setting('webDir_SSL'),
+			'web_dir' => $settings->get_setting('webDir'),
 		));
 		// Clear the addresses because we don't want to automatically send this to the user's
 		// current email (as would happen since we pass in the recipient user to the email template)

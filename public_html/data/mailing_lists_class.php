@@ -235,7 +235,7 @@ class MailingList extends SystemBase {
 				//CHECK TO SEE IF THE USER GETS A FREE GIFT
 				if($this->get('mlt_fil_file_id')){
 					$file = new File($this->get('mlt_fil_file_id'), TRUE);
-					$email_fill['file_link'] = $settings->get_setting('webDir_SSL').'/uploads/'.$file->get('fil_name');
+					$email_fill['file_link'] = $settings->get_setting('webDir').'/uploads/'.$file->get('fil_name');
 					$email_fill['file_name'] = $file->get('fil_name');
 				}
 
