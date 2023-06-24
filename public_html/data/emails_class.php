@@ -97,7 +97,6 @@ class Email extends SystemBase {
 		// Store a few things here for easy passthrough into the 
 		// email templates
 		$settings = Globalvars::get_instance();
-		$this->cdn = $settings->get_setting('CDN');
 		$this->webdir = $settings->get_setting('webDir');
 	}
 	

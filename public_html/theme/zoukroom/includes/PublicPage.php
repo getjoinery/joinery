@@ -67,7 +67,7 @@ class PublicPage extends PublicPageMaster {
   <link href="https://fonts.googleapis.com/css?family=Nunito+Sans:400,600,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/theme/zoukroom/css/main.css" />
   <script src="/theme/zoukroom/js/uikit.js"></script>
-  <script src="<?php echo $this->cdn; ?>/theme/zoukroom/includes/jquery-3.4.1.min.js"></script>
+  <script src="/theme/zoukroom/includes/jquery-3.4.1.min.js"></script>
  
 		<?php
 		if($settings->get_setting('custom_css')){

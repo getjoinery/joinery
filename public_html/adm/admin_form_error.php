@@ -19,7 +19,6 @@
 	$page = new AdminPage();
 
 	$settings = Globalvars::get_instance();
-	$CDN = $settings->get_setting('CDN');
 	$webDir = $settings->get_setting('webDir');
 
 	$page->admin_header(	
