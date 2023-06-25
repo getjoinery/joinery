@@ -742,6 +742,30 @@ Welcome!
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'standard_error'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'standard_error\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
+		$migration['system_version'] = '0.5.21';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_version'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_version\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
+		
+		$migration['system_version'] = '0.5.21';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_eu_api_link'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_eu_api_link\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;		
+
+		$migration['system_version'] = '0.5.21';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_api_key'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_api_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;			
-?>
+	
+		$migration['system_version'] = '0.5.21';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_domain'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_domain\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
 
