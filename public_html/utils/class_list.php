@@ -768,4 +768,15 @@ Welcome!
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_domain\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
+		
+		$migration['system_version'] = '0.5.22';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'social_messenger_link'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'social_messenger_link\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
 
+		$migration['system_version'] = '0.5.23';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'tracking_code'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'tracking_code\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	

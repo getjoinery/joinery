@@ -43,7 +43,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	$charge_total = $cart->get_total();
 
 	if($charge_total){
-		if($_SESSION['test_mode']){
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 			$api_key = $settings->get_setting('stripe_api_key_test');
 			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
 		}

@@ -40,7 +40,8 @@ class Globalvars {
 				return $this_setting->get('stg_value');
 			}
 			else{
-				return false;
+				throw new Exception('Setting '.$setting.' does not exist.');
+				exit;
 			}
 		}
 	}
