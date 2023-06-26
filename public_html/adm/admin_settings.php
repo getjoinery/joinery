@@ -94,6 +94,10 @@
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings');
 	
 	if($_SESSION['permission'] == 10){
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
+		}		
+		
 		echo '<h3>System Settings</h3>';
 
 		$optionvals = array("Yes"=>'1', 'No' => '0');

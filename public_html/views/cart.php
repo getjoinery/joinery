@@ -245,6 +245,10 @@
 			}
 		}
 		
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
+		}
+		
 		
 		if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
 
