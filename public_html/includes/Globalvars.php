@@ -20,7 +20,7 @@ class Globalvars {
 	}
 
 	public function get_setting($setting){
-		if($this->settings[$setting]){
+		if(isset($this->settings[$setting])){
 			return $this->settings[$setting];
 		}
 		else{
