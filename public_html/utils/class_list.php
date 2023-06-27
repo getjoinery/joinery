@@ -780,3 +780,9 @@ Welcome!
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'tracking_code\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
+
+		$migration['system_version'] = '0.5.24';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'subscriptions_active'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'subscriptions_active\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
