@@ -1,13 +1,11 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/FieldConstraints.php');
-require_once($siteDir . '/includes/Globalvars.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SingleRowAccessor.php');
-require_once($siteDir . '/includes/SystemClass.php');
-require_once($siteDir . '/includes/Validator.php');
+require_once(dirname(__DIR__, 1) . '/includes/DbConnector.php');
+require_once(dirname(__DIR__, 1) . '/includes/FieldConstraints.php');
+require_once(dirname(__DIR__, 1) . '/includes/Globalvars.php');
+require_once(dirname(__DIR__, 1) . '/includes/LibraryFunctions.php');
+require_once(dirname(__DIR__, 1) . '/includes/SingleRowAccessor.php');
+require_once(dirname(__DIR__, 1) . '/includes/SystemClass.php');
+require_once(dirname(__DIR__, 1) . '/includes/Validator.php');
 
 
 
