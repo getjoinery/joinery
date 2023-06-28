@@ -179,7 +179,10 @@
 	
 	
 	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Registration active", "register_active", '', $optionvals, $settings->get_setting('register_active'), '', FALSE);	
+	echo $formwriter->dropinput("Registration active", "register_active", '', $optionvals, $settings->get_setting('register_active'), '', FALSE);
+
+	$optionvals = array("Yes"=>1, 'No' => 0);
+	echo $formwriter->dropinput("Subscriptions active", "subscriptions_active", '', $optionvals, $settings->get_setting('subscriptions_active'), '', FALSE);	
 
 	$optionvals = Address::get_timezone_drop_array();
 	echo $formwriter->dropinput("Default timezone", "default_timezone", '', $optionvals, $settings->get_setting('default_timezone'), '', FALSE); 
