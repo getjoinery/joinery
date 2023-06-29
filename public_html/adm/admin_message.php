@@ -67,6 +67,7 @@
 	echo '</ul></div>';	
 	*/
 	
+	$settings = Globalvars::get_instance();
 	if(!$settings->get_setting('mailgun_domain') || !$settings->get_setting('mailgun_api_key')){
 		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Mailgun credentials are not in the db or settings.</div>';
 	}	
