@@ -35,6 +35,11 @@
 	$pageoptions['title'] = "New Email";
 	$page->begin_box($pageoptions);
 	
+	if(!$settings->get_setting('mailgun_domain') || !$settings->get_setting('mailgun_api_key')){
+		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Mailgun credentials are not in the db or settings.</div>';
+		exit;
+	}	
+	
 	if($email->get('eml_mlt_mailing_list_id')){
 		//MAILING LIST
 		$mailing_list = new MailingList($email->get('eml_mlt_mailing_list_id'), TRUE);
