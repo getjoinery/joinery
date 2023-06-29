@@ -67,6 +67,9 @@
 	echo '</ul></div>';	
 	*/
 	
+	if(!$settings->get_setting('mailgun_domain') || !$settings->get_setting('mailgun_api_key')){
+		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Mailgun credentials are not in the db or settings.</div>';
+	}	
 
 	
 	echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';	

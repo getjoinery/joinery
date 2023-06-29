@@ -46,6 +46,12 @@
 	}
 	
 	$settings = Globalvars::get_instance();
+	
+	if(!$settings->get_setting('mailgun_domain') || !$settings->get_setting('mailgun_api_key')){
+		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Mailgun credentials are not in the db or settings.</div>';
+		exit;
+	}	
+	
 	$email_inner_template = $settings->get_setting('event_email_inner_template');
 	$email_outer_template = $settings->get_setting('event_email_outer_template');
 	$email_footer_template = $settings->get_setting('event_email_footer_template');
