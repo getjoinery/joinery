@@ -4,6 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/public_menus_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/pages_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
 
 	$session = SessionControl::get_instance();
@@ -104,15 +105,15 @@
 
 
 	$search_criteria = array('deleted' => false);
-	$page_contents = new MultiPage(
+	$pages = new MultiPage(
 		$search_criteria,
 		NULL,
 		NULL,
 		NULL);	
-	$numrecords = $page_contents->count_all();	
+	$numrecords = $pages->count_all();	
 	if($numrecords){
-		$page_contents->load();
-		$optionvals = $page_contents->get_dropdown_array_link();
+		$pages->load();
+		$optionvals = $pages->get_dropdown_array_link();
 		echo $formwriter->dropinput("Link existing page", "pmu_link_choose", "ctrlHolder", $optionvals, $public_menu->get('pmu_link'), '', TRUE);	
 	}
 
