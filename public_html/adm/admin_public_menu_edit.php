@@ -104,16 +104,17 @@
 
 
 	$search_criteria = array('deleted' => false);
-	$page_contents = new MultiPageContent(
+	$page_contents = new MultiPage(
 		$search_criteria,
 		NULL,
 		NULL,
 		NULL);	
 	$numrecords = $page_contents->count_all();	
-	$page_contents->load();
-	$optionvals = $page_contents->get_dropdown_array_link();
-	echo $formwriter->dropinput("Link existing page", "pmu_link_choose", "ctrlHolder", $optionvals, $public_menu->get('pmu_link'), '', TRUE);	
-
+	if($numrecords){
+		$page_contents->load();
+		$optionvals = $page_contents->get_dropdown_array_link();
+		echo $formwriter->dropinput("Link existing page", "pmu_link_choose", "ctrlHolder", $optionvals, $public_menu->get('pmu_link'), '', TRUE);	
+	}
 
 	$settings = Globalvars::get_instance();
 	$webDir = $settings->get_setting('webDir'); 
