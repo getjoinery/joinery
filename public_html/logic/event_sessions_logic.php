@@ -63,10 +63,12 @@ function event_sessions_logic($get_vars, $post_vars){
 		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
 	} 
 	
-	if($_SESSION['permission'] < 5 && $event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+	if($_SESSION['permission'] < 5 && $event_registrant){
+		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
 		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
 		<p><strong>Your registration has expired, so you cannot access the event materials.</strong></p>	
 		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
+		}
 	}
 	
 	$page_vars['event_registrant'] = $event_registrant;
