@@ -145,6 +145,18 @@ class MultiPage extends SystemMultiBase {
 
 	}
 
+	function get_dropdown_array_link($include_new=FALSE) {
+		$items = array();
+		foreach($this as $page) {
+			$items[$page->get('pag_title')] = $page->get_url();
+		}
+		if ($include_new) {
+			$items['new'] = 'Enter New Below';
+		}
+		return $items;
+
+	}
+
 	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
 		$bind_params = array();
