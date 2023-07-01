@@ -164,6 +164,15 @@ class Order extends SystemBase {
 				'Current user does not have permission to perform this action.');
 		}
 	}	
+	
+	function permanent_delete(){
+		//REMOVE ALL ORDER ITEMS FIRST
+		$order_items = $this->get_order_items();
+		foreach($order_items as $order_item) {
+			$order_item->permanent_delete();
+		}
+		parent::permanent_delete();
+	}
 
 	function get_order_items() {
 		$multi_order_item = new MultiOrderItem(array('order_id' => $this->key));
