@@ -16,6 +16,22 @@
 	
 	require_once( __DIR__ . '/../data/event_logs_class.php');
 	
+	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		$api_key = $settings->get_setting('stripe_api_key_test');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+	}
+	else{
+		$api_key = $settings->get_setting('stripe_api_key');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+	}
+
+	if(!$api_key || !$api_secret_key){
+		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+		exit();			
+	}
+
+	$stripe = new \Stripe\StripeClient($api_key);
+	
 	$event_log = new EventLog(NULL);
 	$event_log->set('evl_event', 'event_registrant_maintenance');
 	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
@@ -66,26 +82,7 @@
 			$order_item = new OrderItem($event_registrant->get('evr_odi_order_item_id'), TRUE);
 			if($order_item->get('odi_is_subscription')){
 				//CHECK SUBSCRIPTION STATUS
-				//require_once($siteDir.'/includes/stripe-php/init.php');
-				$settings = Globalvars::get_instance();
-				$composer_dir = $settings->get_setting('composerAutoLoad');	
-				require_once $composer_dir.'autoload.php';	
 				try{
-					if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-						$api_key = $settings->get_setting('stripe_api_key_test');
-						$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-					}
-					else{
-						$api_key = $settings->get_setting('stripe_api_key');
-						$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-					}
-
-					if(!$api_key || !$api_secret_key){
-						throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-						exit();			
-					}
-
-					$stripe = new \Stripe\StripeClient($api_key);
 					$stripe_subscription = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));	
 					if($stripe_subscription[status] == 'canceled'){
 						$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
