@@ -280,8 +280,9 @@
 				echo $formwriter->hiddeninput('cart_cs', $cart->get_hash());
 				
 				echo $formwriter->start_buttons();
-				echo '<input type="button" value="Pay" onclick="ToCheckout();" style="width:100px;">';
-				//$formwriter->new_form_button('Checkout');
+				echo '<input type="button" value="Pay" class="inline-flex justify-center mr-3 mt-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 " onclick="ToCheckout();" style="width:100px;">';
+				
+				//echo $formwriter->new_form_button('Add Coupon', 'primary');
 				echo $formwriter->end_buttons();
 
 				echo $formwriter->end_form();							

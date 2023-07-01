@@ -27,9 +27,9 @@
 	$order_item->authenticate_write($session);
 	
 	$settings = Globalvars::get_instance();
-	\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));	
+	$stripe = new \Stripe\StripeClient($settings->get_setting('stripe_api_key'));
 
-	$sub = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));
+	$sub = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));
 	try {
 		$sub->cancel();
 	}					
@@ -39,7 +39,7 @@
 	}	
 	
 	if(!$order_item->get('odi_subscription_cancelled_time')){
-		$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
+		$stripe_subscription = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));	
 		if($stripe_subscription[status] == 'canceled'){
 			$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
 			//IF SUBSCRIPTION ENDED, REMOVE 

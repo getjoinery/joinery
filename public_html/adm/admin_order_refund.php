@@ -28,7 +28,7 @@
 		exit();			
 	}
 
-	\Stripe\Stripe::setApiKey($api_key);
+	$stripe = new \Stripe\StripeClient($api_key);
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -51,7 +51,7 @@
 		//HOW TO REFUND PART OF A CHARGE https://stripe.com/docs/refunds#issuing
 
 		try{
-			$re = \Stripe\Refund::create([
+			$re = $stripe->refunds->create([
 			'charge' => $_POST['charge_id'],
 			'amount' => $_POST['refund_amount']*100
 			]);
@@ -63,7 +63,7 @@
 			  exit;
 		}
 		
-		$charge = \Stripe\Charge::retrieve($_POST['charge_id']);
+		$charge = $stripe->charges->retrieve($_POST['charge_id']);
 		
 		$order_item = new OrderItem($_REQUEST['order_item_id'], TRUE); 
 		$order_item->set('odi_refund_amount', $_POST['refund_amount']);
@@ -100,7 +100,7 @@ else{
 	if ($order->get('ord_stripe_charge_id')){
 		$charge_id = $order->get('ord_stripe_charge_id');
 		try{
-			$charge = \Stripe\Charge::retrieve($charge_id);	
+			$charge = $stripe->charges->retrieve($charge_id);	
 		}
 		catch(\Stripe\Exception $e) {
 			  echo 'Status is:' . $e->getHttpStatus() . '\n';
@@ -111,9 +111,9 @@ else{
 	}	
 	else if ($order->get('ord_stripe_payment_intent_id')) {
 		try{
-			$intent = \Stripe\PaymentIntent::retrieve($order->get('ord_stripe_payment_intent_id'));
+			$intent = $stripe->paymentIntents->retrieve($order->get('ord_stripe_payment_intent_id'));
 			$charge_id = $intent->charges->data[0]->id;
-			$charge = \Stripe\Charge::retrieve($charge_id);
+			$charge = $stripe->charges->retrieve($charge_id);
 		}
 		catch(\Stripe\Exception $e) {
 			  echo 'Status is:' . $e->getHttpStatus() . '\n';

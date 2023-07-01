@@ -27,7 +27,7 @@
 
 	if($api_key && $api_secret_key){
 		
-		\Stripe\Stripe::setApiKey($api_key);
+		$stripe = new \Stripe\StripeClient($api_key);
 						
 		$orders = new MultiOrder(array('user_id' => $user->key));
 		$orders->load();	
@@ -40,7 +40,7 @@
 				if($order_item->get('odi_is_subscription') && !$order_item->get('odi_subscription_cancelled_time')){
 					//CHECK SUBSCRIPTION STATUS
 					try{		
-						$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
+						$stripe_subscription = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));	
 						if($stripe_subscription[status] == 'canceled'){
 							$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
 							//IF SUBSCRIPTION ENDED, REMOVE 

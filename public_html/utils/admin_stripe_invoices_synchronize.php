@@ -36,7 +36,7 @@
 		exit();			
 	}
 		
-	\Stripe\Stripe::setApiKey($api_key);
+	$stripe = new \Stripe\StripeClient($api_key);
 	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
@@ -80,10 +80,10 @@
 	$created[lte] = $enddate;
 	
 	if($offset){
-		$stripe_invoices = \Stripe\Invoice::all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created, 'status' => 'paid']);
+		$stripe_invoices = $stripe->invoices->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created, 'status' => 'paid']);
 	}
 	else{
-		$stripe_invoices = \Stripe\Invoice::all(['limit' => $numperpage, 'created' => $created, 'status' => 'paid']);
+		$stripe_invoices = $stripe->invoices->all(['limit' => $numperpage, 'created' => $created, 'status' => 'paid']);
 	}
 
 
@@ -223,7 +223,7 @@
 			$created = array();
 			$created[gte] = $startdate;
 			$created[lte] = $enddate;
-			$stripe_invoices = \Stripe\Invoice::all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+			$stripe_invoices = $stripe->invoices->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 		}
 		else{
 			break;

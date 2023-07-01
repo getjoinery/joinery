@@ -27,13 +27,13 @@
 		$api_key = $settings->get_setting('stripe_api_key');
 		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
 
-		\Stripe\Stripe::setApiKey($api_key);
+		$stripe = new \Stripe\StripeClient($api_key);
 
 		//CHECK STATUS WITH STRIPE
 		if ($order->get('ord_stripe_charge_id')){
 			$charge_id = $order->get('ord_stripe_charge_id');
 			try{
-				$charge = \Stripe\Charge::retrieve($charge_id);	
+				$charge = $stripe->charges->retrieve($charge_id);	
 
 				if($charge->amount_refunded){
 					//print_r($charge->refunds);
@@ -45,15 +45,16 @@
 			}
 			catch(\Stripe\Exception $e) {
 				  //Do nothing
+				  
 			}		
 
 
 		}	
 		else if ($order->get('ord_stripe_payment_intent_id')) {
 			try{
-				$intent = \Stripe\PaymentIntent::retrieve($order->get('ord_stripe_payment_intent_id'));
+				$intent = $stripe->paymentIntents->retrieve($order->get('ord_stripe_payment_intent_id'));
 				$charge_id = $intent->charges->data[0]->id;
-				$charge = \Stripe\Charge::retrieve($charge_id);
+				$charge = $stripe->charges->retrieve($charge_id);
 
 				if($charge->amount_refunded){
 					//print_r($charge->refunds);

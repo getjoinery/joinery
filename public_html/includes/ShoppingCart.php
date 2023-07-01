@@ -171,6 +171,24 @@ class ShoppingCart {
 		$session = SessionControl::get_instance();
 		$charge_total = $this->get_total();
 
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			$api_key = $settings->get_setting('stripe_api_key_test');
+			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+		}
+		else{
+			$api_key = $settings->get_setting('stripe_api_key');
+			$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+		}
+
+		if(!$api_key || !$api_secret_key){
+			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+			exit();			
+		}
+		
+		$page_vars['api_key'] = $api_key;
+		$page_vars['api_secret_key'] = $api_secret_key;
+		
+		$stripe = new \Stripe\StripeClient($api_key);
 
 		//HANDLE THE BILLING USER
 		$billing_user = User::GetByEmail(trim($this->billing_user['billing_email'])); 
@@ -192,14 +210,14 @@ class ShoppingCart {
 			//HANDLE THE STRIPE USER
 			if(!$stripe_customer_id){
 				//CHECK ON STRIPE 
-				$stripe_customer = \Stripe\Customer::all(["email" => $billing_user->get('usr_email')]);
+				$stripe_customer = $stripe->customers->all(["email" => $billing_user->get('usr_email')]);
 				if($stripe_customer[data][0][id]){
 					//IF THERE IS A CUSTOMER ID AT STRIPE
 					$stripe_customer_id = $stripe_customer[data][0][id];
 				}
 				else{		
 					//IF THERE IS NO CUSTOMER ID
-					$stripe_customer = \Stripe\Customer::create([
+					$stripe_customer = $stripe->customers->create([
 						'name' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'),
 						'email' => $billing_user->get('usr_email'),
 						'description' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'). ' ('.$billing_user->get('usr_email').')',

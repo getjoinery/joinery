@@ -26,7 +26,7 @@
 	exit;
 
 		$settings = Globalvars::get_instance();
-		\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
+		$stripe = new \Stripe\StripeClient($settings->get_setting('stripe_api_key'));
 	
 	//SUBSCRIPTIONS
 	$order_items = new MultiOrderItem();
@@ -42,7 +42,7 @@
 				$order_item->set('odi_is_subscription', true);
 				$order_item->set('odi_stripe_subscription_id', $order_item->get('odi_stripe_subscription_id'));
 				$order_item->save();
-				$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
+				$stripe_subscription = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));	
 				if($stripe_subscription[status] == 'canceled'){
 					$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
 					
