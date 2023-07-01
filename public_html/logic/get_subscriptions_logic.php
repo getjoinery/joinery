@@ -24,13 +24,13 @@
 	$customer_ids = array();
 	try{	
 		$settings = Globalvars::get_instance();
-		\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
+		$stripe = new \Stripe\StripeClient($settings->get_setting('stripe_api_key'));
 
 		if($user->get('usr_stripe_customer_id')){
 			$customer_ids[] = $user->get('usr_stripe_customer_id');
 		}
 
-		$stripe_customers = \Stripe\Customer::all(["email" => $user->get('usr_email')]);	
+		$stripe_customers = $stripe->customers->all(["email" => $user->get('usr_email')]);	
 
 		foreach($stripe_customers[data] as $stripe_customer){
 			if(!in_array($stripe_customer[id], $customer_ids)){
@@ -51,7 +51,7 @@
 	$active = 0;
 	foreach($customer_ids as $customer_id){	
 		try{
-			$subs = \Stripe\Subscription::all(['limit' => 5, 'customer' => $customer_id, 'status' => 'all']);
+			$subs = $stripe->subscriptions->all(['limit' => 5, 'customer' => $customer_id, 'status' => 'all']);
 		}
 		catch(Exception $e){
 			//TODO: DISPLAY ERROR NOTICE IN TABLE BELOW

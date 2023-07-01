@@ -31,7 +31,7 @@
 		exit();			
 	}
 		
-	\Stripe\Stripe::setApiKey($api_key);
+	$stripe = new \Stripe\StripeClient($api_key);
 	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
@@ -71,10 +71,10 @@
 	$created[lte] = $enddate;
 	
 	if($offset){
-		$charges = \Stripe\Charge::all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+		$charges = $stripe->charges->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 	}
 	else{
-		$charges = \Stripe\Charge::all(['limit' => $numperpage, 'created' => $created]);
+		$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
 	}
 
 
@@ -203,7 +203,7 @@
 				}
 				else{		
 					//TODO NOT WORKING				
-					//$payment_intent = \Stripe\paymentIntent::retrieve($charge->payment_intent);
+					//$payment_intent = $stripe->paymentIntents->retrieve($charge->payment_intent);
 					array_push($rowvalues, $description.' <a href="/admin/admin_orders">Details here</a>');
 				}			
 			}

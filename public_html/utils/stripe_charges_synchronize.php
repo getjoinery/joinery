@@ -39,7 +39,7 @@
 		exit();			
 	}
 		
-	\Stripe\Stripe::setApiKey($api_key);
+	$stripe = new \Stripe\StripeClient($api_key);
 	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
@@ -85,10 +85,10 @@
 	$created[lte] = $enddate;
 	
 	if($offset){
-		$charges = \Stripe\Charge::all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+		$charges = $stripe->charges->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 	}
 	else{
-		$charges = \Stripe\Charge::all(['limit' => $numperpage, 'created' => $created]);
+		$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
 	}
 
 
@@ -416,7 +416,7 @@
 			$created = array();
 			$created[gte] = $startdate;
 			$created[lte] = $enddate;
-			$charges = \Stripe\Charge::all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+			$charges = $stripe->charges->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 		}
 		else{
 			break;

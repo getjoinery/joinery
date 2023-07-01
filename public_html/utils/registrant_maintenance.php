@@ -85,8 +85,8 @@
 						exit();			
 					}
 
-					\Stripe\Stripe::setApiKey($api_key);
-					$stripe_subscription = \Stripe\Subscription::retrieve($order_item->get('odi_stripe_subscription_id'));	
+					$stripe = new \Stripe\StripeClient($api_key);
+					$stripe_subscription = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));	
 					if($stripe_subscription[status] == 'canceled'){
 						$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
 						//IF SUBSCRIPTION ENDED, REMOVE 

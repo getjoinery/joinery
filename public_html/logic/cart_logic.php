@@ -57,7 +57,7 @@ function cart_logic($get_vars, $post_vars){
 		$page_vars['api_key'] = $api_key;
 		$page_vars['api_secret_key'] = $api_secret_key;
 		
-		\Stripe\Stripe::setApiKey($api_key);
+		$stripe = new \Stripe\StripeClient($api_key);
 	}
 	
 	$currency_code = $settings->get_setting('site_currency');
@@ -129,11 +129,11 @@ function cart_logic($get_vars, $post_vars){
 					//CHECK FOR EXISTING PLAN
 					try{
 						$plan_name = 'recurring_donation-' . (int)($cart_item['price'] - $cart_item['discount']);
-						$plan = \Stripe\Plan::retrieve($plan_name);
+						$plan = $stripe->plans->retrieve($plan_name);
 					}
 					catch (Exception $e) {
 						//CREATE NEW PLAN
-						$plan = \Stripe\Plan::create([
+						$plan = $stripe->plans->create([
 						  "amount" => (int)($cart_item['price'] - $cart_item['discount']) * 100,
 						  "interval" => "month",
 						  "product" => [
@@ -180,6 +180,7 @@ function cart_logic($get_vars, $post_vars){
 				'payment_method_types' => ['card'],
 				'success_url' => $settings->get_setting('webDir'). '/cart_charge?session_id={CHECKOUT_SESSION_ID}',
 				'cancel_url' => $settings->get_setting('webDir'). '/cart',
+				'mode' => 'payment',
 			);
 			
 			if($stripe_item_list){
@@ -188,25 +189,28 @@ function cart_logic($get_vars, $post_vars){
 			
 			if($stripe_subscription_item){
 				$create_list['subscription_data'] = $stripe_subscription_item;
+				$create_list['mode'] = 'subscription';
 			}			
 
-			if($billing_user){
-				$create_list['client_reference_id'] = $billing_user->key;
+			$existing_billing_user = User::GetByEmail($cart->billing_user['billing_email']);
+
+			if($existing_billing_user && !$_SESSION['test_mode']){
+				$create_list['client_reference_id'] = $existing_billing_user->key;
 			
-				if($billing_user->get('usr_stripe_customer_id') && !$_SESSION['test_mode']){
-					$create_list['customer'] = $billing_user->get('usr_stripe_customer_id');
+				if($existing_billing_user->get('usr_stripe_customer_id')){
+					$create_list['customer'] = $existing_billing_user->get('usr_stripe_customer_id');
 				}
 				
-				if($billing_user->get('usr_email')){
-					$create_list['customer_email'] = $billing_user->get('usr_email');		
+				if($$existing_billing_user->get('usr_email')){
+					$create_list['customer_email'] = $existing_billing_user->get('usr_email');		
 				}				
 			}
 			else{
-				$create_list['customer_email'] = $billing_user['billing_email'];
+				$create_list['customer_email'] = $cart->billing_user['billing_email'];
 			}
-										
+								
 
-			$stripe_session = \Stripe\Checkout\Session::create($create_list);
+			$stripe_session = $stripe->checkout->sessions->create($create_list);
 			$page_vars['stripe_session'] = $stripe_session;	
 		}
 	}

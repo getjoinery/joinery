@@ -60,7 +60,7 @@ function cart_charge_logic($get_vars, $post_vars){
 		$page_vars['api_key'] = $api_key;
 		$page_vars['api_secret_key'] = $api_secret_key;
 		
-		\Stripe\Stripe::setApiKey($api_key);
+		$stripe = new \Stripe\StripeClient($api_key);
 	}
 	
 	$receipts = array();
@@ -127,9 +127,16 @@ function cart_charge_logic($get_vars, $post_vars){
 
 		try {
 			//STORE PAYMENT METHOD 
-			$source_result = \Stripe\Customer::createSource( 
-				$stripe_customer_id, 
-				[ 'source' => [ 'object' => 'source', 'type' => 'card', 'token' => $_REQUEST['stripeToken'], ], ] );
+			/*
+			$source_result = $stripe->sources->create([ 
+				 'type' => 'card', 
+				 'token' => $_REQUEST['stripeToken'],  
+			]);
+			*/
+			$source_result = $stripe->customers->createSource($stripe_customer_id, [ 
+				 'source' => $_REQUEST['stripeToken'],  
+			]);
+				
 		}	
 		catch (Exception $e) {
 			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
@@ -215,11 +222,11 @@ function cart_charge_logic($get_vars, $post_vars){
 				//CHECK FOR EXISTING PLAN
 				try{
 					$plan_name = 'subscription-' . (int)($price - $discount);
-					$plan = \Stripe\Plan::retrieve($plan_name);
+					$plan = $stripe->plans->retrieve($plan_name);
 				}
 				catch (Exception $e) {
 					//CREATE NEW PLAN
-					$plan = \Stripe\Plan::create([
+					$plan = $stripe->plans->create([
 					  "amount" => (int)($price - $discount) * 100,
 					  "interval" => 'month',
 					  "product" => [
@@ -242,7 +249,7 @@ function cart_charge_logic($get_vars, $post_vars){
 					 "customer_email" => $billing_user->get('usr_email')
 				);
 				$plan_items_wrap = array($plan_items);
-				$subscription_result = \Stripe\Subscription::create([
+				$subscription_result = $stripe->subscriptions->create([
 				  'customer' => $stripe_customer_id,
 				  'items' => $plan_items_wrap,
 				  'metadata' => [
@@ -388,7 +395,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			if($charge_total > 0){
 				
 				//CHARGE THE PURCHASE
-				$charge_result = \Stripe\Charge::create([
+				$charge_result = $stripe->charges->create([
 				  'source' => $source_result[id],
 				  'amount' => (int)$charge_total*100,
 				  'currency' => $currency_code,
