@@ -53,6 +53,87 @@
 	
 	
 
+<!-- Blog section -->
+      <div class="relative bg-gray-50 py-16 sm:py-24 lg:py-32">
+        <div class="relative">
+          <div class="text-center mx-auto max-w-md px-4 sm:max-w-3xl sm:px-6 lg:px-8 lg:max-w-7xl">
+            <!--<h2 class="text-base font-semibold tracking-wider text-cyan-600 uppercase">Learn</h2>-->
+            <p class="mt-2 text-3xl font-extrabold text-blue-400 font-serif sm:text-4xl">
+              Upcoming Events
+            </p>
+            <!--<p class="mt-5 mx-auto max-w-prose text-xl text-gray-500">
+			
+            </p>-->
+          </div>
+          <div class="mt-12 mx-auto max-w-md px-4 grid gap-8 sm:max-w-lg sm:px-6 lg:px-8 lg:grid-cols-3 lg:max-w-7xl">
+			<?php
+			$numdisplayed = 0;
+			foreach ($events as $event){
+				$now = LibraryFunctions::get_current_time_obj('UTC');
+				$event_time = LibraryFunctions::get_time_obj($event->get('evt_start_time'), 'UTC');
+				$numdisplayed++;
+				if($numdisplayed == 4){
+					break;
+				}		  
+				?>
+		  
+				<div class="flex flex-col rounded-lg shadow-lg overflow-hidden">
+				  <div class="flex-shrink-0">
+				  <?php
+					if($pic = $event->get_picture_link('small')){
+						echo '<img class="h-48 w-full object-cover" src="'.$pic.'" alt="">';
+					}
+					?>
+				  </div>
+				  <div class="flex-1 bg-white p-6 flex flex-col justify-between">
+					<div class="flex-1">
+					  <!--<p class="text-sm font-medium text-cyan-600">
+						<a href="<?php echo $event->get_url(); ?>" class="hover:underline">
+						  Online Course
+						</a>
+					  </p>-->
+					  <a href="<?php echo $event->get_url(); ?>" class="block mt-2">
+						<p class="text-xl font-semibold text-gray-900">
+						  <?php echo $event->get('evt_name'); ?>
+						</p>
+						<p class="mt-3 text-base text-gray-500">
+						  <?php echo $event->get('evt_short_description'); ?>
+						</p>
+					  </a>
+					</div>
+					<div class="mt-6 flex items-center">
+					  <div class="flex-shrink-0">
+						<!--<a href="#">
+						  <img class="h-10 w-10 rounded-full" src="https://integralzen.org/uploads/small/doshin-mic.jpg" alt="Roel Aufderehar">
+						</a>-->
+					  </div>
+					  <!--<div class="ml-3">
+						<p class="text-sm font-medium text-gray-900">
+						  <a href="#" class="hover:underline">
+							Roel Aufderehar
+						  </a>
+						</p>
+						<div class="flex space-x-1 text-sm text-gray-500">
+						  <time datetime="2020-03-16">
+							Mar 16, 2020
+						  </time>
+						  <span aria-hidden="true">
+							&middot;
+						  </span>
+						  <span>
+							6 min read
+						  </span>
+						</div>
+					  </div>-->
+					</div>
+				  </div>
+				</div>
+					<?php
+					}
+					?>
+          </div>
+        </div>
+      </div>
 
 <?php /* ?>
 <div class="py-12 bg-white">
