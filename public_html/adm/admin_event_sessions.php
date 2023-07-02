@@ -112,14 +112,23 @@
 	<?php
 
 
-
-	$searches = array();
-	$searches['event_id'] = $event->key;
-	$event_sessions = new MultiEventSessions(
-		$searches,
-		array('time_then_session_number'=>'DESC')); 
-	$numsessions = $event_sessions->count_all();	
-	$event_sessions->load();	
+	//WAITING LIST
+	$wnumperpage = 10;
+	$woffset = LibraryFunctions::fetch_variable('woffset', 0, 0, '');
+	$wsort = LibraryFunctions::fetch_variable('wsort', 'time_then_session_number', 0, '');
+	$wsdirection = LibraryFunctions::fetch_variable('wsdirection', 'DESC', 0, '');
+	$wsearchterm = LibraryFunctions::fetch_variable('wsearchterm', '', 0, '');
+	$wsearch_criteria = array();
+	$wsearch_criteria['event_id'] = $event->key;
+	$event_sessions = new MultiEventSessions(		
+		$wsearch_criteria,
+		array($wsort=>$wsdirection),
+		$wnumperpage,
+		$woffset);
+	$numsessions = $event_sessions->count_all();
+	$event_sessions->load();
+	$wpager = new Pager(array('numrecords'=>$numsessions, 'numperpage'=> $wnumperpage), 'w');
+	
 
 	$headers = array("Title", "Time", "Links", "Picture/Video", "Edit");
 	$altlinks = array('Add Session'=>'/admin/admin_event_session_edit?evt_event_id='.$event->key);
@@ -127,7 +136,7 @@
 		'altlinks' => $altlinks,
 		'title' => "Sessions"
 	);
-	$page->tableheader($headers, $box_vars);
+	$page->tableheader($headers, $box_vars,$wpager);
 	
 	if($_SESSION['permission'] >= 8 && $numsessions){ 
 		$delform = '<tr colspan="5"><form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event_session_edit?evt_event_id='. $event->key.'">';
@@ -178,7 +187,7 @@
 		<a href="/admin/admin_event_session_edit?action=delete&evs_event_session_id='. $event_session->key .'">delete</a>');
 		$page->disprow($rowvalues);
 	}
-	$page->endtable();
+	$page->endtable($wpager);
 
 	$page->admin_footer();
 

@@ -77,18 +77,43 @@
 	$numwebsiteclick = $websiteclick->count_all();
 	*/
 
-	$dbhelper = DbConnector::get_instance();
-	$dblink = $dbhelper->get_db_link();
 
 	//REGISTRANTS
-	$event_registrants = new MultiEventRegistrant(array('event_id' => $event->key), NULL);
+	$rnumperpage = 50;
+	$roffset = LibraryFunctions::fetch_variable('roffset', 0, 0, '');
+	$rsort = LibraryFunctions::fetch_variable('rsort', 'event_registrant_id', 0, '');
+	$rsdirection = LibraryFunctions::fetch_variable('rsdirection', 'DESC', 0, '');
+	$rsearchterm = LibraryFunctions::fetch_variable('rsearchterm', '', 0, '');
+	$rsearch_criteria = array();
+	$rsearch_criteria['event_id'] = $event->key;
+	
+	$event_registrants = new MultiEventRegistrant(
+		$rsearch_criteria,
+		array($rsort=>$rsdirection),
+		$rnumperpage,
+		$roffset
+		);
 	$numregistrants = $event_registrants->count_all();
 	$event_registrants->load();
+	
+	$rpager = new Pager(array('numrecords'=>$numregistrants, 'numperpage'=> $rnumperpage), 'r');
 
 	//WAITING LIST
-	$waiting_lists = new MultiWaitingList(array('event_id' => $event->key), NULL);
+	$wnumperpage = 20;
+	$woffset = LibraryFunctions::fetch_variable('woffset', 0, 0, '');
+	$wsort = LibraryFunctions::fetch_variable('wsort', 'waiting_list_id', 0, '');
+	$wsdirection = LibraryFunctions::fetch_variable('wsdirection', 'DESC', 0, '');
+	$wsearchterm = LibraryFunctions::fetch_variable('wsearchterm', '', 0, '');
+	$wsearch_criteria = array();
+	$wsearch_criteria['event_id'] = $event->key;
+	$waiting_lists = new MultiWaitingList(		
+		$wsearch_criteria,
+		array($wsort=>$wsdirection),
+		$wnumperpage,
+		$woffset);
 	$numwaitinglist = $waiting_lists->count_all();
 	$waiting_lists->load();
+	$wpager = new Pager(array('numrecords'=>$numwaitinglist, 'numperpage'=> $wnumperpage), 'w');
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -124,6 +149,7 @@
 		if(!$event->get('evt_delete_time') && $_SESSION['permission'] >= 8) {
 			$options['altlinks']['Soft Delete'] = '/admin/admin_event?action=delete&evt_event_id='.$event->key;
 		}
+		$options['altlinks']['Registrant Emails'] = '/admin/admin_event_emails?evt_event_id='.$event->key;
 			
 		$page->begin_box($options);
 	?>
@@ -189,7 +215,7 @@
 		'altlinks' => $altlinks,
 		'title' => "Registrants (".$numregistrants.')'
 	);
-	$page->tableheader($headers, $box_vars);
+	$page->tableheader($headers, $box_vars, $rpager);
 
 	$registrant_emails = '';
 	foreach($event_registrants as $event_registrant){
@@ -276,7 +302,7 @@
         $page->disprow($rowvalues);
 	}
 
-	$page->endtable();
+	$page->endtable($rpager);
 	
 	if($numwaitinglist){
 		
@@ -292,7 +318,7 @@
 			'altlinks' => $altlinks,
 			'title' => "Waiting List (".$numwaitinglist.')'
 		);
-		$page->tableheader($headers, $box_vars);
+		$page->tableheader($headers, $box_vars, $wpager);
 		
 		foreach($waiting_lists as $waiting_list){
 
@@ -313,13 +339,27 @@
 			$page->disprow($rowvalues);
 		}
 
-		$page->endtable();	
+		$page->endtable($wpager);	
 	}
 	
 	
 	//MESSAGES
-	$messages = new MultiMessage(array('event_id_only' => $event->key), NULL);
-	$messages->load();	
+	$mnumperpage = 20;
+	$moffset = LibraryFunctions::fetch_variable('moffset', 0, 0, '');
+	$msort = LibraryFunctions::fetch_variable('msort', 'message_id', 0, '');
+	$msdirection = LibraryFunctions::fetch_variable('msdirection', 'DESC', 0, '');
+	$msearchterm = LibraryFunctions::fetch_variable('msearchterm', '', 0, '');
+	$msearch_criteria = array();
+	$msearch_criteria['event_id_only'] = $event->key;
+	$messages = new MultiMessage(		
+		$msearch_criteria,
+		array($msort=>$msdirection),
+		$mnumperpage,
+		$moffset);
+	$nummessages = $messages->count_all();
+	$messages->load();
+	$mpager = new Pager(array('numrecords'=>$nummessages, 'numperpage'=> $mnumperpage), 'w');
+	
 	
 	$headers = array("Sender", "Message", "Time");
 	$altlinks = array();
@@ -334,7 +374,7 @@
 		'title' => "Messages to registrants"
 	);
 	
-	$page->tableheader($headers, $box_vars);
+	$page->tableheader($headers, $box_vars, $mpager);
 
 	foreach($messages as $message){
 		$user = new User($message->get('msg_usr_user_id_sender'), TRUE);
@@ -346,12 +386,14 @@
         $page->disprow($rowvalues);
 	}
 
-	$page->endtable();	
+	$page->endtable($mpager);	
 	
+	/*
 	$pageoptions['title'] = "Emails of all registrants";
 	$page->begin_box($pageoptions);
 	echo '<p>'.$registrant_emails. '';	
 	$page->end_box();
+	*/
 /*
 	?>
 
