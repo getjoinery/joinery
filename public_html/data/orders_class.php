@@ -165,13 +165,13 @@ class Order extends SystemBase {
 		}
 	}	
 	
-	function permanent_delete(){
+	function permanent_delete($debug = false){
 		//REMOVE ALL ORDER ITEMS FIRST
 		$order_items = $this->get_order_items();
 		foreach($order_items as $order_item) {
 			$order_item->permanent_delete();
 		}
-		parent::permanent_delete();
+		parent::permanent_delete($debug);
 	}
 
 	function get_order_items() {
