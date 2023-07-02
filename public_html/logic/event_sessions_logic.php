@@ -5,7 +5,7 @@ function event_sessions_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Pager.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
@@ -13,6 +13,7 @@ function event_sessions_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
+	
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
@@ -75,22 +76,38 @@ function event_sessions_logic($get_vars, $post_vars){
 
 	$next_session = $event->get_next_session();
 	$page_vars['next_session'] = $next_session;
-	
-	$psearches = array();
-	$psearches['event_id'] = $event->key;
-	if($get_vars['show_all']){
-		$limit = NULL;
+
+	$searches = array();
+	if($get_vars['offset']){
+		$offset = $get_vars['offset'];
 	}
 	else{
-		$limit = 5;
+		$offset = 0;
 	}
-	$event_sessions = new MultiEventSessions($psearches,
-		array('start_time'=>'DESC'), $limit,
-	0);
+
+	
+	$searches['deleted'] = FALSE;
+	$searches['visibility'] = 1;
+	$searches['event_id'] = $event->key;
+	$numperpage = 5;
+	$sort = 'start_time';
+	$sdirection = 'DESC';	
+	
+	$page_vars['numperpage'] = $numperpage;
+
+	$event_sessions = new MultiEventSessions(
+		$searches,
+		array($sort=>$sdirection),
+		$numperpage,
+		$offset,
+		'AND');
+
+
 	$num_sessions = $event_sessions->count_all();
 	$event_sessions->load();	
-	$page_vars['num_sessions'] = $num_sessions;
 	$page_vars['event_sessions'] = $event_sessions;
+	
+	$page_vars['pager'] = new Pager(array('numrecords'=>$num_sessions, 'numperpage'=> $numperpage));
 		
 	return $page_vars;
 }
