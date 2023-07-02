@@ -5,6 +5,7 @@
 	require_once(LibraryFunctions::get_logic_file_path('event_sessions_logic.php'));	
 
 	$page_vars = event_sessions_logic($_GET, $_POST);
+	$pager = $page_vars['pager'];
 
 	if($page_vars['error_message']){
 		PublicPageTW::OutputGenericPublicPage('Not Registered', 'Not Registered', $page_vars['error_message']);
@@ -437,10 +438,18 @@
 								
 
 	
-								if($page_vars['num_sessions'] > 5){
-									echo '            <div>
-									  <a href="/profile/event_sessions?show_all=1&event_id='. $page_vars['event']->key .'" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">See all '.$page_vars['num_sessions'].' sessions</a>
+								if($pager->num_records() > 5){
+									if($page_number = $pager->is_valid_page('+1')){
+										echo '<div>
+									  <a href="'. $pager->get_url($page_number) .'" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">Show next '.$pager->num_per_page(). ' of '.$pager->num_records().' sessions</a>
 									</div>';
+									}
+									else{
+										echo '<div>
+									  <a href="#" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">Final '.$pager->num_per_page(). ' of '.$pager->num_records().' sessions</a>
+									</div>';
+									}
+									
 									
 								}								
 								
