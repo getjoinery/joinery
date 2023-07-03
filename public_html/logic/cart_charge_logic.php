@@ -190,7 +190,16 @@ function cart_charge_logic($get_vars, $post_vars){
 			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
 			exit;
 		}
-
+		
+		//SET NEW CARD AS DEFAULT 
+		try {
+			$customer = $stripe->customers->retrieve($stripe_customer_id);
+			$customer->default_source=$source_result['id'];
+			$customer->save();  
+		}
+		catch (Exception $e) {		  
+			error_log("Unable to set stripe default card.");
+		}
 	}
 
 	//PROCESS RECURRING ITEMS
