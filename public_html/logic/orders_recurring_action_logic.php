@@ -27,7 +27,10 @@
 	$order_item->authenticate_write($session);
 	
 	$settings = Globalvars::get_instance();
-	$stripe = new \Stripe\StripeClient($settings->get_setting('stripe_api_key'));
+	$stripe = new \Stripe\StripeClient([
+		'api_key' => $settings->get_setting('stripe_api_key'),
+		'stripe_version' => '2022-11-15'
+	]);
 
 	$sub = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));
 	try {

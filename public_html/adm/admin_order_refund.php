@@ -28,7 +28,10 @@
 		exit();			
 	}
 
-	$stripe = new \Stripe\StripeClient($api_key);
+			$stripe = new \Stripe\StripeClient([
+			'api_key' => $api_key,
+			'stripe_version' => '2022-11-15'
+		]);
 	
 	$page = new AdminPage();
 	$page->admin_header(	

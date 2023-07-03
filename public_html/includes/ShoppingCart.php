@@ -188,7 +188,10 @@ class ShoppingCart {
 		$page_vars['api_key'] = $api_key;
 		$page_vars['api_secret_key'] = $api_secret_key;
 		
-		$stripe = new \Stripe\StripeClient($api_key);
+		$stripe = new \Stripe\StripeClient([
+			'api_key' => $api_key,
+			'stripe_version' => '2022-11-15'
+		]);
 
 		//HANDLE THE BILLING USER
 		$billing_user = User::GetByEmail(trim($this->billing_user['billing_email'])); 

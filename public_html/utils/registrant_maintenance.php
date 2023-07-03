@@ -30,7 +30,10 @@
 		exit();			
 	}
 
-	$stripe = new \Stripe\StripeClient($api_key);
+	$stripe = new \Stripe\StripeClient([
+		'api_key' => $api_key,
+		'stripe_version' => '2022-11-15'
+	]);
 	
 	$event_log = new EventLog(NULL);
 	$event_log->set('evl_event', 'event_registrant_maintenance');
