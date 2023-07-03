@@ -5,7 +5,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
 	
-	//require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require_once $composer_dir.'autoload.php';
@@ -25,58 +24,72 @@
 	$order_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 	$order = $order_item->get_order();
 	$order_item->authenticate_write($session);
+
+	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		$api_key = $settings->get_setting('stripe_api_key_test');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+	}
+	else{
+		$api_key = $settings->get_setting('stripe_api_key');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+	}
+	
+	if(!$api_key || !$api_secret_key){
+		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+		exit();			
+	}
 	
 	$settings = Globalvars::get_instance();
 	$stripe = new \Stripe\StripeClient([
-		'api_key' => $settings->get_setting('stripe_api_key'),
+		'api_key' => $api_key,
 		'stripe_version' => '2022-11-15'
 	]);
 
-	$sub = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));
-	try {
-		$sub->cancel();
-	}					
-	catch (Exception $e) {
-		//DO NOTHING
-		$error = "We were unable to cancel that subscription.  Please contact the webmaster.";
-	}	
-	
-	if(!$order_item->get('odi_subscription_cancelled_time')){
-		$stripe_subscription = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));	
-		if($stripe_subscription[status] == 'canceled'){
-			$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
+	$stripe_subscription = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));
+	if($stripe_subscription[canceled_at]){
+		//SUBSCRIPTION HAD ALREADY ENDED
+		$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
+		$order_item->set('odi_subscription_cancelled_time', $canceled_at);
+		$order_item->save();
+	}
+	else{
+		try {
+			$response =$stripe_subscription->cancel();
+		}					
+		catch (Exception $e) {
+			//DO NOTHING
+			$error = "We were unable to cancel that subscription.  Please contact the webmaster.";
+			echo 'There was an error canceling the subscription: '. $error;
+			exit;
+		}	
+		
+		if($response[canceled_at]){
+			$canceled_at = gmdate("c", $response[canceled_at]);
 			//IF SUBSCRIPTION ENDED, REMOVE 
-			
-			
 			$order_item->set('odi_subscription_cancelled_time', $canceled_at);
-			$order_item->save();
-			
-			//SEND NOTIFICATION
-			if($settings->get_setting('subscription_notification_emails')){
-				$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
-				foreach($notify_emails as $notify_email){
-					try {
-						$notify_user = User::GetByEmail($notify_email);
-						$body = 'Subscription '.$order_item->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
-						$email_inner_template = $settings->get_setting('individual_email_inner_template');
-						$email = new EmailTemplate($email_inner_template, $notify_user);
-						$email->fill_template(array(
-							'subject' => 'Cancelled Subscription',
-							'body' => $body,
-						));	
-						$result = $email->send();
-					}					
-					catch (Exception $e) {
-						//DO NOTHING
-						$error2 = "";
-					}
+			$order_item->save();			
+		}
+		
+		//SEND NOTIFICATION
+		if($settings->get_setting('subscription_notification_emails')){
+			$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
+			foreach($notify_emails as $notify_email){
+				try {
+					$notify_user = User::GetByEmail($notify_email);
+					$body = 'Subscription '.$order_item->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
+					$email_inner_template = $settings->get_setting('individual_email_inner_template');
+					$email = new EmailTemplate($email_inner_template, $notify_user);
+					$email->fill_template(array(
+						'subject' => 'Cancelled Subscription',
+						'body' => $body,
+					));	
+					$result = $email->send();
+				}					
+				catch (Exception $e) {
+					//DO NOTHING
+					$error2 = "";
 				}
 			}
-
-		}
-		if($error){
-			echo $error;
-			exit;
 		}
 	}
 
