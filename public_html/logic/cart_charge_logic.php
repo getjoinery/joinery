@@ -136,16 +136,61 @@ function cart_charge_logic($get_vars, $post_vars){
 			$source_result = $stripe->customers->createSource($stripe_customer_id, [ 
 				 'source' => $_REQUEST['stripeToken'],  
 			]);
-				
-		}	
-		catch (Exception $e) {
-			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
-			$order->set('ord_error', substr($error, 0, 250));
-			$order->save();		
-			
-			throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
-			exit();		
+	
+
 		}
+		/*
+		catch(\Stripe\Error\Card $e) {
+			// Since it's a decline, \Stripe\Exception\Card will be caught
+			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_error', substr($error, 0, 250));
+			$order->save();	
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+		} 
+		catch(\Stripe\Error\CardException $e) {
+			// Since it's a decline, \Stripe\Exception\Card will be caught
+			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_error', substr($error, 0, 250));
+			$order->save();	
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+		}
+		catch (\Stripe\Exception\RateLimitException $e) {
+		  // Too many requests made to the API too quickly
+			$error = "Sorry, we weren't able to authorize your card due to too many requests. You have not been charged.";
+		} 
+		catch (\Stripe\Exception\InvalidRequestException $e) {
+			$error = "Sorry, we weren't able to authorize your card due to an invalid request. That's our fault. You have not been charged.";	
+		} 
+		catch (\Stripe\Exception\AuthenticationException $e) {
+		  // Authentication with Stripe's API failed
+		  // (maybe you changed API keys recently)
+		  $error = "Sorry, our connection to our credit card processor is not currently working. That's our fault. You have not been charged.";
+		} 
+		catch (\Stripe\Exception\ApiConnectionException $e) {
+		  // Network communication with Stripe failed
+		  $error = "Sorry, we were unable to reach the credit card processor. That's our fault. You have not been charged.";
+		} 
+		catch (\Stripe\Exception\ApiErrorException $e) {
+			
+			print_r($e);
+			exit;
+		  // Display a very generic error to the user, and maybe send
+		  // yourself an email
+		  $error = "Sorry, we weren't able to connect to the Stripe api.";
+		} 
+		*/
+		catch (Exception $e) {		  
+			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage();
+
+			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_error', substr($stored_error, 0, 250));
+			$order->save();	
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+			
+			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
+			exit;
+		}
+
 	}
 
 	//PROCESS RECURRING ITEMS
@@ -249,15 +294,31 @@ function cart_charge_logic($get_vars, $post_vars){
 					 "customer_email" => $billing_user->get('usr_email')
 				);
 				$plan_items_wrap = array($plan_items);
-				$subscription_result = $stripe->subscriptions->create([
-				  'customer' => $stripe_customer_id,
-				  'items' => $plan_items_wrap,
-				  'metadata' => [
-					 "ord_order_id" => $order->key, 
-					 "odi_order_item_id" => $order_item->key,
-					 "customer_name" => $billing_name,
-					 "customer_email" => $billing_user->get('usr_email')],
-				]);		
+				
+				try{
+					$subscription_result = $stripe->subscriptions->create([
+					  'customer' => $stripe_customer_id,
+					  'items' => $plan_items_wrap,
+					  'metadata' => [
+						 "ord_order_id" => $order->key, 
+						 "odi_order_item_id" => $order_item->key,
+						 "customer_name" => $billing_name,
+						 "customer_email" => $billing_user->get('usr_email')],
+					]);	
+
+				}
+				catch (Exception $e) {		  
+					$stored_error = "Subscription failed.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage();
+
+					$error = "Sorry, we weren't able to create your subscription. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+					$order->set('ord_error', substr($stored_error, 0, 250));
+					$order->save();	
+					
+					$order_item->set('odi_status', OrderItem::STATUS_ERROR);
+					$order_item->set('odi_status_change_time', 'NOW');
+					$order_item->save();
+					continue;  //SKIP THE REST OF THE ITEM
+				}				
 				
 
 				//IF THE SUBSCRIPTION FAILED MARK IT AS ERROR
@@ -412,6 +473,18 @@ function cart_charge_logic($get_vars, $post_vars){
 
 
 		}
+		catch (Exception $e) {		  
+			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage();
+
+			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_error', substr($stored_error, 0, 250));
+			$order->save();	
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+			
+			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
+			exit;
+		}
+		/*
 		catch(\Stripe\Error\Card $e) {
 			// Since it's a decline, \Stripe\Exception\Card will be caught
 			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
@@ -451,6 +524,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
 			exit();		 
 		}
+		*/
 
 		//STORE THE CHARGE ID
 		$order->set('ord_stripe_charge_id', $charge_result->id);
