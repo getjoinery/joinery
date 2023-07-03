@@ -27,7 +27,10 @@
 
 	if($api_key && $api_secret_key){
 		
-		$stripe = new \Stripe\StripeClient($api_key);
+		$stripe = new \Stripe\StripeClient([
+			'api_key' => $api_key,
+			'stripe_version' => '2022-11-15'
+		]);
 						
 		$orders = new MultiOrder(array('user_id' => $user->key));
 		$orders->load();	

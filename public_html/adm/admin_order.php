@@ -27,7 +27,10 @@
 		$api_key = $settings->get_setting('stripe_api_key');
 		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
 
-		$stripe = new \Stripe\StripeClient($api_key);
+		$stripe = new \Stripe\StripeClient([
+			'api_key' => $api_key,
+			'stripe_version' => '2022-11-15'
+		]);
 
 		//CHECK STATUS WITH STRIPE
 		if ($order->get('ord_stripe_charge_id')){

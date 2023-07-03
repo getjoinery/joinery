@@ -57,7 +57,10 @@ function cart_logic($get_vars, $post_vars){
 		$page_vars['api_key'] = $api_key;
 		$page_vars['api_secret_key'] = $api_secret_key;
 		
-		$stripe = new \Stripe\StripeClient($api_key);
+		$stripe = new \Stripe\StripeClient([
+			'api_key' => $api_key,
+			'stripe_version' => '2022-11-15'
+		]);
 	}
 	
 	$currency_code = $settings->get_setting('site_currency');
