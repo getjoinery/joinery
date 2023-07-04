@@ -67,7 +67,7 @@
 					?></p>
 				</div>
 				<div class="entry-footer">
-					<a href="<?php echo $post->get_url() ?>" class="typology-button">Read on</a><!--<a href="javascript:void(0);" class="typology-button button-invert typology-rl pocket" data-url="https://getpocket.com/edit?url=https%3A%2F%2Fjeremytestsite-1b8274.ingress-bonde.easywp.com%2Fwhy-do-people-think-clouds-are-so-interesting%2F"><i class="fa fa-bookmark-o"></i>Read later</a> -->       
+					<a href="<?php echo $post->get('pst_link'); ?>" class="typology-button">Read on</a><!--<a href="javascript:void(0);" class="typology-button button-invert typology-rl pocket" data-url="https://getpocket.com/edit?url=https%3A%2F%2Fjeremytestsite-1b8274.ingress-bonde.easywp.com%2Fwhy-do-people-think-clouds-are-so-interesting%2F"><i class="fa fa-bookmark-o"></i>Read later</a> -->       
 				</div>
 			</article>  
 
