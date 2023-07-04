@@ -44,6 +44,14 @@
 		'stripe_version' => '2022-11-15'
 	]);
 	
+	if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+		//ALLOW THIS TO RUN IF IN NORMAL MODE OR IF IN DEBUG MODE
+	}
+	else{
+		throw new SystemDisplayableError("In test mode. Charges synchronize not available.");
+		exit();	
+	}
+	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
 	$nextpage = $currpage + 1;

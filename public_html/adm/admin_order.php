@@ -23,14 +23,27 @@
 	$order_id = LibraryFunctions::fetch_variable('ord_order_id', 0, 0, TRUE);
 	$order = new Order($order_id, TRUE);
 
-	if(!($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+
+	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		$api_key = $settings->get_setting('stripe_api_key_test');
+		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+	}
+	else{
 		$api_key = $settings->get_setting('stripe_api_key');
 		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+	}
 
-		$stripe = new \Stripe\StripeClient([
-			'api_key' => $api_key,
-			'stripe_version' => '2022-11-15'
-		]);
+	if(!$api_key || !$api_secret_key){
+		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+		exit();			
+	}
+
+	$stripe = new \Stripe\StripeClient([
+		'api_key' => $api_key,
+		'stripe_version' => '2022-11-15'
+	]);	
+
+
 
 		//CHECK STATUS WITH STRIPE
 		if ($order->get('ord_stripe_charge_id')){
@@ -43,7 +56,16 @@
 					//$order->set('ord_refund_time', 'now()');
 					$order->set('ord_refund_amount', $charge->amount_refunded/100);
 					//$order->set('ord_refund_note', $_POST['ord_refund_note']);
-					$order->save();
+					
+					//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
+					//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
+					if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+						$order->save();
+					}
+					else{
+						echo 'TEST MODE: '.$order->get('odi_refund_amount'). ' would be refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
+					}
+					
 				}
 			}
 			catch(\Stripe\Exception $e) {
@@ -64,14 +86,22 @@
 					//$order->set('ord_refund_time', 'now()');
 					$order->set('ord_refund_amount', $charge->amount_refunded/100);
 					//$order->set('ord_refund_note', $_POST['ord_refund_note']);
-					$order->save();
+
+					//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
+					//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
+					if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+						$order->save();
+					}
+					else{
+						echo 'TEST MODE: '.$order->get('odi_refund_amount'). ' would be refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
+					}
 				}
 			}
 			catch(\Stripe\Exception $e) {
 				  //Do nothing
 			}
 		}
-	}
+	
 
 
 	if($order->get('ord_usr_user_id')){

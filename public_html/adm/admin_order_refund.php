@@ -28,10 +28,10 @@
 		exit();			
 	}
 
-			$stripe = new \Stripe\StripeClient([
-			'api_key' => $api_key,
-			'stripe_version' => '2022-11-15'
-		]);
+	$stripe = new \Stripe\StripeClient([
+		'api_key' => $api_key,
+		'stripe_version' => '2022-11-15'
+	]);
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -72,19 +72,28 @@
 		$order_item->set('odi_refund_amount', $_POST['refund_amount']);
 		$order_item->set('odi_refund_note', $_POST['odi_refund_note']);
 		$order_item->set('odi_refund_time', 'now()');
-		$order_item->save();
+		
 		
 		$order = $order_item->get_order();
 		$order->set('ord_refund_time', 'now()');
 		$order->set('ord_refund_amount', $charge->amount_refunded/100);
-		//$order->set('ord_refund_note', $_POST['ord_refund_note']);
-		$order->save();
+		
+		//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
+		//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
+		if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+			$order_item->save();
+			$order->save();
+			echo $order_item->get('odi_refund_amount'). ' was refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
+		}
+		else{
+			echo 'TEST MODE: '.$order_item->get('odi_refund_amount'). ' would be refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
+		}
 
 
 		$pageoptions['title'] = 'Refund confirm';
 		$page->begin_box($pageoptions);
 	
-		echo $order_item->get('odi_refund_amount'). ' was refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
+		
 		
 
 

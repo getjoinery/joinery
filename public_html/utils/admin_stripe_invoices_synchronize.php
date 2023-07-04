@@ -25,6 +25,8 @@
 	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 		$api_key = $settings->get_setting('stripe_api_key_test');
 		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+		throw new SystemDisplayableError("In test mode or debug mode. Invoice synchronize not available.");
+		exit();	
 	}
 	else{
 		$api_key = $settings->get_setting('stripe_api_key');
@@ -40,6 +42,14 @@
 		'api_key' => $api_key,
 		'stripe_version' => '2022-11-15'
 	]);
+	
+	if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+		//ALLOW THIS TO RUN IF IN NORMAL MODE OR IF IN DEBUG MODE
+	}
+	else{
+		throw new SystemDisplayableError("In test mode. Invoice synchronize not available.");
+		exit();	
+	}
 	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');

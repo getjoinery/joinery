@@ -92,9 +92,14 @@
 						//IF SUBSCRIPTION ENDED, REMOVE 
 
 						$order_item->set('odi_subscription_cancelled_time', $canceled_at);
-						$order_item->save();
 						$event_registrant->set('evr_expired_time', $canceled_at);
-						$event_registrant->save();
+						
+						//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
+						//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
+						if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+							$order_item->save();
+							$event_registrant->save();
+						}
 
 					}
 				}
