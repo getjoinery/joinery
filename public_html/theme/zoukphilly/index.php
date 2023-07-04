@@ -5,6 +5,7 @@
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
+	require_once (LibraryFunctions::get_logic_file_path('events_logic.php'));
 
 	$session = SessionControl::get_instance();
 
