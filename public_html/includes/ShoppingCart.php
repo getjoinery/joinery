@@ -184,14 +184,14 @@ class ShoppingCart {
 			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
 			exit();			
 		}
-		
-		$page_vars['api_key'] = $api_key;
-		$page_vars['api_secret_key'] = $api_secret_key;
-		
+
 		$stripe = new \Stripe\StripeClient([
 			'api_key' => $api_key,
 			'stripe_version' => '2022-11-15'
-		]);
+		]);	
+		
+		$page_vars['api_key'] = $api_key;
+		$page_vars['api_secret_key'] = $api_secret_key;
 
 		//HANDLE THE BILLING USER
 		$billing_user = User::GetByEmail(trim($this->billing_user['billing_email'])); 
@@ -220,21 +220,29 @@ class ShoppingCart {
 				}
 				else{		
 					//IF THERE IS NO CUSTOMER ID
-					$stripe_customer = $stripe->customers->create([
-						'name' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'),
-						'email' => $billing_user->get('usr_email'),
-						'description' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'). ' ('.$billing_user->get('usr_email').')',
-					]);
-					$stripe_customer_id = $stripe_customer[id];
+					
+					//ONLY SAVE IF IN DEBUG MODE OR REGULAR MODE
+					//DO NOT SAVE IF TEMPORARILY IN TEST MODE
+					if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+						$stripe_customer = $stripe->customers->create([
+							'name' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'),
+							'email' => $billing_user->get('usr_email'),
+							'description' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'). ' ('.$billing_user->get('usr_email').')',
+						]);
+						$stripe_customer_id = $stripe_customer[id];
+					}
 				}
 			}	
 		
 			//SAVE THE CUSTOMER ID
 			$billing_user->set('usr_stripe_customer_id', $stripe_customer_id);
-			//ONLY SAVE THE STRIPE CUSTOMER ID IF WE ARE NOT IN TEST MODE
-			if(!$_SESSION['test_mode']){
+			
+			//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
+			//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
+			if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
 				$billing_user->save();
 			}
+			
 			
 		}	
 

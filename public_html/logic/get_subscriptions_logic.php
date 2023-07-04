@@ -24,10 +24,24 @@
 	$customer_ids = array();
 	try{	
 		$settings = Globalvars::get_instance();
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			$api_key = $settings->get_setting('stripe_api_key_test');
+			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+		}
+		else{
+			$api_key = $settings->get_setting('stripe_api_key');
+			$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+		}
+
+		if(!$api_key || !$api_secret_key){
+			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+			exit();			
+		}
+
 		$stripe = new \Stripe\StripeClient([
-			'api_key' => $settings->get_setting('stripe_api_key'),
+			'api_key' => $api_key,
 			'stripe_version' => '2022-11-15'
-		]);
+		]);	
 
 		if($user->get('usr_stripe_customer_id')){
 			$customer_ids[] = $user->get('usr_stripe_customer_id');

@@ -39,7 +39,6 @@
 		exit();			
 	}
 	
-	$settings = Globalvars::get_instance();
 	$stripe = new \Stripe\StripeClient([
 		'api_key' => $api_key,
 		'stripe_version' => '2022-11-15'
@@ -50,7 +49,16 @@
 		//SUBSCRIPTION HAD ALREADY ENDED
 		$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
 		$order_item->set('odi_subscription_cancelled_time', $canceled_at);
-		$order_item->save();
+		
+		//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
+		//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
+		if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+			$order_item->save();
+		}
+		else{
+			echo 'TEST MODE: Subscription is already cancelled.';
+		}
+		
 	}
 	else{
 		try {
@@ -67,7 +75,16 @@
 			$canceled_at = gmdate("c", $response[canceled_at]);
 			//IF SUBSCRIPTION ENDED, REMOVE 
 			$order_item->set('odi_subscription_cancelled_time', $canceled_at);
-			$order_item->save();			
+			
+			
+			//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
+			//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
+			if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
+				$order_item->save();
+			}
+			else{
+				echo 'TEST MODE: Subscription would be cancelled.';
+			}			
 		}
 		
 		//SEND NOTIFICATION

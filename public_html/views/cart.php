@@ -246,7 +246,7 @@
 		}
 		
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
+			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using Stripe test mode.</div>';
 		}
 		
 		

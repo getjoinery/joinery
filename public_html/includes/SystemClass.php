@@ -1113,10 +1113,10 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 			$errorpage = 'public';
 		}
 
-		$debug = Globalvars::get_instance()->get_setting('debug');
+		$show_errors = Globalvars::get_instance()->get_setting('show_errors');
 
 		$errorhandler = new ErrorHandler($_SERVER["SERVER_PORT"] == 443);
-		if ($debug) {
+		if ($show_errors) {
 			$debug_message = 'Debug Message: ' . $e->getMessage() . '<br>' . $e->getCode() . '<br>' .$e->getTraceAsString(). '<br>' . $e->getFile() . '('.$e->getLine().')';
 			error_log($debug_message);
 			if($errorpage == 'admin'){

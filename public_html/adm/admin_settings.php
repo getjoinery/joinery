@@ -105,7 +105,11 @@
 		echo $formwriter->dropinput("Force HTTPS", "force_https", '', $optionvals, $settings->get_setting('force_https'), '', FALSE);	
 
 		$optionvals = array("Yes"=>1, 'No' => 0);
-		echo $formwriter->dropinput("Debug Mode", "debug", '', $optionvals, $settings->get_setting('debug'), '', FALSE);
+		echo $formwriter->dropinput("Stripe Debug Mode ", "debug", '', $optionvals, $settings->get_setting('debug'), '', FALSE);
+
+		$optionvals = array("Yes (show to screen)"=>1, 'No (logged)' => 0);
+		echo $formwriter->dropinput("Show errors", "show_errors", '', $optionvals, $settings->get_setting('show_errors'), '', FALSE);		
+		
 
 		echo $formwriter->textinput("Base Path", 'baseDir', '', 20, $settings->get_setting('baseDir'), "" , 255, "");
 		echo $formwriter->textinput("Site Template", 'site_template', '', 20, $settings->get_setting('site_template'), "" , 255, "");

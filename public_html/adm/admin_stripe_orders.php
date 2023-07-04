@@ -31,10 +31,10 @@
 		exit();			
 	}
 		
-		$stripe = new \Stripe\StripeClient([
-			'api_key' => $api_key,
-			'stripe_version' => '2022-11-15'
-		]);
+	$stripe = new \Stripe\StripeClient([
+		'api_key' => $api_key,
+		'stripe_version' => '2022-11-15'
+	]);
 	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
