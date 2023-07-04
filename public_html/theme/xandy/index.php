@@ -65,22 +65,22 @@
     </div>
     <dl class="mt-12 space-y-10 sm:space-y-0 sm:grid sm:grid-cols-2 sm:gap-x-6 sm:gap-y-12 lg:grid-cols-4 lg:gap-x-8">
       <div class="relative">
-        <dt>
+        <dt><!--
           <svg xmlns="http://www.w3.org/2000/svg" class="absolute h-6 w-6 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-</svg>
+</svg>-->
           <p class="ml-9 text-lg leading-6 font-medium text-blue-400 font-serif">Liberato Method</p>
         </dt>
         <dd class="mt-2 ml-9 text-base text-gray-500">Experience Xandy Liberato's dance training method.</dd>
       </div>
 
       <div class="relative">
-        <dt>
-          <svg xmlns="http://www.w3.org/2000/svg" class="absolute h-6 w-6 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <dt><!--
+          <svg xmlns="http://www.w3.org/2000/svg" class="absolute h-6 w-6 mr-6 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
   <path d="M12 14l9-5-9-5-9 5 9 5z" />
   <path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14zm-4 6v-7.5l4-2.222" />
-</svg>
+</svg>-->
           <p class="ml-9 text-lg leading-6 font-medium text-blue-400 font-serif">Retreats</p>
         </dt>
         <dd class="mt-2 ml-9 text-base text-gray-500">Concentrated study.</dd>
@@ -88,20 +88,20 @@
 
       <div class="relative">
         <dt>
-		  
+		  <!--
           <svg xmlns="http://www.w3.org/2000/svg" class="absolute h-6 w-6 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-</svg>
+</svg>-->
           <p class="ml-9 text-lg leading-6 font-medium text-blue-400 font-serif">Zouk Training</p>
         </dt>
         <dd class="mt-2 ml-9 text-base text-gray-500">Classes tailored just for Zouk.</dd>
       </div>
 
       <div class="relative">
-        <dt>
+        <dt><!--
           <svg xmlns="http://www.w3.org/2000/svg" class="absolute h-6 w-6 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-</svg>
+</svg>-->
           <p class="ml-9 text-lg leading-6 font-medium text-blue-400 font-serif">Mentorship</p>
         </dt>
         <dd class="mt-2 ml-9 text-base text-gray-500">Improve all aspects of yourself, not just dance.</dd>
