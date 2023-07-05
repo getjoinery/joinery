@@ -184,8 +184,19 @@
 
 	echo $formwriter->dropinput('Led by', 'evt_usr_user_id_leader', 'ctrlHolder', $optionvals, $event->get('evt_usr_user_id_leader'), '', 'None');
 	
+	
+	//HANDLE DEFAULT timezone
+	if(isset($event->get('evt_timezone'))){
+		$timezone = $event->get('evt_timezone');
+	}
+	else{
+		$settings = Globalvars::get_instance();
+		$default_timezone = $settings->get_setting('default_timezone');
+		$timezone = $default_timezone;
+	}
+	
 	$optionvals = Address::get_timezone_drop_array();
-	echo $formwriter->dropinput("Event Time Zone", "evt_timezone", "ctrlHolder", $optionvals, $event->get('evt_timezone'), '', FALSE);	
+	echo $formwriter->dropinput("Event Time Zone", "evt_timezone", "ctrlHolder", $optionvals, $timezone, '', FALSE);	
 
 	
 	
