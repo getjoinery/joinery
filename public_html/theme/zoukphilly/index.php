@@ -28,12 +28,13 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
           <div class="relative shadow-xl sm:rounded-2xl sm:overflow-hidden">
             <div class="absolute inset-0">
-              <img class="h-full w-full object-cover" src="https://devonandjerry.com/static_files/banners/devon-jerry-banner.jpg" alt="People working on laptops">
+              <img class="h-full w-full object-cover" src="https://zoukphilly.org/uploads/large/DSC02831-edited_6uit40q2.jpg" alt="People working on laptops">
              
             </div>
             <div class="relative px-4 py-16 sm:px-6 sm:py-24 lg:py-32 lg:px-8">
               <h1 class="text-center text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
                 <span class="block text-white">&nbsp;</span>
+				<span class="block text-white">&nbsp;</span>
                 <span class="block text-white">Zouk in Philly</span>
               </h1>
               <p class="mt-6 max-w-lg mx-auto text-center text-xl text-indigo-200 sm:max-w-3xl">
@@ -258,7 +259,7 @@
           </div>-->
           <div class="mt-6">
             <h2 class="text-3xl font-extrabold tracking-tight text-gray-900">
-              Our focus is on quality of movement, healthy body awareness, comfort, and longevity.
+              Classes, socials, and parties almost every week!
             </h2>
             <!--<p class="mt-4 text-lg text-gray-500">
               Semper curabitur ullamcorper posuere nunc sed. Ornare iaculis bibendum malesuada faucibus lacinia porttitor. Pulvinar laoreet sagittis viverra duis. In venenatis sem arcu pretium pharetra at. Lectus viverra dui tellus ornare pharetra.
@@ -273,7 +274,7 @@
       </div>
       <div class="mt-12 sm:mt-16 lg:mt-0 lg:col-start-1">
         <div class="pr-4 -ml-48 sm:pr-6 md:-ml-16 lg:px-0 lg:m-0 lg:relative lg:h-full">
-          <img class="w-full rounded-xl shadow-xl ring-1 ring-black ring-opacity-5 lg:absolute lg:right-0 lg:h-full lg:w-auto lg:max-w-none" src="https://devonandjerry.com/uploads/medium/Decon_zouk_5_x74ki5j.jpg" alt="Customer profile user interface">
+          <img class="w-full rounded-xl shadow-xl ring-1 ring-black ring-opacity-5 lg:absolute lg:right-0 lg:h-full lg:w-auto lg:max-w-none" src="https://zoukphilly.org/uploads/medium/IMG_20230626_200624_076_6usu0t54.jpg" alt="Customer profile user interface">
         </div>
       </div>
     </div>
