@@ -23,7 +23,7 @@
 			$admin_menu->set('amu_parent_menu_id', NULL);
 		}
 		
-		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission', 'amu_icon', 'amu_disable');
+		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission', 'amu_icon', 'amu_disable', 'amu_slug');
 
 		foreach($editable_fields as $field) {
 			$admin_menu->set($field, $_POST[$field]);
@@ -71,6 +71,7 @@
 	}
 	
 	echo $formwriter->textinput('Menu name', 'amu_menudisplay', NULL, 100, $admin_menu->get('amu_menudisplay'), '', 255, '');	
+	echo $formwriter->textinput('Slug', 'amu_slug', NULL, 100, $admin_menu->get('amu_slug'), '', 255, '');	
 	echo $formwriter->textinput('Default page', 'amu_defaultpage', NULL, 100, $admin_menu->get('amu_defaultpage'), '', 255, '');
 	
 	$menulist = new MultiAdminMenu(

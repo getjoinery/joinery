@@ -1,0 +1,86 @@
+<?php
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
+
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(8);
+
+	$location = new ContactType($_REQUEST['loc_location_id'], TRUE);
+
+	if($_REQUEST['action'] == 'delete'){
+		$location->authenticate_write($session);		
+		$location->soft_delete();
+
+		header("Location: /admin/admin_locations");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$location->authenticate_write($session);		
+		$location->undelete();
+
+		header("Location: /admin/admin_locations");
+		exit();				
+	}
+
+	$session->set_return();
+
+
+	$page = new AdminPage();
+	$page->admin_header(	
+	array(
+		'menu-id'=> 'locations',
+		'breadcrumbs' => array(
+			'Emails'=>'/admin/admin_emails', 
+			'Locations'=>'/admin/admin_locations', 
+			'Location: '.$location->get('loc_name') => '',
+		),
+		'session' => $session,
+	)
+	);	
+
+
+
+	$options['title'] = 'Location: '.$location->get('loc_name');
+	$options['altlinks'] = array();
+	if(!$location->get('loc_delete_time')) {
+		$options['altlinks'] += array('Edit Location' => '/admin/admin_location_edit?loc_location_id='.$location->key);
+	}
+	
+	if(!$location->get('loc_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Soft Delete'] = '/admin/admin_location?action=delete&loc_location_id='.$location->key;
+	}
+		
+	$page->begin_box($options);
+	
+	echo '<h3>'.$location->get('loc_name').'</h3>'; 
+	
+	if($location->get('loc_is_published')){
+		echo 'Status: Published'.'<br />';
+	}
+	else{
+		echo 'Status: Unpublished'.'<br />';
+	}
+	
+	if($location->get('loc_delete_time')){
+		echo 'Status: Deleted at '.LibraryFunctions::convert_time($location->get('loc_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+	}
+	else{
+		echo 'Status: Active'.'<br />';
+	}
+	
+
+	echo '<br><br>';
+	?><p><?php echo $location->get('loc_description'); ?></p>
+
+
+<?php 
+	$page->end_box();
+
+	$page->admin_footer();
+?>
