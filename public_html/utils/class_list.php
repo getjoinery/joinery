@@ -62,6 +62,7 @@
 	require_once( __DIR__ . '/../data/mailing_list_registrants_class.php');
 	require_once( __DIR__ . '/../data/booking_types_class.php');
 	require_once( __DIR__ . '/../data/event_waiting_lists_class.php');
+	require_once( __DIR__ . '/../data/locations_class.php');
 
 	$classes = array(
 			'Address',
@@ -121,7 +122,8 @@
 			'MailingList',
 			'MailingListRegistrant',
 			'BookingType',
-			'WaitingList'
+			'WaitingList',
+			'Location'
 		);			
 
 
@@ -816,4 +818,12 @@ Welcome!
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'show_errors\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		 
+
+ 		$migration['system_version'] = '0.5.30';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_locations'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Locations\', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = \'locations\'), \'admin_locations\', 5, 5, 0, \'\', \'locations\', \'events_active\');';
+
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
 		 
