@@ -14,11 +14,14 @@
 	$session->check_permission(8);
 	$session->set_return();	
 
+	$searches = array();
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'start_time', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
+
+	
 	if($searchterm) {
 		if(is_numeric($searchterm)) {
 			$searches['event_id'] = $searchterm;
@@ -28,7 +31,7 @@
 		}
 	}
 	
-	$searches = array();
+
 	
 	if($_REQUEST['filter'] == 'all'){
 		$breadcrumb_array = array('Events'=>'All Events');
@@ -45,8 +48,7 @@
 	}
 	*/
 	
-	
-	
+
 
 	$events = new MultiEvent(
 		$searches,
