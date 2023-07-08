@@ -20,13 +20,10 @@
 	
 	if($_POST){
 
-		if($_POST['loc_link']){
-			$location->set('loc_link', preg_replace("/[^a-zA-Z0-9-]/", "", trim(strtolower($_POST['loc_link']))));
-		}
-		else{
-			$location->set('loc_link', preg_replace("/[^a-zA-Z0-9-]/", "", trim(strtolower($_POST['loc_name']))));
-		}
+
 		$editable_fields = array('loc_name', 'loc_link','loc_description','loc_short_description', 'loc_is_published', 'loc_fil_file_id', 'loc_address', 'loc_website');
+
+		$_POST['loc_link'] = $location->create_url($_POST['loc_link']);
 
 		foreach($editable_fields as $field) {
 			$location->set($field, $_POST[$field]);

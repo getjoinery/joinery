@@ -84,6 +84,27 @@ class Page extends SystemBase {
 			return false;
 		}
 	}
+	
+	function create_url($input_url) {
+		if($input_url){
+			$tmp = $input_url;
+		}
+		else{
+			$tmp = $this->get('pag_title');
+		}
+		$tmp = strtolower(str_replace(' ', '-', $tmp));
+		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
+		$tmp = preg_replace('/-{2,}/', '-', $tmp);
+		
+		//NO DUPLICATES
+		$increment=1;
+		$tmp_orig = $tmp;
+		while(Page::get_by_link($tmp, true)){
+			$tmp = $tmp_orig . $increment;
+			$increment++;
+		}
+		return $tmp;
+	}
 
 	function get_filled_content(){
 

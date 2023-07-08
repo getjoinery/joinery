@@ -20,11 +20,10 @@
 
 	
 	if($_POST){
-
-		$_POST['pac_link'] = trim(strtolower($_POST['pac_link']));
-		$_POST['pac_link'] = preg_replace("/[^a-zA-Z0-9-]/", "", $_POST['pac_link']);
 		
 		$page_content->set('pac_body', $_POST['pac_body']);
+		
+		$_POST['pac_link'] = $page_content->create_url($_POST['pac_link']);
 		
 		$editable_fields = array('pac_title', 'pac_is_published', 'pac_location_name', 'pac_link');
 

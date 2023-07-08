@@ -83,19 +83,12 @@ class MailingList extends SystemBase {
 		);
 
 	static function get_by_link($link, $search_deleted=false){
-		$params = explode("/", $link);
-		if($params[0] == 'list'){
-			$lookup = $params[1];
-		}
-		else{
-			$lookup = $params[0];
-		}
 		
 		if($search_deleted){
-			$results = new MultiMailingList(array('link' => $lookup));
+			$results = new MultiMailingList(array('link' => $link));
 		}
 		else{
-			$results = new MultiMailingList(array('link' => $lookup, 'deleted'=>false));
+			$results = new MultiMailingList(array('link' => $link, 'deleted'=>false));
 		}
 		$results->load();
 	
@@ -107,11 +100,17 @@ class MailingList extends SystemBase {
 		}
 	}
 
-	function create_url() {
-		$tmp = strtolower(str_replace(' ', '-', $this->get('mlt_name')));
+	function create_url($input_url) {
+		if($input_url){
+			$tmp = $input_url;
+		}
+		else{
+			$tmp = $this->get('mlt_name');
+		}
+		$tmp = strtolower(str_replace(' ', '-', $tmp));
 		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
 		$tmp = preg_replace('/-{2,}/', '-', $tmp);
-
+		
 		//NO DUPLICATES
 		$increment=1;
 		$tmp_orig = $tmp;
@@ -119,7 +118,6 @@ class MailingList extends SystemBase {
 			$tmp = $tmp_orig . $increment;
 			$increment++;
 		}
-			
 		return $tmp;
 	}
 

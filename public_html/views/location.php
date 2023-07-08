@@ -19,6 +19,6 @@
 	echo '</div>';
 	echo PublicPageTW::EndPanel();
 	echo PublicPageTW::EndPage();
-	$paget->public_footer($foptions=array('track'=>TRUE));
+	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 

@@ -91,7 +91,44 @@ class PageContent extends SystemBase {
 		}
 	}	
 
+	static function get_by_link($link, $search_deleted=false){
+		if($search_deleted){
+			$results = new MultiPageContent(array('link' => $link));
+		}
+		else{
+			$results = new MultiPageContent(array('link' => $link, 'deleted'=>false));
+		}
+		
+		$results->load();
 
+		if($results->count()){	
+			return $results->get(0);	
+		}
+		else{
+			return false;
+		}
+	}
+	
+	function create_url($input_url) {
+		if($input_url){
+			$tmp = $input_url;
+		}
+		else{
+			$tmp = $this->get('pac_title');
+		}
+		$tmp = strtolower(str_replace(' ', '-', $tmp));
+		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
+		$tmp = preg_replace('/-{2,}/', '-', $tmp);
+		
+		//NO DUPLICATES
+		$increment=1;
+		$tmp_orig = $tmp;
+		while(PageContent::get_by_link($tmp, true)){
+			$tmp = $tmp_orig . $increment;
+			$increment++;
+		}
+		return $tmp;
+	}
 
 	
 	
