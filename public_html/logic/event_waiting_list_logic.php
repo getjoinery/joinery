@@ -25,6 +25,13 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 	
 	
 	$event = new Event($event_id, TRUE);
+	
+	if(!$event || !$event->get('evt_visibility') || $event->get('evt_delete_time')){
+		if($session->get_permission() < 5){
+			require_once(LibraryFunctions::display_404_page());	
+		}			
+	}
+	
 	$page_vars['event'] = $event;
 	
 	if($post_vars){
