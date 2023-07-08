@@ -20,9 +20,12 @@
 	if($searchterm){
 		$search_criteria['filename_like'] = $searchterm;
 	}	
+
+	//ONLY SHOW DELETED TO SUPER ADMINS
 	if($_SESSION['permission'] < 10){
 		$search_criteria['deleted'] = false;
 	}
+	
 	if($filter == 'files'){
 		$search_criteria['picture'] = false;
 	}

@@ -80,7 +80,7 @@
 	}
 	
 
-	echo '<strong>Link:</strong> <a href="'.$page->get_url().'">'.$settings->get_setting('webDir'). $page->get_url().'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$page->get_url().'">'.$page->get_url('full').'</a><br />';	
 
 
 	$headers = array("Content",  "Published", "Creator", "Status");

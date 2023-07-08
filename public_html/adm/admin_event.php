@@ -28,14 +28,14 @@
 		$event->authenticate_write($session);
 		$event->soft_delete();
 
-		header("Location: /admin/admin_emails");
+		header("Location: /admin/admin_events");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$event->authenticate_write($session);
-		$event->soft_delete();
+		$event->undelete();
 
-		header("Location: /admin/admin_emails");
+		header("Location: /admin/admin_events");
 		exit();				
 	}
 
@@ -149,6 +149,9 @@
 		if(!$event->get('evt_delete_time') && $_SESSION['permission'] >= 8) {
 			$options['altlinks']['Soft Delete'] = '/admin/admin_event?action=delete&evt_event_id='.$event->key;
 		}
+		else if($event->get('evt_delete_time') && $_SESSION['permission'] >= 8) {
+			$options['altlinks']['Undelete'] = '/admin/admin_event?action=undelete&evt_event_id='.$event->key;
+		}
 		$options['altlinks']['Registrant Emails'] = '/admin/admin_event_emails?evt_event_id='.$event->key;
 			
 		$page->begin_box($options);
@@ -163,13 +166,13 @@
 					echo 'Status: Deleted at '.LibraryFunctions::convert_time($event->get('evt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
 				}
 				else if($event->get('evt_visibility') == 0) {
-					echo '<b>Private</b> <a href="' . $event->get_url() . '">'.$settings->get_setting('webDir').$event->get_url().'</a><br />';
+					echo '<b>Private</b> <a href="' . $event->get_url() . '">'.$event->get_url('full').'</a><br />';
 				} 
 				else if($event->get('evt_visibility') == 1){
-					echo '<b>Public:</b> <a href="' . $event->get_url() . '">'.$settings->get_setting('webDir').$event->get_url().'</a><br />';
+					echo '<b>Public:</b> <a href="' . $event->get_url() . '">'.$event->get_url('full').'</a><br />';
 				}
 				else{
-					echo '<b>Public but unlisted:</b> <a href="' . $event->get_url() . '">'.$settings->get_setting('webDir').$event->get_url().'</a><br />';
+					echo '<b>Public but unlisted:</b> <a href="' . $event->get_url() . '">'.$event->get_url('full').'</a><br />';
 				}		
 				
 				//echo '<b>Sessions page:</b> <a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$settings->get_setting('webDir').'/profile/event_sessions_course?event_id='.$event->key.'</a><br />';

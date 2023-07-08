@@ -49,7 +49,14 @@ function event_sessions_logic($get_vars, $post_vars){
 		exit();
 	}
 
-
+	if ($event && $session->get_user_id() && $session->get_permission() > 4) {
+		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
+	}
+	else {
+		if(!$event->get('evt_visibility') == Event::VISIBILITY_PRIVATE || $event->get('evt_delete_time')){
+			require_once(LibraryFunctions::display_404_page());		
+		}
+	}
 	
 
 	

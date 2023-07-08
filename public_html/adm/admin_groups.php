@@ -18,10 +18,16 @@
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
+	$search_criteria = array();
 
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
+	$search_criteria['category'] = 'user';
 
 	$groups = new MultiGroup(
-		array('category'=>'user'),  //SEARCH CRITERIA
+		$search_criteria,  //SEARCH CRITERIA
 		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
 		$numperpage,  //NUM PER PAGE
 		$offset,  //OFFSET

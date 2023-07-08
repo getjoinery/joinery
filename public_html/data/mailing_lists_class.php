@@ -122,9 +122,15 @@ class MailingList extends SystemBase {
 			
 		return $tmp;
 	}
-	
-	function get_link() {
-		return '/list/' . $this->get('mlt_link');
+
+	function get_url($format='short') {
+		if($format == 'full'){
+			$settings = Globalvars::get_instance();
+			return $settings->get_setting('webDir').'/list/' . $this->get('mlt_link');
+		}
+		else{
+			return '/list/' . $this->get('mlt_link');
+		}
 	}		
 	
 	function get_subscribed_users($return='object'){

@@ -43,10 +43,10 @@ if($settings->get_setting('urls_active')){
 		NULL,
 		1,
 		0,
-		'AND');		
+		'AND');	
+	$urls->load();
 			
-	if($urls->count_all()){
-		$urls->load();
+	if($urls->count()){
 		$url = $urls->get(0);
 
 		if($url->get('url_redirect_url')){		
@@ -282,15 +282,15 @@ if($settings->get_setting('blog_active')){
 		}		
 	}
 	if($params[0] == $blog_subdirectory){
-		$post = Post::get_by_link($params[1]);	
+		$post = Post::get_by_link($params[1], true);	
 	}
 	else{
 		//CHECK BLOG URLS THAT ARE NOT UNDER /POST/
-		$post = Post::get_by_link('/'.$_REQUEST['path']);
+		$post = Post::get_by_link('/'.$_REQUEST['path'], true);
 
 		//CHECK WITHOUT THE SLASH
 		if(!$post){
-			$post = Post::get_by_link($_REQUEST['path']);	
+			$post = Post::get_by_link($_REQUEST['path'], true);	
 		}			
 	}
 	
@@ -317,7 +317,7 @@ if($params[0] == 'page'){
 	if($settings->get_setting('page_contents_active')){
 		require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
 
-		$page = Page::get_by_link($params[1]);		
+		$page = Page::get_by_link($params[1], true);		
 
 		$template_file = $template_directory.'/page.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
@@ -340,7 +340,7 @@ if($params[0] == 'location'){
 	if($settings->get_setting('events_active')){
 		require_once($_SERVER['DOCUMENT_ROOT'].'/data/locations_class.php');
 
-		$location = Location::get_by_link($params[1]);		
+		$location = Location::get_by_link($params[1], true);		
 
 		$template_file = $template_directory.'/location.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/location.php';
@@ -363,7 +363,7 @@ if($params[0] == 'list'){
 	//if($settings->get_setting('mailing_lists_active')){
 		require_once($_SERVER['DOCUMENT_ROOT'].'/data/mailing_lists_class.php');
 
-		$mailing_list = MailingList::get_by_link($params[1]);		
+		$mailing_list = MailingList::get_by_link($params[1], true);		
 
 		$template_file = $template_directory.'/list.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/list.php';
@@ -386,7 +386,7 @@ if($params[0] == 'product'){
 	if($settings->get_setting('products_active')){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
 
-		$product = Product::get_by_link($params[1]);	
+		$product = Product::get_by_link($params[1], true);	
 		$product_id = $product->key;
 		
 		$template_file = $template_directory.'/product.php';

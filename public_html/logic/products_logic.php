@@ -39,6 +39,7 @@ function products_logic($get_vars, $post_vars){
 	
 	$searches = array();
 	$searches['active'] = TRUE;
+	$searches['deleted'] = FALSE;
 	
 	if($show_items && !$show_events){
 		$searches['product_type'] = 2;

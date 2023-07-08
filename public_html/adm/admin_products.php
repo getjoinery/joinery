@@ -48,7 +48,10 @@
 			$searches['is_active'] = true;
 		}
 
-
+		//ONLY SHOW DELETED TO SUPER ADMINS
+		if($_SESSION['permission'] < 10){
+			$searches['deleted'] = false;
+		}
 
 		$products = new MultiProduct(
 			$searches,
@@ -78,6 +81,12 @@
 		$page->tableheader($headers, $table_options, $pager);
 
 		foreach($products as $product) {
+			
+			$deleted_status = '';
+			if($product->get('pro_delete_time')) {
+				$deleted_status = ' DELETED ';
+			}
+		
 			$order_items = new MultiOrderItem(array('product_id' => $product->get('pro_product_id'), 'status' => OrderItem::STATUS_PAID));
 			$order_items->load();
 			$product_order_count = count($order_items);
@@ -120,7 +129,7 @@
 			}
 			
 			$page->disprow(array(
-				'('.$product->get('pro_product_id').') ' . $editlink ,
+				$editlink. $deleted_status ,
 				$event_name,
 				$active,
 				$product_order_count ?: '<strong>0</strong>',

@@ -23,8 +23,22 @@
 	$product = new Product($_GET['pro_product_id'], TRUE);
 	$orders = new MultiOrderItem(array('product_id' => $product->key));
 
-		
-	if($_REQUEST['action'] == 'remove'){
+	if($_REQUEST['action'] == 'delete'){
+		$product->authenticate_write($session);
+		$product->soft_delete();
+
+		header("Location: /admin/admin_products");
+		exit();				
+	}
+	else if($_REQUEST['action'] == 'undelete'){
+		$product->authenticate_write($session);
+		$product->undelete();
+
+		header("Location: /admin/admin_products");
+		exit();				
+	}
+	
+	if($_REQUEST['action'] == 'permanent_delete'){
 		if($orders->count_all()){
 			throw new SystemDisplayableError('You cannot delete a product with orders.');
 		}
@@ -56,9 +70,12 @@
 		}
 		
 		if(!$orders->count_all()){
+			if($_SESSION['permission'] >= 5){
+				$options['altlinks'] += array('Delete'=> '/admin/admin_product?action=delete&pro_product_id='.$product->key);
+			}
 			if($_SESSION['permission'] == 10){
-				$options['altlinks'] += array('Delete Product'=> '/admin/admin_product?action=remove&pro_product_id='.$product->key);
-			}		
+				$options['altlinks'] += array('Permanent Delete'=> '/admin/admin_product?action=permanent_delete&pro_product_id='.$product->key);
+			}				
 		}
 		$page->begin_box($options);
 		

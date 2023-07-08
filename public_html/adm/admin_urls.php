@@ -20,7 +20,11 @@
 	
 	$search_criteria = array();
 	//$search_criteria['source'] = $url_source;
-	
+
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}	
 
 	$urls = new MultiUrl(
 		$search_criteria,
@@ -58,8 +62,13 @@
 
 	foreach ($urls as $url){
 		
+		$deleted = '';
+		if($url->get('url_delete_time')){
+			$deleted = 'DELETED';
+		}
+		
 		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_url?url_url_id=$url->key'>".$url->get('url_incoming')."</a>");	
+		array_push($rowvalues, "<a href='/admin/admin_url?url_url_id=$url->key'>".$url->get('url_incoming')."</a>". $deleted);	
 		if($url->get('url_redirect_url')){
 			array_push($rowvalues, $url->get('url_redirect_url'));
 		}

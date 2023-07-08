@@ -15,6 +15,7 @@ function event_sessions_course_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
 
 	$settings = Globalvars::get_instance();
+	$session = SessionControl::get_instance();
 	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('events_active')){
 		header("HTTP/1.0 404 Not Found");
@@ -42,6 +43,14 @@ function event_sessions_course_logic($get_vars, $post_vars){
 		exit();
 	}
 
+	if ($event && $session->get_user_id() && $session->get_permission() > 4) {
+		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
+	}
+	else {
+		if(!$event->get('evt_visibility') == Event::VISIBILITY_PRIVATE || $event->get('evt_delete_time')){
+			require_once(LibraryFunctions::display_404_page());		
+		}
+	}
 
 	if(isset($get_vars['session_number'])){
 		$session_number = (int)$get_vars['session_number'];

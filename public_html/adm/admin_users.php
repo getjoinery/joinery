@@ -65,6 +65,11 @@
 		$search_criteria['not_system_users'] = true;
 	}
 
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
+	
 	$users = new MultiUser(
 		$search_criteria,
 		array($sort=>$sdirection),
@@ -111,17 +116,20 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($users as $user){
+		
+		$deleted_status = '';
+		if($user->get('usr_delete_time')) {
+			$deleted_status = ' DELETED ';
+		}
 
 		$rowvalues = array();
 
-		array_push($rowvalues, "<a href='/admin/admin_user?usr_user_id=$user->key'>".$user->display_name()."</a> ");
+		array_push($rowvalues, "<a href='/admin/admin_user?usr_user_id=$user->key'>".$user->display_name()."</a> ".$deleted_status);
 		array_push($rowvalues, $user->get('usr_email'));
 		array_push($rowvalues, LibraryFunctions::convert_time($user->get('usr_signup_date'), "UTC", $session->get_timezone(), 'M j, Y')); 
 
-		if($user->get('usr_delete_time')) {
-			$status = 'Deleted';
-		}
-		else if($user->get('usr_email_is_verified')) {
+
+		if($user->get('usr_email_is_verified')) {
 			$status = 'Verified';
 		} 
 		else {

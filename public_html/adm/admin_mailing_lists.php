@@ -20,6 +20,11 @@
 
 	
 	$search_criteria = array();
+	
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
 
 	$mailing_lists = new MultiMailingList(
 		$search_criteria,
@@ -42,7 +47,7 @@
 	);
 		
 
-	$headers = array("Mailing List",  "Description", "# Registrants", "Deleted");
+	$headers = array("Mailing List",  "Description", "# Registrants");
 	$altlinks = array('New Mailing List' => '/admin/admin_mailing_list_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));	
 	$table_options = array(
@@ -56,8 +61,13 @@
 
 	foreach ($mailing_lists as $mailing_list){
 		
+		$deleted = '';
+		if($mailing_list->get('mlt_delete_time')){
+			$deleted = ' DELETED ';
+		}
+		
 		$rowvalues = array();
-		array_push($rowvalues, '<a href="/admin/admin_mailing_list?mlt_mailing_list_id='.$mailing_list->key.'">'.$mailing_list->get('mlt_name').'</a>');	
+		array_push($rowvalues, '<a href="/admin/admin_mailing_list?mlt_mailing_list_id='.$mailing_list->key.'">'.$mailing_list->get('mlt_name').'</a>' . $deleted);	
 		array_push($rowvalues, $mailing_list->get('mlt_description'));	
 		//array_push($rowvalues, LibraryFunctions::convert_time($mailing_list->get('mlt_delete_time'), 'UTC', $session->get_timezone()));
 		//array_push($rowvalues, '('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
@@ -65,11 +75,7 @@
 		$numusers = $mailing_list->count_subscribed_users();
 		array_push($rowvalues, $numusers. ' registrants');
 
-		$status = 'Active';
-		if($mailing_list->get('mlt_delete_time')) {
-			$status = 'Deleted';
-		} 		
-		array_push($rowvalues, $status);
+
 
 /*
 		if($mailing_list->get('mlt_delete_time')){

@@ -220,6 +220,9 @@
 							else{
 								foreach($page_vars['event_registrants'] as $event_registrant){
 									$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
+									if(!$event || !$event->get('evt_visibility') || $event->get('evt_delete_time')){
+										continue;
+									}
 									$next_session = $event->get_next_session();
 
 									

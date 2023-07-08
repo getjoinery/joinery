@@ -20,6 +20,11 @@
 	
 	
 	$search_criteria = array();
+	
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
 
 	$pages = new MultiPage(
 		$search_criteria,
@@ -55,6 +60,10 @@
 
 	foreach ($pages as $page){
 		
+		$deleted = '';
+		if($page->get('pag_delete_time')){
+			$deleted = ' DELETED ';
+		}
 		
 		$title = $page->get('pag_title');
 		if(!$title){
@@ -62,7 +71,7 @@
 		}
 		
 		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_page?pag_page_id=$page->key'>".$title."</a>");	
+		array_push($rowvalues, "<a href='/admin/admin_page?pag_page_id=$page->key'>".$title."</a>" . $deleted);	
 		array_push($rowvalues, LibraryFunctions::convert_time($page->get('pag_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($page->get('pag_published_time'), 'UTC', $session->get_timezone()));
 		

@@ -61,18 +61,22 @@ class Location extends SystemBase {
 	);	
 
 	
-	static function get_by_link($link){
-		$results = new MultiLocation(array('link' => $link, 'deleted'=>false));
-		$numresult = $results->count();
+	static function get_by_link($link, $search_deleted=false){
 
-		if($numresult){
-			$results->load();
+		if($search_deleted){
+			$results = new MultiLocation(array('link' => $link));
+		}
+		else{
+			$results = new MultiLocation(array('link' => $link, 'deleted'=>false));
+		}
+		$results->load();
+
+		if($results->count()){
 			return $results->get(0);
 		}
 		else{
 			return false;
 		}
-
 	}
 	
 	public function check_for_duplicate_link($link) {
@@ -96,10 +100,15 @@ class Location extends SystemBase {
 		}
 	}	
 
-	function get_url(){ 
-		return $this->get('loc_link');
-	}		
-	
+	function get_url($format='short') {
+		if($format == 'full'){
+			$settings = Globalvars::get_instance();
+			return $settings->get_setting('webDir').'/location/' . $this->get('loc_link');
+		}
+		else{
+			return '/location/' . $this->get('loc_link');
+		}
+	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
 

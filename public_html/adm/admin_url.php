@@ -13,14 +13,30 @@
 
 	$url = new Url($_GET['url_url_id'], TRUE);
 	
-	if($_REQUEST['action'] == 'remove'){
+	if($_REQUEST['action'] == 'soft_delete'){
+		$url->authenticate_write($session);
+		$url->soft_delete();
+
+		//$returnurl = $session->get_return();
+		header("Location: /admin/admin_urls");
+		exit();		
+	}
+	if($_REQUEST['action'] == 'undelete'){
+		$url->authenticate_write($session);
+		$url->undelete();
+
+		//$returnurl = $session->get_return();
+		header("Location: /admin/admin_urls");
+		exit();		
+	}		
+	if($_REQUEST['action'] == 'permanent_delete'){
 		$url->authenticate_write($session);
 		$url->permanent_delete();
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_urls");
 		exit();		
-	}	
+	}
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -37,8 +53,18 @@
 	);
 	
 	$options['title'] = 'Url';
-	$options['altlinks'] = array('Edit Url'=>'/admin/admin_url_edit?url_url_id='.$url->key);
-	$options['altlinks'] += array('Delete Url' => '/admin/admin_url?action=remove&url_url_id='.$url->key);
+	$options['altlinks'] = array('Edit'=>'/admin/admin_url_edit?url_url_id='.$url->key);
+	if(!$url->get('url_delete_time')){
+		$options['altlinks']['Soft Delete'] = '/admin/admin_url?action=soft_delete&url_url_id='.$url->key;
+	}
+	else{
+		$options['altlinks']['Undelete'] = '/admin/admin_url?action=undelete&url_url_id='.$url->key;
+	}
+	
+	if($_SESSION['permission'] >= 8) {
+		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_url?action=permanent_delete&url_url_id='.$url->key);
+	}
+
 	$page->begin_box($options);
 
 

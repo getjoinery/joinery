@@ -113,8 +113,8 @@ class File extends SystemBase {
 	//TAKES A SIZE ARGUMENT, AND ALSO EITHER 'SHORT' OR 'FULL'
 	function get_url($size='standard', $format='short') {
 		
-		$settings = Globalvars::get_instance();
 		
+		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
 		$url_append = '';
 		if($format == 'full'){
