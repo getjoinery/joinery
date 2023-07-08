@@ -63,7 +63,7 @@ class Location extends SystemBase {
 	
 	static function get_by_link($link){
 		$results = new MultiLocation(array('link' => $link, 'deleted'=>false));
-		$numresult = $results->count_all();
+		$numresult = $results->count();
 
 		if($numresult){
 			$results->load();

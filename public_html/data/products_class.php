@@ -681,7 +681,7 @@ class Product extends SystemBase {
 		$results = new MultiProduct(array('link' => $link, 'deleted'=>false));
 		$results->load();
 
-		if(count($results)){	
+		if($results->count()){	
 			return $results->get(0);	
 		}
 		else{
