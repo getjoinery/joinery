@@ -23,8 +23,10 @@
 
 		$editable_fields = array('loc_name', 'loc_link','loc_description','loc_short_description', 'loc_is_published', 'loc_fil_file_id', 'loc_address', 'loc_website');
 
-		$_POST['loc_link'] = $location->create_url($_POST['loc_link']);
-
+		if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
+			$_POST['loc_link'] = $location->create_url($_POST['loc_link']);
+		}
+		
 		foreach($editable_fields as $field) {
 			$location->set($field, $_POST[$field]);
 		}
@@ -90,8 +92,9 @@
 	echo $formwriter->textinput('Location street address', 'loc_address', NULL, 100, $location->get('loc_address'), '', 255, '');
 	echo $formwriter->textinput('Location website', 'loc_website', NULL, 100, $location->get('loc_website'), '', 255, '');
 
-	echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir').'/location/', 'loc_link', NULL, 100, $location->get('loc_link'), '', 255, '');	
-
+	if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
+		echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir').'/location/', 'loc_link', NULL, 100, $location->get('loc_link'), '', 255, '');	
+	}
 
 	$optionvals = array("No"=>0, "Yes"=>1);
 	echo $formwriter->dropinput("Published", "loc_is_published", "", $optionvals, $location->get('loc_is_published'), '', FALSE);

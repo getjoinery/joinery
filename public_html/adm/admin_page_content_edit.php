@@ -23,7 +23,9 @@
 		
 		$page_content->set('pac_body', $_POST['pac_body']);
 		
-		$_POST['pac_link'] = $page_content->create_url($_POST['pac_link']);
+		if(!$page_content->get('pac_link') || $_SESSION['permission'] == 10){
+			$_POST['pac_link'] = $page_content->create_url($_POST['pac_link']);
+		}
 		
 		$editable_fields = array('pac_title', 'pac_is_published', 'pac_location_name', 'pac_link');
 
@@ -121,8 +123,9 @@
 
 	echo $formwriter->dropinput('Page', 'pac_pag_page_id', 'ctrlHolder', $optionvals, $page_content->get('pac_pag_page_id'), '', TRUE);
 
-	echo $formwriter->textinput('Content slug (no spaces):', 'pac_link', NULL, 100, $page_link, '', 255, '');	
-
+	if(!$page_content->get('pac_link') || $_SESSION['permission'] == 10){
+		echo $formwriter->textinput('Content slug (no spaces):', 'pac_link', NULL, 100, $page_link, '', 255, '');	
+	}
 	
 	//echo $formwriter->textinput('Script file (optional)', 'pac_script_filename', NULL, 100, $page_content->get('pac_script_filename'), '', 255, '');
 	
