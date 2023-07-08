@@ -19,8 +19,7 @@
 	
 	if($_POST){
 
-		$_POST['pag_link'] = trim(strtolower($_POST['pag_link']));
-		$_POST['pag_link'] = preg_replace("/[^a-zA-Z0-9-]/", "", $_POST['pag_link']);
+		$_POST['pag_link'] = $page->create_url($_POST['pag_link']);
 		
 		$editable_fields = array('pag_title', 'pag_link');
 
