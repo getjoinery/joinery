@@ -25,7 +25,7 @@
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$post->authenticate_write($session);
-		$post->soft_delete();
+		$post->undelete();
 
 		header("Location: /admin/admin_posts");
 		exit();				
@@ -46,9 +46,15 @@
 	
 	$options['title'] = $post->get('pst_title');
 	$options['altlinks'] = array('Edit Post' => '/admin/admin_post_edit?pst_post_id='.$post->key);
-	$options['altlinks'] += array('Delete Post' => '/admin/admin_post_permanent_delete?pst_post_id='.$post->key);
-	if(!$post->get('pst_delete_time') && $_SESSION['permission'] >= 8) {
+	if(!$post->get('pst_delete_time')){
 		$options['altlinks']['Soft Delete'] = '/admin/admin_post?action=delete&pst_post_id='.$post->key;
+	}
+	else{
+		$options['altlinks']['Undelete'] = '/admin/admin_post?action=undelete&pst_post_id='.$post->key;
+	}
+	
+	if($_SESSION['permission'] >= 8) {
+		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_post_permanent_delete?pst_post_id='.$post->key);
 	}
 
 	$page->begin_box($options);
@@ -65,7 +71,7 @@
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
 	
-	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$settings->get_setting('webDir').$post->get_url().'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$post->get_url('full').'</a><br />';	
 
 	if($post->get('pst_short_description')){
 		echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description').'</p><br />';

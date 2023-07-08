@@ -21,7 +21,10 @@
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
-
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
 
 	$surveys = new MultiSurvey(
 		$search_criteria,  //SEARCH CRITERIA

@@ -8,6 +8,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/pages_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
 
 	$paged = new PublicPageTW();
 	$hoptions = array(
@@ -36,7 +37,7 @@
 		echo '</ul>';
 	}
 
-	$settings = Globalvars::get_instance();
+
 	if($settings->get_setting('events_active')){
 		echo '<h2>Events</h2>';
 		
@@ -60,10 +61,33 @@
 			echo '<li><a href="'.$event->get_url().'">'.$event->get('evt_name').'</a></li>';
 		}
 		echo '</ul>';
+
+
+		echo '<h2>Locations</h2>';
+		
+		$sort = 'start_time';
+		$sdirection = 'ASC';
+
+		$searches = array();
+		$searches['deleted'] = FALSE;
+		$searches['published'] = true;
+		$locations = new MultiLocation(
+			$searches,
+			array($sort=>$sdirection),
+			NULL,
+			NULL,
+			'AND');
+		$locations->load();	
+
+		echo '<ul>';
+		foreach ($locations as $location){
+			echo '<li><a href="'.$location->get_url().'">'.$location->get('loc_name').'</a></li>';
+		}
+		echo '</ul>';
 	}
 
 	
-	$settings = Globalvars::get_instance();
+
 	if($settings->get_setting('blog_active')){
 	
 		echo '<h2>Blog Posts</h2>';

@@ -42,7 +42,7 @@ function profile_logic($get_vars, $post_vars){
 	include($_SERVER['DOCUMENT_ROOT'] . '/utils/registrant_maintenance.php');
 	
 
-	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key), array('event_id'=> 'DESC'));
+	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key, 'deleted' => false), array('event_id'=> 'DESC'));
 	$num_events = $event_registrants->count_all();
 	$event_registrants->load();
 	$page_vars['num_events'] = $num_events;
@@ -50,12 +50,12 @@ function profile_logic($get_vars, $post_vars){
 	
 	//COMPATIBILITY WITH OLD TEMPLATE
 	
-	$event_registrants_future = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => false), array('event_id'=> 'DESC'));
+	$event_registrants_future = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => false, 'deleted' => false), array('event_id'=> 'DESC'));
 	$num_future_events = $event_registrants_future->count_all();
 	$event_registrants_future->load();
 	$page_vars['event_registrants_future'] = $event_registrants_future;
 
-	$event_registrants_past = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => true), array('event_id'=> 'DESC'));
+	$event_registrants_past = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => true, 'deleted' => false), array('event_id'=> 'DESC'));
 	$num_past_events = $event_registrants_future->count_all();
 	$event_registrants_past->load();
 	$page_vars['event_registrants_past'] = $event_registrants_past;
@@ -85,6 +85,7 @@ function profile_logic($get_vars, $post_vars){
 	
 	$search_criteria = array();
 	$search_criteria['user_id'] = $session->get_user_id();
+	$search_criteria['deleted'] = false;
 	
 
 	$orders = new MultiOrder(
@@ -116,7 +117,7 @@ function profile_logic($get_vars, $post_vars){
 	
 	//MESSAGES
 	$messages = new MultiMessage(
-	array('user_id_recipient' => $user->key), //SEARCH CRITERIA
+	array('user_id_recipient' => $user->key, 'deleted' => false), //SEARCH CRITERIA
 	array('message_id'=>'DESC'),  // SORT, SORT DIRECTION
 	5, //NUMBER PER PAGE
 	NULL //OFFSET

@@ -64,22 +64,6 @@ class PageContent extends SystemBase {
 		'pac_create_time' => 'now()', 'pac_is_published' => FALSE
 		);
 		
-	function get_url() {
-		return '/page/' . $this->get('pac_link');
-	}	
-	
-	
-	static function get_by_link($link){
-		$results = new MultiPageContent(array('link' => $link, 'deleted'=>false));
-		$results->load();
-
-		if($results->count()){	
-			return $results->get(0);	
-		}
-		else{
-			return false;
-		}
-	}
 	
 	function get_content(){
 		if($this->get('pac_published_time') && !$this->get('pac_delete_time')){
@@ -144,17 +128,6 @@ class PageContent extends SystemBase {
 class MultiPageContent extends SystemMultiBase {
 
 
-	function get_dropdown_array_link($include_new=FALSE) {
-		$items = array();
-		foreach($this as $page_content) {
-			$items[$page_content->get('pac_location_name')] = $page_content->get_url();
-		}
-		if ($include_new) {
-			$items['new'] = 'Enter New Below';
-		}
-		return $items;
-
-	}
 
 	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();

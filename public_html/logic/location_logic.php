@@ -1,6 +1,6 @@
 <?php
 
-function page_logic($get_vars, $post_vars, $page, $params){
+function location_logic($get_vars, $post_vars, $location, $params){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 
@@ -19,9 +19,9 @@ function page_logic($get_vars, $post_vars, $page, $params){
 		exit();
 	}
 	
-	$page_vars['page'] = $page;
-	
-	if($params[0] != 'page' || !$page){
+	$page_vars['location'] = $location;
+
+	if($params[0] != 'location' || !$location){
 		require_once(LibraryFunctions::display_404_page());	
 	}
 	
@@ -29,7 +29,7 @@ function page_logic($get_vars, $post_vars, $page, $params){
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if(!$page->get('pag_published_time') || $page->get('pag_delete_time')){
+		if(!$location->get('loc_is_published') || $location->get('loc_delete_time')){
 			require_once(LibraryFunctions::display_404_page());	
 		}
 	}	

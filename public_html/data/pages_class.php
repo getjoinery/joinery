@@ -55,13 +55,26 @@ class Page extends SystemBase {
 
 	public static $initial_default_values = array('pag_create_time' => 'now()'
 		);		
-	
-	function get_url() {
-		return '/page/' . $this->get('pag_link');
-	}		
 
-	static function get_by_link($link){
-		$results = new MultiPage(array('link' => $link, 'deleted'=>false));
+	function get_url($format='short') {
+		if($format == 'full'){
+			$settings = Globalvars::get_instance();
+			return $settings->get_setting('webDir').'/page/' . $this->get('pag_link');
+		}
+		else{
+			return '/page/' . $this->get('pag_link');
+		}
+	}			
+
+
+	static function get_by_link($link, $search_deleted=false){
+		if($search_deleted){
+			$results = new MultiPage(array('link' => $link));
+		}
+		else{
+			$results = new MultiPage(array('link' => $link, 'deleted'=>false));
+		}
+		
 		$results->load();
 
 		if($results->count()){	

@@ -130,7 +130,7 @@
 
 		$options['title'] = 'Order (' . $order->key . ')';
 		if ($_SESSION['permission'] == 10) {
-			$options['altlinks']['Delete'] = '/admin/admin_order_delete?ord_order_id=' . $order->key;
+			$options['altlinks']['Permanent Delete'] = '/admin/admin_order_delete?ord_order_id=' . $order->key;
 			$options['altlinks']['Edit'] = '/admin/admin_order_edit?ord_order_id=' . $order->key;
 		}
 		$page->begin_box($options);

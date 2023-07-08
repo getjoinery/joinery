@@ -43,10 +43,6 @@ class ProductGroup extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array();
-	
-	function get_url() {
-		return '/products/' . str_replace(' ', '-', $this->get('prg_name')) . '/' . $this->key;
-	}
 
 }
 

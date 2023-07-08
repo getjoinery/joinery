@@ -45,6 +45,11 @@
 	$search_criteria = array();
 	//$search_criteria['email_like'] = $searchterm;
 
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
+	
 	$emails = new MultiEmail(
 		$search_criteria,
 		array($sort=>$sdirection),

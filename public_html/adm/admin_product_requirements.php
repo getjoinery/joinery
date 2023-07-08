@@ -15,10 +15,11 @@
 	$page->admin_header(	
 	array(
 		'menu-id'=> 'product-requirements',
-		'page_title' => 'Products',
-		'readable_title' => 'Products',
+		'page_title' => 'Product Requirements',
+		'readable_title' => 'Product Requirements',
 		'breadcrumbs' => array(
-			'Products'=>'', 
+			'Products'=>'/admin/products', 
+			'Product Requirements' => ''
 		),
 		'session' => $session,
 	)
@@ -51,7 +52,7 @@
 		$table_options = array(
 			//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
 			'altlinks' => $altlinks,
-			'title' => 'Products',
+			'title' => 'Product Requirements',
 			//'search_on' => TRUE
 		);
 		$page->tableheader($headers, $table_options, $pager);
@@ -64,7 +65,7 @@
 
 			
 			$page->disprow(array(
-				'('.$product_requirement->key.') ' . $editlink ,
+				$editlink ,
 
 			));
 

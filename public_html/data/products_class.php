@@ -645,6 +645,7 @@ class Product extends SystemBase {
 		'pro_digital_link' => 'Link for a digital download',
 		'pro_num_remaining_calc' => 'Calculated field of number remaining in stock',
 		'pro_link' => 'Link to use for accessing',
+		'pro_delete_time' => 'time deleted',
 	);
 
 	public static $field_specifications = array(
@@ -667,6 +668,7 @@ class Product extends SystemBase {
 		'pro_digital_link' =>  array('type'=>'varchar(255)'),
 		'pro_num_remaining_calc' => array('type'=>'int4'),
 		'pro_link' => array('type'=>'varchar(255)'),
+		'pro_delete_time' => array('type'=>'timestamp(6)'),
 	);
 			 
 	public static $required_fields = array('pro_link', 'pro_price', 'pro_name');
@@ -677,8 +679,14 @@ class Product extends SystemBase {
 	
 	public static $initial_default_values = array();	
 	
-	public static function get_by_link($link){
-		$results = new MultiProduct(array('link' => $link, 'deleted'=>false));
+	public static function get_by_link($link, $search_deleted=false){
+		if($search_deleted){
+			$results = new MultiProduct(array('link' => $link));
+		}
+		else{
+			$results = new MultiProduct(array('link' => $link, 'deleted'=>false));
+		}
+		
 		$results->load();
 
 		if($results->count()){	
@@ -962,9 +970,14 @@ class Product extends SystemBase {
 		return $tmp;
 	}
 		
-
-	function get_url() {
-		return '/product/'.$this->get('pro_link');
+	function get_url($format='short') {
+		if($format == 'full'){
+			$settings = Globalvars::get_instance();
+			return $settings->get_setting('webDir').'/product/'.$this->get('pro_link');
+		}
+		else{
+			return '/product/'.$this->get('pro_link');
+		}
 	}
 
 	
@@ -1254,6 +1267,10 @@ class MultiProduct extends SystemMultiBase {
 			$where_clauses[] = 'pro_product_id != ?';
 			$bind_params[] = array($this->options['product_id_is_not'], PDO::PARAM_INT);
 		}	
+
+		if (array_key_exists('deleted', $this->options)) {
+			$where_clauses[] = 'pro_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		}
 
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';

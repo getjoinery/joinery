@@ -21,6 +21,11 @@
 	
 	$search_criteria = array();
 
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
+	
 	$posts = new MultiPost(
 		$search_criteria,
 		array($sort=>$sdirection),
@@ -55,6 +60,12 @@
 
 
 	foreach ($posts as $post){
+		
+		$deleted = '';
+		if($post->get('pst_delete_time')){
+			$deleted = ' DELETED ';
+		}
+		
 		$user = new User($post->get('pst_usr_user_id'), TRUE);
 		
 		$title = $post->get('pst_title');
@@ -63,7 +74,7 @@
 		}
 		
 		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_post?pst_post_id=$post->key'>".$title."</a>");	
+		array_push($rowvalues, "<a href='/admin/admin_post?pst_post_id=$post->key'>".$title."</a>". $deleted);	
 		array_push($rowvalues, LibraryFunctions::convert_time($post->get('pst_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');

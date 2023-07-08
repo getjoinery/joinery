@@ -21,6 +21,11 @@
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$searches['deleted'] = false;
+	}
+	
 	
 	if($searchterm) {
 		if(is_numeric($searchterm)) {

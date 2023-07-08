@@ -13,9 +13,9 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	
-	$event = Event::get_by_link($static_routes_path);
+	$event = Event::get_by_link($static_routes_path, true);
 	$page_vars['event'] = $event;
-	if(!$event || !$event->get('evt_visibility')){
+	if(!$event || !$event->get('evt_visibility') || $event->get('evt_delete_time')){
 		if($session->get_permission() < 5){
 			require_once(LibraryFunctions::display_404_page());	
 		}			

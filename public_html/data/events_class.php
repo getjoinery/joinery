@@ -280,8 +280,14 @@ class Event extends SystemBase {
 		return $tmp;
 	}
 	
-	function get_url() {
-		return '/event/' . $this->get('evt_link');
+	function get_url($format='short') {
+		if($format == 'full'){
+			$settings = Globalvars::get_instance();
+			return $settings->get_setting('webDir').'/event/' . $this->get('evt_link');
+		}
+		else{
+			return '/event/' . $this->get('evt_link');
+		}
 	}
 	
 	function get_register_url() {

@@ -25,7 +25,8 @@ class Url extends SystemBase {
 		'url_redirect_url' => 'Url to redirect to',
 		'url_redirect_file' => 'File to load',
 		'url_type' => 'Type of redirect - 301, 302, etc',
-		'url_create_time' => 'Time added'
+		'url_create_time' => 'Time added',
+		'url_delete_time' => 'Time deleted',
 	);
 
 	public static $field_specifications = array(
@@ -35,6 +36,7 @@ class Url extends SystemBase {
 		'url_redirect_file' => array('type'=>'varchar(255)'),
 		'url_type' => array('type'=>'int2'),
 		'url_create_time' => array('type'=>'timestamp(6)'),
+		'url_delete_time' => array('type'=>'timestamp(6)'),
 	);
 	
 	public static $required_fields = array();
@@ -46,6 +48,25 @@ class Url extends SystemBase {
 	public static $initial_default_values = array('url_create_time' => 'now()'
 		);		
 	
+	static function get_by_link($link, $search_deleted=false){
+		if($search_deleted){
+			$results = new MultiUrl(array('link' => $link));
+		}
+		else{
+			$results = new MultiUrl(array('link' => $link, 'deleted'=>false));
+		}
+		
+		$results->load();
+
+		if($results->count()){	
+			$results->load();
+			return $results->get(0);
+		}
+		else{
+			return false;
+		}
+
+	}
 	
 	function get_type_text() {
 		if($this->get('url_type') == 301){

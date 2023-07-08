@@ -66,8 +66,14 @@ class Post extends SystemBase {
 	);	
 
 	
-	static function get_by_link($link){
-		$results = new MultiPost(array('link' => $link, 'deleted'=>false));
+	static function get_by_link($link, $search_deleted=false){
+		if($search_deleted){
+			$results = new MultiPost(array('link' => $link));
+		}
+		else{
+			$results = new MultiPost(array('link' => $link, 'deleted'=>false));
+		}
+		
 		$results->load();
 		if($results->count()){
 			return $results->get(0);
@@ -99,23 +105,38 @@ class Post extends SystemBase {
 		}
 	}	
 
-	function get_url(){ 
+
+	function get_url($format='short'){ 
 		$settings = Globalvars::get_instance();
 		$blog_subdirectory = $settings->get_setting('blog_subdirectory');
-		if($blog_subdirectory){
-			$url = $blog_subdirectory.'/'.$this->get('pst_link');
-		}
-		else{
-			$url = $this->get('pst_link');
+		
+		//SUBDIRECTORY SHOULD WORK WITH OR WITHOUT SLASH
+		if(substr($blog_subdirectory, 0, 1) != "/"){
+			$blog_subdirectory = '/' . $blog_subdirectory;
+		} 
+		else if($blog_subdirectory == '/'){
+			//IF IT IS ROOT, REMOVE THE SLASH
+			$blog_subdirectory = '';
 		}
 		
-		//ADD LEADING SLASH IF NEEDED
-		if(substr($url, 0, 1) == "/"){
-			return $url;
+		if($format == 'full'){
+			if($blog_subdirectory){
+				return $settings->get_setting('webDir') . $blog_subdirectory.'/'.$this->get('pst_link');
+			}
+			else{
+				return $settings->get_setting('webDir') . '/' . $this->get('pst_link');
+			}
 		}
 		else{
-			return '/'.$url;
-		} 
+			if($blog_subdirectory){
+				return $blog_subdirectory.'/'.$this->get('pst_link');
+			}
+			else{
+				return '/' . $this->get('pst_link');
+			}
+
+		}
+
 	}		
 	
 	function get_tags($return_type = 'name'){ 

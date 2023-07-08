@@ -48,6 +48,11 @@
 			$search_criteria['user_id'] = $user_id;
 		}
 	}
+	
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
 
 	$orders = new MultiOrder(
 		$search_criteria,

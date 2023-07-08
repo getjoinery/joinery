@@ -20,6 +20,11 @@
 	
 	
 	$search_criteria = array();
+	
+	//ONLY SHOW DELETED TO SUPER ADMINS
+	if($_SESSION['permission'] < 10){
+		$search_criteria['deleted'] = false;
+	}
 
 	$bookings = new MultiBooking(
 		$search_criteria,

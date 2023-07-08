@@ -39,6 +39,15 @@ function product_logic($get_vars, $post_vars, $product){
 	else{
 		throw new SystemDisplayableError('There is no product present.');
 	}
+	
+	if ($product && $session->get_user_id() && $session->get_permission() > 4) {
+		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
+	}
+	else {
+		if(!$post->get('pst_is_active') || $post->get('pst_delete_time')){
+			require_once(LibraryFunctions::display_404_page());		
+		}
+	}
 	$page_vars['product'] = $product;
 	
 	
