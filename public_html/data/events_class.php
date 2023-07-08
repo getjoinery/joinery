@@ -103,7 +103,8 @@ class Event extends SystemBase {
 		'evt_ety_event_type_id' => 'Type of event',
 		'evt_delete_time' => 'Time of deletion',
 		'evt_svy_survey_id'=> 'Survey, if attached',
-		'evt_survey_required' => 'Is the survey required before registration?'
+		'evt_survey_required' => 'Is the survey required before registration?',
+		'evt_loc_location_id'  => 'Location id if there is a location attached'
 	); 
 
 	public static $field_specifications = array(
@@ -137,6 +138,7 @@ class Event extends SystemBase {
 		'evt_delete_time' => array('type'=>'timestamp(6)'),
 		'evt_svy_survey_id' => array('type'=>'int4'),
 		'evt_survey_required' => array('type'=>'int2'),
+		'evt_loc_location_id' => array('type'=>'int4'),
 	); 
 			
 	public static $required_fields = array(
@@ -228,7 +230,7 @@ class Event extends SystemBase {
 	function get_picture_link($type='standard'){
 		if($this->get('evt_fil_file_id')){
 			$file = new File($this->get('evt_fil_file_id'), TRUE);
-			return $file->get_url($type);
+			return $file->get_url($type, 'full');
 		}
 		else if($this->get('evt_picture_link')){
 			return $this->get('evt_picture_link');

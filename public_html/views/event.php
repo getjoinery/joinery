@@ -168,6 +168,36 @@
 
             </div>
           </section>
+		  
+		  
+	<?php if($page_vars['location_object']){ ?>
+
+          <section aria-labelledby="quick-links-title">
+            <div class="rounded-lg bg-white overflow-hidden shadow p-6">
+			<h2 class="text-base font-medium text-gray-900" id="description-title">Location: <?php echo $page_vars['location_object']->get('loc_name'); ?></h2>
+			<?php if($page_vars['location_object']->get('loc_address')){ echo 'Address:  '. $page_vars['location']->get('loc_address'). '<br>'; } ?>
+			<?php if($page_vars['location_object']->get('loc_website')){ echo 'Website:  <a href="'. $page_vars['location']->get('loc_website'). '">'.$page_vars['location']->get('loc_website').'</a><br>'; } ?>
+              
+				
+				<?php if($page_vars['location_picture']){ ?>
+					<div class="mb-5">
+					<img src="<?php echo $page_vars['location_picture']; ?>">
+					</div>
+				<?php } ?>
+			
+              <?php echo '<div class="prose">'.$page_vars['location_object']->get('loc_description').'</div>'; ?>
+
+
+            </div>
+          </section>
+
+
+	<?php } ?>		
+		  
+		  
+		  
+		  
+		  
         </div>
 
         <!-- Right column -->

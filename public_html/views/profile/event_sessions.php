@@ -43,6 +43,20 @@
 
 			?>
 		</p>
+		<?php if($page_vars['location_string']){ ?>
+		<p class="text-sm font-medium text-gray-600">
+		  <?php 	
+		  
+			echo $page_vars['location_string'];
+
+			?>
+		</p>		
+		
+		
+		<?php } ?>
+		
+		
+		
 		<?php
 		$calendar_text = '';
 		if($page_vars['event']->get('evt_status') != 2 && $page_vars['event']->get('evt_status') != 3){
@@ -113,6 +127,30 @@
   <div class="px-4 py-5 sm:px-6">
     <?php echo $page_vars['event']->get('evt_short_description'); ?>
   </div>
+  
+  	<?php if($page_vars['location_object']){ ?>
+
+          <section aria-labelledby="quick-links-title">
+            <div class="rounded-lg bg-white overflow-hidden shadow p-6">
+			<h2 class="text-base font-medium text-gray-900" id="description-title">Location: <?php echo $page_vars['location_object']->get('loc_name'); ?></h2>
+			<?php if($page_vars['location_object']->get('loc_address')){ echo 'Address:  '. $page_vars['location_object']->get('loc_address'). '<br>'; } ?>
+			<?php if($page_vars['location_object']->get('loc_website')){ echo 'Website:  <a href="'. $page_vars['location_object']->get('loc_website'). '">'.$page_vars['location_object']->get('loc_website').'</a><br>'; } ?>
+              
+				
+				<?php if($page_vars['location_picture']){ ?>
+					<div class="mb-5">
+					<img src="<?php echo $page_vars['location_picture']; ?>">
+					</div>
+				<?php } ?>
+			
+              <?php echo '<div class="prose">'.$page_vars['location_object']->get('loc_description').'</div>'; ?>
+
+
+            </div>
+          </section>
+
+
+	<?php } ?>	
 
 <!--
   <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
