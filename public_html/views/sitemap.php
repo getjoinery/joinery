@@ -25,7 +25,7 @@
 		echo '<h2>Pages</h2>';
 
 
-		$search_criteria = array('published' => TRUE, 'has_link' => TRUE);
+		$search_criteria = array('published' => TRUE, 'deleted' => false, 'has_link' => TRUE);
 		$pages = new MultiPage(
 			$search_criteria);	
 		$pages->load();
@@ -95,6 +95,7 @@
 		$page_sort = LibraryFunctions::fetch_variable('page_sort', 'post_id', 0, '');	
 		$page_direction = LibraryFunctions::fetch_variable('page_direction', 'DESC', 0, '');
 		$search_criteria = array('published'=>TRUE);
+		$search_criteria['deleted'] = false;
 		$posts = new MultiPost(
 			$search_criteria);	
 		$posts->load();		
