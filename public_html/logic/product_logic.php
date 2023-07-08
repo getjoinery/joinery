@@ -44,7 +44,7 @@ function product_logic($get_vars, $post_vars, $product){
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if(!$post->get('pst_is_active') || $post->get('pst_delete_time')){
+		if(!$product->get('pro_is_active') || $product->get('pro_delete_time')){
 			require_once(LibraryFunctions::display_404_page());		
 		}
 	}
