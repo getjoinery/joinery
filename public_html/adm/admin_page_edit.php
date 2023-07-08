@@ -19,7 +19,9 @@
 	
 	if($_POST){
 
-		$_POST['pag_link'] = $page->create_url($_POST['pag_link']);
+		if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
+			$_POST['pag_link'] = $page->create_url($_POST['pag_link']);
+		}
 		
 		$editable_fields = array('pag_title', 'pag_link');
 
@@ -109,8 +111,9 @@
 	
 	echo $formwriter->textinput('Page title', 'pag_title', NULL, 100, $title, '', 255, '');		
 
-	echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir').'/page/', 'pag_link', NULL, 100, $page->get('pag_link'), '', 255, '');	
-
+	if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
+		echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir').'/page/', 'pag_link', NULL, 100, $page->get('pag_link'), '', 255, '');	
+	}
 
 	$optionvals = array("No"=>0, "Yes"=>1);
 	echo $formwriter->dropinput("Published", "pag_is_published", "ctrlHolder", $optionvals, $is_published, '', FALSE);

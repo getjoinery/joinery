@@ -250,17 +250,30 @@ class Event extends SystemBase {
 		return $calendar_links;
 	}
 	
-	function create_url() {
-		$tmp = strtolower(str_replace(' ', '-', $this->get('evt_name')));
+	function create_url($input_url) {
+		if($input_url){
+			$tmp = $input_url;
+		}
+		else{
+			$tmp = $this->get('evt_name');
+		}		
+
+		$tmp = strtolower(str_replace(' ', '-', $tmp));
 		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
 		$tmp = preg_replace('/-{2,}/', '-', $tmp);
 		
 		//NO DUPLICATES
 		$increment=1;
 		$tmp_orig = $tmp;
-		while(Event::get_by_link($tmp, true)){
-			$tmp = $tmp_orig . $increment;
-			$increment++;
+		while($result = Event::get_by_link($tmp, true)){
+			if($result->key == $this->key){
+				//IF WE FOUND THIS ONE, IT'S OKAY
+				return $tmp;
+			}
+			else{
+				$tmp = $tmp_orig . $increment;
+				$increment++;
+			}
 		}
 		return $tmp;
 	}

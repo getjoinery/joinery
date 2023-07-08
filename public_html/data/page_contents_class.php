@@ -123,9 +123,15 @@ class PageContent extends SystemBase {
 		//NO DUPLICATES
 		$increment=1;
 		$tmp_orig = $tmp;
-		while(PageContent::get_by_link($tmp, true)){
-			$tmp = $tmp_orig . $increment;
-			$increment++;
+		while($result = PageContent::get_by_link($tmp, true)){
+			if($result->key == $this->key){
+				//IF WE FOUND THIS ONE, IT'S OKAY
+				return $tmp;
+			}
+			else{
+				$tmp = $tmp_orig . $increment;
+				$increment++;
+			}
 		}
 		return $tmp;
 	}

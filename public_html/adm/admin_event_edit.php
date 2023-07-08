@@ -71,7 +71,7 @@
 			$event->set($field, $_POST[$field]);
 		}
 		
-		if(!$event->get('evt_link')){
+		if(!$event->get('evt_link') || $_SESSION['permission'] == 10){
 			$event->set('evt_link', $event->create_url());
 		}		
 
