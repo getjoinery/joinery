@@ -134,12 +134,12 @@
 	
 	echo '<br />';
 	if($file->is_image()){
-		echo '<div class="padding10px">Full size:  <pre><a href="'.$settings->get_setting('webDir').'/uploads/'.$file->get('fil_name').'">'.$settings->get_setting('webDir').'/uploads/'.$file->get('fil_name').'</a></pre></div>';
-		echo '<div class="padding10px">Large size:  <pre><a href="'.$settings->get_setting('webDir').'/uploads/large/'.$file->get('fil_name').'">'.$settings->get_setting('webDir').'/uploads/large/'.$file->get('fil_name').'</a></pre></div>'; 
-		echo '<div class="padding10px">Medium size:  <pre><a href="'.$settings->get_setting('webDir').'/uploads/medium/'.$file->get('fil_name').'">'.$settings->get_setting('webDir').'/uploads/medium/'.$file->get('fil_name').'</a></pre></div>';
-		echo '<div class="padding10px">Small size:  <pre><a href="'.$settings->get_setting('webDir').'/uploads/small/'.$file->get('fil_name').'">'.$settings->get_setting('webDir').'/uploads/small/'.$file->get('fil_name').'</a></pre></div>';
-		echo '<div class="padding10px">Large thumbnail size:  <pre><a href="'.$settings->get_setting('webDir').'/uploads/lthumbnail/'.$file->get('fil_name').'">'.$settings->get_setting('webDir').'/uploads/lthumbnail/'.$file->get('fil_name').'</a></pre></div>';
-		echo '<div class="padding10px">Thumbnail size:  <pre><a href="'.$settings->get_setting('webDir').'/uploads/thumbnail/'.$file->get('fil_name').'">'.$settings->get_setting('webDir').'/uploads/thumbnail/'.$file->get('fil_name').'</a></pre></div>';
+		echo '<div class="padding10px">Full size:  <pre><a href="'.$file->get_url('standard','full').'">'.$file->get_url('standard','full').'</a></pre></div>';
+		echo '<div class="padding10px">Large size:  <pre><a href="'.$file->get_url('large','full').'">'.$file->get_url('large','full').'</a></pre></div>'; 
+		echo '<div class="padding10px">Medium size:  <pre><a href="'.$file->get_url('medium','full').'">'.$file->get_url('medium','full').'</a></pre></div>';
+		echo '<div class="padding10px">Small size:  <pre><a href="'.$file->get_url('small','full').'">'.$file->get_url('small','full').'</a></pre></div>';
+		echo '<div class="padding10px">Large thumbnail size:  <pre><a href="'.$file->get_url('lthumbnail','full').'">'.$file->get_url('lthumbnail','full').'</a></pre></div>';
+		echo '<div class="padding10px">Thumbnail size:  <pre><a href="'.$file->get_url('thumbnail','full').'">'.$file->get_url('thumbnail','full').'</a></pre></div>';
 		//echo '<div class="padding10px"><img src="/uploads/medium/'.$file->get('fil_name').'"/></div>';
 	}
 	else{

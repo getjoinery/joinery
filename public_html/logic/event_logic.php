@@ -8,6 +8,7 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_registrants_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_waiting_lists_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/locations_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
@@ -136,6 +137,18 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 	$page_vars['show_sessions_block'] = false;
 	if(($event->get('evt_session_display_type') == Event::DISPLAY_SEPARATE && $numsessions > 0) || $future_numsessions || $past_numsessions){
 		$page_vars['show_sessions_block'] = true;
+	}
+	
+	if($event->get('evt_loc_location_id')){
+		$location = new Location($event->get('evt_loc_location_id'), true);
+		$page_vars['location_object'] = $location;
+		if($location->get('loc_fil_file_id')){
+			$file = new File($location->get('loc_fil_file_id'), true);
+			$page_vars['location_picture'] = $file->get_url('small','full');
+		}
+	}
+	else{
+		$page_vars['location_string'] = $event->get('evt_location');
 	}
 	
 

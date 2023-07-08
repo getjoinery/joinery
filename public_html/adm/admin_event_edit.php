@@ -8,6 +8,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_types_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/surveys_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -64,7 +65,7 @@
 		}
 		
 		
-		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_survey_required');
+		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_survey_required','evt_loc_location_id');
 
 		foreach($editable_fields as $field) {
 			$event->set($field, $_POST[$field]);
@@ -164,7 +165,48 @@
 	
 	//echo $formwriter->textinput('Picture link', 'evt_picture_link', NULL, 100, $event->get('evt_picture_link'), '', 255, '');
 	
-	echo $formwriter->textinput('Event location', 'evt_location', NULL, 100, $event->get('evt_location'), '', 255, '');
+
+	$locations = new MultiLocation(
+		array('deleted'=>false, 'published'=>true),
+		array('location_id' => 'ASC'),		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$locations->load();
+	$numlocations = $locations->count_all();
+	if($numlocations){
+		?>
+		<script type="text/javascript">
+	
+		function set_choices(){
+			var value = $("#evt_loc_location_id").val();
+			if(value == ''){  //ONE PRICE	
+				$("#evt_location_container").show();
+			}	
+			else{  //MULTIPLE PRICES
+				$("#evt_location_container").hide();
+				$("#evt_location").val('');				
+			}		
+		}
+		
+	
+		$(document).ready(function() {
+			set_choices();
+			$("#evt_loc_location_id").change(function() {	
+				set_choices();
+			});	
+		});
+	
+		
+		</script>
+		<?php
+		$optionvals = $locations->get_dropdown_array();
+		echo $formwriter->dropinput('Location', 'evt_loc_location_id', '', $optionvals, $event->get('evt_loc_location_id'), '', 'Custom location');
+		echo $formwriter->textinput('Custom location', 'evt_location', NULL, 100, $event->get('evt_location'), '', 255, '');
+	}
+	else{
+		echo $formwriter->textinput('Location', 'evt_location', NULL, 100, $event->get('evt_location'), '', 255, '');
+	}
+	
 
 	echo $formwriter->textinput('Max signups (number)', 'evt_max_signups', NULL, 100, $event->get('evt_max_signups'), '', 255, '');
 
@@ -186,7 +228,7 @@
 	
 	
 	//HANDLE DEFAULT timezone
-	if(isset($event->get('evt_timezone'))){
+	if($event->get('evt_timezone')){
 		$timezone = $event->get('evt_timezone');
 	}
 	else{

@@ -12,6 +12,7 @@ function event_sessions_course_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
@@ -99,6 +100,18 @@ function event_sessions_course_logic($get_vars, $post_vars){
 	}
 	else{
 		$event_session->record_analytic($session->get_user_id());
+	}
+	
+	if($event->get('evt_loc_location_id')){
+		$location = new Location($event->get('evt_loc_location_id'), true);
+		$page_vars['location_object'] = $location;
+		if($location->get('loc_fil_file_id')){
+			$file = new File($location->get('loc_fil_file_id'), true);
+			$page_vars['location_picture'] = $file->get_url('small','full');
+		}
+	}
+	else{
+		$page_vars['location_string'] = $event->get('evt_location');
 	}
 
 	return $page_vars;

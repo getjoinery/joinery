@@ -11,7 +11,7 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	$location = new ContactType($_REQUEST['loc_location_id'], TRUE);
+	$location = new Location($_REQUEST['loc_location_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
 		$location->authenticate_write($session);		
@@ -59,7 +59,8 @@
 	$page->begin_box($options);
 	
 	echo '<h3>'.$location->get('loc_name').'</h3>'; 
-	
+	?><p><?php echo 'Address: '.$location->get('loc_address'); ?></p><?php
+	?><p><?php echo 'Website: '.$location->get('loc_website'); ?></p><?php
 	if($location->get('loc_is_published')){
 		echo 'Status: Published'.'<br />';
 	}
@@ -74,7 +75,15 @@
 		echo 'Status: Active'.'<br />';
 	}
 	
+	if($location->get('loc_fil_file_id')){
+		$file = new File($location->get('loc_fil_file_id'), true);
 
+		echo '<img src="'.$settings->get_setting('webDir').'/uploads/small/'.$file->get('fil_name').'">';
+	}	
+
+	
+	echo '<br><br>';
+	?><p><?php echo $location->get('loc_short_description'); ?></p><?php
 	echo '<br><br>';
 	?><p><?php echo $location->get('loc_description'); ?></p>
 

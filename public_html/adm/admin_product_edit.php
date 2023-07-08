@@ -30,7 +30,14 @@
 	if ($_POST || $_POST['action']) {
 		
 		if ($_POST['action'] == 'add' || $_POST['action'] == 'edit') {
-			$product->set('pro_link', preg_replace("/[^a-zA-Z0-9-]/", "", trim(strtolower($_POST['pro_link']))));
+			
+			if($_POST['pro_link']){
+				$product->set('pro_link', preg_replace("/[^a-zA-Z0-9-]/", "", trim(strtolower($_POST['pro_link']))));
+			}
+			else{
+				$product->set('pro_link', preg_replace("/[^a-zA-Z0-9-]/", "", trim(strtolower($_POST['pro_name']))));
+			}
+			
 			
 		
 			if($_POST['pro_requirements']){

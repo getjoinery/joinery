@@ -29,9 +29,11 @@ class Location extends SystemBase {
 		'loc_website' => 'Address of the location',
 		'loc_description' => 'Description of the location',
 		'loc_short_description' => 'Short description, no html, max 255 chars',
+		'loc_fil_file_id' => 'Image attached',
 		'loc_is_published' => 'Time published',
 		'loc_create_time' => 'Time Created',
 		'loc_delete_time' => 'Time of deletion',
+		
 	);
 
 	public static $field_specifications = array(
@@ -42,12 +44,13 @@ class Location extends SystemBase {
 		'loc_website' => array('type'=>'varchar(255)'),
 		'loc_description' => array('type'=>'text'),
 		'loc_short_description' => array('type'=>'varchar(255)'),
+		'loc_fil_file_id' => array('type'=>'int4'),
 		'loc_is_published' => array('type'=>'bool'),
 		'loc_create_time' => array('type'=>'timestamp(6)'),
 		'loc_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $required_fields = array('loc_title', 'loc_link');
+	public static $required_fields = array('loc_name', 'loc_link');
 
 	public static $field_constraints = array();	
 	
@@ -120,10 +123,10 @@ class Location extends SystemBase {
 class MultiLocation extends SystemMultiBase {
 
 
-	function get_location_dropdown_array($include_new=FALSE) {
+	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $location) {
-			$items['('.$location->key.') '.$location->get('loc_title')] = $location->key;
+			$items[$location->get('loc_name')] = $location->key;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

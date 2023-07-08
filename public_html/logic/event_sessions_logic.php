@@ -13,6 +13,7 @@ function event_sessions_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
 	
 
 	$settings = Globalvars::get_instance();
@@ -106,6 +107,18 @@ function event_sessions_logic($get_vars, $post_vars){
 	$num_sessions = $event_sessions->count_all();
 	$event_sessions->load();	
 	$page_vars['event_sessions'] = $event_sessions;
+	
+	if($event->get('evt_loc_location_id')){
+		$location = new Location($event->get('evt_loc_location_id'), true);
+		$page_vars['location_object'] = $location;
+		if($location->get('loc_fil_file_id')){
+			$file = new File($location->get('loc_fil_file_id'), true);
+			$page_vars['location_picture'] = $file->get_url('small','full');
+		}
+	}
+	else{
+		$page_vars['location_string'] = $event->get('evt_location');
+	}
 	
 	$page_vars['pager'] = new Pager(array('numrecords'=>$num_sessions, 'numperpage'=> $numperpage));
 		
