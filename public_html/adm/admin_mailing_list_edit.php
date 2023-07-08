@@ -31,7 +31,7 @@
 			$mailing_list->set($field, $_POST[$field]);
 		}
 		
-		if(!$mailing_list->get('mlt_link')){
+		if(!$mailing_list->get('mlt_link') || $_SESSION['permission'] == 10){
 			$mailing_list->set('mlt_link', $mailing_list->create_url());
 		}
 		
