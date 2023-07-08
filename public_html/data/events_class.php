@@ -165,21 +165,13 @@ class Event extends SystemBase {
 
 	
 	static function get_by_link($link, $search_deleted=false){
-		$params = explode("/", $link);
-		if($params[0] == 'event'){
-			$lookup = $params[1];
-		}
-		else{
-			$lookup = $params[0];
-		}
 		
 		if($search_deleted){
-			$results = new MultiEvent(array('link' => $lookup));
+			$results = new MultiEvent(array('link' => $link));
 		}
 		else{
-			$results = new MultiEvent(array('link' => $lookup, 'deleted'=>false));
+			$results = new MultiEvent(array('link' => $link, 'deleted'=>false));
 		}
-		
 		
 		$results->load();
 	
@@ -187,14 +179,7 @@ class Event extends SystemBase {
 			return $results->get(0);	
 		}
 		else{
-			//THIS IS THE OLD URL SCHEME
-			try{
-				$event = new Event((int)$params[1], TRUE);
-				return $event;
-			}
-			catch(exception $e){
-				return false;
-			}
+			return false;
 		}
 	}	
 	/*

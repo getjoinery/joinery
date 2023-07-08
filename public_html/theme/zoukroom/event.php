@@ -10,12 +10,14 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_registrants_class.php');
 
-	$session = SessionControl::get_instance();
+	require_once (LibraryFunctions::get_logic_file_path('event_logic.php'));
+
+
+	$page_vars = event_logic($_GET, $_POST, $event, NULL);
+	$event = $page_vars['event'];
 	
-	$event = Event::get_by_link($static_routes_path);
-	if(!$event || !$event->get('evt_visibility')){
-		require_once(LibraryFunctions::display_404_page());				
-	}
+	$session = SessionControl::get_instance();
+
 
 	
 	$page = new PublicPage(TRUE);
