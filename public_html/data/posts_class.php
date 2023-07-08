@@ -68,10 +68,8 @@ class Post extends SystemBase {
 	
 	static function get_by_link($link){
 		$results = new MultiPost(array('link' => $link, 'deleted'=>false));
-		$numresult = $results->count_all();
-
-		if($numresult){
-			$results->load();
+		$results->load();
+		if($results->count()){
 			return $results->get(0);
 		}
 		else{

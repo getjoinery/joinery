@@ -335,6 +335,29 @@ if($params[0] == 'page'){
 	}	
 }
 
+//LOCATIONS.  DEFAULT IS TO USE THE /LOCATION/ SUBDIRECTORY
+if($params[0] == 'location'){
+	if($settings->get_setting('events_active')){
+		require_once($_SERVER['DOCUMENT_ROOT'].'/data/locations_class.php');
+
+		$location = Location::get_by_link($params[1]);		
+
+		$template_file = $template_directory.'/location.php';
+		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/location.php';
+		
+		$is_valid_page = true;
+		
+		if(file_exists($template_file)){
+			require_once($template_file);
+			exit();
+		}
+		else if(file_exists($base_file)){
+			require_once($base_file); 
+			exit();		
+		}		
+	}	
+}
+
 //MAILING LISTS.  DEFAULT IS TO USE THE /LIST/ SUBDIRECTORY
 if($params[0] == 'list'){
 	//if($settings->get_setting('mailing_lists_active')){

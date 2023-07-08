@@ -73,7 +73,7 @@ class PageContent extends SystemBase {
 		$results = new MultiPageContent(array('link' => $link, 'deleted'=>false));
 		$results->load();
 
-		if(count($results)){	
+		if($results->count()){	
 			return $results->get(0);	
 		}
 		else{
