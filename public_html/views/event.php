@@ -4,7 +4,7 @@
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	
-	$page_vars = event_logic($_GET, $_POST, $static_routes_path);
+	$page_vars = event_logic($_GET, $_POST, $event);
 	$event = $page_vars['event'];
 	
 	

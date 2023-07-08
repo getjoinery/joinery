@@ -1,6 +1,6 @@
 <?php
 
-function event_logic($get_vars, $post_vars, $static_routes_path){
+function event_logic($get_vars, $post_vars, $event){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 
@@ -13,7 +13,7 @@ function event_logic($get_vars, $post_vars, $static_routes_path){
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	
-	$event = Event::get_by_link($static_routes_path, true);
+
 	$page_vars['event'] = $event;
 	if(!$event || !$event->get('evt_visibility') || $event->get('evt_delete_time')){
 		if($session->get_permission() < 5){

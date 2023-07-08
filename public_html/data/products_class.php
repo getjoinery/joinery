@@ -963,7 +963,7 @@ class Product extends SystemBase {
 		//NO DUPLICATES
 		$increment=1;
 		$tmp_orig = $tmp;
-		while(Event::get_by_link($tmp, true)){
+		while(Product::get_by_link($tmp, true)){
 			$tmp = $tmp_orig . $increment;
 			$increment++;
 		}
