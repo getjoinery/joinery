@@ -49,7 +49,7 @@
 			<article class="typology-post typology-layout-a  post-131 post type-post status-publish format-standard hentry category-politics tag-noimages tag-stories tag-writing">
 
 				<header class="entry-header">
-					<h2 class="entry-title h1"><a href="<?php echo $post->get('pst_link') ?>"><?php echo $post->get('pst_title'); ?></a></h2>         
+					<h2 class="entry-title h1"><a href="<?php echo $post->get_url() ?>"><?php echo $post->get('pst_title'); ?></a></h2>         
 					<div class="entry-meta">
 						<div class="meta-item meta-author">By <span class="vcard author"><span class="fn"><a href="/page/about"><?php echo $author->display_name(); ?></a></span></span></div><div class="meta-item meta-category">on <!--<a href="category/politics/index.html" rel="category tag">Politics</a></div>--><div class="meta-item meta-rtime"><?php echo LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'); ?>
 						</div>
@@ -67,7 +67,7 @@
 					?></p>
 				</div>
 				<div class="entry-footer">
-					<a href="<?php echo $post->get('pst_link'); ?>" class="typology-button">Read on</a><!--<a href="javascript:void(0);" class="typology-button button-invert typology-rl pocket" data-url="https://getpocket.com/edit?url=https%3A%2F%2Fjeremytestsite-1b8274.ingress-bonde.easywp.com%2Fwhy-do-people-think-clouds-are-so-interesting%2F"><i class="fa fa-bookmark-o"></i>Read later</a> -->       
+					<a href="<?php echo $post->get_url(); ?>" class="typology-button">Read on</a><!--<a href="javascript:void(0);" class="typology-button button-invert typology-rl pocket" data-url="https://getpocket.com/edit?url=https%3A%2F%2Fjeremytestsite-1b8274.ingress-bonde.easywp.com%2Fwhy-do-people-think-clouds-are-so-interesting%2F"><i class="fa fa-bookmark-o"></i>Read later</a> -->       
 				</div>
 			</article>  
 
