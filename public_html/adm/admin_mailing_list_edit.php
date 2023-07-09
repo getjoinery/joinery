@@ -30,10 +30,16 @@
 		foreach($editable_fields as $field) {
 			$mailing_list->set($field, $_POST[$field]);
 		}
-		
+
 		if(!$mailing_list->get('mlt_link') || $_SESSION['permission'] == 10){
-			$mailing_list->set('mlt_link', $mailing_list->create_url());
+			if($_POST['mlt_link']){
+				$mailing_list->set('mlt_link', $mailing_list->create_url($_POST['mlt_link']));
+			}
+			else{
+				$mailing_list->set('mlt_link', $mailing_list->create_url($event->get('mlt_name')));
+			}
 		}
+		
 		
 		$mailing_list->prepare();
 		$mailing_list->save();

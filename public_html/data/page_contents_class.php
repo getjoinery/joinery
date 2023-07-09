@@ -90,33 +90,6 @@ class PageContent extends SystemBase {
 			return $this->get('pac_body');
 		}
 	}	
-	
-	function create_url($input_url) {
-		if($input_url){
-			$tmp = $input_url;
-		}
-		else{
-			$tmp = $this->get('pac_title');
-		}
-		$tmp = strtolower(str_replace(' ', '-', $tmp));
-		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
-		$tmp = preg_replace('/-{2,}/', '-', $tmp);
-		
-		//NO DUPLICATES
-		$increment=1;
-		$tmp_orig = $tmp;
-		while($result = PageContent::get_by_link($tmp, true)){
-			if($result->key == $this->key){
-				//IF WE FOUND THIS ONE, IT'S OKAY
-				return $tmp;
-			}
-			else{
-				$tmp = $tmp_orig . $increment;
-				$increment++;
-			}
-		}
-		return $tmp;
-	}
 
 	
 	

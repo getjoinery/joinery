@@ -63,7 +63,8 @@
 				$_POST['evt_is_accepting_signups'] = 0;
 			}
 		}
-		
+
+	
 		
 		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_survey_required','evt_loc_location_id');
 
@@ -72,8 +73,13 @@
 		}
 		
 		if(!$event->get('evt_link') || $_SESSION['permission'] == 10){
-			$event->set('evt_link', $event->create_url());
-		}		
+			if($_POST['evt_link']){
+				$event->set('evt_link', $event->create_url($_POST['evt_link']));
+			}
+			else{
+				$event->set('evt_link', $event->create_url($event->get('evt_name')));
+			}
+		}			
 
 		if($_POST['evt_start_time_date'] && $_POST['evt_start_time_time']){
 			$time_combined = $_POST['evt_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evt_start_time_time']);

@@ -19,14 +19,20 @@
 	
 	if($_POST){
 
-		if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
-			$_POST['pag_link'] = $page->create_url($_POST['pag_link']);
-		}
 		
-		$editable_fields = array('pag_title', 'pag_link');
+		$editable_fields = array('pag_title');
 
 		foreach($editable_fields as $field) {
 			$page->set($field, $_POST[$field]);
+		}
+
+		if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
+			if($_POST['pag_link']){
+				$page->set('pag_link', $page->create_url($_POST['pag_link']));
+			}
+			else{
+				$page->set('pag_link', $page->create_url($event->get('pag_title')));
+			}
 		}
 		
 		if($_POST['pag_is_published']){
