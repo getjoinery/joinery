@@ -191,8 +191,14 @@ if($settings->get_setting('files_active')){
 
 //HOMEPAGE
 if(!$params[0]){
-	$template_file = $template_directory.'/index.php';
-	$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/index.php';
+	if($settings->get_setting('use_blog_as_homepage')){
+		$template_file = $template_directory.'/blog.php';
+		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+	}
+	else{
+		$template_file = $template_directory.'/index.php';
+		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/index.php';		
+	}
 	$is_valid_page = true;
 
 	if(file_exists($template_file)){
