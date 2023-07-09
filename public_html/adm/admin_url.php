@@ -84,10 +84,10 @@
 	echo '<br />';
 	
 	if($url->get('url_type') == 301){
-		echo 'Type: Permanent';
+		echo '<strong>Type:</strong> Permanent';
 	}
 	else if($url->get('url_type') == 302){
-		echo 'Type: Temporary';
+		echo '<strong>Type:</strong> Temporary';
 	}
 	echo '<br />';
 	$page->end_box();
