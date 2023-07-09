@@ -84,12 +84,21 @@
 				$_POST['pro_link'] = $product->create_url($_POST['pro_link']);
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_link', 'pro_digital_link');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_POST[$field]);
 			}
 
+			if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
+				if($_POST['pro_link']){
+					$product->set('pro_link', $product->create_url($_POST['pro_link']));
+				}
+				else{
+					$product->set('pro_link', $product->create_url($event->get('pro_name')));
+				}
+			}
+		
 			$product->prepare();
 			$product->save();
 			$product->load();

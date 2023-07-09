@@ -23,14 +23,20 @@
 		
 		$page_content->set('pac_body', $_POST['pac_body']);
 		
-		if(!$page_content->get('pac_link') || $_SESSION['permission'] == 10){
-			$_POST['pac_link'] = $page_content->create_url($_POST['pac_link']);
-		}
 		
-		$editable_fields = array('pac_title', 'pac_is_published', 'pac_location_name', 'pac_link');
+		$editable_fields = array('pac_title', 'pac_is_published', 'pac_location_name');
 
 		foreach($editable_fields as $field) {
 			$page_content->set($field, $_POST[$field]);
+		}
+		
+		if(!$page_content->get('pac_link') || $_SESSION['permission'] == 10){
+			if($_POST['pac_link']){
+				$page_content->set('pac_link', $page_content->create_url($_POST['pac_link']));
+			}
+			else{
+				$page_content->set('pac_link', $page_content->create_url($event->get('pac_title')));
+			}
 		}
 		
 		if($_POST['pac_is_published']){

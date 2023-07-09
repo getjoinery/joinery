@@ -18,14 +18,19 @@
 
 	if($_POST){
 		
-		if(!$post->get('pst_link') || $_SESSION['permission'] == 10){
-			$_POST['pst_link'] = $post->create_url($_POST['pst_link']);
-		}
-		
-		$editable_fields = array('pst_body', 'pst_title', 'pst_is_published', 'pst_link', 'pst_short_description', 'pst_is_on_homepage','pst_is_pinned');
+		$editable_fields = array('pst_body', 'pst_title', 'pst_is_published', 'pst_short_description', 'pst_is_on_homepage','pst_is_pinned');
 
 		foreach($editable_fields as $field) {
 			$post->set($field, $_POST[$field]);
+		}
+
+		if(!$post->get('pst_link') || $_SESSION['permission'] == 10){
+			if($_POST['pst_link']){
+				$post->set('pst_link', $post->create_url($_POST['pst_link']));
+			}
+			else{
+				$post->set('pst_link', $post->create_url($event->get('pst_title')));
+			}
 		}
 		
 		if($_REQUEST['pst_is_published']){

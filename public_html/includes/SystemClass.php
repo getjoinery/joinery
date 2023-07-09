@@ -104,6 +104,8 @@ abstract class SystemBase {
 		return $object;
 	}
 	
+	//BEGIN LINK FUNCTIONS
+	
 	//FETCH AN ENTRY BASED ON ITS LINK, OR SLUG
 	//ARGUMENTS ARE THE LINK TO SEARCH AND WHETHER DELETED ITEMS SHOULD BE SEARCHED
 	static function get_by_link($link, $search_deleted=false){
@@ -124,6 +126,36 @@ abstract class SystemBase {
 			return false;
 		}
 	}
+	
+	//CREATES A URL OR SLUG BASED ON AN INPUT STRING
+	function create_url($input_url) {
+		if(!$input_url){
+			throw new SystemClassException('You must pass a string to the create_url function.');
+		}
+		
+		$classname = get_called_class();
+
+		$tmp = strtolower(str_replace(' ', '-', $input_url));
+		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
+		$tmp = preg_replace('/-{2,}/', '-', $tmp);
+		
+		//NO DUPLICATES
+		$increment=1;
+		$tmp_orig = $tmp;
+		while($result = $classname::get_by_link($tmp, true)){
+			if($result->key == $this->key){
+				//IF WE FOUND THIS ONE, IT'S OKAY
+				return $tmp;
+			}
+			else{
+				$tmp = $tmp_orig . $increment;
+				$increment++;
+			}
+		}
+		return $tmp;
+	}
+	
+	//END LINK FUNCTIONS
 	
 	function set($key, $value, $check_existance=TRUE) {
 		if ($check_existance && !array_key_exists($key, static::$fields)) {

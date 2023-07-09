@@ -20,17 +20,25 @@
 	
 	if($_POST){
 
-
-		$editable_fields = array('loc_name', 'loc_link','loc_description','loc_short_description', 'loc_is_published', 'loc_fil_file_id', 'loc_address', 'loc_website');
-
-		if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
-			$_POST['loc_link'] = $location->create_url($_POST['loc_link']);
+		if(empty($_POST['loc_fil_file_id'])){
+			$_POST['loc_fil_file_id'] = NULL;
 		}
+
+		$editable_fields = array('loc_name','loc_description','loc_short_description', 'loc_is_published', 'loc_fil_file_id', 'loc_address', 'loc_website');
+
 		
 		foreach($editable_fields as $field) {
 			$location->set($field, $_POST[$field]);
 		}
-				
+
+		if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
+			if($_POST['loc_link']){
+				$location->set('loc_link', $location->create_url($_POST['loc_link']));
+			}
+			else{
+				$location->set('loc_link', $location->create_url($event->get('loc_name')));
+			}
+		}					
 
 		$location->prepare();
 		$location->save();
@@ -75,6 +83,7 @@
 	$formwriter = new FormWriterMaster('form1');
 	
 	$validation_rules = array();
+	$validation_rules['loc_name']['required']['value'] = 'true';
 	$validation_rules['loc_link']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 
