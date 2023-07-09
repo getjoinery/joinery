@@ -39,7 +39,7 @@ class Url extends SystemBase {
 		'url_delete_time' => array('type'=>'timestamp(6)'),
 	);
 	
-	public static $required_fields = array();
+	public static $required_fields = array('url_incoming');
 
 	public static $field_constraints = array();	
 	

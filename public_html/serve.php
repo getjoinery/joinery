@@ -248,53 +248,29 @@ if($params[0] == 'profile'){
 
 //BLOG.  DEFAULT IS TO USE THE /POST/ SUBDIRECTORY
 if($settings->get_setting('blog_active')){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/posts_class.php');
-	$blog_subdirectory = ltrim($settings->get_setting('blog_subdirectory'), '/');
+	if($params[0] == 'posts'){
+		if(!$params[1] || $params[1] == 'tag'){
+			$template_file = $template_directory.'/blog.php';
+			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+			
+			$is_valid_page = true; 
 
-	if($params[0] == $blog_subdirectory && !$params[1]){
-		$template_file = $template_directory.'/blog.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
-		
-		$is_valid_page = true; 
-
-		if(file_exists($template_file)){
-			require_once($template_file);
-			exit();
+			if(file_exists($template_file)){
+				require_once($template_file);
+				exit();
+			}
+			else if(file_exists($base_file)){
+				require_once($base_file); 
+				exit();		
+			}			
 		}
-		else if(file_exists($base_file)){
-			require_once($base_file); 
-			exit();		
-		}
 	}
-	else if($params[0] == $blog_subdirectory && $params[1] == 'tag'){
-		$template_file = $template_directory.'/blog.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
-		
-		$is_valid_page = true; 
-
-		if(file_exists($template_file)){
-			require_once($template_file);
-			exit();
-		}
-		else if(file_exists($base_file)){
-			require_once($base_file); 
-			exit();		
-		}		
-	}
-	if($params[0] == $blog_subdirectory){
-		$post = Post::get_by_link($params[1], true);	
-	}
-	else{
-		//CHECK BLOG URLS THAT ARE NOT UNDER /POST/
-		$post = Post::get_by_link('/'.$_REQUEST['path'], true);
-
-		//CHECK WITHOUT THE SLASH
-		if(!$post){
-			$post = Post::get_by_link($_REQUEST['path'], true);	
-		}			
-	}
+	else if($params[0] == 'post'){
 	
-	if($post){
+		require_once($_SERVER['DOCUMENT_ROOT'].'/data/posts_class.php');
+		
+		$post = Post::get_by_link($params[1], true);	
+
 		$template_file = $template_directory.'/post.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/post.php';
 		
@@ -307,9 +283,8 @@ if($settings->get_setting('blog_active')){
 		else if(file_exists($base_file)){
 			require_once($base_file); 
 			exit();		
-		}		
+		}
 	}
-
 }
 
 //PAGE CONTENTS.  DEFAULT IS TO USE THE /PAGE/ SUBDIRECTORY

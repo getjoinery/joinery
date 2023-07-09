@@ -18,6 +18,7 @@ class Post extends SystemBase {
 	public static $prefix = 'pst';
 	public static $tablename = 'pst_posts';
 	public static $pkey_column = 'pst_post_id';
+	public static $url_namespace = 'post';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 	public static $permanent_delete_actions = array(
 		'pst_post_id' => 'delete',	
 		'cmt_pst_post_id' => 'delete',
@@ -65,7 +66,7 @@ class Post extends SystemBase {
 	'pst_is_on_homepage' => true
 	);	
 
-
+	/*
 	function get_url($format='short'){ 
 		$settings = Globalvars::get_instance();
 		$blog_subdirectory = $settings->get_setting('blog_subdirectory');
@@ -97,7 +98,8 @@ class Post extends SystemBase {
 
 		}
 
-	}		
+	}	
+*/	
 	
 	function get_tags($return_type = 'name'){ 
 		$tags = array();
