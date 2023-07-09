@@ -90,24 +90,6 @@ class PageContent extends SystemBase {
 			return $this->get('pac_body');
 		}
 	}	
-
-	static function get_by_link($link, $search_deleted=false){
-		if($search_deleted){
-			$results = new MultiPageContent(array('link' => $link));
-		}
-		else{
-			$results = new MultiPageContent(array('link' => $link, 'deleted'=>false));
-		}
-		
-		$results->load();
-
-		if($results->count()){	
-			return $results->get(0);	
-		}
-		else{
-			return false;
-		}
-	}
 	
 	function create_url($input_url) {
 		if($input_url){

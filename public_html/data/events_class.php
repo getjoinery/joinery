@@ -162,45 +162,7 @@ class Event extends SystemBase {
 		//	),
 		);
 		
-
 	
-	static function get_by_link($link, $search_deleted=false){
-		
-		if($search_deleted){
-			$results = new MultiEvent(array('link' => $link));
-		}
-		else{
-			$results = new MultiEvent(array('link' => $link, 'deleted'=>false));
-		}
-		
-		$results->load();
-	
-		if($results->count()){	
-			return $results->get(0);	
-		}
-		else{
-			return false;
-		}
-	}	
-	/*
-	public function remove_expired_registrants(){
-		//CHECK THAT THE USER IS A VALID REGISTRANT
-		$searches['event_id'] = $event->key;
-		$event_registrants = new MultiEventRegistrant(
-			$searches,
-			NULL, //array('event_id'=>'DESC'),
-			NULL,
-			NULL);	
-
-		$event_registrants->load();
-		foreach($event_registrants as $event_registrant){
-			if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
-				$event_registrant->remove();
-			}
-		}
-		return true;
-	}
-	*/
 	
 	function get_leader() {
 		if($this->get('evt_usr_user_id_leader')){

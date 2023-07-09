@@ -679,23 +679,7 @@ class Product extends SystemBase {
 	
 	public static $initial_default_values = array();	
 	
-	public static function get_by_link($link, $search_deleted=false){
-		if($search_deleted){
-			$results = new MultiProduct(array('link' => $link));
-		}
-		else{
-			$results = new MultiProduct(array('link' => $link, 'deleted'=>false));
-		}
-		
-		$results->load();
 
-		if($results->count()){	
-			return $results->get(0);	
-		}
-		else{
-			return false;
-		}
-	}	
 	
 	public function get_requirement_info($output='text') {
 		$requirements_out = array();

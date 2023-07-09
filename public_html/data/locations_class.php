@@ -59,46 +59,7 @@ class Location extends SystemBase {
 	public static $initial_default_values = array(
 	'loc_create_time' => 'now()'
 	);	
-
 	
-	static function get_by_link($link, $search_deleted=false){
-
-		if($search_deleted){
-			$results = new MultiLocation(array('link' => $link));
-		}
-		else{
-			$results = new MultiLocation(array('link' => $link, 'deleted'=>false));
-		}
-		$results->load();
-
-		if($results->count()){
-			return $results->get(0);
-		}
-		else{
-			return false;
-		}
-	}
-	
-	public function check_for_duplicate_link($link) {
-		$results = new MultiLocation(array('link' => $link));
-		$results->load();
-
-		if(count($results) > 1){
-			return true;	
-		}
-		else if(count($results) == 1){
-			$result = $results->get(0); 
-			if($result->key == $this->key){
-				return false;
-			}
-			else{
-				return true;
-			}
-		}
-		else{
-			return false;
-		}
-	}	
 
 	function get_url($format='short') {
 		if($format == 'full'){

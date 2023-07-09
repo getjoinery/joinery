@@ -104,6 +104,27 @@ abstract class SystemBase {
 		return $object;
 	}
 	
+	//FETCH AN ENTRY BASED ON ITS LINK, OR SLUG
+	//ARGUMENTS ARE THE LINK TO SEARCH AND WHETHER DELETED ITEMS SHOULD BE SEARCHED
+	static function get_by_link($link, $search_deleted=false){
+		$classname = get_called_class();
+		$mclassname = 'Multi'.$classname;
+		if($search_deleted){
+			$results = new $mclassname(array('link' => $link));
+		}
+		else{
+			$results = new $mclassname(array('link' => $link, 'deleted'=>false));
+		}
+		$results->load();
+	
+		if($results->count()){	
+			return $results->get(0);	
+		}
+		else{
+			return false;
+		}
+	}
+	
 	function set($key, $value, $check_existance=TRUE) {
 		if ($check_existance && !array_key_exists($key, static::$fields)) {
 			//TODO BETTER LOGGING HERE
