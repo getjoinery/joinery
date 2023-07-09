@@ -83,6 +83,13 @@
 		}	
 	echo '<br />';
 	
+	if($url->get('url_type') == 301){
+		echo 'Type: Permanent';
+	}
+	else if($url->get('url_type') == 302){
+		echo 'Type: Temporary';
+	}
+	echo '<br />';
 	$page->end_box();
 
 	$page->admin_footer();
