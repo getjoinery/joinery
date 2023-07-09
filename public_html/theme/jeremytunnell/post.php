@@ -72,7 +72,7 @@
 				<div class="col-lg-10">
 
 					<h5 class="typology-author-box-title">Jeremy Tunnell</h5>
-					<div class="typology-author-desc">I study Integral Theory and Zen Buddhism at <a href="https://integralzen.org">Integral Zen</a>.
+					<div class="typology-author-desc">I study meditation and write some software.
 											</div>
 
 					<div class="typology-author-links">
