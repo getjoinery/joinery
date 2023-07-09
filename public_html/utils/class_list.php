@@ -831,4 +831,10 @@ Welcome!
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
+ 		$migration['system_version'] = '0.5.32';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'blog_subdirectory'";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
 		 
