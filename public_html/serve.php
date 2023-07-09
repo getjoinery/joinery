@@ -45,7 +45,7 @@ if($settings->get_setting('urls_active')){
 		0,
 		'AND');	
 	$urls->load();
-			
+
 	if($urls->count()){
 		$url = $urls->get(0);
 

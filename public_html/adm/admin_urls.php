@@ -48,7 +48,7 @@
 	);
 
 
-	$headers = array("Url",  "Redirect");
+	$headers = array("Url",  "Redirect", "Type");
 	$altlinks = array('Add Url'=>'/admin/admin_url_edit');
 
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
@@ -74,6 +74,13 @@
 		}
 		else{
 			array_push($rowvalues, $url->get('url_redirect_file'));
+		}
+		
+		if($url->get('url_type') == 301){
+			array_push($rowvalues, 'Permanent');
+		}
+		else if($url->get('url_type') == 302){
+			array_push($rowvalues, 'Temporary');
 		}
 
 

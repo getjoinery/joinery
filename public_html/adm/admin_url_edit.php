@@ -26,6 +26,9 @@
 		if($url_incoming[0] == '/'){
 			$url_incoming = substr($url_incoming, 1);
 		}
+		if(substr($url_incoming, -1) == '/') {
+			$url_incoming = substr($url_incoming, 0, -1);
+		}
 		$url->set('url_incoming', strtolower($url_incoming));
 
 		$url_redirect_url = $_POST['url_redirect_url'];
