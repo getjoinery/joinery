@@ -50,6 +50,7 @@ class Event extends SystemBase {
 	public static $prefix = 'evt';
 	public static $tablename = 'evt_events';
 	public static $pkey_column = 'evt_event_id';
+	public static $url_namespace = 'event';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 	public static $permanent_delete_actions = array(
 		'evt_event_id' => 'delete',
 		'evs_evt_event_id' => 'delete',	
@@ -210,17 +211,6 @@ class Event extends SystemBase {
 		}	
 		
 		return $calendar_links;
-	}
-	
-	
-	function get_url($format='short') {
-		if($format == 'full'){
-			$settings = Globalvars::get_instance();
-			return $settings->get_setting('webDir').'/event/' . $this->get('evt_link');
-		}
-		else{
-			return '/event/' . $this->get('evt_link');
-		}
 	}
 	
 	function get_register_url() {
