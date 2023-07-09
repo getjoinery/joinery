@@ -27,6 +27,7 @@ class MailingList extends SystemBase {
 	public static $prefix = 'mlt';
 	public static $tablename = 'mlt_mailing_lists';
 	public static $pkey_column = 'mlt_mailing_list_id';
+	public static $url_namespace = 'list';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 	public static $permanent_delete_actions = array(
 		'mlt_mailing_list_id' => 'delete',
 		'mlr_mlt_mailing_list_id' => 'prevent',
@@ -81,18 +82,7 @@ class MailingList extends SystemBase {
 			'NoCaps',
 			),
 		);
-
-
-
-	function get_url($format='short') {
-		if($format == 'full'){
-			$settings = Globalvars::get_instance();
-			return $settings->get_setting('webDir').'/list/' . $this->get('mlt_link');
-		}
-		else{
-			return '/list/' . $this->get('mlt_link');
-		}
-	}		
+	
 	
 	function get_subscribed_users($return='object'){
 		$searches = array();

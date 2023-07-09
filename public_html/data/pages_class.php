@@ -17,6 +17,7 @@ class Page extends SystemBase {
 	public static $prefix = 'pag';
 	public static $tablename = 'pag_pages';
 	public static $pkey_column = 'pag_page_id';
+	public static $url_namespace = 'page';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 	public static $permanent_delete_actions = array(
 		'pag_page_id' => 'delete',	
 		'pac_pag_page_id' => 'delete',
@@ -54,17 +55,7 @@ class Page extends SystemBase {
 	public static $zero_variables = array();	
 
 	public static $initial_default_values = array('pag_create_time' => 'now()'
-		);		
-
-	function get_url($format='short') {
-		if($format == 'full'){
-			$settings = Globalvars::get_instance();
-			return $settings->get_setting('webDir').'/page/' . $this->get('pag_link');
-		}
-		else{
-			return '/page/' . $this->get('pag_link');
-		}
-	}			
+		);				
 
 
 	function get_filled_content(){

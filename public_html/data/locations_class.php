@@ -16,6 +16,7 @@ class Location extends SystemBase {
 	public static $prefix = 'loc';
 	public static $tablename = 'loc_locations';
 	public static $pkey_column = 'loc_location_id';
+	public static $url_namespace = 'location';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 	public static $permanent_delete_actions = array(
 		'loc_location_id' => 'delete',	
 		'evt_loc_location_id' => 'null',
@@ -60,16 +61,6 @@ class Location extends SystemBase {
 	'loc_create_time' => 'now()'
 	);	
 	
-
-	function get_url($format='short') {
-		if($format == 'full'){
-			$settings = Globalvars::get_instance();
-			return $settings->get_setting('webDir').'/location/' . $this->get('loc_link');
-		}
-		else{
-			return '/location/' . $this->get('loc_link');
-		}
-	}	
 	
 	function authenticate_write($session, $other_data=NULL) {
 

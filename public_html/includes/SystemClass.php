@@ -154,6 +154,20 @@ abstract class SystemBase {
 		}
 		return $tmp;
 	}
+
+	function get_url($format='short') {
+		if(!isset(static::$url_namespace)){
+			throw new SystemClassException('URL namespace is not set in object '.get_called_class().'.');
+		}
+		
+		if($format == 'full'){
+			$settings = Globalvars::get_instance();
+			return $settings->get_setting('webDir').'/'. static::$url_namespace .'/' . $this->get('evt_link');
+		}
+		else{
+			return '/'. static::$url_namespace .'/' . $this->get('evt_link');
+		}
+	}
 	
 	//END LINK FUNCTIONS
 	

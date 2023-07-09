@@ -602,6 +602,7 @@ class Product extends SystemBase {
 	public static $prefix = 'pro';
 	public static $tablename = 'pro_products';
 	public static $pkey_column = 'pro_product_id';
+	public static $url_namespace = 'product';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 	public static $permanent_delete_actions = array(
 		'pro_product_id' => 'delete',	
 		'prd_pro_product_id' => 'delete',
@@ -931,16 +932,6 @@ class Product extends SystemBase {
 			$product->load_from_data($data, array_keys(Product::$fields));
 			return $product;
 
-	}
-		
-	function get_url($format='short') {
-		if($format == 'full'){
-			$settings = Globalvars::get_instance();
-			return $settings->get_setting('webDir').'/product/'.$this->get('pro_link');
-		}
-		else{
-			return '/product/'.$this->get('pro_link');
-		}
 	}
 
 	
