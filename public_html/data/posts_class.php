@@ -65,45 +65,32 @@ class Post extends SystemBase {
 	'pst_is_on_homepage' => true
 	);	
 
-	
-	static function get_by_link($link, $search_deleted=false){
-		if($search_deleted){
-			$results = new MultiPost(array('link' => $link));
+	function create_url($input_url) {
+		if($input_url){
+			$tmp = $input_url;
 		}
 		else{
-			$results = new MultiPost(array('link' => $link, 'deleted'=>false));
+			$tmp = $this->get('pst_title');
 		}
+		$tmp = strtolower(str_replace(' ', '-', $tmp));
+		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
+		$tmp = preg_replace('/-{2,}/', '-', $tmp);
 		
-		$results->load();
-		if($results->count()){
-			return $results->get(0);
-		}
-		else{
-			return false;
-		}
-
-	}
-	
-	public function check_for_duplicate_link($link) {
-		$results = new MultiPost(array('link' => $link));
-		$results->load();
-
-		if(count($results) > 1){
-			return true;	
-		}
-		else if(count($results) == 1){
-			$result = $results->get(0); 
+		//NO DUPLICATES
+		$increment=1;
+		$tmp_orig = $tmp;
+		while($result = Post::get_by_link($tmp, true)){
 			if($result->key == $this->key){
-				return false;
+				//IF WE FOUND THIS ONE, IT'S OKAY
+				return $tmp;
 			}
 			else{
-				return true;
+				$tmp = $tmp_orig . $increment;
+				$increment++;
 			}
 		}
-		else{
-			return false;
-		}
-	}	
+		return $tmp;
+	}
 
 
 	function get_url($format='short'){ 
@@ -202,26 +189,10 @@ class Post extends SystemBase {
 	function prepare() {
 		
 		//CHECK FOR DUPLICATES
-		if($this->check_for_duplicate_link($this->get('pst_link'))){
+		if($this->check_for_duplicate(array('pst_link'))){
 			throw new SystemAuthenticationError(
 					'This page link is a duplicate.');
 		}
-		
-		if(!$this->get('pst_link')){
-			$tmp_link = '';
-			$tmp_link .= '/'. date('Y') . '/' . date('m') . '/' . date('d') . '/';
-			$tmp_link .= strtolower(preg_replace('![^a-z0-9]+!i','-',$this->get('pst_title')));
-
-			if($this->check_for_duplicate_link($tmp_link)){
-				$tmp_link .= '-1';
-				if($this->check_for_duplicate_link($tmp_link)){
-					throw new SystemAuthenticationError(
-							'This page link is a duplicate.  Try a new title.');
-				}
-			}
-			$this->set('pst_link', $tmp_link);
-			
-		}		
 
 	}	
 	

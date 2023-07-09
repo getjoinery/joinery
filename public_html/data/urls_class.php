@@ -48,25 +48,7 @@ class Url extends SystemBase {
 	public static $initial_default_values = array('url_create_time' => 'now()'
 		);		
 	
-	static function get_by_link($link, $search_deleted=false){
-		if($search_deleted){
-			$results = new MultiUrl(array('link' => $link));
-		}
-		else{
-			$results = new MultiUrl(array('link' => $link, 'deleted'=>false));
-		}
-		
-		$results->load();
 
-		if($results->count()){	
-			$results->load();
-			return $results->get(0);
-		}
-		else{
-			return false;
-		}
-
-	}
 	
 	function get_type_text() {
 		if($this->get('url_type') == 301){
