@@ -220,11 +220,7 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Blog module active", "blog_active", '', $optionvals, $settings->get_setting('blog_active'), '', FALSE);
 
-	/*
-	REMOVED FEATURE
-	$optionvals = array("/"=>'/', '/post' => '/post');
-	echo $formwriter->dropinput("Default blog subdirectory", "blog_subdirectory", '', $optionvals, $settings->get_setting('blog_subdirectory'), '', FALSE);
-	*/
+
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Use blog as homepage", "use_blog_as_homepage", '', $optionvals, $settings->get_setting('use_blog_as_homepage'), '', FALSE);	
 

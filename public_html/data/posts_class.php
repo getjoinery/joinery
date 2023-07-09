@@ -65,41 +65,6 @@ class Post extends SystemBase {
 	'pst_create_time' => 'now()', 
 	'pst_is_on_homepage' => true
 	);	
-
-	/*
-	function get_url($format='short'){ 
-		$settings = Globalvars::get_instance();
-		$blog_subdirectory = $settings->get_setting('blog_subdirectory');
-		
-		//SUBDIRECTORY SHOULD WORK WITH OR WITHOUT SLASH
-		if(substr($blog_subdirectory, 0, 1) != "/"){
-			$blog_subdirectory = '/' . $blog_subdirectory;
-		} 
-		else if($blog_subdirectory == '/'){
-			//IF IT IS ROOT, REMOVE THE SLASH
-			$blog_subdirectory = '';
-		}
-		
-		if($format == 'full'){
-			if($blog_subdirectory){
-				return $settings->get_setting('webDir') . $blog_subdirectory.'/'.$this->get('pst_link');
-			}
-			else{
-				return $settings->get_setting('webDir') . '/' . $this->get('pst_link');
-			}
-		}
-		else{
-			if($blog_subdirectory){
-				return $blog_subdirectory.'/'.$this->get('pst_link');
-			}
-			else{
-				return '/' . $this->get('pst_link');
-			}
-
-		}
-
-	}	
-*/	
 	
 	function get_tags($return_type = 'name'){ 
 		$tags = array();
