@@ -32,7 +32,7 @@
 
 		echo '<ul>';
 		foreach ($pages as $page){
-			echo '<li><a href="/page/'.$page->get('pag_link').'">'.$page->get('pag_title').'</a></li>';
+			echo '<li><a href="/page/'.$page->get_url().'">'.$page->get('pag_title').'</a></li>';
 		}
 		echo '</ul>';
 	}
@@ -109,5 +109,5 @@
 
 	echo PublicPageTW::EndPanel();
 	echo PublicPageTW::EndPage();
-	$paged->public_footer(array('track'=>TRUE, 'is_404'=> 1));
+	$paged->public_footer(array('track'=>TRUE));
 ?>

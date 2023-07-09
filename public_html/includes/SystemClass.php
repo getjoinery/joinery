@@ -162,10 +162,10 @@ abstract class SystemBase {
 		
 		if($format == 'full'){
 			$settings = Globalvars::get_instance();
-			return $settings->get_setting('webDir').'/'. static::$url_namespace .'/' . $this->get('evt_link');
+			return $settings->get_setting('webDir').'/'. static::$url_namespace .'/' . $this->get(static::$prefix .'_link');
 		}
 		else{
-			return '/'. static::$url_namespace .'/' . $this->get('evt_link');
+			return '/'. static::$url_namespace .'/' . $this->get(static::$prefix .'_link');
 		}
 	}
 	
