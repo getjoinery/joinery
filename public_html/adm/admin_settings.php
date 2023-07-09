@@ -225,6 +225,8 @@
 	$optionvals = array("/"=>'/', '/post' => '/post');
 	echo $formwriter->dropinput("Default blog subdirectory", "blog_subdirectory", '', $optionvals, $settings->get_setting('blog_subdirectory'), '', FALSE);
 	*/
+	$optionvals = array("Yes"=>1, 'No' => 0);
+	echo $formwriter->dropinput("Use blog as homepage", "use_blog_as_homepage", '', $optionvals, $settings->get_setting('use_blog_as_homepage'), '', FALSE);	
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Show comments", "show_comments", '', $optionvals, $settings->get_setting('show_comments'), '', FALSE);	
