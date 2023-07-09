@@ -65,7 +65,7 @@
 
 		echo '<h2>Locations</h2>';
 		
-		$sort = 'start_time';
+		$sort = 'location_id';
 		$sdirection = 'ASC';
 
 		$searches = array();
