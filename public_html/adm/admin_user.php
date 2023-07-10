@@ -58,7 +58,7 @@
 		if($_POST['action'] == 'add_to_group'){
 			//ADD THE USER TO A GROUP
 			$group = new Group($_POST['grp_group_id'], TRUE);
-			$group->add_member($user->key);
+			$groupmember = $group->add_member($user->key);
 			header("Location: /admin/admin_user?usr_user_id=".$user->key);
 			exit();			
 		}
@@ -405,12 +405,13 @@
 	);
 	$page->tableheader($headers, $box_vars);
 
+	$event_ids_for_user = array();
 	foreach ($event_registrations as $event_registration){
 		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);	 
-
+		$event_ids_for_user[] = $event->key;
 		$rowvalues = array();
 
-		array_push($rowvalues, '('.$event->key.') <a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->getString('evt_name', 50). '</strong> '. $event->get('evt_location').'</a>');
+		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.LibraryFunctions::convert_time($event->get('evt_start_time'), "UTC", "UTC", 'M j, Y') . ' <strong>'.$event->getString('evt_name', 50). '</strong> '. $event->get('evt_location').'</a>');
 
 		array_push($rowvalues, LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone()));
@@ -437,6 +438,12 @@
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$events->load();
+	
+	foreach($event_ids_for_user as $event_id) {
+		if($events->contains_key($event_id)){
+			$events->remove_by_key($event_id);
+		}
+	}
 	
 	$optionvals = $events->get_dropdown_array();
 	echo $formwriter->hiddeninput('action', 'add_to_event');
@@ -481,14 +488,20 @@
 	echo $formwriter->set_validate($validation_rules);	
 	echo $formwriter->begin_form('form5', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
 	
-	$groups = new MultiGroup(
+	$group_drops = new MultiGroup(
 		array('category'=>'user'),  //SEARCH 
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
-	$groups->load();
+	$group_drops->load();
+
+	foreach($groups as $group) {
+		if($group_drops->contains_key($group->key)){
+			$group_drops->remove_by_key($group->key);
+		}
+	}
 	
-	$optionvals = $groups->get_dropdown_array();
+	$optionvals = $group_drops->get_dropdown_array();
 	echo $formwriter->hiddeninput('action', 'add_to_group');
 	echo $formwriter->hiddeninput('usr_user_id', $user->key);
 	echo $formwriter->dropinput("Add to group", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
