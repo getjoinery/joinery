@@ -2,6 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_groups_class.php');
@@ -10,8 +11,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 
 	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';	
+
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -24,83 +24,8 @@
 	$order = new Order($order_id, TRUE);
 
 
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
-
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-
-	$stripe = new \Stripe\StripeClient([
-		'api_key' => $api_key,
-		'stripe_version' => '2022-11-15'
-	]);	
-
-
-
-		//CHECK STATUS WITH STRIPE
-		if ($order->get('ord_stripe_charge_id')){
-			$charge_id = $order->get('ord_stripe_charge_id');
-			try{
-				$charge = $stripe->charges->retrieve($charge_id);	
-
-				if($charge->amount_refunded){
-					//print_r($charge->refunds);
-					//$order->set('ord_refund_time', 'now()');
-					$order->set('ord_refund_amount', $charge->amount_refunded/100);
-					//$order->set('ord_refund_note', $_POST['ord_refund_note']);
-					
-					//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
-					//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
-					if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-						$order->save();
-					}
-					else{
-						echo 'TEST MODE: '.$order->get('odi_refund_amount'). ' would be refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
-					}
-					
-				}
-			}
-			catch(\Stripe\Exception $e) {
-				  //Do nothing
-				  
-			}		
-
-
-		}	
-		else if ($order->get('ord_stripe_payment_intent_id')) {
-			try{
-				$intent = $stripe->paymentIntents->retrieve($order->get('ord_stripe_payment_intent_id'));
-				$charge_id = $intent->charges->data[0]->id;
-				$charge = $stripe->charges->retrieve($charge_id);
-
-				if($charge->amount_refunded){
-					//print_r($charge->refunds);
-					//$order->set('ord_refund_time', 'now()');
-					$order->set('ord_refund_amount', $charge->amount_refunded/100);
-					//$order->set('ord_refund_note', $_POST['ord_refund_note']);
-
-					//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
-					//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
-					if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-						$order->save();
-					}
-					else{
-						echo 'TEST MODE: '.$order->get('odi_refund_amount'). ' would be refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
-					}
-				}
-			}
-			catch(\Stripe\Exception $e) {
-				  //Do nothing
-			}
-		}
+	$stripe_helper = new StripeHelper();
+	$charge = $stripe_helper->update_order_refund_amount_from_stripe($order);
 	
 
 
