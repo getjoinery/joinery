@@ -42,14 +42,20 @@ function profile_logic($get_vars, $post_vars){
 	include($_SERVER['DOCUMENT_ROOT'] . '/utils/registrant_maintenance.php');
 	
 
-	$event_registrants = new MultiEventRegistrant(array('user_id' => $user->key, 'deleted' => false), array('event_id'=> 'DESC'));
+	$event_registrants = new MultiEventRegistrant(
+		array(
+		'user_id' => $user->key, 
+		'deleted' => false
+		), 
+		array('event_id'=> 'DESC')
+	);
 	$num_events = $event_registrants->count_all();
 	$event_registrants->load();
 	$page_vars['num_events'] = $num_events;
 	$page_vars['event_registrants'] = $event_registrants;
 	
 	//COMPATIBILITY WITH OLD TEMPLATE
-	
+	/*
 	$event_registrants_future = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => false, 'deleted' => false), array('event_id'=> 'DESC'));
 	$num_future_events = $event_registrants_future->count_all();
 	$event_registrants_future->load();
@@ -59,7 +65,7 @@ function profile_logic($get_vars, $post_vars){
 	$num_past_events = $event_registrants_future->count_all();
 	$event_registrants_past->load();
 	$page_vars['event_registrants_past'] = $event_registrants_past;
-	
+	*/
 	//END COMPATIBILITY WITH OLD TEMPLATE
 
 		
