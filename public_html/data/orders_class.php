@@ -46,7 +46,8 @@ class Order extends SystemBase {
 		'ord_refund_time' => '***DEPRECATED***Time of last refund', 
 		'ord_refund_note' => '***DEPRECATED***Note for the refund',
 		'ord_stripe_charge_id' => 'Charge ID from stripe',
-		'ord_stripe_invoice_id' => 'Stripe invoice for subscriptions'
+		'ord_stripe_invoice_id' => 'Stripe invoice for subscriptions',
+		'ord_test_mode' => 'This is a test order'
 	);
 
 	public static $field_specifications = array(
@@ -67,6 +68,7 @@ class Order extends SystemBase {
 		'ord_refund_note' => array('type'=>'varchar(255)'),
 		'ord_stripe_charge_id' => array('type'=>'varchar(64)'),
 		'ord_stripe_invoice_id' => array('type'=>'varchar(64)'),
+		'ord_test_mode' => array('type'=>'bool'),
 	);
 
 	public static $required_fields = array();
@@ -76,7 +78,8 @@ class Order extends SystemBase {
 	public static $zero_variables = array();	
 
 	public static $initial_default_values = array(
-		'ord_timestamp' => 'now()'
+		'ord_timestamp' => 'now()',
+		'ord_test_mode' => false
 		);	
 
 	
