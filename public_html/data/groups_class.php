@@ -74,7 +74,7 @@ class Group extends SystemBase {
 
 		$sql = "SELECT grp_group_id FROM grp_groups
 			WHERE grp_name = :grp_name AND grp_delete_time IS ".($return_deleted ? 'NOT NULL' : 'NULL');
-		$sql .= ' AND grp_category = :category ';
+		$sql .= ' AND grp_category = :category LIMIT 1';
 
 		try{
 			$q = $dblink->prepare($sql);
@@ -134,22 +134,42 @@ class Group extends SystemBase {
 	}
 	
 	//RETURNS A LIST OF GROUPS WITH THE SPECIFIED CATEGORY
-	public static function get_groups_in_category($category, $return_deleted=false){
+	public static function get_groups_in_category($category, $return_deleted=false, $return_type = 'objects'){
 		if(!$category){
 			throw new GroupException('A category is required to get groups in category.');
 			exit();	
 		}
 		
-		$groups = new MultiGroup(array(
+		$groups_out = new MultiGroup(array(
 			'category' => $category,
 			'return_deleted' => $return_deleted
 		));
+			
+		$groups_out->load();
 		
-		if ($groups->count_all() > 0) {
-			$groups->load();
-			return $groups;
+		
+		if($return_type == 'objects'){
+			return $groups_out; 
 		}
-		return NULL;		
+		else if($return_type == 'names'){
+			$names_out = array();
+			foreach ($groups_out as $group_out){
+				$names_out[] = $group_out->get('grp_name');
+			}
+			return $names_out;
+			
+		}
+		else if($return_type == 'ids'){
+			$ids_out = array();
+			foreach ($groups_out as $group_out){
+				$ids_out[] = $group_out->key;
+			}
+			return $ids_out;			
+		}
+		else{
+			throw new GroupException('Unknown return type for get_groups_for_member.');
+			exit();				
+		}		
 	}
 
 	//RETURNS A LIST OF GROUPS FOR A MEMBER WITH SPECIFIED CATEGORY

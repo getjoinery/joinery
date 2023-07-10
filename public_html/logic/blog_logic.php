@@ -63,7 +63,7 @@
 		$page_vars[pinned_posts] = $pinned_posts;		
 		
 		
-		$page_vars[tags] = MultiPost::get_all_tags();
+		$page_vars[tags] = Group::get_groups_in_category('post_tag', false, 'names');
 
 		$page_vars[pager] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 		

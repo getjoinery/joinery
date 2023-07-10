@@ -601,7 +601,7 @@ class User extends SystemBase {
 		}
 		
 		//DELETE ANY GROUP MEMBERSHIPS
-		$groups = Group::get_groups_in_category('user');
+		$groups = Group::get_groups_in_category('user', false, 'objects');
 		foreach($groups as $group){
 			$group->remove_member($this->key);
 		}

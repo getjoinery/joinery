@@ -159,7 +159,7 @@ class Post extends SystemBase {
 		}		
 		
 		//DELETE ANY GROUP MEMBERSHIPS
-		$groups = Group::get_groups_in_category('post_tag');
+		$groups = Group::get_groups_in_category('post_tag', false, 'objects');
 		foreach($groups as $group){
 			$group->remove_member($this->key);
 		}
@@ -188,21 +188,6 @@ class MultiPost extends SystemMultiBase {
 		}
 		return $items;
 
-	}
-
-	static function get_all_tags($return_type = 'name'){ 
-		$tags = array();
-		$groups = Group::get_groups_in_category('post_tag');
-
-		foreach ($groups as $group){
-			if($return_type == 'name'){
-				$tags[] = $group->get('grp_name');
-			}
-			else{
-				$tags[] = $group->key;
-			}
-		}	
-		return array_unique($tags);
 	}
 	
 	static function get_posts_for_tag($tag, $numperpage=NULL, $page_offset=NULL){ 
