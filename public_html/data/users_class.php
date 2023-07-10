@@ -225,30 +225,6 @@ class User extends SystemBase {
 	}
 
 
-	
-	public function add_user_to_automatic_groups(){
-
-		if(!$group_all_users = Group::get_by_name("All users")){
-			$group_all_users = Group::add_group('All users', $this->key, 'user');
-		}
-		if(!$group_us_users = Group::get_by_name("US users")){
-			$group_us_users = Group::add_group('US users', $this->key, 'user');
-		}
-		if(!$group_nus_users = Group::get_by_name("Non-US users")){
-			$group_nus_users = Group::add_group('Non-US users', $this->key, 'user');
-		} 
-
-		$group_all_users->add_member($this->key);
-		
-		if($address = $this->address()){
-			if($address->get('usa_cco_country_code_id') == 1){
-				$group_us_users->add_member($this->key);
-			}
-			else{
-				$group_nus_users->add_member($this->key);
-			}
-		}		
-	}
 
 
 	static function CreateNewUser($first_name, $last_name, $email, $password, $send_emails=TRUE){   
@@ -540,10 +516,6 @@ class User extends SystemBase {
 		parent::save($debug);
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-		
-		//ADD THE USER TO ANY GROUPS NEEDED
-		//TODO REMOVE FROM GROUPS NO LONGER APPLICABLE
-		$this->add_user_to_automatic_groups();
 		
 		//THIS IS A SPECIAL CALCULATED FIELD BASED ON THE USER ID
 		if($rowdata['usr_authhash'] === NULL){
