@@ -66,28 +66,7 @@ class Post extends SystemBase {
 	'pst_is_on_homepage' => true
 	);	
 	
-	function get_tags($return_type = 'name'){ 
-		$tags = array();
-		$group_members = new MultiGroupMember(
-			array('foreign_key_id' => $this->key),  //SEARCH CRITERIA
-		);
-		$group_members->load();
 
-		foreach ($group_members as $group_member){
-			$group = new Group($group_member->get('grm_grp_group_id'), TRUE);
-			if($group->get('grp_category') == 'post_tag'){
-				if($return_type == 'name'){
-					$tags[] = $group->get('grp_name');
-				}
-			else{
-					$tags[] = $group->key;
-				}
-			}
-		}	
-		return array_unique($tags);
-	}	
-
-	
 	function save_tags($tags_array){
 		$tags_array = array_filter($tags_array);
 
@@ -97,23 +76,35 @@ class Post extends SystemBase {
 		
 		$session = SessionControl::get_instance();
 
-		//OLD TAGS
-		$post_tag_ids = $this->get_tags('id');
-		foreach ($post_tag_ids as $post_tag_id){
-			$group = new Group($post_tag_id, TRUE);
-			$group->remove_member($this->key);
-		}		
-		
-		//NEW TAGS
+		//ADD IN ALL THE NEW TAGS
+		$new_post_tag_ids = array();
+
 		foreach ($tags_array as $tag){
 			$tag = trim($tag);
 			$tag = preg_replace("/[^A-Za-z0-9 -_]/", '', $tag);
+			//DON'T SAVE BLANK TAGS
+			if($tag == ''){
+				continue;
+			}
 			
 			if(!$group = Group::get_by_name($tag)){
 				$group = Group::add_group($tag, $session->get_user_id(), 'post_tag');
 			}
-			$group->add_member($this->key);
-		}		
+			$new_post_tag_ids[] = $group->key;
+			$group->add_member($this->key);	
+		}	
+
+		//NOW REMOVE THE TAGS THAT NO LONGER APPLY
+		$old_post_tag_ids = Group::get_groups_for_member($this->key, 'post_tag', false, 'ids');
+		$tag_ids_removed = array_diff($old_post_tag_ids, $new_post_tag_ids);
+		
+		foreach($tag_ids_removed as $tag_id_removed){
+			$group = new Group($tag_id_removed, true);
+			$group->remove_member($this->key);	
+		}
+		
+		return true;
+				
 	}	
 
 	function load($debug = false) {
@@ -215,9 +206,9 @@ class MultiPost extends SystemMultiBase {
 	}
 	
 	static function get_posts_for_tag($tag, $numperpage=NULL, $page_offset=NULL){ 
-		$group = Group::get_by_name($tag);
+		$group = Group::get_by_name($tag, 'post_tag');
 
-		if(!$group || $group->get('grp_category') != 'post_tag'){
+		if(!$group){
 			return false;
 		}
 		

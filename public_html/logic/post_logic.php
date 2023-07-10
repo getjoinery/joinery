@@ -38,7 +38,7 @@ function post_logic($get_vars, $post_vars, $post){
 	//GET AUTHOR
 	$author = new User($post->get('pst_usr_user_id'), TRUE);
 	$page_vars['author'] = $author;
-	$tags = $post->get_tags();
+	$tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
 	$page_vars['tags'] = $tags;
 		
 

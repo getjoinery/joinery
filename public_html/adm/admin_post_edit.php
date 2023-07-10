@@ -112,7 +112,8 @@
 		echo $formwriter->hiddeninput('pst_post_id', $post->key);
 		echo $formwriter->hiddeninput('action', 'edit');
 		
-		$post_tags = $post->get_tags();
+		$post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
+
 		$tags = implode(', ', $post_tags);
 		$pst_is_on_homepage = $post->get('pst_is_on_homepage');
 	}

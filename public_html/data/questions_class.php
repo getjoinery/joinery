@@ -287,51 +287,6 @@ class Question extends SystemBase {
 		$options->load();
 		return $options;
 	}
-	
-	function get_tags($return_type = 'name'){ 
-		$tags = array();
-		$group_members = new MultiGroupMember(
-			array('question_id' => $this->key),  //SEARCH CRITERIA
-		);
-		$group_members->load();
-
-		foreach ($group_members as $group_member){
-			$group = new Group($group_member->get('grm_foreign_key_id'), TRUE);
-			if($return_type == 'name'){
-				$tags[] = $group->get('grp_name');
-			}
-			else{
-				$tags[] = $group->key;
-			}
-		}	
-		return $tags;
-	}	
-
-	
-	function save_tags($tags_array){
-		if(count($tags_array) == 0){
-			return false;
-		}
-		
-		$session = SessionControl::get_instance();
-		//OLD TAGS
-		$question_tag_ids = $this->get_tags('id');
-		foreach ($question_tag_ids as $question_tag_id){
-			$group = new Group($question_tag_id, TRUE);
-			$group->remove_member($this->key);
-		}		
-		
-		//NEW TAGS
-		foreach ($tags_array as $tag){
-			$tag = trim($tag);
-			$tag = preg_replace("/[^A-Za-z0-9 -_]/", '', $tag);
-			
-			if(!$group = Group::get_by_name($tag)){
-				$group = Group::add_group($tag, $session->get_user_id(), 'post_tag');
-			}
-			$group->add_member($this->key);
-		}		
-	}	
 
 
 	function prepare() {
