@@ -42,21 +42,6 @@ class GroupMember extends SystemBase {
 
 	public static $initial_default_values = array(
 		);		
-		
-	
-	private function _check_for_duplicates() {
-		
-		$count = new MultiGroupMember(array(
-			'group_id' => $this->get('grm_grp_group_id'),
-			'foreign_key_id' => $this->get('grm_foreign_key_id'),
-		));
-		 
-		if ($count->count_all() > 0) {
-			$count->load();
-			return $count->get(0);
-		}
-		return NULL;
-	}	
 	
 	function remove(){
 		$dbhelper = DbConnector::get_instance();
@@ -72,14 +57,11 @@ class GroupMember extends SystemBase {
 	
 
 	function prepare() {	
-		
 		if(!$this->key){
-			if($this->_check_for_duplicates()){
+			if($this->check_for_duplicate(array('grm_grp_group_id', 'grm_foreign_key_id'))){
 				throw new GroupMemberException('This is a duplicate.');
 			}
 		}
-		
-
 	}
 	
 	
@@ -87,20 +69,18 @@ class GroupMember extends SystemBase {
 		$current_user = $session->get_user_id();
 		if ($session->get_permission() < 5) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this group_member.');
+				'Current user does not have permission to edit this group member.');
 		}
 	}
 
 	function save($debug=false) {
 		if(!$this->key){
-			if($this->_check_for_duplicates()){
+			if($this->check_for_duplicate(array('grm_grp_group_id', 'grm_foreign_key_id'))){
 				return FALSE;
 			}			
 		}
 		parent::save($debug);
 	}
-	
-
 	
 }
 

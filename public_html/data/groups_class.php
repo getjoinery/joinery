@@ -198,41 +198,39 @@ class Group extends SystemBase {
 	}	
 	
 	//ADD A MEMBER TO THIS GROUP
-	function add_member($id){ 
-		if(!$id){
+	function add_member($foreign_key_id){ 
+		if(!$foreign_key_id){
 			throw new GroupException('To add a group member an id is required.');
 			exit();	
 		}
 	
-		if(!$this->is_member_in_group($id)){
+	
+		if(!$groupmember = $this->is_member_in_group($foreign_key_id)){
+			
 			$groupmember = new GroupMember(NULL);
-			$groupmember->set('grm_foreign_key_id', $id);	
+			$groupmember->set('grm_foreign_key_id', $foreign_key_id);	
 			$groupmember->set('grm_grp_group_id', $this->key);
 			$groupmember->prepare();
 			$groupmember->save();
 			
 			$this->set('grp_update_time', 'now()');
 			$this->save();
+			return $groupmember;
+		}
+		else{
+			return $groupmember;
 		}
 	}
 	
 	//REMOVE A MEMBER FROM THIS GROUP
-	function remove_member($id){
+	function remove_member($foreign_key_id){
 
-		if(!$id){
+		if(!$foreign_key_id){
 			throw new GroupException('To remove a group member an id is required.');
 			exit();	
 		}
-		$searches = array('group_id' => $this->key);
-		$searches['foreign_key_id'] = $id;
-	
-		$group_members = new MultiGroupMember($searches);
-		$exists = $group_members->count_all();
 		
-		
-		if($exists){
-			$group_members->load();
-			$group_member = $group_members->get(0);
+		if($group_member = $this->is_member_in_group($foreign_key_id)){
 			$group_member->remove();
 			return true;
 		}
@@ -263,13 +261,20 @@ class Group extends SystemBase {
 		'foreign_key_id' => $id
 		);
 
-		$group_members = new MultiGroupMember($searches);
+		$group_members = new MultiGroupMember(
+			$searches,
+			NULL,
+			1,
+			0,
+			'AND');
+		$group_members->load();
 		
-		if ($group_members->count_all() > 0) {
-			$group_members->load();
+		if ($group_members->count() > 0) {
 			return $group_members->get(0);
 		}
-		return false;
+		else{
+			return false;
+		}
 	}	
 	
 	//RETURN A LIST OF GROUP MEMBERS IN A GROUP
@@ -290,28 +295,14 @@ class Group extends SystemBase {
 			'group_id' => $this->key,
 		));
 		
-		$numrecords = $count->count_all();
-		return $numrecords;
-	}		
-	
-	private function _check_for_duplicate_group() {
-		$count = new MultiGroup(array(
-			'group_name' => $this->get('grp_name'),
-		));
-		
-		if ($count->count_all() > 0) {
-			$count->load();
-			return $count->get(0);
-		}
-		return NULL;
-	}		
+		return $count->count_all();
+	}				
 	
 
 	function prepare() {
-		
 		//CHECK FOR DUPLICATES
 		if(!$this->key){
-			if($this->_check_for_duplicate_group()){
+			if($this->check_for_duplicate(array('grp_name'))){
 				throw new GroupException(
 				'This group already exists');
 			}
