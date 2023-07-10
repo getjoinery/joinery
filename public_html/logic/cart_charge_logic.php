@@ -82,7 +82,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	*/
 
 	//HANDLE THE BILLING USER
-	$billing_user = $cart->get_or_create_billing_user();  //NOTE IF WE ARE IN TEST MODE THIS BILLING USER WILL CONTAIN THE TEST STRIPE ID, BUT THE DATABASE MIGHT CONTAIN THE REAL ONE
+	$billing_user = $cart->get_or_create_billing_user(); 
 	$stripe_customer_id = $billing_user->get('usr_stripe_customer_id'); 
 
 	//GET OR CREATE THE ORDER
@@ -97,6 +97,10 @@ function cart_charge_logic($get_vars, $post_vars){
 			exit();				  
 		}
 
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			$order->set('ord_test_mode', true);
+		}
+		
 		$order->set('ord_usr_user_id', $billing_user->key);
 		$order->prepare();	
 		$order->save();
@@ -104,6 +108,9 @@ function cart_charge_logic($get_vars, $post_vars){
 	}
 	else{
 		$order = new Order(NULL);
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			$order->set('ord_test_mode', true);
+		}
 		$order->set('ord_usr_user_id', $billing_user->key);
 		$order->set('ord_total_cost', $cart->get_total());
 		$order->set('ord_timestamp', 'now');	
