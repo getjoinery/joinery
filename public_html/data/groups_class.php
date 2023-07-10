@@ -63,7 +63,7 @@ class Group extends SystemBase {
 		);		
 	
 	//RETURNS A GROUP OBJECT WITH A SPECIFIED NAME
-	public static function get_by_name($name, $return_deleted=false) {
+	public static function get_by_name($name, $category, $return_deleted=false) {
 		if(!$name){
 			throw new GroupException('A name is required to get groups by name.');
 			exit();	
@@ -74,10 +74,12 @@ class Group extends SystemBase {
 
 		$sql = "SELECT grp_group_id FROM grp_groups
 			WHERE grp_name = :grp_name AND grp_delete_time IS ".($return_deleted ? 'NOT NULL' : 'NULL');
+		$sql .= ' AND grp_category = :category ';
 
 		try{
 			$q = $dblink->prepare($sql);
 			$q->bindValue(':grp_name', $name, PDO::PARAM_STR);
+			$q->bindValue(':category', $category, PDO::PARAM_STR);
 			$q->execute();
 			$q->setFetchMode(PDO::FETCH_OBJ);
 		}
@@ -113,7 +115,7 @@ class Group extends SystemBase {
 			exit();	
 		}
 		
-		if($group = Group::get_by_name($name)){
+		if($group = Group::get_by_name($name, $category)){
 			throw new GroupException('A group named "'.$name.'" already exists.');
 			exit();	
 		}
@@ -122,7 +124,6 @@ class Group extends SystemBase {
 			$group = new Group(NULL);
 			$group->set('grp_name', $name);
 			$group->set('grp_usr_user_id_created', $user_id);
-			//$group->set('grp_type', $type);
 			$group->set('grp_category', $category);
 			$group->prepare();
 			$group->save();
@@ -152,9 +153,11 @@ class Group extends SystemBase {
 	}
 
 	//RETURNS A LIST OF GROUPS FOR A MEMBER WITH SPECIFIED CATEGORY
-	public static function get_groups_for_member($id, $category=NULL, $return_deleted=false) { 
-		if(!$id){
-			throw new GroupException('To get groups for a group member an id is required.');
+	//CATEGORIES ARE 'USER', 'POST_TAG'
+	//RETURN_TYPE IS 'OBJECTS', 'NAMES', 'IDS'
+	public static function get_groups_for_member($foreign_key_id, $category, $return_deleted=false, $return_type = 'objects') { 
+		if(!$foreign_key_id){
+			throw new GroupException('To get groups for a group member an foreign_key_id is required.');
 			exit();	
 		}
 		
@@ -163,18 +166,15 @@ class Group extends SystemBase {
 		$dblink = $dbhelper->get_db_link();
 	
 		$sql = 'SELECT DISTINCT grp_group_id FROM grp_groups INNER JOIN grm_group_members ON grp_groups.grp_group_id=grm_group_members.grm_grp_group_id 
-				WHERE grm_foreign_key_id = :id AND grp_delete_time IS '.($return_deleted ? 'NOT NULL' : 'NULL');
+				WHERE grm_foreign_key_id = :foreign_key_id AND grp_delete_time IS '.($return_deleted ? 'NOT NULL' : 'NULL');
 				
-		if($category){
-			$sql .= ' AND grp_category = :category ';
-		}
+		$sql .= ' AND grp_category = :category ';		
 
 		try{
 			$q = $dblink->prepare($sql);
-			$q->bindValue(':id', $id, PDO::PARAM_INT);
-			if($category){
-				$q->bindValue(':category', $category, PDO::PARAM_STR);
-			}
+			$q->bindValue(':foreign_key_id', $foreign_key_id, PDO::PARAM_INT);
+			$q->bindValue(':category', $category, PDO::PARAM_STR);
+			
 
 
 			$q->execute();
@@ -192,8 +192,29 @@ class Group extends SystemBase {
 			$group_out = new Group($group->grp_group_id , TRUE);
 			$groups_out->add($group_out);
 		}
-		return $groups_out; //RETURNS A LIST OF GROUPS
-
+		
+		if($return_type == 'objects'){
+			return $groups_out; 
+		}
+		else if($return_type == 'names'){
+			$names_out = array();
+			foreach ($groups_out as $group_out){
+				$names_out[] = $group_out->get('grp_name');
+			}
+			return $names_out;
+			
+		}
+		else if($return_type == 'ids'){
+			$ids_out = array();
+			foreach ($groups_out as $group_out){
+				$ids_out[] = $group_out->key;
+			}
+			return $ids_out;			
+		}
+		else{
+			throw new GroupException('Unknown return type for get_groups_for_member.');
+			exit();				
+		}
 		
 	}	
 	

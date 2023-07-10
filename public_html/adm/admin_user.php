@@ -456,7 +456,7 @@
 	$page->endtable(); 
 
 
-	$groups = Group::get_groups_for_member($user->key, 'user');
+	$groups = Group::get_groups_for_member($user->key, 'user', false, 'objects');
 
 	$headers = array("Group", "Action");
 	$altlinks = array();

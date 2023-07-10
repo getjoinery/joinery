@@ -49,7 +49,7 @@
 		
 		foreach ($page_vars[posts] as $post){  
 			$author = new User($post->get('pst_usr_user_id'), TRUE);
-			$post_tags = $post->get_tags();
+			$post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
 			?>							
 			
 			
