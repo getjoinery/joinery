@@ -34,6 +34,7 @@ function event_sessions_course_logic($get_vars, $post_vars){
 		throw new SystemDisplayablePermanentError("This event does not exist.");
 		exit;
 	}
+	
 			
 	$event = new Event($event_id, TRUE);
 	$page_vars['event'] = $event;
@@ -47,7 +48,7 @@ function event_sessions_course_logic($get_vars, $post_vars){
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if(!$event->get('evt_visibility') == Event::VISIBILITY_PRIVATE || $event->get('evt_delete_time')){
+		if($event->get('evt_visibility') == Event::VISIBILITY_PRIVATE || $event->get('evt_delete_time')){
 			require_once(LibraryFunctions::display_404_page());		
 		}
 	}

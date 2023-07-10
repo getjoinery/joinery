@@ -65,66 +65,13 @@ class Post extends SystemBase {
 	'pst_create_time' => 'now()', 
 	'pst_is_on_homepage' => true
 	);	
-	
 
-	function save_tags($tags_array){
-		$tags_array = array_filter($tags_array);
-
-		if(empty($tags_array)){
-			return false;
-		}
-		
-		$session = SessionControl::get_instance();
-
-		//ADD IN ALL THE NEW TAGS
-		$new_post_tag_ids = array();
-
-		foreach ($tags_array as $tag){
-			$tag = trim($tag);
-			$tag = preg_replace("/[^A-Za-z0-9 -_]/", '', $tag);
-			//DON'T SAVE BLANK TAGS
-			if($tag == ''){
-				continue;
-			}
-			
-			if(!$group = Group::get_by_name($tag)){
-				$group = Group::add_group($tag, $session->get_user_id(), 'post_tag');
-			}
-			$new_post_tag_ids[] = $group->key;
-			$group->add_member($this->key);	
-		}	
-
-		//NOW REMOVE THE TAGS THAT NO LONGER APPLY
-		$old_post_tag_ids = Group::get_groups_for_member($this->key, 'post_tag', false, 'ids');
-		$tag_ids_removed = array_diff($old_post_tag_ids, $new_post_tag_ids);
-		
-		foreach($tag_ids_removed as $tag_id_removed){
-			$group = new Group($tag_id_removed, true);
-			$group->remove_member($this->key);	
-		}
-		
-		return true;
-				
-	}	
-
-	function load($debug = false) {
-		parent::load();
-		$this->data = SingleRowFetch('pst_posts', 'pst_post_id',
-			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-		if ($this->data === NULL) {
-			throw new PostException(
-				'This post does not exist');
-		}
-	}
-	
-	function prepare() {
-		
+	function prepare() {	
 		//CHECK FOR DUPLICATES
 		if($this->check_for_duplicate(array('pst_link'))){
 			throw new SystemAuthenticationError(
 					'This page link is a duplicate.');
 		}
-
 	}	
 	
 	

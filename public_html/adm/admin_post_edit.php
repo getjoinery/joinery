@@ -52,8 +52,15 @@
 		$post->load();
 
 		if($_REQUEST['tags']){
+			//PROCESS THE TAGS
 			$tags_array = explode(',',$_REQUEST['tags']);
-			$post->save_tags($tags_array);
+			$tags_array = array_filter($tags_array);
+			foreach ($tags_array as $key=>$tag){
+				$tags_array[$key] = preg_replace("/[^A-Za-z0-9 -_]/", '', trim($tag));
+			}
+			Group::AddMemberBulkByName($post->key, $tags_array, 'post_tag');
+			
+			//$post->save_tags($tags_array);
 		}
 
 		LibraryFunctions::redirect('/admin/admin_post?pst_post_id='. $post->key);
