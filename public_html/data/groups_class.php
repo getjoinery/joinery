@@ -237,6 +237,51 @@ class Group extends SystemBase {
 		}
 		
 	}	
+
+	//ADD A FOREIGN KEY TO AN ARRAY OF GROUPS IN GROUP_NAMES_ARRAY
+	static function AddMemberBulkByName($foreign_key_id, $group_names_array, $category){
+		if(!$foreign_key_id){
+			throw new GroupException('To add to groups to a group member a foreign_key_id is required.');
+			exit();	
+		}
+		if(!$foreign_key_id){
+			throw new GroupException('To add to groups to a group member a category is required.');
+			exit();	
+		}		
+		if(empty($group_names_array)){
+			return false;
+		}
+		
+		$session = SessionControl::get_instance();
+
+		//ADD IN ALL THE NEW TAGS
+		$new_post_tag_ids = array();
+
+		foreach ($group_names_array as $group_name){
+			//DON'T SAVE BLANK TAGS
+			if($group_name == ''){
+				continue;
+			}
+			
+			if(!$group = Group::get_by_name($group_name, $category)){
+				$group = Group::add_group($group_name, $session->get_user_id(), $category);
+			}
+			$new_post_tag_ids[] = $group->key;
+			$group->add_member($foreign_key_id);	
+		}	
+
+		//NOW REMOVE THE TAGS THAT NO LONGER APPLY
+		$old_post_tag_ids = Group::get_groups_for_member($foreign_key_id, 'post_tag', false, 'ids');
+		$tag_ids_removed = array_diff($old_post_tag_ids, $new_post_tag_ids);
+		
+		foreach($tag_ids_removed as $tag_id_removed){
+			$group = new Group($tag_id_removed, true);
+			$group->remove_member($foreign_key_id);	
+		}
+		
+		return true;
+				
+	}
 	
 	//ADD A MEMBER TO THIS GROUP
 	function add_member($foreign_key_id){ 
@@ -262,6 +307,8 @@ class Group extends SystemBase {
 			return $groupmember;
 		}
 	}
+	
+	
 	
 	//REMOVE A MEMBER FROM THIS GROUP
 	function remove_member($foreign_key_id){

@@ -53,7 +53,7 @@ function event_sessions_logic($get_vars, $post_vars){
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if(!$event->get('evt_visibility') == Event::VISIBILITY_PRIVATE || $event->get('evt_delete_time')){
+		if($event->get('evt_visibility') == Event::VISIBILITY_PRIVATE || $event->get('evt_delete_time')){
 			require_once(LibraryFunctions::display_404_page());		
 		}
 	}
