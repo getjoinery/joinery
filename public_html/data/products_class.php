@@ -381,13 +381,14 @@ class RecordConsentRequirement extends BasicProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->checkboxinput("I am aware that the course/event may be recorded and consent to being recorded.", "record_terms", "sm:col-span-6", "normal", NULL, "yes", '');
+		echo $formwriter->checkboxinput("I am aware that the course/event may be recorded and consent to being recorded.", "record_terms", "sm:col-span-6", "normal", '1', "yes", '');
 		//echo '<div id="record_terms_container" class=NULL>';
 		//echo '<label for="record_terms">Recording Notice</label>';
 		//echo '<input name="record_terms" id="record_terms" value="1" type="checkbox"  /><span onclick="$(\'#record_terms\').attr(\'checked\', !$(\'#record_terms\').attr(\'checked\')); return false;"> I am aware that the course/event may be recorded and consent to being recorded. </span></div>';
 	}
 
 	function validate_form($data, $session=NULL) {
+
 		if (empty($data['record_terms'])) {
 			throw new BasicProductRequirementException('You must have read and agreed to the recording notice in order to continue.');
 		}
@@ -526,7 +527,7 @@ class NewsletterSignupRequirement extends BasicProductRequirement {
 		echo '<div id="newsletter_container" class="sm:col-span-6 errorplacement">
 					<div class="relative flex items-start">
 						<div class="flex items-center h-5">
-							<input class="" type="checkbox" id="newsletter" name="newsletter" value=""   />
+							<input class="" type="checkbox" id="newsletter" name="newsletter" value="1"   />
 						</div>
 						<div class="ml-3 text-sm">
 							<label class="font-medium text-gray-700" for="newsletter">Please add me to the newsletter.</label>      

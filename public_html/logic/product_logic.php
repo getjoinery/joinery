@@ -66,6 +66,7 @@ function product_logic($get_vars, $post_vars, $product){
 	$page_vars['display_empty_form'] = TRUE;
 
 	if ($post_vars || isset($get_vars['cart'])) {
+
 		try {
 			list($form_data, $display_data) = $product->validate_form($post_vars, $session);
 			$page_vars['display_data'] = $display_data;
