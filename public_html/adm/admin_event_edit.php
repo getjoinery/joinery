@@ -63,6 +63,10 @@
 				$_POST['evt_is_accepting_signups'] = 0;
 			}
 		}
+		
+		if($_POST['evt_loc_location_id'] == ''){
+			$_POST['evt_loc_location_id'] = NULL;
+		}
 
 	
 		
