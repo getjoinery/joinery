@@ -101,6 +101,7 @@ class User extends SystemBase {
 		'usr_urbit_ship_name' => 'If using urbit login, this is the user ship name',
 		'usr_calendly_uri' => 'Uri for user for calendly integration',
 		//'usr_contact_type_unsubscribes' => 'Contains a serialized array of contact types that the user has unsubscribed from',
+		'usr_stripe_customer_id_test' => 'Stripe customer id in the test sandbox.',
 	);
 
 	public static $field_specifications = array(
@@ -133,6 +134,7 @@ class User extends SystemBase {
 		'usr_urbit_ship_name' => array('type'=>'varchar(128)'),
 		'usr_calendly_uri' => array('type'=>'varchar(255)'),
 		//'usr_contact_type_unsubscribes' => array('type'=>'varchar(255)'),
+		'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
 	);
 	
 	public static $timestamp_fields = array(
