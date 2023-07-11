@@ -118,6 +118,7 @@ function cart_logic($get_vars, $post_vars){
 		$cart->billing_user = $billing_user;
 	}	
 	
+	$billing_user = $cart->get_or_create_billing_user(); 
 	
 	
 	if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
