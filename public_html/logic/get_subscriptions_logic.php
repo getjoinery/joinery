@@ -1,14 +1,16 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
 	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));	
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	//require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+
 	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';
+
+	
+	$stripe_helper = new StripeHelper();
 	
 	$session = SessionControl::get_instance();	
 	$session->check_permission(0);
@@ -21,33 +23,17 @@
 	
 	$page = new PublicPageTW();
 	
+	$stripe_customer_id = $stripe_helper->get_or_create_stripe_customer($user);
+	
+	/*
 	$customer_ids = array();
 	try{	
-		$settings = Globalvars::get_instance();
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			$api_key = $settings->get_setting('stripe_api_key_test');
-			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-		}
-		else{
-			$api_key = $settings->get_setting('stripe_api_key');
-			$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-		}
-
-		if(!$api_key || !$api_secret_key){
-			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-			exit();			
-		}
-
-		$stripe = new \Stripe\StripeClient([
-			'api_key' => $api_key,
-			'stripe_version' => '2022-11-15'
-		]);	
-
+		
 		if($user->get('usr_stripe_customer_id')){
 			$customer_ids[] = $user->get('usr_stripe_customer_id');
 		}
 
-		$stripe_customers = $stripe->customers->all(["email" => $user->get('usr_email')]);	
+		$stripe_customers = $stripe_helper->get_customers(["email" => $user->get('usr_email')]);	
 
 		foreach($stripe_customers[data] as $stripe_customer){
 			if(!in_array($stripe_customer[id], $customer_ids)){
@@ -58,7 +44,7 @@
 	catch(Exception $e){
 		$customer_ids = array();
 	}
-	
+	*/
 	?>
 	<div class="sidebar-box">
 		<h6 class="font-small font-weight-normal uppercase">Recurring Donations</h6>
@@ -66,9 +52,9 @@
 	<?php
 
 	$active = 0;
-	foreach($customer_ids as $customer_id){	
+	//foreach($customer_ids as $customer_id){	
 		try{
-			$subs = $stripe->subscriptions->all(['limit' => 5, 'customer' => $customer_id, 'status' => 'all']);
+			$subs = $stripe_helper->get_subscriptions(['limit' => 5, 'customer' => $stripe_customer_id, 'status' => 'all']);
 		}
 		catch(Exception $e){
 			//TODO: DISPLAY ERROR NOTICE IN TABLE BELOW
@@ -97,7 +83,7 @@
 			}
 			*/
 		}
-	}
+	//}
 
 	if(!$active){
 		echo '<a class="button button-dark" href="/product/recurring-donation">Start a new recurring donation</a>';
