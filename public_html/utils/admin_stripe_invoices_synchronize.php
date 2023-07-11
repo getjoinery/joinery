@@ -4,10 +4,8 @@
 	require_once( __DIR__ . '/../includes/AdminPage-uikit3.php');
 	require_once( __DIR__ . '/../includes/FormWriterMaster.php');
 	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
-	//require_once( __DIR__ . '/../includes/stripe-php/init.php');
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';	
+	require_once( __DIR__ . '/../includes/StripeHelper.php');
+
 
 	require_once( __DIR__ . '/../data/stripe_invoices_class.php');
 	require_once( __DIR__ . '/../data/orders_class.php');
@@ -22,32 +20,11 @@
 	
 	$settings = Globalvars::get_instance();
 
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-		throw new SystemDisplayableError("In test mode or debug mode. Invoice synchronize not available.");
-		exit();	
-	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
+	$stripe_helper = new StripeHelper();
 	
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-		
-	$stripe = new \Stripe\StripeClient([
-		'api_key' => $api_key,
-		'stripe_version' => '2022-11-15'
-	]);
-	
-	if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-		//ALLOW THIS TO RUN IF IN NORMAL MODE OR IF IN DEBUG MODE
-	}
-	else{
-		throw new SystemDisplayableError("In test mode. Invoice synchronize not available.");
+	//TODO: MAKE THIS WORK TRANSPARENTLY
+	if($stripe_helper->test_mode)){
+		throw new SystemDisplayableError("In test mode. Invoices synchronize not available.");
 		exit();	
 	}
 	
@@ -93,10 +70,10 @@
 	$created[lte] = $enddate;
 	
 	if($offset){
-		$stripe_invoices = $stripe->invoices->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created, 'status' => 'paid']);
+		$stripe_invoices = $stripe_helper->get_invoices(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created, 'status' => 'paid']);
 	}
 	else{
-		$stripe_invoices = $stripe->invoices->all(['limit' => $numperpage, 'created' => $created, 'status' => 'paid']);
+		$stripe_invoices = $stripe_helper->get_invoices(['limit' => $numperpage, 'created' => $created, 'status' => 'paid']);
 	}
 
 
@@ -236,7 +213,7 @@
 			$created = array();
 			$created[gte] = $startdate;
 			$created[lte] = $enddate;
-			$stripe_invoices = $stripe->invoices->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+			$stripe_invoices = $stripe_helper->get_invoices(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 		}
 		else{
 			break;
