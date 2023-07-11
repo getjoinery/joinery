@@ -89,6 +89,11 @@ class StripeHelper {
 			exit();			
 		}
 	}
+	
+	public function get_customers($params){
+		$stripe_customers = $this->stripe->customers->all($params);
+		return $stripe_customers;
+	}
 
 	public function create_customer_at_stripe($user, $return_type='object') {
 		$stripe_customer = $this->stripe->customers->create([
@@ -227,7 +232,10 @@ class StripeHelper {
 		return $charge;		
 	}
 
-	
+	public function get_subscriptions($params){
+		$subs = $this->stripe->subscriptions->all($params);
+		return $subs;
+	}
 }
 
 ?>
