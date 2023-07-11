@@ -13,6 +13,7 @@ class StripeHelper {
 	private $api_key;
 	private $api_secret_key;
 	private $stripe;
+	private $stripe_test;
 	public $test_mode;
 
 	public function __construct() {
@@ -154,17 +155,16 @@ class StripeHelper {
 	}
 	
 	public function get_charge_from_order($order){
-		//CHECK TO MAKE SURE ORDER IS TEST OR LIVE
 		if($order->get('ord_test_mode')){
 			if(!$this->test_mode){
-				throw new SystemDisplayablePermanentError("Received a test order in live mode.");
-				exit();			
+				//DON'T UPDATE TEST MODE ORDERS IF NOT IN TEST MODE
+				return false;		
 			}
 		}
 		else{
 			if($this->test_mode){
-				throw new SystemDisplayablePermanentError("Received a live order in test mode.");
-				exit();			
+				//DON'T UPDATE LIVE MODE ORDERS IF IN TEST MODE
+				return false;			
 			}			
 		}
 		
@@ -194,17 +194,16 @@ class StripeHelper {
 	}
 	
 	public function update_order_refund_amount_from_stripe($order){
-		//CHECK TO MAKE SURE ORDER IS TEST OR LIVE
 		if($order->get('ord_test_mode')){
 			if(!$this->test_mode){
-				throw new SystemDisplayablePermanentError("Received a test order in live mode.");
-				exit();			
+				//DON'T UPDATE TEST MODE ORDERS IF NOT IN TEST MODE
+				return false;		
 			}
 		}
 		else{
 			if($this->test_mode){
-				throw new SystemDisplayablePermanentError("Received a live order in test mode.");
-				exit();			
+				//DON'T UPDATE LIVE MODE ORDERS IF IN TEST MODE
+				return false;			
 			}			
 		}
 		$charge = $this->get_charge_from_order($order);

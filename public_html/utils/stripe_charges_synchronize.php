@@ -4,10 +4,7 @@
 	require_once( __DIR__ . '/../includes/AdminPage-uikit3.php');
 	require_once( __DIR__ . '/../includes/FormWriterMaster.php');
 	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
-	//require_once( __DIR__ . '/../includes/stripe-php/init.php');
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';	
+	require_once( __DIR__ . '/../includes/StripeHelper.php');
 
 	require_once( __DIR__ . '/../data/orders_class.php');
 	require_once( __DIR__ . '/../data/products_class.php');
@@ -17,6 +14,8 @@
 
 	require_once( __DIR__ . '/../data/event_logs_class.php');
 	
+	$stripe_helper = new StripeHelper();
+	
 	$event_log = new EventLog(NULL);
 	$event_log->set('evl_event', 'stripe_charges_synchronize');
 	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);
@@ -25,32 +24,6 @@
 	
 	$settings = Globalvars::get_instance();
 
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
-	
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-		
-	$stripe = new \Stripe\StripeClient([
-		'api_key' => $api_key,
-		'stripe_version' => '2022-11-15'
-	]);
-	
-	if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-		//ALLOW THIS TO RUN IF IN NORMAL MODE OR IF IN DEBUG MODE
-	}
-	else{
-		throw new SystemDisplayableError("In test mode. Charges synchronize not available.");
-		exit();	
-	}
 	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
@@ -96,10 +69,10 @@
 	$created[lte] = $enddate;
 	
 	if($offset){
-		$charges = $stripe->charges->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+		$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 	}
 	else{
-		$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
+		$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'created' => $created]);
 	}
 
 
@@ -427,7 +400,7 @@
 			$created = array();
 			$created[gte] = $startdate;
 			$created[lte] = $enddate;
-			$charges = $stripe->charges->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+			$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 		}
 		else{
 			break;
