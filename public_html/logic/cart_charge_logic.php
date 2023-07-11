@@ -3,6 +3,7 @@ function cart_charge_logic($get_vars, $post_vars){
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
@@ -41,6 +42,8 @@ function cart_charge_logic($get_vars, $post_vars){
 	$cart = $session->get_shopping_cart();
 	$page_vars['cart'] = $cart;
 	$charge_total = $cart->get_total();
+	
+	$stripe_helper = new StripeHelper();
 
 	if($charge_total){
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
@@ -83,7 +86,7 @@ function cart_charge_logic($get_vars, $post_vars){
 
 	//HANDLE THE BILLING USER
 	$billing_user = $cart->get_or_create_billing_user(); 
-	$stripe_customer_id = $billing_user->get('usr_stripe_customer_id'); 
+	$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
 
 	//GET OR CREATE THE ORDER
 	if($settings->get_setting('checkout_type') == 'stripe_checkout'){

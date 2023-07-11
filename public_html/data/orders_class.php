@@ -215,6 +215,10 @@ class MultiOrder extends SystemMultiBase {
 		if (array_key_exists('created_after', $this->options)) {
 			$where_clauses[] = 'ord_timestamp >= ?';
 			$bind_params[] = array($this->options['created_after'], PDO::PARAM_STR);
+		}	
+
+		if (array_key_exists('test_mode', $this->options)) {
+			$where_clauses[] = 'ord_test_mode IS ' . ($this->options['test_mode'] ? 'true' : 'false');
 		}			
 
 		if (array_key_exists('order_finished', $this->options)) {

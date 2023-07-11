@@ -22,12 +22,12 @@ class StripeHelper {
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 			$this->api_key = $settings->get_setting('stripe_api_key_test');
 			$this->api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-			$test_mode = true;
+			$this->test_mode = true;
 		}
 		else{
 			$this->api_key = $settings->get_setting('stripe_api_key');
 			$this->api_secret_key = $settings->get_setting('stripe_api_pkey');
-			$test_mode = false;			
+			$this->test_mode = false;			
 		}
 
 		if(!$this->api_key || !$this->api_secret_key){
@@ -46,7 +46,7 @@ class StripeHelper {
 
 
 	public function get_stripe_customer_id($user) {
-		if($test_mode){
+		if($this->test_mode){
 			return $user->get('usr_stripe_customer_id_test');
 		}
 		else{
@@ -54,13 +54,27 @@ class StripeHelper {
 		}
 	}
 
-	public function get_customer_by_email($email, $return_type='object') {
-		$stripe_customer = $this->stripe->customers->all(["email" => $email]);
+	public function get_customer($user, $return_type='object') {
+		$stripe_customer = $this->stripe->customers->all(["email" => $user->get('usr_email')]);
 		if($return_type == 'object'){
+			if($this->test_mode){
+				$user->set('usr_stripe_customer_id_test', $stripe_customer[data][0][id]);
+			}
+			else{
+				$user->set('usr_stripe_customer_id', $stripe_customer[data][0][id]);
+			}		 
+			$user->save();
 			return $stripe_customer;
 		}
 		else if($return_type == 'id'){
 			if($stripe_customer[data][0][id]){
+				if($this->test_mode){
+					$user->set('usr_stripe_customer_id_test', $stripe_customer[data][0][id]);
+				}
+				else{
+					$user->set('usr_stripe_customer_id', $stripe_customer[data][0][id]);
+				}		 
+				$user->save();
 				return $stripe_customer[data][0][id];
 			}
 			else{
@@ -80,7 +94,7 @@ class StripeHelper {
 				'description' => $user->get('usr_first_name'). ' ' . $user->get('usr_last_name'). ' ('.$user->get('usr_email').')',
 			]);
 			
-		if($test_mode){
+		if($this->test_mode){
 			$user->set('usr_stripe_customer_id_test', $stripe_customer[id]);
 		}
 		else{
@@ -106,11 +120,10 @@ class StripeHelper {
 	}
 	
 	public function get_or_create_stripe_customer($user){
-		
 		if($stripe_customer_id = $this->get_stripe_customer_id($user)){
 			return $stripe_customer_id;
 		}
-		else if($stripe_customer_id = $this->get_customer_by_email($user->get('usr_email'), 'id')){
+		else if($stripe_customer_id = $this->get_customer($user, 'id')){
 			return $stripe_customer_id;
 		}
 		else{

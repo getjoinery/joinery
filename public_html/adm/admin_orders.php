@@ -51,8 +51,10 @@
 	
 	//ONLY SHOW DELETED TO SUPER ADMINS
 	if($_SESSION['permission'] < 10){
-		$search_criteria['deleted'] = false;
+		//$search_criteria['deleted'] = false;
+		$search_criteria['test_mode'] = false;
 	}
+
 
 	$orders = new MultiOrder(
 		$search_criteria,
@@ -150,6 +152,9 @@
 		
 		if($order->get('ord_error')){
 			$order_items_out[] = '<b>ERROR - '.$order->get('ord_error').'</b>';
+		}
+		else if($order->get('ord_test_mode')){
+			$order_items_out[] = '<b>TEST TRANSACTION</b>';
 		}
 
 		array_push($rowvalues,'<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>');
