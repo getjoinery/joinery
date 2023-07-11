@@ -23,7 +23,7 @@
 	$stripe_helper = new StripeHelper();
 	
 	//TODO: MAKE THIS WORK TRANSPARENTLY
-	if($stripe_helper->test_mode)){
+	if($stripe_helper->test_mode){
 		throw new SystemDisplayableError("In test mode. Invoices synchronize not available.");
 		exit();	
 	}

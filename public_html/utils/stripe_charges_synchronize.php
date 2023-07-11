@@ -60,7 +60,7 @@
 	}
 
 	//TODO: MAKE THIS WORK TRANSPARENTLY
-	if($stripe_helper->test_mode)){
+	if($stripe_helper->test_mode){
 		throw new SystemDisplayableError("In test mode. Charges synchronize not available.");
 		exit();	
 	}
