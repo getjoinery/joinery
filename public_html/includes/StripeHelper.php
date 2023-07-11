@@ -138,7 +138,7 @@ class StripeHelper {
 	}
 	
 	public function get_charges($params){
-		$charges = $stripe->charges->all($params);
+		$charges = $this->stripe->charges->all($params);
 		return $charges;
 	}
 	
