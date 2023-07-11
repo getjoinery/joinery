@@ -232,10 +232,17 @@ class StripeHelper {
 		return $charge;		
 	}
 
+	public function get_subscription($stripe_subscription_id){
+		$stripe_subscription = $this->stripe->subscriptions->retrieve($stripe_subscription_id);
+		return $stripe_subscription;
+	}
+	
 	public function get_subscriptions($params){
 		$subs = $this->stripe->subscriptions->all($params);
 		return $subs;
 	}
+	
+
 }
 
 ?>

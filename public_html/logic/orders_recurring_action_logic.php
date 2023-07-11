@@ -1,13 +1,12 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
 	
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';
+	$stripe_helper = new StripeHelper();
 	
 	$settings = Globalvars::get_instance();
 	if(!$settings->get_setting('products_active')){
@@ -25,26 +24,8 @@
 	$order = $order_item->get_order();
 	$order_item->authenticate_write($session);
 
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
-	
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-	
-	$stripe = new \Stripe\StripeClient([
-		'api_key' => $api_key,
-		'stripe_version' => '2022-11-15'
-	]);
 
-	$stripe_subscription = $stripe->subscriptions->retrieve($order_item->get('odi_stripe_subscription_id'));
+	$stripe_subscription = $stripe_helper->get_subscription($order_item->get('odi_stripe_subscription_id'));
 	if($stripe_subscription[canceled_at]){
 		//SUBSCRIPTION HAD ALREADY ENDED
 		$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
@@ -62,7 +43,7 @@
 	}
 	else{
 		try {
-			$response =$stripe_subscription->cancel();
+			$response = $stripe_subscription->cancel();
 		}					
 		catch (Exception $e) {
 			//DO NOTHING
