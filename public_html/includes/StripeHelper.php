@@ -142,6 +142,11 @@ class StripeHelper {
 		$charges = $this->stripe->charges->all($params);
 		return $charges;
 	}
+
+	public function get_invoices($params){
+		$charges = $this->stripe->invoices->all($params);
+		return $charges;
+	}
 	
 	public function get_payment_intent($stripe_payment_intent_id){
 		$intent = $this->stripe->paymentIntents->retrieve($stripe_payment_intent_id);
