@@ -133,7 +133,7 @@
                       Live Online
                     </a>
                   </p>
-                  <a href="/event/28/Sunday-Integral-Dharma-Calls" class="block mt-2">
+                  <a href="/event/sunday-integral-dharma-calls" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       Live Dharma talks by Doshin
                     </p>
