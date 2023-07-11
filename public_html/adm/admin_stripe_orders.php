@@ -2,9 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';	
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
@@ -16,25 +14,8 @@
 	$session->check_permission(5);
 	
 	$settings = Globalvars::get_instance();
-
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
 	
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-		
-	$stripe = new \Stripe\StripeClient([
-		'api_key' => $api_key,
-		'stripe_version' => '2022-11-15'
-	]);
+	$stripe_helper = new StripeHelper();
 	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
@@ -74,10 +55,12 @@
 	$created[lte] = $enddate;
 	
 	if($offset){
-		$charges = $stripe->charges->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+		$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+		//$charges = $stripe->charges->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 	}
 	else{
-		$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
+		$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'created' => $created]);
+		//$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
 	}
 
 
