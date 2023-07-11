@@ -81,7 +81,7 @@
                       Online Course
                     </a>
                   </p>
-                  <a href="/event/42/Shadow-and-Integral-Theory-Fundamentals-Self-paced-Course" class="block mt-2">
+                  <a href="/event/shadow-and-integral-theory-fundamentals-self-paced-course" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       Shadow and Integral Theory Fundamentals Self-paced Course
                     </p>
