@@ -2,6 +2,7 @@
 require_once('Globalvars.php');
 $settings = Globalvars::get_instance();
 $siteDir = $settings->get_setting('siteDir');
+require_once($siteDir . '/includes/StripeHelper.php');
 require_once($siteDir.'/data/products_class.php');
 require_once($siteDir.'/data/product_groups_class.php');
 require_once($siteDir.'/data/users_class.php');
@@ -167,31 +168,8 @@ class ShoppingCart {
 	}
 	
 	public function get_or_create_billing_user(){
-		$settings = Globalvars::get_instance();
-		$session = SessionControl::get_instance();
 		$charge_total = $this->get_total();
 
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			$api_key = $settings->get_setting('stripe_api_key_test');
-			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-		}
-		else{
-			$api_key = $settings->get_setting('stripe_api_key');
-			$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-		}
-
-		if(!$api_key || !$api_secret_key){
-			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-			exit();			
-		}
-
-		$stripe = new \Stripe\StripeClient([
-			'api_key' => $api_key,
-			'stripe_version' => '2022-11-15'
-		]);	
-		
-		$page_vars['api_key'] = $api_key;
-		$page_vars['api_secret_key'] = $api_secret_key;
 
 		//HANDLE THE BILLING USER
 		$billing_user = User::GetByEmail(trim($this->billing_user['billing_email'])); 
@@ -199,51 +177,11 @@ class ShoppingCart {
 			$cart_billing_user = $this->billing_user;
 			//CREATE THE USER	
 			$billing_user = User::CreateNewUser($cart_billing_user['billing_first_name'], $cart_billing_user['billing_last_name'], $cart_billing_user['billing_email'], NULL, TRUE); 
-			$billing_name = $billing_user->get('usr_first_name') . ' ' . $billing_user->get('usr_last_name');
 		}	
 
-		if($charge_total > 0){
-			//IN TEST MODE JUST GET THE CUSTOMER ID FROM STRIPE OR CREATE ONE
-			$stripe_customer_id = NULL;
-			if(!$_SESSION['test_mode'] && $billing_user->get('usr_stripe_customer_id')){
-				//IF WE STORED A CUSTOMER ID
-				$stripe_customer_id = $billing_user->get('usr_stripe_customer_id');
-			}			
-			
-			//HANDLE THE STRIPE USER
-			if(!$stripe_customer_id){
-				//CHECK ON STRIPE 
-				$stripe_customer = $stripe->customers->all(["email" => $billing_user->get('usr_email')]);
-				if($stripe_customer[data][0][id]){
-					//IF THERE IS A CUSTOMER ID AT STRIPE
-					$stripe_customer_id = $stripe_customer[data][0][id];
-				}
-				else{		
-					//IF THERE IS NO CUSTOMER ID
-					
-					//ONLY SAVE IF IN DEBUG MODE OR REGULAR MODE
-					//DO NOT SAVE IF TEMPORARILY IN TEST MODE
-					if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-						$stripe_customer = $stripe->customers->create([
-							'name' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'),
-							'email' => $billing_user->get('usr_email'),
-							'description' => $billing_user->get('usr_first_name'). ' ' . $billing_user->get('usr_last_name'). ' ('.$billing_user->get('usr_email').')',
-						]);
-						$stripe_customer_id = $stripe_customer[id];
-					}
-				}
-			}	
-		
-			//SAVE THE CUSTOMER ID
-			$billing_user->set('usr_stripe_customer_id', $stripe_customer_id);
-			
-			//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
-			//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
-			if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-				$billing_user->save();
-			}
-			
-			
+		if($charge_total > 0){ 
+			$stripe_helper = new StripeHelper();
+			$stripe_customer_id = $stripe_helper->get_or_create_stripe_customer($billing_user);
 		}	
 
 		return $billing_user;
