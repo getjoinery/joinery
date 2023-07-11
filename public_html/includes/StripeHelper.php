@@ -19,6 +19,7 @@ class StripeHelper {
 	public function __construct() {
 		
 		$settings = Globalvars::get_instance();
+		$session = SessionControl::get_instance();
 
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 			$this->api_key = $settings->get_setting('stripe_api_key_test');
@@ -35,6 +36,7 @@ class StripeHelper {
 			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
 			exit();			
 		}
+		
 
 		$this->stripe = new \Stripe\StripeClient([
 			'api_key' => $this->api_key,
@@ -144,8 +146,8 @@ class StripeHelper {
 	}
 
 	public function get_invoices($params){
-		$charges = $this->stripe->invoices->all($params);
-		return $charges;
+		$invoices = $this->stripe->invoices->all($params);
+		return $invoices;
 	}
 	
 	public function get_payment_intent($stripe_payment_intent_id){
