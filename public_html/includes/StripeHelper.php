@@ -286,6 +286,93 @@ class StripeHelper {
 			}
 		}		
 	}
+	
+	
+	public function create_card_from_token($stripe_token, $stripe_customer_id, $set_as_default=true){
+		try {
+			//STORE PAYMENT METHOD 
+			/*
+			$source_result = $stripe->sources->create([ 
+				 'type' => 'card', 
+				 'token' => $_REQUEST['stripeToken'],  
+			]);
+			*/
+			$source_result = $this->stripe->customers->createSource($stripe_customer_id, [ 
+				 'source' => $stripe_token,  
+			]);
+	
+
+		}
+		/*
+		catch(\Stripe\Error\Card $e) {
+			// Since it's a decline, \Stripe\Exception\Card will be caught
+			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_error', substr($error, 0, 250));
+			$order->save();	
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+		} 
+		catch(\Stripe\Error\CardException $e) {
+			// Since it's a decline, \Stripe\Exception\Card will be caught
+			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_error', substr($error, 0, 250));
+			$order->save();	
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+		}
+		catch (\Stripe\Exception\RateLimitException $e) {
+		  // Too many requests made to the API too quickly
+			$error = "Sorry, we weren't able to authorize your card due to too many requests. You have not been charged.";
+		} 
+		catch (\Stripe\Exception\InvalidRequestException $e) {
+			$error = "Sorry, we weren't able to authorize your card due to an invalid request. That's our fault. You have not been charged.";	
+		} 
+		catch (\Stripe\Exception\AuthenticationException $e) {
+		  // Authentication with Stripe's API failed
+		  // (maybe you changed API keys recently)
+		  $error = "Sorry, our connection to our credit card processor is not currently working. That's our fault. You have not been charged.";
+		} 
+		catch (\Stripe\Exception\ApiConnectionException $e) {
+		  // Network communication with Stripe failed
+		  $error = "Sorry, we were unable to reach the credit card processor. That's our fault. You have not been charged.";
+		} 
+		catch (\Stripe\Exception\ApiErrorException $e) {
+			
+			print_r($e);
+			exit;
+		  // Display a very generic error to the user, and maybe send
+		  // yourself an email
+		  $error = "Sorry, we weren't able to connect to the Stripe api.";
+		} 
+		*/
+		catch (Exception $e) {	
+			$error = "Sorry, we weren't able to store your card. " . $e->getMessage();
+			error_log($error);
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);	
+			exit;
+			/*		
+			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
+
+			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_error', substr($stored_error, 0, 250));
+			$order->save();	
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+			
+			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
+			exit;
+			*/
+		}
+		
+		//SET NEW CARD AS DEFAULT 
+		try {
+			$customer = $this->stripe->customers->retrieve($stripe_customer_id);
+			$customer->default_source=$source_result['id'];
+			$customer->save();  
+		}
+		catch (Exception $e) {		  
+			error_log("Unable to set stripe default card.");
+		}	
+		return true;
+		
+	}
 
 }
 
