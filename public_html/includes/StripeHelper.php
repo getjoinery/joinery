@@ -362,17 +362,51 @@ class StripeHelper {
 		}
 		
 		//SET NEW CARD AS DEFAULT 
-		try {
-			$customer = $this->stripe->customers->retrieve($stripe_customer_id);
-			$customer->default_source=$source_result['id'];
-			$customer->save();  
-		}
-		catch (Exception $e) {		  
-			error_log("Unable to set stripe default card.");
-		}	
-		return true;
+		if($set_as_default){
+			try {
+				$customer = $this->stripe->customers->retrieve($stripe_customer_id);
+				$customer->default_source=$source_result['id'];
+				$customer->save();  
+			}
+			catch (Exception $e) {		  
+				error_log("Unable to set stripe default card.");
+			}
+		}			
+		return $source_result;
 		
 	}
+	
+	public function get_subscription_plan($plan_name){
+		$plan = $this->stripe->plans->retrieve($plan_name);
+		return $plan;
+	}
+	
+	public function create_subscription_plan($params){
+		//CREATE NEW PLAN
+		$plan = $this->stripe->plans->create([
+		  "amount" => (int)$params['price'] * 100,
+		  "interval" => $params['interval'],
+		  "product" => [
+			"name" => 'Subscription '.$params['currency_symbol'] . (int)$params['price'],
+		  ],
+		  "currency" => $params['currency_code'],
+		  "id" => 'subscription-' . (int)$params['price'],
+		]); 	
+		return $plan;
+	}
+	
+	public function create_subscription($params){
+		$subscription = $this->stripe->subscriptions->create($params);	
+		return $subscription;
+	}
+
+
+	public function create_charge($params){
+		//CHARGE THE PURCHASE
+		$charge = $this->stripe->charges->create($params); 
+		return $charge;
+	}
+
 
 }
 
