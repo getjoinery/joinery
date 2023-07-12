@@ -198,7 +198,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				}
 				catch (Exception $e) {
 					$plan_params=array();
-					$plan_params['price'] = $price - $discount;
+					$plan_params['amount'] = $price - $discount;
 					$plan_params['interval'] = 'month';
 					$plan_params['currency_symbol'] = $currency_symbol;
 					$plan_params['currency_code'] = $currency_code;

@@ -40,6 +40,9 @@ function cart_logic($get_vars, $post_vars){
 	}
 	
 	if($cart->get_total() > 0){
+		$stripe_helper = new StripeHelper();
+		$page_vars['stripe_helper'] = $stripe_helper;
+		/*
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 			$api_key = $settings->get_setting('stripe_api_key_test');
 			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
@@ -61,6 +64,7 @@ function cart_logic($get_vars, $post_vars){
 			'api_key' => $api_key,
 			'stripe_version' => '2022-11-15'
 		]);
+		*/
 	}
 	
 	$currency_code = $settings->get_setting('site_currency');
@@ -129,8 +133,25 @@ function cart_logic($get_vars, $post_vars){
 			foreach($cart->get_detailed_items() as $cart_item) {
 
 				if($cart_item['recurring']){
+					//CHECK FOR EXISTING PLAN
+					try{
+						$plan_name = 'subscription-' . (int)($cart_item['price'] - $cart_item['discount']);
+						$plan = $stripe_helper->get_subscription_plan($plan_name);
+					}
+					catch (Exception $e) {
+						$plan_params=array();
+						$plan_params['amount'] = (int)($cart_item['price'] - $cart_item['discount']) * 100;
+						$plan_params['interval'] = 'month';
+						$plan_params['currency_code'] = $currency_code;
+						$plan_params['currency_symbol'] = $currency_symbol;
+						$plan_params['product'] = $currency_code;
+						
+						//CREATE NEW PLAN
+						$plan = $stripe_helper->create_subscription_plan($plan_params); 							
+					}	
 					
 					//CHECK FOR EXISTING PLAN
+					/*
 					try{
 						$plan_name = 'recurring_donation-' . (int)($cart_item['price'] - $cart_item['discount']);
 						$plan = $stripe->plans->retrieve($plan_name);
@@ -144,9 +165,9 @@ function cart_logic($get_vars, $post_vars){
 							"name" => 'Recurring donation $' . (int)($cart_item['price'] - $cart_item['discount']),
 						  ],
 						  "currency" => $currency_code,
-						  "id" => 'recurring_donation-' . (int)($cart_item['price'] - $cart_item['discount']),
 						]); 							
 					}
+					*/
 
 					$plan_items = array(
 						'plan' => $plan['id'],
@@ -198,14 +219,16 @@ function cart_logic($get_vars, $post_vars){
 
 			$existing_billing_user = User::GetByEmail($cart->billing_user['billing_email']);
 
-			if($existing_billing_user && !$_SESSION['test_mode']){
+			if($existing_billing_user){
 				$create_list['client_reference_id'] = $existing_billing_user->key;
 			
-				if($existing_billing_user->get('usr_stripe_customer_id')){
+				if($existing_billing_user->get('usr_stripe_customer_id_test') && $stripe_helper->test_mode){
+					$create_list['customer'] = $existing_billing_user->get('usr_stripe_customer_id_test');
+				}
+				else if($existing_billing_user->get('usr_stripe_customer_id') && !$stripe_helper->test_mode){
 					$create_list['customer'] = $existing_billing_user->get('usr_stripe_customer_id');
 				}
-				
-				if($$existing_billing_user->get('usr_email')){
+				else if($existing_billing_user->get('usr_email')){
 					$create_list['customer_email'] = $existing_billing_user->get('usr_email');		
 				}				
 			}
@@ -214,7 +237,7 @@ function cart_logic($get_vars, $post_vars){
 			}
 								
 
-			$stripe_session = $stripe->checkout->sessions->create($create_list);
+			$stripe_session = $stripe_helper->create_stripe_checkout_session($create_list);
 			$page_vars['stripe_session'] = $stripe_session;	
 		}
 	}

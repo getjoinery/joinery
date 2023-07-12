@@ -257,7 +257,7 @@
 				?>
 				<script src="https://js.stripe.com/v3/"></script>
 				<script language="javascript">
-				var stripe = Stripe('<?php echo $page_vars['api_secret_key']; ?>');
+				var stripe = Stripe('<?php echo $page_vars['stripe_helper']->get_stripe_private_key(); ?>');
 
 				function ToCheckout() {
 					stripe.redirectToCheckout({
