@@ -22,8 +22,6 @@ function cart_charge_logic($get_vars, $post_vars){
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';
 	
 	if(!$settings->get_setting('products_active')){
 		header("HTTP/1.0 404 Not Found");
@@ -43,30 +41,10 @@ function cart_charge_logic($get_vars, $post_vars){
 	$page_vars['cart'] = $cart;
 	$charge_total = $cart->get_total();
 	
-	$stripe_helper = new StripeHelper();
+	
 
 	if($charge_total){
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			$api_key = $settings->get_setting('stripe_api_key_test');
-			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-		}
-		else{
-			$api_key = $settings->get_setting('stripe_api_key');
-			$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-		}
-
-		if(!$api_key || !$api_secret_key){
-			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-			exit();			
-		}
-		
-		$page_vars['api_key'] = $api_key;
-		$page_vars['api_secret_key'] = $api_secret_key;
-		
-		$stripe = new \Stripe\StripeClient([
-			'api_key' => $api_key,
-			'stripe_version' => '2022-11-15'
-		]);
+		$stripe_helper = new StripeHelper();
 	}
 	
 	$receipts = array();
@@ -138,7 +116,8 @@ function cart_charge_logic($get_vars, $post_vars){
 			exit();					
 		}	
 
-		$stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
+		$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
+
 	}
 
 	//PROCESS RECURRING ITEMS
@@ -215,19 +194,16 @@ function cart_charge_logic($get_vars, $post_vars){
 				//CHECK FOR EXISTING PLAN
 				try{
 					$plan_name = 'subscription-' . (int)($price - $discount);
-					$plan = $stripe->plans->retrieve($plan_name);
+					$plan = $stripe_helper->get_subscription_plan($plan_name);
 				}
 				catch (Exception $e) {
+					$plan_params=array();
+					$plan_params['price'] = $price - $discount;
+					$plan_params['interval'] = 'month';
+					$plan_params['currency_symbol'] = $currency_symbol;
+					$plan_params['currency_code'] = $currency_code;
 					//CREATE NEW PLAN
-					$plan = $stripe->plans->create([
-					  "amount" => (int)($price - $discount) * 100,
-					  "interval" => 'month',
-					  "product" => [
-						"name" => 'Subscription '.$currency_symbol . (int)($price - $discount),
-					  ],
-					  "currency" => $currency_code,
-					  "id" => 'subscription-' . (int)($price - $discount),
-					]); 							
+					$plan = $stripe_helper->create_subscription_plan($plan_params); 							
 				}
 
 				$plan_items = array(
@@ -244,7 +220,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				$plan_items_wrap = array($plan_items);
 				
 				try{
-					$subscription_result = $stripe->subscriptions->create([
+					$subscription_params = array([
 					  'customer' => $stripe_customer_id,
 					  'items' => $plan_items_wrap,
 					  'metadata' => [
@@ -252,7 +228,10 @@ function cart_charge_logic($get_vars, $post_vars){
 						 "odi_order_item_id" => $order_item->key,
 						 "customer_name" => $billing_name,
 						 "customer_email" => $billing_user->get('usr_email')],
-					]);	
+					]);
+					
+					$subscription_result = $stripe_helper->create_subscription($subscription_params);
+
 
 				}
 				catch (Exception $e) {		  
@@ -398,13 +377,14 @@ function cart_charge_logic($get_vars, $post_vars){
 		}
 	}		
 
+
 	//NOW CHARGE THE CREDIT CARD FOR THE REMAINING AMOUNT
 	if($settings->get_setting('checkout_type') == 'stripe_regular'){
 		try{	
 			if($charge_total > 0){
-				
 				//CHARGE THE PURCHASE
-				$charge_result = $stripe->charges->create([
+				
+				$charge_params = array(
 				  'source' => $source_result[id],
 				  'amount' => (int)$charge_total*100,
 				  'currency' => $currency_code,
@@ -415,7 +395,8 @@ function cart_charge_logic($get_vars, $post_vars){
 					 "ord_order_id" => $order->get('ord_order_id'), 
 					 "customer_name" => $billing_name,
 					 "customer_email" => $billing_user->get('usr_email')],
-				]); 
+				);
+				$charge_result = $stripe_helper->create_charge($charge_params);
 				
 			}
 
