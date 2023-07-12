@@ -3,6 +3,8 @@ require_once('Globalvars.php');
 $settings = Globalvars::get_instance();
 $siteDir = $settings->get_setting('siteDir');
 require_once($siteDir.'/data/users_class.php');
+require_once($siteDir.'/data/orders_class.php');
+require_once($siteDir.'/data/order_items_class.php');
 
 $composer_dir = $settings->get_setting('composerAutoLoad');	
 require_once $composer_dir.'autoload.php';
@@ -242,6 +244,48 @@ class StripeHelper {
 		return $subs;
 	}
 	
+	public function refund_charge($stripe_charge_id, $refund_amount){
+		try{
+			$re = $this->stripe->refunds->create([
+			'charge' => $stripe_charge_id,
+			'amount' => $refund_amount*100
+			]);
+		}
+		catch(\Stripe\Exception $e) {
+			  echo 'Status is:' . $e->getHttpStatus() . '\n';
+			  echo 'Type is:' . $e->getError()->type . '\n';
+			  echo 'Code is:' . $e->getError()->code . '\n';
+			  exit;
+		}		
+	}
+	
+	public function update_all_subscriptions_in_order($order){
+		$order_items = $order->get_order_items();
+		foreach($order_items as $order_item){
+			$this->update_subscription_in_order_item($order_item);
+		}	
+		return true;
+	}
+	
+	public function update_subscription_in_order_item($order_item){
+		if($order_item->get('odi_is_subscription') && !$order_item->get('odi_subscription_cancelled_time')){
+			//CHECK SUBSCRIPTION STATUS
+			try{		
+				$stripe_subscription = $this->get_subscription($order_item->get('odi_stripe_subscription_id'));	
+				if($stripe_subscription[status] == 'canceled'){
+					$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
+					//IF SUBSCRIPTION ENDED, REMOVE 
+					$order_item->set('odi_subscription_cancelled_time', $canceled_at);
+					$order_item->save();
+				}
+				return true;
+			}
+			catch(Exception $e){
+				//FAIL SILENTLY
+				return false;
+			}
+		}		
+	}
 
 }
 

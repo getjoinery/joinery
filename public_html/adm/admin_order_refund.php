@@ -1,12 +1,11 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';	
+
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -14,24 +13,7 @@
 	$settings = Globalvars::get_instance();
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-		$api_key = $settings->get_setting('stripe_api_key_test');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-	}
-	else{
-		$api_key = $settings->get_setting('stripe_api_key');
-		$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-	}
-
-	if(!$api_key || !$api_secret_key){
-		throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-		exit();			
-	}
-
-	$stripe = new \Stripe\StripeClient([
-		'api_key' => $api_key,
-		'stripe_version' => '2022-11-15'
-	]);
+	$stripe_helper = new StripeHelper();
 	
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -52,50 +34,32 @@
 		
 			
 		//HOW TO REFUND PART OF A CHARGE https://stripe.com/docs/refunds#issuing
-
-		try{
-			$re = $stripe->refunds->create([
-			'charge' => $_POST['charge_id'],
-			'amount' => $_POST['refund_amount']*100
-			]);
-		}
-		catch(\Stripe\Exception $e) {
-			  echo 'Status is:' . $e->getHttpStatus() . '\n';
-			  echo 'Type is:' . $e->getError()->type . '\n';
-			  echo 'Code is:' . $e->getError()->code . '\n';
-			  exit;
-		}
+		$refund = $stripe_helper->refund_charge($_POST['charge_id'], $_POST['refund_amount']);
 		
-		$charge = $stripe->charges->retrieve($_POST['charge_id']);
+		
+		$charge = $stripe_helper->get_charge($_POST['charge_id']);
 		
 		$order_item = new OrderItem($_REQUEST['order_item_id'], TRUE); 
-		$order_item->set('odi_refund_amount', $_POST['refund_amount']);
+		$refund_amount_before = $order_item->get('odi_refund_amount');
+		$refund_amount_this_time = $_POST['refund_amount'];
+		$order_item->set('odi_refund_amount', $_POST['refund_amount'] + $refund_amount_before);
 		$order_item->set('odi_refund_note', $_POST['odi_refund_note']);
 		$order_item->set('odi_refund_time', 'now()');
 		
 		
 		$order = $order_item->get_order();
 		$order->set('ord_refund_time', 'now()');
-		$order->set('ord_refund_amount', $charge->amount_refunded/100);
+		$order->set('ord_refund_amount', $charge->amount_refunded/100);	
+
+		$order_item->save();
+		$order->save();
 		
-		//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
-		//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
-		if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-			$order_item->save();
-			$order->save();
-			echo $order_item->get('odi_refund_amount'). ' was refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
-		}
-		else{
-			echo 'TEST MODE: '.$order_item->get('odi_refund_amount'). ' would be refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
-		}
 
 
 		$pageoptions['title'] = 'Refund confirm';
 		$page->begin_box($pageoptions);
-	
 		
-		
-
+		echo $currency_symbol.$refund_amount_this_time. ' was refunded on order <a href="/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
 
 	}
 else{
@@ -111,28 +75,10 @@ else{
 
 	if ($order->get('ord_stripe_charge_id')){
 		$charge_id = $order->get('ord_stripe_charge_id');
-		try{
-			$charge = $stripe->charges->retrieve($charge_id);	
-		}
-		catch(\Stripe\Exception $e) {
-			  echo 'Status is:' . $e->getHttpStatus() . '\n';
-			  echo 'Type is:' . $e->getError()->type . '\n';
-			  echo 'Code is:' . $e->getError()->code . '\n';
-			  exit;
-		}		
+		$charge = $stripe_helper->get_charge($charge_id);		
 	}	
 	else if ($order->get('ord_stripe_payment_intent_id')) {
-		try{
-			$intent = $stripe->paymentIntents->retrieve($order->get('ord_stripe_payment_intent_id'));
-			$charge_id = $intent->charges->data[0]->id;
-			$charge = $stripe->charges->retrieve($charge_id);
-		}
-		catch(\Stripe\Exception $e) {
-			  echo 'Status is:' . $e->getHttpStatus() . '\n';
-			  echo 'Type is:' . $e->getError()->type . '\n';
-			  echo 'Code is:' . $e->getError()->code . '\n';
-			  exit;
-		}
+		$charge = get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
 	}
 	else{
 		echo "No payment intent or charge id.";
