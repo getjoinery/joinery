@@ -159,7 +159,7 @@
 		echo $formwriter->textinput("Stripe Endpoint Secret (Example: whsec_xxxx)", 'stripe_endpoint_secret', '', 20, $settings->get_setting('stripe_endpoint_secret'), "" , 255, "");
 		
 		//TODO: FIX STRIPE CHECKOUT WEBHOOK FOR NEW API VERSION
-		$optionvals = array("Stripe Regular"=>'stripe_regular',/* 'Stripe Checkout' => 'stripe_checkout',  'Paypal Checkout' => 'paypal_checkout' */ ); 
+		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', /* 'Paypal Checkout' => 'paypal_checkout' */ ); 
 		echo $formwriter->dropinput("Checkout Type", "checkout_type", '', $optionvals, $settings->get_setting('checkout_type'), '', FALSE);
 
 		$optionvals = array("Version 2.X"=>'1', 'Version 3.X' => '2');

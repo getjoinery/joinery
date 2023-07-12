@@ -49,6 +49,9 @@ class StripeHelper {
 
 	}
 
+	public function get_stripe_private_key() {
+		return $this->api_secret_key;
+	}
 
 	public function get_stripe_customer_id($user) {
 		if($this->test_mode){
@@ -384,13 +387,13 @@ class StripeHelper {
 	public function create_subscription_plan($params){
 		//CREATE NEW PLAN
 		$plan = $this->stripe->plans->create([
-		  "amount" => (int)$params['price'] * 100,
+		  "amount" => (int)$params['amount'] * 100,
 		  "interval" => $params['interval'],
 		  "product" => [
-			"name" => 'Subscription '.$params['currency_symbol'] . (int)$params['price'],
+			"name" => 'Subscription '.$params['currency_symbol'] . (int)$params['amount'],
 		  ],
 		  "currency" => $params['currency_code'],
-		  "id" => 'subscription-' . (int)$params['price'],
+		  "id" => 'subscription-' . (int)$params['amount'],
 		]); 	
 		return $plan;
 	}
@@ -407,6 +410,10 @@ class StripeHelper {
 		return $charge;
 	}
 
+	public function create_stripe_checkout_session($params){
+		$stripe_session = $this->stripe->checkout->sessions->create($params);
+		return $stripe_session;
+	}
 
 }
 
