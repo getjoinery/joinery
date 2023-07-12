@@ -24,25 +24,15 @@
 	$order = $order_item->get_order();
 	$order_item->authenticate_write($session);
 
-
-	$stripe_subscription = $stripe_helper->get_subscription($order_item->get('odi_stripe_subscription_id'));
-	if($stripe_subscription[canceled_at]){
-		//SUBSCRIPTION HAD ALREADY ENDED
-		$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
-		$order_item->set('odi_subscription_cancelled_time', $canceled_at);
-		
-		//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
-		//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
-		if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-			$order_item->save();
-		}
-		else{
-			echo 'TEST MODE: Subscription is already cancelled.';
-		}
-		
-	}
-	else{
+	$result = $stripe_helper->update_subscription_in_order_item($order_item);
+	
+	//REFRESH THE ORDER ITEM
+	$order_item = new OrderItem($order_item_id, TRUE);
+	
+	if(!$order_item->get('odi_subscription_cancelled_time')){
+	
 		try {
+			$stripe_subscription = $stripe_helper->get_subscription($order_item->get('odi_stripe_subscription_id'));
 			$response = $stripe_subscription->cancel();
 		}					
 		catch (Exception $e) {
@@ -52,21 +42,7 @@
 			exit;
 		}	
 		
-		if($response[canceled_at]){
-			$canceled_at = gmdate("c", $response[canceled_at]);
-			//IF SUBSCRIPTION ENDED, REMOVE 
-			$order_item->set('odi_subscription_cancelled_time', $canceled_at);
-			
-			
-			//ONLY SAVE TO DATABASE IF IN DEBUG MODE OR REGULAR MODE
-			//DO NOT SAVE TO DATABASE IF TEMPORARILY IN TEST MODE
-			if($settings->get_setting('debug') || (!$_SESSION['test_mode'] && !$settings->get_setting('debug'))){
-				$order_item->save();
-			}
-			else{
-				echo 'TEST MODE: Subscription would be cancelled.';
-			}			
-		}
+		$result = $stripe_helper->update_subscription_in_order_item($order_item);
 		
 		//SEND NOTIFICATION
 		if($settings->get_setting('subscription_notification_emails')){
