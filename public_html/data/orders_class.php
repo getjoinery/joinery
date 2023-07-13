@@ -47,7 +47,8 @@ class Order extends SystemBase {
 		'ord_refund_note' => 'Note for the refund',
 		'ord_stripe_charge_id' => 'Charge ID from stripe',
 		'ord_stripe_invoice_id' => 'Stripe invoice for subscriptions',
-		'ord_test_mode' => 'This is a test order'
+		'ord_test_mode' => 'This is a test order',
+		'ord_stripe_subscription_id_temp' => 'Temporary storage for subscription ids coming from stripe checkout webhook'
 	);
 
 	public static $field_specifications = array(
@@ -69,6 +70,7 @@ class Order extends SystemBase {
 		'ord_stripe_charge_id' => array('type'=>'varchar(64)'),
 		'ord_stripe_invoice_id' => array('type'=>'varchar(64)'),
 		'ord_test_mode' => array('type'=>'bool'),
+		'ord_stripe_subscription_id_temp' =>  array('type'=>'varchar(255)'),
 	);
 
 	public static $required_fields = array();

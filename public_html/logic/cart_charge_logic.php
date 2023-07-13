@@ -192,12 +192,13 @@ function cart_charge_logic($get_vars, $post_vars){
 
 			if($settings->get_setting('checkout_type') == 'stripe_regular'){
 				//CHECK FOR EXISTING PLAN
+				$plan_name = 'subscription-' . (int)($price - $discount);
 				try{
-					$plan_name = 'subscription-' . (int)($price - $discount);
 					$plan = $stripe_helper->get_subscription_plan($plan_name);
 				}
 				catch (Exception $e) {
 					$plan_params=array();
+					$plan_params['plan_name'] = $plan_name;
 					$plan_params['amount'] = $price - $discount;
 					$plan_params['interval'] = 'month';
 					$plan_params['currency_symbol'] = $currency_symbol;
@@ -255,7 +256,27 @@ function cart_charge_logic($get_vars, $post_vars){
 					$order_item->save();
 					continue;  //SKIP THE REST OF THE ITEM
 				}
+				
+				//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT
+				$order_item->set('odi_stripe_subscription_id', $subscription_result[id]);
+				$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result[latest_invoice]);
+				$order_item->set('odi_is_subscription', true);
+				$order_item->set('odi_status', OrderItem::STATUS_PAID);
+				$order_item->set('odi_status_change_time', 'NOW');
+				$order_item->save();
 			}
+			else if($settings->get_setting('checkout_type') == 'stripe_checkout'){
+				$order_item->set('odi_is_subscription', true);
+				$order_item->set('odi_status', OrderItem::STATUS_PAID);
+				$order_item->set('odi_status_change_time', 'NOW');
+				//MOVE THE SUBSCRIPTION ID FROM THE ORDER TO THE ORDER ITEM AND REMOVE IT FROM THE ORDER
+				$order_item->set('odi_stripe_subscription_id', $order->get('ord_stripe_subscription_id_temp'));
+				$order_item->save();
+				$order->set('ord_stripe_subscription_id_temp', NULL);
+				$order->save();
+				
+			}			
+			
 			
 			//SEND NOTIFICATION
 			if($settings->get_setting('subscription_notification_emails')){
@@ -278,14 +299,6 @@ function cart_charge_logic($get_vars, $post_vars){
 					}
 				}
 			}
-			
-			//OTHERWISE PROCESS THE ORDER ITEM
-			$order_item->set('odi_is_subscription', true);
-			$order_item->set('odi_stripe_subscription_id', $subscription_result[id]);
-			$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result[latest_invoice]);
-			$order_item->set('odi_status', OrderItem::STATUS_PAID);
-			$order_item->set('odi_status_change_time', 'NOW');
-			$order_item->save();
 			
 	
 			//ATTACH USERS TO THE RIGHT EVENTS/COURSES

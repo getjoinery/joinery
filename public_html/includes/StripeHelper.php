@@ -167,7 +167,15 @@ class StripeHelper {
 	
 	public function get_charge_from_payment_intent($stripe_payment_intent_id){
 		$intent = $this->get_payment_intent($stripe_payment_intent_id);
-		$charge = $this->get_charge($intent->charges->data[0]->id);
+		if(isset($intent->charges->data[0]->id)){
+			$charge = $this->get_charge($intent->charges->data[0]->id);
+		}
+		else if(isset($intent->latest_charge)){
+			$charge = $this->get_charge($intent->latest_charge);
+		}
+		else{
+			return false;
+		}
 		return $charge;
 	}
 	
@@ -199,7 +207,7 @@ class StripeHelper {
 		}	
 		else if ($order->get('ord_stripe_payment_intent_id')) {
 			try{
-				
+
 				$charge = $this->get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
 				return $charge;
 			}
@@ -386,15 +394,22 @@ class StripeHelper {
 	
 	public function create_subscription_plan($params){
 		//CREATE NEW PLAN
-		$plan = $this->stripe->plans->create([
+		
+		$plan_info = array(
+		[
 		  "amount" => (int)$params['amount'] * 100,
 		  "interval" => $params['interval'],
 		  "product" => [
-			"name" => 'Subscription '.$params['currency_symbol'] . (int)$params['amount'],
+			"name" => $params['plan_name'],
 		  ],
 		  "currency" => $params['currency_code'],
-		  "id" => 'subscription-' . (int)$params['amount'],
-		]); 	
+		  //"id" => 'subscription-' . (int)$params['amount'],
+		]		
+		);
+		
+		//print_r($plan_info);
+		//exit;
+		$plan = $this->stripe->plans->create($plan_info); 	
 		return $plan;
 	}
 	
@@ -413,6 +428,14 @@ class StripeHelper {
 	public function create_stripe_checkout_session($params){
 		$stripe_session = $this->stripe->checkout->sessions->create($params);
 		return $stripe_session;
+	}
+	
+	public function webhook_construct_event($payload, $sig_header, $endpoint_secret){
+	
+		  $event = $this->stripe->Webhook->construct_event(
+			$payload, $sig_header, $endpoint_secret
+		  );
+		  return $event;
 	}
 
 }
