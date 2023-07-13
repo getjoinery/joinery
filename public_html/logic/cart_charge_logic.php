@@ -64,8 +64,10 @@ function cart_charge_logic($get_vars, $post_vars){
 
 	//HANDLE THE BILLING USER
 	$billing_user = $cart->get_or_create_billing_user(); 
-	$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
-
+	if($charge_total){
+		$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
+	}
+	
 	//GET OR CREATE THE ORDER
 	if($settings->get_setting('checkout_type') == 'stripe_checkout'){
 		$session_id = $_GET['session_id'];
