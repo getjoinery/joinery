@@ -147,9 +147,6 @@ function cart_logic($get_vars, $post_vars){
 				}
 				else{
 					//ASSEMBLE THE STRIPE PRODUCT ARRAY
-					//'images' => ['https://example.com/t-shirt.png'],
-
-													
 
 					
 					$product_data = array(
@@ -220,7 +217,6 @@ function cart_logic($get_vars, $post_vars){
 				$create_list['customer_email'] = $cart->billing_user['billing_email'];
 			}
 								
-
 			$stripe_session = $stripe_helper->create_stripe_checkout_session($create_list);
 			$page_vars['stripe_session'] = $stripe_session;	
 		}
