@@ -191,79 +191,13 @@ function cart_charge_logic($get_vars, $post_vars){
 			}
 
 			if($settings->get_setting('checkout_type') == 'stripe_regular'){
-				//CHECK FOR EXISTING PLAN
-				$plan_name = 'subscription-' . (int)($price - $discount);
-				try{
-					$plan = $stripe_helper->get_subscription_plan($plan_name);
-				}
-				catch (Exception $e) {
-					$plan_params=array();
-					$plan_params['plan_name'] = $plan_name;
-					$plan_params['amount'] = $price - $discount;
-					$plan_params['interval'] = 'month';
-					$plan_params['currency_symbol'] = $currency_symbol;
-					$plan_params['currency_code'] = $currency_code;
-					//CREATE NEW PLAN
-					$plan = $stripe_helper->create_subscription_plan($plan_params); 							
-				}
-
-				$plan_items = array(
-					'plan' => $plan['id'],
-				);
-
-				//START THE SUBSCRIPTION
-				$plan_items['metadata'] = array(
-					"ord_order_id" => $order->key, 
-					"odi_order_item_id" => $order_item->key, 
-					 "customer_name" => $billing_name,
-					 "customer_email" => $billing_user->get('usr_email')
-				);
-				$plan_items_wrap = array($plan_items);
+				//CREATE A PLAN AND RUN THE SUBSCRIPTION
+				$final_price = $price - $discount;
+				$plan = $stripe_helper->get_or_create_subscription_plan($final_price);		
+				$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($plan, $order_item, $billing_user, $stripe_customer_id);	
+				//REFRESH THE ORDER ITEM
+				$order_item->load();
 				
-				try{
-					$subscription_params = array([
-					  'customer' => $stripe_customer_id,
-					  'items' => $plan_items_wrap,
-					  'metadata' => [
-						 "ord_order_id" => $order->key, 
-						 "odi_order_item_id" => $order_item->key,
-						 "customer_name" => $billing_name,
-						 "customer_email" => $billing_user->get('usr_email')],
-					]);
-					
-					$subscription_result = $stripe_helper->create_subscription($subscription_params);
-
-
-				}
-				catch (Exception $e) {		  
-					$stored_error = "Subscription failed.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
-
-					$error = "Sorry, we weren't able to create your subscription. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-					$order->set('ord_error', substr($stored_error, 0, 250));
-					$order->save();	
-					
-					$order_item->set('odi_status', OrderItem::STATUS_ERROR);
-					$order_item->set('odi_status_change_time', 'NOW');
-					$order_item->save();
-					continue;  //SKIP THE REST OF THE ITEM
-				}				
-				
-
-				//IF THE SUBSCRIPTION FAILED MARK IT AS ERROR
-				if(!$subscription_result[id]){
-					$order_item->set('odi_status', OrderItem::STATUS_ERROR);
-					$order_item->set('odi_status_change_time', 'NOW');
-					$order_item->save();
-					continue;  //SKIP THE REST OF THE ITEM
-				}
-				
-				//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT
-				$order_item->set('odi_stripe_subscription_id', $subscription_result[id]);
-				$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result[latest_invoice]);
-				$order_item->set('odi_is_subscription', true);
-				$order_item->set('odi_status', OrderItem::STATUS_PAID);
-				$order_item->set('odi_status_change_time', 'NOW');
-				$order_item->save();
 			}
 			else if($settings->get_setting('checkout_type') == 'stripe_checkout'){
 				$order_item->set('odi_is_subscription', true);
@@ -393,86 +327,29 @@ function cart_charge_logic($get_vars, $post_vars){
 
 	//NOW CHARGE THE CREDIT CARD FOR THE REMAINING AMOUNT
 	if($settings->get_setting('checkout_type') == 'stripe_regular'){
-		try{	
-			if($charge_total > 0){
-				//CHARGE THE PURCHASE
-				
-				$charge_params = array(
-				  'source' => $source_result[id],
-				  'amount' => (int)$charge_total*100,
-				  'currency' => $currency_code,
-				  'customer' => $stripe_customer_id,
-				  'description' => implode(",", $stripe_item_list), 
-				  //'billing_details' => ['email' => $billing_user->get('usr_email'), 'name' => $billing_name, ],
-				  'metadata' => [
-					 "ord_order_id" => $order->get('ord_order_id'), 
-					 "customer_name" => $billing_name,
-					 "customer_email" => $billing_user->get('usr_email')],
-				);
-				$charge_result = $stripe_helper->create_charge($charge_params);
-				
+		if($charge_total > 0){
+			try{
+				$charge_result = $stripe_helper->process_charge($source_result, $charge_total, $stripe_customer_id, $stripe_item_list, $billing_user, $order);
 			}
+			catch (Exception $e) {		  
+				$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
 
-
-		}
-		catch (Exception $e) {		  
-			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
-
-			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-			$order->set('ord_error', substr($stored_error, 0, 250));
-			$order->save();	
-			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
-			
-			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
-			exit;
-		}
-		/*
-		catch(\Stripe\Error\Card $e) {
-			// Since it's a decline, \Stripe\Exception\Card will be caught
-			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-			$order->set('ord_error', substr($error, 0, 250));
-			$order->save();	
-			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
-		} 
-		catch (\Stripe\Exception\RateLimitException $e) {
-		  // Too many requests made to the API too quickly
-			$error = "Sorry, we weren't able to authorize your card due to too many requests. You have not been charged.";
-		} 
-		catch (\Stripe\Exception\InvalidRequestException $e) {
-			$error = "Sorry, we weren't able to authorize your card due to an invalid request. That's our fault. You have not been charged.";	
-		} 
-		catch (\Stripe\Exception\AuthenticationException $e) {
-		  // Authentication with Stripe's API failed
-		  // (maybe you changed API keys recently)
-		  $error = "Sorry, our connection to our credit card processor is not currently working. That's our fault. You have not been charged.";
-		} 
-		catch (\Stripe\Exception\ApiConnectionException $e) {
-		  // Network communication with Stripe failed
-		  $error = "Sorry, we were unable to reach the credit card processor. That's our fault. You have not been charged.";
-		} 
-		catch (\Stripe\Exception\ApiErrorException $e) {
-		  // Display a very generic error to the user, and maybe send
-		  // yourself an email
-		  $error = "Sorry, we weren't able to connect to the Stripe api.";
-		} 
-		catch (Exception $e) {
-			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
+				$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+				$order->set('ord_error', substr($stored_error, 0, 250));
+				$order->save();	
+				PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+				
+				$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
+				exit;
+			}
 		}
 
-		if($error){
-			$order->set('ord_error', substr($error, 0, 250));
-			$order->save();		
-			
-			throw new SystemDisplayablePermanentError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
-			exit();		 
-		}
-		*/
 
 		//STORE THE CHARGE ID
 		$order->set('ord_stripe_charge_id', $charge_result->id);
 		
 		//MARK THE ORDER PAID
-		$order->set('ord_status', 2);
+		$order->set('ord_status', Order::STATUS_PAID);
 		$order->save();	
 	}		
 	

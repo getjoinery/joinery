@@ -4,10 +4,8 @@ function cart_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/StripeHelper.php');
 
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
@@ -42,29 +40,6 @@ function cart_logic($get_vars, $post_vars){
 	if($cart->get_total() > 0){
 		$stripe_helper = new StripeHelper();
 		$page_vars['stripe_helper'] = $stripe_helper;
-		/*
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			$api_key = $settings->get_setting('stripe_api_key_test');
-			$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-		}
-		else{
-			$api_key = $settings->get_setting('stripe_api_key');
-			$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-		}
-		
-		if(!$api_key || !$api_secret_key){
-			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-			exit();			
-		}
-		
-		$page_vars['api_key'] = $api_key;
-		$page_vars['api_secret_key'] = $api_secret_key;
-		
-		$stripe = new \Stripe\StripeClient([
-			'api_key' => $api_key,
-			'stripe_version' => '2022-11-15'
-		]);
-		*/
 	}
 	
 	$currency_code = $settings->get_setting('site_currency');
@@ -134,43 +109,9 @@ function cart_logic($get_vars, $post_vars){
 			foreach($cart->get_detailed_items() as $cart_item) {
 
 				if($cart_item['recurring']){
-					//CHECK FOR EXISTING PLAN
-					$plan_name = 'subscription-' . (int)($cart_item['price'] - $cart_item['discount']);
-					try{
-						$plan = $stripe_helper->get_subscription_plan($plan_name);
-					}
-					catch (Exception $e) {
-						
-						$plan_params=array();
-						$plan_params['plan_name'] = $plan_name;
-						$plan_params['amount'] = (int)($cart_item['price'] - $cart_item['discount']) * 100;
-						$plan_params['interval'] = 'month';
-						$plan_params['currency_code'] = $currency_code;
-						$plan_params['currency_symbol'] = $currency_symbol;
-						$plan_params['product'] = $currency_code;
-
-						//CREATE NEW PLAN
-						$plan = $stripe_helper->create_subscription_plan($plan_params); 							
-					}	
+					$final_price = $cart_item['price'] - $cart_item['discount'];
+					$plan = $stripe_helper->get_or_create_subscription_plan($final_price);
 					
-					//CHECK FOR EXISTING PLAN
-					/*
-					try{
-						$plan_name = 'recurring_donation-' . (int)($cart_item['price'] - $cart_item['discount']);
-						$plan = $stripe->plans->retrieve($plan_name);
-					}
-					catch (Exception $e) {
-						//CREATE NEW PLAN
-						$plan = $stripe->plans->create([
-						  "amount" => (int)($cart_item['price'] - $cart_item['discount']) * 100,
-						  "interval" => "month",
-						  "product" => [
-							"name" => 'Recurring donation $' . (int)($cart_item['price'] - $cart_item['discount']),
-						  ],
-						  "currency" => $currency_code,
-						]); 							
-					}
-					*/
 
 					$product_data = array(
 						'name' => $cart_item['name'],
@@ -202,17 +143,7 @@ function cart_logic($get_vars, $post_vars){
 
 					$contains_subscription = 1;
 
-/*
-					$plan_items = array(
-						'plan' => $plan['id'],
-					);
-					
-					$plan_items_wrap = array($plan_items);
-					
-					$stripe_subscription_item = array(
-						'items' => $plan_items_wrap,
-					);
-					*/
+
 				}
 				else{
 					//ASSEMBLE THE STRIPE PRODUCT ARRAY

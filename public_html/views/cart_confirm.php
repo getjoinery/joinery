@@ -28,7 +28,7 @@
 		<p class="mt-3 text-base text-gray-500">Thank you for your purchase.  An email has been sent to the email address of all registrants with your purchase confirmation and a link to provide any further info that we need.</p>
 		<?php
 		
-		$headers = array('Cart item', 'Item', 'Price', 'Extra Info');
+		$headers = array('Item', 'Price');
 		$page->tableheader($headers);
 
 		$total = 0;
@@ -36,14 +36,14 @@
 			$total += $receipt[price];
 			$rowvalues = array();
 			
-			array_push($rowvalues, $rkey);
+			
+			//array_push($rowvalues, $rkey);
 			array_push($rowvalues, $receipt[pname] . ' ('. $receipt[name]. ') ');
 			array_push($rowvalues, '$' . money_format('%i', $receipt[price]));
-			array_push($rowvalues, '<a href="'.$receipt[link].'">'.$receipt[link].'</a>');
+			//array_push($rowvalues, '<a href="'.$receipt[link].'">'.$receipt[link].'</a>');
 			$page->disprow($rowvalues);
 		}
 			$rowvalues = array();	
-			array_push($rowvalues, '&nbsp;');
 			array_push($rowvalues, '<b>Total</b>');
 			array_push($rowvalues, '<b>$' . money_format('%i', $total).'</b>');
 			$page->disprow($rowvalues);		
