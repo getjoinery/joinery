@@ -424,6 +424,131 @@ class StripeHelper {
 		$charge = $this->stripe->charges->create($params); 
 		return $charge;
 	}
+	
+	
+	//DEFAULT NAME IS 'subscription-price'
+	public function get_or_create_subscription_plan($amount){
+		$settings = Globalvars::get_instance();
+		$currency_code = $settings->get_setting('site_currency');
+		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+		
+		//CHECK FOR EXISTING PLAN
+		$plan_name = 'subscription-' . $amount;
+		try{
+			$plan = $this->get_subscription_plan($plan_name);
+		}
+		catch (Exception $e) {
+			$plan_params=array();
+			$plan_params['plan_name'] = $plan_name;
+			$plan_params['amount'] = $amount;
+			$plan_params['interval'] = 'month';
+			$plan_params['currency_symbol'] = $currency_symbol;
+			$plan_params['currency_code'] = $currency_code;
+			//CREATE NEW PLAN
+			$plan = $this->create_subscription_plan($plan_params); 	
+		}
+		return $plan;
+	}
+	
+	public function process_stripe_regular_subscription_from_order_item($plan, $order_item, $billing_user, $stripe_customer_id){
+		$billing_name = $billing_user->display_name();
+		$order = $order_item->get_order();
+		
+		$plan_items = array(
+			'plan' => $plan['id'],
+		);
+				
+		//START THE SUBSCRIPTION
+		$plan_items['metadata'] = array(
+			"ord_order_id" => $order->key, 
+			"odi_order_item_id" => $order_item->key, 
+			 "customer_name" => $billing_name,
+			 "customer_email" => $billing_user->get('usr_email')
+		);
+		$plan_items_wrap = array($plan_items);
+		
+		try{
+			$subscription_params = array([
+			  'customer' => $stripe_customer_id,
+			  'items' => $plan_items_wrap,
+			  'metadata' => [
+				 "ord_order_id" => $order->key, 
+				 "odi_order_item_id" => $order_item->key,
+				 "customer_name" => $billing_name,
+				 "customer_email" => $billing_user->get('usr_email')],
+			]);
+			
+			$subscription_result = $this->create_subscription($subscription_params);
+
+
+		}
+		catch (Exception $e) {		  
+			$stored_error = "Subscription failed.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
+
+			$error = "Sorry, we weren't able to create your subscription. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_error', substr($stored_error, 0, 250));
+			$order->save();	
+			
+			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
+			$order_item->set('odi_status_change_time', 'NOW');
+			$order_item->save();
+			exit;;  //SKIP THE REST OF THE ITEM
+		}				
+		
+
+		//IF THE SUBSCRIPTION FAILED MARK IT AS ERROR
+		if(!$subscription_result[id]){
+			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
+			$order_item->set('odi_status_change_time', 'NOW');
+			$order_item->save();
+			exit;  //SKIP THE REST OF THE ITEM
+		}
+		
+		//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT
+		$order_item->set('odi_stripe_subscription_id', $subscription_result[id]);
+		$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result[latest_invoice]);
+		$order_item->set('odi_is_subscription', true);
+		$order_item->set('odi_status', OrderItem::STATUS_PAID);
+		$order_item->set('odi_status_change_time', 'NOW');
+		$order_item->save();		
+		
+		return $subscription_result;
+		
+	}
+	
+	public function process_charge($source, $amount, $stripe_customer_id, $item_list, $billing_user, $order=NULL){
+		$settings = Globalvars::get_instance();
+		$currency_code = $settings->get_setting('site_currency');
+		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+		$billing_name = $billing_user->display_name();
+			
+		//CHARGE THE PURCHASE
+		
+		$metadata = array();
+		if($order){
+			$metadata['ord_order_id'] = $order->get('ord_order_id'); 
+		}
+		$metadata['customer_name'] = $billing_name;
+		$metadata['customer_email'] = $billing_user->get('usr_email');
+			 
+		$charge_params = array(
+		  'source' => $source[id],
+		  'amount' => (int)$amount*100,
+		  'currency' => $currency_code,
+		  'customer' => $stripe_customer_id,
+		  'description' => implode(",", $item_list), 
+		  //'billing_details' => ['email' => $billing_user->get('usr_email'), 'name' => $billing_name, ],
+		  'metadata' => $metadata 
+		);
+		$charge = $this->create_charge($charge_params);
+
+		return $charge;
+			
+	}
+	
+	
+	/* BEGIN STRIPE CHECKOUT FUNCTIONS */
+	
 
 	public function create_stripe_checkout_session($params){
 		$stripe_session = $this->stripe->checkout->sessions->create($params);
