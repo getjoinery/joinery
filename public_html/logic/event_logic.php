@@ -14,8 +14,12 @@ function event_logic($get_vars, $post_vars, $event){
 	$page_vars['session'] = $session;
 	
 
+	if(!$event){
+		require_once(LibraryFunctions::display_404_page());
+	}
+
 	$page_vars['event'] = $event;
-	if(!$event || !$event->get('evt_visibility') || $event->get('evt_delete_time')){
+	if(!$event->get('evt_visibility') || $event->get('evt_delete_time')){
 		if($session->get_permission() < 5){
 			require_once(LibraryFunctions::display_404_page());	
 		}			
