@@ -74,7 +74,7 @@
                       Online Course
                     </a>
                   </p>
-                  <a href="/event/42/Shadow-and-Integral-Theory-Fundamentals-Self-paced-Course" class="block mt-2">
+                  <a href="/event/shadow-and-integral-theory-fundamentals-self-paced-course" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       Promo 1
                     </p>
@@ -122,7 +122,7 @@
                       Live Online
                     </a>
                   </p>
-                  <a href="/event/28/Sunday-Integral-Dharma-Calls" class="block mt-2">
+                  <a href="/event/sunday-integral-dharma-calls" class="block mt-2">
                     <p class="text-xl font-semibold text-gray-900">
                       Promo 2
                     </p>
