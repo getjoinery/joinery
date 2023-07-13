@@ -1,16 +1,17 @@
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/StripeHelper.php');
 	//require_once( __DIR__ . '/../includes/stripe-php/init.php');
 	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';
+	//$composer_dir = $settings->get_setting('composerAutoLoad');	
+	//require_once $composer_dir.'autoload.php';
 	require_once( __DIR__ . '/../data/events_class.php');
 	require_once( __DIR__ . '/../data/orders_class.php');
 
 $settings = Globalvars::get_instance();
-\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
+//\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
 
-
+$stripe_helper = new StripeHelper();
 // You can find your endpoints secret in your webhook settings
 $endpoint_secret = $settings->get_setting('stripe_endpoint_secret_test');
 if(!$endpoint_secret){
@@ -23,7 +24,8 @@ $sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'];
 $event = null;
 
 try {
-  $event = \Stripe\Webhook::constructEvent(
+	$event = $stripe_helper->webhook_construct_event(
+  //$event = \Stripe\Webhook::constructEvent(
     $payload, $sig_header, $endpoint_secret
   );
 } catch(\UnexpectedValueException $e) {
@@ -42,7 +44,7 @@ try {
 // Handle the checkout.session.completed event
 if ($event->type == 'checkout.session.completed') {
 	$sessionobject = $event->data->object;
-
+/*
 	$total=0;
 	foreach ($sessionobject->display_items as $item){
 		for ($i=0; $i<(int)$item->quantity; $i++) {
@@ -50,9 +52,9 @@ if ($event->type == 'checkout.session.completed') {
 		}		
 	}
 	$total = $total / 100;
-
+*/
 	$order = new Order(NULL);
-	$order->set('ord_total_cost', $total);
+	$order->set('ord_total_cost', $sessionobject->amount_total / 100);
 	if($sessionobject->client_reference_id){
 		$order->set('ord_usr_user_id', $sessionobject->client_reference_id);
 	}
@@ -61,6 +63,7 @@ if ($event->type == 'checkout.session.completed') {
 	$order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
 	//$order->set('ord_stripe_subscription_id', $sessionobject->subscription);
 	$order->set('ord_status', Order::STATUS_PAID);
+	$order->set('ord_test_mode', true);
 	
 	$order->prepare();
 	$order->save();	

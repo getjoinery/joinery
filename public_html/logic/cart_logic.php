@@ -129,23 +129,26 @@ function cart_logic($get_vars, $post_vars){
 
 		if($settings->get_setting('checkout_type') == 'stripe_checkout'){
 
+			$contains_subscription = 0;
 			$stripe_item_list = array();
 			foreach($cart->get_detailed_items() as $cart_item) {
 
 				if($cart_item['recurring']){
 					//CHECK FOR EXISTING PLAN
+					$plan_name = 'subscription-' . (int)($cart_item['price'] - $cart_item['discount']);
 					try{
-						$plan_name = 'subscription-' . (int)($cart_item['price'] - $cart_item['discount']);
 						$plan = $stripe_helper->get_subscription_plan($plan_name);
 					}
 					catch (Exception $e) {
+						
 						$plan_params=array();
+						$plan_params['plan_name'] = $plan_name;
 						$plan_params['amount'] = (int)($cart_item['price'] - $cart_item['discount']) * 100;
 						$plan_params['interval'] = 'month';
 						$plan_params['currency_code'] = $currency_code;
 						$plan_params['currency_symbol'] = $currency_symbol;
 						$plan_params['product'] = $currency_code;
-						
+
 						//CREATE NEW PLAN
 						$plan = $stripe_helper->create_subscription_plan($plan_params); 							
 					}	
@@ -169,6 +172,37 @@ function cart_logic($get_vars, $post_vars){
 					}
 					*/
 
+					$product_data = array(
+						'name' => $cart_item['name'],
+						'description' => $cart_item['name'].' ',
+					);
+					
+					$recurring = array(
+						'interval' => 'month'
+					);
+					
+					$price_data = array(
+						'currency' => $currency_code,
+						'product_data' => $product_data,
+						'unit_amount' => (int)($cart_item['price'] - $cart_item['discount']) * 100,
+						'recurring' => $recurring,
+					);
+					
+					$stripe_current_item = array(
+						'price_data' => $price_data,
+						'quantity' => $cart_item['quantity'],
+						//'metadata' => 
+					);
+
+					
+					//TODO add description "metadata" => 
+					if($cart_item['price'] > 0){
+						array_push($stripe_item_list, $stripe_current_item);		
+					}	
+
+					$contains_subscription = 1;
+
+/*
 					$plan_items = array(
 						'plan' => $plan['id'],
 					);
@@ -178,35 +212,54 @@ function cart_logic($get_vars, $post_vars){
 					$stripe_subscription_item = array(
 						'items' => $plan_items_wrap,
 					);
-					
+					*/
 				}
 				else{
 					//ASSEMBLE THE STRIPE PRODUCT ARRAY
 					//'images' => ['https://example.com/t-shirt.png'],
 
 													
-					$stripe_current_item = array(
+
+					
+					$product_data = array(
 						'name' => $cart_item['name'],
-						'description' => $cart_item['name'].' ',			
-						'amount' => (int)($cart_item['price'] - $cart_item['discount']) * 100,
-						'currency' => $currency_code,
-						'quantity' => $cart_item['quantity'],
+						'description' => $cart_item['name'].' ',
 					);
 					
-					//TODO add description "metadata" => ["order_id" => "6735"],
+					$price_data = array(
+						'currency' => $currency_code,
+						'product_data' => $product_data,
+						'unit_amount' => (int)($cart_item['price'] - $cart_item['discount']) * 100,
+					);
+					
+					$stripe_current_item = array(
+						'price_data' => $price_data,
+						'quantity' => $cart_item['quantity'],
+						//'metadata' => 
+					);
+
+					
+					//TODO add description "metadata" => 
 					if($cart_item['price'] > 0){
 						array_push($stripe_item_list, $stripe_current_item);		
 					}							
 				}
 			}
-
+				
 			$create_list = array(
 				'billing_address_collection' => 'auto',
 				'payment_method_types' => ['card'],
 				'success_url' => $settings->get_setting('webDir'). '/cart_charge?session_id={CHECKOUT_SESSION_ID}',
 				'cancel_url' => $settings->get_setting('webDir'). '/cart',
-				'mode' => 'payment',
+				
 			);
+			
+			if($contains_subscription){
+				$create_list['mode'] = 'subscription';
+			}
+			else{
+				$create_list['mode'] = 'payment';
+			}
 			
 			if($stripe_item_list){
 				$create_list['line_items'] = $stripe_item_list;

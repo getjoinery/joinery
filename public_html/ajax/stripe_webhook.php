@@ -1,6 +1,5 @@
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
-	//require_once( __DIR__ . '/../includes/stripe-php/init.php');
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require_once $composer_dir.'autoload.php';
@@ -46,23 +45,15 @@ catch(\Stripe\Error\SignatureVerification $e) {
 if ($event->type == 'checkout.session.completed') {
 	$sessionobject = $event->data->object;
 
-	$total=0;
-	foreach ($sessionobject->display_items as $item){
-		for ($i=0; $i<(int)$item->quantity; $i++) {
-			$total += $item->amount;
-		}		
-	}
-	$total = $total / 100;
-
 	$order = new Order(NULL);
-	$order->set('ord_total_cost', $total);
+	$order->set('ord_total_cost', $sessionobject->amount_total / 100);
 	if($sessionobject->client_reference_id){
 		$order->set('ord_usr_user_id', $sessionobject->client_reference_id);
 	}
 	$order->set('ord_stripe_session_id', $sessionobject->id);
 	$order->set('ord_raw_response', $sessionobject);
 	$order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
-	//$order->set('ord_stripe_subscription_id', $sessionobject->subscription);
+	$order->set('ord_stripe_subscription_id_temp', $sessionobject->subscription);  //TEMPORARILY STORING THIS TO MOVE IT TO THE ORDER ITEM IN CART_CHARGE_LOGIC
 	$order->set('ord_status', Order::STATUS_PAID);
 
 	$order->prepare();
