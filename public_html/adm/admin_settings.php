@@ -155,12 +155,21 @@
 		echo $formwriter->textinput("Stripe API Key (Example: sk_live_xxxx)", 'stripe_api_key', '', 20, $settings->get_setting('stripe_api_key'), "" , 255, "");
 		echo $formwriter->textinput("Stripe API Private Key (Example: pk_live_xxxx)", 'stripe_api_pkey', '', 20, $settings->get_setting('stripe_api_pkey'), "" , 255, "");
 		echo $formwriter->textinput("Test Stripe API Key (Example: sk_test_xxxx)", 'stripe_api_key_test', '', 20, $settings->get_setting('stripe_api_key_test'), "" , 255, "");
-		echo $formwriter->textinput("Test Stripe API Key (Example: pk_test_xxxx)", 'stripe_api_pkey_test', '', 20, $settings->get_setting('stripe_api_pkey_test'), "" , 255, "");
+		echo $formwriter->textinput("Test Stripe Private Key (Example: pk_test_xxxx)", 'stripe_api_pkey_test', '', 20, $settings->get_setting('stripe_api_pkey_test'), "" , 255, "");
 		echo $formwriter->textinput("Stripe Endpoint Secret (Example: whsec_xxxx)", 'stripe_endpoint_secret', '', 20, $settings->get_setting('stripe_endpoint_secret'), "" , 255, "");
 		
 		//TODO: FIX STRIPE CHECKOUT WEBHOOK FOR NEW API VERSION
-		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', /* 'Paypal Checkout' => 'paypal_checkout' */ ); 
+		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', 'None' => 'none'); 
 		echo $formwriter->dropinput("Checkout Type", "checkout_type", '', $optionvals, $settings->get_setting('checkout_type'), '', FALSE);
+
+		$optionvals = array("Yes"=>1, 'No' => 0);
+		echo $formwriter->dropinput("Enable Paypal Checkout", "use_paypal_checkout", '', $optionvals, $settings->get_setting('use_paypal_checkout'), '', FALSE);
+		echo $formwriter->textinput("Paypal Client ID (Example: ATF46g-L-ler2xxxx)", 'paypal_api_key', '', 20, $settings->get_setting('paypal_api_key'), "" , 255, "");
+		echo $formwriter->textinput("Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)", 'paypal_api_secret', '', 20, $settings->get_setting('paypal_api_secret'), "" , 255, "");
+		echo $formwriter->textinput("Test Paypal Client ID (Example: ATF46g-L-ler2xxxx)", 'paypal_api_key_test', '', 20, $settings->get_setting('paypal_api_key_test'), "" , 255, "");
+		echo $formwriter->textinput("Test Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)", 'paypal_api_secret_test', '', 20, $settings->get_setting('paypal_api_secret_test'), "" , 255, "");
+
+
 
 		$optionvals = array("Version 2.X"=>'1', 'Version 3.X' => '2');
 		echo $formwriter->dropinput("Mailgun Version", "mailgun_version", '', $optionvals, $settings->get_setting('mailgun_version'), '', FALSE);	

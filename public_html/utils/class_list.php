@@ -841,5 +841,35 @@ Welcome!
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'custom_css'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'custom_css\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
-		$migrations[] = $migration;			
+		$migrations[] = $migration;		
+
+ 		$migration['system_version'] = '0.5.34';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'paypal_api_key'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'paypal_api_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;		
+
+ 		$migration['system_version'] = '0.5.34';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'paypal_api_secret'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'paypal_api_secret\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+
+ 		$migration['system_version'] = '0.5.34';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'paypal_api_key_test'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'paypal_api_key_test\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+
+ 		$migration['system_version'] = '0.5.34';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'paypal_api_secret_test'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'paypal_api_secret_test\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;		
+
+ 		$migration['system_version'] = '0.5.35';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'use_paypal_checkout'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'use_paypal_checkout\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;				
 		 
