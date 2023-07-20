@@ -105,7 +105,7 @@
 		echo $formwriter->dropinput("Force HTTPS", "force_https", '', $optionvals, $settings->get_setting('force_https'), '', FALSE);	
 
 		$optionvals = array("Yes"=>1, 'No' => 0);
-		echo $formwriter->dropinput("Stripe Debug Mode ", "debug", '', $optionvals, $settings->get_setting('debug'), '', FALSE);
+		echo $formwriter->dropinput("Payment Debug Mode ", "debug", '', $optionvals, $settings->get_setting('debug'), '', FALSE);
 
 		$optionvals = array("Yes (show to screen)"=>1, 'No (logged)' => 0);
 		echo $formwriter->dropinput("Show errors", "show_errors", '', $optionvals, $settings->get_setting('show_errors'), '', FALSE);		

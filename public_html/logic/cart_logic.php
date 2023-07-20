@@ -5,6 +5,7 @@ function cart_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/StripeHelper.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PaypalHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');
@@ -37,10 +38,6 @@ function cart_logic($get_vars, $post_vars){
 		$cart->remove_item(intval($_REQUEST['r']));
 	}
 	
-	if($cart->get_total() > 0){
-		$stripe_helper = new StripeHelper();
-		$page_vars['stripe_helper'] = $stripe_helper;
-	}
 	
 	$currency_code = $settings->get_setting('site_currency');
 	$page_vars['currency_code'] = $currency_code;
@@ -99,133 +96,40 @@ function cart_logic($get_vars, $post_vars){
 	
 	$billing_user = $cart->get_or_create_billing_user(); 
 	
-	
+
 	if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
+		if($settings->get_setting('use_paypal_checkout')){
+			//CHECK FOR RECURRING
+			$recurring_present = 0;
+			foreach($cart->items as $key => $cart_item) {
+				list($quantity, $product, $data, $price, $discount) = $cart_item;
+				if($product->get('pro_recurring')){
+					$recurring_present = 1;
+				}
+			}
+			
+			if(!$recurring_present){
+				//PAYPAL
+				$paypal = new PaypalHelper();
+				$page_vars['paypal_helper'] = $paypal;
+				$paypal_item_list = $paypal->build_item_array($cart->get_detailed_items());	
+				$page_vars['paypal_item_list'] = $paypal_item_list;	
+			}
+		}
 
 		if($settings->get_setting('checkout_type') == 'stripe_checkout'){
-
-			$contains_subscription = 0;
-			$stripe_item_list = array();
-			foreach($cart->get_detailed_items() as $cart_item) {
-
-				if($cart_item['recurring']){
-					$final_price = $cart_item['price'] - $cart_item['discount'];
-					$plan = $stripe_helper->get_or_create_subscription_plan($final_price);
-					
-
-					$product_data = array(
-						'name' => $cart_item['name'],
-						'description' => $cart_item['name'].' ',
-					);
-					
-					$recurring = array(
-						'interval' => 'month'
-					);
-					
-					$price_data = array(
-						'currency' => $currency_code,
-						'product_data' => $product_data,
-						'unit_amount' => (int)($cart_item['price'] - $cart_item['discount']) * 100,
-						'recurring' => $recurring,
-					);
-					
-					$stripe_current_item = array(
-						'price_data' => $price_data,
-						'quantity' => $cart_item['quantity'],
-						//'metadata' => 
-					);
-
-					
-					//TODO add description "metadata" => 
-					if($cart_item['price'] > 0){
-						array_push($stripe_item_list, $stripe_current_item);		
-					}	
-
-					$contains_subscription = 1;
-
-
-				}
-				else{
-					//ASSEMBLE THE STRIPE PRODUCT ARRAY
-
-					
-					$product_data = array(
-						'name' => $cart_item['name'],
-						'description' => $cart_item['name'].' ',
-					);
-					
-					$price_data = array(
-						'currency' => $currency_code,
-						'product_data' => $product_data,
-						'unit_amount' => (int)($cart_item['price'] - $cart_item['discount']) * 100,
-					);
-					
-					$stripe_current_item = array(
-						'price_data' => $price_data,
-						'quantity' => $cart_item['quantity'],
-						//'metadata' => 
-					);
-
-					
-					//TODO add description "metadata" => 
-					if($cart_item['price'] > 0){
-						array_push($stripe_item_list, $stripe_current_item);		
-					}							
-				}
-			}
-				
-			$create_list = array(
-				'billing_address_collection' => 'auto',
-				'payment_method_types' => ['card'],
-				'success_url' => $settings->get_setting('webDir'). '/cart_charge?session_id={CHECKOUT_SESSION_ID}',
-				'cancel_url' => $settings->get_setting('webDir'). '/cart',
-				
-			);
-			
-			if($contains_subscription){
-				$create_list['mode'] = 'subscription';
-			}
-			else{
-				$create_list['mode'] = 'payment';
-			}
-			
-			if($stripe_item_list){
-				$create_list['line_items'] = $stripe_item_list;
-			}
-			
-			if($stripe_subscription_item){
-				$create_list['subscription_data'] = $stripe_subscription_item;
-				$create_list['mode'] = 'subscription';
-			}			
-
+			$stripe_helper = new StripeHelper();
+			$page_vars['stripe_helper'] = $stripe_helper;
 			$existing_billing_user = User::GetByEmail($cart->billing_user['billing_email']);
-
-			if($existing_billing_user){
-				$create_list['client_reference_id'] = $existing_billing_user->key;
-			
-				if($existing_billing_user->get('usr_stripe_customer_id_test') && $stripe_helper->test_mode){
-					$create_list['customer'] = $existing_billing_user->get('usr_stripe_customer_id_test');
-				}
-				else if($existing_billing_user->get('usr_stripe_customer_id') && !$stripe_helper->test_mode){
-					$create_list['customer'] = $existing_billing_user->get('usr_stripe_customer_id');
-				}
-				else if($existing_billing_user->get('usr_email')){
-					$create_list['customer_email'] = $existing_billing_user->get('usr_email');		
-				}				
-			}
-			else{
-				$create_list['customer_email'] = $cart->billing_user['billing_email'];
-			}
-								
+			$create_list = $stripe_helper->build_checkout_item_array($cart, $existing_billing_user);								
 			$stripe_session = $stripe_helper->create_stripe_checkout_session($create_list);
-			$page_vars['stripe_session'] = $stripe_session;	
+		}
+		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
+			$stripe_helper = new StripeHelper();
+			$page_vars['stripe_helper'] = $stripe_helper;
 		}
 	}
-	
-	
-	
-	
-	
+
 	$page_vars['cart'] = $cart;
 
 	return $page_vars;

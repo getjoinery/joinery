@@ -4,6 +4,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PaypalHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
@@ -44,7 +45,13 @@ function cart_charge_logic($get_vars, $post_vars){
 	
 
 	if($charge_total){
-		$stripe_helper = new StripeHelper();
+		if($settings->get_setting('use_paypal_checkout')){
+			$paypal = new PaypalHelper();
+			$page_vars['paypal_helper'] = $paypal;
+		}
+		if($settings->get_setting('checkout_type') != 'none'){
+			$stripe_helper = new StripeHelper();
+		}
 	}
 	
 	$receipts = array();
@@ -64,30 +71,108 @@ function cart_charge_logic($get_vars, $post_vars){
 
 	//HANDLE THE BILLING USER
 	$billing_user = $cart->get_or_create_billing_user(); 
-	if($charge_total){
-		$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
-	}
 	
-	//GET OR CREATE THE ORDER
-	if($settings->get_setting('checkout_type') == 'stripe_checkout'){
-		$session_id = $_GET['session_id'];
-		if($order = Order::GetByStripeSession($session_id)){
-			$order->set('ord_raw_cart', print_r($cart, true));
+	
+	$payment_service = '';
+	if($charge_total > 0){
+		if($settings->get_setting('use_paypal_checkout') && $_GET['id']){
+			$payment_id=$_GET['id'];
+			$paypal=new PaypalHelper();
+			$payment=$paypal->validatePayment($payment_id);
+			
+			
+			if($payment['status']=='COMPLETED'){
+				$order = new Order(NULL);
+				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+					$order->set('ord_test_mode', true);
+				}
+				$order->set('ord_usr_user_id', $billing_user->key);
+				$order->set('ord_total_cost', $cart->get_total());
+				$order->set('ord_timestamp', 'now');	
+				$order->set('ord_raw_cart', print_r($cart, true));
+				$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
+				$order->set('ord_status', Order::STATUS_PAID);
+				$order->prepare();	
+				$order->save();
+				$order->load();	
+				
+				$payment_service = 'paypal';
+			}
+			else{
+				$error = 'Paypal returned bad or missing payment id';
+				$order->set('ord_error', $error);
+				$order->set('ord_status', Order::STATUS_ERROR);
+				$order->save();
+				throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no paypal transaction ID returned.");
+				exit();		
+			}	
+		}
+		else if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
+			$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
+			$session_id = $_GET['session_id'];
+			if($order = Order::GetByStripeSession($session_id)){
+				$order->set('ord_raw_cart', print_r($cart, true));
+			}
+			else{	
+				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+					$order->set('ord_test_mode', true);
+				}
+				$error = 'Stripe returned bad or missing session id';
+				$order->set('ord_error', $error);
+				$order->set('ord_status', Order::STATUS_ERROR);
+				$order->save();
+				throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no stripe session ID returned.");
+				exit();				  
+			}
+
+			if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+				$order->set('ord_test_mode', true);
+			}
+			
+			$order->set('ord_status', Order::STATUS_PAID);
+			$order->set('ord_usr_user_id', $billing_user->key);
+			$order->prepare();	
 			$order->save();
+			$order->load();	
+				
+			$payment_service = 'stripe_checkout';
+		}
+		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
+			$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
+			$order = new Order(NULL);
+			if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+				$order->set('ord_test_mode', true);
+			}
+			$order->set('ord_usr_user_id', $billing_user->key);
+			$order->set('ord_total_cost', $cart->get_total());
+			$order->set('ord_timestamp', 'now');	
+			$order->set('ord_raw_cart', print_r($cart, true));
+			$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
+			$order->set('ord_status', Order::STATUS_UNPAID);	
+			$order->prepare();	
+			$order->save();
+			$order->load();	
+
+			//CHECK CREDIT CARD INFO AND STORE IF PRESENT FOR REGULAR STRIPE CHECKOUT
+			//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
+			if(!isset($_REQUEST['stripeToken'])){
+				$order->set('ord_status', Order::STATUS_ERROR);
+				$order->set('ord_error', 'The credit card was not submitted because the browser is not using https.');
+				$order->save();
+				
+				$log_error = "The credit card information was not submitted because your browser is not using https.  Go back to the previous page and make sure that you are accessing this page from https (look for the lock icon).  For help, contact us at ".$settings->get_setting('defaultemail')." .";
+
+				throw new SystemDisplayableError($log_error);
+				exit();					
+			}	
+
+			$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
+			$payment_service = 'stripe_regular';
 		}
 		else{		
-			throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no stripe session ID returned.");
+			throw new SystemDisplayablePermanentError("Something went wrong with the order. Unable to determine checkout type.");
 			exit();				  
 		}
-
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			$order->set('ord_test_mode', true);
-		}
-		
-		$order->set('ord_usr_user_id', $billing_user->key);
-		$order->prepare();	
-		$order->save();
-		$order->load();			
 	}
 	else{
 		$order = new Order(NULL);
@@ -99,29 +184,14 @@ function cart_charge_logic($get_vars, $post_vars){
 		$order->set('ord_timestamp', 'now');	
 		$order->set('ord_raw_cart', print_r($cart, true));
 		$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
-		$order->set('ord_status', 1);	
+		$order->set('ord_status', Order::STATUS_PAID);	
 		$order->prepare();	
 		$order->save();
-		$order->load();	 
+		$order->load();	
+		$payment_service = 'none';		
 	}
-
-	//CHECK CREDIT CARD INFO AND STORE IF PRESENT FOR REGULAR STRIPE CHECKOUT
-	if($settings->get_setting('checkout_type') == 'stripe_regular' && $charge_total > 0){	
-		//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
-		if(!isset($_REQUEST['stripeToken'])){
-			$order->set('ord_error', 'The credit card was not submitted because the browser is not using https.');
-			$order->save();
-			
-			$log_error = "The credit card information was not submitted because your browser is not using https.  Go back to the previous page and make sure that you are accessing this page from https (look for the lock icon).  For help, contact us at ".$settings->get_setting('defaultemail')." .";
-
-			throw new SystemDisplayableError($log_error);
-			exit();					
-		}	
-
-		$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
-
-	}
-
+	
+	
 	//PROCESS RECURRING ITEMS
 	$stripe_item_list = array();
 	foreach($cart->items as $key => $cart_item) {
@@ -198,6 +268,9 @@ function cart_charge_logic($get_vars, $post_vars){
 				$plan = $stripe_helper->get_or_create_subscription_plan($final_price);		
 				$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($plan, $order_item, $billing_user, $stripe_customer_id);	
 				//REFRESH THE ORDER ITEM
+				$order_item->set('odi_status', OrderItem::STATUS_PAID);
+				$order_item->set('odi_status_change_time', 'NOW');
+				$order_item->save();	
 				$order_item->load();
 				
 			}
@@ -328,24 +401,22 @@ function cart_charge_logic($get_vars, $post_vars){
 
 
 	//NOW CHARGE THE CREDIT CARD FOR THE REMAINING AMOUNT
-	if($settings->get_setting('checkout_type') == 'stripe_regular'){
-		if($charge_total > 0){
-			try{
-				$charge_result = $stripe_helper->process_charge($source_result, $charge_total, $stripe_customer_id, $stripe_item_list, $billing_user, $order);
-			}
-			catch (Exception $e) {		  
-				$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
+	if($payment_service == 'stripe_regular'){
 
-				$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-				$order->set('ord_error', substr($stored_error, 0, 250));
-				$order->save();	
-				PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
-				
-				$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
-				exit;
-			}
+		try{
+			$charge_result = $stripe_helper->process_charge($source_result, $charge_total, $stripe_customer_id, $stripe_item_list, $billing_user, $order);
 		}
+		catch (Exception $e) {		  
+			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
 
+			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			$order->set('ord_status', Order::STATUS_ERROR);
+			$order->set('ord_error', substr($stored_error, 0, 250));
+			$order->save();	
+			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+
+			exit;
+		}
 
 		//STORE THE CHARGE ID
 		$order->set('ord_stripe_charge_id', $charge_result->id);
