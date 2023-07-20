@@ -206,14 +206,17 @@
 
 				if(!$found_order){
 					$order = new Order(NULL);
-					$order->save();
-					$order->load();
+					if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+						$order->set('ord_test_mode', true);
+					}
 					echo '<b>NEW ORDER</b><br>';
 					if($verbose){
 						echo 'Time: '.$order->get('ord_timestamp').'<br>';
 					}
 					$order->set('ord_timestamp', gmdate("c", $charge->created));
 					$order->set('ord_status', Order::STATUS_PAID);
+					$order->save();
+					$order->load();
 				}
 
 
