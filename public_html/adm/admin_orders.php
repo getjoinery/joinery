@@ -142,7 +142,7 @@
 			}
 			
 			if($product_data['comment']){
-				$this_out .= '<br /><b> (Note: '.$product_data['comment'].')<b>';
+				$this_out .= '<br /><b> (Note: '.$product_data['comment'].')</b>';
 			}
 
 			
