@@ -17,6 +17,7 @@ class StripeHelper {
 	private $stripe;
 	private $stripe_test;
 	public $test_mode;
+	private $stripe_checkout_session;
 
 	public function __construct() {
 		
@@ -60,6 +61,195 @@ class StripeHelper {
 		else{
 			return $user->get('usr_stripe_customer_id');
 		}
+	}
+	
+	public function output_stripe_regular_form(){
+				$formwriter = new FormWriterPublicTW("form_submit", TRUE);
+				
+				$output = '
+				<script>
+				$(document).ready(function() {
+					$(\'#nojavascript\').hide();
+				});
+				</script>
+				<div id="nojavascript" style="border: 3px solid red; padding: 10px; margin: 10px;">Our payment form requires javascript to be turned on.  Please set your browser to allow javascript, turn off ad blockers, or try another browser.</div>
+				<script src="https://js.stripe.com/v3/"></script>
+				<form action="/cart_charge" method="post" id="payment-form">
+				  <div>
+					<div id="card-element">
+					  <!-- A Stripe Element will be inserted here. -->
+					</div>
+
+					<!-- Used to display form errors. -->
+					<div id="card-errors" role="alert"></div>
+				  </div>
+				<br />'. $formwriter->new_form_button('Pay with Stripe', 'primary', 'full').'</form>					
+				
+				<script language="javascript" src="'.LibraryFunctions::get_theme_file_path('stripe_payment_js.php', '/includes', 'web').'"></script>';	
+				
+				return $output;
+	}
+	
+	public function output_stripe_checkout_form($cart_hash){
+				$formwriter = new FormWriterPublicTW("form3", TRUE);
+				$output = '
+				<script src="https://js.stripe.com/v3/"></script>
+				<script language="javascript">
+				var stripe = Stripe(\''. $this->get_stripe_private_key().'\');
+
+				function ToCheckout() {
+					stripe.redirectToCheckout({
+					  sessionId: \''. $this->stripe_checkout_session->id .'\'
+					}).then(function (result) {
+					  // If `redirectToCheckout` fails due to a browser or network
+					  // error, display the localized error message to your customer
+					  // using `result.error.message`.
+					});
+				}
+				</script>';
+					
+
+				
+				$output .= $formwriter->begin_form("mt-6", "post", '/profile/payment_finalize');
+
+				$output .=  '<div id="errorMsg" style="display:none;"></div>';
+
+				$output .=  $formwriter->hiddeninput('cc_type', '');
+				$output .=  $formwriter->hiddeninput('cart_cs', $cart_hash);
+				
+				$output .=  $formwriter->start_buttons();
+				$output .=  '<input type="button" value="Pay with Stripe" class="inline-flex justify-center mr-3 mt-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 " onclick="ToCheckout();" style="width:200px;">';
+				
+				$output .=  $formwriter->end_buttons();
+
+				$output .=  $formwriter->end_form();	
+
+				return $output;
+	}
+	
+	public function build_checkout_item_array($cart, $existing_billing_user){
+		
+		$settings = Globalvars::get_instance();
+		$currency_code = $settings->get_setting('site_currency');
+		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+	
+		$contains_subscription = 0;
+		$stripe_item_list = array();
+		
+		foreach($cart->get_detailed_items() as $cart_item) {
+			$final_price = $cart_item['price'] - $cart_item['discount'];
+
+			if($cart_item['recurring']){
+				
+				$plan = $this->get_or_create_subscription_plan($final_price);
+				
+
+				$product_data = array(
+					'name' => $cart_item['name'],
+					'description' => $cart_item['name'].' ',
+				);
+				
+				$recurring = array(
+					'interval' => 'month'
+				);
+				
+				$price_data = array(
+					'currency' => $currency_code,
+					'product_data' => $product_data,
+					'unit_amount' => (int)($final_price) * 100,
+					'recurring' => $recurring,
+				);
+				
+				$stripe_current_item = array(
+					'price_data' => $price_data,
+					'quantity' => $cart_item['quantity'],
+					//'metadata' => 
+				);
+
+				
+				//TODO add description "metadata" => 
+				if($cart_item['price'] > 0){
+					array_push($stripe_item_list, $stripe_current_item);		
+				}	
+
+				$contains_subscription = 1;
+
+
+			}
+			else{
+				//ASSEMBLE THE STRIPE PRODUCT ARRAY
+
+				
+				$product_data = array(
+					'name' => $cart_item['name'],
+					'description' => $cart_item['name'].' ',
+				);
+				
+				$price_data = array(
+					'currency' => $currency_code,
+					'product_data' => $product_data,
+					'unit_amount' => (int)($final_price) * 100,
+				);
+				
+				$stripe_current_item = array(
+					'price_data' => $price_data,
+					'quantity' => $cart_item['quantity'],
+					//'metadata' => 
+				);
+
+				
+				//TODO add description "metadata" => 
+				if($final_price > 0){
+					array_push($stripe_item_list, $stripe_current_item);		
+				}	
+				
+			}
+		}
+			
+		$create_list = array(
+			'billing_address_collection' => 'auto',
+			'payment_method_types' => ['card'],
+			'success_url' => $settings->get_setting('webDir'). '/cart_charge?session_id={CHECKOUT_SESSION_ID}',
+			'cancel_url' => $settings->get_setting('webDir'). '/cart',
+			
+		);
+		
+		if($contains_subscription){
+			$create_list['mode'] = 'subscription';
+		}
+		else{
+			$create_list['mode'] = 'payment';
+		}
+		
+		if($stripe_item_list){
+			$create_list['line_items'] = $stripe_item_list;
+		}
+		
+		if($stripe_subscription_item){
+			$create_list['subscription_data'] = $stripe_subscription_item;
+			$create_list['mode'] = 'subscription';
+		}			
+
+		
+
+		if($existing_billing_user){
+			$create_list['client_reference_id'] = $existing_billing_user->key;
+		
+			if($existing_billing_user->get('usr_stripe_customer_id_test') && $this->test_mode){
+				$create_list['customer'] = $existing_billing_user->get('usr_stripe_customer_id_test');
+			}
+			else if($existing_billing_user->get('usr_stripe_customer_id') && !$this->test_mode){
+				$create_list['customer'] = $existing_billing_user->get('usr_stripe_customer_id');
+			}
+			else if($existing_billing_user->get('usr_email')){
+				$create_list['customer_email'] = $existing_billing_user->get('usr_email');		
+			}				
+		}
+		else{
+			$create_list['customer_email'] = $cart->billing_user['billing_email'];
+		}		
+		
+		return $create_list;
 	}
 
 	public function get_customer($user, $return_type='object') {
@@ -552,6 +742,7 @@ class StripeHelper {
 
 	public function create_stripe_checkout_session($params){
 		$stripe_session = $this->stripe->checkout->sessions->create($params);
+		$this->stripe_checkout_session = $stripe_session;
 		return $stripe_session;
 	}
 	

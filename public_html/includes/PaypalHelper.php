@@ -46,8 +46,8 @@ class PaypalHelper{
 		$purchase_units = array();
 		foreach ($cart_items as $item) {
 			if($item['recurring']){
-				throw new SystemDisplayablePermanentError("Paypal api cannot process recurring items.");
-				exit();			
+				//PAYPAL DOES NOT WORK WITH RECURRING ITEMS
+				return false;
 			}
 			$purchase_unit = array();
 			$purchase_unit['reference_id'] = $item['name'];
@@ -73,10 +73,13 @@ class PaypalHelper{
 	}
 	
 	public function output_paypal_checkout_code($data){ 
+		if(!$data){
+			return false;
+		}
 		$output = '
-		<div class="inline-flex justify-center mr-3 mt-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
+		<div class="flex justify-end"><div class="inline-flex justify-end mt-3 mr-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
 			<div id="paypal-button-container"></div>
-		  </div>
+		  </div></div>
 
 		  <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&enable-funding=venmo&disable-funding=paylater"></script>
 		  <script>
