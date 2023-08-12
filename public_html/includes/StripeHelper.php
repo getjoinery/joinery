@@ -473,12 +473,12 @@ class StripeHelper {
 			//CHECK SUBSCRIPTION STATUS
 			try{		
 				$stripe_subscription = $this->get_subscription($order_item->get('odi_stripe_subscription_id'));	
-				if($stripe_subscription[status] == 'canceled'){
+				if($stripe_subscription[status] == 'canceled' || $stripe_subscription[status] == 'incomplete_expired'){
 					$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
 					//IF SUBSCRIPTION ENDED, REMOVE 
 					$order_item->set('odi_subscription_cancelled_time', $canceled_at);
 					$order_item->save();
-				}
+				} 
 				return true;
 			}
 			catch(Exception $e){
