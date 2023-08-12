@@ -28,19 +28,30 @@
 	
 	//REFRESH THE ORDER ITEM
 	$order_item = new OrderItem($order_item_id, TRUE);
-	
+
 	if(!$order_item->get('odi_subscription_cancelled_time')){
-	
+
 		try {
 			$stripe_subscription = $stripe_helper->get_subscription($order_item->get('odi_stripe_subscription_id'));
-			$response = $stripe_subscription->cancel();
+			
 		}					
 		catch (Exception $e) {
-			//DO NOTHING
-			$error = "We were unable to cancel that subscription.  Please contact the webmaster.";
+			$error = "We were unable to retrieve that subscription.  Please contact the webmaster.";
 			echo 'There was an error canceling the subscription: '. $error;
 			exit;
 		}	
+				
+		if(!$stripe_subscription->canceled_at){
+		
+			try {
+				$response = $stripe_subscription->cancel();
+			}					
+			catch (Exception $e) {
+				$error = "We were unable to cancel that subscription.  Please contact the webmaster.";
+				echo 'There was an error canceling the subscription: '. $error;
+				exit;
+			}	
+		}
 		
 		$result = $stripe_helper->update_subscription_in_order_item($order_item);
 		
