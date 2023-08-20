@@ -336,7 +336,7 @@
 							$status_words = $subscription->get('odi_subscription_status');
 						}
 						
-						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month, Status: '.$status_words.'<a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
+						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month, Status: '.$status_words.' <a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
 						
 						?><span><?php echo $status; ?></span><br />
 						<?php
