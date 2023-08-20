@@ -469,14 +469,17 @@ class StripeHelper {
 	}
 	
 	public function update_subscription_in_order_item($order_item){
-		if($order_item->get('odi_is_subscription') && !$order_item->get('odi_subscription_cancelled_time')){
+		if($order_item->get('odi_is_subscription')){
 			//CHECK SUBSCRIPTION STATUS
 			try{		
 				$stripe_subscription = $this->get_subscription($order_item->get('odi_stripe_subscription_id'));	
-
-				$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
-				//IF SUBSCRIPTION ENDED, REMOVE 
-				$order_item->set('odi_subscription_cancelled_time', $canceled_at);
+				
+				if($stripe_subscription[canceled_at]){
+					$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
+					
+					//IF SUBSCRIPTION ENDED, REMOVE 
+					$order_item->set('odi_subscription_cancelled_time', $canceled_at);
+				}
 
 				//if($stripe_subscription[status] == 'canceled' || $stripe_subscription[status] == 'incomplete_expired'){
 				$order_item->set('odi_subscription_status', $stripe_subscription[status]);
