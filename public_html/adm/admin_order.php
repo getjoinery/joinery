@@ -93,6 +93,11 @@
 	foreach($order_items as $order_item) {
 		$product_data = $order_item->get_data();
 		
+		if($order_item->get('odi_is_subscription')){
+			$result = $stripe_helper->update_subscription_in_order_item($order_item);
+		}
+		
+		
 		if($order_item->get('odi_usr_user_id')){
 			$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 		}
