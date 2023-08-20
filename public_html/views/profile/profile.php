@@ -442,6 +442,9 @@
 							}
 							else{
 								$status = 'active';
+								if($subscription->get('odi_subscription_status')){
+									$status = $subscription->get('odi_subscription_status');
+								}
 								$action = '<a class="inline-flex items-center shadow-sm px-2.5 py-0.5 border border-gray-300 text-sm leading-5 font-medium rounded-full text-gray-700 bg-white hover:bg-gray-50" href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
 								
 							}

@@ -45,7 +45,8 @@ class OrderItem extends SystemBase {
 		'odi_refund_amount' => 'Amount from this order item that has been refunded',
 		'odi_refund_note' => 'Note for the refund',
 		'odi_refund_time' => 'Time of last refund',
-		'odi_stripe_foreign_invoice_id' => 'Stripe invoice id if it is the first of a subscription'
+		'odi_stripe_foreign_invoice_id' => 'Stripe invoice id if it is the first of a subscription', 
+		'odi_subscription_status' => 'Status if it is a subscription'
 	);
 
 	public static $field_specifications = array(
@@ -67,6 +68,7 @@ class OrderItem extends SystemBase {
 		'odi_refund_note' => array('type'=>'varchar(255)'),
 		'odi_refund_time' => array('type'=>'timestamp(6)'),
 		'odi_stripe_foreign_invoice_id' => array('type'=>'varchar(64)'),
+		'odi_subscription_status' => array('type'=>'varchar(64)'),
 	);
 
 	public static $required_fields = array('odi_ord_order_id', 'odi_pro_product_id', 'odi_price');
