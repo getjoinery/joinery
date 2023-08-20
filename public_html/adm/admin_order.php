@@ -121,7 +121,11 @@
 		}
 		
 		if($order_item->get('odi_subscription_cancelled_time')){
-			$this_out .= $order_item->get('odi_subscription_status'). ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());	
+			$status_words = 'canceled';
+			if($order_item->get('odi_subscription_status')){
+				$status_words = $order_item->get('odi_subscription_status');
+			}
+			$this_out .= ' '. $status_words. ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());	
 		}
 		else if($order_item->get('odi_subscription_status')){
 			$this_out .=  ' STATUS: '. $order_item->get('odi_subscription_status');
