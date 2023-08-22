@@ -569,9 +569,22 @@ class FormWriterMasterTW {
 			</script>
 				
 			<style>
+			.trumbowyg-box,
+			.trumbowyg-editor,
+			.trumbowyg-textarea {
+				height: 500px;
+			}
+
+			.trumbowyg-box.trumbowyg-fullscreen,
+			.trumbowyg-box.trumbowyg-fullscreen .trumbowyg-editor,
+			.trumbowyg-box.trumbowyg-fullscreen .trumbowyg-textarea {
+				height: 100%;
+			}
+			/*
 			.trumbowyg-box {
 				max-height: 500px;
 			}
+			*/
 			</style>
 
 			";
