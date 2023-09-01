@@ -195,6 +195,26 @@ class ShoppingCart {
 		}
 		return $total_price;
 	}
+	
+	public function get_num_recurring() {
+		$num_recurring = 0;
+		foreach($this->get_detailed_items() as $cart_item) {
+			if($cart_item['recurring']){
+				$num_recurring++;
+			}
+		}
+		return $num_recurring;
+	}
+	
+	public function get_num_non_recurring() {
+		$num_non_recurring = 0;
+		foreach($this->get_detailed_items() as $cart_item) {
+			if(!$cart_item['recurring']){
+				$num_non_recurring++;
+			}
+		}
+		return $num_non_recurring;
+	}
 
 	public function remove_item($item_id) {
 		foreach($this->items as $key => $cart_item) {

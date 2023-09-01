@@ -111,7 +111,7 @@ class PaypalHelper{
 		<div class="flex justify-end"><div class="inline-flex justify-end mt-3 mr-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
 			<div id="paypal-button-container"></div>
 		  </div></div>
- <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&enable-funding=venmo&intent=subscription&vault=true">
+ <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&enable-funding=venmo&intent=subscription&vault=true&disable-funding=paylater">
    </script>
  
    <script>
@@ -121,10 +121,13 @@ class PaypalHelper{
           "plan_id": "'.$plan_id.'",
         });
       },
-      onApprove: function(data, actions) {
-        alert("You have successfully subscribed to " + data.subscriptionID);
-       	
-      }
+      onApprove: function(data, actions) {    
+		// Go to the return URL page
+		window.location.href = "'.$this->return_url.'?subscription=1";
+      },
+	  onError: function(err) {
+		alert("An error occurred during the payment. Please try again.");
+	  }
     }).render("#paypal-button-container"); 
   </script>';
 		  
@@ -431,9 +434,9 @@ class PaypalHelper{
 	public function createSubscription($plan_id) {
 		$access_token = $this->getAccessToken();
 		$subscription_url = $this->endpoint.'/v1/billing/subscriptions';
-		$planid = $plan_id;
+
 		$subscription_data = array(
-			'plan_id' => $planid,
+			'plan_id' => $plan_id,
 			'start_time' => date('Y-m-d\TH:i:s\Z', strtotime('+1 day')),
 			'quantity' => 1,
 			/*'shipping_amount' => array(
@@ -441,8 +444,8 @@ class PaypalHelper{
 				'value' => '10.00', 
 			),*/
 			'application_context' => array( 
-				"return_url" => PAYPAL_RETURN_URL,
-				"cancel_url" => PAYPAL_CANCEL_URL,
+				"return_url" => $this->return_url,
+				"cancel_url" => $this->cancel_url,
 			), 
 		);
 
@@ -458,8 +461,7 @@ class PaypalHelper{
 		));
 
 		$result = curl_exec($ch);
-
-		curl_close($ch);
+		curl_close($ch);			
 		return json_decode($result, true);
 	}
 	
