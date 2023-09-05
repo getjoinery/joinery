@@ -26,7 +26,7 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
           <div class="relative shadow-xl sm:rounded-2xl sm:overflow-hidden">
             <div class="absolute inset-0">
-              <img class="h-full w-full object-cover" src="https://devonandjerry.com/static_files/banners/devon-jerry-banner.jpg" alt="People working on laptops">
+              <img class="h-full w-full object-cover" src="https://devonnearhill.com/static_files/banners/devon-jerry-banner.jpg" alt="People working on laptops">
              
             </div>
             <div class="relative px-4 py-16 sm:px-6 sm:py-24 lg:py-32 lg:px-8">
@@ -275,7 +275,7 @@ passion is whole child development through the lens of social emotional learning
       </h2>
 	  <!--
       <p class="mt-3 max-w-3xl text-lg leading-6 text-gray-300">
-        @devonandjerry / devonandjerry@gmail.com
+        @devonandjerry / devonhasanemail@gmail.com
       </p>-->
     </div>
     <div class="mt-8 lg:mt-0 lg:ml-8">

@@ -25,7 +25,7 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
           <div class="relative shadow-xl sm:rounded-2xl sm:overflow-hidden">
             <div class="absolute inset-0">
-              <img class="h-full w-full object-cover" src="https://devonandjerry.com/static_files/banners/devon-jerry-banner.jpg" alt="People working on laptops">
+              <img class="h-full w-full object-cover" src="https://devonnearhill.com/static_files/banners/devon-jerry-banner.jpg" alt="People working on laptops">
              
             </div>
             <div class="relative px-4 py-16 sm:px-6 sm:py-24 lg:py-32 lg:px-8">
@@ -189,7 +189,7 @@
       </div>
       <div class="mt-12 sm:mt-16 lg:mt-0 lg:col-start-1">
         <div class="pr-4 -ml-48 sm:pr-6 md:-ml-16 lg:px-0 lg:m-0 lg:relative lg:h-full">
-          <img class="w-full rounded-xl shadow-xl ring-1 ring-black ring-opacity-5 lg:absolute lg:right-0 lg:h-full lg:w-auto lg:max-w-none" src="https://devonandjerry.com/uploads/medium/Decon_zouk_5_x74ki5j.jpg" alt="Customer profile user interface">
+          <img class="w-full rounded-xl shadow-xl ring-1 ring-black ring-opacity-5 lg:absolute lg:right-0 lg:h-full lg:w-auto lg:max-w-none" src="https://devonnearhill.com/uploads/medium/Decon_zouk_5_x74ki5j.jpg" alt="Customer profile user interface">
         </div>
       </div>
     </div>
@@ -327,7 +327,7 @@
         Want to book us for classes or DJing
       </h2>
       <p class="mt-3 max-w-3xl text-lg leading-6 text-gray-300">
-        @devonandjerry / devonandjerry@gmail.com
+        @devonandjerry / devonhasanemail@gmail.com
       </p>
     </div>
     <div class="mt-8 lg:mt-0 lg:ml-8">
@@ -335,7 +335,7 @@
         <!--<label for="email-address" class="sr-only">Email address</label>
         <input id="email-address" name="email-address" type="email" autocomplete="email" required class="w-full px-5 py-3 border border-transparent placeholder-gray-500 focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white focus:border-white sm:max-w-xs rounded-md" placeholder="Enter your email">-->
         <div class="mt-3 rounded-md shadow sm:mt-0 sm:ml-3 sm:flex-shrink-0">
-          <a href="mailto:devonandjerry@gmail.com"><button type="button" class="w-full flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-white bg-indigo-500 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-indigo-500">
+          <a href="mailto:devonhasanemail@gmail.com"><button type="button" class="w-full flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-white bg-indigo-500 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-indigo-500">
             Get in Touch
           </button></a>
         </div>
