@@ -200,9 +200,19 @@ class Video extends SystemBase {
 				$vid_video_number = $matches[1];
 			} 
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)(&|$|"))', $vid_url, $matches)) {
+				//vimeo.com/387usd8
+				$vid_video_number = $matches[1];
+			}
+			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)\?(.*))', $vid_url, $matches)) {
+				//vimeo.com/387usd8?share=copy
 				$vid_video_number = $matches[1];
 			}
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/([A-Za-z0-9]+)(&|$|"))', $vid_url, $matches)) {
+				//vimeo.com/387usd8/3874ruso
+				$vid_video_number = $matches[1] . '/' . $matches[2];
+			}
+			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/(\d+)/([A-Za-z0-9]+)\?(.*))', $vid_url, $matches)) {
+				//vimeo.com/387usd8/3874ruso?share=copy
 				$vid_video_number = $matches[1] . '/' . $matches[2];
 			}
 			else if (preg_match('(http[s]?://[www\.]?vimeo\.com/manage/videos/(\d+)/([A-Za-z0-9]+)(&|$|"))', $vid_url, $matches)) {
