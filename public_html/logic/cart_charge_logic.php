@@ -75,13 +75,29 @@ function cart_charge_logic($get_vars, $post_vars){
 	
 	$payment_service = '';
 	if($charge_total > 0){
-		if($settings->get_setting('use_paypal_checkout') && $_GET['id']){
+		if(($settings->get_setting('use_paypal_checkout') && $_GET['id']) || ($settings->get_setting('use_paypal_checkout') && $_GET['subscription'])){
 			$payment_id=$_GET['id'];
 			$paypal=new PaypalHelper();
 			$payment=$paypal->validatePayment($payment_id);
 			
-			
-			if($payment['status']=='COMPLETED'){
+			if($_GET['subscription']){
+				$order = new Order(NULL);
+				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+					$order->set('ord_test_mode', true);
+				}
+				$order->set('ord_usr_user_id', $billing_user->key);
+				$order->set('ord_total_cost', $cart->get_total());
+				$order->set('ord_timestamp', 'now');	
+				$order->set('ord_raw_cart', print_r($cart, true));
+				$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
+				$order->set('ord_status', Order::STATUS_PAID);
+				$order->prepare();	
+				$order->save();
+				$order->load();	
+				
+				$payment_service = 'paypal';				
+			}
+			else if($payment['status']=='COMPLETED'){
 				$order = new Order(NULL);
 				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 					$order->set('ord_test_mode', true);
@@ -262,7 +278,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				}
 			}
 
-			if($settings->get_setting('checkout_type') == 'stripe_regular'){
+			if($payment_service == 'stripe_regular'){
 				//CREATE A PLAN AND RUN THE SUBSCRIPTION
 				$final_price = $price - $discount;
 				$plan = $stripe_helper->get_or_create_subscription_plan($final_price);		
@@ -274,7 +290,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				$order_item->load();
 				
 			}
-			else if($settings->get_setting('checkout_type') == 'stripe_checkout'){
+			else if($payment_service == 'stripe_checkout'){
 				$order_item->set('odi_is_subscription', true);
 				$order_item->set('odi_status', OrderItem::STATUS_PAID);
 				$order_item->set('odi_status_change_time', 'NOW');
@@ -284,7 +300,8 @@ function cart_charge_logic($get_vars, $post_vars){
 				$order->set('ord_stripe_subscription_id_temp', NULL);
 				$order->save();
 				
-			}			
+			}		
+
 			
 			
 			//SEND NOTIFICATION

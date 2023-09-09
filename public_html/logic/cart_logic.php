@@ -99,22 +99,32 @@ function cart_logic($get_vars, $post_vars){
 
 	if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
 		if($settings->get_setting('use_paypal_checkout')){
-			//CHECK FOR RECURRING
-			$recurring_present = 0;
+			//HANDLE SUBSCRIPTION PREP FIRST
+			$paypal = new PaypalHelper();
+			$page_vars['paypal_helper'] = $paypal;
 			foreach($cart->items as $key => $cart_item) {
 				list($quantity, $product, $data, $price, $discount) = $cart_item;
 				if($product->get('pro_recurring')){
-					$recurring_present = 1;
+					//TODO:
+					if(!$paypal_product = $paypal->searchProduct($product->get('pro_name'))){
+						$paypal_product = $paypal->createProduct($product);
+					}
+
+					$paypal_product_id = $paypal_product['id'];
+					$amount = $price - $discount;
+					if(!$paypal_plan = $paypal->searchPlans($product->get('pro_name') . '-' . $amount)){
+						$paypal_plan = $paypal->createPlan($paypal_product_id, $product, $amount);
+					}
+					$page_vars['plan_id'] = $paypal_plan['id'];
+					//$result = $paypal->createSubscription($page_vars['plan_id']);
+
 				}
 			}
 			
-			if(!$recurring_present){
-				//PAYPAL
-				$paypal = new PaypalHelper();
-				$page_vars['paypal_helper'] = $paypal;
-				$paypal_item_list = $paypal->build_item_array($cart->get_detailed_items());	
-				$page_vars['paypal_item_list'] = $paypal_item_list;	
-			}
+			//NOW ITEMS
+			$paypal_item_list = $paypal->build_item_array($cart->get_detailed_items());	
+			$page_vars['paypal_item_list'] = $paypal_item_list;	
+		
 		}
 
 		if($settings->get_setting('checkout_type') == 'stripe_checkout'){
@@ -130,7 +140,13 @@ function cart_logic($get_vars, $post_vars){
 		}
 	}
 
+
+
+
+
+
 	$page_vars['cart'] = $cart;
+	
 
 	return $page_vars;
 }
