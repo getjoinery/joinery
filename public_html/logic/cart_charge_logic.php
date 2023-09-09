@@ -404,10 +404,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			$receipts[$key+1][pname] = $product_name;
 			$receipts[$key+1][name] = $data['full_name_first']. ' ' .$data['full_name_last'];
 			$receipts[$key+1][price] = $price - $discount;				
-	
-						
 
-			$charge_total = $charge_total - $price - $discount;
 		}
 		else{
 			//ASSEMBLE THE STRIPE CHARGE DESCRIPTION
@@ -421,7 +418,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	if($payment_service == 'stripe_regular'){
 
 		try{
-			$charge_result = $stripe_helper->process_charge($source_result, $charge_total, $stripe_customer_id, $stripe_item_list, $billing_user, $order);
+			$charge_result = $stripe_helper->process_charge($source_result, $cart->get_non_recurring_total(), $stripe_customer_id, $stripe_item_list, $billing_user, $order);
 		}
 		catch (Exception $e) {		  
 			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
