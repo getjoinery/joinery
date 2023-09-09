@@ -231,19 +231,52 @@
 			}
 			
 			if($settings->get_setting('use_paypal_checkout') && $page_vars['paypal_helper']){
-				//PAYPAL
-				echo '<div class="relative mt-8">
-				  <div class="absolute inset-0 flex items-center" aria-hidden="true">
-					<div class="w-full border-t border-gray-200"></div>
-				  </div>
-				  <div class="relative flex justify-center">
-					<span class="px-4 bg-white text-sm font-medium text-gray-500">
-					  <>
-					</span>
-				  </div>
-				</div>';
-				echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
-				echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
+
+				if($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0){
+					//PAYPAL
+					echo '<div class="relative mt-8">
+					  <div class="absolute inset-0 flex items-center" aria-hidden="true">
+						<div class="w-full border-t border-gray-200"></div>
+					  </div>
+					  <div class="relative flex justify-center">
+						<span class="px-4 bg-white text-sm font-medium text-gray-500">
+						  <>
+						</span>
+					  </div>
+					</div>';
+					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
+					echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id']);
+				}
+				else if($cart->get_num_recurring() == 0){
+					//PAYPAL
+					echo '<div class="relative mt-8">
+					  <div class="absolute inset-0 flex items-center" aria-hidden="true">
+						<div class="w-full border-t border-gray-200"></div>
+					  </div>
+					  <div class="relative flex justify-center">
+						<span class="px-4 bg-white text-sm font-medium text-gray-500">
+						  <>
+						</span>
+					  </div>
+					</div>';
+					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
+					echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
+				}
+				else{
+					//PAYPAL
+					echo '<div class="relative mt-8">
+					  <div class="absolute inset-0 flex items-center" aria-hidden="true">
+						<div class="w-full border-t border-gray-200"></div>
+					  </div>
+					  <div class="relative flex justify-center">
+						<span class="px-4 bg-white text-sm font-medium text-gray-500">
+						  <>
+						</span>
+					  </div>
+					</div>';
+					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
+					echo '<p><b>Paypal subscriptions must be purchased individually.  Remove all other items from your cart to pay with Paypal.</b></p>'; 				
+				}
 			}
 		}			
 		else if($cart->billing_user){					

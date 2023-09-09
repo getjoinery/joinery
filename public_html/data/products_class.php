@@ -1116,6 +1116,8 @@ class Product extends SystemBase {
 				FALSE);
 		}
 
+
+		
 		$form_javascript = array();
 		foreach ($this->get_product_requirements() as $product_requirement) {
 			$product_requirement->get_form($formwriter, $user);	
