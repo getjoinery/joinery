@@ -36,8 +36,7 @@
 			
 		}					
 		catch (Exception $e) {
-			$error = "We were unable to retrieve that subscription.  Please contact the webmaster.";
-			echo 'There was an error canceling the subscription: '. $error;
+			throw new SystemDisplayablePermanentError("We were unable to retrieve that subscription (".$order_item->get('odi_stripe_subscription_id').") Please contact the webmaster.");
 			exit;
 		}	
 				
@@ -47,8 +46,7 @@
 				$response = $stripe_subscription->cancel();
 			}					
 			catch (Exception $e) {
-				$error = "We were unable to cancel that subscription.  Please contact the webmaster.";
-				echo 'There was an error canceling the subscription: '. $error;
+				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (".$order_item->get('odi_stripe_subscription_id').").  Please contact the webmaster.");
 				exit;
 			}	
 		}
