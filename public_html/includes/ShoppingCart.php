@@ -196,6 +196,28 @@ class ShoppingCart {
 		return $total_price;
 	}
 	
+	public function get_recurring_total() {
+		$total_price = 0;
+		foreach($this->get_detailed_items() as $cart_item) {
+			if($cart_item['recurring']){
+				$this_item_price = $cart_item['total'] -  $cart_item['discount'];
+				$total_price += $this_item_price;
+			}
+		}
+		return $total_price;
+	}
+	
+	public function get_non_recurring_total() {
+		$total_price = 0;
+		foreach($this->get_detailed_items() as $cart_item) {
+			if(!$cart_item['recurring']){
+				$this_item_price = $cart_item['total'] -  $cart_item['discount'];
+				$total_price += $this_item_price;
+			}
+		}
+		return $total_price;
+	}
+	
 	public function get_num_recurring() {
 		$num_recurring = 0;
 		foreach($this->get_detailed_items() as $cart_item) {
