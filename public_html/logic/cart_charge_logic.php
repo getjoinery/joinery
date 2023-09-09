@@ -284,10 +284,10 @@ function cart_charge_logic($get_vars, $post_vars){
 				$plan = $stripe_helper->get_or_create_subscription_plan($final_price);		
 				$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($plan, $order_item, $billing_user, $stripe_customer_id);	
 				//REFRESH THE ORDER ITEM
+				$order_item->set('odi_is_subscription', true);
 				$order_item->set('odi_status', OrderItem::STATUS_PAID);
 				$order_item->set('odi_status_change_time', 'NOW');
 				$order_item->save();	
-				$order_item->load();
 				
 			}
 			else if($payment_service == 'stripe_checkout'){
@@ -300,7 +300,9 @@ function cart_charge_logic($get_vars, $post_vars){
 				$order->set('ord_stripe_subscription_id_temp', NULL);
 				$order->save();
 				
-			}		
+			}	
+			
+			$order_item->load();
 
 			
 			
@@ -415,30 +417,32 @@ function cart_charge_logic($get_vars, $post_vars){
 
 
 	//NOW CHARGE THE CREDIT CARD FOR THE REMAINING AMOUNT
-	if($payment_service == 'stripe_regular'){
+	if($cart->get_non_recurring_total()){
+		if($payment_service == 'stripe_regular'){
 
-		try{
-			$charge_result = $stripe_helper->process_charge($source_result, $cart->get_non_recurring_total(), $stripe_customer_id, $stripe_item_list, $billing_user, $order);
-		}
-		catch (Exception $e) {		  
-			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
+			try{
+				$charge_result = $stripe_helper->process_charge($source_result, $cart->get_non_recurring_total(), $stripe_customer_id, $stripe_item_list, $billing_user, $order);
+			}
+			catch (Exception $e) {		  
+				$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
 
-			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-			$order->set('ord_status', Order::STATUS_ERROR);
-			$order->set('ord_error', substr($stored_error, 0, 250));
+				$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+				$order->set('ord_status', Order::STATUS_ERROR);
+				$order->set('ord_error', substr($stored_error, 0, 250));
+				$order->save();	
+				PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+
+				exit;
+			}
+
+			//STORE THE CHARGE ID
+			$order->set('ord_stripe_charge_id', $charge_result->id);
+			
+			//MARK THE ORDER PAID
+			$order->set('ord_status', Order::STATUS_PAID);
 			$order->save();	
-			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
-
-			exit;
-		}
-
-		//STORE THE CHARGE ID
-		$order->set('ord_stripe_charge_id', $charge_result->id);
-		
-		//MARK THE ORDER PAID
-		$order->set('ord_status', Order::STATUS_PAID);
-		$order->save();	
-	}		
+		}	
+	}	
 	
 	
 	//NOW HANDLE ALL OF THE NON RECURRING ITEMS
