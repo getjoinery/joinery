@@ -713,10 +713,17 @@ class StripeHelper {
 	}
 	
 	public function process_charge($source, $amount, $stripe_customer_id, $item_list, $billing_user, $order=NULL){
+		
+		if($amount <= 0){
+			throw new SystemDisplayablePermanentError("The amount value ".$amount."submitted for process_charge is not greater than zero.");
+			exit();	
+		}
 		$settings = Globalvars::get_instance();
 		$currency_code = $settings->get_setting('site_currency');
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 		$billing_name = $billing_user->display_name();
+		
+		$amount = (int)$amount*100;
 			
 		//CHARGE THE PURCHASE
 		
@@ -729,13 +736,14 @@ class StripeHelper {
 			 
 		$charge_params = array(
 		  'source' => $source[id],
-		  'amount' => (int)$amount*100,
+		  'amount' => $amount,
 		  'currency' => $currency_code,
 		  'customer' => $stripe_customer_id,
 		  'description' => implode(",", $item_list), 
 		  //'billing_details' => ['email' => $billing_user->get('usr_email'), 'name' => $billing_name, ],
 		  'metadata' => $metadata 
 		);
+
 		$charge = $this->create_charge($charge_params);
 
 		return $charge;
