@@ -36,8 +36,9 @@ class StripeHelper {
 		}
 
 		if(!$this->api_key || !$this->api_secret_key){
-			throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-			exit();			
+			return false;
+			//throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+			//exit();			
 		}
 		
 
