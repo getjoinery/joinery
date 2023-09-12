@@ -50,6 +50,15 @@ class StripeHelper {
 
 	}
 
+	public function is_initialized() {
+		if($this->api_key && $this->api_secret_key){
+			return true;			
+		}
+		else{
+			return false;
+		}
+	}
+
 	public function get_stripe_private_key() {
 		return $this->api_secret_key;
 	}
