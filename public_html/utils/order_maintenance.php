@@ -22,7 +22,9 @@
 	
 	//PERFORM MAINTENANCE ON THE ORDERS	
 	foreach($orders as $order){
-		$result = $stripe_helper->update_all_subscriptions_in_order($order);
+		if($stripe_helper->is_initialized()){
+			$result = $stripe_helper->update_all_subscriptions_in_order($order);
+		}
 	}
 	
 

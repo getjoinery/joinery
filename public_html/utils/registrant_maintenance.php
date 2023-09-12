@@ -63,7 +63,9 @@
 		if($event_registrant->get('evr_odi_order_item_id')){
 			$order_item = new OrderItem($event_registrant->get('evr_odi_order_item_id'), TRUE);
 			if($order_item->get('odi_is_subscription')){
-				$result = $stripe_helper->update_subscription_in_order_item($order_item);
+				if($stripe_helper->is_initialized()){
+					$result = $stripe_helper->update_subscription_in_order_item($order_item);
+				}
 			}
 		}
 	
