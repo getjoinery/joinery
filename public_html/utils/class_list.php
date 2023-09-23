@@ -63,6 +63,7 @@
 	require_once( __DIR__ . '/../data/booking_types_class.php');
 	require_once( __DIR__ . '/../data/event_waiting_lists_class.php');
 	require_once( __DIR__ . '/../data/locations_class.php');
+	require_once( __DIR__ . '/../data/api_keys_class.php');
 
 	$classes = array(
 			'Address',
@@ -123,7 +124,8 @@
 			'MailingListRegistrant',
 			'BookingType',
 			'WaitingList',
-			'Location'
+			'Location',
+			'ApiKey',
 		);			
 
 
