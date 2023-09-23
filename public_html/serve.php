@@ -71,6 +71,21 @@ if($settings->get_setting('urls_active')){
 	}
 }
 
+//CHECK API
+if($params[0] == 'api' && $params[1] == 'v1'){
+	$theme_file = $template_directory.'/api/apiv1.php';
+	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/api/apiv1.php';
+
+	if(file_exists($theme_file)){
+		require_once($theme_file);
+		exit();
+	}
+	else if(file_exists($base_file)){
+		require_once($base_file); 
+		exit();		
+	}
+}
+
 //CHECK STATIC FILES DIRECTORY (/VAR/WWW/HTML/$SITE/STATIC_FILES)
 if($params[0] == 'static_files'){
 	$static_files_dir = $settings->get_setting('static_files_dir');
