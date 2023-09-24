@@ -31,8 +31,7 @@ function event_sessions_course_logic($get_vars, $post_vars){
 		$event_id = LibraryFunctions::fetch_variable_local($get_vars, 'event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
 	else{
-		throw new SystemDisplayablePermanentError("This event does not exist.");
-		exit;
+		require_once(LibraryFunctions::display_404_page());	
 	}
 	
 			
