@@ -17,7 +17,7 @@ if ($_POST['confirm']){
 	
 	if ($confirm) {
 		$post = new Post($pst_post_id, TRUE);
-		$post->authenticate_write($session);
+		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$post->permanent_delete();
 	}
 

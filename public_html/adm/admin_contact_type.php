@@ -14,14 +14,14 @@
 	$contact_type = new ContactType($_REQUEST['ctt_contact_type_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$contact_type->authenticate_write($session);		
+		$contact_type->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$contact_type->soft_delete();
 
 		header("Location: /admin/admin_contact_types");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$contact_type->authenticate_write($session);		
+		$contact_type->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$contact_type->undelete();
 
 		header("Location: /admin/admin_contact_types");

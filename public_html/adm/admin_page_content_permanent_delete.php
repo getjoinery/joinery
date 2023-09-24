@@ -18,7 +18,7 @@ if ($_POST['confirm']){
 	
 	if ($confirm) {
 		$page_content = new PageContent($pac_page_content_id, TRUE);
-		$page_content->authenticate_write($session);
+		$page_content->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_content->permanent_delete();
 	}
 

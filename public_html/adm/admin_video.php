@@ -16,7 +16,7 @@
 	$user = new User($video->get('vid_usr_user_id'), TRUE);
 	
 	if($_REQUEST['action'] == 'remove'){
-		$video->authenticate_write($session);
+		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->permanent_delete();
 
 		//$returnurl = $session->get_return();
@@ -26,14 +26,14 @@
 
 
 	if($_REQUEST['action'] == 'delete'){
-		$video->authenticate_write($session);
+		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->soft_delete();
 
 		header("Location: /admin/admin_videos");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$video->authenticate_write($session);
+		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->undelete();
 
 		header("Location: /admin/admin_videos");

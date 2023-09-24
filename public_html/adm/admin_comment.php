@@ -19,7 +19,7 @@
 
 	if($_REQUEST['action'] == 'approve'){
 		$comment->set('cmt_is_approved', true);
-		$comment->authenticate_write($session);
+		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$comment->save();
 
 		header("Location: /admin/admin_comments");
@@ -28,21 +28,21 @@
 	else if($_REQUEST['action'] == 'unapprove'){
 
 		$comment->set('cmt_is_approved', false);
-		$comment->authenticate_write($session);		
+		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$comment->save();
 
 		header("Location: /admin/admin_comments");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'delete'){
-		$comment->authenticate_write($session);		
+		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$comment->soft_delete();
 
 		header("Location: /admin/admin_comments");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$comment->authenticate_write($session);		
+		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$comment->undelete();
 
 		header("Location: /admin/admin_comments");

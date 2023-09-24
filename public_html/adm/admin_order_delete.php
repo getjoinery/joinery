@@ -21,7 +21,7 @@ if ($_POST){
 	if ($confirm) {
 
 		$order = new Order($ord_order_id, TRUE);
-		$order->authenticate_write($session);
+		$order->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$order->permanent_delete();
 					
 	}

@@ -24,7 +24,7 @@ function address_edit_logic($get_vars, $post_vars){
 		}
 
 		$address = new Address($address_id, TRUE);
-		$address->authenticate_write($session);
+		$address->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		/*
 		if (!$new_address && $session->get_permission() == 0) {
 			if ($address->get('usa_address_is_verified')) {

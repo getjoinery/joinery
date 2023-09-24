@@ -86,7 +86,7 @@ if($_POST){
 	$event_registrant->set('evr_extra_info_completed', TRUE);
 	
 	
-	//$event_registrant->authenticate_write($session);
+	//$event_registrant->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 	$event_registrant->prepare();
 	$event_registrant->save();
 	

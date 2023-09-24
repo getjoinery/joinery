@@ -27,7 +27,7 @@ if ($_POST){
 
 		$event_registrant = new EventRegistrant($evr_event_registrant_id, TRUE);
 		$event = new Event($event_registrant->get('evr_evt_event_id'),true);
-		$event_registrant->authenticate_write($session);
+		$event_registrant->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event_registrant->remove();
 		
 		$msgtxt = 'You have now withdrawn from '.$event->get('evt_name').'.';

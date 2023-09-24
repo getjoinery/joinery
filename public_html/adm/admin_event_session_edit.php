@@ -43,7 +43,7 @@
 	}
 	else if($_REQUEST['action'] == 'addfile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
-		$event_session->authenticate_write($session);
+		$event_session->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		
 		//IF SOMEONE JUST CLICKS THE BUTTON, FAIL SILENTLY
 		if($_REQUEST['fil_file_id']){
@@ -56,7 +56,7 @@
 	}	
 	else if($_REQUEST['action'] == 'removefile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
-		$event_session->authenticate_write($session);
+		$event_session->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event_session->remove_file($_REQUEST['fil_file_id']);
 
 		//$returnurl = $session->get_return();

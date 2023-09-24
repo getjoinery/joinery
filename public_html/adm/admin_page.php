@@ -29,14 +29,14 @@
 	$page_contents->load();
 
 	if($_REQUEST['action'] == 'delete'){
-		$page->authenticate_write($session);
+		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page->soft_delete();
 
 		header("Location: /admin/admin_pages");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$page->authenticate_write($session);
+		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page->undelete();
 
 		header("Location: /admin/admin_pages");

@@ -85,11 +85,10 @@ class Setting extends SystemBase {
 	}
 
 	
-	function authenticate_write($session, $other_data=NULL) {
-		$current_user = $session->get_user_id();
-		if ($session->get_permission() < 10) {
+	function authenticate_write($data) {
+		if ($data['current_user_permission'] < 10) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this setting.');
+				'Current user does not have permission to edit this entry in '. $this->tablename);
 		}
 	}
 

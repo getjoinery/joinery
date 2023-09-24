@@ -59,15 +59,14 @@ class AdminMenu extends SystemBase {
 		'amu_disable' => 0, 
 		);		 
 	
-	
-	function authenticate_write($session, $other_data=NULL) {
-		$current_user = $session->get_user_id();
 
-		if ($session->get_permission() < 10) {
+	function authenticate_write($data) {
+		// If the user's ID doesn't match, we have to make
+		// sure they have admin access, otherwise denied.
+		if ($data['current_user_permission'] < 10) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this admin_menu.');
+				'Current user does not have permission to edit this entry in '. $this->tablename);
 		}
-
 	}
 
 }

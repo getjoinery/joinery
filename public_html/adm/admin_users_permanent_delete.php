@@ -17,7 +17,7 @@ if ($_POST){
 	
 	if ($confirm) {
 		$user = new User($usr_user_id, TRUE);
-		$user->authenticate_write($session);
+		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$user->permanent_delete();
 	}
 

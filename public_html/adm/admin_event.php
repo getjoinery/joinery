@@ -25,14 +25,14 @@
 	$event = new Event($_REQUEST['evt_event_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$event->authenticate_write($session);
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event->soft_delete();
 
 		header("Location: /admin/admin_events");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$event->authenticate_write($session);
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event->undelete();
 
 		header("Location: /admin/admin_events");

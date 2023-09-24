@@ -69,19 +69,21 @@ class StripeInvoice extends SystemBase {
 	}
 	
 
-	function authenticate_read($session, $other_data=NULL) {
-		if ($session->get_permission() < 8) {
+	function authenticate_read($data) {
+		// If the user's ID doesn't match, we have to make
+		// sure they have admin access, otherwise denied.
+		if ($data['current_user_permission'] < 8) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to perform this action.');
+				'Current user does not have permission to view this entry in '. $this->tablename);
 		}
 	}
 	
-	function authenticate_write($session, $other_data=NULL) {
-		if ($session->get_permission() < 8) {
+	function authenticate_write($data) {
+		if ($data['current_user_permission'] < 8) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to perform this action.');
+				'Current user does not have permission to edit this entry in '. $this->tablename);
 		}
-	}	
+	}
 
 }
 

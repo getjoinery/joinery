@@ -16,14 +16,14 @@
 	$mailing_list = new MailingList($_REQUEST['mlt_mailing_list_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$mailing_list->authenticate_write($session);		
+		$mailing_list->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$mailing_list->soft_delete();
 
 		header("Location: /admin/admin_mailing_lists");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$mailing_list->authenticate_write($session);		
+		$mailing_list->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$mailing_list->undelete();
 
 		header("Location: /admin/admin_mailing_lists");

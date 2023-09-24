@@ -39,14 +39,14 @@
 	include($_SERVER['DOCUMENT_ROOT'] . '/utils/order_maintenance.php');
 
 	if($_REQUEST['action'] == 'delete'){
-		$user->authenticate_write($session);
+		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$user->soft_delete();
 
 		header("Location: /admin/admin_users");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$user->authenticate_write($session);
+		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$user->soft_delete();
 
 		header("Location: /admin/admin_user?usr_user_id=".$user->key);

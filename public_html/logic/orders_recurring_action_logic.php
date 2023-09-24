@@ -22,7 +22,7 @@
 	$order_item = new OrderItem($order_item_id, TRUE);	
 	$order_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 	$order = $order_item->get_order();
-	$order_item->authenticate_write($session);
+	$order_item->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 
 	$result = $stripe_helper->update_subscription_in_order_item($order_item);
 	

@@ -62,13 +62,11 @@ class Location extends SystemBase {
 	);	
 	
 	
-	function authenticate_write($session, $other_data=NULL) {
-
-		if ($session->get_permission() < 5) {
+	function authenticate_write($data) {
+		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this location.');
+				'Current user does not have permission to edit this entry in '. $this->tablename);
 		}
-
 	}
 
 	function save($debug=false) {

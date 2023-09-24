@@ -15,14 +15,14 @@
 	$page_content = new PageContent($_GET['pac_page_content_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$page_content->authenticate_write($session);
+		$page_content->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_content->soft_delete();
 
 		header("Location: /admin/admin_page_contents");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$page_content->authenticate_write($session);
+		$page_content->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_content->undelete();
 
 		header("Location: /admin/admin_page_contents");
