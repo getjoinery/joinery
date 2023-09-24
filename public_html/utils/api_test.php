@@ -7,7 +7,7 @@
 		$access_token = '';	
 		$curl=curl_init();
 		curl_setopt_array($curl, array(
-		  CURLOPT_URL => 'https://jeremytunnell.net/api/v1/users?name_like=james',
+		  CURLOPT_URL => 'https://jeremytunnell.net/api/v1/user/100000000?usr_permission=9',
 		  CURLOPT_RETURNTRANSFER => true,
 		  CURLOPT_ENCODING => '',
 		  CURLOPT_MAXREDIRS => 10,

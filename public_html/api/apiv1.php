@@ -39,17 +39,152 @@
 	
 	$operation = ucwords($params[2]);
 
+
 	$response = NULL;
 	if(in_array($operation, $classes)){
-		//IT IS A QUERY FOR A SINGLE OBJECT
 		$class_name = $operation;
-		$object = new $class_name($params[3], TRUE);
-		$response = array(
-		  'api_version' => '1.0',
-		  'data' => $object->export_as_array()
-		);
+		
+		
+		if(strtolower($_SERVER['REQUEST_METHOD']) == 'get'){
+			
+			if($api_entry->get('apk_permission') == 2){
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => 'Error: Unable to fetch object, insufficient permission'
+				);
+				header("Content-Type: application/json");
+				http_response_code(403);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;				
+			}			
+			
+			//IT IS A QUERY FOR A SINGLE OBJECT
+
+			try{
+				$object = new $class_name($params[3], TRUE);	
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => $object->export_as_array()
+				);
+			}
+			catch (Exception $e){
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => 'Error: Unable to fetch object ('.$e->getMessage().')'
+				);
+				header("Content-Type: application/json");
+				http_response_code(400);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;
+			}
+		}
+		else if(strtolower($_SERVER['REQUEST_METHOD']) == 'put'){
+			//IT IS AN UPDATE TO A SINGLE OBJECT
+			if($api_entry->get('apk_permission') < 2){
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => 'Error: Unable to update object, insufficient permission'
+				);
+				header("Content-Type: application/json");
+				http_response_code(403);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;				
+			}
+			
+			
+			parse_str($_SERVER['QUERY_STRING'], $url_parts);
+
+			try{
+				$object = new $class_name($params[3], TRUE);	
+				foreach($url_parts as $key=>$value){
+					$object->set($key, $value);
+				}
+				$object->prepare();
+				$object->save();	
+
+				//IT IS A QUERY FOR A SINGLE OBJECT
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => $object->export_as_array()
+				);
+			}
+			catch (Exception $e){
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => 'Error: Unable to update object ('.$e->getMessage().')'
+				);
+				header("Content-Type: application/json");
+				http_response_code(400);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;
+			}
+		}
+		else if(strtolower($_SERVER['REQUEST_METHOD']) == 'post'){
+			//IT IS A NEW OBJECT
+			if($api_entry->get('apk_permission') < 2){
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => 'Error: Unable to create object, insufficient permission'
+				);
+				header("Content-Type: application/json");
+				http_response_code(403);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;				
+			}
+			
+
+			try{
+				$object = new $class_name(NULL);	
+				foreach($_POST as $key=>$value){
+					$object->set($key, $value);
+				}
+				$object->prepare();
+				$object->save();	
+
+				//IT IS A QUERY FOR A SINGLE OBJECT
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => $object->export_as_array()
+				);
+			}
+			catch (Exception $e){
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => 'Error: Unable to create object ('.$e->getMessage().')'
+				);
+				header("Content-Type: application/json");
+				http_response_code(400);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;
+			}
+		}
 	}
 	else if(in_array(substr($operation, 0, -1), $classes)){
+		if($api_entry->get('apk_permission') == 2){
+			$response = array(
+			  'api_version' => '1.0',
+			  'data' => 'Error: Unable to fetch objects, insufficient permission'
+			);
+			header("Content-Type: application/json");
+			http_response_code(403);
+
+			$response = json_encode($response);
+			echo $response . PHP_EOL;
+			exit;				
+		}	
+			
 		//IT IS A QUERY FOR A LIST OF OBJECTS
 		$class_name = substr($operation, 0, -1);
 		$multiclassname = 'Multi'.$class_name;
@@ -137,6 +272,7 @@
 
 		$response = json_encode($response);
 		echo $response . PHP_EOL;
+		exit;
 	}
 
 ?>
