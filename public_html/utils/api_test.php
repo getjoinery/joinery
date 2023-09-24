@@ -17,7 +17,7 @@
 		  CURLOPT_CUSTOMREQUEST => 'GET',
 		  CURLOPT_HTTPHEADER => array(
 			"public_key: ".$public_key,
-			"secret_key:".$secret_key,
+			"secret_key: ".$secret_key,
 		  ),
 		));
 
