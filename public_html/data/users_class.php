@@ -510,7 +510,7 @@ class User extends SystemBase {
 			// sure they have admin access, otherwise denied.
 			if ($data['current_user_permission'] < 5) {
 				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. $this->tablename);
+					'Current user does not have permission to edit this entry in '. static::$tablename.'-'.$data['current_user_permission'] );
 			}
 		}
 	}
