@@ -12,7 +12,51 @@
 	$public_key = $headers['public_key'];
 	$secret_key = $headers['secret_key'];
 
-	$api_entry = ApiKey::GetByColumn('apk_public_key', $public_key);
+	try{
+		$api_entry = ApiKey::GetByColumn('apk_public_key', $public_key);
+	}
+	catch (Exception $e){
+		$response = array(
+		  'api_version' => '1.0',
+		  'data' => 'Error: Unable to find the api key'
+		);
+		header("Content-Type: application/json");
+		http_response_code(400);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
+		exit;
+	}
+
+	try{
+		$api_user = new User($api_entry->get('apk_usr_user_id', TRUE));
+	}
+	catch (Exception $e){
+		$response = array(
+		  'api_version' => '1.0',
+		  'data' => 'Error: Unable find the api user'
+		);
+		header("Content-Type: application/json");
+		http_response_code(400);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
+		exit;
+	}
+	
+	if($api_user->get('usr_delete_time')){
+		$response = array(
+		  'api_version' => '1.0',
+		  'data' => 'Error: API user has been deleted'
+		);
+		header("Content-Type: application/json");
+		http_response_code(400);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
+		exit;		
+	}
+	
 
 	if($api_entry === NULL){
 		//$error = error_get_last();
@@ -161,6 +205,46 @@
 				$response = array(
 				  'api_version' => '1.0',
 				  'data' => 'Error: Unable to create object ('.$e->getMessage().')'
+				);
+				header("Content-Type: application/json");
+				http_response_code(400);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;
+			}
+		}
+		else if(strtolower($_SERVER['REQUEST_METHOD']) == 'delete'){
+			//DELETE THE OBJECT
+			if($api_entry->get('apk_permission') < 4){
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => 'Error: Unable to delete object, insufficient permission'
+				);
+				header("Content-Type: application/json");
+				http_response_code(403);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;				
+			}
+			
+
+			try{
+				$object = new $class_name($params[3], TRUE);					
+				$object->soft_delete();	
+				$object = new $class_name($params[3], TRUE);	
+
+				//IT IS A QUERY FOR A SINGLE OBJECT
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => $object->export_as_array()
+				);
+			}
+			catch (Exception $e){
+				$response = array(
+				  'api_version' => '1.0',
+				  'data' => 'Error: Unable to delete object ('.$e->getMessage().')'
 				);
 				header("Content-Type: application/json");
 				http_response_code(400);
