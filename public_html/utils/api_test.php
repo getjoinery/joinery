@@ -7,7 +7,7 @@
 		$access_token = '';	
 		$curl=curl_init();
 		curl_setopt_array($curl, array(
-		  CURLOPT_URL => 'https://jeremytunnell.net/api/v1/user/1',
+		  CURLOPT_URL => 'https://jeremytunnell.net/api/v1/users?name_like=james',
 		  CURLOPT_RETURNTRANSFER => true,
 		  CURLOPT_ENCODING => '',
 		  CURLOPT_MAXREDIRS => 10,
@@ -19,7 +19,8 @@
 			"public_key: ".$public_key,
 			"secret_key: ".$secret_key,
 		  ),
-		));
+		));	
+
 
 		$response = curl_exec($curl);
 		curl_close($curl);

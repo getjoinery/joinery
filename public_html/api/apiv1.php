@@ -15,6 +15,7 @@
 	$api_entry = ApiKey::GetByColumn('apk_public_key', $public_key);
 
 	if($api_entry === NULL){
+		//$error = error_get_last();
 		http_response_code(401);
 		exit;		
 	}
@@ -36,20 +37,106 @@
 		exit;
 	}
 	
-	
-	//TODO MAKE MORE EFFICIENT
-	$object = new $params[2]($params[3], TRUE);
-	
-	// Collection object
-	$response = array(
-	  'api_version' => '1.0',
-	  'data' => $object->export_as_array()
-	);
-	
-	header("Content-Type: application/json");
-	http_response_code(200);
+	$operation = ucwords($params[2]);
 
-	$response = json_encode($response);
-	echo $response . PHP_EOL;
+	$response = NULL;
+	if(in_array($operation, $classes)){
+		//IT IS A QUERY FOR A SINGLE OBJECT
+		$class_name = $operation;
+		$object = new $class_name($params[3], TRUE);
+		$response = array(
+		  'api_version' => '1.0',
+		  'data' => $object->export_as_array()
+		);
+	}
+	else if(in_array(substr($operation, 0, -1), $classes)){
+		//IT IS A QUERY FOR A LIST OF OBJECTS
+		$class_name = substr($operation, 0, -1);
+		$multiclassname = 'Multi'.$class_name;
+		
+		parse_str($_SERVER['QUERY_STRING'], $url_parts);
+
+		if(isset($url_parts['page'])){
+			$page = $url_parts['page'];
+			unset($url_parts['page']);
+		}
+		else{
+			$page = 0;
+		}
+
+		if(isset($url_parts['numperpage'])){
+			$numperpage = $url_parts['numperpage'];
+			unset($url_parts['numperpage']);
+		}
+		else{
+			$numperpage = 3;
+		}
+		
+		if(isset($url_parts['sort'])){
+			$sort = $url_parts['sort'];
+			unset($url_parts['sort']);
+		}
+		else{
+			$sort = NULL;
+		}
+		
+		if(isset($url_parts['sdirection'])){
+			$sdirection = $url_parts['sdirection'];
+			unset($url_parts['sdirection']);
+		}
+		else{
+			$sdirection = 'ASC';
+		}
+		
+		if($sort && $sdirection){
+			$sortarray = array($sort=>$sdirection);
+		}
+		else{
+			$sortarray = NULL;
+		}
+		
+		$offset = $numperpage * $page;
+		
+		$objects = new $multiclassname(
+			$url_parts,
+			$sortarray,
+			$numperpage,
+			$offset);	
+		$numobjects = $objects->count_all();	
+		$objects->load();
+		
+		$response_array = array();
+		foreach($objects as $object){
+			$response_array[] = $object->export_as_array();
+		}
+
+		$response = array(
+		  'api_version' => '1.0',
+		  'num_results' => $numobjects,
+		  'page' => $page,
+		  'numperpage' => $numperpage,
+		  'data' => $response_array
+		);
+	}
+
+	if($response !== NULL){
+		
+		header("Content-Type: application/json");
+		http_response_code(200);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
+	}
+	else{
+		$response = array(
+		  'api_version' => '1.0',
+		  'data' => 'Error: Invalid object or list ('.$operation.')'
+		);
+		header("Content-Type: application/json");
+		http_response_code(400);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
+	}
 
 ?>
