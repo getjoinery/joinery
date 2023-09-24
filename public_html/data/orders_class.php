@@ -228,7 +228,13 @@ class MultiOrder extends SystemMultiBase {
 		}	
 
 		if (array_key_exists('test_mode', $this->options)) {
-			$where_clauses[] = 'ord_test_mode IS ' . ($this->options['test_mode'] ? 'true' : 'false');
+			if($this->options['test_mode'] == true){
+				$where_clauses[] = 'ord_test_mode IS true';
+			}
+			else{
+				$where_clauses[] = '(ord_test_mode IS false OR ord_test_mode IS NULL)';
+			}
+			
 		}			
 
 		if (array_key_exists('order_finished', $this->options)) {
