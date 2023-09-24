@@ -37,7 +37,7 @@ function product_logic($get_vars, $post_vars, $product){
 		$product = new Product($product_id, TRUE);
 	}
 	else{
-		throw new SystemDisplayableError('There is no product present.');
+		require_once(LibraryFunctions::display_404_page());	
 	}
 	
 	if ($product && $session->get_user_id() && $session->get_permission() > 4) {

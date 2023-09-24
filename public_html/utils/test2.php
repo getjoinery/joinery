@@ -9,7 +9,7 @@
 		require_once($siteDir . '/data/files_class.php');
 	require_once($siteDir . '/data/orders_class.php');
 	require_once($siteDir . '/data/products_class.php');
-	require_once($siteDir . '/data/events_class.php');
+	require_once($siteDir . '/data/users_class.php');
 	require_once($siteDir . '/data/groups_class.php');
 	require_once($siteDir . '/data/product_details_class.php');
 	require_once($siteDir . '/data/event_registrants_class.php');
@@ -21,6 +21,7 @@
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require_once $composer_dir.'autoload.php';
 use MailchimpAPI\Mailchimp;
+
 
 echo 'turned off';
 exit;

@@ -445,8 +445,9 @@ abstract class SystemBase {
 		$this->data = SingleRowFetch(static::$tablename, static::$pkey_column,
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
 		if ($this->data === NULL) {
-			throw new Exception(
-				'This '.static::$tablename.' row ('.static::$pkey_column.'='.$this->key.') does not exist');
+			error_log('This '.static::$tablename.' row ('.static::$pkey_column.'='.$this->key.') does not exist');
+			return false;
+			//throw new Exception('This '.static::$tablename.' row ('.static::$pkey_column.'='.$this->key.') does not exist');
 		}		
 		
 	}
