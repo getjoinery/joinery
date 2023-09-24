@@ -56,7 +56,7 @@ class QuestionOption extends SystemBase {
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. $this->tablename);
+				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
 	}
 	

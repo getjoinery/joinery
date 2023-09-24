@@ -238,12 +238,12 @@ class Video extends SystemBase {
 	
 	
 	function authenticate_write($data) {
-		if ($this->get($this->prefix.'_usr_user_id') != $data['current_user_id']) {
+		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
 			// sure they have admin access, otherwise denied.
 			if ($data['current_user_permission'] < 5) {
 				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. $this->tablename);
+					'Current user does not have permission to edit this entry in '. static::$tablename);
 			}
 		}
 	}

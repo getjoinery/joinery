@@ -29,7 +29,8 @@
 	}
 
 	try{
-		$api_user = new User($api_entry->get('apk_usr_user_id', TRUE));
+		$api_user = new User($api_entry->get('apk_usr_user_id'), TRUE);
+
 	}
 	catch (Exception $e){
 		$response = array(
@@ -42,6 +43,19 @@
 		$response = json_encode($response);
 		echo $response . PHP_EOL;
 		exit;
+	}	
+	
+	if(!$api_user->key){
+		$response = array(
+		  'api_version' => '1.0',
+		  'data' => 'Error: Unable find the api user'
+		);
+		header("Content-Type: application/json");
+		http_response_code(400);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
+		exit;		
 	}
 	
 	if($api_user->get('usr_delete_time')){
@@ -94,7 +108,7 @@
 			if($api_entry->get('apk_permission') == 2){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to fetch object, insufficient permission'
+				  'data' => 'Error: Unable to fetch object, insufficient api permission'
 				);
 				header("Content-Type: application/json");
 				http_response_code(403);
@@ -105,9 +119,9 @@
 			}			
 			
 			//IT IS A QUERY FOR A SINGLE OBJECT
-
 			try{
-				$object = new $class_name($params[3], TRUE);	
+				$object = new $class_name($params[3], TRUE);
+				$object->authenticate_read(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')));				
 				$response = array(
 				  'api_version' => '1.0',
 				  'data' => $object->export_as_array()
@@ -127,11 +141,11 @@
 			}
 		}
 		else if(strtolower($_SERVER['REQUEST_METHOD']) == 'put'){
-			//IT IS AN UPDATE TO A SINGLE OBJECT
+			//IT IS AN UPDATE TO A SINGLE OBJECT		
 			if($api_entry->get('apk_permission') < 2){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to update object, insufficient permission'
+				  'data' => 'Error: Unable to update object, insufficient api permission'
 				);
 				header("Content-Type: application/json");
 				http_response_code(403);
@@ -150,6 +164,7 @@
 					$object->set($key, $value);
 				}
 				$object->prepare();
+				$object->authenticate_write(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')));	
 				$object->save();	
 
 				//IT IS A QUERY FOR A SINGLE OBJECT
@@ -173,10 +188,10 @@
 		}
 		else if(strtolower($_SERVER['REQUEST_METHOD']) == 'post'){
 			//IT IS A NEW OBJECT
-			if($api_entry->get('apk_permission') < 2){
+			if($api_entry->get('apk_permission') < 2 ){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to create object, insufficient permission'
+				  'data' => 'Error: Unable to create object, insufficient api permission'
 				);
 				header("Content-Type: application/json");
 				http_response_code(403);
@@ -193,6 +208,7 @@
 					$object->set($key, $value);
 				}
 				$object->prepare();
+				$object->authenticate_write(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')));	
 				$object->save();	
 
 				//IT IS A QUERY FOR A SINGLE OBJECT
@@ -219,7 +235,7 @@
 			if($api_entry->get('apk_permission') < 4){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to delete object, insufficient permission'
+				  'data' => 'Error: Unable to delete object, insufficient api permission'
 				);
 				header("Content-Type: application/json");
 				http_response_code(403);
@@ -231,7 +247,8 @@
 			
 
 			try{
-				$object = new $class_name($params[3], TRUE);					
+				$object = new $class_name($params[3], TRUE);
+				$object->authenticate_write(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')));		
 				$object->soft_delete();	
 				$object = new $class_name($params[3], TRUE);	
 
@@ -256,7 +273,7 @@
 		}
 	}
 	else if(in_array(substr($operation, 0, -1), $classes)){
-		if($api_entry->get('apk_permission') == 2){
+		if($api_entry->get('apk_permission') == 2 || !$objects->authenticate_read(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')))){
 			$response = array(
 			  'api_version' => '1.0',
 			  'data' => 'Error: Unable to fetch objects, insufficient permission'
@@ -345,6 +362,7 @@
 
 		$response = json_encode($response);
 		echo $response . PHP_EOL;
+		exit;
 	}
 	else{
 		$response = array(
