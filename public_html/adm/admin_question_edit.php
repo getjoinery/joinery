@@ -24,7 +24,7 @@
 		$question_option->set('qop_qst_question_id', $question->key);
 		$question_option->set('qop_question_option_label', $_REQUEST['qop_question_option_label']);
 		$question_option->set('qop_question_option_value', $_REQUEST['qop_question_option_value']);
-		$question_option->authenticate_write($session);
+		$question_option->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$question_option->prepare();
 		$question_option->save();
 
@@ -34,7 +34,7 @@
 	}	
 	if($_REQUEST['action'] == 'remove_question_option'){
 		$question_option = new QuestionOption($_REQUEST['qop_question_option_id'], TRUE);
-		$question_option->authenticate_write($session);
+		$question_option->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$question_option->permanent_delete();
 
 		//$returnurl = $session->get_return();

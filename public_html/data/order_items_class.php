@@ -87,12 +87,16 @@ class OrderItem extends SystemBase {
 		return $order;
 	}
 	
-	function authenticate_write($session, $other_data=NULL) {
-		if ($session->get_permission() < 5 && $session->get_user_id() != $this->get('odi_usr_user_id')) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to perform this action.');
+	function authenticate_write($data) {
+		if ($this->get($this->prefix.'_usr_user_id') != $data['current_user_id']) {
+			// If the user's ID doesn't match, we have to make
+			// sure they have admin access, otherwise denied.
+			if ($data['current_user_permission'] < 5) {
+				throw new SystemAuthenticationError(
+					'Current user does not have permission to edit this entry in '. $this->tablename);
+			}
 		}
-	}	
+	}
 
 	protected function _unsafe_edit() {
 		$rowdata = array();

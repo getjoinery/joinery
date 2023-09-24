@@ -20,7 +20,7 @@
 	$user = new User($file->get('fil_usr_user_id'), TRUE);
 	
 	if($_POST['action'] == 'remove'){
-		$file->authenticate_write($session);
+		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$file->permanent_delete();
 
 		//$returnurl = $session->get_return();
@@ -44,14 +44,14 @@
 		exit();		
 	}	
 	else if($_REQUEST['action'] == 'delete'){
-		$file->authenticate_write($session);
+		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$file->soft_delete();
 
 		header("Location: /admin/admin_files");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$file->authenticate_write($session);
+		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$file->undelete();
 
 		header("Location: /admin/admin_files");

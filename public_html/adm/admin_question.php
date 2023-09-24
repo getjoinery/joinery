@@ -16,14 +16,14 @@
 	$question = new Question($_REQUEST['qst_question_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$question->authenticate_write($session);
+		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$question->soft_delete();
 
 		header("Location: /admin/admin_questions");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$question->authenticate_write($session);
+		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$question->soft_delete();
 
 		header("Location: /admin/admin_questions");

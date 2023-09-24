@@ -16,14 +16,14 @@
 	$location = new Location($_REQUEST['loc_location_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$location->authenticate_write($session);		
+		$location->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$location->soft_delete();
 
 		header("Location: /admin/admin_locations");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$location->authenticate_write($session);		
+		$location->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
 		$location->undelete();
 
 		header("Location: /admin/admin_locations");

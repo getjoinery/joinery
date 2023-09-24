@@ -14,7 +14,7 @@
 	$coupon_code = new CouponCode($_GET['ccd_coupon_code_id'], TRUE);
 	
 	if($_REQUEST['action'] == 'remove'){
-		$coupon_code->authenticate_write($session);
+		$coupon_code->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$coupon_code->permanent_delete();
 
 		//$returncoupon_code = $session->get_return();

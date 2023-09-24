@@ -22,12 +22,12 @@
 	}
 	else if($_POST['action'] == 'removequestion'){
 		$survey_question = new SurveyQuestion($_REQUEST['srq_survey_question_id'], TRUE);
-		$survey_question->authenticate_write($session);
+		$survey_question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$survey_question->permanent_delete();
 	}
 	else if($_POST['action'] == 'removesurvey'){
 		$survey = new Survey($_REQUEST['svy_survey_id'], TRUE);
-		$survey->authenticate_write($session);
+		$survey->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$survey->permanent_delete();
 	}
 	
@@ -36,14 +36,14 @@
 
 
 	if($_REQUEST['action'] == 'delete'){
-		$survey->authenticate_write($session);
+		$survey->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$survey->soft_delete();
 
 		header("Location: /admin/admin_surveys");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$survey->authenticate_write($session);
+		$survey->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$survey->soft_delete();
 
 		header("Location: /admin/admin_surveys");

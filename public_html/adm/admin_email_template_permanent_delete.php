@@ -17,7 +17,7 @@ if ($_POST['confirm']){
 	
 	if ($confirm) {
 		$email_template = new EmailTemplateStore($emt_email_template_id, TRUE);
-		$email_template->authenticate_write($session);
+		$email_template->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$email_template->permanent_delete();
 	}
 

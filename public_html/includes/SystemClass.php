@@ -818,9 +818,9 @@ abstract class SystemBase {
 		
 	}
 
-	function authenticate_read($session, $other_data=NULL) {}
+	function authenticate_read($data) {}
 
-	function authenticate_write($session, $other_data=NULL) {}
+	function authenticate_write($data) {}
 
 	function is_owner($session) { return FALSE; }
 
@@ -978,9 +978,9 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		return '';
 	}
 
-	function authenticate_read($session, $other_data=NULL) {
+	function authenticate_read($data) {
 		foreach ($this as $child) {
-			$child->authenticate_read($session, $other_data);
+			$child->authenticate_read($data);
 		}
 	}
 

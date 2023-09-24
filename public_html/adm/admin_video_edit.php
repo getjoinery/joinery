@@ -44,7 +44,7 @@
 		$video->set('vid_description', $_POST['vid_description']);
 		
 		try {
-			$video->authenticate_write($session);
+			$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			$video->save();
 		} catch (TTClassException $e) {
 			$errorhandler = new ErrorHandler();

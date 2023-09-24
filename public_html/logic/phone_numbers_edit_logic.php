@@ -17,7 +17,7 @@ function phone_numbers_edit_logic($get_vars, $post_vars){
 
 		if($post_vars['phn_phone_number_id']){
 			$phone_number = new PhoneNumber($post_vars['phn_phone_number_id'], TRUE);
-			$phone_number->authenticate_write($session);
+			$phone_number->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		}
 		else{
 			$phone_number = NULL;

@@ -44,11 +44,6 @@ class ProductDetail extends SystemBase {
 	
 	public static $initial_default_values = array();
 
-	
-	function authenticate_write($session, $other_data=NULL) {
-		$current_user = $session->get_user_id();
-
-	}
 
 
 

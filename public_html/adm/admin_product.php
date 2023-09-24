@@ -24,14 +24,14 @@
 	$orders = new MultiOrderItem(array('product_id' => $product->key));
 
 	if($_REQUEST['action'] == 'delete'){
-		$product->authenticate_write($session);
+		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$product->soft_delete();
 
 		header("Location: /admin/admin_products");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$product->authenticate_write($session);
+		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$product->undelete();
 
 		header("Location: /admin/admin_products");
@@ -42,7 +42,7 @@
 		if($orders->count_all()){
 			throw new SystemDisplayableError('You cannot delete a product with orders.');
 		}
-		$product->authenticate_write($session);
+		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$product->permanent_delete();
 
 		//$returnurl = $session->get_return();

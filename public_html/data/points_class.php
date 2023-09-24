@@ -38,10 +38,6 @@ class Point extends SystemBase {
 
 	public static $initial_default_values = array();
 
-	
-	function authenticate_write($session, $other_data=NULL) {
-
-	}
 
 	public static function get_by_id($pnt_point_id) {
 		$dbhelper = DbConnector::get_instance();

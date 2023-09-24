@@ -22,14 +22,14 @@
 	}
 	/*
 	if($_REQUEST['action'] == 'delete'){
-		$booking->authenticate_write($session);
+		$booking->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$booking->soft_delete();
 
 		header("Location: /admin/admin_bookings");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$booking->authenticate_write($session);
+		$booking->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$booking->soft_delete();
 
 		header("Location: /admin/admin_bookings");

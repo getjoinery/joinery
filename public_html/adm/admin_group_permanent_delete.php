@@ -17,7 +17,7 @@ if ($_POST['confirm']){
 	
 	if ($confirm) {
 		$group = new Group($grp_group_id, TRUE);
-		$group->authenticate_write($session);
+		$group->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$group->permanent_delete();
 	}
 

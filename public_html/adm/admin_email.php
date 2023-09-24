@@ -22,7 +22,7 @@
 	
 
 	if($_REQUEST['action'] == 'delete'){
-		$email->authenticate_write($session);
+		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		//REMOVE THE RECIPIENTS
 		EmailRecipient::DeleteAll($email->key);
 		$email->soft_delete();
@@ -31,7 +31,7 @@
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$email->authenticate_write($session);
+		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$email->undelete();
 
 		header("Location: /admin/admin_emails");
@@ -39,7 +39,7 @@
 	}
 	else if($_REQUEST['action'] == 'unqueue'){
 		$email->set('eml_status', Email::EMAIL_CREATED);
-		$email->authenticate_write($session);
+		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$email->save();
 		//REMOVE THE RECIPIENTS
 		EmailRecipient::DeleteAll($email->key);

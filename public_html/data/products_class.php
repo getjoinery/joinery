@@ -320,7 +320,7 @@ class AddressRequirement extends BasicProductRequirement {
 				throw new BasicProductRequirementException('You have selected an invalid address, please try again.');
 			}
 			$address = new Address($address_key, TRUE);
-			$address->authenticate_write($session);
+			$address->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			return array(
 				array('address' => $address),
 				array('Address' => $address->get_address_string(', '))

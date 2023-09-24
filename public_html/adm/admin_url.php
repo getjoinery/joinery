@@ -14,7 +14,7 @@
 	$url = new Url($_GET['url_url_id'], TRUE);
 	
 	if($_REQUEST['action'] == 'soft_delete'){
-		$url->authenticate_write($session);
+		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$url->soft_delete();
 
 		//$returnurl = $session->get_return();
@@ -22,7 +22,7 @@
 		exit();		
 	}
 	if($_REQUEST['action'] == 'undelete'){
-		$url->authenticate_write($session);
+		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$url->undelete();
 
 		//$returnurl = $session->get_return();
@@ -30,7 +30,7 @@
 		exit();		
 	}		
 	if($_REQUEST['action'] == 'permanent_delete'){
-		$url->authenticate_write($session);
+		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$url->permanent_delete();
 
 		//$returnurl = $session->get_return();

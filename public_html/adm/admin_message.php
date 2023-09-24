@@ -24,14 +24,14 @@
 
 
 	if($_REQUEST['action'] == 'delete'){
-		$message->authenticate_write($session);
+		$message->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$message->soft_delete();
 
 		header("Location: /admin/admin_posts");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$message->authenticate_write($session);
+		$message->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$message->soft_delete();
 
 		header("Location: /admin/admin_posts");
