@@ -80,6 +80,7 @@
 	
 	if($authorized_ips = $api_entry->get('apk_ip_restriction')){
 		$ip_list = fgetcsv($authorized_ips);
+		$ip_list = array_map('trim', $ip_list);
 		if(count($ip_list)){
 			if(!in_array($_SERVER['REMOTE_ADDR'], $ip_list)){
 				http_response_code(401);
