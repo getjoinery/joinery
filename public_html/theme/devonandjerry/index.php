@@ -69,7 +69,7 @@
           <p class="mt-5 text-lg leading-6 font-medium text-gray-900">Recorded Classes</p>
         </dt>
         <dd class="mt-2 text-base text-gray-500">
-          Find it challenging to make it onto live zoom sessions or live in a dance wasteland? We've got you covered. All our courses are hi-def, succinctly edited, and vouched for by many!
+          Find it challenging to make it onto live zoom sessions or live in a dance wasteland? We've got you covered. All my courses are hi-def, succinctly edited, and vouched for by many!
         </dd>
       </div>
 
@@ -97,7 +97,7 @@
           <p class="mt-5 text-lg leading-6 font-medium text-gray-900">Hilarious Delivery 🤣</p>
         </dt>
         <dd class="mt-2 text-base text-gray-500">
-          We're pretty funny - just ask our therapists and our students.
+          I'm pretty funny - just ask my therapists and my students.
         </dd>
       </div>
     </dl>
@@ -271,7 +271,7 @@
             <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
           </svg>
           <p class="relative">
-           In science, the validity of a unified model is judged on its capability to answer not only the question its developers set out to explain, but it's ability to predict the solutions to problems they never intended to solve. That is exactly my feeling after attending Deconstructing Zouk. So many frustrating problems in my dance magically disappeared when I applied the concepts we learned. I'm exceptionally grateful for the wonderful instructors and hosts that made it possible.
+           I wholeheartedly recommend The Efficient Follow Online – both for Devon in general as an instructor for Brazilian Zouk & Lambada, and also for the"Remixing Head Movement- Level 3" online course I took! Devon is a genius when it comes to deconstructing head movement and her workshops & course taught me a whole new way to think about, analyze, and practice head movement in a way that opened up so many new possibilities!! So grateful for the amount of thought and care she puts into her teaching.
           </p>
         </div>
         <footer class="mt-8">
@@ -280,7 +280,123 @@
               <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
             </div>-->
             <div class="ml-4">
-              <div class="text-base font-medium text-white">Carrie Brandl</div>
+              <div class="text-base font-medium text-white">Shane Rasnak</div>
+              <!--<div class="text-base font-medium text-indigo-200">Founder of Sotaki Dance School</div>-->
+            </div>
+          </div>
+        </footer>
+      </blockquote>
+    </div>
+    <div class="py-12 px-4 border-t-2 border-indigo-900 sm:px-6 md:py-16 md:pr-0 md:pl-10 md:border-t-0 md:border-l lg:pl-16">
+      <!--<div class="md:flex-shrink-0">
+        <img class="h-12" src="https://tailwindui.com/img/logos/workcation-logo-indigo-300.svg" alt="Workcation">
+      </div>-->
+      <blockquote class="mt-6 md:flex-grow md:flex md:flex-col">
+        <div class="relative text-lg font-medium text-white md:flex-grow">
+          <svg class="absolute top-0 left-0 transform -translate-x-3 -translate-y-2 h-8 w-8 text-indigo-600" fill="currentColor" viewBox="0 0 32 32">
+            <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
+          </svg>
+          <p class="relative">
+            I truly recommend anything that Devon does especially this class in particular. The amount of info provided in this class for one's needs and development when it comes to Zouk is truly invaluable. Definitely one of the best classes out there.
+          </p>
+        </div>
+        <footer class="mt-8">
+          <div class="flex items-start">
+            <div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
+              <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+            </div>
+            <div class="ml-4">
+              <div class="text-base font-medium text-white">Efosa Uwa-Omede</div>
+              <!--<div class="text-base font-medium text-indigo-200">Movement Therapist</div>-->
+            </div>
+          </div>
+        </footer>
+      </blockquote>
+    </div>
+  </div>
+</section>		
+	
+	
+
+<section class="bg-gray-600">
+  <div class="max-w-7xl mx-auto md:grid md:grid-cols-2 md:px-6 lg:px-8">
+    <div class="py-12 px-4 sm:px-6 md:flex md:flex-col md:py-16 md:pl-0 md:pr-10 md:border-r md:border-gray-900 lg:pr-16">
+      <!--<div class="md:flex-shrink-0">
+        <img class="h-12" src="https://tailwindui.com/img/logos/tuple-logo-indigo-300.svg" alt="Tuple">
+      </div>-->
+      <blockquote class="mt-6 md:flex-grow md:flex md:flex-col">
+        <div class="relative text-lg font-medium text-white md:flex-grow">
+          <svg class="absolute top-0 left-0 transform -translate-x-3 -translate-y-2 h-8 w-8 text-indigo-600" fill="currentColor" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
+          </svg>
+          <p class="relative">
+           There are a lot of visual illusions in zouk, some of the riskiest to emulate involving head movement. Devon's class is luxuriously paced, methodically laid out, and entertaining to watch and follow. It's perfect for people who want to learn it safely and thoroughly-which should be everyone, both leads and follows, who want to stay safe (and upright!) while incorporating this expressive vocabulary into their dance.
+          </p>
+        </div>
+        <footer class="mt-8">
+          <div class="flex items-start">
+            <!--<div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
+              <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+            </div>-->
+            <div class="ml-4">
+              <div class="text-base font-medium text-white">Larissa Archer</div>
+              <!--<div class="text-base font-medium text-indigo-200">Founder of Sotaki Dance School</div>-->
+            </div>
+          </div>
+        </footer>
+      </blockquote>
+    </div>
+    <div class="py-12 px-4 border-t-2 border-indigo-900 sm:px-6 md:py-16 md:pr-0 md:pl-10 md:border-t-0 md:border-l lg:pl-16">
+      <!--<div class="md:flex-shrink-0">
+        <img class="h-12" src="https://tailwindui.com/img/logos/workcation-logo-indigo-300.svg" alt="Workcation">
+      </div>-->
+      <blockquote class="mt-6 md:flex-grow md:flex md:flex-col">
+        <div class="relative text-lg font-medium text-white md:flex-grow">
+          <svg class="absolute top-0 left-0 transform -translate-x-3 -translate-y-2 h-8 w-8 text-indigo-600" fill="currentColor" viewBox="0 0 32 32">
+            <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
+          </svg>
+          <p class="relative">
+            Working with Devon has been both fun and highly effective. She is such a sweet and authentic person and is good at helping dancers make little tweaks that make a big difference in visual appeal and partner connection. I’m somewhat new to Zouk and Devon had great tips, tricks, and visualizations to help me get into the correct postures and frames that would look better, feel good to me and my partner, and help keep me safe. Ask her to show you how to offer libations to the gods and watch how your posture shifts! She gave me permission to try and mess up, which I apparently really needed. She creates a safe and playful space to move through hang-ups, find what works best for you and generally nerd out on dance. I really appreciate her awareness of how the the mental, emotional, and physical aspects of life and our experiences all contribute to our state of being and our dancing. I’m already excited for the next time she visits San Diego.
+          </p>
+        </div>
+        <footer class="mt-8">
+          <div class="flex items-start">
+            <div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
+              <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+            </div>
+            <div class="ml-4">
+              <div class="text-base font-medium text-white">Vanessa Zimmerman</div>
+              <!--<div class="text-base font-medium text-indigo-200">Movement Therapist</div>-->
+            </div>
+          </div>
+        </footer>
+      </blockquote>
+    </div>
+  </div>
+</section>		
+	
+<section class="bg-gray-600">
+  <div class="max-w-7xl mx-auto md:grid md:grid-cols-2 md:px-6 lg:px-8">
+    <div class="py-12 px-4 sm:px-6 md:flex md:flex-col md:py-16 md:pl-0 md:pr-10 md:border-r md:border-gray-900 lg:pr-16">
+      <!--<div class="md:flex-shrink-0">
+        <img class="h-12" src="https://tailwindui.com/img/logos/tuple-logo-indigo-300.svg" alt="Tuple">
+      </div>-->
+      <blockquote class="mt-6 md:flex-grow md:flex md:flex-col">
+        <div class="relative text-lg font-medium text-white md:flex-grow">
+          <svg class="absolute top-0 left-0 transform -translate-x-3 -translate-y-2 h-8 w-8 text-indigo-600" fill="currentColor" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
+          </svg>
+          <p class="relative">
+           I really enjoyed the warm up exercises and learning how to strengthen the corresponding muscle groups to prevent injuries. As someone with neck issues, you really made Zouk head movement feel accessible and possible. I didn't have any anxiety or worry that I would do anything to hurt myself during class which has been my experience in other workshops causing me to tense. I felt each movement and proper form in my body, which is a great foundational step. Additionally, each movement taught was broken down into digestible steps which made it feel seamless when the time came to try the full movement. Thank you!
+          </p>
+        </div>
+        <footer class="mt-8">
+          <div class="flex items-start">
+            <!--<div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
+              <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+            </div>-->
+            <div class="ml-4">
+              <div class="text-base font-medium text-white">Samantha Feller</div>
               <!--<div class="text-base font-medium text-indigo-200">Founder of Sotaki Dance School</div>-->
             </div>
           </div>
@@ -297,7 +413,7 @@
             <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
           </svg>
           <p class="relative">
-            
+            Working with Devon has been both fun and highly effective. She is such a sweet and authentic person and is good at helping dancers make little tweaks that make a big difference in visual appeal and partner connection. I’m somewhat new to Zouk and Devon had great tips, tricks, and visualizations to help me get into the correct postures and frames that would look better, feel good to me and my partner, and help keep me safe. Ask her to show you how to offer libations to the gods and watch how your posture shifts! She gave me permission to try and mess up, which I apparently really needed. She creates a safe and playful space to move through hang-ups, find what works best for you and generally nerd out on dance. I really appreciate her awareness of how the the mental, emotional, and physical aspects of life and our experiences all contribute to our state of being and our dancing. I’m already excited for the next time she visits San Diego.
           </p>
         </div>
         <footer class="mt-8">
@@ -306,7 +422,7 @@
               <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
             </div>
             <div class="ml-4">
-              <div class="text-base font-medium text-white">Rose Curtis</div>
+              <div class="text-base font-medium text-white">Vanessa Zimmerman</div>
               <div class="text-base font-medium text-indigo-200">Movement Therapist</div>
             </div>
           </div>
@@ -315,10 +431,9 @@
     </div>
   </div>
 </section>		
-	
-	
-	
-	
+
+
+
 
 <div class="bg-gray-800 mt-24">
   <div class="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:py-16 lg:px-8 lg:flex lg:items-center">
