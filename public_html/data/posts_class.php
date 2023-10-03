@@ -161,6 +161,22 @@ class MultiPost extends SystemMultiBase {
 
 		return $posts;
 	}	
+	
+	static function get_num_posts_for_tag($tag, $numperpage=NULL, $page_offset=NULL){ 
+		$group = Group::get_by_name($tag, 'post_tag');
+
+		if(!$group){
+			return false;
+		}
+		
+		$group_members = new MultiGroupMember(
+			array('group_id' => $group->key),  //SEARCH CRITERIA
+			array('group_member_id'=>'desc'),
+			$numperpage,
+			$page_offset
+		);
+		return $group_members->count_all();
+	}
 
 	function _get_results($only_count=FALSE, $debug = false) { 
 		$where_clauses = array();
