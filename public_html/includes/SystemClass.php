@@ -933,8 +933,8 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		}
 
 		$this->order_by = $order_by;
-		$this->limit = $limit;
-		$this->offset = $offset;
+		$this->limit = (int)$limit;
+		$this->offset = (int)$offset;
 		$this->operation = $operation;
 		$this->write_lock = $write_lock;
 		$this->cached_references = array();
