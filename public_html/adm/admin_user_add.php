@@ -20,7 +20,15 @@ if ($_POST){
 	else{
 		$password = NULL;
 	}
-	$user = User::CreateNewUser($_POST['usr_first_name'], $_POST['usr_last_name'], $_POST['usr_email'], $password, $_POST['send_activation_email']);
+	
+	$data = array(
+		'usr_first_name' => $_POST['usr_first_name'],
+		'usr_last_name' => $_POST['usr_last_name'],
+		'usr_email' => $_POST['usr_email'],
+		'password' => $password,
+		'send_emails' => $_POST['send_activation_email']
+	);
+	$user = User::CreateNew($data);
 	
 	$user->set('usr_nickname', trim($_POST['usr_nickname']));
 	$user->set('usr_timezone', $_POST['usr_timezone']);

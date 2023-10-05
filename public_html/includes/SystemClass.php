@@ -104,6 +104,11 @@ abstract class SystemBase {
 		return $object;
 	}
 	
+	//STUB FUNCTION THAT MODELS CAN OPTIONALLY EXTEND
+	static function CreateNew($data){
+		return false; //WE RETURN FALSE IF WE DID NOT, IN FACT, CREATE A NEW SOMETHING
+	}
+	
 	//BEGIN LINK FUNCTIONS
 	
 	//FETCH AN ENTRY BASED ON ITS LINK, OR SLUG

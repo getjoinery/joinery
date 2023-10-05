@@ -371,12 +371,26 @@
 					$user_name = LibraryFunctions::doSplitName($charge->billing_details->name);
 					if($charge['metadata']['customer_email']){
 						echo '<b>NEW USER: '.$charge['metadata']['customer_email'].'</b><br>';
-						$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge['metadata']['customer_email'], NULL, FALSE);
+						$data = array(
+							'usr_first_name' => $user_name['first'],
+							'usr_last_name' => $user_name['last'],
+							'usr_email' => $charge['metadata']['customer_email'],
+							'password' => NULL,
+							'send_emails' => false
+						);
+						$order_user = User::CreateNew($data);	
 						//echo '<b>'.$print_r($order_user).'</b><br>'; 					
 					}
 					else if($charge->billing_details->email){
 						echo '<b>NEW USER: '.$charge->billing_details->email.'</b><br>';
-						$order_user = User::CreateNewUser($user_name['first'], $user_name['last'], $charge->billing_details->email, NULL, FALSE);
+						$data = array(
+							'usr_first_name' => $user_name['first'],
+							'usr_last_name' => $user_name['last'],
+							'usr_email' => $charge->billing_details->email,
+							'password' => NULL,
+							'send_emails' => false
+						);
+						$order_user = User::CreateNew($data);	
 						//echo '<b>'.$print_r($order_user).'</b><br>'; 					
 					}
 					else{

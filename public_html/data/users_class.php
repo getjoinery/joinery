@@ -229,7 +229,28 @@ class User extends SystemBase {
 
 
 
-	static function CreateNewUser($first_name, $last_name, $email, $password, $send_emails=TRUE){   
+	static function CreateNew($data){   
+	
+			if(!$first_name = $data['usr_first_name']){
+				throw new SystemDisplayablePermanentError("All items must be passed to create user.");
+			}
+			
+			if(!$last_name = $data['usr_last_name']){
+				throw new SystemDisplayablePermanentError("All items must be passed to create user.");
+			}
+				
+			if(!$email = $data['usr_email']){
+				throw new SystemDisplayablePermanentError("All items must be passed to create user.");
+			}
+					
+			if(!$password = $data['password']){
+				$password = NULL;
+			}
+			
+			if(!$send_emails = $data['send_emails']){
+				$send_emails = true;
+			}
+
 			
 			//PREVENT DUPLICATES
 			if($user = User::GetByEmail($email)){
@@ -629,8 +650,16 @@ class User extends SystemBase {
 		
 		$email = LibraryFunctions::random_string(10).'@test.com';
 		//NEW USER
-		$user = User::CreateNewUser(LibraryFunctions::random_string(10), LibraryFunctions::random_string(10), $email , 'testpass', FALSE);
 		
+		$data = array(
+			'usr_first_name' => LibraryFunctions::random_string(10),
+			'usr_last_name' => LibraryFunctions::random_string(10),
+			'usr_email' => $email,
+			'password' => 'testpass',
+			'send_emails' => false
+		);
+		$user = User::CreateNew($data);
+	
 		$user = User::GetByEmail($email);
 		if(!$user){
 			$dbhelper->close_test_mode(); 

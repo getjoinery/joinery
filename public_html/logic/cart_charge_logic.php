@@ -224,7 +224,14 @@ function cart_charge_logic($get_vars, $post_vars){
 			//DEAL WITH CREATING USERS FOR EACH PRODUCT ITEM
 			$user = User::GetByEmail($data['email']);
 			if(!$user){
-				$user = User::CreateNewUser($data['full_name_first'], $data['full_name_last'], $data['email'], NULL, TRUE); 
+				$data = array(
+					'usr_first_name' => $data['full_name_first'],
+					'usr_last_name' => $data['full_name_last'],
+					'usr_email' => $data['email'],
+					'password' => NULL,
+					'send_emails' => true
+				);
+				$user = User::CreateNew($data);
 			}
 			
 			$act_code = Activation::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));	
@@ -460,7 +467,14 @@ function cart_charge_logic($get_vars, $post_vars){
 			//DEAL WITH CREATING USERS FOR EACH PRODUCT ITEM
 			$user = User::GetByEmail($data['email']);
 			if(!$user){
-				$user = User::CreateNewUser($data['full_name_first'], $data['full_name_last'], $data['email'], NULL, TRUE); 
+				$data = array(
+					'usr_first_name' => $data['full_name_first'],
+					'usr_last_name' => $data['full_name_last'],
+					'usr_email' => $data['email'],
+					'password' => NULL,
+					'send_emails' => true
+				);
+				$user = User::CreateNew($data);
 			}
 
 			$act_code = Activation::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));	

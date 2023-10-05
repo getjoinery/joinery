@@ -175,8 +175,15 @@ class ShoppingCart {
 		$billing_user = User::GetByEmail(trim($this->billing_user['billing_email'])); 
 		if(!$billing_user){
 			$cart_billing_user = $this->billing_user;
-			//CREATE THE USER	
-			$billing_user = User::CreateNewUser($cart_billing_user['billing_first_name'], $cart_billing_user['billing_last_name'], $cart_billing_user['billing_email'], NULL, TRUE); 
+			//CREATE THE USER
+			$data = array(
+				'usr_first_name' => $cart_billing_user['billing_first_name'],
+				'usr_last_name' => $cart_billing_user['billing_last_name'],
+				'usr_email' => $cart_billing_user['billing_email'],
+				'password' => NULL,
+				'send_emails' => true
+			);
+			$billing_user = User::CreateNew($data);			
 		}	
 
 		if($charge_total > 0){ 
