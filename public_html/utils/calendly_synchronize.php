@@ -139,7 +139,14 @@
 				}
 				else{
 					//CREATE NEW USER
-					$user = User::CreateNewUser($invitee->first_name, $invitee->last_name, $invitee->email, NULL, FALSE);	//DO NOT SEND WELCOME EMAIL	
+					$data = array(
+						'usr_first_name' => $invitee->first_name,
+						'usr_last_name' => $invitee->last_name,
+						'usr_email' => $invitee->email,
+						'password' => NULL,
+						'send_emails' => false
+					);
+					$user = User::CreateNew($data);	
 				}
 			}
 			$new_booking->prepare();

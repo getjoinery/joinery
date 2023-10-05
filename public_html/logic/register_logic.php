@@ -129,7 +129,14 @@ function register_logic($get_vars, $post_vars){
 		}
 
 		try {
-			$user = User::CreateNewUser($fixed_fields['usr_first_name'], $fixed_fields['usr_last_name'], $fixed_fields['usr_email'], $fixed_fields['usr_password'], TRUE);
+			$data = array(
+				'usr_first_name' => $fixed_fields['usr_first_name'],
+				'usr_last_name' => $fixed_fields['usr_last_name'],
+				'usr_email' => $fixed_fields['usr_email'],
+				'password' => $fixed_fields['usr_password'],
+				'send_emails' => TRUE
+			);
+			$user = User::CreateNew($data);	
 			
 			if($post_vars['usr_nickname']){
 				$user->set('usr_nickname', $post_vars['usr_nickname']);

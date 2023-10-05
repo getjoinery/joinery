@@ -60,8 +60,14 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 			}	
 			
 			if(!$user = User::GetByEmail($post_vars['usr_email'])){
-				$user = User::CreateNewUser($post_vars['usr_first_name'], $post_vars['usr_last_name'], $post_vars['usr_email'], NULL, TRUE);
-				
+				$data = array(
+					'usr_first_name' => $post_vars['usr_first_name'],
+					'usr_last_name' => $post_vars['usr_last_name'],
+					'usr_email' => $post_vars['usr_email'],
+					'password' => NULL,
+					'send_emails' => true
+				);
+				$user = User::CreateNew($data);	
 			}	
 
 			if($post_vars['usr_nickname']){

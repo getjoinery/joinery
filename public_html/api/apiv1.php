@@ -12,6 +12,21 @@
 	$public_key = $headers['public_key'];
 	$secret_key = $headers['secret_key'];
 
+	if(!$public_key || !$secret_key){
+		$response = array(
+		  'api_version' => '1.0',
+		  'data' => 'Error: Public/secret keys not present',
+		);
+		header("Content-Type: application/json");
+		http_response_code(400);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
+		exit;		
+	}
+
+
+
 	try{
 		$api_entry = ApiKey::GetByColumn('apk_public_key', $public_key);
 	}
@@ -21,11 +36,24 @@
 		  'data' => 'Error: Unable to find the api key'
 		);
 		header("Content-Type: application/json");
-		http_response_code(400);
+		http_response_code(200);
 
 		$response = json_encode($response);
 		echo $response . PHP_EOL;
 		exit;
+	}
+	
+	if(!$api_entry->key){
+		$response = array(
+		  'api_version' => '1.0',
+		  'data' => 'Error: Unable to find the api key'
+		);
+		header("Content-Type: application/json");
+		http_response_code(400);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
+		exit;		
 	}
 
 	try{
@@ -204,13 +232,17 @@
 			
 
 			try{
-				$object = new $class_name(NULL);	
-				foreach($_POST as $key=>$value){
-					$object->set($key, $value);
+
+				if(!$object = $class_name::CreateNew($_POST)){
+					$object = new $class_name(NULL);
+					foreach($_POST as $key=>$value){
+						$object->set($key, $value);
+					}
+					$object->prepare();
+					$object->authenticate_write(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')));	
+					$object->save();					
 				}
-				$object->prepare();
-				$object->authenticate_write(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')));	
-				$object->save();	
+	
 
 				//IT IS A QUERY FOR A SINGLE OBJECT
 				$response = array(
@@ -224,7 +256,7 @@
 				  'data' => 'Error: Unable to create object ('.$e->getMessage().')'
 				);
 				header("Content-Type: application/json");
-				http_response_code(400);
+				//http_response_code(400);
 
 				$response = json_encode($response);
 				echo $response . PHP_EOL;

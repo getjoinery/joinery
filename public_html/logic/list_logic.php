@@ -52,7 +52,14 @@
 			$user = new User($session->get_user_id(), TRUE);
 		}
 		else if(!$user = User::GetByEmail($_POST['usr_email'])){
-			$user = User::CreateNewUser($_POST['usr_first_name'], $_POST['usr_last_name'], $_POST['usr_email'], NULL, FALSE);	//DO NOT SEND WELCOME EMAIL	
+			$data = array(
+				'usr_first_name' => $_POST['usr_first_name'],
+				'usr_last_name' => $_POST['usr_last_name'],
+				'usr_email' => $_POST['usr_email'],
+				'password' => NULL,
+				'send_emails' => false
+			);
+			$user = User::CreateNew($data);	
 		}
 
 		if($_POST['usr_nickname']){
