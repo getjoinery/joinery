@@ -303,9 +303,9 @@
         </div>
         <footer class="mt-8">
           <div class="flex items-start">
-            <div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
-             <!-- <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">-->
-            </div>
+            <!-- <div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
+             <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+            </div>-->
             <div class="ml-4">
               <div class="text-base font-medium text-white">Samantha Feller</div>
               <!--<div class="text-base font-medium text-indigo-200">Movement Therapist</div>-->
@@ -363,9 +363,9 @@
         </div>
         <footer class="mt-8">
           <div class="flex items-start">
-            <div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
-              <!--<img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">-->
-            </div>
+            <!--<div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
+              <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+            </div>-->
             <div class="ml-4">
               <div class="text-base font-medium text-white">Efosa Uwa-Omede</div>
               <!--<div class="text-base font-medium text-indigo-200">Movement Therapist</div>-->
