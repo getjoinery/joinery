@@ -297,16 +297,17 @@
             <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
           </svg>
           <p class="relative">
-            I truly recommend anything that Devon does especially this class in particular. The amount of info provided in this class for one's needs and development when it comes to Zouk is truly invaluable. Definitely one of the best classes out there.
+		  I really enjoyed the warm up exercises and learning how to strengthen the corresponding muscle groups to prevent injuries. As someone with neck issues, you really made Zouk head movement feel accessible and possible. I didn't have any anxiety or worry that I would do anything to hurt myself during class which has been my experience in other workshops causing me to tense. I felt each movement and proper form in my body, which is a great foundational step. Additionally, each movement taught was broken down into digestible steps which made it feel seamless when the time came to try the full movement. Thank you!
+           
           </p>
         </div>
         <footer class="mt-8">
           <div class="flex items-start">
             <div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
-              <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+             <!-- <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">-->
             </div>
             <div class="ml-4">
-              <div class="text-base font-medium text-white">Efosa Uwa-Omede</div>
+              <div class="text-base font-medium text-white">Samantha Feller</div>
               <!--<div class="text-base font-medium text-indigo-200">Movement Therapist</div>-->
             </div>
           </div>
@@ -356,16 +357,17 @@
             <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
           </svg>
           <p class="relative">
-            Working with Devon has been both fun and highly effective. She is such a sweet and authentic person and is good at helping dancers make little tweaks that make a big difference in visual appeal and partner connection. I’m somewhat new to Zouk and Devon had great tips, tricks, and visualizations to help me get into the correct postures and frames that would look better, feel good to me and my partner, and help keep me safe. Ask her to show you how to offer libations to the gods and watch how your posture shifts! She gave me permission to try and mess up, which I apparently really needed. She creates a safe and playful space to move through hang-ups, find what works best for you and generally nerd out on dance. I really appreciate her awareness of how the the mental, emotional, and physical aspects of life and our experiences all contribute to our state of being and our dancing. I’m already excited for the next time she visits San Diego.
+		  I truly recommend anything that Devon does especially this class in particular. The amount of info provided in this class for one's needs and development when it comes to Zouk is truly invaluable. Definitely one of the best classes out there.
+            
           </p>
         </div>
         <footer class="mt-8">
           <div class="flex items-start">
             <div class="flex-shrink-0 inline-flex rounded-full border-2 border-white">
-              <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
+              <!--<img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">-->
             </div>
             <div class="ml-4">
-              <div class="text-base font-medium text-white">Vanessa Zimmerman</div>
+              <div class="text-base font-medium text-white">Efosa Uwa-Omede</div>
               <!--<div class="text-base font-medium text-indigo-200">Movement Therapist</div>-->
             </div>
           </div>
@@ -387,7 +389,7 @@
             <path d="M9.352 4C4.456 7.456 1 13.12 1 19.36c0 5.088 3.072 8.064 6.624 8.064 3.36 0 5.856-2.688 5.856-5.856 0-3.168-2.208-5.472-5.088-5.472-.576 0-1.344.096-1.536.192.48-3.264 3.552-7.104 6.624-9.024L9.352 4zm16.512 0c-4.8 3.456-8.256 9.12-8.256 15.36 0 5.088 3.072 8.064 6.624 8.064 3.264 0 5.856-2.688 5.856-5.856 0-3.168-2.304-5.472-5.184-5.472-.576 0-1.248.096-1.44.192.48-3.264 3.456-7.104 6.528-9.024L25.864 4z" />
           </svg>
           <p class="relative">
-           I really enjoyed the warm up exercises and learning how to strengthen the corresponding muscle groups to prevent injuries. As someone with neck issues, you really made Zouk head movement feel accessible and possible. I didn't have any anxiety or worry that I would do anything to hurt myself during class which has been my experience in other workshops causing me to tense. I felt each movement and proper form in my body, which is a great foundational step. Additionally, each movement taught was broken down into digestible steps which made it feel seamless when the time came to try the full movement. Thank you!
+            Working with Devon has been both fun and highly effective. She is such a sweet and authentic person and is good at helping dancers make little tweaks that make a big difference in visual appeal and partner connection. I’m somewhat new to Zouk and Devon had great tips, tricks, and visualizations to help me get into the correct postures and frames that would look better, feel good to me and my partner, and help keep me safe. Ask her to show you how to offer libations to the gods and watch how your posture shifts! She gave me permission to try and mess up, which I apparently really needed. She creates a safe and playful space to move through hang-ups, find what works best for you and generally nerd out on dance. I really appreciate her awareness of how the the mental, emotional, and physical aspects of life and our experiences all contribute to our state of being and our dancing. I’m already excited for the next time she visits San Diego.
           </p>
         </div>
         <footer class="mt-8">
@@ -396,7 +398,7 @@
               <img class="h-12 w-12 rounded-full" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
             </div>-->
             <div class="ml-4">
-              <div class="text-base font-medium text-white">Samantha Feller</div>
+              <div class="text-base font-medium text-white">Vanessa Zimmerman</div>
               <!--<div class="text-base font-medium text-indigo-200">Founder of Sotaki Dance School</div>-->
             </div>
           </div>
