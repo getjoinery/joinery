@@ -960,6 +960,12 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	}
 
 	function generate_limit_and_offset($include_write_lock=TRUE) {
+		
+		if(!is_numeric($this->limit) || !is_numeric($this->offset)){
+			//IF THEY AREN'T INTEGERS FAIL BUT DON'T LOG THE FAILURE (SPAM)
+			throw new SystemDisplayableError('Bad limit or offset');
+		}
+		
 		$sql = '';
 
 		if ($this->limit) {
