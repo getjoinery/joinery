@@ -15,7 +15,9 @@
 	if(!$public_key || !$secret_key){
 		$response = array(
 		  'api_version' => '1.0',
-		  'data' => 'Error: Public/secret keys not present',
+		  'errortype' => 'AuthenticationError',
+		  'error' => 'Error: Public/secret keys not present',
+		  'data' => '',
 		);
 		header("Content-Type: application/json");
 		http_response_code(400);
@@ -33,7 +35,9 @@
 	catch (Exception $e){
 		$response = array(
 		  'api_version' => '1.0',
-		  'data' => 'Error: Unable to find the api key'
+		  'errortype' => 'AuthenticationError',
+		  'error' => 'Error: Unable to find the api key',
+		  'data' => ''
 		);
 		header("Content-Type: application/json");
 		http_response_code(200);
@@ -46,7 +50,9 @@
 	if(!$api_entry->key){
 		$response = array(
 		  'api_version' => '1.0',
-		  'data' => 'Error: Unable to find the api key'
+		  'errortype' => 'AuthenticationError',
+		  'error' => 'Error: Unable to find the api key',
+		  'data' => ''
 		);
 		header("Content-Type: application/json");
 		http_response_code(400);
@@ -63,7 +69,9 @@
 	catch (Exception $e){
 		$response = array(
 		  'api_version' => '1.0',
-		  'data' => 'Error: Unable find the api user'
+		  'errortype' => 'AuthenticationError',
+		  'error' => 'Error: Unable find the api user',
+		  'data' => ''
 		);
 		header("Content-Type: application/json");
 		http_response_code(400);
@@ -76,7 +84,9 @@
 	if(!$api_user->key){
 		$response = array(
 		  'api_version' => '1.0',
-		  'data' => 'Error: Unable find the api user'
+		  'errortype' => 'AuthenticationError',
+		  'error' => 'Error: Unable find the api user',
+		  'data' => ''
 		);
 		header("Content-Type: application/json");
 		http_response_code(400);
@@ -89,7 +99,9 @@
 	if($api_user->get('usr_delete_time')){
 		$response = array(
 		  'api_version' => '1.0',
-		  'data' => 'Error: API user has been deleted'
+		  'errortype' => 'AuthenticationError',
+		  'error' => 'Error: API user has been deleted',
+		  'data' => ''
 		);
 		header("Content-Type: application/json");
 		http_response_code(400);
@@ -99,20 +111,24 @@
 		exit;		
 	}
 	
-
-	if($api_entry === NULL){
-		//$error = error_get_last();
-		http_response_code(401);
-		exit;		
-	}
 	
 	if($authorized_ips = $api_entry->get('apk_ip_restriction')){
 		$ip_list = fgetcsv($authorized_ips);
 		$ip_list = array_map('trim', $ip_list);
 		if(count($ip_list)){
 			if(!in_array($_SERVER['REMOTE_ADDR'], $ip_list)){
+				$response = array(
+				  'api_version' => '1.0',
+				  'errortype' => 'AuthenticationError',
+				  'error' => 'Error: Unauthorized IP',
+				  'data' => ''
+				);
+				header("Content-Type: application/json");
 				http_response_code(401);
-				exit;
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;	
 			}
 		}
 	}
@@ -120,8 +136,19 @@
 	
 	
 	if(!$api_entry->check_secret_key($secret_key)){
+		$response = array(
+		  'api_version' => '1.0',
+		  'errortype' => 'AuthenticationError',
+		  'error' => 'Error: Incorrect secret key',
+		  'data' => ''
+		);
+		header("Content-Type: application/json");
 		http_response_code(401);
+
+		$response = json_encode($response);
+		echo $response . PHP_EOL;
 		exit;
+
 	}
 	
 	$operation = ucwords($params[2]);
@@ -137,7 +164,9 @@
 			if($api_entry->get('apk_permission') == 2){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to fetch object, insufficient api permission'
+				  'errortype' => 'AuthenticationError',
+				  'error' => 'Error: Unable to fetch object, insufficient api permission',
+				  'data' => ''
 				);
 				header("Content-Type: application/json");
 				http_response_code(403);
@@ -153,13 +182,16 @@
 				$object->authenticate_read(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')));				
 				$response = array(
 				  'api_version' => '1.0',
+				  'success_message' => $class_name. ' found.',
 				  'data' => $object->export_as_array()
 				);
 			}
 			catch (Exception $e){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to fetch object ('.$e->getMessage().')'
+				  'errortype' => 'TransactionError',
+				  'error' => 'Error: Unable to fetch object ('.$e->getMessage().')',
+				  'data' => ''
 				);
 				header("Content-Type: application/json");
 				http_response_code(400);
@@ -174,7 +206,9 @@
 			if($api_entry->get('apk_permission') < 2){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to update object, insufficient api permission'
+				  'errortype' => 'AuthenticationError',
+				  'error' => 'Error: Unable to update object, insufficient api permission',
+				  'data' => ''
 				);
 				header("Content-Type: application/json");
 				http_response_code(403);
@@ -196,16 +230,19 @@
 				$object->authenticate_write(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')));	
 				$object->save();	
 
-				//IT IS A QUERY FOR A SINGLE OBJECT
+				//IT IS AN UPDATE FOR A SINGLE OBJECT
 				$response = array(
 				  'api_version' => '1.0',
+				  'success_message' => $class_name. ' update successful.',
 				  'data' => $object->export_as_array()
 				);
 			}
 			catch (Exception $e){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to update object ('.$e->getMessage().')'
+				  'errortype' => 'TransactionError',
+				  'error' => 'Error: Unable to update object ('.$e->getMessage().')',
+				  'data' => ''
 				);
 				header("Content-Type: application/json");
 				http_response_code(400);
@@ -220,7 +257,9 @@
 			if($api_entry->get('apk_permission') < 2 ){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to create object, insufficient api permission'
+				  'errortype' => 'AuthenticationError',
+				  'error' => 'Error: Unable to create object, insufficient api permission',
+				  'data' => ''
 				);
 				header("Content-Type: application/json");
 				http_response_code(403);
@@ -247,13 +286,16 @@
 				//IT IS A QUERY FOR A SINGLE OBJECT
 				$response = array(
 				  'api_version' => '1.0',
+				  'success_message' => 'New '.$class_name. ' successful.',
 				  'data' => $object->export_as_array()
 				);
 			}
 			catch (Exception $e){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to create object ('.$e->getMessage().')'
+				  'errortype' => 'TransactionError',
+				  'error' => 'Error: Unable to create object ('.$e->getMessage().')',
+				  'data' => ''
 				);
 				header("Content-Type: application/json");
 				//http_response_code(400);
@@ -268,7 +310,9 @@
 			if($api_entry->get('apk_permission') < 4){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to delete object, insufficient api permission'
+				  'errortype' => 'AuthenticationError',
+				  'error' => 'Error: Unable to delete object, insufficient api permission',
+				  'data' => ''
 				);
 				header("Content-Type: application/json");
 				http_response_code(403);
@@ -288,13 +332,16 @@
 				//IT IS A QUERY FOR A SINGLE OBJECT
 				$response = array(
 				  'api_version' => '1.0',
+				  'success_message' => 'Deletion successful.',
 				  'data' => $object->export_as_array()
 				);
 			}
 			catch (Exception $e){
 				$response = array(
 				  'api_version' => '1.0',
-				  'data' => 'Error: Unable to delete object ('.$e->getMessage().')'
+				  'errortype' => 'TransactionError',
+				  'error' => 'Error: Unable to delete object ('.$e->getMessage().')',
+				  'data' => ''
 				);
 				header("Content-Type: application/json");
 				http_response_code(400);
@@ -306,10 +353,12 @@
 		}
 	}
 	else if(in_array(substr($operation, 0, -1), $classes)){
-		if($api_entry->get('apk_permission') == 2 || !$objects->authenticate_read(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')))){
+		if($api_entry->get('apk_permission') == 2){
 			$response = array(
 			  'api_version' => '1.0',
-			  'data' => 'Error: Unable to fetch objects, insufficient permission'
+			  'errortype' => 'AuthenticationError',
+			  'error' => 'Error: Unable to fetch objects, insufficient permission',
+			  'data' => ''
 			);
 			header("Content-Type: application/json");
 			http_response_code(403);
@@ -376,11 +425,28 @@
 		
 		$response_array = array();
 		foreach($objects as $object){
+			/*
+			if(!$object->authenticate_read(array('current_user_id'=>$api_user->key, 'current_user_permission'=>$api_user->get('usr_permission')))){
+				$response = array(
+				  'api_version' => '1.0',
+				  'errortype' => 'AuthenticationError',
+				  'error' => 'Error: Unable to fetch objects, insufficient permission',
+				  'data' => ''
+				);
+				header("Content-Type: application/json");
+				http_response_code(403);
+
+				$response = json_encode($response);
+				echo $response . PHP_EOL;
+				exit;					
+			}
+			*/
 			$response_array[] = $object->export_as_array();
 		}
 
 		$response = array(
 		  'api_version' => '1.0',
+		  'success_message' => '',
 		  'num_results' => $numobjects,
 		  'page' => $page,
 		  'numperpage' => $numperpage,
@@ -400,7 +466,8 @@
 	else{
 		$response = array(
 		  'api_version' => '1.0',
-		  'data' => 'Error: Invalid object or list ('.$operation.')'
+		  'error' => 'Error: Invalid object or list ('.$operation.')',
+		  'data' => ''
 		);
 		header("Content-Type: application/json");
 		http_response_code(400);
