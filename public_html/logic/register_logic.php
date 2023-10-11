@@ -101,7 +101,7 @@ function register_logic($get_vars, $post_vars){
 
 		if ($error_fields) {
 			throw new SystemDisplayableError(
-				"The following required fields were left blank: " . implode(', ', $error_fields) . '.  Please go back and try again.');
+				"The following required fields were left blank: " . implode(', ', $error_fields) . '.  Please try again.');
 		}
 
 		/*
@@ -110,7 +110,7 @@ function register_logic($get_vars, $post_vars){
 
 		if (!$zip_data) {
 			throw new SystemDisplayableError(
-				'We could not find that zip code.  Please go back and try again.');
+				'We could not find that zip code.  Please try again.');
 		}
 		*/
 

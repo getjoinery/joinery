@@ -962,7 +962,7 @@ class Product extends SystemBase {
 			$version = $this->get_product_version_details(intval($data['product_version']));
 			if ($version === NULL) {
 				throw new BasicProductRequirementException(
-					'Sorry, the product you have selected is not valid.  Please go back and try again.');
+					'Sorry, the product you have selected is not valid.  Please try again.');
 			}
 
 			$form_display_data['Product'] = $version->prv_version_name;

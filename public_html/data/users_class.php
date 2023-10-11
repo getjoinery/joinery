@@ -374,13 +374,13 @@ class User extends SystemBase {
 			//CHECK FOR DUPLICATES
 			if(User::GetByEmail($this->get('usr_email'))){
 				throw new DisplayableUserException(
-					'Sorry, that email address "'.$this->get('usr_email').'" has already been used.  Please go back and try again.');				
+					'Sorry, that email address "'.$this->get('usr_email').'" has already been used.  Please try again.');				
 			}
 		}
 
 		if (!LibraryFunctions::IsValidEmail($this->get('usr_email'))) {
 			throw new DisplayableUserException(
-				'Sorry, that email address "'.$this->get('usr_email').'" you entered is invalid.  Please go back and try again.');
+				'Sorry, that email address "'.$this->get('usr_email').'" you entered is invalid.  Please try again.');
 		}
 
 		//CAPITALIZATION
