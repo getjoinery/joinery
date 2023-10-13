@@ -1,7 +1,7 @@
     <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 
-		$public_key = 'public_fq9l8bwujz45ejq2';
+		$public_key = 'public_fn4ini750e8pkjwq';
 		$secret_key = 'test1';
 
 		$access_token = '';	
