@@ -1197,6 +1197,7 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 		$errorhandler = new ErrorHandler($_SERVER["SERVER_PORT"] == 443);
 		if ($show_errors) {
 			$debug_message = 'Debug Message: ' . $e->getMessage() . '<br>' . $e->getCode() . '<br>' .$e->getTraceAsString(). '<br>' . $e->getFile() . '('.$e->getLine().')';
+			GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
 			error_log($debug_message);
 			if($errorpage == 'admin'){
 				$errorhandler->handle_admin_error($debug_message, ErrorHandler::INPUT_ERROR);

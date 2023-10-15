@@ -67,18 +67,31 @@ class GeneralError extends SystemBase {
 
 	public static function LogGeneralError($e, $session, $request) { 
 		$session_obj = SessionControl::get_instance();
+
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
 	
 		$error_context = $e->getTraceAsString(). "\r\n \r\n REQUEST_URI: ". $_SERVER['REQUEST_URI']. "\r\n \r\n $_SESSION: " . print_r($session, true). ' $_REQUEST: '.print_r($request, true);
-		$error_context = '<pre>'.htmlentities($error_context).'</pre>';
 	
 
 		$error = new GeneralError(NULL);
 		if ($e instanceof PDOException) {
 			$error->set('err_level', 'Database Error');
+			$error_context .= 'POSTGRES DEBUG INFO:';;
+			if(count($dbhelper->last_query)){
+				$error_context .= print_r($dbhelper->last_query, true);
+			}
+			if(count($dbhelper->last_query_params)){
+				$error_context .= print_r($dbhelper->last_query_params, true);
+			}
+
 		}
 		else{
 			$error->set('err_level', 'Exception');
-		}		
+		}
+
+		$error_context = '<pre>'.htmlentities($error_context).'</pre>';
+		
 		$error->set('err_code', $e->getCode());
 		$error->set('err_file', $e->getFile());
 		$error->set('err_line', $e->getLine());
