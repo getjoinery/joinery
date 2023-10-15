@@ -1298,36 +1298,7 @@ class LibraryFunctions {
 	**********************************************************************/
 
     static function edit_table($dbhelper, $dblink, $tablename, $p_keys, $rowdata, $use_transaction, $debug=0){
-		if($debug){
-			echo '<pre>';
-			echo "Table: $tablename\n";
-			//print_r($p_keys);
-			//print_r($rowdata);
-			foreach ($rowdata as $col=>$val){
-				echo "[$col]=>";
-				if(is_null($val)) {
-					echo 'NULL';
-				}
-				else if($val === '') {
-					echo "''";
-				}
-				else if($val === FALSE) {
-					echo "FALSE";
-				}
-				else if($val === TRUE) {
-					echo "TRUE";
-				}
-				else  {
-					echo "$val";
-				}
-				echo "\n";
-			}
-			if(is_null($p_keys)){
-				echo 'pkeys is null ' . "\n";
-			}
-			echo 'Number of Keys: '. count($p_keys) . "\n";
-		}
-
+		
 
 		if($use_transaction && !$debug){
 			$dblink->beginTransaction();
@@ -1401,26 +1372,32 @@ class LibraryFunctions {
 		foreach($rowdata as $column_name=>$column_val){
 			if((string)$column_val != "-NOUPDATE-"){
 				if($column_meta[$column_name]['data_type'] == 'integer' || $column_meta[$column_name]['data_type'] == 'smallint'){
-					$q->bindValue(":$column_name", $column_val, PDO::PARAM_INT);
+					//$q->bindValue(":$column_name", $column_val, PDO::PARAM_INT);
+					$q = $dbhelper->bind_value($q, ":$column_name", $column_val, PDO::PARAM_INT);
 				}
 				else if($column_meta[$column_name]['data_type'] == 'boolean'){
 					if($column_val===NULL){
 						//BUG FIX, TEMPORARY
 						if($column_meta[$column_name]['is_nullable'] == 'YES') {
-							$q->bindValue(":$column_name", NULL, PDO::PARAM_BOOL);
+							//$q->bindValue(":$column_name", NULL, PDO::PARAM_BOOL);
+							$q = $dbhelper->bind_value($q, ":$column_name", NULL, PDO::PARAM_BOOL);
 						} else {
-							$q->bindValue(":$column_name", FALSE, PDO::PARAM_BOOL);
+							//$q->bindValue(":$column_name", FALSE, PDO::PARAM_BOOL);
+							$q = $dbhelper->bind_value($q, ":$column_name", FALSE, PDO::PARAM_BOOL);
 						}
 					}
 					else if($column_val==TRUE){
-						$q->bindValue(":$column_name", TRUE, PDO::PARAM_BOOL);
+						//$q->bindValue(":$column_name", TRUE, PDO::PARAM_BOOL);
+						$q = $dbhelper->bind_value($q, ":$column_name", TRUE, PDO::PARAM_BOOL);
 					}
 					else if($column_val==FALSE){
-						$q->bindValue(":$column_name", FALSE, PDO::PARAM_BOOL);
+						//$q->bindValue(":$column_name", FALSE, PDO::PARAM_BOOL);
+						$q = $dbhelper->bind_value($q, ":$column_name", FALSE, PDO::PARAM_BOOL);
 					}
 				}
 				else{
 					$q->bindValue(":$column_name", $column_val, PDO::PARAM_STR);
+					$q = $dbhelper->bind_value($q, ":$column_name", $column_val, PDO::PARAM_STR);
 				}
 			}
     	}
@@ -1430,19 +1407,51 @@ class LibraryFunctions {
 				$pbindcol = '$p_keys[\'' . $pname . '\']';
 				if($column_meta[$pname]['data_type'] == 'integer' || $column_meta[$pname]['data_type'] == 'smallint'){
 					$q->bindValue(":$pname", $pvalue, PDO::PARAM_INT);
+					$q = $dbhelper->bind_value($q, ":$pname", $pvalue, PDO::PARAM_INT);
 				}
 				else{
 					$q->bindValue(":$pname", $pvalue, PDO::PARAM_STR);
+					$q = $dbhelper->bind_value($q, ":$pname", $pvalue, PDO::PARAM_STR);
 				}
 			}
 		}
 
 		if($debug){
+			$error_var_statement = '<pre>';
+			$error_var_statement .= "Table: $tablename\n";
+			//print_r($p_keys);
+			//print_r($rowdata);
+			foreach ($rowdata as $col=>$val){
+				$error_var_statement .= "[$col]=>";
+				if(is_null($val)) {
+					$error_var_statement .= 'NULL';
+				}
+				else if($val === '') {
+					$error_var_statement .= "''";
+				}
+				else if($val === FALSE) {
+					$error_var_statement .= "FALSE";
+				}
+				else if($val === TRUE) {
+					$error_var_statement .= "TRUE";
+				}
+				else  {
+					$error_var_statement .= "$val";
+				}
+				$error_var_statement .= "\n";
+			}
+			if(is_null($p_keys)){
+				$error_var_statement .= 'pkeys is null ' . "\n";
+			}
+			$error_var_statement .= 'Number of Keys: '. count($p_keys) . "\n";
+			echo $error_var_statement;
 			echo $q->debugDumpParams();
 			echo '</pre>';
 		}
+		
+		$q = $dbhelper->execute_query($q);
 
-		$q->execute();
+			
 		if($op == 'edit'){
 			if($use_transaction){
 				$dblink->commit();

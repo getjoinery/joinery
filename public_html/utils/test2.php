@@ -9,6 +9,7 @@
 		require_once($siteDir . '/data/files_class.php');
 	require_once($siteDir . '/data/orders_class.php');
 	require_once($siteDir . '/data/products_class.php');
+	require_once($siteDir . '/data/posts_class.php');
 	require_once($siteDir . '/data/users_class.php');
 	require_once($siteDir . '/data/groups_class.php');
 	require_once($siteDir . '/data/product_details_class.php');
@@ -22,6 +23,42 @@
 	require_once $composer_dir.'autoload.php';
 use MailchimpAPI\Mailchimp;
 
+		$post = new Post(1, TRUE);
+		$post->set('pst_usr_user_id',a);
+		
+				
+		
+		$post->prepare();
+		$post->save();
+		$post->load();
+exit;
+
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+		
+		/*
+		$p_keys = array('odi_order_item_id' => 122);
+		$rowdata = array('param1' => 11);
+		
+		$p_keys_return = LibraryFunctions::edit_table(
+			$dbhelper, $dblink, 'usa_users_addrsaaa', $p_keys, $rowdata, FALSE, 0);
+*/
+			
+		//SET ALL DEFAULT FOR THIS USER TO ZERO
+		$sql = "SELECT usa_users_addr_id FROM usa_users_addrs
+			WHERE usa_usr_user_id = :usr_user_id AND usa_is_default = TRUE";
+
+		try{
+			$q = $dblink->prepare($sql);
+			//$q->bindValue(':usr_user_id', 111, PDO::PARAM_INT);
+			$q = $dbhelper->bind_value($q, ':usr_user_id', 111, PDO::PARAM_INT);
+			$q = $dbhelper->execute_query($q);
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		}
+		catch(PDOException $e){
+			$dbhelper->handle_query_error($e);
+		}
+		
 
 echo 'turned off';
 exit;
