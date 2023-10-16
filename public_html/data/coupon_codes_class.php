@@ -63,34 +63,6 @@ class CouponCode extends SystemBase {
 		'ccd_create_time' => 'now()'
 	);	
 
-
-	public static function get_by_name($name) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		//SET ALL DEFAULT FOR THIS USER TO ZERO
-		$sql = "SELECT ccd_coupon_code_id FROM ccd_coupon_codes
-			WHERE ccd_code = :ccd_code";
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(':ccd_code', $name, PDO::PARAM_STR);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		if (!$q->rowCount()) {
-			//throw new AddressException('This user doesn\'t have a default address.');
-			return FALSE;
-		}
-
-		$r = $q->fetch();
-
-		return new CouponCode($r->ccd_coupon_code_id, TRUE);
-	}	
 	
 	function get_discount($full_price){
 		if($this->get('ccd_amount_discount')){
@@ -106,8 +78,7 @@ class CouponCode extends SystemBase {
 
 	
 	function prepare() {
-		
-		if(CouponCode::get_by_name($this->get('ccd_code')) && !$this->key){
+		if(CouponCode::GetByColumn('ccd_code', $this->get('ccd_code')) && !$this->key){
 			throw new CouponCodeException('That coupon code already exists.');
 		}		
 
@@ -120,8 +91,6 @@ class CouponCode extends SystemBase {
 				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
 	}
-
-	
 	
 }
 
