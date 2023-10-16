@@ -1301,7 +1301,7 @@ class LibraryFunctions {
 		
 
 		if($use_transaction && !$debug){
-			$dblink->beginTransaction();
+			DbConnector::BeginTransaction();
 		}
 
 
@@ -1367,37 +1367,38 @@ class LibraryFunctions {
 
 
 		//BIND VALUES AND PREPARE STATEMENT
-		$q = $dblink->prepare($sql);
+		//$q = $dblink->prepare($sql);
+		$dbhelper->prepare_query($sql);
 
 		foreach($rowdata as $column_name=>$column_val){
 			if((string)$column_val != "-NOUPDATE-"){
 				if($column_meta[$column_name]['data_type'] == 'integer' || $column_meta[$column_name]['data_type'] == 'smallint'){
 					//$q->bindValue(":$column_name", $column_val, PDO::PARAM_INT);
-					$q = $dbhelper->bind_value($q, ":$column_name", $column_val, PDO::PARAM_INT);
+					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_INT);
 				}
 				else if($column_meta[$column_name]['data_type'] == 'boolean'){
 					if($column_val===NULL){
 						//BUG FIX, TEMPORARY
 						if($column_meta[$column_name]['is_nullable'] == 'YES') {
 							//$q->bindValue(":$column_name", NULL, PDO::PARAM_BOOL);
-							$q = $dbhelper->bind_value($q, ":$column_name", NULL, PDO::PARAM_BOOL);
+							$dbhelper->bind_value(":$column_name", NULL, PDO::PARAM_BOOL);
 						} else {
 							//$q->bindValue(":$column_name", FALSE, PDO::PARAM_BOOL);
-							$q = $dbhelper->bind_value($q, ":$column_name", FALSE, PDO::PARAM_BOOL);
+							$dbhelper->bind_value(":$column_name", FALSE, PDO::PARAM_BOOL);
 						}
 					}
 					else if($column_val==TRUE){
 						//$q->bindValue(":$column_name", TRUE, PDO::PARAM_BOOL);
-						$q = $dbhelper->bind_value($q, ":$column_name", TRUE, PDO::PARAM_BOOL);
+						$dbhelper->bind_value(":$column_name", TRUE, PDO::PARAM_BOOL);
 					}
 					else if($column_val==FALSE){
 						//$q->bindValue(":$column_name", FALSE, PDO::PARAM_BOOL);
-						$q = $dbhelper->bind_value($q, ":$column_name", FALSE, PDO::PARAM_BOOL);
+						$dbhelper->bind_value(":$column_name", FALSE, PDO::PARAM_BOOL);
 					}
 				}
 				else{
-					$q->bindValue(":$column_name", $column_val, PDO::PARAM_STR);
-					$q = $dbhelper->bind_value($q, ":$column_name", $column_val, PDO::PARAM_STR);
+					//$q->bindValue(":$column_name", $column_val, PDO::PARAM_STR);
+					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_STR);
 				}
 			}
     	}
@@ -1406,12 +1407,12 @@ class LibraryFunctions {
 			foreach($p_keys as $pname=>$pvalue){
 				$pbindcol = '$p_keys[\'' . $pname . '\']';
 				if($column_meta[$pname]['data_type'] == 'integer' || $column_meta[$pname]['data_type'] == 'smallint'){
-					$q->bindValue(":$pname", $pvalue, PDO::PARAM_INT);
-					$q = $dbhelper->bind_value($q, ":$pname", $pvalue, PDO::PARAM_INT);
+					//$q->bindValue(":$pname", $pvalue, PDO::PARAM_INT);
+					$dbhelper->bind_value(":$pname", $pvalue, PDO::PARAM_INT);
 				}
 				else{
-					$q->bindValue(":$pname", $pvalue, PDO::PARAM_STR);
-					$q = $dbhelper->bind_value($q, ":$pname", $pvalue, PDO::PARAM_STR);
+					//$q->bindValue(":$pname", $pvalue, PDO::PARAM_STR);
+					$dbhelper->bind_value(":$pname", $pvalue, PDO::PARAM_STR);
 				}
 			}
 		}
@@ -1445,16 +1446,16 @@ class LibraryFunctions {
 			}
 			$error_var_statement .= 'Number of Keys: '. count($p_keys) . "\n";
 			echo $error_var_statement;
-			echo $q->debugDumpParams();
+			//echo $q->debugDumpParams();
 			echo '</pre>';
 		}
 		
-		$q = $dbhelper->execute_query($q);
+		$dbhelper->execute_query();
 
 			
 		if($op == 'edit'){
 			if($use_transaction){
-				$dblink->commit();
+				DbConnector::Commit();
 			}
 			
 			if($debug){
@@ -1484,7 +1485,7 @@ class LibraryFunctions {
 			}
 
 			if($use_transaction){
-				$dblink->commit();
+				DbConnector::Commit();
 			}
 			
 			if($debug){

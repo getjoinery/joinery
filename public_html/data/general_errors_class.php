@@ -78,8 +78,8 @@ class GeneralError extends SystemBase {
 		if ($e instanceof PDOException) {
 			$error->set('err_level', 'Database Error');
 			$error_context .= 'POSTGRES DEBUG INFO:';;
-			if(count($dbhelper->last_query)){
-				$error_context .= print_r($dbhelper->last_query, true);
+			if(count($dbhelper->query_history)){
+				$error_context .= print_r($dbhelper->query_history, true);
 			}
 			if(count($dbhelper->last_query_params)){
 				$error_context .= print_r($dbhelper->last_query_params, true);

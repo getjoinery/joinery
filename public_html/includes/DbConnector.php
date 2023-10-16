@@ -8,7 +8,8 @@ class DbConnector {
 	private $dblink;
 	private $dblink_test;
 	private $test_mode;
-	public $last_query = NULL;
+	private $current_query;
+	public $query_history = array();
 	public $last_query_params = array();
 
 	private function __construct() {
@@ -47,7 +48,14 @@ class DbConnector {
 		$dblink->commit();
 	}
 	
-	public function bind_value($q, $name, $value, $type){
+	public function prepare_query($sql){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();	
+		$this->current_query = $dblink->prepare($sql);
+	}
+	
+	public function bind_value($name, $value, $type){
+		$q = $this->current_query;
 		if(is_null($value)) {
 			$this->last_query_params[$name] = 'NULL';
 		}
@@ -64,15 +72,16 @@ class DbConnector {
 			$this->last_query_params[$name] = "$value";
 		}
 		$q->bindValue($name, $value, $type);
-		return $q;
+		return true;
 	}
 	
-	public function execute_query($q) {
-		if (!in_array($q, $this->last_query)){
-			$this->last_query[] = $q; 
+	public function execute_query() {
+		$q = $this->current_query;
+		if (!in_array($q, $this->query_history)){
+			$this->query_history[] = $q; 
 		}
 		$q->execute();
-		return $q;
+		return true;
 	}
 
 	public static function Rollback() {
@@ -105,8 +114,8 @@ class DbConnector {
 
 	function handle_query_error($e) {
 		$error_context .= 'POSTGRES DEBUG INFO:';;
-		if(count($this->last_query)){
-			$error_context .= print_r($this->last_query, true);
+		if(count($this->query_history)){
+			$error_context .= print_r($this->query_history, true);
 		}
 		if(count($this->last_query_params)){
 			$error_context .= print_r($this->last_query_params, true);
