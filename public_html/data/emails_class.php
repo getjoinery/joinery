@@ -120,7 +120,7 @@ class Email extends SystemBase {
 		$email_recipient_group->set('erg_operation', $op);
 		
 		//DON'T ADD IT AGAIN IF IT'S ALREADY THERE
-		if(!$email_recipient_group->check_for_duplicates()){
+		if(!$email_recipient_group->check_for_duplicate(array('erg_grp_group_id', 'erg_evt_event_id', 'erg_eml_email_id', 'erg_operation'))){
 			$email_recipient_group->prepare();
 			$email_recipient_group->save();
 		}

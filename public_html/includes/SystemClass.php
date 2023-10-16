@@ -218,11 +218,116 @@ abstract class SystemBase {
 		}
 		return NULL;
 	}
-	
+
+
+	//TAKES AN OBJECT TO SEARCH FOR AND A STRING OR AN ARRAY REPRESENTING NAMES OF FIELDS TO CHECK WITH CURRENT OBJECT
+	//IT WILL RETURN A LIST OF DUPLICATES, SEPARATING FIELDS WITH 'AND' IN THE SQL
+	//IF SEARCH_DELETED IS TRUE, IT WILL ALSO SEARCH ALL DELETED ITEMS
+	public static function CheckForDuplicate($obj_to_check, $fields=NULL, $search_deleted=false) {
+		if(!isset($fields) || $fields == '' || $fields == NULL){
+			throw new SystemClassException('You must pass some fields to check for duplicates.');
+		}
+		
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();  
+
+		$sql = 'SELECT * from '.static::$tablename . ' WHERE ';
+
+		$whereclauses = array();
+		if(is_array($fields)){
+			foreach ($fields as $field){
+				$field_type = static::$field_specifications[$field][type];
+				if(str_contains($field_type, 'int')){
+					$whereclauses[] = $field . '='.$obj_to_check->get($field). ' ';
+				}
+				else if(str_contains($field_type, 'bool')){
+					if($obj_to_check->get($field) === true){
+						$whereclauses[] = $field . '= true ';
+					}
+					else if($obj_to_check->get($field) === false){
+						$whereclauses[] = $field . '= false ';
+					}
+					else{
+						$whereclauses[] = $field . ' IS NULL';
+					}
+					
+				} 
+				else{
+					$whereclauses[] = $field . '=\''.$obj_to_check->get($field). '\' ';
+				}				
+				
+			}
+		}
+		else{
+			$field_type = static::$field_specifications[$fields][type];
+			if(str_contains($field_type, 'int')){
+				$whereclauses[] = $field . '='.$obj_to_check->get($field). ' ';
+			}
+			else if(str_contains($field_type, 'bool')){
+				if($obj_to_check->get($field) === true){
+					$whereclauses[] = $field . '= true ';
+				}
+				else if($obj_to_check->get($field) === false){
+					$whereclauses[] = $field . '= false ';
+				}
+				else{
+					$whereclauses[] = $field . ' IS NULL';
+				}
+				
+			} 
+			else{
+				$whereclauses[] = $field . '=\''.$obj_to_check->get($field). '\' ';
+			}
+		}
+		
+		if(!$search_deleted){
+			//SEE IF THERE IS A DELETED FIELD
+			if(isset(static::$field_specifications[static::$prefix . '_delete_time'])){
+				$whereclauses[] = static::$prefix . '_delete_time IS NULL ';
+			}
+			else if(isset(static::$field_specifications[static::$prefix . '_is_deleted'])){
+				$whereclauses[] = '('.static::$prefix . '_is_deleted IS NULL OR '.static::$prefix . '_is_deleted = FALSE)';
+			}			
+		}
+
+		$sql .= implode(' AND ', $whereclauses);
+
+		try{
+			$q = $dblink->prepare($sql);
+			$q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		}
+		catch(PDOException $e){
+			$dbhelper->handle_query_error($e);
+		}	
+		
+
+		$this_class = static::class;
+		$multi_class_name = 'Multi'.$this_class;
+		$pkey_column_name = $this_class::$pkey_column;
+
+		$this_multi_array = new $multi_class_name();
+		$numresults = 0;
+		foreach($q->fetchAll() as $row) {
+			$numresults++;
+			$child = new $this_class($row->$pkey_column_name);
+			$child->load_from_data($row, array_keys($this_class::$fields));
+			$this_multi_array->add($child);
+		}
+		
+		if($numresults){
+			return $this_multi_array;
+		}
+		else{
+			return NULL;
+		}		
+
+	}		
 	
 	//TAKES A STRING OR AN ARRAY REPRESENTING NAMES OF FIELDS TO CHECK WITH CURRENT OBJECT
 	//WILL RETURN THE NUMBER OF DUPLICATES FOUND, SEPARATING FIELDS WITH 'AND' IN THE SQL
-	public function check_for_duplicate($fields=NULL) {
+	//IF SEARCH_DELETED IS TRUE, IT WILL ALSO SEARCH ALL DELETED ITEMS
+	public function check_for_duplicate($fields=NULL, $search_deleted=false) {
 		if(!isset($fields) || $fields == '' || $fields == NULL){
 			throw new SystemClassException('You must pass some fields to check for duplicates.');
 		}
@@ -233,6 +338,7 @@ abstract class SystemBase {
 
 
 		$sql = 'SELECT count(*) as total from '.static::$tablename . ' WHERE ';
+	
 		$whereclauses = array();
 		$param_string = ':param';
 		$counter = 0;
@@ -244,6 +350,16 @@ abstract class SystemBase {
 		}
 		else{
 			$whereclauses[] = $fields . '= :param1 ';
+		}
+		
+		if(!$search_deleted){
+			//SEE IF THERE IS A DELETED FIELD
+			if(isset(static::$field_specifications[static::$prefix . '_delete_time'])){
+				$whereclauses[] = static::$prefix . '_delete_time IS NULL ';
+			}
+			else if(isset(static::$field_specifications[static::$prefix . '_is_deleted'])){
+				$whereclauses[] = '('.static::$prefix . '_is_deleted IS NULL OR '.static::$prefix . '_is_deleted = FALSE)';
+			}			
 		}
 
 		$sql .= implode(' AND ', $whereclauses);
@@ -293,9 +409,7 @@ abstract class SystemBase {
 		}	
 		
 		$count = $q->fetch();
-
 		return $count->total;
-
 	}	
 
 	function hash() {

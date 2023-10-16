@@ -53,22 +53,6 @@ class EmailRecipientGroup extends SystemBase {
 		}
 	}
 	
-	
-	function check_for_duplicates() {
-		$count = new MultiEmailRecipientGroup(array(
-			'group_id' => $this->get('erg_grp_group_id'),
-			'event_id' => $this->get('erg_evt_event_id'),
-			'email_id' => $this->get('erg_eml_email_id'),
-			'operation' => $this->get('erg_operation'),
-		));
-		
-		if ($count->count_all() > 0) {
-			$count->load();
-			return $count->get(0);
-		}
-		return NULL;
-	}	
-	
 }
 
 

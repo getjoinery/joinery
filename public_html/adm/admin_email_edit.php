@@ -16,6 +16,10 @@
 	}
 
 	if($_POST){
+		
+		if($_POST['eml_mlt_mailing_list_id'] == ''){
+			$_POST['eml_mlt_mailing_list_id'] = NULL;
+		}
 
 		$editable_fields = array('eml_description', 'eml_subject', 'eml_from_address', 'eml_from_name', 'eml_message_html', 'eml_preview_text', 'eml_ctt_contact_type_id', 'eml_mlt_mailing_list_id');
 
