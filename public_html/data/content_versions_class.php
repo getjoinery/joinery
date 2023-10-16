@@ -135,9 +135,7 @@ class ContentVersion extends SystemBase {
 
 	
 	function permanent_delete($debug=false){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();	
-		$dblink->beginTransaction();
+		DbConnector::BeginTransaction();
 		
 		$next_version = $this->get_next_version();
 		$previous_version = $this->get_previous_version();
@@ -160,7 +158,7 @@ class ContentVersion extends SystemBase {
 		
 		parent::permanent_delete();
 		
-		$dblink->commit();
+		DbConnector::Commit();
 		
 		return true;		
 	}

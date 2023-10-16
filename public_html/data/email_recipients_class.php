@@ -64,20 +64,6 @@ class EmailRecipient extends SystemBase {
 			}
 		}
 	}
-	
-	
-	function check_for_duplicates() {
-		$count = new MultiEmailRecipient(array(
-			'email_id' => $this->get('erc_eml_email_id'),
-			'user_email' => $this->get('erc_email')
-		));
-		
-		if ($count->count_all() > 0) {
-			$count->load();
-			return $count->get(0);
-		}
-		return NULL;
-	}	
 
 	function get_name() { 
 		if ($this->get('erc_name')) { 

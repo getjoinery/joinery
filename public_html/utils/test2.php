@@ -22,8 +22,13 @@
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require_once $composer_dir.'autoload.php';
 use MailchimpAPI\Mailchimp;
+exit;
 
-		$post = new Post(1, TRUE);
+$user = new User(47, True);
+$results = User::CheckForDuplicate($user, array('usr_first_name', 'usr_email_is_verified'));
+print_r($results);
+exit;
+		$post = new Post(47, TRUE);
 		$post->set('pst_usr_user_id',a);
 		
 				
