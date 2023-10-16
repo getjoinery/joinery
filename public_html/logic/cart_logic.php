@@ -53,7 +53,7 @@ function cart_logic($get_vars, $post_vars){
 		}
 		else if($_GET['coupon_code']){
 			//CHECK IF VALID
-			$coupon_code_test = CouponCode::get_by_name($_GET['coupon_code']);
+			$coupon_code_test = CouponCode::GetByColumn('ccd_code', $_GET['coupon_code']);
 			$cart->coupon_code = $coupon_code_test->get('ccd_code');
 			$cart->update_items_for_coupon();
 		}

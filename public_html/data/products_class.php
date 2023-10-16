@@ -843,7 +843,7 @@ class Product extends SystemBase {
 	}
 	
 	public function has_coupon($coupon_code_name){
-		$coupon_code = CouponCode::get_by_name($coupon_code_name);
+		$coupon_code = CouponCode::GetByColumn('ccd_code', $coupon_code_name);
 		if(!$coupon_code){
 			return false;
 		}
