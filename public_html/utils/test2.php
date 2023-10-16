@@ -51,8 +51,8 @@ exit;
 		try{
 			$q = $dblink->prepare($sql);
 			//$q->bindValue(':usr_user_id', 111, PDO::PARAM_INT);
-			$q = $dbhelper->bind_value($q, ':usr_user_id', 111, PDO::PARAM_INT);
-			$q = $dbhelper->execute_query($q);
+			$dbhelper->bind_value(':usr_user_id', 111, PDO::PARAM_INT);
+			$dbhelper->execute_query();
 			$q->setFetchMode(PDO::FETCH_OBJ);
 		}
 		catch(PDOException $e){
