@@ -191,6 +191,9 @@
 				echo $formwriter->begin_form("mt-6", "get", '/cart');
 
 				echo $formwriter->textinput('Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
+				if($page_vars['coupon_error']){
+					echo '<p>'.$page_vars['coupon_error'].'</p>';
+				}
 				//echo $formwriter->start_buttons();
 				echo $formwriter->new_form_button('Add Coupon', 'secondary');
 				//echo $formwriter->end_buttons();
