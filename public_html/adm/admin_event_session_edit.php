@@ -134,12 +134,36 @@
 			$event_session->set('evs_vid_video_id', NULL); 
 		}
 		
+		
+		
 		if (isset($_POST['evs_session_number'])){
 			if(is_null($_POST['evs_session_number']) || $_POST['evs_session_number'] === ''){
 				$event_session->set('evs_session_number', NULL);
 			}
 			else if($_POST['evs_session_number'] >= 0){
-				$event_session->set('evs_session_number', (int)$_POST['evs_session_number']);
+				$event_sessions = new MultiEventSessions(		
+					array('event_id'=>$event->key, 'session_number'=>$_POST['evs_session_number'],'deleted'=>false),
+					NULL,
+					10,
+					0);
+				$numsessions = $event_sessions->count_all();
+				if($numsessions == 1){
+					$event_sessions->load();
+					$event_session = $event_sessions->get(0);
+
+					if($_POST['evs_session_number'] == $event_session->get('evs_session_number')){
+						$event_session->set('evs_session_number', (int)$_POST['evs_session_number']);
+					}
+					else{
+						throw new SystemDisplayableError('Session '.$_POST['evs_session_number'].' already exists. Please try a different session number.');
+					}
+				}
+				if($numsessions > 1){
+					throw new SystemDisplayableError('Sessions with number '.$_POST['evs_session_number'].' already exist. Please try a different session number.');
+				}
+				else{
+					$event_session->set('evs_session_number', (int)$_POST['evs_session_number']);
+				}
 			}
 		}
 
@@ -203,7 +227,7 @@
 	//$validation_rules['evs_start_time_date']['required']['value'] = 'true';
 	$validation_rules['evs_title']['required']['value'] = 'true';
 	$validation_rules['evs_session_number']['required']['value'] = 'true';
-	$validation_rules['evs_session_number']['digits']['value'] = 'true';
+	$validation_rules['evs_session_number']['digits']['value'] = 'true';	
 	echo $formwriter->set_validate($validation_rules);	
 	
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_event_session_edit');
@@ -244,7 +268,15 @@
 	}
 	
 	
-	echo $formwriter->textinput('Session number (number, for ordering)', 'evs_session_number', NULL, 100, @$event_session_fill, '', 255, '');
+	//echo $formwriter->textinput('Session number (number, for ordering)', 'evs_session_number', NULL, 100, @$event_session_fill, '', 255, '');
+	
+
+	$optionvals = $event->get_all_valid_session_numbers();
+	//ADD IN THE CURRENT SESSION NUMBER 
+	if($event_session->get('evs_session_number')){
+		$optionvals[$event_session->get('evs_session_number')] = $event_session->get('evs_session_number');
+	}
+	echo $formwriter->dropinput("Session number (number, for ordering)", "evs_session_number", "ctrlHolder", $optionvals, $event_session->get('evs_session_number'), '', false);	
 	echo $formwriter->datetimeinput('Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_start_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
 	echo $formwriter->datetimeinput('Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_end_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
