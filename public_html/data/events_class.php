@@ -297,6 +297,36 @@ class Event extends SystemBase {
 		}				
 	}
 	
+	public function get_all_valid_session_numbers(){
+		$results = new MultiEventSessions(array('event_id' => $this->key, 'deleted' => false));
+		$results->load();
+
+		$existing_numbers = array();
+		$available_numbers = array();
+		foreach ($results as $result){
+			if($result->get('evs_session_number')){
+				array_push($existing_numbers, $result->get('evs_session_number'));
+			}
+		}
+		
+		//NOW GET THE AVAILABLE ONES
+		$max_value = max($existing_numbers)+1;
+
+		for($x=1; $x<=$max_value; $x++){
+			if(!in_array($x, $existing_numbers)){
+				array_push($available_numbers, $x);
+			}
+		}
+		
+		$out_array = array();
+		foreach($available_numbers as $available_number){
+			$out_array[$available_number] = $available_number;
+		}
+
+		return $out_array;
+
+	}
+	
 	function add_registrant($usr_user_id, $order_item=NULL, $bundle_id=NULL, $days_until_expire=NULL){
 		$order = NULL;
 		if($order_item){
