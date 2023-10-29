@@ -6,6 +6,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
 	$page_vars = product_logic($_GET, $_POST, $product);
 	$product = $page_vars['product'];
+	$cart = $page_vars['cart'];
 
 	$page = new PublicPageTW(TRUE);
 	$page->public_header(array(
@@ -53,8 +54,8 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 			if($product->is_sold_out()){
 				echo '<p>Sorry, this item is currently sold out.</p>';		
 			}
-			else if(!$product->num_versions() && $product->get('pro_price_type') != Product::PRICE_TYPE_USER_CHOOSE){
-				echo $page_vars['currency_symbol'].$product->get('pro_price');
+			else if($product->get_readable_price()){
+				echo $product->get_readable_price();
 			} 
 			?>
           </p>
@@ -106,21 +107,35 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
           </div>
         </div>-->
 					<?php
-				if(!$product->is_sold_out()){
+					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT OR IF IT CANNOT BE ADDED TO THE CART
+				if(!$product->is_sold_out() && $cart->can_add_to_cart($product)){
 
 					$formwriter = new FormWriterPublicTW("product_form", TRUE);
 					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 					echo $formwriter->hiddeninput('product_id', $product_id);
-					if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+					/*if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 						$validation_rules = array();
 						$validation_rules['user_price_override']['required']['value'] = 'true';
 						echo $formwriter->textinput('Amount to pay ('.$page_vars['currency_symbol'].')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
-					}
+					}*/
 					if ($product->output_product_form($formwriter, $page_vars['user'], null)) {
 						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
 					}
 					echo $formwriter->end_form(true);
-					$product->output_javascript($validation_rules);
+					$product->output_javascript(NULL);
+				}
+				else if(!$cart->can_add_to_cart($product)){
+					if($product->get('pro_recurring')){
+						if($cart->get_num_recurring()){
+							echo 'You cannot add more than one subscription to the cart.  Please check out first or clear your cart.';
+						}
+						else if(!$cart->get_num_recurring()){
+							echo 'You cannot add a subscription to a cart that contains other items.  Please check out first or clear your cart.';
+						}
+					}
+					else{
+						echo 'You cannot add an item to a cart containing a subscription.  Please check out first or clear your cart.';
+					}
 				}
 				?>	 		
 		

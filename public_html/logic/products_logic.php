@@ -22,7 +22,12 @@ function products_logic($get_vars, $post_vars){
 		exit();			
 	}
 
-	$numperpage = 12;
+	if($get_vars['numperpage']){
+		$numperpage = $get_vars['numperpage'];
+	}
+	else{
+		$numperpage = 12;
+	}
 	$page_vars['numperpage'] = $numperpage;
 	$offset = $get_vars['offset'];
 	$page_vars['offset'] = $offset;
@@ -33,12 +38,38 @@ function products_logic($get_vars, $post_vars){
 		$offsetdisp = $offset + 1;
 	}
 	$page_vars['offsetdisp'] = $offsetdisp;
-	$sort = 'product_id';
-	$sdirection = 'ASC';
+	
+	if($get_vars['sort']){
+		$sort = $get_vars['sort'];
+	}
+	else{
+		$sort = 'product_id';
+	}
+	
+	if($get_vars['sdirection']){
+		$sdirection = $get_vars['sdirection'];
+	}
+	else{
+		$sdirection = 'DESC';
+	}
+	
 	$searchterm = $get_vars['searchterm'];
 	
 	$searches = array();
 	$searches['active'] = TRUE;
+	
+	if($get_vars['subscriptions'] == 'all'){
+		//NO FILTER
+	}
+	else if($get_vars['subscriptions'] == TRUE){
+		$searches['is_recurring'] = TRUE;
+	}
+	else if($get_vars['subscriptions'] == FALSE){
+		$searches['is_recurring'] = FALSE;
+	}
+	 
+	
+	
 	$searches['deleted'] = FALSE;
 	
 	if($show_items && !$show_events){
@@ -51,8 +82,7 @@ function products_logic($get_vars, $post_vars){
 		//RETURN ALL
 	}
 
-	$searches['in_stock'] = true;
-	$sdirection = 'DESC';	
+	$searches['in_stock'] = true;	
 
 	$products = new MultiProduct(
 		$searches,

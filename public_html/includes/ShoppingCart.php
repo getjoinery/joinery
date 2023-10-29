@@ -39,10 +39,36 @@ class ShoppingCart {
 	public function get_extra_info() {
 		return $this->extras;
 	}
+	
+	public function can_add_to_cart($product){
+		//PAYPAL CHECKOUT CAN ONLY DO ONE SUBSCRIPTION AT A TIME, OR ONLY NON SUBSCRIPTION ITEMS.  ENFORCE THIS IF PAYPAL IS ENABLED.
+		$settings = Globalvars::get_instance();
+		if($settings->get_setting('use_paypal_checkout')){
+			if($this->count_items() > 0 && $product->get('pro_recurring')){
+				return false;
+			}
+			else if($this->get_recurring_total() > 0){
+				return false;
+			}
+			else{
+				return true;
+			}
+		}
+		else{
+			return true;
+		}
+	}
+	
 
 	public function add_item($product, $form_data) {
 
 		// First lets validate we can add this item to the cart!
+		// DO NOT ALLOW THE CART TO HOLD RECURRING AND NON RECURRING AT THE SAME time 
+		if(!$this->can_add_to_cart($product)){
+			throw new ShoppingCartException(
+					'Sorry, the cart may contain only one subscription, and it cannot be mixed with other items.  Remove the other items or the subscription or check out with those first. <a href="/cart">Return to the cart</a>');
+		}
+		
 		$current_count = 0;
 		if ($product->get('pro_max_cart_count')) {
 			// Check to make sure we haven't gone over this item's maximum purchase count
@@ -81,6 +107,7 @@ class ShoppingCart {
 		$product_version = $product->get_product_version($form_data);
 		$price = $product->get_price($product_version, $form_data);
 
+		
 		//HANDLE COUPONS
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('coupons_active')){

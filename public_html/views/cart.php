@@ -203,7 +203,7 @@
 		}
 		
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode.</div>';
+			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
 		}
 		
 		
