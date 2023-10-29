@@ -11,9 +11,12 @@ require_once($siteDir . '/includes/Validator.php');
 require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 require_once($siteDir . '/data/order_items_class.php');
+require_once($siteDir . '/data/questions_class.php');
 require_once($siteDir . '/data/coupon_codes_class.php');
 require_once($siteDir . '/data/coupon_code_products_class.php');
 require_once($siteDir . '/data/product_versions_class.php');
+require_once($siteDir . '/data/product_requirements_class.php');
+require_once($siteDir . '/data/product_requirement_instances_class.php');
 
 class ProductException extends SystemClassException {}
 
@@ -789,18 +792,69 @@ class Product extends SystemBase {
 		return $validation_rules;
 	}
 	
+	//THIS FUNCTION GIVES AN ESTIMATE OF PRICE FOR DISPLAY PURPOSES
+	public function get_readable_price(){
+		$settings = Globalvars::get_instance(); 
+		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+		
+		if($this->key == Product::PRODUCT_ID_OPTIONAL_DONATION){
+			//IT IS AN OPTIONAL DONATION
+			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
+			return false;
+		}		
+		else if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+			return false;
+		}
+		else if($this->get('pro_price_type') == Product::PRICE_TYPE_MULTIPLE){
+			$versions = $this->get_product_versions();
+			if(!count($versions)){
+				return false;
+			}
+			$low_price = NULL;
+			$high_price = NULL;
+			foreach ($versions as $version) {
+				if ($version->prv_status == ProductVersion::ACTIVE) {
+					
+					if(!$low_price || $version->prv_version_price < $low_price){
+						$low_price = $version->prv_version_price;
+					}
+					
+					if(!$high_price || $version->prv_version_price > $high_price){
+						$high_price = $version->prv_version_price;
+					}
+				} 
+			}
+			
+			if($low_price && $high_price){
+				return $currency_symbol.$low_price . ' - ' . $currency_symbol.$high_price;
+			}
+			else{
+				return false;
+			}
+
+		}
+		else if($this->get('pro_price_type') == Product::PRICE_TYPE_ONE){	
+			return $currency_symbol . $this->get('pro_price'); 	
+		}	
+	
+	}
 	
 	public function get_price($product_version, $data){
+		$requirements = $this->get_requirement_info('id');
 
 		//HANDLE PRICES
 		$settings = Globalvars::get_instance(); 
-		if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
-			$requirements = $this->get_requirement_info('id');
-			if(in_array(128, $requirements) && $data['user_price']){
-				return $data['user_price'];
-			}
-			else if($data['user_price_override']){
-				return $data['user_price_override'];
+		
+		if($this->key == Product::PRODUCT_ID_OPTIONAL_DONATION){
+			//IT IS AN OPTIONAL DONATION
+			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
+			return (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price']));
+		}		
+		else if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+	
+			if($data['user_price_override']){
+				//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
+				return (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price_override']));
 			}
 			else{
 				$error = 'This product is missing the price override.';
@@ -820,12 +874,8 @@ class Product extends SystemBase {
 			}
 		}
 		else if($this->get('pro_price_type') == Product::PRICE_TYPE_ONE){
-			
-			$requirements = $this->get_requirement_info('id');
-			if(in_array(128, $requirements) && $data['user_price']){
-				return $data['user_price'];
-			}
-			else if($this->get('pro_price')){
+	
+			if($this->get('pro_price')){
 				return $this->get('pro_price'); 	
 			}
 			else{
@@ -835,6 +885,8 @@ class Product extends SystemBase {
 			}
 		}	
 		else{
+			print_r($this);
+			exit;
 			$error = 'This product has no price.';
 			throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
 			exit;
@@ -947,19 +999,18 @@ class Product extends SystemBase {
 		return $data;
 	}
 
-	function validate_form($data, $session) {
-		$form_data = array();
+	function validate_form($form_data, $session) {
 		$form_display_data = array();
 
 		// If the product has active product verisons, one of them must be selected!
 		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
 		if ($versions) {
-			if (!isset($data['product_version']) || !is_numeric($data['product_version'])) {
+			if (!isset($form_data['product_version']) || !is_numeric($form_data['product_version'])) {
 				throw new BasicProductRequirementException(
 					'You must select which version of the product you would like to purchase.');
 			}
 
-			$version = $this->get_product_version_details(intval($data['product_version']));
+			$version = $this->get_product_version_details(intval($form_data['product_version']));
 			if ($version === NULL) {
 				throw new BasicProductRequirementException(
 					'Sorry, the product you have selected is not valid.  Please try again.');
@@ -969,10 +1020,18 @@ class Product extends SystemBase {
 			$form_data['product_version'] = $version->prv_product_version_id;
 		}
 
+		//IF NO ITEMS REMAINING, SHOW ERROR
+		if($this->get('pro_max_purchase_count') > 0){
+			$remaining = $this->get('pro_max_purchase_count') - $this->get_number_purchased();
+			if(!$remaining){
+				throw new SystemDisplayableErrorNoLog(
+							'This item is sold out.');
+			}
+		}
 
 		foreach ($this->get_product_requirements() as $product_requirement) {
 
-			list($validation_data, $display_data) = $product_requirement->validate_form($data, $session);
+			list($validation_data, $display_data) = $product_requirement->validate_form($form_data, $session);
 			
 			if ($validation_data !== NULL) {
 				$form_data = array_merge($form_data, $validation_data);
@@ -981,7 +1040,35 @@ class Product extends SystemBase {
 				$form_display_data = array_merge($form_display_data, $display_data);
 			}
 		}
+		
+		//VALIDATE THE USER PRICE OVERRIDE IF THAT EXISTS
+		if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE && isset($form_data['user_price_override'])){	
+			if(!$form_data['user_price_override']){
+				throw new SystemDisplayableErrorNoLog(
+					'You must enter an amount in the "Price to pay" field.');
+			}
+		}
+		
+		//NOW VALIDATE THE ADDITIONAL PRODUCT REQUIREMENTS
+		$instances = $this->get_requirement_instances();
 
+		foreach($instances as $instance){
+			$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
+			$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
+			$valid = $question->validate_answers($form_data['question_'.$question->key]);
+			if($valid == 'valid'){
+				$question_info = array('name' => 'question_'.$question->key, 'requirement_id' => $instance->get('pri_prq_product_requirement_id'), 'question_id' => $question->key, 'question' => $question->get('qst_question'), 'answer' => $question->get_answer_readable($form_data['question_'.$question->key], false));
+				$form_data['question_'.$question->key] = $question_info;
+			}
+			else{
+				throw new SystemDisplayableErrorNoLog($valid);
+				/*$errorhandler = new ErrorHandler(TRUE);
+				$errorhandler->handle_general_error();
+				exit();*/
+			}
+		}
+
+			
 /*
 		$errors = array();
 		foreach (static::$required_fields as $field => $error_message) {
@@ -998,7 +1085,7 @@ class Product extends SystemBase {
 		return array($form_data, $form_display_data);
 	}
 
-	function output_javascript($extra_data=array()) {
+	function output_javascript($extra_data=array(), $form_id='product_form') {
 		$validation_info = array();
 
 		echo '<script type="text/javascript">';
@@ -1040,6 +1127,12 @@ class Product extends SystemBase {
 					
 				}
 			}
+			
+			
+			//ADD IN REQUIRED PRICE OVERRIDE
+			if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+				$rules['user_price_override'] = array('required' => 'true');
+			}
 
 
 			//ADD IN EXTRA DATA 
@@ -1065,7 +1158,7 @@ class Product extends SystemBase {
 									}
 					);
 
-					$('#product_form').validate({
+					$('#".$form_id."').validate({
 							rules: " . str_replace('"', '', json_encode($rules)) . ",
 							messages: " . str_replace('"', '', json_encode($messages)) . ",";
 					
@@ -1098,7 +1191,13 @@ class Product extends SystemBase {
 	function output_product_form($formwriter, $user, $extra_data=array()) {
 		$settings = Globalvars::get_instance(); 
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
-		
+
+		if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+			$validation_rules = array();
+			$validation_rules['user_price_override']['required']['value'] = 'true';
+			echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
+		}
+	
 		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
 		if ($versions) {
 			$version_dropdown = array();
@@ -1163,6 +1262,16 @@ class Product extends SystemBase {
 				exit;
 			}
 		}	
+		
+		//DO NOT ALLOW RECURRING ITEMS TO ALSO ALLOW "OPTIONAL ONE TIME DONATION"
+		if($this->get('pro_recurring')){
+			foreach ($this->get_product_requirements() as $product_requirement) {
+				if(get_class($product_requirement) == 'UserPriceRequirement'){
+					throw new SystemDisplayableError('Sorry, due to the limitations of Stripe and Paypal, you cannot have a subscription also contain an "Optional one-time donation".');
+					exit;
+				}
+			}
+		}
 	}
 	
 }
@@ -1206,6 +1315,15 @@ class MultiProduct extends SystemMultiBase {
 			$bind_params[] = array($this->options['is_active'], PDO::PARAM_BOOL);
 		}			
 
+		if (array_key_exists('is_recurring', $this->options)) {
+			if($this->options['is_recurring']){
+				$where_clauses[] = 'pro_recurring IS NOT NULL';
+			}
+			else{
+				$where_clauses[] = '(pro_recurring IS NULL OR pro_recurring = \'\')';
+			}
+		}		
+		
 		if (array_key_exists('link', $this->options)) {
 			$where_clauses[] = 'pro_link = ?';
 			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);

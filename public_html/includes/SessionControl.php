@@ -125,7 +125,7 @@ class SessionControl{
 		}		
 	}
 
-	public function save_item($key, $value) {
+	public function save_session_item($key, $value) {
 		$_SESSION['temporary_storage'][$key] = $value;
 	}
 
