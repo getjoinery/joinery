@@ -127,11 +127,9 @@
 	else if($_POST){
 		
 		//TODO FIX THIS FROM HAVING TO BE DONE
-		if($_POST['evs_vid_video_id']){
-			$event_session->set('evs_vid_video_id', $_POST['evs_vid_video_id']);
-		}
-		else{
-			$event_session->set('evs_vid_video_id', NULL); 
+		
+		if(!$_POST['evs_vid_video_id']){
+			$_POST['evs_vid_video_id'] = NULL; 
 		}
 		
 		
@@ -170,7 +168,7 @@
 		
 
 	
-		$editable_fields = array('evs_evt_event_id', 'evs_content', 'evs_links', 'evs_picture_link', 'evs_is_public', 'evs_title');
+		$editable_fields = array('evs_evt_event_id', 'evs_content', 'evs_links', 'evs_picture_link', 'evs_is_public', 'evs_title', 'evs_vid_video_id');
 
 		foreach($editable_fields as $field) {
 			$event_session->set($field, $_POST[$field]);
@@ -191,8 +189,6 @@
 			$event_session->set('evs_end_time_local', $time_combined);			
 		}
 
-
-		
 
 
 		$event_session->prepare();

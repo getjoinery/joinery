@@ -149,13 +149,6 @@
 	}
 
 	foreach($event_sessions as $event_session){
-		if($event_session->get('evs_vid_video_id')){ 
-			$video = new Video($event_session->get('evs_vid_video_id'), TRUE);
-		}
-		else{
-			$video = new Video(NULL);
-		}
-
 		
 		$rowvalues = array();		
 		
@@ -179,12 +172,18 @@
 		if($event_session->get('evs_picture_link')){
 			array_push($rowvalues, $event_session->get('evs_picture_link'));
 		}
-		else{
+		else if($event_session->get('evs_vid_video_id')){
+			$video = new Video($event_session->get('evs_vid_video_id'), TRUE);
 			$video_status = '';
 			if($video->get('vid_delete_time')){
 				$video_status = 'DELETED';
 			}
+
 			array_push($rowvalues, $video->get_embed(300, 168). '<br><a href="/admin/admin_video?vid_video_id='.$video->key.'">Video: '.$video->get('vid_title').'</a> '.$video_status);
+			
+		}
+		else{
+			array_push($rowvalues, 'No image or video');
 		}
 		
 		array_push($rowvalues, '<a href="/admin/admin_event_session_edit?evs_event_session_id='. $event_session->key .'">edit</a> |
