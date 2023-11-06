@@ -14,15 +14,25 @@
 	$theme_directory = $full_site_dir.'/theme';
 	
 	//GET THE UPGRADE FILE
-			echo 'Getting: '. $sourceFile.'<br>';;
-            if(saveFileByUrl($sourceFile, $target_location)){
-				echo 'Upgrade downloaded...<br>';
-			}
-			else{
-				echo 'Unable to download upgrade...<br>';
-				exit;
-			}
-			chmod($target_location, 0777);
+	echo 'Getting: '. $sourceFile.'<br>';;
+	/*
+	if(saveFileByUrl($sourceFile, $target_location)){
+		echo 'Upgrade downloaded...<br>';
+	}
+	else{
+		echo 'Unable to download upgrade...<br>';
+		exit;
+	}
+	*/
+
+	if(download_file($sourceFile, $target_location)){
+		echo 'Upgrade downloaded...<br>';
+	}
+	else{
+		echo 'Unable to download upgrade...<br>';
+		exit;
+	}
+	chmod($target_location, 0777);
 
 	//CLEAR OLD STAGED FILES 
 	exec ("rm -rf $stage_location");
@@ -51,7 +61,6 @@
 			exec("cp -r $theme_directory $stage_directory");
 			
 			//RUN THE DEPLOY
-				//CLEAR OLD STAGED FILES 
 			exec ("rm -rf $backup_directory");
 			rename($live_directory, $backup_directory);
 			rename($stage_directory, $live_directory);
@@ -71,7 +80,27 @@
 			}	
 			*/		
 
-			
+function download_file ($url, $path) {
+
+  $newfilename = $path;
+  $file = fopen ($url, "rb");
+  if ($file) {
+    $newfile = fopen ($newfilename, "wb");
+
+    if ($newfile)
+    while(!feof($file)) {
+      fwrite($newfile, fread($file, 1024 * 8 ), 1024 * 8 );
+    }
+	else{
+		return false;
+	}
+  }
+  else{
+	  return false;
+  }
+
+  return true;
+ }			
 		
 
             function saveFileByUrl ( $source, $destination ) {
