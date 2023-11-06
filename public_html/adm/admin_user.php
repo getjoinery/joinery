@@ -284,10 +284,10 @@
 				<?php
 				echo 'Email address:  <strong>'.$user->get('usr_email').'</strong> ';
 				if($user->get('usr_email_is_verified')) {
-					echo ' Verified';
+					echo ' <b>Verified</b>';
 				}
 				else{
-					echo ' Unverified';
+					echo ' <b>Unverified</b>';
 				}	
 
 
