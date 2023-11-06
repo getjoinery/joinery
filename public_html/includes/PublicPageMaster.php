@@ -11,7 +11,6 @@ require_once($siteDir . '/data/public_menus_class.php');
 class PublicPageMaster {
 
 	protected $rowcount;
-	//protected $theme_url;
 
 	protected static $header_defaults = array(
 		//'title' => '',
@@ -84,8 +83,6 @@ class PublicPageMaster {
 			$secure = FALSE;
 			$this->secure = FALSE;
 		}
-		
-		//$this->theme_url = LibraryFunctions::get_theme_path('web');
 		
 	}
 	
