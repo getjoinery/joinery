@@ -25,6 +25,7 @@
 	}
 	*/
 
+	/*
 	if(download_file($sourceFile, $target_location)){
 		echo 'Upgrade downloaded...<br>';
 	}
@@ -32,7 +33,51 @@
 		echo 'Unable to download upgrade...<br>';
 		exit;
 	}
+	*/
+
+	$new_file = fopen($target_location, "w") or die("cannot open" . $target_location);
+
+	// Setting the curl operations
+	$cd = curl_init();
+	curl_setopt($cd, CURLOPT_URL, $sourceFile);
+	curl_setopt($cd, CURLOPT_FILE, $new_file);
+	curl_setopt($cd, CURLOPT_TIMEOUT, 30); // timeout is 30 seconds, to download the large files you may need to increase the timeout limit.
+
+	curl_exec($cd);
+	if (curl_errno($cd)) {
+	  echo "the cURL error is : " . curl_error($cd);
+	  exit;
+	} 
+	else {
+	  $status = curl_getinfo($cd);
+	  if($status["http_code"] == 200){
+		echo "The upgrade is downloaded...<br>";
+	  }
+		else{
+			echo "The error code is : " . $status["http_code"];
+			exit;
+		}	
+	  // the http status 200 means everything is going well. the error codes can be 401, 403 or 404.
+	}
+
+	// close and finalize the operations.
+	curl_close($cd);
+	fclose($new_file);	
+	
+	
+	
+	
+	/*
+	$ch = curl_init();
+	curl_setopt($ch, CURLOPT_URL,$sourceFile);
+	$fp = fopen($target_location, 'w');
+	curl_setopt($ch, CURLOPT_FILE, $fp);
+	curl_exec ($ch);
+	curl_close ($ch);
+	fclose($fp);
+	*/
 	chmod($target_location, 0777);
+	
 
 	//CLEAR OLD STAGED FILES 
 	exec ("rm -rf $stage_location");
