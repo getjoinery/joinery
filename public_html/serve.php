@@ -108,7 +108,14 @@ if($params[0] == 'static_files'){
 
 	//ORIGINAL FILE
 	if(file_exists($file)){
-		$seconds_to_cache = 43200;
+		
+		//DO NOT CACHE UPGRADES
+		if(str_contains($file, '.upg.zip')){
+			$seconds_to_cache = 10;
+		}
+		else{
+			$seconds_to_cache = 43200;
+		}
 		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
 		header("Expires: $ts");
 		header("Pragma: cache");
