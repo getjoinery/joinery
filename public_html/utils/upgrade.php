@@ -7,10 +7,12 @@
 	$full_site_dir = $baseDir.$site_template;
 	
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
-	if($_GET['request-upgrade'] && $settings->get_setting('upgrade_server_active')){
+	if($_GET['serve-upgrade'] && $settings->get_setting('upgrade_server_active')){
 		$response = array();
 		$response['system_version'] = $settings->get_setting('system_version');
-		$response['upgrade_location'] = $settings->get_setting('webDir').$settings->get_setting('upgrade_location');
+		//TODO:  MAKE UPGRADE LOCATION NOT STATIC USING THE UPGRADE_LOCATION SETTING
+		//$response['upgrade_location'] = $settings->get_setting('webDir').$settings->get_setting('upgrade_location');
+		$response['upgrade_location'] = $settings->get_setting('webDir').'/static_files/current_upgrade.upg.zip';
 		header("Content-Type: application/json");
 		http_response_code(400);
 
@@ -23,7 +25,7 @@
 	$session->check_permission(8);
 	
 	//GET THE UPGRADE INFO
-	$upgrade_source = $settings->get_setting('upgrade_source').'/utils/upgrade';
+	$upgrade_source = $settings->get_setting('upgrade_source').'/utils/upgrade?request-upgrade=1';
 	$access_token = '';	
 	$curl=curl_init();
 	curl_setopt_array($curl, array(
