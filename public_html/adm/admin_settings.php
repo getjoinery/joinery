@@ -415,6 +415,13 @@
 	//$optionvals = array("General"=>'general', 'Emails' => 'emails');
 	//echo $formwriter->dropinput("Setting group", "stg_group_name", '', $optionvals, $setting->get('stg_group_name'), '', FALSE);
 
+	echo '<h3>Upgrade Settings</h3>';
+	$optionvals = array("Yes"=>1, 'No' => 0);
+	echo $formwriter->dropinput("Act as upgrade server", "upgrade_server_active", '', $optionvals, $settings->get_setting('upgrade_server_active'), '', FALSE);	
+	if(!$upgrade_source = $settings->get_setting('upgrade_source')){
+		$upgrade_source = 'https://jeremytunnell.com';
+	}
+	echo $formwriter->textinput("Upgrade source", "upgrade_source", '', 20, $upgrade_source, "" , 255, "");
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

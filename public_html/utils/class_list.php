@@ -880,4 +880,22 @@ Welcome!
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'preview_image\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
+		
+ 		$migration['system_version'] = '0.5.37';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'upgrade_source'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'upgrade_source\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
+ 		$migration['system_version'] = '0.5.37';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'upgrade_server_active'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'upgrade_server_active\', \'0\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
+ 		$migration['system_version'] = '0.5.37';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'upgrade_location'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'upgrade_location\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
 		 
