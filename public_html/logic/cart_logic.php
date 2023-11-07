@@ -28,12 +28,6 @@ function cart_logic($get_vars, $post_vars){
 		exit();
 	} 	
 
-	$newbilling = 0;
-	if($_GET['newbilling'] == 1){
-		$cart->billing_user = NULL;
-		$newbilling = 1;
-	}	
-
 	if (isset($_REQUEST['r']) && is_numeric($_REQUEST['r'])) {
 		$cart->remove_item(intval($_REQUEST['r']));
 	}
@@ -44,8 +38,7 @@ function cart_logic($get_vars, $post_vars){
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 	$page_vars['currency_symbol'] = $currency_symbol;
 	
-	//COUPONS
-		
+	//COUPONS	
 	if($settings->get_setting('coupons_active')){
 		if($_GET['clear_coupon_code']){
 			$cart->coupon_code = NULL;
@@ -64,6 +57,11 @@ function cart_logic($get_vars, $post_vars){
 		}
 	}
 
+	$newbilling = 0;
+	if($_GET['newbilling'] == 1){
+		$cart->billing_user = NULL;
+		$newbilling = 1;
+	}	
 
 	if($_POST['existing_billing_email']){
 		$billing_user = array();
@@ -99,10 +97,12 @@ function cart_logic($get_vars, $post_vars){
 		$cart->billing_user = $billing_user;
 	}	
 	
-	$billing_user = $cart->get_or_create_billing_user(); 
+	
+	
 	
 
 	if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
+		$billing_user = $cart->get_or_create_billing_user(); 
 		if($settings->get_setting('use_paypal_checkout')){
 			//HANDLE SUBSCRIPTION PREP FIRST
 			$paypal = new PaypalHelper();
