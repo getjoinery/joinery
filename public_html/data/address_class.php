@@ -321,7 +321,7 @@ class Address extends SystemBase {
 		}
 		return $str;
 	}
-	public function check_for_duplicate($fields=NULL) {
+	public function check_for_duplicate($fields=NULL, TRUE) {
 		//FIELDS WILL BE UNUSED IN THIS FUNCTION, INCLUDED TO MATCH SYSTEMCLASS DECLARATION
 		
 		// See if there is a duplicate address to this one for this user already!
