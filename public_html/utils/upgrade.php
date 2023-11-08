@@ -25,7 +25,7 @@
 	$session->check_permission(8);
 	
 	//GET THE UPGRADE INFO
-	$upgrade_source = $settings->get_setting('upgrade_source').'/utils/upgrade?request-upgrade=1';
+	$upgrade_source = $settings->get_setting('upgrade_source').'/utils/upgrade?serve-upgrade=1';
 	$access_token = '';	
 	$curl=curl_init();
 	curl_setopt_array($curl, array(
@@ -40,16 +40,34 @@
 	));	
 	$response = curl_exec($curl);
 	curl_close($curl);
-	print_r( json_decode($response, true));
-	exit;
+	$decode_response = json_decode($response, true);
+	if($decode_response['system_version']){
+		echo 'Upgrade available: '. $decode_response['system_version'] . '<br>';
+		echo 'Current local version: '.$settings->get_setting('system_version').'<br>';
+		
+		//TODO: SYSTEM VERSIONS ONLY INCREMENT WITH MIGRATIONS
+		/*
+		if($decode_response['system_version'] >= $settings->get_setting('system_version') && !$_GET['force-upgrade']){
+			echo 'You are up-to-date and do not need an upgrade.<br>';
+			exit;
+		}
+		*/
+	}
+	else{
+		echo 'Unable to reach upgrade server.<br>';
+		exit;
+	}
+	
+	$sourceFile = $decode_response['upgrade_location'];
 	
 	
-	$sourceFile     = 'https://jeremytunnell.com/static_files/current_upgrade.zip';
-	$target_location = $full_site_dir.'/uploads/current_upgrade.zip';
+	//$sourceFile     = 'https://jeremytunnell.com/static_files/current_upgrade.zip';
+	$target_location = $full_site_dir.'/uploads/current_upgrade.upg.zip';
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
 	$live_directory = $full_site_dir. 'public_html';
 	$backup_directory = $full_site_dir. 'public_html_last';
 	$stage_directory = $stage_location. 'public_html_stage';
+	$failed_directory = $stage_location. 'public_html_fail';
 	$theme_directory = $full_site_dir.'/theme';
 	
 	//GET THE UPGRADE FILE
@@ -151,8 +169,12 @@
 	
 	//DO THE MIGRATION
 	require_once($_SERVER['DOCUMENT_ROOT'].'/utils/update_database.php');
-	
-	
+	$migration_result = update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
+	if(!$migration_result){
+		echo 'Migration failed...reverting upgrade.<br>';
+		rename($live_directory, $failed_directory);
+		rename($backup_directory, $live_directory);		
+	}
 	
 	//UNTAR IT 
 	/*

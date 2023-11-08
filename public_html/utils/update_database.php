@@ -496,9 +496,12 @@
 		return true;
 	}
 	
-	update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
-	echo 'Database update complete'. "<br>\n";
-	return 0;
+	if($_REQUEST['autorun']){
+		if(update_database($classes, $migrations, $verbose, $upgrade, $cleanup)){
+			echo 'Database update complete'. "<br>\n";
+			return 0;  //RETURN 0 FOR THE DEPLOY SCRIPT
+		}
+	}
 
 
 ?>
