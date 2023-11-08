@@ -168,6 +168,7 @@
 	rename($stage_directory, $live_directory);
 	
 	//DO THE MIGRATION
+	$noautorun = 1;  //DO NOT AUTORUN THE update_database include
 	require_once($_SERVER['DOCUMENT_ROOT'].'/utils/update_database.php');
 	$migration_result = update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
 	if(!$migration_result){
