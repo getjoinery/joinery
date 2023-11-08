@@ -43,9 +43,12 @@ function event_logic($get_vars, $post_vars, $event){
 	if($session->get_user_id()){
 		$is_registered = EventRegistrant::check_if_registrant_exists($session->get_user_id(), $event->key);
 	}
-					
+	
+	$register_url = $event->get_register_url();
 	if($is_registered){
-		$register_urls[] = array('label' => 'Make a payment', 'link' => $event->get_register_url());
+		if($register_url){
+			$register_urls[] = array('label' => 'Make a payment', 'link' => $register_url);
+		}
 		$register_urls[] = array('label' => 'View Course', 'link' => '/profile/event_sessions_course?event_id='.$event->key);
 	}
 	else{
@@ -55,7 +58,7 @@ function event_logic($get_vars, $post_vars, $event){
 		else if($event->get('evt_status') == Event::STATUS_CANCELED){
 			$registration_message = 'This event has been cancelled.';
 		}						
-		else if($event->get('evt_is_accepting_signups') && $event->get_register_url()){	
+		else if($event->get('evt_is_accepting_signups') && $register_url){	
 			if($event->get('evt_allow_waiting_list') && ($event->get('evt_max_signups') && $numregistrants >= $event->get('evt_max_signups'))){
 				if($session->get_user_id() && $on_waiting_list){
 					$registration_message = 'You are on the waiting list.';			
@@ -69,7 +72,7 @@ function event_logic($get_vars, $post_vars, $event){
 				$registration_message = 'This event is full.';
 			}
 			else{
-				$register_urls[] = array('label' => 'Register Now', 'link' => $event->get_register_url());
+				$register_urls[] = array('label' => 'Register Now', 'link' => $register_url);
 			}
 		}
 		else if($event->get('evt_allow_waiting_list')){
