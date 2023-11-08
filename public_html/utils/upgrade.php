@@ -54,8 +54,14 @@
 		*/
 	}
 	else{
-		echo 'Unable to reach upgrade server.<br>';
-		exit;
+		if(!$settings->get_setting('upgrade_source')){
+			echo 'Upgrade server not set.  Go to the settings and enter one.<br>';
+			exit;			
+		}
+		else{
+			echo 'Unable to reach upgrade server: '.$upgrade_source.'<br>';
+			exit;
+		}
 	}
 	
 	$sourceFile = $decode_response['upgrade_location'];
