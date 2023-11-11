@@ -149,7 +149,7 @@ class Event extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
-		'evt_create_time' => NOW, 'evt_visibility' => 0, 'evt_status' => 1, 'evt_show_add_to_calendar_link' => true
+		'evt_create_time' => 'now()', 'evt_visibility' => 0, 'evt_status' => 1, 'evt_show_add_to_calendar_link' => true
 	);	
 
 	public static $field_constraints = array(
