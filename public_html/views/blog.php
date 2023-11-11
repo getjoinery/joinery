@@ -10,7 +10,7 @@
 	$page = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
-		'title' => $page_vars[title]
+		'title' => $page_vars['title']
 	);
 	$page->public_header($hoptions); 
 	
