@@ -82,7 +82,7 @@ abstract class SystemBase {
 			throw new SystemClassException('That column '.$column.' does not exist in '.static::$tablename);
 		}
 
-		$field_type = static::$field_specifications[$column][type];
+		$field_type = static::$field_specifications[$column]['type'];
 		if(str_contains($field_type, 'int')){
 			$data = SingleRowFetch(static::$tablename, $column,
 			$value, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -236,7 +236,7 @@ abstract class SystemBase {
 		$whereclauses = array();
 		if(is_array($fields)){
 			foreach ($fields as $field){
-				$field_type = static::$field_specifications[$field][type];
+				$field_type = static::$field_specifications[$field]['type'];
 				if(str_contains($field_type, 'int')){
 					$whereclauses[] = $field . '='.$obj_to_check->get($field). ' ';
 				}
@@ -259,7 +259,7 @@ abstract class SystemBase {
 			}
 		}
 		else{
-			$field_type = static::$field_specifications[$fields][type];
+			$field_type = static::$field_specifications[$fields]['type'];
 			if(str_contains($field_type, 'int')){
 				$whereclauses[] = $field . '='.$obj_to_check->get($field). ' ';
 			}
@@ -373,7 +373,7 @@ abstract class SystemBase {
 			$counter = 0;
 			if(is_array($fields)){
 				foreach ($fields as $field){
-					$field_type = static::$field_specifications[$field][type];
+					$field_type = static::$field_specifications[$field]['type'];
 					$counter++;
 					$param_name = $param_string . $counter;
 					if(str_contains($field_type, 'int')){
@@ -388,7 +388,7 @@ abstract class SystemBase {
 				}
 			}
 			else{
-				$field_type = static::$field_specifications[$fields][type];
+				$field_type = static::$field_specifications[$fields]['type'];
 				if(str_contains($field_type, 'int')){
 					$q->bindParam(':param1', $this->get($fields), PDO::PARAM_INT);
 				}
@@ -973,7 +973,7 @@ abstract class SystemBase {
 			if($debug){
 				echo "<br>\n<b>" . $field . '</b>';
 			}
-			$field_type = static::$field_specifications[$field][type];
+			$field_type = static::$field_specifications[$field]['type'];
 			if($debug){
 				print_r(' -' .$field_type. '- ');
 			}
