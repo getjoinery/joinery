@@ -489,7 +489,7 @@ class MultiEventSessions extends SystemMultiBase {
 			$sql = 'SELECT * FROM evs_event_sessions
 				' . $where_clause . ' ORDER BY ';
 
-			if ($this->order_by === NULL) {
+			if (empty($this->order_by)) {
 				$sql .= 'evs_event_session_id DESC';
 			} else {
 				$sort_clauses = array();

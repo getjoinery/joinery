@@ -127,7 +127,7 @@ class MultiProductRequirementInstance extends SystemMultiBase {
 			$sql = 'SELECT * FROM pri_product_requirement_instances
 				' . $where_clause . ' ORDER BY ';
 
-			if ($this->order_by === NULL) {
+			if (empty($this->order_by)) {
 				$sql .= 'pri_product_requirement_instance_id DESC';
 			} else {
 				$sort_clauses = array();

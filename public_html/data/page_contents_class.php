@@ -172,7 +172,7 @@ class MultiPageContent extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " pac_page_content_id ASC ";
 			}
 			else {

@@ -211,7 +211,7 @@ class MultiComment extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " cmt_comment_id ASC ";
 			}
 			else {

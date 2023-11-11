@@ -148,7 +148,7 @@ class MultiApiKey extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " apk_api_key_id ASC ";
 			}
 			else {

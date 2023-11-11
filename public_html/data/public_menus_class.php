@@ -151,7 +151,7 @@ class MultiPublicMenu extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 				
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " pmu_public_menu_id ASC ";
 			}
 			else {

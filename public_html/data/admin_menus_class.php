@@ -192,7 +192,7 @@ class MultiAdminMenu extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 				
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " amu_admin_menu_id ASC ";
 			}
 			else {

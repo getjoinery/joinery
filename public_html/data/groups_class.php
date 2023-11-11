@@ -469,7 +469,7 @@ class MultiGroup extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 				
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " grp_group_id ASC ";
 			}
 			else {

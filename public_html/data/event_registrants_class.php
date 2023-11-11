@@ -271,7 +271,7 @@ class MultiEventRegistrant extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " evr_event_registrant_id ASC ";
 			}
 			else {

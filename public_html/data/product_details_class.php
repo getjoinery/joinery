@@ -82,7 +82,7 @@ class MultiProductDetail extends SystemMultiBase {
 			$sql = 'SELECT * FROM prd_product_details
 				' . $where_clause . ' ORDER BY ';
 
-			if ($this->order_by === NULL) {
+			if (empty($this->order_by)) {
 				$sql .= 'prd_product_detail_id DESC';
 			} else {
 				$sort_clauses = array();

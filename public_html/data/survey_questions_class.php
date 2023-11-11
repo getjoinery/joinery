@@ -138,7 +138,7 @@ class MultiSurveyQuestion extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 				
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " srq_survey_question_id ASC ";
 			}
 			else {

@@ -261,7 +261,7 @@ class MultiOrder extends SystemMultiBase {
 			$sql = 'SELECT * FROM ord_orders
 				' . $where_clause . ' ORDER BY ';
 
-			if ($this->order_by === NULL) {
+			if (empty($this->order_by)) {
 				$sql .= 'ord_order_id DESC';
 			} else {
 				$sort_clauses = array();

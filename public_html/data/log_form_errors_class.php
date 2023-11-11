@@ -102,7 +102,7 @@ class MultiFormError extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " lfe_log_form_error_id ASC ";
 			}
 			else {

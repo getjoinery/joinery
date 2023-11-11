@@ -142,7 +142,7 @@ class MultiPoint extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 			
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " pnt_point_id ASC ";
 			}
 			else {

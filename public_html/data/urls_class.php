@@ -99,7 +99,7 @@ class MultiUrl extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 			
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " url_url_id ASC ";
 			}
 			else {

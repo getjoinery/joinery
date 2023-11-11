@@ -863,13 +863,19 @@ class MultiAddress extends SystemMultiBase {
 
 		if ($only_count) {
 			$sql = 'SELECT COUNT(1) as count_all FROM usa_users_addrs ' . $where_clause;
-		} else {
-			$sql = "
-				SELECT *
-				FROM usa_users_addrs
-				" . $where_clause . "
-				ORDER BY usa_users_addr_id ASC" . $this->generate_limit_and_offset();
+		} 
+		else {
+			$sql = 'SELECT * FROM usa_users_addrs
+				' . $where_clause . '
+				ORDER BY ';
+
+			if (empty($this->order_by)) {
+				$sql .= " usa_users_addr_id ASC ";
+			}
+			
+			$sql .= ' '.$this->generate_limit_and_offset();			
 		}
+
 
 		try {
 			$q = $dblink->prepare($sql);
