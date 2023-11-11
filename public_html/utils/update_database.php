@@ -80,13 +80,13 @@
 					
 				foreach($class::$field_specifications as $field_name=>$field_specs){
 					
-					$sql .= ' "'.$field_name.'" '.$field_specs[type];
+					$sql .= ' "'.$field_name.'" '.$field_specs['type'];
 						
-					if(isset($field_specs[is_nullable]) && !$field_specs[is_nullable]){
+					if(isset($field_specs['is_nullable']) && !$field_specs['is_nullable']){
 						$sql .= ' NOT NULL ';
 					}
 
-					if(isset($field_specs[serial]) && $field_specs[serial]){
+					if(isset($field_specs['serial']) && $field_specs['serial']){
 						$sql .= 'DEFAULT nextval(\''.$sequence_name.'\'::regclass)';
 					}
 					$sql .= ', ';
@@ -152,8 +152,8 @@
 				
 				$live_column_info = array();
 				while ($row = $q->fetch()) {
-					$live_column_info[$row->column_name][data_type] = $row->data_type;
-					$live_column_info[$row->column_name][character_maximum_length] = $row->character_maximum_length;
+					$live_column_info[$row->column_name]['data_type'] = $row->data_type;
+					$live_column_info[$row->column_name]['character_maximum_length'] = $row->character_maximum_length;
 				}			
 			
 		
@@ -169,7 +169,7 @@
 			
 			//MAKE SURE ALL OF THE SEQUENCE VALUES ARE CREATED AND ON THE RIGHT COLUMNS
 			foreach($class::$field_specifications as $field_name=>$field_specs){
-				if(isset($field_specs[serial]) && $field_specs[serial]){
+				if(isset($field_specs['serial']) && $field_specs['serial']){
 					$sequence_name = $table_name.'_'.$pkey_column.'_seq';
 					
 					$sql = 'SELECT COUNT(*) as schema_found
@@ -186,7 +186,7 @@
 					$row = $q->fetch();
 
 					
-					if(!$row[schema_found]){
+					if(!$row['schema_found']){
 						if($verbose){
 							echo 'NOTICE: '. $sequence_name ." is missing.<br>\n"; 
 						}
@@ -204,7 +204,7 @@
 							echo $e->getMessage();
 						}	
 						$row = $q->fetch();
-						$max_val = $row[max_val];
+						$max_val = $row['max_val'];
 						if(!$max_val){
 							$max_val = 1;
 						}
@@ -258,10 +258,10 @@
 					if($verbose || $upgrade){
 						$upgrade_field = false;
 						//CHECK THE COLUMN SPECS
-						$field_length = LibraryFunctions::extract_length_from_spec($field_specifications[$field][type]);
-						$field_without_length = preg_replace('/[^a-z ]/', '', $field_specifications[$field][type]);
-						if(LibraryFunctions::translate_data_types($live_column_info[$field][data_type]) != $field_without_length){
-							echo 'NOTICE: Data types do not match on field '.$field.' (live: '. $live_column_info[$field][data_type] .'<->spec:'. $field_without_length .")<br>\n";
+						$field_length = LibraryFunctions::extract_length_from_spec($field_specifications[$field]['type']);
+						$field_without_length = preg_replace('/[^a-z ]/', '', $field_specifications[$field]['type']);
+						if(LibraryFunctions::translate_data_types($live_column_info[$field]['data_type']) != $field_without_length){
+							echo 'NOTICE: Data types do not match on field '.$field.' (live: '. $live_column_info[$field]['data_type'] .'<->spec:'. $field_without_length .")<br>\n";
 							$upgrade_field = true;
 						}
 						
@@ -270,8 +270,8 @@
 						if($field_length){
 							$length_phrase = '('.$field_length.')';
 						}
-						if($live_column_info[$field][character_maximum_length]){
-							if($live_column_info[$field][character_maximum_length] != $field_length){
+						if($live_column_info[$field]['character_maximum_length']){
+							if($live_column_info[$field]['character_maximum_length'] != $field_length){
 								echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field][character_maximum_length] .'<->spec: '. $field_length .")<br>\n";	
 								$upgrade_field = true;								
 							}
@@ -281,7 +281,7 @@
 							//IF COLUMN LENGTH OR TYPE DOESN'T MATCH, UPGRADE IT
 
 							$sql = 'ALTER TABLE '.$table_name.'
-								ALTER COLUMN '.$field.' TYPE '.$field_specifications[$field][type];
+								ALTER COLUMN '.$field.' TYPE '.$field_specifications[$field]['type'];
 								
 							$sql .= ';';
 							echo $sql."<br>\n";
@@ -307,9 +307,9 @@
 					}
 
 					$sql = 'ALTER TABLE '.$table_name.'
-						ADD COLUMN '.$field.' '.$field_specifications[$field][type];
+						ADD COLUMN '.$field.' '.$field_specifications[$field]['type'];
 						
-					if(isset($field_specifications[$field][is_nullable]) && !$field_specifications[$field][is_nullable]){
+					if(isset($field_specifications[$field]['is_nullable']) && !$field_specifications[$field]['is_nullable']){
 						$sql .= ' NOT NULL ';
 					}
 						
@@ -395,11 +395,11 @@
 			$run = true;
 			if($migration[test]){
 				if($verbose){
-					echo 'Test: '.$migration[test]. "<br>\n";
+					echo 'Test: '.$migration['test']. "<br>\n";
 				}
 				
 				try{
-					$q = $dblink->prepare($migration[test]);
+					$q = $dblink->prepare($migration['test']);
 					$q->execute();
 					$row = $q->fetch();
 				}
@@ -418,11 +418,11 @@
 			}
 
 			
-			if($run && $migration[migration_sql]){
+			if($run && $migration['migration_sql']){
 				try{
-					$q = $dblink->prepare($migration[migration_sql]);
+					$q = $dblink->prepare($migration['migration_sql']);
 					$q->execute();
-					echo 'Run: '.$migration[migration_sql]. "<br>\n";
+					echo 'Run: '.$migration['migration_sql']. "<br>\n";
 				}
 				catch(PDOException $e){
 					echo $e->getMessage();
@@ -430,10 +430,10 @@
 					exit;
 				}			
 			}
-			else if($run && $migration[migration_file]){
+			else if($run && $migration['migration_file']){
 				//MIGRATION FUNCTION NAMES ARE THE SAME AS THE FILE NAME, MINUS THE .PHP, UNIQUE IS REQUIRED
-				require_once( __DIR__ . '/../migrations/'. $migration[migration_file]);
-				$function_name = pathinfo($migration[migration_file]);
+				require_once( __DIR__ . '/../migrations/'. $migration['migration_file']);
+				$function_name = pathinfo($migration['migration_file']);
 				if(!function_exists($function_name['filename'])){
 					echo 'ABORTING MIGRATIONS at Migration '. $key ." Function does not exist.<br>\n";
 					exit;							
@@ -451,18 +451,18 @@
 			}
 
 			//UPDATE THE SYSTEM VERSION
-			$sql = "UPDATE stg_settings set stg_value='".$migrations[$key][system_version]."' WHERE stg_name='system_version'";
+			$sql = "UPDATE stg_settings set stg_value='".$migrations[$key]['system_version']."' WHERE stg_name='system_version'";
 			try{
 				$q = $dblink->prepare($sql);
 				$q->execute();
 				if($verbose){
-					echo 'System version now '.$migrations[$key][system_version]."<br>\n";
+					echo 'System version now '.$migrations[$key]['system_version']."<br>\n";
 				}
 				
 			}
 			catch(PDOException $e){
 				echo $e->getMessage();
-				echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $migrations[$key][system_version] ."<br>\n";
+				echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $migrations[$key]['system_version'] ."<br>\n";
 				exit;
 			}	
 				
