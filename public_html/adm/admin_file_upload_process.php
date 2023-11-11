@@ -195,7 +195,9 @@
 			// Replaces multiple hyphens with single one. 
 			$new_name = preg_replace('/_+/', '_', $new_name);
 			
-			rename($upload_dir.'/'.$thisfile->name, $upload_dir.'/'.$new_name);
+			if(!rename($upload_dir.'/'.$thisfile->name, $upload_dir.'/'.$new_name)){
+				throw new SystemDisplayablePermanentError('Unable to save resized image.  Check file permissions.');
+			}
 			
 			$file =	new File(NULL);
 			$file->set('fil_name', $new_name);
