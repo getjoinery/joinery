@@ -904,4 +904,11 @@ Welcome!
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'show_errors\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
+
+ 		$migration['system_version'] = '0.5.39';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = 'ALTER TABLE usr_users ALTER COLUMN usr_password TYPE varchar(255);';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+
 		 

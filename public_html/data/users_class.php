@@ -110,7 +110,7 @@ class User extends SystemBase {
 		'usr_last_name' => array('type'=>'varchar(32)'),
 		'usr_email' => array('type'=>'varchar(64)'),
 		'usr_signup_date' => array('type'=>'date'),
-		'usr_password' => array('type'=>'character(34)'),
+		'usr_password' => array('type'=>'varchar(255)'),
 		'usr_permission' => array('type'=>'int4'),
 		'usr_timezone' => array('type'=>'varchar(32)'),
 		'usr_email_is_verified' => array('type'=>'bool'),
@@ -428,6 +428,7 @@ class User extends SystemBase {
 	}
 	
 	public static function GeneratePassword($password) {
+		$password = trim($password);
 		if (strlen($password) < 5) {
 			throw new DisplayableUserException('Your password must be at least 5 characters');
 		}
@@ -436,13 +437,25 @@ class User extends SystemBase {
 			throw new DisplayableUserException('Your password cannot contain spaces.');
 		}
 
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
-		require_once($siteDir . '/includes/PasswordHash.php');
-		$hasher = new PasswordHash(8, TRUE);
-		return $hasher->HashPassword($password);
+		return password_hash($password, PASSWORD_BCRYPT);
 	}
 
+	function check_password($password) {
+		$password = trim($password);
+		
+		//USE THE NEW VERSION FIRST, IF THAT FAILS TRY THE OLD VERSION
+		if(password_verify($password, trim($this->get('usr_password')))){
+			return true;
+		}
+		else{
+			$settings = Globalvars::get_instance();
+			$siteDir = $settings->get_setting('siteDir');
+			require_once($siteDir . '/includes/PasswordHash.php');
+			$hasher = new PasswordHash(8, TRUE);
+			return $hasher->CheckPassword($password, trim($this->get('usr_password')));			
+		}
+	}
+	
 	function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {
 		if ($use_transaction) {
 			DbConnector::BeginTransaction();
@@ -478,13 +491,7 @@ class User extends SystemBase {
 		}
 	}
 
-	function check_password($password) {
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
-		require_once($siteDir . '/includes/PasswordHash.php');
-		$hasher = new PasswordHash(8, TRUE);
-		return $hasher->CheckPassword($password, $this->get('usr_password'));
-	}
+
 
 	function display_name() {
 
