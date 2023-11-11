@@ -127,7 +127,7 @@ class MultiLocation extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " loc_location_id ASC ";
 			}
 			else {

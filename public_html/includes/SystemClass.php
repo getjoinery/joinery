@@ -1041,17 +1041,35 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	protected $cached_references;
 	protected static $default_options = array();
 
-	function __construct($options=array(), $order_by=NULL, $limit=NULL, $offset=NULL, $operation='AND', $write_lock=FALSE) {
+	function __construct($options=array(), $order_by=array(), $limit=NULL, $offset=NULL, $operation='AND', $write_lock=FALSE) {
 		$this->multi_data = array();
 		$this->loaded = FALSE;
 
+		if (is_array($options)) {
+			$this->options = array_merge(static::$default_options, $options);
+		} 
+		else{
+			$this->options = static::$default_options;
+		}
+
+		if (is_array($order_by)) {
+			$this->order_by = $order_by;
+		} 
+		else{
+			$this->order_by = array();
+		}
+
+		
+		
+	/*
 		if ($options !== NULL) {
 			$this->options = array_merge(static::$default_options, $options);
 		} else {
 			$this->options = NULL;
 		}
+		*/
 
-		$this->order_by = $order_by;
+		//$this->order_by = $order_by;
 		$this->limit = (int)$limit;
 		$this->offset = (int)$offset;
 		$this->operation = $operation;

@@ -125,7 +125,7 @@ class MultiOrderItemRequirement extends SystemMultiBase {
 			$sql = 'SELECT * FROM oir_order_item_requirements
 				' . $where_clause . ' ORDER BY ';
 
-			if ($this->order_by === NULL) {
+			if (empty($this->order_by)) {
 				$sql .= 'oir_order_item_requirement_id DESC';
 			} else {
 				$sort_clauses = array();

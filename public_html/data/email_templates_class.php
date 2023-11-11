@@ -151,7 +151,7 @@ class MultiEmailTemplateStore extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 				
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " emt_email_template_id ASC ";
 			}
 			else {

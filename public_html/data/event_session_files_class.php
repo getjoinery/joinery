@@ -69,7 +69,7 @@ class MultiEventSessionFile extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " esf_event_session_file_id ASC ";
 			}
 			else {

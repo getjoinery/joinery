@@ -135,7 +135,7 @@ class MultiGroupMember extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 				
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " grm_group_member_id ASC ";
 			}
 			else {

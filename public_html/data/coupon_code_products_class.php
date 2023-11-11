@@ -99,7 +99,7 @@ class MultiCouponCodeProduct extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " ccp_coupon_code_product_id ASC ";
 			}
 			else {

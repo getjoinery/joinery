@@ -702,7 +702,7 @@ class Multievent extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " evt_event_id ASC ";
 			}
 			else {

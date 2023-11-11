@@ -143,7 +143,7 @@ class MultiProductRequirement extends SystemMultiBase {
 			$sql = 'SELECT * FROM prq_product_requirements
 				' . $where_clause . ' ORDER BY ';
 
-			if ($this->order_by === NULL) {
+			if (empty($this->order_by)) {
 				$sql .= 'prq_product_requirement_id DESC';
 			} else {
 				$sort_clauses = array();

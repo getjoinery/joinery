@@ -220,7 +220,7 @@ class MultiEmailRecipient extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " erc_email_recipient_id ASC ";
 			}
 			else {

@@ -154,7 +154,7 @@ class MultiWaitingList extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 				
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " ewl_waiting_list_id ASC ";
 			}
 			else {

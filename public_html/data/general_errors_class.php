@@ -131,7 +131,7 @@ class MultiGeneralError extends SystemMultiBase {
 				' . $where_clause . '
 				ORDER BY ';
 
-			if (!$this->order_by) {
+			if (empty($this->order_by)) {
 				$sql .= " err_general_error_id ASC ";
 			}
 			else {
