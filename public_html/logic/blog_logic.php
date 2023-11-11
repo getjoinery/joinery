@@ -37,7 +37,7 @@
 				LibraryFunctions::display_404_page();
 				exit();					
 			}
-			$page_vars[title] = 'Blog Posts with tag '.$params[2];
+			$page_vars['title'] = 'Blog Posts with tag '.$params[2];
 		}
 		else{
 			$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE, 'listed'=>TRUE);
@@ -59,14 +59,14 @@
 			$numperpage,
 			$page_offset,
 			'AND');	
-		$page_vars[num_pinned_posts] = $pinned_posts->count_all();	
+		$page_vars['num_pinned_posts'] = $pinned_posts->count_all();	
 		$pinned_posts->load();	
-		$page_vars[pinned_posts] = $pinned_posts;		
+		$page_vars['pinned_posts'] = $pinned_posts;		
 		
 		
-		$page_vars[tags] = Group::get_groups_in_category('post_tag', false, 'names');
+		$page_vars['tags'] = Group::get_groups_in_category('post_tag', false, 'names');
 
-		$page_vars[pager] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
+		$page_vars['pager'] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 		
 		return $page_vars;
 	}
