@@ -66,8 +66,8 @@
 
 	
 	$created = array();
-	$created[gte] = $startdate;
-	$created[lte] = $enddate;
+	$created['gte'] = $startdate;
+	$created['lte'] = $enddate;
 	
 	if($offset){
 		$stripe_invoices = $stripe_helper->get_invoices(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created, 'status' => 'paid']);

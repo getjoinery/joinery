@@ -69,8 +69,8 @@
 
 	
 	$created = array();
-	$created[gte] = $startdate;
-	$created[lte] = $enddate;
+	$created['gte'] = $startdate;
+	$created['lte'] = $enddate;
 	
 	if($offset){
 		$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
