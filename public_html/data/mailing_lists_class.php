@@ -73,7 +73,7 @@ class MailingList extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array(
-		'mlt_create_time' => NOW, 'mlt_visibility' => 0
+		'mlt_create_time' => 'now()', 'mlt_visibility' => 0
 	);	
 
 	public static $field_constraints = array(

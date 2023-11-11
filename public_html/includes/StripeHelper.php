@@ -696,7 +696,7 @@ class StripeHelper {
 			$order->save();	
 			
 			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
-			$order_item->set('odi_status_change_time', 'NOW');
+			$order_item->set('odi_status_change_time', 'now()');
 			$order_item->save();
 			exit;;  //SKIP THE REST OF THE ITEM
 		}				
@@ -705,7 +705,7 @@ class StripeHelper {
 		//IF THE SUBSCRIPTION FAILED MARK IT AS ERROR
 		if(!$subscription_result[id]){
 			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
-			$order_item->set('odi_status_change_time', 'NOW');
+			$order_item->set('odi_status_change_time', 'now()');
 			$order_item->save();
 			exit;  //SKIP THE REST OF THE ITEM
 		}
@@ -715,7 +715,7 @@ class StripeHelper {
 		$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result[latest_invoice]);
 		$order_item->set('odi_is_subscription', true);
 		$order_item->set('odi_status', OrderItem::STATUS_PAID);
-		$order_item->set('odi_status_change_time', 'NOW');
+		$order_item->set('odi_status_change_time', 'now()');
 		$order_item->save();		
 		
 		return $subscription_result;
