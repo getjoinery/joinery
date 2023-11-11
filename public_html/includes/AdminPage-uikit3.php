@@ -547,22 +547,23 @@ class AdminPage{
 			$options['options_label'] = 'Options';
 		}		
 		
-
-		if(count($options['altlinks']) > 3){
-			echo '<button class="uk-button uk-button-default" type="button">'.$options['options_label'].'</button><div uk-dropdown><ul class="uk-nav uk-dropdown-nav">';
-			foreach($options['altlinks'] as $label=>$link){
-				echo '<li><a href="'.$link.'" class="dropdown-item">'.$label.'</a></li>';
-			}	
-			echo '</ul></div>';	    
-								
-		}
-		else if(count($options['altlinks']) > 0){
-			echo'<div class="'.$options['options_class'].'">';
-			foreach($options['altlinks'] as $label=>$link){
-				echo '<a class="uk-button uk-button-default" href="'.$link.'">'.$label.'</a>';
+		if(is_array($options['altlinks'])){
+			if(count($options['altlinks']) > 3){
+				echo '<button class="uk-button uk-button-default" type="button">'.$options['options_label'].'</button><div uk-dropdown><ul class="uk-nav uk-dropdown-nav">';
+				foreach($options['altlinks'] as $label=>$link){
+					echo '<li><a href="'.$link.'" class="dropdown-item">'.$label.'</a></li>';
+				}	
+				echo '</ul></div>';	    
+									
 			}
-			echo '</div>';
-		}		
+			else if(count($options['altlinks']) > 0){
+				echo'<div class="'.$options['options_class'].'">';
+				foreach($options['altlinks'] as $label=>$link){
+					echo '<a class="uk-button uk-button-default" href="'.$link.'">'.$label.'</a>';
+				}
+				echo '</div>';
+			}
+		}			
 	}
 	
 	
