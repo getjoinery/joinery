@@ -358,7 +358,7 @@ class EventSession extends SystemBase {
 		$q->bindValue(1, $this->key, PDO::PARAM_INT);
 		$q->execute();	
 		$counter = $q->fetch();
-		if($counter[count] == 0){
+		if($counter['count'] == 0){
 			return false;
 		}
 		

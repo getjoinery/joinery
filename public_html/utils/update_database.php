@@ -409,7 +409,7 @@
 					exit;					
 				}	
 
-				if($row[count] == 0){
+				if($row['count'] == 0){
 					$run = true;
 				}
 				else{
