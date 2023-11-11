@@ -62,7 +62,7 @@ function events_logic($get_vars, $post_vars){
 	}
 	$tab_menus['past'] = 'Past Events';
 
-	$page_vars['$tab_menus'] = $tab_menus;
+	$page_vars['tab_menus'] = $tab_menus;
 	return $page_vars;
 }
 ?>

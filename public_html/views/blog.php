@@ -139,7 +139,7 @@
                 <h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Tags</h2>
                 <div class="flow-root mt-6">
 					<?php
-					foreach ($page_vars[tags] as $tag){
+					foreach ($page_vars['tags'] as $tag){
 						echo '<a href="/blog/tag/'.urlencode($tag).'" class="inline-block p-1">
 						<span class="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">'.$tag.'</span>
 						</a>';			
