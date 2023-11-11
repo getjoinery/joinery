@@ -393,7 +393,7 @@
 			}
 			
 			$run = true;
-			if($migration[test]){
+			if($migration['test']){
 				if($verbose){
 					echo 'Test: '.$migration['test']. "<br>\n";
 				}
