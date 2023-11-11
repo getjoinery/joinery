@@ -117,9 +117,9 @@
 		echo ' <strong>Page '.$currpage.'</strong> ';
 	}
 	
-	if(count($charges[data]) == $numperpage){
+	if(count($charges['data']) == $numperpage){
 		$last_charge_number = $numperpage - 1;
-		$last_charge = $charges[data][$last_charge_number];
+		$last_charge = $charges['data'][$last_charge_number];
 		echo 'Multiple pages of results:  <a href="/admin/admin_stripe_orders?offset='.$last_charge->id.'&startdate='.$display_startdate.'&enddate='.$display_enddate.'&currpage='.$nextpage .'">Next page >></a> ';
 	}
 
