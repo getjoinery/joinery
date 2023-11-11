@@ -14,7 +14,7 @@
 	);
 	$page->public_header($hoptions); 
 	
-	echo PublicPageTW::BeginPage($page_vars[title]);		
+	echo PublicPageTW::BeginPage($page_vars['title']);		
 ?>
 
 
@@ -30,7 +30,7 @@
             
 			
 		<?php
-		if(!$page_vars[posts]){
+		if(!$page_vars['posts']){
 			?>
 			<div class="rounded-lg bg-white overflow-hidden shadow mb-6">
 			  <div class="p-6">
@@ -47,7 +47,7 @@
 		
 		
 		
-		foreach ($page_vars[posts] as $post){  
+		foreach ($page_vars['posts'] as $post){  
 			$author = new User($post->get('pst_usr_user_id'), TRUE);
 			$post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
 			?>							
@@ -151,7 +151,7 @@
           </section>
 
 			
-		<?php if($page_vars[num_pinned_posts] > 0){ ?>
+		<?php if($page_vars['num_pinned_posts'] > 0){ ?>
           <!-- Pinned posts -->
           <section aria-labelledby="announcements-title">
             <div class="rounded-lg bg-white overflow-hidden shadow">
@@ -159,7 +159,7 @@
                 <h2 class="text-base font-medium text-gray-900" id="announcements-title">Pinned Posts</h2>
                 <div class="flow-root mt-6">
                   <ul role="list" class="-my-5 divide-y divide-gray-200">
-                    <?php foreach ($page_vars[pinned_posts] as $pinned_post){   ?>
+                    <?php foreach ($page_vars['pinned_posts'] as $pinned_post){   ?>
 					<li class="py-5">
                       <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
                         <h3 class="text-sm font-semibold text-gray-800">
@@ -268,30 +268,30 @@
         </div>
 		
 		<?php
-		if($page_vars[pager]->is_valid_page('-1') || $page_vars[pager]->is_valid_page('+1')){
+		if($page_vars['pager']->is_valid_page('-1') || $page_vars['pager']->is_valid_page('+1')){
 		?>
 			<nav class="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 sm:px-6 lg:col-span-2 rounded-lg" aria-label="Pagination">
 			  <div class="hidden sm:block">
 				<p class="text-sm text-gray-700">
 				  Showing
-				  <span class="font-medium"><?php echo $page_vars[pager]->current_record_start(); ?></span>
+				  <span class="font-medium"><?php echo $page_vars['pager']->current_record_start(); ?></span>
 				  to
-				  <span class="font-medium"><?php echo $page_vars[pager]->current_record_end(); ?></span>
+				  <span class="font-medium"><?php echo $page_vars['pager']->current_record_end(); ?></span>
 				  of
-				  <span class="font-medium"><?php echo $page_vars[pager]->num_records(); ?></span>
+				  <span class="font-medium"><?php echo $page_vars['pager']->num_records(); ?></span>
 				  results
 				</p>
 			  </div>
 			  <div class="flex-1 flex justify-between sm:justify-end">
 
 				<?php	
-				if($page_vars[pager]->is_valid_page('-1')){
-					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars[pager]->get_url('-1', '').'">Previous</a>';
+				if($page_vars['pager']->is_valid_page('-1')){
+					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars['pager']->get_url('-1', '').'">Previous</a>';
 				}
 				?>
 				<?php	
-				if($page_vars[pager]->is_valid_page('+1')){
-					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars[pager]->get_url('+1', '').'">Next</a>';
+				if($page_vars['pager']->is_valid_page('+1')){
+					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars['pager']->get_url('+1', '').'">Next</a>';
 				}
 				?>
 				
