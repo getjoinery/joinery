@@ -46,16 +46,17 @@
 	echo '<strong>Title:</strong> '.$file->get('fil_title') .'<br />';	
 	
 	if($file->get('fil_delete_time')) {
-		echo 'Deleted';
-	} else {
-		echo '<br /><br /><div>';
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_file?fil_file_id='. $file->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove" />
-		<button class="uk-button" type="submit">Delete this file permanently</button>
-		</form>';
-		echo $delform;
-		echo '</div>';
-	}
+		echo 'Soft Deleted';
+	} 
+	
+	echo '<br /><br /><div>';
+	$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_file?fil_file_id='. $file->key.'">
+	<input type="hidden" class="hidden" name="action" id="action" value="remove" />
+	<button class="uk-button" type="submit">Delete this file permanently</button>
+	</form>';
+	echo $delform;
+	echo '</div>';
+	
 	$formwriter->end_form();	
 	
 
