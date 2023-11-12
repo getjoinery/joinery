@@ -73,14 +73,39 @@
 	$live_directory = $full_site_dir. '/public_html';
 	$backup_directory = $full_site_dir. '/public_html_last';
 	$stage_directory = $stage_location. 'public_html_stage';
-	$failed_directory = $stage_location. 'public_html_fail';
 	$theme_directory = $full_site_dir.'/theme';
 	
+	//CHECK ALL FILE Permissions and owners
+	if(substr(sprintf('%o', fileperms($stage_location)), -4) != '770'){
+		echo $stage_location . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		exit;
+	}
+	if(posix_getpwuid(fileowner($stage_location))['name'] != 'www-data'){
+		echo $stage_location . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		exit;		
+	}
+
+	if(substr(sprintf('%o', fileperms($live_directory)), -4) != '770'){
+		echo $live_directory . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		exit;
+	}
+	if(posix_getpwuid(fileowner($live_directory))['name'] != 'www-data'){
+		echo $live_directory . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		exit;		
+	}
 	
+	if(substr(sprintf('%o', fileperms($backup_directory)), -4) != '770'){
+		echo $backup_directory . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		exit;
+	}
+	if(posix_getpwuid(fileowner($backup_directory))['name'] != 'www-data'){
+		echo $backup_directory . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		exit;		
+	}
 	
 	
 	//GET THE UPGRADE FILE
-	echo 'Getting: '. $sourceFile.'<br>';;
+	echo 'Getting: '. $sourceFile.'<br>';
 
 
 	$new_file = fopen($file_download_location, "w") or die("cannot open" . $file_download_location);
@@ -122,23 +147,31 @@
 	
 	//chmod($file_download_location, 0777);
 	
-	
-
 	//CLEAR OLD STAGED FILES 
-	exec ("rm -rf $stage_location");
+	echo 'Clearing staging area: '.$stage_location.'...<br>';
+	exec("chmod -R 770 $stage_location");
 	if(file_exists($stage_location)){
-		echo "Failed to clear staging location...aborting.<br>";
-		exit;
-	}
+		exec ("rm -rf $stage_location".'/*');
+		if(!is_dir_empty($stage_location)){
+			echo 'Failed to clear staging location:'.$stage_location.'...aborting.<br>';
+			echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
+			exit;
+		}
+		else{
+			echo 'Staging area cleared<br>';
+		}
+	}	
 	
 	//CREATE NEW STAGE LOCATION
+	/*
 	echo 'Creating '.$stage_location.'<br>';
-	mkdir($stage_location, 0777);
-	chmod($stage_location, 0777);
+	mkdir($stage_location, 0770);
+	chmod($stage_location, 0770);
 	if(!file_exists($stage_location)){
 		echo "Failed to create new staging location...aborting.<br>";
 		exit;
 	}
+	*/
 	
 	//$result = array();
 	//system("unzip $file_download_location $stage_location");
@@ -156,7 +189,6 @@
 	
 	//TODO: DO BACKUPS
 	
-	
 	//TODO:  THIS IS A HACK, FIX IT
 	rename($stage_location.'var/www/html/jeremytunnell/public_html_stage', $stage_directory);
 	
@@ -167,43 +199,79 @@
 		echo "Failed to move theme files...aborting.<br>";
 		exit;
 	}
-	
+	else{
+		echo "Theme files copied.<br>";
+	}
+
 	//RUN THE DEPLOY
-	echo 'Removing '.$backup_directory.'<br>';
-	exec ("rm -rf $backup_directory");
-	if(file_exists($backup_directory)){ 
+	echo 'Clearing backup area: '.$backup_directory.'<br>';
+	exec ("rm -rf $backup_directory".'/*');
+	if(!is_dir_empty($backup_directory)){
 		
 		echo "Failed to remove old backup files...aborting.<br>";
 		echo 'Permissions of '.$backup_directory.': '.substr(sprintf('%o', fileperms($backup_directory)), -4).'<br>';
 		exit;
-	}		
+	}
+	else{
+		echo 'Backup area cleared<br>';
+	}	
 	
+
+	//SET PERMISSIONS FOR NEW FILES 
+	echo 'Setting '.$stage_location.' to 770<br>';
+	exec("chmod -R 770 $stage_location");
+	echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
+
+	//echo 'Setting '.$stage_location.' to user1<br>';
+	//exec ("chown -R user1 $stage_location");
+	//echo posix_getpwuid(fileowner($stage_location))['name'];
+	//exit;
 	echo 'Copying '.$live_directory. ' to '. $backup_directory.'<br>';
 	echo 'Copying '.$stage_directory. ' to '. $live_directory.'<br>';
 	
-		
-	rename($live_directory, $backup_directory);
-	rename($stage_directory, $live_directory);
+	//chmod($live_directory, 0770);
+	//rename($live_directory, $backup_directory);
+	//rename($stage_directory, $live_directory);
+	exec("cp -r $live_directory $backup_directory");
+	exec("cp -r $stage_directory $live_directory");
+	exec("chmod -R 770 $live_directory");
+	exec("chmod -R 770 $backup_directory");
 
 	if(file_exists($live_directory) && file_exists($backup_directory)){
 		echo 'Copied upgrade files.<br>';
-		exit;
 	}
 	else if(!file_exists($live_directory)){
 		//FAILED, LETS LOAD FROM BACKUP 
 		echo 'Upgrade failed, loading from backup.<br>';
 		rename($backup_directory, $live_directory);
+		exit;
 	}
 	
+	//CLEAR OLD STAGED FILES 
+	echo 'Clearing staging area: '.$stage_location.'...<br>';
+	exec("chmod -R 770 $stage_location");
+	if(file_exists($stage_location)){
+		exec ("rm -rf $stage_location".'/*');
+		if(!is_dir_empty($stage_location)){
+			echo 'Failed to clear staging location:'.$stage_location.'...aborting.<br>';
+			echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
+			exit;
+		}
+		else{
+			echo 'Staging area cleared<br>';
+		}
+	}	
 	
+	
+
 	//DO THE MIGRATION
 	$noautorun = 1;  //DO NOT AUTORUN THE update_database include
 	require_once('update_database.php');
 	$migration_result = update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
 	if(!$migration_result){
 		echo 'Migration failed...reverting upgrade.<br>';
-		rename($live_directory, $failed_directory);
-		rename($backup_directory, $live_directory);		
+		exec("cp -r $backup_directory $live_directory");
+	
 	}
 	else{
 		echo 'Upgrade complete.<br>';
@@ -219,7 +287,9 @@
 	}	
 	*/		
 
-
+	function is_dir_empty($dir) {
+	  return (count(scandir($dir)) == 2);
+	}
 
 	
 
