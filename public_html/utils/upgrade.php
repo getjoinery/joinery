@@ -76,30 +76,36 @@
 	$theme_directory = $full_site_dir.'/theme';
 	
 	//CHECK ALL FILE Permissions and owners
-	if(substr(sprintf('%o', fileperms($stage_location)), -4) != '770'){
+	if(substr(sprintf('%o', fileperms($stage_location)), -3) != '770'){
 		echo $stage_location . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
 		exit;
 	}
 	if(posix_getpwuid(fileowner($stage_location))['name'] != 'www-data'){
 		echo $stage_location . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
 		exit;		
 	}
 
-	if(substr(sprintf('%o', fileperms($live_directory)), -4) != '770'){
+	if(substr(sprintf('%o', fileperms($live_directory)), -3) != '770'){
 		echo $live_directory . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
 		exit;
 	}
 	if(posix_getpwuid(fileowner($live_directory))['name'] != 'www-data'){
 		echo $live_directory . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
 		exit;		
 	}
 	
-	if(substr(sprintf('%o', fileperms($backup_directory)), -4) != '770'){
+	if(substr(sprintf('%o', fileperms($backup_directory)), -3) != '770'){
 		echo $backup_directory . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($backup_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($backup_directory)), -3).'<br>';
 		exit;
 	}
 	if(posix_getpwuid(fileowner($backup_directory))['name'] != 'www-data'){
 		echo $backup_directory . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($backup_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($backup_directory)), -3).'<br>';
 		exit;		
 	}
 	
