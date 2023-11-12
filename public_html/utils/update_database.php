@@ -14,7 +14,7 @@
 		$verbose=$_REQUEST['verbose'];
 	}
 	else{
-		$verbose=1;
+		$verbose=false;
 	}
 
 	if($_REQUEST['upgrade']){
