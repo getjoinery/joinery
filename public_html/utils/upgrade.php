@@ -162,20 +162,7 @@
 		}
 	}	
 	
-	//CREATE NEW STAGE LOCATION
-	/*
-	echo 'Creating '.$stage_location.'<br>';
-	mkdir($stage_location, 0770);
-	chmod($stage_location, 0770);
-	if(!file_exists($stage_location)){
-		echo "Failed to create new staging location...aborting.<br>";
-		exit;
-	}
-	*/
-	
-	//$result = array();
-	//system("unzip $file_download_location $stage_location");
-
+	//UNZIP THE FILE
 	$zip = new ZipArchive;
 	if ($zip->open($file_download_location)){
 	  $zip->extractTo($stage_location);
@@ -232,8 +219,8 @@
 	//chmod($live_directory, 0770);
 	//rename($live_directory, $backup_directory);
 	//rename($stage_directory, $live_directory);
-	exec("cp -r $live_directory $backup_directory");
-	exec("cp -r $stage_directory $live_directory");
+	exec("mv $live_directory $backup_directory");
+	exec("mv $stage_directory $live_directory");
 	exec("chmod -R 770 $live_directory");
 	exec("chmod -R 770 $backup_directory");
 
@@ -243,7 +230,7 @@
 	else if(!file_exists($live_directory)){
 		//FAILED, LETS LOAD FROM BACKUP 
 		echo 'Upgrade failed, loading from backup.<br>';
-		rename($backup_directory, $live_directory);
+		exec("mv $backup_directory $live_directory");
 		exit;
 	}
 	
@@ -270,7 +257,7 @@
 	$migration_result = update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
 	if(!$migration_result){
 		echo 'Migration failed...reverting upgrade.<br>';
-		exec("cp -r $backup_directory $live_directory");
+		exec("mv $backup_directory $live_directory");
 	
 	}
 	else{
