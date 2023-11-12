@@ -68,37 +68,22 @@
 	
 	
 	//$sourceFile     = 'https://jeremytunnell.com/static_files/current_upgrade.zip';
-	$target_location = $full_site_dir.'/uploads/current_upgrade.upg.zip';
+	$file_download_location = $full_site_dir.'/uploads/current_upgrade.upg.zip';
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
-	$live_directory = $full_site_dir. 'public_html';
-	$backup_directory = $full_site_dir. 'public_html_last';
+	$live_directory = $full_site_dir. '/public_html';
+	$backup_directory = $full_site_dir. '/public_html_last';
 	$stage_directory = $stage_location. 'public_html_stage';
 	$failed_directory = $stage_location. 'public_html_fail';
 	$theme_directory = $full_site_dir.'/theme';
 	
+	
+	
+	
 	//GET THE UPGRADE FILE
 	echo 'Getting: '. $sourceFile.'<br>';;
-	/*
-	if(saveFileByUrl($sourceFile, $target_location)){
-		echo 'Upgrade downloaded...<br>';
-	}
-	else{
-		echo 'Unable to download upgrade...<br>';
-		exit;
-	}
-	*/
 
-	/*
-	if(download_file($sourceFile, $target_location)){
-		echo 'Upgrade downloaded...<br>';
-	}
-	else{
-		echo 'Unable to download upgrade...<br>';
-		exit;
-	}
-	*/
 
-	$new_file = fopen($target_location, "w") or die("cannot open" . $target_location);
+	$new_file = fopen($file_download_location, "w") or die("cannot open" . $file_download_location);
 
 	// Setting the curl operations
 	$cd = curl_init();
@@ -112,10 +97,10 @@
 	  exit;
 	} 
 	else {
-	  $status = curl_getinfo($cd);
-	  if($status["http_code"] == 200){
-		echo "The upgrade is downloaded...<br>";
-	  }
+		$status = curl_getinfo($cd);
+		if($status["http_code"] == 200){
+			//echo "The upgrade is downloaded...<br>";
+		}
 		else{
 			echo "The error code is : " . $status["http_code"];
 			exit;
@@ -126,30 +111,40 @@
 	// close and finalize the operations.
 	curl_close($cd);
 	fclose($new_file);	
+
+	if(file_exists($file_download_location)){
+		echo "The upgrade is downloaded...<br>";
+	}
+	else{
+		echo "The upgrade failed to download...aborting.<br>";
+		exit;
+	}
 	
+	//chmod($file_download_location, 0777);
 	
-	
-	
-	/*
-	$ch = curl_init();
-	curl_setopt($ch, CURLOPT_URL,$sourceFile);
-	$fp = fopen($target_location, 'w');
-	curl_setopt($ch, CURLOPT_FILE, $fp);
-	curl_exec ($ch);
-	curl_close ($ch);
-	fclose($fp);
-	*/
-	chmod($target_location, 0777);
 	
 
 	//CLEAR OLD STAGED FILES 
 	exec ("rm -rf $stage_location");
+	if(file_exists($stage_location)){
+		echo "Failed to clear staging location...aborting.<br>";
+		exit;
+	}
+	
+	//CREATE NEW STAGE LOCATION
+	echo 'Creating '.$stage_location.'<br>';
+	mkdir($stage_location, 0777);
+	chmod($stage_location, 0777);
+	if(!file_exists($stage_location)){
+		echo "Failed to create new staging location...aborting.<br>";
+		exit;
+	}
 	
 	//$result = array();
-	//system("unzip $target_location $stage_location");
+	//system("unzip $file_download_location $stage_location");
 
 	$zip = new ZipArchive;
-	if ($zip->open($target_location)){
+	if ($zip->open($file_download_location)){
 	  $zip->extractTo($stage_location);
 	  $zip->close();
 	  echo 'Upgrade unzipped...<br>';
@@ -167,20 +162,51 @@
 	
 	//COPY THE THEME FILES 
 	exec("cp -r $theme_directory $stage_directory");
+	$location_of_themes = $stage_directory.'/theme';
+	if(!file_exists($location_of_themes)){
+		echo "Failed to move theme files...aborting.<br>";
+		exit;
+	}
 	
 	//RUN THE DEPLOY
+	echo 'Removing '.$backup_directory.'<br>';
 	exec ("rm -rf $backup_directory");
+	if(file_exists($backup_directory)){ 
+		
+		echo "Failed to remove old backup files...aborting.<br>";
+		echo 'Permissions of '.$backup_directory.': '.substr(sprintf('%o', fileperms($backup_directory)), -4).'<br>';
+		exit;
+	}		
+	
+	echo 'Copying '.$live_directory. ' to '. $backup_directory.'<br>';
+	echo 'Copying '.$stage_directory. ' to '. $live_directory.'<br>';
+	
+		
 	rename($live_directory, $backup_directory);
 	rename($stage_directory, $live_directory);
+
+	if(file_exists($live_directory) && file_exists($backup_directory)){
+		echo 'Copied upgrade files.<br>';
+		exit;
+	}
+	else if(!file_exists($live_directory)){
+		//FAILED, LETS LOAD FROM BACKUP 
+		echo 'Upgrade failed, loading from backup.<br>';
+		rename($backup_directory, $live_directory);
+	}
+	
 	
 	//DO THE MIGRATION
 	$noautorun = 1;  //DO NOT AUTORUN THE update_database include
-	require_once($_SERVER['DOCUMENT_ROOT'].'/utils/update_database.php');
+	require_once('update_database.php');
 	$migration_result = update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
 	if(!$migration_result){
 		echo 'Migration failed...reverting upgrade.<br>';
 		rename($live_directory, $failed_directory);
 		rename($backup_directory, $live_directory);		
+	}
+	else{
+		echo 'Upgrade complete.<br>';
 	}
 	
 	//UNTAR IT 
@@ -193,61 +219,9 @@
 	}	
 	*/		
 
-	function download_file ($url, $path) {
-
-	  $newfilename = $path;
-	  $file = fopen ($url, "rb");
-	  if ($file) {
-		$newfile = fopen ($newfilename, "wb");
-
-		if ($newfile)
-		while(!feof($file)) {
-		  fwrite($newfile, fread($file, 1024 * 8 ), 1024 * 8 );
-		}
-		else{
-			return false;
-		}
-	  }
-	  else{
-		  return false;
-	  }
-
-	  return true;
-	 }			
 
 
-	function saveFileByUrl ( $source, $destination ) {
-
-		   return file_put_contents($destination, file_get_contents($source));
-		
-	}
-
-	function deleteDir($dirPath) {
-		if (! is_dir($dirPath)) {
-			throw new InvalidArgumentException("$dirPath must be a directory");
-		}
-		if (substr($dirPath, strlen($dirPath) - 1, 1) != '/') {
-			$dirPath .= '/';
-		}
-		$files = glob($dirPath . '*', GLOB_MARK);
-		foreach ($files as $file) {
-			if (is_dir($file)) {
-				deleteDir($file);
-			} else {
-				unlink($file);
-			}
-		}
-		rmdir($dirPath);
-	}
 	
-	function deleteallfiles($directory){
-			$files = glob($directory); // get all file names
-		foreach($files as $file){ // iterate files
-		  if(is_file($file)) {
-			unlink($file); // delete file
-		  }
-		}			
-	}
 
 
 ?>
