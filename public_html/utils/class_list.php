@@ -452,19 +452,19 @@ Welcome!
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-/*
+
 		$migration['system_version'] = '0.5.14';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = NULL;
-		$migration['migration_file'] = 'groups_to_waiting_list_migration.php';
+		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
 		$migration['system_version'] = '0.5.15';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = NULL;
-		$migration['migration_file'] = 'groups_to_waiting_list_migration.php';
+		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
-*/
+
 		$migration['system_version'] = '0.5.16';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_menudisplay= \'Events List\', amu_slug=\'events-list\' WHERE amu_menudisplay= \'Future Events\'';
