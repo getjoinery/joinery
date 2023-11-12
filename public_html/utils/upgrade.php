@@ -1,6 +1,6 @@
 <?php
-	require_once('../includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/SessionControl.php');
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
 	$site_template = $settings->get_setting('site_template');
@@ -150,6 +150,8 @@
 	//CLEAR OLD STAGED FILES 
 	echo 'Clearing staging area: '.$stage_location.'...<br>';
 	exec("chmod -R 770 $stage_location");
+	exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
+	exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
 	if(file_exists($stage_location)){
 		exec ("rm -rf $stage_location".'/*');
 		if(!is_dir_empty($stage_location)){
@@ -193,15 +195,26 @@
 	//RUN THE DEPLOY
 	echo 'Clearing backup area: '.$backup_directory.'<br>';
 	exec ("rm -rf $backup_directory".'/*');
-	if(!is_dir_empty($backup_directory)){
+	exec ("rm -rf $backup_directory".'/.git');  //REMOVE LATENT GIT FILES
+	exec ("rm -rf $backup_directory".'/.gitignore');  //REMOVE LATENT GIT FILES
+	if(is_dir_empty($backup_directory)){
+		echo 'Backup area cleared<br>';
+	}
+	else{
 		
 		echo "Failed to remove old backup files...aborting.<br>";
 		echo 'Permissions of '.$backup_directory.': '.substr(sprintf('%o', fileperms($backup_directory)), -4).'<br>';
+		$x=1;
+		$files = scandir($dir);
+		foreach($files as $file){
+			echo $file.'<br>';
+			$x++;
+			if($x == 10){
+				break;
+			}
+		}
 		exit;
 	}
-	else{
-		echo 'Backup area cleared<br>';
-	}	
 	
 
 	//SET PERMISSIONS FOR NEW FILES 
@@ -239,6 +252,8 @@
 	exec("chmod -R 770 $stage_location");
 	if(file_exists($stage_location)){
 		exec ("rm -rf $stage_location".'/*');
+		exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
+		exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
 		if(!is_dir_empty($stage_location)){
 			echo 'Failed to clear staging location:'.$stage_location.'...aborting.<br>';
 			echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
@@ -253,7 +268,7 @@
 
 	//DO THE MIGRATION
 	$noautorun = 1;  //DO NOT AUTORUN THE update_database include
-	require_once('update_database.php');
+	require_once(__DIR__.'/update_database.php');
 	$migration_result = update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
 	if(!$migration_result){
 		echo 'Migration failed...reverting upgrade.<br>';
@@ -275,7 +290,13 @@
 	*/		
 
 	function is_dir_empty($dir) {
-	  return (count(scandir($dir)) == 2);
+		$numfiles = count(scandir($dir));
+		if($numfiles == 0 || $numfiles == 2){
+			return true;
+		}
+		else{
+			return false;
+		}
 	}
 
 	
