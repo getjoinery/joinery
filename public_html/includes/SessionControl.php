@@ -677,38 +677,15 @@ class SessionControl{
 				parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) . '?' . $query_string);
 
 			//REDIRECT TO THE LOGIN PAGE
-			$settings = Globalvars::get_instance();
-			$site_template = $settings->get_setting('site_template');
-			$login_page_theme = $_SERVER['DOCUMENT_ROOT'].'/theme/'.$site_template.'/login.php';
-			$login_page_base = $_SERVER['DOCUMENT_ROOT'].'/views/login.php';
 			if($msgtext) {
 				$msgtext= urlencode($msgtext);
-
-				if(file_exists($login_page_theme)){
-					header("HTTP/1.1 401 Unauthorized");
-					require_once($login_page_theme.'?msgtext='.$msgtext);
-				}
-				else if(file_exists($login_page_base)){
-					header("HTTP/1.1 401 Unauthorized");
-					require_once($login_page_base.'?msgtext='.$msgtext);
-				}
-				else{
-					throw new SystemDisplayableError('Log in page is missing.');	
-				}			
+				header("HTTP/1.1 401 Unauthorized");
+				require_once(LibraryFunctions::get_theme_file_path('login.php', '/views', 'system').'?msgtext='.$msgtext);			
 				exit();
 			}
 			else {
-				if(file_exists($login_page_theme)){
-					header("HTTP/1.1 401 Unauthorized");
-					require_once($login_page_theme);
-				}
-				else if(file_exists($login_page_base)){
-					header("HTTP/1.1 401 Unauthorized");
-					require_once($login_page_base);
-				}
-				else{
-					throw new SystemDisplayableError('Log in page is missing.');					
-				}			
+				header("HTTP/1.1 401 Unauthorized");
+				require_once(LibraryFunctions::get_theme_file_path('login.php', '/views', 'system'));	
 				exit();
 			}
 

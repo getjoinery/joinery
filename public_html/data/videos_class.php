@@ -95,21 +95,7 @@ class Video extends SystemBase {
 		return $src;
 	}
 
-	/*
-	function get_swfobject_html($src_link, $vidwidth, $vidheight) { 
-		return '<script type="text/javascript">swfobject.registerObject("vid_' . $this->key . '", "9.0.115", "/theme/flash/expressInstall.swf");</script>
-			<object id="vid_' . $this->key . '" classid="clsid:D27CDB6E-AE6D-11cf-96B8-444553540000" width="' .  $vidwidth . '" height="' . $vidheight . '">
-			<param name="movie" value="' . $src_link . '" />
-			<!--[if !IE]>-->
-			<object type="application/x-shockwave-flash" data="' . $src_link . '" width="' .  $vidwidth . '" height="' . $vidheight . '">
-			<!--<![endif]-->
-			<p>Flash is required to view this video. <a href="http://get.adobe.com/flashplayer/">Get Flash</a>.</p>
-			<!--[if !IE]>-->
-			</object>
-			<!--<![endif]-->
-			</object>';
-	}
-	*/
+
 	
 	function get_source() {
 		if($this->get('vid_source') == 1){

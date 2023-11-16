@@ -37,12 +37,6 @@ class EmailTemplate {
 		$settings = Globalvars::get_instance();
 		$this->admin_notify_address = $settings->get_setting('defaultemail');
 
-		//$template_dir = $settings->get_setting('siteDir') . '/theme/emailtemplates/';		
-		//$this->inner_template = file_get_contents($template_dir . $inner_template);
-		//$this->outer_template = file_get_contents($template_dir . $outer_template);
-		//if ($footer) {
-			//$this->footer = file_get_contents($template_dir . $footer);
-		//}
 		
 		if(!$outer_template){
 			//GET THE DEFAULT OUTER TEMPLATE
@@ -135,7 +129,7 @@ class EmailTemplate {
 
 		$this->orig_inner_template = $this->inner_template;
 
-		// For a sample path like theme/emailtemplates/whatever/email_name.html
+		
 		// this pulls out the "email_name" part
 		$tmp_template_name = preg_split('/[\/\.]/', $inner_template);
 
@@ -229,30 +223,6 @@ class EmailTemplate {
 		return $email_body;
 		
 	}
-
-	/*
-	protected function _load_template_file($file) {
-		if ($this->testing) {
-			return $file;
-		}
-
-		$settings = Globalvars::get_instance();
-		$template_dir = $settings->get_setting('siteDir') . '/theme/emailtemplates/';
-		return file_get_contents($template_dir . $file);
-	}
-
-	protected function _parse_file_callback($matches) {
-		return $this->_load_template_file($matches[1]);
-	}
-
-	protected function _parse_file_insertions($template_contents) {
-		return preg_replace_callback(
-			'/\<\<([a-zA-Z_\/\*\.]+?)\>\>/',
-			array(&$this, '_parse_file_callback'),
-			$template_contents
-		);
-	}
-	*/
 
 	function reset($user=NULL) {
 		$this->email_has_content = FALSE;

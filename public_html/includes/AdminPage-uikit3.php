@@ -150,9 +150,9 @@ class AdminPage{
 
 		
 	<!--
-		<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-32x32.png" sizes="32x32" />
-		<link rel="icon" href="/theme/integralzen/images/cropped-IZ-Icon-07-192x192.png" sizes="192x192" />
-		<link rel="apple-touch-icon-precomposed" href="/theme/integralzen/images/cropped-IZ-Icon-07-180x180.png" />	-->
+		<link rel="icon" href="icon.png" sizes="32x32" />
+		<link rel="icon" href="icon.png" sizes="192x192" />
+		<link rel="apple-touch-icon-precomposed" href="icon.png" />	-->
 				
 	</head>
 	<body>
