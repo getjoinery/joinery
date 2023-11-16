@@ -113,7 +113,6 @@ class RecurringMailer {
 		$this->web_dir = $settings->get_setting('webDir');
 		$this->email_template_contents = array();
 		$this->email_templates = array();
-		//$this->_load_templates($siteDir . '/theme/emailtemplates/recurring_emails');
 	}
 
 	public function get_send_counts($range) {
