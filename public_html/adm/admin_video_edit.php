@@ -4,6 +4,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/videos_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/groups_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -39,9 +41,39 @@
 			$video->set('vid_video_number', $vid_video_number);
 			$video->set('vid_video_text', $_POST['vid_url']);
 		}
+
+		if($_POST['vid_min_permission'] === NULL || $_POST['vid_min_permission'] === ''){
+			$video->set('vid_min_permission', NULL);
+		} 
+		else{
+			$video->set('vid_min_permission', $_POST['vid_min_permission']);
+		}
+
+		if($_POST['vid_grp_group_id'] === NULL || $_POST['vid_grp_group_id'] === ''){
+			$video->set('vid_grp_group_id', NULL);
+		} 
+		else{
+			$video->set('vid_grp_group_id', $_POST['vid_grp_group_id']);
+		}
+		
+		if($_POST['vid_evt_event_id'] === NULL || $_POST['vid_evt_event_id'] === ''){
+			$video->set('vid_evt_event_id', NULL);
+		} 
+		else{
+			$video->set('vid_evt_event_id', $_POST['vid_evt_event_id']);
+		}
 		
 		$video->set('vid_title', $_POST['vid_title']);
 		$video->set('vid_description', $_POST['vid_description']);
+
+		if(!$video->get('vid_link') || $_SESSION['permission'] == 10){
+			if($_POST['vid_link']){
+				$video->set('vid_link', $video->create_url($_POST['vid_link']));
+			}
+			else{
+				$video->set('vid_link', $video->create_url($video->get('vid_title')));
+			}
+		}
 		
 		try {
 			$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -106,12 +138,42 @@
 		}
 		
 		echo $formwriter->textinput('Video title', 'vid_title', NULL, 100, $video->get('vid_title'), '', 255, '');
+		if(!$video->get('vid_link') || $_SESSION['permission'] == 10){
+			echo $formwriter->textinput('Link (no spaces, optional): '.$settings->get_setting('webDir').'/video/', 'pag_link', NULL, 100, $video->get('vid_link'), '', 255, '');	
+		}
 		echo $formwriter->textbox('Video description', 'vid_description', 'ctrlHolder', 5, 80, $video->get('vid_description'), '', 'no');		
 		
 		if(!$video->key){
 			echo $formwriter->textinput('Video link', 'vid_url', 'ctrlHolder', 5, NULL, '', 'no'); 
 		}
 
+	$optionvals = array('Public (anyone)' => null, 'Any logged in user (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
+	echo $formwriter->dropinput("Permission level can access", "vid_min_permission", "ctrlHolder", $optionvals, $video->get('vid_min_permission'), '', FALSE, TRUE);
+	
+	$groups = new MultiGroup(
+		array('category'=>'user'),  //SEARCH 
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$groups->load();
+
+	$optionvals1['All'] = NULL;	
+	$optionvals2 = $groups->get_dropdown_array();
+	$optionvals = array_merge($optionvals1, $optionvals2);
+	echo $formwriter->dropinput("Group can access", "vid_grp_group_id", "ctrlHolder", $optionvals, $video->get('vid_grp_group_id'), '', FALSE, TRUE);
+
+	$events = new MultiEvent(
+		array(),  //SEARCH 
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$events->load();
+
+	$optionvals['All'] = NULL;	
+	$optionvals2 = $events->get_dropdown_array();
+	$optionvals = array_merge($optionvals1, $optionvals2);
+	echo $formwriter->dropinput("Event can access", "vid_evt_event_id", "ctrlHolder", $optionvals, $video->get('vid_evt_event_id'), '', FALSE, TRUE);
+	
 			
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

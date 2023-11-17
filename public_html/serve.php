@@ -142,54 +142,11 @@ if($settings->get_setting('files_active')){
 		if(file_exists($file)){
 			require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
 			$file_obj = File::get_by_name(basename($file));
-			if($file_obj){
-				if($file_obj->get('fil_delete_time')){
-					LibraryFunctions::display_404_page();
-					exit;
-				}
 
-				if($file_obj->get('fil_min_permission')){
-					require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-					$session = SessionControl::get_instance();
-					if (!isset($_SESSION['loggedin']) || !$_SESSION['loggedin']) {
-						echo 'Insufficient permissions.  Must be logged in.';
-						exit;
-					}
-					if ($session->$session->get_permission() < $file_obj->get('fil_min_permission')){
-						echo 'Insufficient permissions';
-						exit;
-					}
-					
-					if ($group_id = $file_obj->get('fil_grp_group_id')){
-						require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-						//CHECK TO SEE IF USER IS IN AUTHORIZED GROUP
-						$group = new Group($group_id, TRUE);
-						if(!$group->is_member_in_group($session->get_user_id())){
-							echo 'Insufficient group permissions';
-							exit;
-						}
-					}
-					
-					if ($event_id = $file_obj->get('fil_evt_event_id')){
-						require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
-						//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
-						$searches['user_id'] = $session->get_user_id();
-						$searches['event_id'] = $event_id;
-						$searches['expired'] = false;
-						$event_registrations = new MultiEventRegistrant(
-							$searches,
-							NULL, //array('event_id'=>'DESC'),
-							NULL,
-							NULL);
-						$numeventsregistrations = $event_registrations->count_all();	
-
-						if(!$numeventsregistrations){
-							echo 'Insufficient event permissions';
-							exit;
-						}
-					}
-				}
-						
+			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+			$session = SessionControl::get_instance();		
+			if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){	
+				
 				$seconds_to_cache = 43200;
 				$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
 				header("Expires: $ts");
@@ -199,17 +156,44 @@ if($settings->get_setting('files_active')){
 				header($the_content_type);
 				readfile($file);
 				exit();
+
 			}
 			else{
 				LibraryFunctions::display_404_page();		
-			}
+			}	
+		}
+	}
+}
+
+//VIDEOS
+if($settings->get_setting('videos_active')){
+	if($params[0] == 'video'){
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
+		$video = Video::get_by_link($params[1], true);
+		
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+		$session = SessionControl::get_instance();
+		if($video && $video->authenticate_read(array('session'=>$session))){		
+				$template_file = $template_directory.'/video.php';
+				$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/video.php';
+				
+				$is_valid_page = true;
+				
+				if(file_exists($template_file)){
+					require_once($template_file);
+					exit();
+				}
+				else if(file_exists($base_file)){
+					require_once($base_file); 
+					exit();		
+				}
+				exit();
 		}
 		else{
 			LibraryFunctions::display_404_page();		
 		}	
 	}
 }
-
 
 //HOMEPAGE
 if(!$params[0]){

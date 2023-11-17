@@ -377,6 +377,57 @@ class File extends SystemBase {
 		}
 	}
 
+	function authenticate_read($data=NULL){
+		if(isset($data['session'])){
+			$session = $data['session'];
+		}
+		else{
+			SystemDisplayablePermanentError("Session is not present to authenticate.");
+		}		
+		
+		if($this->get('fil_delete_time')){
+			return false;
+		}
+
+		if($this->get('fil_min_permission')){
+			if (!$session->get_permission()) {
+				return false;
+			}
+			if ($session->get_permission() < $this->get('fil_min_permission')){
+				return false;
+			}
+	
+		}	
+	
+		if ($group_id = $this->get('fil_grp_group_id')){
+			require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
+			//CHECK TO SEE IF USER IS IN AUTHORIZED GROUP
+			$group = new Group($group_id, TRUE);
+			if(!$group->is_member_in_group($session->get_user_id())){
+				return false;
+			}
+		}
+		
+		if ($event_id = $this->get('fil_evt_event_id')){
+			require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
+			//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
+			$searches['user_id'] = $session->get_user_id();
+			$searches['event_id'] = $event_id;
+			$searches['expired'] = false;
+			$event_registrations = new MultiEventRegistrant(
+				$searches,
+				NULL, //array('event_id'=>'DESC'),
+				NULL,
+				NULL);
+			$numeventsregistrations = $event_registrations->count_all();	
+
+			if(!$numeventsregistrations){
+				return false;
+			}
+		}
+
+		return true;
+	}
 		
 }
 
@@ -412,6 +463,17 @@ class MultiFile extends SystemMultiBase {
 		 	$where_clauses[] = 'fil_usr_user_id = ?';
 		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		} 
+
+		if (array_key_exists('group_id', $this->options)) {
+		 	$where_clauses[] = 'fil_grp_group_id = ?';
+		 	$bind_params[] = array($this->options['group_id'], PDO::PARAM_INT);
+		} 
+		
+		if (array_key_exists('event_id', $this->options)) {
+		 	$where_clauses[] = 'fil_evt_event_id = ?';
+		 	$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
+		} 
+		
 		if (array_key_exists('deleted', $this->options)) {
 			$where_clauses[] = 'fil_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
 		}	
