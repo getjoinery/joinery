@@ -134,10 +134,14 @@ abstract class SystemBase {
 	
 	//CREATES A URL OR SLUG BASED ON AN INPUT STRING
 	function create_url($input_url) {
+		//REQUIRE THAT THE OBJECT IS LOADED
+		if(!$this->loaded){
+			throw new SystemClassException('Object must be loaded before using the create_url function.');
+		}
 		if(!$input_url){
 			throw new SystemClassException('You must pass a string to the create_url function.');
 		}
-		
+
 		$classname = get_called_class();
 
 		$tmp = strtolower(str_replace(' ', '-', $input_url));
@@ -145,9 +149,15 @@ abstract class SystemBase {
 		$tmp = preg_replace('/-{2,}/', '-', $tmp);
 		
 		//NO DUPLICATES
+		$safety = 0;
 		$increment=1;
 		$tmp_orig = $tmp;
 		while($result = $classname::get_by_link($tmp, true)){
+			$safety++;
+			if($safety > 50){
+				throw new SystemClassException('Create_url is stuck in a loop. Check the presence of link Multi search.');
+				exit;
+			}
 			if($result->key == $this->key){
 				//IF WE FOUND THIS ONE, IT'S OKAY
 				return $tmp;
