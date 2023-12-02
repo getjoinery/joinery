@@ -98,7 +98,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	}
 	
 	
-	//CREATE ALL OF THE NEEDED USERS
+	//CREATE ALL OF THE NEEDED USERS 
 	foreach($cart->items as $key => $cart_item) {
 		list($quantity, $product, $data, $price, $discount) = $cart_item;
 
