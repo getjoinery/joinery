@@ -9,6 +9,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
 
 	$paged = new PublicPageTW();
 	$hoptions = array(

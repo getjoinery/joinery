@@ -118,9 +118,12 @@
 	$optionvals = array_merge($optionvals1, $optionvals2);
 	echo $formwriter->dropinput("Event can access", "fil_evt_event_id", "ctrlHolder", $optionvals, $file->get('fil_evt_event_id'), '', FALSE, TRUE);
 	
+
 	
-	if($file->is_image()){
+	if($file->is_image()){ 
+	/*
 		echo $formwriter->checkboxinput("Include this image in the gallery", "fil_gal_gallery_id", "checkbox", "left", $file->get('fil_gal_gallery_id'), 1, "");
+		*/
 	}
 	
 	echo $formwriter->start_buttons();

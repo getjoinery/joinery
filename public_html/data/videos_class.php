@@ -36,6 +36,7 @@ class Video extends SystemBase {
 		'vid_min_permission' => 'Permission level required to view video',
 		'vid_grp_group_id' => 'Group with permission to see video',
 		'vid_evt_event_id' => 'Event registrants with permission to see video',
+		//'vid_is_listed' => 'Whether to list the video in indexes'
 	);
 
 	public static $field_specifications = array(
@@ -53,6 +54,7 @@ class Video extends SystemBase {
 		'vid_min_permission' => array('type'=>'int2'),
 		'vid_grp_group_id' => array('type'=>'int4'),
 		'vid_evt_event_id' => array('type'=>'int4'),
+		//'vid_is_listed' => array('type'=>'int2'),
 	);
 	
 	public static $required_fields = array();
@@ -256,6 +258,7 @@ class Video extends SystemBase {
 			return false;
 		}
 
+		//DISALLOW IF MIN PERMISSION AND USER IS NOT LOGGED IN OR DOESNT HAVE PERMISSION
 		if($this->get('vid_min_permission')){
 			if (!$session->get_permission()) {
 				return false;

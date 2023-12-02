@@ -28,7 +28,7 @@ function video_logic($get_vars, $post_vars, $video, $params){
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
-		if($video->get('vid_delete_time')){
+		if(!$video->authenticate_read($session)){
 			require_once(LibraryFunctions::display_404_page());	
 		}
 	}	

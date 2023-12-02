@@ -911,5 +911,4 @@ Welcome!
 		$migration['migration_sql'] = 'ALTER TABLE usr_users ALTER COLUMN usr_password TYPE varchar(255);';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
-
 		 
