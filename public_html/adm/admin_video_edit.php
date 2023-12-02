@@ -146,6 +146,8 @@
 		if(!$video->key){
 			echo $formwriter->textinput('Video link', 'vid_url', 'ctrlHolder', 5, NULL, '', 'no'); 
 		}
+		
+	//echo $formwriter->checkboxinput("List video in index", "vid_is_listed", "checkbox", "left", $file->get('vid_is_listed'), 1, "");
 
 	$optionvals = array('Public (anyone)' => null, 'Any logged in user (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
 	echo $formwriter->dropinput("Permission level can access", "vid_min_permission", "ctrlHolder", $optionvals, $video->get('vid_min_permission'), '', FALSE, TRUE);
