@@ -72,7 +72,10 @@
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
 	$live_directory = $full_site_dir. '/public_html';
 	$backup_directory = $full_site_dir. '/public_html_last';
+	$live_directory_contents = $live_directory.'/*';
+	$backup_directory_contents = $backup_directory.'/';
 	$stage_directory = $stage_location. 'public_html_stage';
+	$stage_directory_contents = $stage_directory.'/*';
 	$theme_directory = $full_site_dir.'/theme';
 	
 	//CHECK ALL FILE Permissions and owners
@@ -232,14 +235,14 @@
 	//exec ("chown -R user1 $stage_location");
 	//echo posix_getpwuid(fileowner($stage_location))['name'];
 	//exit;
-	echo 'Copying '.$live_directory. ' to '. $backup_directory.'<br>';
-	echo 'Copying '.$stage_directory. ' to '. $live_directory.'<br>';
-	
+	echo 'Moving '.$live_directory. ' to '. $backup_directory.'<br>';
+	echo 'Moving '.$stage_directory. ' to '. $live_directory.'<br>';
+
 	//chmod($live_directory, 0770);
 	//rename($live_directory, $backup_directory);
 	//rename($stage_directory, $live_directory);
-	exec("mv $live_directory $backup_directory");
-	exec("mv $stage_directory $live_directory");
+	exec("mv $live_directory_contents $backup_directory");
+	exec("mv $stage_directory_contents $live_directory");
 	exec("chmod -R 770 $live_directory");
 	exec("chmod -R 770 $backup_directory");
 
@@ -249,7 +252,7 @@
 	else if(!file_exists($live_directory)){
 		//FAILED, LETS LOAD FROM BACKUP 
 		echo 'Upgrade failed, loading from backup.<br>';
-		exec("mv $backup_directory $live_directory");
+		exec("mv $backup_directory_contents $live_directory");
 		exit;
 	}
 	
@@ -278,7 +281,7 @@
 	$migration_result = update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
 	if(!$migration_result){
 		echo 'Migration failed...reverting upgrade.<br>';
-		exec("mv $backup_directory $live_directory");
+		exec("mv $backup_directory_contents $live_directory");
 	
 	}
 	else{
