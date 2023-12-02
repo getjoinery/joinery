@@ -72,6 +72,77 @@ function cart_charge_logic($get_vars, $post_vars){
 	//HANDLE THE BILLING USER
 	$billing_user = $cart->get_or_create_billing_user(); 
 	
+	//GET THE ORDER IF IT WAS CREATED EARLIER
+	if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
+		if(!$order = Order::GetByStripeSession($session_id)){	
+			$error = 'Stripe returned bad or missing session id';
+			throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no stripe session ID returned.");
+			exit();				  
+		}
+	}
+	else{
+		//CREATE THE ORDER 
+		$order = new Order(NULL);
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			$order->set('ord_test_mode', true);
+		}
+		$order->set('ord_usr_user_id', $billing_user->key);
+		$order->set('ord_total_cost', $cart->get_total());
+		$order->set('ord_timestamp', 'now()');	
+		$order->set('ord_raw_cart', print_r($cart, true));
+		$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
+		$order->set('ord_status', Order::STATUS_UNPAID);
+		$order->prepare();	
+		$order->save();
+		$order->load();		
+	}
+	
+	
+	//CREATE ALL OF THE NEEDED USERS
+	foreach($cart->items as $key => $cart_item) {
+		list($quantity, $product, $data, $price, $discount) = $cart_item;
+
+		//DEAL WITH CREATING USERS FOR EACH PRODUCT ITEM
+		$user = User::GetByEmail($data['email']);
+		if(!$user){
+			$data = array(
+				'usr_first_name' => $data['full_name_first'],
+				'usr_last_name' => $data['full_name_last'],
+				'usr_email' => $data['email'],
+				'password' => NULL,
+				'send_emails' => true
+			);
+			$user = User::CreateNew($data);
+		}
+		
+		$act_code = Activation::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));	
+		$default_fill = array(
+			'act_code' => $act_code,
+			'user_id' => $user->key,
+		);
+		
+		//ADD TO THE MAILING LIST IF CHOSEN
+		if(isset($data['newsletter']) && $data['newsletter']){
+			if($settings->get_setting('default_mailing_list')){
+				$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
+			}
+		}		
+
+		//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
+		if(!$user->phone() && $data['phn_phone_number']){
+			$phone_number = PhoneNumber::CreateFromForm($data, $user->key, NULL, FALSE);
+		}
+		
+		//IF THE USER ENTERED AN ADDRESS, SAVE THAT
+		if(!$user->address() && $data['address']){
+			$address = $data['address'];
+			if(!$address->get('usa_usr_user_id')){
+				$address->set('usa_usr_user_id', $user->key);
+				$address->save();
+			}
+		}
+	}
+	
 	
 	$payment_service = '';
 	if($charge_total > 0){
@@ -80,37 +151,15 @@ function cart_charge_logic($get_vars, $post_vars){
 			$paypal=new PaypalHelper();
 			$payment=$paypal->validatePayment($payment_id);
 			
-			if($_GET['subscription']){
-				$order = new Order(NULL);
-				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-					$order->set('ord_test_mode', true);
-				}
-				$order->set('ord_usr_user_id', $billing_user->key);
-				$order->set('ord_total_cost', $cart->get_total());
-				$order->set('ord_timestamp', 'now');	
-				$order->set('ord_raw_cart', print_r($cart, true));
-				$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
-				$order->set('ord_status', Order::STATUS_PAID);
-				$order->prepare();	
+			if($_GET['subscription']){	
+				$order->set('ord_status', Order::STATUS_PAID);	
 				$order->save();
-				$order->load();	
 				
 				$payment_service = 'paypal';				
 			}
-			else if($payment['status']=='COMPLETED'){
-				$order = new Order(NULL);
-				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-					$order->set('ord_test_mode', true);
-				}
-				$order->set('ord_usr_user_id', $billing_user->key);
-				$order->set('ord_total_cost', $cart->get_total());
-				$order->set('ord_timestamp', 'now');	
-				$order->set('ord_raw_cart', print_r($cart, true));
-				$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
+			else if($payment['status']=='COMPLETED'){	
 				$order->set('ord_status', Order::STATUS_PAID);
-				$order->prepare();	
 				$order->save();
-				$order->load();	
 				
 				$payment_service = 'paypal';
 			}
@@ -125,49 +174,15 @@ function cart_charge_logic($get_vars, $post_vars){
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
 			$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
-			$session_id = $_GET['session_id'];
-			if($order = Order::GetByStripeSession($session_id)){
-				$order->set('ord_raw_cart', print_r($cart, true));
-			}
-			else{	
-				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-					$order->set('ord_test_mode', true);
-				}
-				$error = 'Stripe returned bad or missing session id';
-				$order->set('ord_error', $error);
-				$order->set('ord_status', Order::STATUS_ERROR);
-				$order->save();
-				throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no stripe session ID returned.");
-				exit();				  
-			}
-
-			if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-				$order->set('ord_test_mode', true);
-			}
 			
 			$order->set('ord_status', Order::STATUS_PAID);
-			$order->set('ord_usr_user_id', $billing_user->key);
-			$order->prepare();	
 			$order->save();
-			$order->load();	
 				
 			$payment_service = 'stripe_checkout';
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
 			$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
-			$order = new Order(NULL);
-			if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-				$order->set('ord_test_mode', true);
-			}
-			$order->set('ord_usr_user_id', $billing_user->key);
-			$order->set('ord_total_cost', $cart->get_total());
-			$order->set('ord_timestamp', 'now');	
-			$order->set('ord_raw_cart', print_r($cart, true));
-			$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
-			$order->set('ord_status', Order::STATUS_UNPAID);	
-			$order->prepare();	
-			$order->save();
-			$order->load();	
+
 
 			//CHECK CREDIT CARD INFO AND STORE IF PRESENT FOR REGULAR STRIPE CHECKOUT
 			//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
@@ -191,22 +206,14 @@ function cart_charge_logic($get_vars, $post_vars){
 		}
 	}
 	else{
-		$order = new Order(NULL);
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			$order->set('ord_test_mode', true);
-		}
-		$order->set('ord_usr_user_id', $billing_user->key);
-		$order->set('ord_total_cost', $cart->get_total());
-		$order->set('ord_timestamp', 'now');	
-		$order->set('ord_raw_cart', print_r($cart, true));
-		$order->set('ord_serialized_cart', serialize($cart->get_items_generic()));	
+		
 		$order->set('ord_status', Order::STATUS_PAID);	
-		$order->prepare();	
-		$order->save();
-		$order->load();	
+		$order->save();	
 		$payment_service = 'none';		
 	}
 	
+	//REFRESH THE ORDER 
+	$order->load();
 	
 	//PROCESS RECURRING ITEMS
 	$stripe_item_list = array();
@@ -221,33 +228,6 @@ function cart_charge_logic($get_vars, $post_vars){
 		//HANDLE SUBSCRIPTIONS
 		if($product->get('pro_recurring')){
 
-			//DEAL WITH CREATING USERS FOR EACH PRODUCT ITEM
-			$user = User::GetByEmail($data['email']);
-			if(!$user){
-				$data = array(
-					'usr_first_name' => $data['full_name_first'],
-					'usr_last_name' => $data['full_name_last'],
-					'usr_email' => $data['email'],
-					'password' => NULL,
-					'send_emails' => true
-				);
-				$user = User::CreateNew($data);
-			}
-			
-			$act_code = Activation::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));	
-			$default_fill = array(
-				'act_code' => $act_code,
-				'user_id' => $user->key,
-			);
-			
-			//ADD TO THE MAILING LIST IF CHOSEN
-			if(isset($data['newsletter']) && $data['newsletter']){
-				if($settings->get_setting('default_mailing_list')){
-					$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
-				}
-			}
-			
-			
 			//CREATE THE ORDER ITEM
 			$order_item = new OrderItem(NULL);
 			$order_item->set('odi_ord_order_id', $order->key);
@@ -264,26 +244,14 @@ function cart_charge_logic($get_vars, $post_vars){
 				$order_item->set('odi_prv_product_version_id', $product_version->prv_product_version_id);
 			}			
 			$order_item->set('odi_status', OrderItem::STATUS_UNPAID);
-			$order_item->set('odi_status_change_time', 'NOW');
+			$order_item->set('odi_status_change_time', 'now()');
+			$order_item->set('odi_is_subscription', true);
 			$order_item->save();	
 			$order_item->load();
 			
 			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
 			$order_item->save_cart_data($data);
 
-			//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
-			if(!$user->phone() && $data['phn_phone_number']){
-				$phone_number = PhoneNumber::CreateFromForm($data, $user->key, NULL, FALSE);
-			}
-			
-			//IF THE USER ENTERED AN ADDRESS, SAVE THAT
-			if(!$user->address() && $data['address']){
-				$address = $data['address'];
-				if(!$address->get('usa_usr_user_id')){
-					$address->set('usa_usr_user_id', $user->key);
-					$address->save();
-				}
-			}
 
 			if($payment_service == 'stripe_regular'){
 				//CREATE A PLAN AND RUN THE SUBSCRIPTION
@@ -291,16 +259,12 @@ function cart_charge_logic($get_vars, $post_vars){
 				$plan = $stripe_helper->get_or_create_subscription_plan($final_price);		
 				$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($plan, $order_item, $billing_user, $stripe_customer_id);	
 				//REFRESH THE ORDER ITEM
-				$order_item->set('odi_is_subscription', true);
 				$order_item->set('odi_status', OrderItem::STATUS_PAID);
-				$order_item->set('odi_status_change_time', 'NOW');
 				$order_item->save();	
 				
 			}
 			else if($payment_service == 'stripe_checkout'){
-				$order_item->set('odi_is_subscription', true);
 				$order_item->set('odi_status', OrderItem::STATUS_PAID);
-				$order_item->set('odi_status_change_time', 'NOW');
 				//MOVE THE SUBSCRIPTION ID FROM THE ORDER TO THE ORDER ITEM AND REMOVE IT FROM THE ORDER
 				$order_item->set('odi_stripe_subscription_id', $order->get('ord_stripe_subscription_id_temp'));
 				$order_item->save();
@@ -464,31 +428,8 @@ function cart_charge_logic($get_vars, $post_vars){
 		$one_time_purchase_exists = 0;
 		if(!$product->get('pro_recurring')){
 			$one_time_purchase_exists = 1;
-			//DEAL WITH CREATING USERS FOR EACH PRODUCT ITEM
-			$user = User::GetByEmail($data['email']);
-			if(!$user){
-				$data = array(
-					'usr_first_name' => $data['full_name_first'],
-					'usr_last_name' => $data['full_name_last'],
-					'usr_email' => $data['email'],
-					'password' => NULL,
-					'send_emails' => true
-				);
-				$user = User::CreateNew($data);
-			}
-
-			$act_code = Activation::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));	
-			$default_fill = array(
-				'act_code' => $act_code,
-				'user_id' => $user->key,
-			);
 			
-			//ADD TO THE MAILING LIST IF CHOSEN
-			if(isset($data['newsletter']) && $data['newsletter']){
-				if($settings->get_setting('default_mailing_list')){
-					$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
-				}
-			}
+			
 			
 			
 			//CREATE THE ORDER ITEM
@@ -509,26 +450,12 @@ function cart_charge_logic($get_vars, $post_vars){
 			}
 			
 			$order_item->set('odi_status', OrderItem::STATUS_PAID);
-			$order_item->set('odi_status_change_time', 'NOW');
+			$order_item->set('odi_status_change_time', 'now()');
 			$order_item->save();				
 			$order_item->load();
 			
 			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
 			$order_item->save_cart_data($data);
-			
-			//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
-			if(!$user->phone() && $data['phn_phone_number']){
-				$phone_number = PhoneNumber::CreateFromForm($data, $user->key, NULL, FALSE);
-			}
-			
-			//IF THE USER ENTERED AN ADDRESS, SAVE THAT
-			if(!$user->address() && $data['address']){
-				$address = $data['address'];
-				if(!$address->get('usa_usr_user_id')){
-					$address->set('usa_usr_user_id', $user->key);
-					$address->save();
-				}
-			}
 			
 			//ATTACH USERS TO THE RIGHT EVENTS/COURSES
 			if($product->get('pro_evt_event_id')){
