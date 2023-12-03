@@ -15,7 +15,10 @@
 
 	echo PublicPageTW::BeginPage('Withdraw from Event/Course', $hoptions);
 
-	if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
+	if(!$event_registrant){
+		echo 'You are not registered for this course, or you have already withdrawn.';
+	}
+	else if($event->get('evt_end_time') > date('Y-m-d H:i:s')){
 		$formwriter = new FormWriterPublicTW("form1");
 		echo $formwriter->begin_form("form", "post", "/profile/event_withdraw");
 

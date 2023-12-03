@@ -157,7 +157,7 @@ class EventRegistrant extends SystemBase {
 		}
 
 		if (!$q->rowCount()) {
-			throw new DisplayablePermanentEventRegistrantException('Sorry, this registration does not exist or has already withdrawn from the event.');
+			return false;
 		}
 
 		$this->data = $q->fetch();
