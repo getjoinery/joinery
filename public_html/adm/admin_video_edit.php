@@ -65,19 +65,20 @@
 		
 		$video->set('vid_title', $_POST['vid_title']);
 		$video->set('vid_description', $_POST['vid_description']);
-
-		if(!$video->get('vid_link') || $_SESSION['permission'] == 10){
-			if($_POST['vid_link']){
-				$video->set('vid_link', $video->create_url($_POST['vid_link']));
-			}
-			else{
-				$video->set('vid_link', $video->create_url($video->get('vid_title')));
-			}
-		}
 		
 		try {
 			$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-			$video->save();
+			$video->save(); 
+			$video->load();
+
+			if(!$video->get('vid_link') || $_SESSION['permission'] == 10){
+				if($_POST['vid_link']){
+					$video->set('vid_link', $video->create_url($_POST['vid_link']));
+				}
+				else{
+					$video->set('vid_link', $video->create_url($video->get('vid_title')));
+				}
+			}
 		} catch (TTClassException $e) {
 			$errorhandler = new ErrorHandler();
 			$errorhandler->handle_general_error($e->getMessage());
