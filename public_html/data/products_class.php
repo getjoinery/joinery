@@ -655,7 +655,7 @@ class Product extends SystemBase {
 
 	public static $field_specifications = array(
 		'pro_product_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'pro_name' => array('type'=>'varchar(100)'),
+		'pro_name' => array('type'=>'varchar(255)'),
 		'pro_description' => array('type'=>'text'),
 		'pro_price' => array('type'=>'numeric(10,2)'),
 		'pro_requirements' => array('type'=>'int4'),
