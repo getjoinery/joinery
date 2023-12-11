@@ -27,7 +27,7 @@
 
 
 
-	if ($_POST || $_POST['action']) {
+	if ($_POST || $_REQUEST['action']) {
 		
 		if ($_POST['action'] == 'add' || $_POST['action'] == 'edit') {
 			
@@ -105,7 +105,8 @@
 			
 		
 		} 
-		else if ($_REQUEST['action'] == 'new_version') {
+		
+		if ($_REQUEST['action'] == 'new_version') {
 			
 			$product->add_product_version($_REQUEST['version_name'], $_REQUEST['version_price']);
 		} 
