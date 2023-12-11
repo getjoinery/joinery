@@ -135,9 +135,6 @@ abstract class SystemBase {
 	//CREATES A URL OR SLUG BASED ON AN INPUT STRING
 	function create_url($input_url) {
 		//REQUIRE THAT THE OBJECT IS LOADED
-		if(!$this->loaded){
-			throw new SystemClassException('Object must be loaded before using the create_url function.');
-		}
 		if(!$input_url){
 			throw new SystemClassException('You must pass a string to the create_url function.');
 		}
