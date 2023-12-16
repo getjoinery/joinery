@@ -931,5 +931,11 @@ Welcome!
 		$migration['migration_sql'] = 'UPDATE stg_settings set stg_value=\'\' where stg_name= \'system_version\'';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
+
+ 		$migration['database_version'] = '0.5.40';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = 'SELECT 1 FROM stg_settings';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
 		
 		 
