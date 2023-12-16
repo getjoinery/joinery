@@ -499,7 +499,7 @@
 	if(!isset($noautorun)){
 		if(update_database($classes, $migrations, $verbose, $upgrade, $cleanup)){
 			echo 'Database update successful'. "<br>\n";
-			return 1;  //RETURN 0 FOR THE DEPLOY SCRIPT
+			return 1;  //RETURN 1 FOR THE DEPLOY SCRIPT
 		}
 		else{
 			echo 'Database update failed'. "<br>\n";
