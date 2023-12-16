@@ -19,7 +19,7 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	
-	if(isset($_GET['version_major']) && isset($_GET['version_minor'])){
+	if(isset($_REQUEST['version_major']) && isset($_REQUEST['version_minor'])){
 	
 		$version_major = $_GET['version_major'];
 		$version_minor = $_GET['version_minor'];
