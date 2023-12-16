@@ -21,8 +21,8 @@
 	
 	if(isset($_REQUEST['version_major']) && isset($_REQUEST['version_minor'])){
 	
-		$version_major = $_GET['version_major'];
-		$version_minor = $_GET['version_minor'];
+		$version_major = $_REQUEST['version_major'];
+		$version_minor = $_REQUEST['version_minor'];
 		
 		$filename = 'current_upgrade'.$version_major.'-'.$version_minor.'.upg.zip';
 
@@ -38,7 +38,7 @@
 		$upgrade->set('upg_major_version', $version_major);
 		$upgrade->set('upg_minor_version', $version_minor);
 		$upgrade->set('upg_name', $filename);
-		$upgrade->set('upg_release_notes', $_GET['release_notes']);
+		$upgrade->set('upg_release_notes', $_REQUEST['release_notes']);
 		$upgrade->prepare();
 		$upgrade->save();
 		
