@@ -10,9 +10,12 @@
 	if($_GET['serve-upgrade'] && $settings->get_setting('upgrade_server_active')){
 		$response = array();
 		$response['system_version'] = $settings->get_setting('system_version');
-		//TODO:  MAKE UPGRADE LOCATION NOT STATIC USING THE UPGRADE_LOCATION SETTING
-		//$response['upgrade_location'] = $settings->get_setting('webDir').$settings->get_setting('upgrade_location');
-		$response['upgrade_location'] = $settings->get_setting('webDir').'/static_files/current_upgrade.upg.zip';
+		$major = new MultiUpgrade(array(), array('major_version' => 'DESC', 'minor_version' => 'DESC'));
+		$major->load();
+		$upgrade =  $major->get(0);
+		$response['system_version'] = $upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version');
+		$response['release_notes'] = $upgrade->get('upg_release_notes');
+		$response['upgrade_location'] = $settings->get_setting('webDir').'/static_files/'.$upgrade->get('upg_name');
 		header("Content-Type: application/json");
 		http_response_code(400);
 
@@ -297,6 +300,22 @@
 		print_r($e);
 	}	
 	*/		
+	
+	//UPDATE THE SYSTEM VERSION
+	$sql = "UPDATE stg_settings set stg_value='".$decode_response['system_version']."' WHERE stg_name='system_version'";
+	try{
+		$q = $dblink->prepare($sql);
+		$q->execute();
+		if($verbose){
+			echo 'System version now '.$decode_response['system_version']."<br>\n";
+		}
+		
+	}
+	catch(PDOException $e){
+		echo $e->getMessage();
+		echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $decode_response['system_version'] ."<br>\n";
+		exit;
+	}	
 
 	function is_dir_empty($dir) {
 		$numfiles = count(scandir($dir));

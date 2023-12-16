@@ -64,6 +64,7 @@
 	require_once( __DIR__ . '/../data/event_waiting_lists_class.php');
 	require_once( __DIR__ . '/../data/locations_class.php');
 	require_once( __DIR__ . '/../data/api_keys_class.php');
+	require_once( __DIR__ . '/../data/upgrades_class.php');
 
 	$classes = array(
 			'Address',
@@ -126,6 +127,7 @@
 			'WaitingList',
 			'Location',
 			'ApiKey',
+			'Upgrade'
 		);			
 
 
@@ -909,6 +911,24 @@ Welcome!
  		$migration['system_version'] = '0.5.39';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'ALTER TABLE usr_users ALTER COLUMN usr_password TYPE varchar(255);';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
+ 		$migration['system_version'] = '0.5.39';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'database_version'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'database_version\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
+ 		$migration['system_version'] = '0.5.39';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = 'UPDATE stg_settings set database_version=system_version';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+		
+ 		$migration['system_version'] = '0.5.39';
+		$migration['test'] = NULL;
+		$migration['migration_sql'] = 'UPDATE stg_settings set system_version=NULL';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		 

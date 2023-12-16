@@ -450,19 +450,19 @@
 				}
 			}
 
-			//UPDATE THE SYSTEM VERSION
-			$sql = "UPDATE stg_settings set stg_value='".$migrations[$key]['system_version']."' WHERE stg_name='system_version'";
+			//UPDATE THE DATABASE VERSION
+			$sql = "UPDATE stg_settings set stg_value='".$migrations[$key]['database_version']."' WHERE stg_name='database_version'";
 			try{
 				$q = $dblink->prepare($sql);
 				$q->execute();
 				if($verbose){
-					echo 'System version now '.$migrations[$key]['system_version']."<br>\n";
+					echo 'System version now '.$migrations[$key]['database_version']."<br>\n";
 				}
 				
 			}
 			catch(PDOException $e){
 				echo $e->getMessage();
-				echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $migrations[$key]['system_version'] ."<br>\n";
+				echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $migrations[$key]['database_version'] ."<br>\n";
 				exit;
 			}	
 				
@@ -487,7 +487,7 @@
 		}
 
 
-		$sql = "SELECT * FROM stg_settings WHERE stg_name='system_version'";
+		$sql = "SELECT * FROM stg_settings WHERE stg_name='database_version'";
 		$q = $dblink->prepare($sql);
 		$q->execute();
 		$row = $q->fetch();		
