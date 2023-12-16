@@ -162,7 +162,7 @@
 			}
 			if(!isset($class::$field_specifications)){
 				echo 'ERROR:  '.$table_name . ' has no field specifications.';
-				exit;
+				return 0;
 			}
 			$field_specifications = $class::$field_specifications;
 			
@@ -406,7 +406,7 @@
 				catch(PDOException $e){
 					echo $e->getMessage();
 					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
-					exit;					
+					return 0;					
 				}	
 
 				if($row['count'] == 0){
@@ -427,7 +427,7 @@
 				catch(PDOException $e){
 					echo $e->getMessage();
 					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
-					exit;
+					return 0;
 				}			
 			}
 			else if($run && $migration['migration_file']){
@@ -436,12 +436,12 @@
 				$function_name = pathinfo($migration['migration_file']);
 				if(!function_exists($function_name['filename'])){
 					echo 'ABORTING MIGRATIONS at Migration '. $key ." Function does not exist.<br>\n";
-					exit;							
+					return 0;							
 				}
 				$result = call_user_func($function_name['filename']);
 				if(!result){
 					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
-					exit;					
+					return 0;					
 				}
 			}
 			else{
@@ -463,7 +463,7 @@
 			catch(PDOException $e){
 				echo $e->getMessage();
 				echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $migrations[$key]['database_version'] ."<br>\n";
-				exit;
+				return 0;
 			}	
 				
 			
@@ -481,7 +481,7 @@
 			catch(PDOException $e){
 				echo $e->getMessage();
 				echo 'ABORTING MIGRATIONS.  Failed to set next row: '. $key ."<br>\n";
-				exit;
+				return 0;
 			}				
 	
 		}
