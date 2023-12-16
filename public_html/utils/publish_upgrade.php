@@ -100,13 +100,26 @@
 		
 		$major = new MultiUpgrade(array(), array('major_version' => DESC));
 		$major->load();
-		$major_temp =  $major->get(0);
-		$major_version = $major_temp->get('upg_major_version');
+		$count = $major->count_all();
+		if($count){
+			$major_temp =  $major->get(0);
+			$major_version = $major_temp->get('upg_major_version');
+		}
+		else{
+			$major_version = 0;
+		}
 
 		$minor = new MultiUpgrade(array(), array('minor_version' => DESC));
 		$minor->load();
+		$count = $minor->count_all();
+		if($count){
 		$minor_temp =  $minor->get(0);
 		$minor_version = $minor_temp->get('upg_major_version') + 1;
+		}
+		else{
+			$minor_version = 0;
+		}
+
 		
 		echo $formwriter->textinput('Major Version', 'version_major', NULL, 100, $major_version, '', 255, '');
 		echo $formwriter->textinput('Minor Version', 'version_minor', NULL, 100, $minor_version, '', 255, '');
