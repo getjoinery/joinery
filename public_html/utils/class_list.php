@@ -928,7 +928,7 @@ Welcome!
 		
  		$migration['system_version'] = '0.5.39';
 		$migration['test'] = NULL;
-		$migration['migration_sql'] = 'UPDATE stg_settings set stg_value=NULL where stg_name= \'system_version\'';
+		$migration['migration_sql'] = 'UPDATE stg_settings set stg_value=\'\' where stg_name= \'system_version\'';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
