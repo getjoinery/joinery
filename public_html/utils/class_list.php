@@ -138,35 +138,35 @@
 		//IF THERE IS NO TEST SQL, IT IS ASSUMED THAT WE ALWAYS RUN THE MIGRATION
 		//ALSO UPDATES LAST SYSTEM VERSION
 		$migrations = array();
-		$migrations[0]['system_version'] = '0.5';
+		$migrations[0]['database_version'] = '0.5';
 		$migrations[0]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_product_requirements'";
 		$migrations[0]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Product Requirements\', 5, \'admin_product_requirements\', 5, 8, 0, \'\');';
 		
-		$migrations[1]['system_version'] = '0.5';
+		$migrations[1]['database_version'] = '0.5';
 		$migrations[1]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'system_version'";
 		$migrations[1]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'system_version\', \'0.5\', 1, \'now()\', \'now()\', \'general\');';
 		
-		$migrations[2]['system_version'] = '0.5';
+		$migrations[2]['database_version'] = '0.5';
 		$migrations[2]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'db_migration_version'";
 		$migrations[2]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'db_migration_version\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 
-		$migrations[3]['system_version'] = '0.5.1';
+		$migrations[3]['database_version'] = '0.5.1';
 		$migrations[3]['test'] = NULL;
 		$migrations[3]['migration_sql'] = NULL;		
 
-		$migrations[4]['system_version'] = '0.5.2';
+		$migrations[4]['database_version'] = '0.5.2';
 		$migrations[4]['test'] = NULL;
 		$migrations[4]['migration_sql'] = NULL;				
 
-		$migrations[5]['system_version'] = '0.5.2';
+		$migrations[5]['database_version'] = '0.5.2';
 		$migrations[5]['test'] = NULL;
 		$migrations[5]['migration_sql'] = NULL;			
 	
-		$migrations[6]['system_version'] = '0.5.3';
+		$migrations[6]['database_version'] = '0.5.3';
 		$migrations[6]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_mailing_lists'";
 		$migrations[6]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Mailing Lists\', 11, \'admin_mailing_lists\', 7, 8, 0, \'\');';		
 		
-		$migrations[7]['system_version'] = '0.5.4';
+		$migrations[7]['database_version'] = '0.5.4';
 		$migrations[7]['test'] = NULL;
 		$migrations[7]['migration_sql'] = 'UPDATE emt_email_templates SET emt_body=\'<br/>----
 <br/>
@@ -178,15 +178,15 @@
 <br/>
 <br/>\' WHERE emt_name=\'default_footer\';';				
 		
-		$migrations[8]['system_version'] = '0.5.4';
+		$migrations[8]['database_version'] = '0.5.4';
 		$migrations[8]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_analytics_email_stats'";
 		$migrations[8]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Email Statistics\', 12, \'admin_analytics_email_stats\', 2, 5, 0, \'\');';	
 
-		$migrations[9]['system_version'] = '0.5.5';
+		$migrations[9]['database_version'] = '0.5.5';
 		$migrations[9]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailing_lists_active'";
 		$migrations[9]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailing_lists_active\', 1, 1, \'now()\', \'now()\', \'general\');';		
 
-		$migrations[10]['system_version'] = '0.5.6';
+		$migrations[10]['database_version'] = '0.5.6';
 		$migrations[10]['test'] = NULL;
 		$migrations[10]['migration_sql'] = 'UPDATE "public"."emt_email_templates" SET "emt_body" = \'<br/>----
 <br/>
@@ -205,12 +205,12 @@ This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end
 ';
 		$migrations[10]['migration_file'] = NULL;	
 		
-		$migrations[11]['system_version'] = '0.5.7';
+		$migrations[11]['database_version'] = '0.5.7';
 		$migrations[11]['test'] = NULL;
 		$migrations[11]['migration_sql'] = NULL;
 		$migrations[11]['migration_file'] = 'test_migration.php';	
 		
-		$migrations[12]['system_version'] = '0.5.8';
+		$migrations[12]['database_version'] = '0.5.8';
 		$migrations[12]['test'] = 'SELECT count(1) as count FROM emt_email_templates WHERE emt_name = \'mailing_list_subscribe\'';
 		$migrations[12]['migration_sql'] = 'INSERT INTO "public"."emt_email_templates"("emt_name", "emt_type", "emt_body", "emt_create_time", "emt_update_time", "emt_delete_time") VALUES (\'mailing_list_subscribe\', 2, \'This is your confirmation that you are subscribed to the *mailing_list_string* mailing list.  
 
@@ -220,155 +220,155 @@ Welcome!
 		$migrations[12]['migration_file'] = NULL;	
 		
 
-		$migrations[13]['system_version'] = '0.5.9';
+		$migrations[13]['database_version'] = '0.5.9';
 		$migrations[13]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'bookings_active'";
 		$migrations[13]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'bookings_active\', \'0\', 1, \'now()\', \'now()\', \'general\');';
 		
-		$migrations[14]['system_version'] = '0.5.9';
+		$migrations[14]['database_version'] = '0.5.9';
 		$migrations[14]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'calendly_api_token'";
 		$migrations[14]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'calendly_api_token\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		
-		$migrations[15]['system_version'] = '0.5.9';
+		$migrations[15]['database_version'] = '0.5.9';
 		$migrations[15]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'calendly_organization_uri'";
 		$migrations[15]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'calendly_organization_uri\', \'\', 1, \'now()\', \'now()\', \'general\');';
 
-		$migrations[19]['system_version'] = '0.5.9';
+		$migrations[19]['database_version'] = '0.5.9';
 		$migrations[19]['test'] = NULL;
 		$migrations[19]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug=REGEXP_REPLACE(REPLACE(LOWER(amu_menudisplay), \'\'\'\', \'\'), \'[^a-z]+\', \'-\');';
 		
-		$migrations[23]['system_version'] = '0.5.9';
+		$migrations[23]['database_version'] = '0.5.9';
 		$migrations[23]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_bookings'";
 		$migrations[23]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Bookings\', NULL, \'\', 6, 8, 0, \'clock\', \'bookings-parent\', \'bookings_active\');';
 
-		$migrations[24]['system_version'] = '0.5.9';
+		$migrations[24]['database_version'] = '0.5.9';
 		$migrations[24]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_booking_types'";
 		$migrations[24]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Booking Types\', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = \'bookings-parent\'), \'admin_booking_types\', 5, 8, 0, \'\', \'booking-types\', \'bookings_active\');';
 
-		$migrations[25]['system_version'] = '0.5.9';
+		$migrations[25]['database_version'] = '0.5.9';
 		$migrations[25]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_bookings'";
 		$migrations[25]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Bookings\', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = \'bookings-parent\'), \'admin_bookings\', 3, 8, 0, \'\', \'bookings\', \'bookings_active\');';
 	
 
-		$migrations[26]['system_version'] = '0.5.10';
+		$migrations[26]['database_version'] = '0.5.10';
 		$migrations[26]['test'] = NULL;
 		$migrations[26]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'blog_active\' WHERE amu_menudisplay= \'Blog\'';
 
-		$migrations[27]['system_version'] = '0.5.10';
+		$migrations[27]['database_version'] = '0.5.10';
 		$migrations[27]['test'] = NULL;
 		$migrations[27]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'blog_active\' WHERE amu_menudisplay= \'Blog Posts\'';
 
-		$migrations[28]['system_version'] = '0.5.10';
+		$migrations[28]['database_version'] = '0.5.10';
 		$migrations[28]['test'] = NULL;
 		$migrations[28]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'blog_active\' WHERE amu_menudisplay= \'Comments\'';
 
-		$migrations[29]['system_version'] = '0.5.10';
+		$migrations[29]['database_version'] = '0.5.10';
 		$migrations[29]['test'] = NULL;
 		$migrations[29]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'events_active\' WHERE amu_menudisplay= \'All Events\'';
 
-		$migrations[30]['system_version'] = '0.5.10';
+		$migrations[30]['database_version'] = '0.5.10';
 		$migrations[30]['test'] = NULL;
 		$migrations[30]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'events_active\' WHERE amu_menudisplay= \'Future Events\'';
 
-		$migrations[31]['system_version'] = '0.5.10';
+		$migrations[31]['database_version'] = '0.5.10';
 		$migrations[31]['test'] = NULL;
 		$migrations[31]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'events_active\' WHERE amu_menudisplay= \'Events\'';
 
-		$migrations[32]['system_version'] = '0.5.10';
+		$migrations[32]['database_version'] = '0.5.10';
 		$migrations[33]['test'] = NULL;
 		$migrations[33]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'events_active\' WHERE amu_menudisplay= \'Event Bundles\'';
 
-		$migrations[34]['system_version'] = '0.5.10';
+		$migrations[34]['database_version'] = '0.5.10';
 		$migrations[34]['test'] = NULL;
 		$migrations[34]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Products\'';
 
-		$migrations[35]['system_version'] = '0.5.10';
+		$migrations[35]['database_version'] = '0.5.10';
 		$migrations[35]['test'] = NULL;
 		$migrations[35]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Orders\'';
 
-		$migrations[36]['system_version'] = '0.5.10';
+		$migrations[36]['database_version'] = '0.5.10';
 		$migrations[36]['test'] = NULL;
 		$migrations[36]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Orders list\'';
 		
-		$migrations[37]['system_version'] = '0.5.10';
+		$migrations[37]['database_version'] = '0.5.10';
 		$migrations[37]['test'] = NULL;
 		$migrations[37]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Stripe Payments\'';
 		
-		$migrations[38]['system_version'] = '0.5.10';
+		$migrations[38]['database_version'] = '0.5.10';
 		$migrations[38]['test'] = NULL;
 		$migrations[38]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Shadow Sessions\'';
 
-		$migrations[39]['system_version'] = '0.5.10';
+		$migrations[39]['database_version'] = '0.5.10';
 		$migrations[39]['test'] = NULL;
 		$migrations[39]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Products list\'';
 		
-		$migrations[40]['system_version'] = '0.5.10';
+		$migrations[40]['database_version'] = '0.5.10';
 		$migrations[40]['test'] = NULL;
 		$migrations[40]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Product Groups\'';		
-		$migrations[41]['system_version'] = '0.5.10';
+		$migrations[41]['database_version'] = '0.5.10';
 		$migrations[41]['test'] = NULL;
 		$migrations[41]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Product Requirements\'';	
 	
-		$migrations[42]['system_version'] = '0.5.10';
+		$migrations[42]['database_version'] = '0.5.10';
 		$migrations[42]['test'] = NULL;
 		$migrations[42]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'emails_active\' WHERE amu_menudisplay= \'Emails list\'';
 
-		$migrations[43]['system_version'] = '0.5.10';
+		$migrations[43]['database_version'] = '0.5.10';
 		$migrations[43]['test'] = NULL;
 		$migrations[43]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'emails_active\' WHERE amu_menudisplay= \'Emails\'';
 		
-		$migrations[44]['system_version'] = '0.5.10';
+		$migrations[44]['database_version'] = '0.5.10';
 		$migrations[44]['test'] = NULL;
 		$migrations[44]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'emails_active\' WHERE amu_menudisplay= \'Email Templates\'';
 		
-		$migrations[45]['system_version'] = '0.5.10';
+		$migrations[45]['database_version'] = '0.5.10';
 		$migrations[45]['test'] = NULL;
 		$migrations[45]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'files_active\' WHERE amu_menudisplay= \'Files\'';
 	
-		$migrations[46]['system_version'] = '0.5.10';
+		$migrations[46]['database_version'] = '0.5.10';
 		$migrations[46]['test'] = NULL;
 		$migrations[46]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'files_active\' WHERE amu_menudisplay= \'Images\'';
 	
-		$migrations[47]['system_version'] = '0.5.10';
+		$migrations[47]['database_version'] = '0.5.10';
 		$migrations[47]['test'] = NULL;
 		$migrations[47]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'videos_active\' WHERE amu_menudisplay= \'Products\'';
 	
-		$migrations[48]['system_version'] = '0.5.10';
+		$migrations[48]['database_version'] = '0.5.10';
 		$migrations[48]['test'] = NULL;
 		$migrations[48]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'videos_active\' WHERE amu_menudisplay= \'Videos\'';
 	
-		$migrations[49]['system_version'] = '0.5.10';
+		$migrations[49]['database_version'] = '0.5.10';
 		$migrations[49]['test'] = NULL;
 		$migrations[49]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'page_contents_active\' WHERE amu_menudisplay= \'Pages\'';
 	
-		$migrations[50]['system_version'] = '0.5.10';
+		$migrations[50]['database_version'] = '0.5.10';
 		$migrations[50]['test'] = NULL;
 		$migrations[50]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'urls_active\' WHERE amu_menudisplay= \'Urls\'';
 	
-		$migrations[51]['system_version'] = '0.5.10';
+		$migrations[51]['database_version'] = '0.5.10';
 		$migrations[51]['test'] = NULL;
 		$migrations[51]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Products\'';
 	
-		$migrations[52]['system_version'] = '0.5.10';
+		$migrations[52]['database_version'] = '0.5.10';
 		$migrations[52]['test'] = NULL;
 		$migrations[52]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Coupon codes\'';
 
-		$migrations[53]['system_version'] = '0.5.10';
+		$migrations[53]['database_version'] = '0.5.10';
 		$migrations[53]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'surveys_active'";
 		$migrations[53]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'surveys_active\', \'0\', 1, \'now()\', \'now()\', \'general\');';
 
-		$migrations[54]['system_version'] = '0.5.10';
+		$migrations[54]['database_version'] = '0.5.10';
 		$migrations[54]['test'] = NULL;
 		$migrations[54]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'surveys_active\' WHERE amu_menudisplay= \'Surveys\'';
 
-		$migrations[55]['system_version'] = '0.5.10';
+		$migrations[55]['database_version'] = '0.5.10';
 		$migrations[55]['test'] = NULL;
 		$migrations[55]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'surveys_active\' WHERE amu_menudisplay= \'Survey questions\'';
 
-		$migrations[56]['system_version'] = '0.5.11';
+		$migrations[56]['database_version'] = '0.5.11';
 		$migrations[56]['test'] = NULL;
 		$migrations[56]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'files-parent\' WHERE amu_icon= \'file-pdf\'';
 
-		$migrations[57]['system_version'] = '0.5.11';
+		$migrations[57]['database_version'] = '0.5.11';
 		$migrations[57]['test'] = NULL;
 		$migrations[57]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'surveys-parent\' WHERE amu_icon= \'list\'';
 
