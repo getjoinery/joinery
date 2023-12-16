@@ -456,7 +456,7 @@
 				$q = $dblink->prepare($sql);
 				$q->execute();
 				if($verbose){
-					echo 'System version now '.$migrations[$key]['database_version']."<br>\n";
+					echo 'Database version now '.$migrations[$key]['database_version']."<br>\n";
 				}
 				
 			}
