@@ -180,6 +180,8 @@
 			exit;
 			//return false; 
 		}
+		
+		$numfiles = 0;
 
 		//if we have good files...
 		if(count($files)) {
@@ -192,6 +194,23 @@
 			}
 			//add the files
 			foreach($files as $file) {
+				$numfiles++;
+				if($numfiles == 500){
+					//HANDLE THE MAX LIMIT OF FILES FOR ZIPARCHIVE
+					if($zip->close()){
+						return true;
+					}
+					else{
+						echo 'Zip file failed to close.';
+						exit;
+					}	
+					
+					if($zip->open($destination, ZIPARCHIVE::OVERWRITE) !== true) {
+						echo 'Failed to create zip file: '.$destination;
+						exit;
+						//return false;
+					}					
+				}
 				//SKIP EXCLUDED FILES
 				if(in_array(basename($file), $exclude_filenames)){
 					echo 'Excluded file: '.$file.'<br>';
