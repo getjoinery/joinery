@@ -1,6 +1,7 @@
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/upgrades_class.php');
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
 	$site_template = $settings->get_setting('site_template');
