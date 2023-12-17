@@ -1,7 +1,7 @@
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/upgrades_class.php');
+	
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
 	$site_template = $settings->get_setting('site_template');
@@ -9,6 +9,7 @@
 	
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
 	if($_GET['serve-upgrade'] && $settings->get_setting('upgrade_server_active')){
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/upgrades_class.php');
 		$response = array();
 		$response['system_version'] = $settings->get_setting('system_version');
 		$major = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'));
@@ -27,6 +28,9 @@
 	
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
+	
+	$dbhelper = DbConnector::get_instance();
+	$dblink = $dbhelper->get_db_link();
 	
 	//GET THE UPGRADE INFO
 	$upgrade_source = $settings->get_setting('upgrade_source').'/utils/upgrade?serve-upgrade=1';
@@ -72,7 +76,7 @@
 	
 	
 	//$sourceFile     = 'https://jeremytunnell.com/static_files/current_upgrade.zip';
-	$file_download_location = $full_site_dir.'/uploads/current_upgrade.upg.zip';
+	$file_download_location = $full_site_dir.'/uploads/'.basename($sourceFile);//$full_site_dir.'/uploads/current_upgrade.upg.zip';
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
 	$live_directory = $full_site_dir. '/public_html';
 	$backup_directory = $full_site_dir. '/public_html_last';
@@ -182,23 +186,24 @@
 	if ($zip->open($file_download_location)){
 	  $zip->extractTo($stage_location);
 	  $zip->close();
-	  echo 'Upgrade unzipped...<br>';
+	  echo 'Upgrade at '.$file_download_location. ' unzipped to '.$stage_location.'<br>';
 	} 
 	else {
-	  echo 'Unable to unzip upgrade<br>';
+	  echo 'Unable to unzip upgrade from '.$file_download_location.' <br>';
 	  exit;
 	}			
-	
+
 	//TODO: DO BACKUPS
 	
 	//TODO:  THIS IS A HACK, FIX IT
-	rename($stage_location.'var/www/html/jeremytunnell/public_html_stage', $stage_directory);
+	echo 'Moving '.$stage_location.'var/www/html/jeremytunnell/public_html'. ' to '.$stage_directory.'<br>';
+	rename($stage_location.'var/www/html/jeremytunnell/public_html', $stage_directory);
 	
 	//COPY THE THEME FILES 
-	exec("cp -r $theme_directory $stage_directory");
 	$location_of_themes = $stage_directory.'/theme';
+	exec("cp -r $theme_directory $location_of_themes");
 	if(!file_exists($location_of_themes)){
-		echo "Failed to move theme files...aborting.<br>";
+		echo "Failed to move theme files ($theme_directory to $location_of_themes...aborting.<br>";
 		exit;
 	}
 	else{
