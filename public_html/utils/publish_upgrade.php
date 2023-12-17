@@ -44,16 +44,25 @@
 		}		
 		*/
 		
-		//EXPORT THE ZIP FILE
-		$zip_command = 'zip -qr '.$file_output_location. ' ' .$full_site_dir."/public_html -x '*.git*' -x "."'".$full_site_dir."/public_html/theme'";
-		echo $zip_command.'<br>';
-		exec("$zip_command");
+
+		$file = fopen($file_output_location, 'w') or die("can't open file");
+		fclose($file);
+
+		
+		$files_list = array();
+		$exclude_folder_names = array('.git', '.gitignore');
+		$files_list = getDirContents($full_site_dir.'/public_html', $exclude_folder_names);
+		
+		echo 'Creating zip: '.$file_output_location.'<br>';
+		$exclude_filenames = array('.git', '.gitignore');
+		$remove_relative_path = 'var/www/html/jeremytunnell/';
+		create_zip($files_list, $file_output_location, $exclude_filenames, $remove_relative_path, true);
 
 		if(!file_exists($file_output_location)){
 			echo "Failed to write the zip file: $file_output_location...aborting.<br>";
 			exit;
 		}
-	
+	exit;
 		//STORE THE INFO IN THE DATABASE
 		$upgrade = new Upgrade(NULL);
 		$upgrade->set('upg_major_version', $version_major);
@@ -67,21 +76,6 @@
 		//GET THE UPGRADE FILE
 		echo 'Exported: '. $file_output_location.'<br>';
 
-
-		
-		//UNZIP THE FILE
-		/*
-		$zip = new ZipArchive;
-		if ($zip->open($file_download_location)){
-		  $zip->extractTo($stage_location);
-		  $zip->close();
-		  echo 'Upgrade unzipped...<br>';
-		} 
-		else {
-		  echo 'Unable to unzip upgrade<br>';
-		  exit;
-		}	
-		*/	
 	}
 	else{
 		$breadcrumbs = array();
@@ -160,6 +154,93 @@
 		
 	}
 	
+	function getDirContents($dir, $exclude_folder_names = array(), &$results = array()) {
+		$files = scandir($dir);
+
+		foreach ($files as $key => $value) {
+			$path = realpath($dir . DIRECTORY_SEPARATOR . $value);
+			if (!is_dir($path)) {
+				$results[] = $path;
+			} 
+			else if ($value != "." && $value != "..") {
+				if(!in_array(basename($path), $exclude_folder_names)){
+					getDirContents($path, $exclude_folder_names, $results);
+					//$results[] = $path;
+				}
+			}
+		}
+
+		return $results;
+	}
+	
+	function create_zip($files = array(),$destination = '', $exclude_filenames = array(), $remove_relative_path = '', $overwrite = false) {
+		//if the zip file already exists and overwrite is false, return false
+		if(file_exists($destination) && !$overwrite) { 
+			echo 'File already exists: '.$destination;
+			exit;
+			//return false; 
+		}
+
+		//if we have good files...
+		if(count($files)) {
+			//create the archive
+			$zip = new ZipArchive();
+			if($zip->open($destination,$overwrite ? ZIPARCHIVE::OVERWRITE : ZIPARCHIVE::CREATE) !== true) {
+				echo 'Failed to create zip file: '.$destination;
+				exit;
+				//return false;
+			}
+			//add the files
+			foreach($files as $file) {
+				//SKIP EXCLUDED FILES
+				if(in_array(basename($file), $exclude_filenames)){
+					echo 'Excluded file: '.$file.'<br>';
+					continue;
+				}
+				else if (is_dir($file)){
+					echo 'Excluded directory: '.$file.'<br>';
+					continue;
+				}
+				else if(!file_exists($file) || !is_readable($file)){
+					echo 'Excluded nonexistent or unreadable file: '.$file.'<br>';
+					continue;
+				}
+				else{
+					echo 'Adding file: '.$file.'<br>';
+					$zip->addFile(realpath($file),ltrim(str_replace($remove_relative_path, '', $file), '/'));
+
+				}
+			}
+			
+			//debug
+			//echo 'The zip archive contains ',$zip->numFiles,' files with a status of ',$zip->getStatusString().'<br>';
+			
+			//close the zip -- done!
+			
+			if($zip->close()){
+				return true;
+			}
+			else{
+				echo 'Zip file failed to close.';
+				exit;
+			}	
+			
+			//check to make sure the file exists
+			if(file_exists($destination)){
+				return true;
+			}
+			else{
+				echo 'Zip file failed to save.';
+				exit;
+			}	
+		}
+		else
+		{
+				echo 'There are no valid files for the zip file.';
+				exit;
+				//return false;
+		}
+	}	
 
 
 ?>

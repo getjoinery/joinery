@@ -82,7 +82,7 @@
 	$backup_directory = $full_site_dir. '/public_html_last';
 	$live_directory_contents = $live_directory.'/*';
 	$backup_directory_contents = $backup_directory.'/';
-	$stage_directory = $stage_location. 'public_html_stage';
+	$stage_directory = $stage_location. 'public_html';
 	$stage_directory_contents = $stage_directory.'/*';
 	$theme_directory = $full_site_dir.'/theme';
 	
@@ -194,20 +194,17 @@
 	}			
 
 	//TODO: DO BACKUPS
-	
-	//TODO:  THIS IS A HACK, FIX IT
-	echo 'Moving '.$stage_location.'var/www/html/jeremytunnell/public_html'. ' to '.$stage_directory.'<br>';
-	rename($stage_location.'var/www/html/jeremytunnell/public_html', $stage_directory);
+
 	
 	//COPY THE THEME FILES 
 	$location_of_themes = $stage_directory.'/theme';
-	exec("cp -r $theme_directory $location_of_themes");
+	exec("cp -r $theme_directory $stage_directory");
 	if(!file_exists($location_of_themes)){
 		echo "Failed to move theme files ($theme_directory to $location_of_themes...aborting.<br>";
 		exit;
 	}
 	else{
-		echo "Theme files copied.<br>";
+		echo "Theme files copied from $theme_directory to $stage_directory.<br>";
 	}
 
 	//RUN THE DEPLOY
