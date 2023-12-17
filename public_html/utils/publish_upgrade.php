@@ -31,15 +31,17 @@
 
 		//CHECK ALL FILE Permissions and owners
 		if(substr(sprintf('%o', fileperms($file_output_folder)), -3) != '770'){
-			echo $file_output_folder . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+			echo $file_output_folder . ' must have permissions of 770.  Aborting upgrade.<br>';
 			echo 'Instead, it is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
 			exit;
 		}
+		/*
 		if(posix_getpwuid(fileowner($file_output_folder))['name'] != 'www-data'){
 			echo $file_output_folder . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
 			echo 'Instead, it is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
 			exit;		
 		}		
+		*/
 		
 		//EXPORT THE ZIP FILE
 		$zip_command = 'zip '.$file_output_location. ' ' .$full_site_dir."/public_html -x '*.git*' -x '/var/www/html/$1/public_html/theme'";
