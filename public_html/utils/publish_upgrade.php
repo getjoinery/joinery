@@ -1,10 +1,11 @@
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/upgrades_class.php');
+	require_once( __DIR__ . '/../includes/AdminPage-uikit3.php');
+	require_once( __DIR__ . '/../includes/FormWriterMaster.php');
+	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
+	require_once( __DIR__ . '/../data/upgrades_class.php');
+
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
 	$site_template = $settings->get_setting('site_template');
@@ -44,10 +45,15 @@
 		*/
 		
 		//EXPORT THE ZIP FILE
-		$zip_command = 'zip '.$file_output_location. ' ' .$full_site_dir."/public_html -x '*.git*' -x '/var/www/html/$1/public_html/theme'";
-		//echo $zip_command;
+		$zip_command = 'zip -qr '.$file_output_location. ' ' .$full_site_dir."/public_html -x '*.git*' -x "."'".$full_site_dir."/public_html/theme'";
+		echo $zip_command.'<br>';
 		exec("$zip_command");
-		
+
+		if(!file_exists($file_output_location)){
+			echo "Failed to write the zip file: $file_output_location...aborting.<br>";
+			exit;
+		}
+	
 		//STORE THE INFO IN THE DATABASE
 		$upgrade = new Upgrade(NULL);
 		$upgrade->set('upg_major_version', $version_major);
@@ -78,7 +84,6 @@
 		*/	
 	}
 	else{
-
 		$breadcrumbs = array();
 
 
