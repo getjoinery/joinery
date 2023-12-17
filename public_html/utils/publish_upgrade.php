@@ -42,8 +42,9 @@
 		}		
 		
 		//EXPORT THE ZIP FILE
-		
-		exec("$file_output_location $full_site_dir/public_html -x '*.git*' -x '/var/www/html/$1/public_html/theme'");
+		$zip_command = 'zip '.$file_output_location. ' ' .$full_site_dir."/public_html -x '*.git*' -x '/var/www/html/$1/public_html/theme'";
+		//echo $zip_command;
+		exec("$zip_command");
 		
 		//STORE THE INFO IN THE DATABASE
 		$upgrade = new Upgrade(NULL);
