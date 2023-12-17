@@ -203,7 +203,7 @@
 						exit;
 					}	
 					
-					if($zip->open($destination, ZIPARCHIVE::OVERWRITE) !== true) {
+					if($zip->open($destination, ZIPARCHIVE::CREATE) !== true) {
 						echo 'Failed to create zip file: '.$destination;
 						exit;
 						//return false;
