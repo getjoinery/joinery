@@ -195,12 +195,10 @@
 			//add the files
 			foreach($files as $file) {
 				$numfiles++;
-				if($numfiles == 500){
+				if($numfiles % 500 == 0){
+					echo 'Writing to zip file...<br>';
 					//HANDLE THE MAX LIMIT OF FILES FOR ZIPARCHIVE
-					if($zip->close()){
-						return true;
-					}
-					else{
+					if(!$zip->close()){
 						echo 'Zip file failed to close.';
 						exit;
 					}	
@@ -225,14 +223,14 @@
 					continue;
 				}
 				else{
-					echo 'Adding file: '.$file.'<br>';
+					echo $numfiles.' Adding file: '.$file.'<br>';
 					$zip->addFile(realpath($file),ltrim(str_replace($remove_relative_path, '', $file), '/'));
 
 				}
 			}
 			
 			//debug
-			//echo 'The zip archive contains ',$zip->numFiles,' files with a status of ',$zip->getStatusString().'<br>';
+			echo 'The zip archive contains ',$zip->numFiles,' files with a status of ',$zip->getStatusString().'<br>';
 			
 			//close the zip -- done!
 			
