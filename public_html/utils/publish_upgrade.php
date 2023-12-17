@@ -62,7 +62,7 @@
 			echo "Failed to write the zip file: $file_output_location...aborting.<br>";
 			exit;
 		}
-	exit;
+		
 		//STORE THE INFO IN THE DATABASE
 		$upgrade = new Upgrade(NULL);
 		$upgrade->set('upg_major_version', $version_major);
