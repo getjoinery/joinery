@@ -11,7 +11,7 @@
 	if($_GET['serve-upgrade'] && $settings->get_setting('upgrade_server_active')){
 		$response = array();
 		$response['system_version'] = $settings->get_setting('system_version');
-		$major = new MultiUpgrade(array(), array('major_version' => 'DESC', 'minor_version' => 'DESC'));
+		$major = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'));
 		$major->load();
 		$upgrade =  $major->get(0);
 		$response['system_version'] = $upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version');
