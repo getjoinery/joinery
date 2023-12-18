@@ -150,23 +150,23 @@
 		$migrations[2]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'db_migration_version'";
 		$migrations[2]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'db_migration_version\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 
-		$migrations[3]['database_version'] = '0.5.1';
+		$migrations[3]['database_version'] = '0.1';
 		$migrations[3]['test'] = NULL;
 		$migrations[3]['migration_sql'] = NULL;		
 
-		$migrations[4]['database_version'] = '0.5.2';
+		$migrations[4]['database_version'] = '0.2';
 		$migrations[4]['test'] = NULL;
 		$migrations[4]['migration_sql'] = NULL;				
 
-		$migrations[5]['database_version'] = '0.5.2';
+		$migrations[5]['database_version'] = '0.2';
 		$migrations[5]['test'] = NULL;
 		$migrations[5]['migration_sql'] = NULL;			
 	
-		$migrations[6]['database_version'] = '0.5.3';
+		$migrations[6]['database_version'] = '0.3';
 		$migrations[6]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_mailing_lists'";
 		$migrations[6]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Mailing Lists\', 11, \'admin_mailing_lists\', 7, 8, 0, \'\');';		
 		
-		$migrations[7]['database_version'] = '0.5.4';
+		$migrations[7]['database_version'] = '0.4';
 		$migrations[7]['test'] = NULL;
 		$migrations[7]['migration_sql'] = 'UPDATE emt_email_templates SET emt_body=\'<br/>----
 <br/>
@@ -178,15 +178,15 @@
 <br/>
 <br/>\' WHERE emt_name=\'default_footer\';';				
 		
-		$migrations[8]['database_version'] = '0.5.4';
+		$migrations[8]['database_version'] = '0.4';
 		$migrations[8]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_analytics_email_stats'";
 		$migrations[8]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Email Statistics\', 12, \'admin_analytics_email_stats\', 2, 5, 0, \'\');';	
 
-		$migrations[9]['database_version'] = '0.5.5';
+		$migrations[9]['database_version'] = '0.5';
 		$migrations[9]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailing_lists_active'";
 		$migrations[9]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailing_lists_active\', 1, 1, \'now()\', \'now()\', \'general\');';		
 
-		$migrations[10]['database_version'] = '0.5.6';
+		$migrations[10]['database_version'] = '0.6';
 		$migrations[10]['test'] = NULL;
 		$migrations[10]['migration_sql'] = 'UPDATE "public"."emt_email_templates" SET "emt_body" = \'<br/>----
 <br/>
@@ -205,12 +205,12 @@ This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end
 ';
 		$migrations[10]['migration_file'] = NULL;	
 		
-		$migrations[11]['database_version'] = '0.5.7';
+		$migrations[11]['database_version'] = '0.7';
 		$migrations[11]['test'] = NULL;
 		$migrations[11]['migration_sql'] = NULL;
 		$migrations[11]['migration_file'] = 'test_migration.php';	
 		
-		$migrations[12]['database_version'] = '0.5.8';
+		$migrations[12]['database_version'] = '0.8';
 		$migrations[12]['test'] = 'SELECT count(1) as count FROM emt_email_templates WHERE emt_name = \'mailing_list_subscribe\'';
 		$migrations[12]['migration_sql'] = 'INSERT INTO "public"."emt_email_templates"("emt_name", "emt_type", "emt_body", "emt_create_time", "emt_update_time", "emt_delete_time") VALUES (\'mailing_list_subscribe\', 2, \'This is your confirmation that you are subscribed to the *mailing_list_string* mailing list.  
 
@@ -220,210 +220,210 @@ Welcome!
 		$migrations[12]['migration_file'] = NULL;	
 		
 
-		$migrations[13]['database_version'] = '0.5.9';
+		$migrations[13]['database_version'] = '0.9';
 		$migrations[13]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'bookings_active'";
 		$migrations[13]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'bookings_active\', \'0\', 1, \'now()\', \'now()\', \'general\');';
 		
-		$migrations[14]['database_version'] = '0.5.9';
+		$migrations[14]['database_version'] = '0.9';
 		$migrations[14]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'calendly_api_token'";
 		$migrations[14]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'calendly_api_token\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		
-		$migrations[15]['database_version'] = '0.5.9';
+		$migrations[15]['database_version'] = '0.9';
 		$migrations[15]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'calendly_organization_uri'";
 		$migrations[15]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'calendly_organization_uri\', \'\', 1, \'now()\', \'now()\', \'general\');';
 
-		$migrations[19]['database_version'] = '0.5.9';
+		$migrations[19]['database_version'] = '0.9';
 		$migrations[19]['test'] = NULL;
 		$migrations[19]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug=REGEXP_REPLACE(REPLACE(LOWER(amu_menudisplay), \'\'\'\', \'\'), \'[^a-z]+\', \'-\');';
 		
-		$migrations[23]['database_version'] = '0.5.9';
+		$migrations[23]['database_version'] = '0.9';
 		$migrations[23]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_bookings'";
 		$migrations[23]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Bookings\', NULL, \'\', 6, 8, 0, \'clock\', \'bookings-parent\', \'bookings_active\');';
 
-		$migrations[24]['database_version'] = '0.5.9';
+		$migrations[24]['database_version'] = '0.9';
 		$migrations[24]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_booking_types'";
 		$migrations[24]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Booking Types\', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = \'bookings-parent\'), \'admin_booking_types\', 5, 8, 0, \'\', \'booking-types\', \'bookings_active\');';
 
-		$migrations[25]['database_version'] = '0.5.9';
+		$migrations[25]['database_version'] = '0.9';
 		$migrations[25]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_bookings'";
 		$migrations[25]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Bookings\', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = \'bookings-parent\'), \'admin_bookings\', 3, 8, 0, \'\', \'bookings\', \'bookings_active\');';
 	
 
-		$migrations[26]['database_version'] = '0.5.10';
+		$migrations[26]['database_version'] = '0.10';
 		$migrations[26]['test'] = NULL;
 		$migrations[26]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'blog_active\' WHERE amu_menudisplay= \'Blog\'';
 
-		$migrations[27]['database_version'] = '0.5.10';
+		$migrations[27]['database_version'] = '0.10';
 		$migrations[27]['test'] = NULL;
 		$migrations[27]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'blog_active\' WHERE amu_menudisplay= \'Blog Posts\'';
 
-		$migrations[28]['database_version'] = '0.5.10';
+		$migrations[28]['database_version'] = '0.10';
 		$migrations[28]['test'] = NULL;
 		$migrations[28]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'blog_active\' WHERE amu_menudisplay= \'Comments\'';
 
-		$migrations[29]['database_version'] = '0.5.10';
+		$migrations[29]['database_version'] = '0.10';
 		$migrations[29]['test'] = NULL;
 		$migrations[29]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'events_active\' WHERE amu_menudisplay= \'All Events\'';
 
-		$migrations[30]['database_version'] = '0.5.10';
+		$migrations[30]['database_version'] = '0.10';
 		$migrations[30]['test'] = NULL;
 		$migrations[30]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'events_active\' WHERE amu_menudisplay= \'Future Events\'';
 
-		$migrations[31]['database_version'] = '0.5.10';
+		$migrations[31]['database_version'] = '0.10';
 		$migrations[31]['test'] = NULL;
 		$migrations[31]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'events_active\' WHERE amu_menudisplay= \'Events\'';
 
-		$migrations[32]['database_version'] = '0.5.10';
+		$migrations[32]['database_version'] = '0.10';
 		$migrations[33]['test'] = NULL;
 		$migrations[33]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'events_active\' WHERE amu_menudisplay= \'Event Bundles\'';
 
-		$migrations[34]['database_version'] = '0.5.10';
+		$migrations[34]['database_version'] = '0.10';
 		$migrations[34]['test'] = NULL;
 		$migrations[34]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Products\'';
 
-		$migrations[35]['database_version'] = '0.5.10';
+		$migrations[35]['database_version'] = '0.10';
 		$migrations[35]['test'] = NULL;
 		$migrations[35]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Orders\'';
 
-		$migrations[36]['database_version'] = '0.5.10';
+		$migrations[36]['database_version'] = '0.10';
 		$migrations[36]['test'] = NULL;
 		$migrations[36]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Orders list\'';
 		
-		$migrations[37]['database_version'] = '0.5.10';
+		$migrations[37]['database_version'] = '0.10';
 		$migrations[37]['test'] = NULL;
 		$migrations[37]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Stripe Payments\'';
 		
-		$migrations[38]['database_version'] = '0.5.10';
+		$migrations[38]['database_version'] = '0.10';
 		$migrations[38]['test'] = NULL;
 		$migrations[38]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Shadow Sessions\'';
 
-		$migrations[39]['database_version'] = '0.5.10';
+		$migrations[39]['database_version'] = '0.10';
 		$migrations[39]['test'] = NULL;
 		$migrations[39]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Products list\'';
 		
-		$migrations[40]['database_version'] = '0.5.10';
+		$migrations[40]['database_version'] = '0.10';
 		$migrations[40]['test'] = NULL;
 		$migrations[40]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Product Groups\'';		
-		$migrations[41]['database_version'] = '0.5.10';
+		$migrations[41]['database_version'] = '0.10';
 		$migrations[41]['test'] = NULL;
 		$migrations[41]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Product Requirements\'';	
 	
-		$migrations[42]['database_version'] = '0.5.10';
+		$migrations[42]['database_version'] = '0.10';
 		$migrations[42]['test'] = NULL;
 		$migrations[42]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'emails_active\' WHERE amu_menudisplay= \'Emails list\'';
 
-		$migrations[43]['database_version'] = '0.5.10';
+		$migrations[43]['database_version'] = '0.10';
 		$migrations[43]['test'] = NULL;
 		$migrations[43]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'emails_active\' WHERE amu_menudisplay= \'Emails\'';
 		
-		$migrations[44]['database_version'] = '0.5.10';
+		$migrations[44]['database_version'] = '0.10';
 		$migrations[44]['test'] = NULL;
 		$migrations[44]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'emails_active\' WHERE amu_menudisplay= \'Email Templates\'';
 		
-		$migrations[45]['database_version'] = '0.5.10';
+		$migrations[45]['database_version'] = '0.10';
 		$migrations[45]['test'] = NULL;
 		$migrations[45]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'files_active\' WHERE amu_menudisplay= \'Files\'';
 	
-		$migrations[46]['database_version'] = '0.5.10';
+		$migrations[46]['database_version'] = '0.10';
 		$migrations[46]['test'] = NULL;
 		$migrations[46]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'files_active\' WHERE amu_menudisplay= \'Images\'';
 	
-		$migrations[47]['database_version'] = '0.5.10';
+		$migrations[47]['database_version'] = '0.10';
 		$migrations[47]['test'] = NULL;
 		$migrations[47]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'videos_active\' WHERE amu_menudisplay= \'Products\'';
 	
-		$migrations[48]['database_version'] = '0.5.10';
+		$migrations[48]['database_version'] = '0.10';
 		$migrations[48]['test'] = NULL;
 		$migrations[48]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'videos_active\' WHERE amu_menudisplay= \'Videos\'';
 	
-		$migrations[49]['database_version'] = '0.5.10';
+		$migrations[49]['database_version'] = '0.10';
 		$migrations[49]['test'] = NULL;
 		$migrations[49]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'page_contents_active\' WHERE amu_menudisplay= \'Pages\'';
 	
-		$migrations[50]['database_version'] = '0.5.10';
+		$migrations[50]['database_version'] = '0.10';
 		$migrations[50]['test'] = NULL;
 		$migrations[50]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'urls_active\' WHERE amu_menudisplay= \'Urls\'';
 	
-		$migrations[51]['database_version'] = '0.5.10';
+		$migrations[51]['database_version'] = '0.10';
 		$migrations[51]['test'] = NULL;
 		$migrations[51]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Products\'';
 	
-		$migrations[52]['database_version'] = '0.5.10';
+		$migrations[52]['database_version'] = '0.10';
 		$migrations[52]['test'] = NULL;
 		$migrations[52]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'products_active\' WHERE amu_menudisplay= \'Coupon codes\'';
 
-		$migrations[53]['database_version'] = '0.5.10';
+		$migrations[53]['database_version'] = '0.10';
 		$migrations[53]['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'surveys_active'";
 		$migrations[53]['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'surveys_active\', \'0\', 1, \'now()\', \'now()\', \'general\');';
 
-		$migrations[54]['database_version'] = '0.5.10';
+		$migrations[54]['database_version'] = '0.10';
 		$migrations[54]['test'] = NULL;
 		$migrations[54]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'surveys_active\' WHERE amu_menudisplay= \'Surveys\'';
 
-		$migrations[55]['database_version'] = '0.5.10';
+		$migrations[55]['database_version'] = '0.10';
 		$migrations[55]['test'] = NULL;
 		$migrations[55]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_setting_activate= \'surveys_active\' WHERE amu_menudisplay= \'Survey questions\'';
 
-		$migrations[56]['database_version'] = '0.5.11';
+		$migrations[56]['database_version'] = '0.11';
 		$migrations[56]['test'] = NULL;
 		$migrations[56]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'files-parent\' WHERE amu_icon= \'file-pdf\'';
 
-		$migrations[57]['database_version'] = '0.5.11';
+		$migrations[57]['database_version'] = '0.11';
 		$migrations[57]['test'] = NULL;
 		$migrations[57]['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'surveys-parent\' WHERE amu_icon= \'list\'';
 
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'blog_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'blog_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'blog_subdirectory'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'blog_subdirectory\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'events_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'events_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'products_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'products_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'emails_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'emails_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'files_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'files_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'videos_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'videos_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'page_contents_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'page_contents_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'urls_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'urls_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.12';
+		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'tracking'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'tracking\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.13';
+		$migration['database_version'] = '0.13';
 		$migration['test'] = "SELECT count(1) as count FROM pag_pages WHERE pag_link = 'register-thanks'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."pag_pages"("pag_title", "pag_link", "pag_body", "pag_usr_user_id", "pag_published_time", "pag_create_time", "pag_script_filename", "pag_delete_time") VALUES (\'Registration Welcome Page\', \'register-thanks\', \'			<h2>Thanks for signing up!</h2>
 
@@ -435,7 +435,7 @@ Welcome!
 \', 1, \'2020-12-23 19:46:30.894481\', \'2022-12-27 18:21:48.775604\', NULL, NULL);';
 		$migrations[] = $migration;
 		
-		$migration['database_version'] = '0.5.13';
+		$migration['database_version'] = '0.13';
 		$migration['test'] = "SELECT count(1) as count FROM pag_pages WHERE pag_link = 'verify-email-confirm'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."pag_pages"("pag_title", "pag_link", "pag_body", "pag_usr_user_id", "pag_published_time", "pag_create_time", "pag_script_filename", "pag_delete_time") VALUES (\'Verify Email Confirm\', \'verify-email-confirm\', \'<h2>Congratulations! Your email address is now verified.</h2> 
 				<p>Your email has been verified. </p> 
@@ -448,133 +448,133 @@ Welcome!
 			 \', 1, \'2020-12-23 19:44:22.427349\', \'2022-12-27 18:21:48.785528\', NULL, NULL);';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.13';
+		$migration['database_version'] = '0.13';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_slug= \'signups-by-date\' WHERE amu_icon= \'signups-by date\'';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
 
-		$migration['database_version'] = '0.5.14';
+		$migration['database_version'] = '0.14';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = NULL;
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.15';
+		$migration['database_version'] = '0.15';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = NULL;
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.16';
+		$migration['database_version'] = '0.16';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'UPDATE amu_admin_menus SET amu_menudisplay= \'Events List\', amu_slug=\'events-list\' WHERE amu_menudisplay= \'Future Events\'';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.16';
+		$migration['database_version'] = '0.16';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'DELETE FROM amu_admin_menus WHERE amu_menudisplay= \'All Events\'';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.17';
+		$migration['database_version'] = '0.17';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'ALTER TABLE usa_users_addrs ALTER COLUMN usa_usr_user_id drop not null;';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		
-		$migration['database_version'] = '0.5.18';
+		$migration['database_version'] = '0.18';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'default_mailing_list'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'default_mailing_list\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'force_https'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'force_https\', \'0\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'hcaptcha_public'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'hcaptcha_public\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'hcaptcha_private'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'hcaptcha_private\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'captcha_public'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'captcha_public\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'captcha_private'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'captcha_private\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailchimp_api_key'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailchimp_api_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailchimp_list_id'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailchimp_list_id\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'urbit_endpoint'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'urbit_endpoint\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'urbit_endpoint_password'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'urbit_endpoint_password\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'stripe_api_key'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'stripe_api_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'stripe_api_pkey'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'stripe_api_pkey\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'stripe_api_key_test'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'stripe_api_key_test\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'stripe_api_pkey_test'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'stripe_api_pkey_test\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'stripe_endpoint_secret'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'stripe_endpoint_secret\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
@@ -582,42 +582,42 @@ Welcome!
 
 
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'calendly_organization_uri'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'calendly_organization_uri\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'calendly_organization_name'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'calendly_organization_name\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'calendly_api_key'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'calendly_api_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'calendly_api_token'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'calendly_api_token\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
 
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'acuity_user_id'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'acuity_user_id\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'acuity_api_key'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'acuity_api_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
@@ -626,42 +626,42 @@ Welcome!
 		
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'composerAutoLoad'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'composerAutoLoad\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'node_dir'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'node_dir\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'apache_error_log'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'apache_error_log\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'site_name'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'site_name\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
 
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'site_description'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'site_description\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'logo_link'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'logo_link\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
@@ -670,269 +670,269 @@ Welcome!
 		
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'baseDir'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'baseDir\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;			
 
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'site_template'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'site_template\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'webDir'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'webDir\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'siteDir'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'siteDir\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'upload_dir'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'upload_dir\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
 
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'upload_web_dir'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'upload_web_dir\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.19';
+		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'static_files_dir'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'static_files_dir\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
 
-		$migration['database_version'] = '0.5.20';
+		$migration['database_version'] = '0.20';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'webmaster_email'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'webmaster_email\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
 
-		$migration['database_version'] = '0.5.20';
+		$migration['database_version'] = '0.20';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'defaultemail'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'defaultemail\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.20';
+		$migration['database_version'] = '0.20';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'defaultemailname'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'defaultemailname\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
-		$migration['database_version'] = '0.5.20';
+		$migration['database_version'] = '0.20';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'debug'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'debug\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;			
 	
-		$migration['database_version'] = '0.5.20';
+		$migration['database_version'] = '0.20';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'standard_error'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'standard_error\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
-		$migration['database_version'] = '0.5.21';
+		$migration['database_version'] = '0.21';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_version'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_version\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
 		
-		$migration['database_version'] = '0.5.21';
+		$migration['database_version'] = '0.21';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_eu_api_link'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_eu_api_link\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
-		$migration['database_version'] = '0.5.21';
+		$migration['database_version'] = '0.21';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_api_key'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_api_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;			
 	
-		$migration['database_version'] = '0.5.21';
+		$migration['database_version'] = '0.21';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_domain'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailgun_domain\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
-		$migration['database_version'] = '0.5.22';
+		$migration['database_version'] = '0.22';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'social_messenger_link'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'social_messenger_link\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
-		$migration['database_version'] = '0.5.23';
+		$migration['database_version'] = '0.23';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'tracking_code'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'tracking_code\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
-		$migration['database_version'] = '0.5.24';
+		$migration['database_version'] = '0.24';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'subscriptions_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'subscriptions_active\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
-		$migration['database_version'] = '0.5.25';
+		$migration['database_version'] = '0.25';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'activation_required_login'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'activation_required_login\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.26';
+		$migration['database_version'] = '0.26';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'newsletter_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'newsletter_active\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.27';
+		$migration['database_version'] = '0.27';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'event_email_inner_template'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'event_email_inner_template\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '0.5.28';
+		$migration['database_version'] = '0.28';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'preview_image'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'preview_image\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		 
- 		$migration['database_version'] = '0.5.29';
+ 		$migration['database_version'] = '0.29';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'show_errors'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'show_errors\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		 
 
- 		$migration['database_version'] = '0.5.30';
+ 		$migration['database_version'] = '0.30';
 		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_locations'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Locations\', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = \'events\'), \'admin_locations\', 5, 5, 0, \'\', \'locations\', \'events_active\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.31';
+ 		$migration['database_version'] = '0.31';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'use_blog_as_homepage'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'use_blog_as_homepage\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.32';
+ 		$migration['database_version'] = '0.32';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'blog_subdirectory'";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
- 		$migration['database_version'] = '0.5.33';
+ 		$migration['database_version'] = '0.33';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'custom_css'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'custom_css\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
- 		$migration['database_version'] = '0.5.34';
+ 		$migration['database_version'] = '0.34';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'paypal_api_key'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'paypal_api_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
- 		$migration['database_version'] = '0.5.34';
+ 		$migration['database_version'] = '0.34';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'paypal_api_secret'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'paypal_api_secret\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
- 		$migration['database_version'] = '0.5.34';
+ 		$migration['database_version'] = '0.34';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'paypal_api_key_test'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'paypal_api_key_test\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
- 		$migration['database_version'] = '0.5.34';
+ 		$migration['database_version'] = '0.34';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'paypal_api_secret_test'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'paypal_api_secret_test\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 
- 		$migration['database_version'] = '0.5.35';
+ 		$migration['database_version'] = '0.35';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'use_paypal_checkout'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'use_paypal_checkout\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;				
 		
- 		$migration['database_version'] = '0.5.36';
+ 		$migration['database_version'] = '0.36';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'preview_image'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'preview_image\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.37';
+ 		$migration['database_version'] = '0.37';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'upgrade_source'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'upgrade_source\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.37';
+ 		$migration['database_version'] = '0.37';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'upgrade_server_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'upgrade_server_active\', \'0\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.37';
+ 		$migration['database_version'] = '0.37';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'upgrade_location'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'upgrade_location\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.38';
+ 		$migration['database_version'] = '0.38';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'show_errors'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'show_errors\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
- 		$migration['database_version'] = '0.5.39';
+ 		$migration['database_version'] = '0.39';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'ALTER TABLE usr_users ALTER COLUMN usr_password TYPE varchar(255);';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.39';
+ 		$migration['database_version'] = '0.39';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'database_version'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'database_version\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.39';
+ 		$migration['database_version'] = '0.39';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'UPDATE stg_settings set stg_value=(select stg_value from stg_settings where stg_name = \'system_version\') where stg_name = \'database_version\'';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '0.5.39';
+ 		$migration['database_version'] = '0.39';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'UPDATE stg_settings set stg_value=\'\' where stg_name= \'system_version\'';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 
- 		$migration['database_version'] = '0.5.40';
+ 		$migration['database_version'] = '0.40';
 		$migration['test'] = NULL;
 		$migration['migration_sql'] = 'SELECT 1 FROM stg_settings';
 		$migration['migration_file'] = NULL;
