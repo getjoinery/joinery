@@ -127,8 +127,8 @@
 		$minor->load();
 		$count = $minor->count_all();
 		if($count){
-		$minor_temp =  $minor->get(0);
-		$minor_version = $minor_temp->get('upg_major_version') + 1;
+			$minor_temp =  $minor->get(0);
+			$minor_version = $minor_temp->get('upg_minor_version') + 1;
 		}
 		else{
 			$minor_version = 0;
