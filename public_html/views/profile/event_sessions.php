@@ -74,7 +74,7 @@
 	
 	
 	<?php 
-	if($page_vars['event']->get('evt_end_time') > date('Y-m-d H:i:s')){
+	if(!$page_vars['event']->get('evt_end_time') || $page_vars['event']->get('evt_end_time') > date('Y-m-d H:i:s')){
 		$options = array('Withdraw from Course'=> '/profile/event_withdraw?evr_event_registrant_id='.$page_vars['event_registrant']->key);
 	}
 	else{
