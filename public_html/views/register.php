@@ -28,7 +28,7 @@
 		}
 	}		
 			
-
+	$nickname_display = $settings->get_setting('nickname_display_as');
 
 	$formwriter = new FormWriterPublicTW("form1", TRUE);
 
@@ -40,6 +40,9 @@
 	$validation_rules['usr_last_name']['required']['value'] = 'true';
 	$validation_rules['usr_last_name']['minlength']['value'] = 2;
 	$validation_rules['usr_last_name']['maxlength']['value'] = 32;
+	if($nickname_display){
+	$validation_rules['usr_nickname']['maxlength']['value'] = 32;
+	}
 	$validation_rules['usr_email']['required']['value'] = 'true';
 	$validation_rules['usr_email']['email']['value'] = 'true';
 	$validation_rules['usr_email']['maxlength']['value'] = 64;
@@ -60,7 +63,7 @@
 
 	echo $formwriter->textinput("First Name", "usr_first_name", 'sm:col-span-2', 20, @$form_fields->usr_first_name , "",32, "");	
 	echo $formwriter->textinput("Last Name", "usr_last_name", 'sm:col-span-2', 20, @$form_fields->usr_last_name, "" , 32, "");
-	$nickname_display = $settings->get_setting('nickname_display_as');
+	
 	if($nickname_display){
 		echo $formwriter->textinput($nickname_display, "usr_nickname", 'sm:col-span-2', 20, @$form_fields->usr_nickname, "" , 32, "");
 	}
