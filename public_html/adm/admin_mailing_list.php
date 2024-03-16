@@ -99,10 +99,10 @@
 		
 		
 		if($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC_UNLISTED){
-			echo 'Visibility: Public, Unlisted (<a href="'. $mailing_list->get_link(). '">'. $mailing_list->get_link(). '</a>)<br />';
+			echo 'Visibility: Public, Unlisted (<a href="'. $mailing_list->get_url(). '">'. $mailing_list->get_url(). '</a>)<br />';
 		}
 		else if ($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC){
-			echo 'Visibility: Public (<a href="'. $mailing_list->get_link(). '">'. $mailing_list->get_link(). '</a>)<br />';
+			echo 'Visibility: Public (<a href="'. $mailing_list->get_url(). '">'. $mailing_list->get_url(). '</a>)<br />';
 		}
 		else{
 			echo 'Visibility: Hidden<br>';
