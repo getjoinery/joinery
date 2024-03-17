@@ -33,6 +33,7 @@ class PublicPageMaster {
 		$session = SessionControl::get_instance();
 
 		$this->debug = $settings->get_setting('debug');
+		$this->debug_css = $settings->get_setting('debug_css');
 		if ($this->debug == 1) {
 			$secure = FALSE;
 			$this->secure = FALSE;
