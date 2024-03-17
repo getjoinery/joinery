@@ -17,11 +17,8 @@
 	}
 
 	if($_POST){
-		
-		$group->save();
-		$group->load();
 
-		if ($group){
+		if ($group->id){
 			$group->remove_all_members();	
 		}
 		else{
