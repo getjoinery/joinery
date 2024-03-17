@@ -937,5 +937,10 @@ Welcome!
 		$migration['migration_sql'] = 'SELECT 1 FROM stg_settings';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
-		
+	
+ 		$migration['database_version'] = '0.41';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'debug_css'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'debug_css\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;		
 		 
