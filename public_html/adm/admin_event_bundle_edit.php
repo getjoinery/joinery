@@ -12,6 +12,9 @@
 	if (isset($_REQUEST['grp_group_id'])) {
 		$group = new Group($_REQUEST['grp_group_id'], TRUE);
 	} 
+	else{
+		$group = new Group(NULL);
+	}
 
 	if($_POST){
 
