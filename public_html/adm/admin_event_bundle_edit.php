@@ -12,13 +12,10 @@
 	if (isset($_REQUEST['grp_group_id'])) {
 		$group = new Group($_REQUEST['grp_group_id'], TRUE);
 	} 
-	else{
-		$group = new Group(NULL);
-	}
 
 	if($_POST){
 
-		if ($group->id){
+		if ($group){
 			$group->remove_all_members();	
 		}
 		else{
@@ -34,6 +31,9 @@
 		exit;
 	}
 
+	if(!$group){
+		$group = new Group(NULL);
+	}
 
 	$page = new AdminPage();
 	$page->admin_header(	
