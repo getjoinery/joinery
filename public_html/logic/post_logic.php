@@ -33,8 +33,6 @@ function post_logic($get_vars, $post_vars, $post){
 		}
 	}
 	
-	$site_template = $settings->get_setting('site_template');
-	
 	//GET AUTHOR
 	$author = new User($post->get('pst_usr_user_id'), TRUE);
 	$page_vars['author'] = $author;
