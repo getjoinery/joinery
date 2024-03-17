@@ -19,7 +19,7 @@ class Globalvars {
 		return self::$instance_map[$doc_root];
 	}
 
-	public function get_setting($setting, $calculated_values=true){
+	public function get_setting($setting, $calculated_values=true, $fail_silently=false){
 		$found = 0;
 		if(isset($this->settings[$setting])){
 			if($this->settings[$setting] || $this->settings[$setting] === 0){
@@ -80,7 +80,7 @@ class Globalvars {
 			}
 		}	
 		
-		if(!$found){
+		if(!$found && !$fail_silently){
 			throw new Exception('Setting '.$setting.' does not exist.');
 			exit;	
 		}
