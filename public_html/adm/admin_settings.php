@@ -81,6 +81,9 @@
 	$pageoptions['altlinks'] += array('Admin Menu'=>'/admin/admin_admin_menu'); 
 	$pageoptions['altlinks'] += array('API Keys'=>'/admin/admin_api_keys'); 
 	$pageoptions['altlinks'] += array('Upgrade'=>'/utils/upgrade');
+	if($settings->get_setting('upgrade_server_active')){
+		$pageoptions['altlinks'] += array('Publish Upgrade'=>'/utils/publish_upgrade');
+	}
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
