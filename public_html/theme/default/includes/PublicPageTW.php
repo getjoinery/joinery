@@ -203,8 +203,13 @@ class PublicPageTW extends PublicPageMaster {
 		
 		<!-- CSS -->
 
-		
-		<link rel="stylesheet" type="text/css" href="<?php echo LibraryFunctions::get_theme_file_path('output.css', '/includes', 'web'); ?>">
+		<?php
+		if (!$this->debug_css) {
+			?>
+			<link rel="stylesheet" type="text/css" href="<?php echo LibraryFunctions::get_theme_file_path('output.css', '/includes', 'web'); ?>">
+			<?php
+		}
+		?>
 		<?php
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';

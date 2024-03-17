@@ -132,6 +132,12 @@ class PublicPageMaster {
 		<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js', '/includes', 'web'); ?>"></script>	
 		
 		<?php
+		//IF WE ARE IN DEBUG MODE LOAD TAILWIND DIRECTLY
+		if ($this->debug_css == 1) {
+			echo '<script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio"></script>';
+		}
+		
+		
 		//CHECK TO SEE IF WE PASSED IN A PREVIEW IMAGE
 		if(isset($options['preview_image_url']) && $options['preview_image_url']){
 			//IF NO INCREMENT IS PROVIDED, USE 1
