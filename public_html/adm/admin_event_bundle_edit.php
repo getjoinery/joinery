@@ -17,6 +17,9 @@
 	}
 
 	if($_POST){
+		
+		$group->save();
+		$group->load();
 
 		if ($group){
 			$group->remove_all_members();	
