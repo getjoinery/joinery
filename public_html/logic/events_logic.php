@@ -22,6 +22,14 @@ function events_logic($get_vars, $post_vars){
 	$searches['visibility'] = 1;
 	$swasdirection = 'DESC';	
 	
+	$settings = Globalvars::get_instance();
+	if($settings->get_setting('events_label')){
+		$page_vars['events_label'] = $settings->get_setting('events_label');
+	}
+	else{
+		$page_vars['events_label'] = 'Events';
+	}
+	
 	//SEE IF WE ARE ON A TAB
 	if(!isset($get_vars['type']) || $get_vars['type'] == 'future'){
 		//ASSUME WE'RE JUST LISTING FUTURE EVENTS
@@ -56,11 +64,11 @@ function events_logic($get_vars, $post_vars){
 	$event_types = new MultiEventType();
 	$event_types->load();	
 	//BUILD THE TAB MENU
-	$tab_menus = array ('future' => 'Future Events');
+	$tab_menus = array ('future' => 'Future '.$page_vars['events_label']);
 	foreach ($event_types as $event_type){
 		$tab_menus[$event_type->key] = $event_type->get('ety_name');
 	}
-	$tab_menus['past'] = 'Past Events';
+	$tab_menus['past'] = 'Past '.$page_vars['events_label'];
 
 	$page_vars['tab_menus'] = $tab_menus;
 	return $page_vars;
