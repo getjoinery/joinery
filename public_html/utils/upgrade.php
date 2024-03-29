@@ -58,29 +58,6 @@
 	$response = curl_exec($curl);
 	curl_close($curl);
 	$decode_response = json_decode($response, true);
-	if($decode_response['system_version']){
-		echo 'Upgrade available: '. $decode_response['system_version'] . '<br>';
-		echo 'Current local version: '.$settings->get_setting('system_version').'<br>';
-		
-		//TODO: SYSTEM VERSIONS ONLY INCREMENT WITH MIGRATIONS
-		/*
-		if($decode_response['system_version'] >= $settings->get_setting('system_version') && !$_GET['force-upgrade']){
-			echo 'You are up-to-date and do not need an upgrade.<br>';
-			exit;
-		}
-		*/
-	}
-	else{
-		if(!$settings->get_setting('upgrade_source')){
-			echo 'Upgrade server not set.  Go to the settings and enter one.<br>';
-			exit;			
-		}
-		else{
-			echo 'Unable to reach upgrade server: '.$upgrade_source.'<br>';
-			exit;
-		}
-	}
-	
 	$sourceFile = $decode_response['upgrade_location'];
 		
 	
