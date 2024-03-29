@@ -9,9 +9,9 @@
 	$page = new PublicPageTW(TRUE);
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
-		'title' => 'Events'
+		'title' => $page_vars['events_label']
 	));
-	echo PublicPageTW::BeginPage('Retreats and Events');
+	echo PublicPageTW::BeginPage($page_vars['events_label']);
 
 
 	
