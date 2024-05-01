@@ -42,6 +42,15 @@
     <div class="mt-6 prose prose-indigo prose-lg text-gray-500 mx-auto">
       <?php echo $post->get('pst_body'); ?>
     </div>
+	
+	<?php if($page_vars['settings']->get_setting('blog_footer_text')){
+	?>
+	<div class="mt-6 prose prose-indigo prose-lg text-gray-500 mx-auto">
+      <?php echo $page_vars['settings']->get_setting('blog_footer_text'); ?>
+    </div>
+	<?php
+	}
+	?>
 
       <h3>
         <span class="mt-2 mb-4 block text-xl text-center leading-8 font-extrabold tracking-tight text-gray-900 sm:text-xl">Add Comment</span>
