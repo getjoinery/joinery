@@ -265,7 +265,7 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Use captcha on comments", "use_captcha_comments", '', $optionvals, $settings->get_setting('use_captcha_comments'), '', FALSE);	
 
-	
+	echo $formwriter->textbox('Blog footer text', 'blog_footer_text', 'ctrlHolder', 10, 80, $settings->get_setting('blog_footer_text'), '', 'no');	
  
 	echo '<hr>';
  
