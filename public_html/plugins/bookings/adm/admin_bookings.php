@@ -6,7 +6,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/bookings_class.php');
+	
+	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

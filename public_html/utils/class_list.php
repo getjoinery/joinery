@@ -6,7 +6,6 @@
 	require_once( __DIR__ . '/../data/activation_codes_class.php');	
 	require_once( __DIR__ . '/../data/address_class.php');
 	require_once( __DIR__ . '/../data/admin_menus_class.php');
-	require_once( __DIR__ . '/../data/bookings_class.php');
 	require_once( __DIR__ . '/../data/comments_class.php');
 	require_once( __DIR__ . '/../data/content_versions_class.php');
 	require_once( __DIR__ . '/../data/coupon_codes_class.php');
@@ -60,12 +59,14 @@
 	require_once( __DIR__ . '/../data/contact_types_class.php');
 	require_once( __DIR__ . '/../data/mailing_lists_class.php');
 	require_once( __DIR__ . '/../data/mailing_list_registrants_class.php');
-	require_once( __DIR__ . '/../data/booking_types_class.php');
 	require_once( __DIR__ . '/../data/event_waiting_lists_class.php');
 	require_once( __DIR__ . '/../data/locations_class.php');
 	require_once( __DIR__ . '/../data/api_keys_class.php');
 	require_once( __DIR__ . '/../data/upgrades_class.php');
-
+	
+	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
+	require_once(LibraryFunctions::get_plugin_file_path('booking_types_class.php', 'bookings', 'data'));
+	
 	$classes = array(
 			'Address',
 			'AdminMenu', 

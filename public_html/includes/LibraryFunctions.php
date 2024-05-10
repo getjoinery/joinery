@@ -174,6 +174,116 @@ class LibraryFunctions {
 		}
 
 	}		
+	
+	//RETURNS A LIST OF FULL PATHS FOR ALL FILES IN A DIRECTORY
+	//PATH FORMAT IS EITHER FULL OR FILENAME
+	static function list_files_in_directory($directory, $path_format='full'){
+		$files_list = array();
+		if ($handle = opendir($directory)) {
+			while (false !== ($file = readdir($handle))) {
+				if ('.' === $file) continue;
+				if ('..' === $file) continue;
+				if($path_format == 'full'){
+					$files_list[] = $directory.'/'.$file;
+				}
+				else{
+					$files_list[] = $file;
+				}
+			}
+			closedir($handle);
+		}	
+		return $files_list;		
+	}
+	
+	//RETURNS A LIST OF FULL PATHS FOR ALL DIRECTORIES IN A DIRECTORY
+	//PATH FORMAT IS EITHER FULL OR FILENAME
+	static function list_directories_in_directory($directory, $path_format='full'){
+		$directories = array();
+		$files = LibraryFunctions::list_files_in_directory($directory, 'full');
+		foreach($files as $file){
+			if(is_dir($file)){
+				$directories[] = basename($file);
+			}
+		}
+		return $directories;	
+	}
+	
+	static function list_plugins(){
+		$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
+		return LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
+	}
+	
+	
+	//RETURNS THE PATH OF A FILE IN A PLUGIN, PLUGIN IS OPTIONAL, SUBDIRECTORY IS OPTIONAL
+	static function get_plugin_file_path($filename, $plugin='', $subdirectory='', $path_format='system'){
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');
+		
+		//MAKE SURE THEY START WITH A SLASH
+		if($plugin[0] != '/'){
+			$plugin = '/'.$plugin;
+		}
+		if($subdirectory[0] != '/'){
+			$subdirectory = '/'.$subdirectory;
+		}
+		
+		
+		if($plugin && $subdirectory){
+			$site_file = $siteDir.'/plugins/'.$plugin.$subdirectory.'/'.$filename;  
+			if(file_exists($site_file)){
+				if($path_format == 'system'){
+					//WE WANT A FILE PATH
+					return $site_file;
+				}
+				else{
+					//WE WANT A URL
+					return '/plugins/'.$plugin.$subdirectory.'/'.$filename;
+				}
+			}
+		}
+		else if($plugin && !$subdirectory){
+			$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
+			$directories = LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
+			
+			foreach($directories as $directory){
+				$site_file = $siteDir.'/plugins/'.$plugin.$directory.'/'.$filename;
+				
+				if(file_exists($site_file)){
+					if($path_format == 'system'){
+						//WE WANT A FILE PATH
+						return $site_file;
+					}
+					else{
+						//WE WANT A URL
+						return '/plugins/'.$plugin.$directory.'/'.$filename;
+					}
+				}
+			}
+		}
+		else{
+			$plugins = LibraryFunctions::list_plugins();
+			foreach($plugins as $plugin){
+				$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
+				$directories = LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
+				
+				foreach($directories as $directory){
+					$site_file = $siteDir.'/plugins/'.$plugin.$directory.'/'.$filename;
+					
+					if(file_exists($site_file)){
+						if($path_format == 'system'){
+							//WE WANT A FILE PATH
+							return $site_file;
+						}
+						else{
+							//WE WANT A URL
+							return '/plugins/'.$plugin.$directory.'/'.$filename;
+						}
+					}
+				}
+			}				
+		}
+		return false;					
+	}
 
 	//subdirectory starts with a slash
 	static function get_theme_file_path($filename, $subdirectory='', $path_format='system'){

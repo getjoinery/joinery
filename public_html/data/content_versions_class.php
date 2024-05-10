@@ -24,6 +24,7 @@ class ContentVersion extends SystemBase {
 	const TYPE_EVENT = 5;
 	const TYPE_PAGE = 6;
 	const TYPE_LOCATION = 7;
+	const TYPE_ITEM = 8;
 
 	public static $fields = array(
 		'cnv_content_version_id' => 'ID of the content_version',
