@@ -7,8 +7,8 @@
 	require_once($siteDir . '/includes/SessionControl.php');
 
 	require_once($siteDir . '/data/users_class.php');
-	require_once($siteDir . '/data/bookings_class.php');
-
+	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
+	
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require_once $composer_dir.'autoload.php';	

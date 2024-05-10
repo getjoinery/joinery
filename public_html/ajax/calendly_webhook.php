@@ -3,7 +3,7 @@
 	require_once( __DIR__ . '/../includes/DbConnector.php');
 	require_once( __DIR__ . '/../includes/FormattingFunctions.php');
 	require_once( __DIR__ . '/../data/orders_class.php');
-	require_once( __DIR__ . '/../data/bookings_class.php');
+	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
 
 	header("HTTP/1.0 404 Not Found");
 	echo 'Feature turned off';

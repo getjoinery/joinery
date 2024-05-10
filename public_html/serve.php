@@ -217,24 +217,6 @@ if(!$params[0]){
 	}
 }
 
-//ADMIN SECTION
-if($params[0] == 'admin'){
-	if(!$params[1]){
-		require_once(LibraryFunctions::display_404_page());		
-	}
-	$theme_file = $template_directory.'/adm/'.$params[1].'.php';
-	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/adm/'.$params[1].'.php';
-
-	if(file_exists($theme_file)){
-		require_once($theme_file);
-		exit();
-	}
-	else if(file_exists($base_file)){
-		require_once($base_file); 
-		exit();		
-	}
-}
-
 //PROFILE SECTION
 if($params[0] == 'profile'){
 	if($params[1]){
@@ -246,16 +228,16 @@ if($params[0] == 'profile'){
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/profile/profile.php';
 	}
 	
-	$is_valid_page = true;
-
 	if(file_exists($template_file)){
+		$is_valid_page = true;
 		require_once($template_file);
 		exit();
 	}
 	else if(file_exists($base_file)){
+		$is_valid_page = true;
 		require_once($base_file); 
 		exit();		
-	}
+	}		
 }
 
 //BLOG.  DEFAULT IS TO USE THE /POST/ SUBDIRECTORY
@@ -265,16 +247,16 @@ if($settings->get_setting('blog_active')){
 			$template_file = $template_directory.'/blog.php';
 			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
 			
-			$is_valid_page = true; 
-
 			if(file_exists($template_file)){
+				$is_valid_page = true;
 				require_once($template_file);
 				exit();
 			}
 			else if(file_exists($base_file)){
+				$is_valid_page = true;
 				require_once($base_file); 
 				exit();		
-			}			
+			}				
 		}
 	}
 	else if($params[0] == 'post'){
@@ -286,16 +268,16 @@ if($settings->get_setting('blog_active')){
 		$template_file = $template_directory.'/post.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/post.php';
 		
-		$is_valid_page = true;
-		
 		if(file_exists($template_file)){
+			$is_valid_page = true;
 			require_once($template_file);
 			exit();
 		}
 		else if(file_exists($base_file)){
+			$is_valid_page = true;
 			require_once($base_file); 
 			exit();		
-		}
+		}		
 	}
 }
 
@@ -309,16 +291,16 @@ if($params[0] == 'page'){
 		$template_file = $template_directory.'/page.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
 		
-		$is_valid_page = true;
-		
 		if(file_exists($template_file)){
+			$is_valid_page = true;
 			require_once($template_file);
 			exit();
 		}
 		else if(file_exists($base_file)){
+			$is_valid_page = true;
 			require_once($base_file); 
 			exit();		
-		}		
+		}			
 	}	
 }
 
@@ -332,16 +314,16 @@ if($params[0] == 'location'){
 		$template_file = $template_directory.'/location.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/location.php';
 		
-		$is_valid_page = true;
-		
 		if(file_exists($template_file)){
+			$is_valid_page = true;
 			require_once($template_file);
 			exit();
 		}
 		else if(file_exists($base_file)){
+			$is_valid_page = true;
 			require_once($base_file); 
 			exit();		
-		}		
+		}			
 	}	
 }
 
@@ -354,14 +336,14 @@ if($params[0] == 'event'){
 
 		$template_file = $template_directory.'/event.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/event.php';
-		
-		$is_valid_page = true;
-		
+
 		if(file_exists($template_file)){
+			$is_valid_page = true;
 			require_once($template_file);
 			exit();
 		}
 		else if(file_exists($base_file)){
+			$is_valid_page = true;
 			require_once($base_file); 
 			exit();		
 		}		
@@ -378,13 +360,13 @@ if($params[0] == 'list'){
 		$template_file = $template_directory.'/list.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/list.php';
 		
-		$is_valid_page = true;
-		
 		if(file_exists($template_file)){
+			$is_valid_page = true;
 			require_once($template_file);
 			exit();
 		}
 		else if(file_exists($base_file)){
+			$is_valid_page = true;
 			require_once($base_file); 
 			exit();		
 		}		
@@ -402,31 +384,66 @@ if($params[0] == 'product'){
 		$template_file = $template_directory.'/product.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/product.php';
 		
-		$is_valid_page = true;
 		
 		if(file_exists($template_file)){
+			$is_valid_page = true;
 			require_once($template_file);
 			exit();
 		}
 		else if(file_exists($base_file)){
+			$is_valid_page = true;
 			require_once($base_file); 
 			exit();		
 		}		
 	}	
 }
 
+//ADMIN AREA
+if($params[0] == 'admin'){
+	if($params[1]){
+		
+		//LOAD THE ADMIN FILES FROM THE PLUGINS
+		$plugins = LibraryFunctions::list_plugins();
+		foreach($plugins as $plugin){
+			$plugin_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/adm/'.$params[1].'.php';
+			if(file_exists($plugin_file)){
+				$is_valid_page = true;
+				require_once($plugin_file);
+				exit();
+			}
+		}	
+		
+		$base_file = $_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1].'.php';
+		if(file_exists($base_file)){
+			$is_valid_page = true;
+			require_once($base_file); 
+			exit();		
+		}
+	}
+	else{
+		$base_file = $_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1].'.php';
+		if(file_exists($base_file)){
+			$is_valid_page = true;
+			require_once($base_file); 
+			exit();		
+		}
+	}
+}
+
+
+
 //ROOT PAGES
 if($params[0]){
 	$template_file = $template_directory.'/'.$params[0].'.php';
 	$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/'.$params[0].'.php';
-	
-	$is_valid_page = true; 
 
 	if(file_exists($template_file)){
+		$is_valid_page = true;
 		require_once($template_file);
 		exit();
 	}
 	else if(file_exists($base_file)){
+		$is_valid_page = true;
 		require_once($base_file); 
 		exit();		
 	}
