@@ -1,10 +1,15 @@
 <?php
 	require_once('../includes/Globalvars.php');
+	require_once('../includes/LibraryFunctions.php');
+	require_once('../includes/SessionControl.php');	
+	
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	
 	
-	echo 'feature turned off';
-	exit;
+	if($_REQUEST['password'] != 'setupinfo'){
+		echo 'Bad password';
+		exit;
+	}
 #
 # This is a test program for the portable PHP password hashing framework.
 #
@@ -12,7 +17,7 @@
 # See PasswordHash.php for more information.
 #
 
-error_reporting(E_ALL);
+error_reporting(E_ALL | E_STRICT);
 
 require "../includes/PasswordHash.php";
 
@@ -33,7 +38,7 @@ else{
 
 
 
-echo 'TESTING ENCRYPTION\n';
+echo "TESTING ENCRYPTION\n";
 
 
 $ok = 0;
@@ -99,17 +104,20 @@ else
 
 
 <?php
-echo 'TESTING PDO DRIVER\n';
+echo "TESTING PDO DRIVER\n";
 
+$dbusername = $settings->get_setting('dbusername');
+$dbname = $settings->get_setting('dbname');
+$dbpassword = $settings->get_setting('dbpassword');
 foreach(PDO::getAvailableDrivers() as $driver)
     {
-    echo $driver.'<br />';
+    echo 'Driver: '.$driver."\n";
     }
 
-echo 'TESTING DB CONNECTION\n';
-
+echo "TESTING DB CONNECTION\n";
+echo 'Connecting to '.$dbname.' with user '.$dbusername.' and password ending '.substr($dbpassword, -3).".\n";
 try {
-    $db = new PDO("pgsql:dbname=integralzen;host=localhost", "postgres", "devdbaccess" );
+    $db = new PDO("pgsql:dbname=".$dbname.";host=localhost", $dbusername, $dbpassword );
     echo "PDO connection object created";
     }
 catch(PDOException $e)
@@ -117,7 +125,30 @@ catch(PDOException $e)
     echo $e->getMessage();
     }
 
-	echo phpinfo();
+
+echo "\n\n\n\n";
+echo "TESTING TIME FUNCTIONS\n";
+//$session = SessionControl::get_instance();
+$tz = 'UTC';
+$tz2 = 'America/New_York';
+$time = '2020-03-12 13:00:11.184756'."\n";
+echo 'Input time: '. $time;
+echo 'Converted from UTC to UTC: '.LibraryFunctions::convert_time($time, 'UTC', 'UTC'). "\n";
+echo 'Converted from UTC to America/New_York: '.LibraryFunctions::convert_time($time, 'UTC', $tz2). "\n";
+
+
+$dt = new DateTime($time, new DateTimeZone($tz)); //first argument "must" be a string
+echo 'Formatted input time: '.$dt->format('d.m.Y, H:i:s e T');
+echo "\n";
+
+$dt->setTimezone(new DateTimeZone($tz2));
+
+echo 'Input time with timezone: '.$dt->format('d.m.Y, H:i:s e T') ;
+
+
+
+echo "\n\n\n\n\n";
+	echo phpinfo(INFO_GENERAL);
 
 
 ?>
