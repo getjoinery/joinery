@@ -289,7 +289,7 @@ class PublicPageTW extends PublicPageMaster {
         <nav class="hidden md:flex space-x-10">
 		<?php
 			foreach ($menus as $menu){
-				if($menu[parent] == true){
+				if($menu['parent'] == true){
 					$submenus = $menu['submenu'];
 					
 					if(empty($submenus)){	
@@ -483,7 +483,7 @@ class PublicPageTW extends PublicPageMaster {
 			
 		<?php
 			foreach ($menus as $menu){
-				if($menu[parent] == true){
+				if($menu['parent'] == true){
 					$submenus = $menu['submenu'];
 					
 					if(empty($submenus)){
