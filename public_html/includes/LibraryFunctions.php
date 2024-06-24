@@ -229,7 +229,7 @@ class LibraryFunctions {
 		
 		
 		if($plugin && $subdirectory){
-			$site_file = $siteDir.'/plugins/'.$plugin.$subdirectory.'/'.$filename;  
+			$site_file = $siteDir.'/plugins/'.$plugin.$subdirectory.'/'.$filename; 
 			if(file_exists($site_file)){
 				if($path_format == 'system'){
 					//WE WANT A FILE PATH
@@ -297,7 +297,6 @@ class LibraryFunctions {
 		
 		$default_theme_file = $siteDir.'/theme/default'.$subdirectory.'/'.$filename;
 		$default_file = $siteDir.$subdirectory.'/'.$filename;
-		
 
 
 		if($theme_template && file_exists($theme_file)){
