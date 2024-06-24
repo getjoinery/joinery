@@ -100,6 +100,22 @@ if ($ok == 6)
 else
 	print "Some tests have FAILED\n";
 
+echo "\n\n\n";
+echo "TESTING PASSWORD HASHING\n";
+$password = 'thispassword';
+echo "Password: ".$password."\n";
+$hashedpw = password_hash($password, PASSWORD_BCRYPT);
+echo "Hashed password: ".$hashedpw."\n";
+$verified = password_verify($password, $hashedpw);
+print_r(password_get_info($hashedpw));
+
+if($verified){
+	echo "CHECK PASSED\n";
+}
+else{
+	echo "CHECK FAILED\n";
+}
+
 ?>
 
 
