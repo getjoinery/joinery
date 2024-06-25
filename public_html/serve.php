@@ -89,7 +89,7 @@ if($params[0] == 'api' && $params[1] == 'v1'){
 //CHECK STATIC FILES DIRECTORY (/VAR/WWW/HTML/$SITE/STATIC_FILES)
 if($params[0] == 'static_files'){
 	$static_files_dir = $settings->get_setting('static_files_dir');
-	if(!static_files_dir){
+	if(!$static_files_dir){
 		throw new SystemDisplayableError('static_files_dir is missing.');
 		exit();
 	}
