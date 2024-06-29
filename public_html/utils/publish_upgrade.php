@@ -30,19 +30,41 @@
 		$file_output_folder = $full_site_dir.'/static_files';
 		$file_output_location = $full_site_dir.'/static_files/'.$filename;
 
+
 		//CHECK ALL FILE Permissions and owners
-		if(substr(sprintf('%o', fileperms($file_output_folder)), -3) != '770'){
-			echo $file_output_folder . ' must have permissions of 770.  Aborting upgrade.<br>';
+		$perms = fileperms($file_output_folder);
+		$user_read = (($perms & 0x0100) ? 'r' : '-');
+		$user_write = (($perms & 0x0080) ? 'w' : '-');
+		$user_ex = (($perms & 0x0040) ?
+					(($perms & 0x0800) ? 's' : 'x' ) :
+					(($perms & 0x0800) ? 'S' : '-'));
+
+		// Group
+		$group_read = (($perms & 0x0020) ? 'r' : '-');
+		$group_write = (($perms & 0x0010) ? 'w' : '-');
+		$group_ex = (($perms & 0x0008) ?
+					(($perms & 0x0400) ? 's' : 'x' ) :
+					(($perms & 0x0400) ? 'S' : '-'));
+
+		// World
+		$world_read = (($perms & 0x0004) ? 'r' : '-');
+		$world_write = (($perms & 0x0002) ? 'w' : '-');
+		$world_ex = (($perms & 0x0001) ?
+					(($perms & 0x0200) ? 't' : 'x' ) :
+					(($perms & 0x0200) ? 'T' : '-'));
+		if(!($user_read && $user_write)){	
+		
+			echo $file_output_folder . ' must have user write permission.  Aborting upgrade.<br>';
 			echo 'Instead, it is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
 			exit;
 		}
-		/*
+		
 		if(posix_getpwuid(fileowner($file_output_folder))['name'] != 'www-data'){
-			echo $file_output_folder . ' must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+			echo $file_output_folder . ' must be owned by www-data.  Aborting upgrade.<br>';
 			echo 'Instead, it is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
 			exit;		
 		}		
-		*/
+		
 		
 
 		$file = fopen($file_output_location, 'w') or die("can't open file");
@@ -55,7 +77,7 @@
 		
 		echo 'Creating zip: '.$file_output_location.'<br>';
 		$exclude_filenames = array('.git', '.gitignore');
-		$remove_relative_path = 'var/www/html/jeremytunnell/';
+		$remove_relative_path = 'var/www/html/'.$site_template.'/';
 		create_zip($files_list, $file_output_location, $exclude_filenames, $remove_relative_path, true);
 
 		if(!file_exists($file_output_location)){
@@ -112,7 +134,7 @@
 		echo $formwriter->begin_form('form1', 'POST', '/utils/publish_upgrade');
 
 		
-		$major = new MultiUpgrade(array(), array('major_version' => DESC));
+		$major = new MultiUpgrade(array(), array('major_version' => 'DESC'));
 		$major->load();
 		$count = $major->count_all();
 		if($count){
@@ -123,7 +145,7 @@
 			$major_version = 0;
 		}
 
-		$minor = new MultiUpgrade(array(), array('minor_version' => DESC));
+		$minor = new MultiUpgrade(array(), array('minor_version' => 'DESC'));
 		$minor->load();
 		$count = $minor->count_all();
 		if($count){
