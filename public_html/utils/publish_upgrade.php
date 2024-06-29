@@ -64,7 +64,7 @@
 			echo 'Instead, it is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
 			exit;		
 		}		
-		
+		 
 		
 
 		$file = fopen($file_output_location, 'w') or die("can't open file");
