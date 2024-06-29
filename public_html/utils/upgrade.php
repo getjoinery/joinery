@@ -36,10 +36,6 @@
 	$live_themes = $live_directory.'/theme';
 
 	//CHECK FOR EXISTENCE OF ALL NEEDED DIRECTORIES 
-	if(!file_exists($stage_location)){
-		echo $stage_location. ' (stage_location) does not exist or is not readable by www-data.';
-		exit;
-	}
 	if(!file_exists($live_directory)){
 		echo $live_directory. ' (live_directory) does not exist or is not readable by www-data.';
 		exit;
@@ -48,9 +44,12 @@
 		echo $theme_directory. ' (theme_directory) does not exist or is not readable by www-data.';
 		exit;
 	}
+	if (is_dir_empty($theme_directory)) {
+		echo $theme_directory. ' (theme_directory) is empty.';
+		exit;
+	}
 	
 /*
-print_r($stage_location);
 $perms = fileperms($stage_location);
 
 // Owner
@@ -77,32 +76,7 @@ $info .= (($perms & 0x0001) ?
 echo $info;
 */
 
-	//CHECK ALL FILE Permissions and owners
-	$perms = fileperms($stage_location);
-	$user_read = (($perms & 0x0100) ? 'r' : '-');
-$user_write = (($perms & 0x0080) ? 'w' : '-');
-$user_ex = (($perms & 0x0040) ?
-            (($perms & 0x0800) ? 's' : 'x' ) :
-            (($perms & 0x0800) ? 'S' : '-'));
 
-// Group
-$group_read = (($perms & 0x0020) ? 'r' : '-');
-$group_write = (($perms & 0x0010) ? 'w' : '-');
-$group_ex = (($perms & 0x0008) ?
-            (($perms & 0x0400) ? 's' : 'x' ) :
-            (($perms & 0x0400) ? 'S' : '-'));
-
-// World
-$world_read = (($perms & 0x0004) ? 'r' : '-');
-$world_write = (($perms & 0x0002) ? 'w' : '-');
-$world_ex = (($perms & 0x0001) ?
-            (($perms & 0x0200) ? 't' : 'x' ) :
-            (($perms & 0x0200) ? 'T' : '-'));
-	if(!($user_read && $user_write && $group_read && $group_write)){
-		echo $stage_location . ' (stage_location) must be writable by user and group (770 at least).  Aborting upgrade.<br>';
-		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
-		exit;
-	}
 	
 	$perms = fileperms($live_directory);
 $user_read = (($perms & 0x0100) ? 'r' : '-');
@@ -124,44 +98,12 @@ $world_write = (($perms & 0x0002) ? 'w' : '-');
 $world_ex = (($perms & 0x0001) ?
             (($perms & 0x0200) ? 't' : 'x' ) :
             (($perms & 0x0200) ? 'T' : '-'));
-	if(!($user_read && $user_write && $group_read && $group_write)){
-		echo $live_directory . ' (live_directory) must have permissions of 770.  Aborting upgrade.<br>';
+	if(!($user_read && $user_write)){
+		echo $live_directory . ' (live_directory)must be writable by user1.  Aborting upgrade.<br>';
 		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
 		exit;
 	}
 	
-	$perms = fileperms($backup_directory);
-$user_read = (($perms & 0x0100) ? 'r' : '-');
-$user_write = (($perms & 0x0080) ? 'w' : '-');
-$user_ex = (($perms & 0x0040) ?
-            (($perms & 0x0800) ? 's' : 'x' ) :
-            (($perms & 0x0800) ? 'S' : '-'));
-
-// Group
-$group_read = (($perms & 0x0020) ? 'r' : '-');
-$group_write = (($perms & 0x0010) ? 'w' : '-');
-$group_ex = (($perms & 0x0008) ?
-            (($perms & 0x0400) ? 's' : 'x' ) :
-            (($perms & 0x0400) ? 'S' : '-'));
-
-// World
-$world_read = (($perms & 0x0004) ? 'r' : '-');
-$world_write = (($perms & 0x0002) ? 'w' : '-');
-$world_ex = (($perms & 0x0001) ?
-            (($perms & 0x0200) ? 't' : 'x' ) :
-            (($perms & 0x0200) ? 'T' : '-'));
-	if(!($user_read && $user_write && $group_read && $group_write)){
-		echo $backup_directory . ' (backup_directory) must have permissions of 770.  Aborting upgrade.<br>';
-		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($backup_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($backup_directory)), -3).'<br>';
-		exit;
-	}
-	
-	/*
-	if(posix_getpwuid(fileowner($stage_location))['name'] != 'www-data'){
-		echo $stage_location . ' (stage_location) must be owned by www-data.  Aborting upgrade.<br>';
-		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
-		exit;		
-	}
 	
 	if(posix_getpwuid(fileowner($live_directory))['name'] != 'www-data'){
 		echo $live_directory . ' (live_directory) must be owned by www-data.  Aborting upgrade.<br>';
@@ -169,12 +111,8 @@ $world_ex = (($perms & 0x0001) ?
 		exit;		
 	}
 
-	if(posix_getpwuid(fileowner($backup_directory))['name'] != 'www-data'){
-		echo $backup_directory . ' (backup_directory) must be owned by www-data.  Aborting upgrade.<br>';
-		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($backup_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($backup_directory)), -3).'<br>';
-		exit;		
-	}
-		*/
+
+
 
 
 	if(isset($_GET['theme-only']) && $_GET['theme-only']){
@@ -187,12 +125,12 @@ $world_ex = (($perms & 0x0001) ?
 			echo "Failed to move theme files ($theme_directory to $live_themes...aborting.<br>";
 			
 			if(substr(sprintf('%o', fileperms($live_themes)), -3) != '770'){
-				echo $live_themes . ' (stage_location) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+				echo $live_themes . ' (live_themes) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
 				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
 				exit;
 			}
 			if(posix_getpwuid(fileowner($live_themes))['name'] != 'www-data'){
-				echo $live_themes . ' (stage_location) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+				echo $live_themes . ' (live_themes) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
 				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
 				exit;		
 			}
@@ -330,7 +268,7 @@ $world_ex = (($perms & 0x0001) ?
 		//chmod($file_download_location, 0777);
 		
 		//CLEAR OLD STAGED FILES 
-		echo 'Clearing staging area: '.$stage_location.'...<br>';
+		echo 'Clearing staging area: '.$stage_location.'<br>';
 		exec("chmod -R 770 $stage_location");
 		exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
 		exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
@@ -357,15 +295,58 @@ $world_ex = (($perms & 0x0001) ?
 		  echo 'Unable to unzip upgrade from '.$file_download_location.' <br>';
 		  exit;
 		}			
+		
 
 		//TODO: DO BACKUPS
 
 		
 		//COPY THE THEME FILES 
 		$location_of_themes = $stage_directory.'/theme';
-		exec("cp -r $theme_directory $stage_directory");
+		//print_r($location_of_themes);
+		//echo 'copying '. $theme_directory. ' to ' .$stage_directory ;
+		
+		//CHECK PERMISSION OF DESTINATION THEME FOLDER
+		/*
+		$perms = fileperms($live_directory);
+		$user_read = (($perms & 0x0100) ? 'r' : '-');
+		$user_write = (($perms & 0x0080) ? 'w' : '-');
+		$user_ex = (($perms & 0x0040) ?
+					(($perms & 0x0800) ? 's' : 'x' ) :
+					(($perms & 0x0800) ? 'S' : '-'));
+
+		// Group
+		$group_read = (($perms & 0x0020) ? 'r' : '-');
+		$group_write = (($perms & 0x0010) ? 'w' : '-');
+		$group_ex = (($perms & 0x0008) ?
+					(($perms & 0x0400) ? 's' : 'x' ) :
+					(($perms & 0x0400) ? 'S' : '-'));
+
+		// World
+		$world_read = (($perms & 0x0004) ? 'r' : '-');
+		$world_write = (($perms & 0x0002) ? 'w' : '-');
+		$world_ex = (($perms & 0x0001) ?
+					(($perms & 0x0200) ? 't' : 'x' ) :
+					(($perms & 0x0200) ? 'T' : '-'));
+		if(!($user_read && $user_write && $group_read && $group_write && $world_read && $world_write)){
+			echo $live_directory . ' (theme_directory) must be writable by all (777).  Aborting upgrade.<br>';
+			echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
+			exit;
+		}
+		*/
+		//echo 'Creating directory: '.$location_of_themes."\n<br>";
+		//mkdir($location_of_themes, 0777);
+		//exec("mkdir $location_of_themes");
+
 		if(!file_exists($location_of_themes)){
+			echo 'Directory does not exist: '.$location_of_themes. "\n<br>";
 			echo "Failed to move theme files ($theme_directory to $location_of_themes...aborting.<br>";
+			exit;
+		}
+
+
+		exec("cp -r $theme_directory $stage_directory");
+		if (is_dir_empty($location_of_themes)) {
+			echo $location_of_themes. ' (theme_directory) failed to copy.';
 			exit;
 		}
 		else{
