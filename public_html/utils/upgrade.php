@@ -195,8 +195,14 @@ $world_ex = (($perms & 0x0001) ?
 	if ($_POST && $_POST['confirm']){
 	
 		if($decode_response['system_version']){
-			echo 'Upgrade available: '. $decode_response['system_version'] . '<br>';
-			echo 'Current local version: '.$settings->get_setting('system_version').'<br>';
+			if($settings->get_setting('system_version') > $decode_response['system_version']){
+				echo 'Your system is up to date.  No upgrade needed.';
+				exit;
+			}
+			else{
+				echo 'Upgrade available: '. $decode_response['system_version'] . '<br>';
+				echo 'Current local version: '.$settings->get_setting('system_version').'<br>';
+			}
 			
 			//TODO: SYSTEM VERSIONS ONLY INCREMENT WITH MIGRATIONS
 			/*
@@ -499,13 +505,29 @@ $world_ex = (($perms & 0x0001) ?
 
 		echo '<fieldset><h4>Confirm Upgrade</h4>';
 			echo '<div class="fields full">';
-			echo '<p>Latest upgrade available: '. $decode_response['system_version'] . '('.$decode_response['upgrade_name'].') released on '. $decode_response['release_date'] .' - '.$decode_response['release_notes'].' </p>';
+			if($decode_response['system_version'] > $settings->get_setting('system_version')){
+				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . '('.$decode_response['upgrade_name'].') released on '. $decode_response['release_date'] .' - '.$decode_response['release_notes'].' </p>';
+				echo $formwriter->hiddeninput("confirm", 1);
 
-		echo $formwriter->hiddeninput("confirm", 1);
+				echo $formwriter->start_buttons();
+				echo $formwriter->new_form_button('Submit');
+				echo $formwriter->end_buttons();	
 
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
+			}
+			else if($decode_response['system_version'] == $settings->get_setting('system_version')){
+				echo 'Your version '. $decode_response['system_version']. ' is up to date.  ';
+				echo $formwriter->hiddeninput("confirm", 1);
+
+				echo $formwriter->start_buttons();
+				echo $formwriter->new_form_button('Upgrade anyway');
+				echo $formwriter->end_buttons();	
+
+			}
+			else{
+				echo 'Your version '. $decode_response['system_version']. ' is up to date.  ';
+			}
+
+
 
 			echo '</div>';
 		echo '</fieldset>';
