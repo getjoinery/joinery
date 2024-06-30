@@ -505,6 +505,7 @@ $world_ex = (($perms & 0x0001) ?
 
 		echo '<fieldset><h4>Confirm Upgrade</h4>';
 			echo '<div class="fields full">';
+			echo '<p><b>Checking upgrade source: '.$settings->get_setting('upgrade_source').'</b></p>';
 			if($decode_response['system_version'] > $settings->get_setting('system_version')){
 				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . '('.$decode_response['upgrade_name'].') released on '. $decode_response['release_date'] .' - '.$decode_response['release_notes'].' </p>';
 				echo $formwriter->hiddeninput("confirm", 1);
