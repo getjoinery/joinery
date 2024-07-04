@@ -7,7 +7,7 @@
 	$siteDir = $settings->get_setting('siteDir');	
 	
 	if($_REQUEST['password'] != 'setupinfo'){
-		echo 'Bad password';
+		echo 'Bad access password';
 		exit;
 	}
 #
