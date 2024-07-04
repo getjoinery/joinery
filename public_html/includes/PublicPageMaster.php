@@ -71,6 +71,21 @@ class PublicPageMaster {
 		
 		//https://blog.vnaik.com/posts/web-attacks.html
 		if($settings->get_setting('force_https')){
+			$isSecure = false;
+			if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') {
+				$isSecure = true;
+			}
+			elseif (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https' || !empty($_SERVER['HTTP_X_FORWARDED_SSL']) && $_SERVER['HTTP_X_FORWARDED_SSL'] == 'on') {
+				$isSecure = true;
+			}
+			$REQUEST_PROTOCOL = $isSecure ? 'https' : 'http';
+			if($REQUEST_PROTOCOL == 'http'){
+				 $location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+				header('HTTP/1.1 301 Moved Permanently');
+				header('Location: ' . $location);
+				exit;
+			}
+			
 			header('Strict-Transport-Security: max-age=3153600');
 			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
 			//header("Content-Security-Policy-Report-Only: default-src https:");
@@ -169,6 +184,22 @@ class PublicPageMaster {
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('force_https')){
+
+			$isSecure = false;
+			if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') {
+				$isSecure = true;
+			}
+			elseif (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https' || !empty($_SERVER['HTTP_X_FORWARDED_SSL']) && $_SERVER['HTTP_X_FORWARDED_SSL'] == 'on') {
+				$isSecure = true;
+			}
+			$REQUEST_PROTOCOL = $isSecure ? 'https' : 'http';
+			if($REQUEST_PROTOCOL == 'http'){
+				 $location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+				header('HTTP/1.1 301 Moved Permanently');
+				header('Location: ' . $location);
+				exit;
+			}
+			
 			header('Strict-Transport-Security: max-age=3153600');
 			header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
 			//header("Content-Security-Policy-Report-Only: default-src https:");
