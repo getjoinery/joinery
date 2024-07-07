@@ -24,7 +24,7 @@
 	$formwriter = new FormWriterPublicTW("form1");
 				
 	$validation_rules = array();
-	if ($has_old_password) {
+	if ($page_vars['has_old_password']) {
 		$validation_rules['usr_old_password']['required']['value'] = 'true';
 	}
 	$validation_rules['usr_password']['required']['value'] = 'true';
@@ -43,7 +43,7 @@
 		}
 	}
 
-	if ($has_old_password) {
+	if ($page_vars['has_old_password']) {
 		echo $formwriter->passwordinput("Old Password", "usr_old_password", NULL, 20, NULL , '',255, "");
 	}
 	echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
