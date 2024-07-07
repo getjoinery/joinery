@@ -19,12 +19,13 @@ function address_edit_logic($get_vars, $post_vars){
 		$address_id = $_POST['usa_address_id'];
 		$page_vars['usa_address_id'] = $address_id;
 
-		if ($address_id == FALSE) {
-			throw new SystemInvalidFormError('The address edit form is invalid.');
+		if ($address_id) {
+			$address = new Address($address_id, TRUE);
+			$address->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		}
-
-		$address = new Address($address_id, TRUE);
-		$address->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		
+		
+		
 		/*
 		if (!$new_address && $session->get_permission() == 0) {
 			if ($address->get('usa_address_is_verified')) {
@@ -50,7 +51,7 @@ function address_edit_logic($get_vars, $post_vars){
 			$session->save_message($message);	
 		}
 		else{
-			$msgtxt = 'Addresses have been edited.';
+			$msgtxt = 'Addresses have been edited.'; 
 			$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/address_edit.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "addressbox", TRUE);
 			$session->save_message($message);	
 		}
