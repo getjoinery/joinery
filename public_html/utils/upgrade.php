@@ -499,7 +499,7 @@ $world_ex = (($perms & 0x0001) ?
 		$formwriter = new FormWriterMaster("form1");
 		echo $formwriter->begin_form("form", "post", "/utils/upgrade");
 
-		echo 'System Version: '.$settings->get_setting('system_version').'<br>';
+		echo 'Local system Version: '.$settings->get_setting('system_version').'<br>';
 		echo 'Database Version: '.$settings->get_setting('database_version').'<br>';
 
 
@@ -516,7 +516,8 @@ $world_ex = (($perms & 0x0001) ?
 
 			}
 			else if($decode_response['system_version'] == $settings->get_setting('system_version')){
-				echo 'Your version '. $decode_response['system_version']. ' is up to date.  ';
+				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . '('.$decode_response['upgrade_name'].') released on '. $decode_response['release_date'] .' - '.$decode_response['release_notes'].' </p>';
+				echo 'Your version '. $settings->get_setting('system_version'). ' is up to date.  No upgrade needed.  ';
 				echo $formwriter->hiddeninput("confirm", 1);
 
 				echo $formwriter->start_buttons();
