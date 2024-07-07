@@ -64,6 +64,8 @@ function password_edit_logic($get_vars, $post_vars){
 	else {
 		$page_vars['page_title'] = 'Set Password';
 	}			
+	$page_vars['has_old_password'] = $has_old_password;
+
 
 	return $page_vars;
 }
