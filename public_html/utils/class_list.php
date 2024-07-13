@@ -3,6 +3,49 @@
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
 
+
+	//LOAD ALL CLASSES 
+	$path = $_SERVER['DOCUMENT_ROOT']."/data";
+	if ($handle = opendir($path)) {
+		while (false !== ($file = readdir($handle))) {
+			if ('.' === $file) continue;
+			if ('..' === $file) continue;
+			$filepath = $path.'/'.$file;
+			
+			$file_parts = pathinfo($file);
+			if($file_parts['extension'] == 'php'){
+				if(file_exists($filepath)){
+					if (str_contains($file, '_class')) {
+						require_once($filepath);
+					}
+				}
+			}
+		}
+		closedir($handle);
+	}
+	
+	//LOAD FROM PLUGINS 
+	$plugins = LibraryFunctions::list_plugins();
+	foreach($plugins as $plugin){
+		$plugin_data_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/data';
+
+		if ($handle = opendir($plugin_data_dir)) {
+			while (false !== ($file = readdir($handle))) {
+				if ('.' === $file) continue;
+				if ('..' === $file) continue;
+				$filepath = $plugin_data_dir.'/'.$file;
+				$file_parts = pathinfo($file);
+				if($file_parts['extension'] == 'php'){
+					if (str_contains($file, '_class')) {
+						require_once($filepath);
+					}
+				}
+			}
+			closedir($handle);
+		}
+	}	
+
+/*
 	require_once( __DIR__ . '/../data/activation_codes_class.php');	
 	require_once( __DIR__ . '/../data/address_class.php');
 	require_once( __DIR__ . '/../data/admin_menus_class.php');
@@ -64,8 +107,15 @@
 	require_once( __DIR__ . '/../data/api_keys_class.php');
 	require_once( __DIR__ . '/../data/upgrades_class.php');
 	
+	
+	
 	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
 	require_once(LibraryFunctions::get_plugin_file_path('booking_types_class.php', 'bookings', 'data'));
+	
+	require_once(LibraryFunctions::get_plugin_file_path('items_class.php', 'items', 'data'));
+	require_once(LibraryFunctions::get_plugin_file_path('item_relations_class.php', 'items', 'data'));
+	require_once(LibraryFunctions::get_plugin_file_path('item_relation_types_class.php', 'items', 'data'));
+*/
 	
 	$classes = array(
 			'Address',
@@ -128,7 +178,10 @@
 			'WaitingList',
 			'Location',
 			'ApiKey',
-			'Upgrade'
+			'Upgrade',
+			'Item',
+			'ItemRelation',
+			'ItemRelationType'
 		);			
 
 

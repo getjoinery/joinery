@@ -229,7 +229,7 @@ class LibraryFunctions {
 		
 		
 		if($plugin && $subdirectory){
-			$site_file = $siteDir.'/plugins/'.$plugin.$subdirectory.'/'.$filename; 
+			$site_file = $siteDir.'/plugins'.$plugin.$subdirectory.'/'.$filename; 
 			if(file_exists($site_file)){
 				if($path_format == 'system'){
 					//WE WANT A FILE PATH
@@ -246,7 +246,7 @@ class LibraryFunctions {
 			$directories = LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
 			
 			foreach($directories as $directory){
-				$site_file = $siteDir.'/plugins/'.$plugin.$directory.'/'.$filename;
+				$site_file = $siteDir.'/plugins'.$plugin.$directory.'/'.$filename;
 				
 				if(file_exists($site_file)){
 					if($path_format == 'system'){
@@ -343,6 +343,35 @@ class LibraryFunctions {
 			throw new SystemDisplayablePermanentError('Could not find the specified theme file: '. $filename);					
 		}
 	}
+
+	/*
+	NOT NEEDED?
+	static function get_admin_file_path($filename, $plugin='', $path_format='system'){
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');
+		$site_template = $settings->get_setting('site_template');
+		
+		$main_file = $siteDir.'/adm/'.$filename;
+
+		//CHECK IF IT IS IN A PLUGIN FIRST, THEN CHECK IN THE CORE ADMIN DIRECTORY
+		if($path = LibraryFunctions::get_plugin_file_path($filename, $plugin, '/admin', $path_format)){
+			return $path;
+		}
+		else if(file_exists($main_file)){
+			if($path_format == 'system'){
+				//WE WANT A FILE PATH
+				return $main_file;
+			}
+			else{
+				//WE WANT A URL
+				return '/logic/'.basename($filename, '.php');
+			}
+		}
+		else{
+			throw new SystemDisplayablePermanentError('Could not find the specified admin file: '. $filename);					
+		}
+	}
+	*/
 	
 	static function get_logic_file_path($filename, $path_format='system'){
 		$settings = Globalvars::get_instance();

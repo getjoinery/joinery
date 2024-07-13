@@ -2,7 +2,7 @@
 $settings = Globalvars::get_instance();
 $siteDir = $settings->get_setting('siteDir');
 require_once($siteDir.'/data/videos_class.php');
-require_once($siteDir.'/data/friend_reviews_class.php');
+//require_once($siteDir.'/data/friend_reviews_class.php');
 require_once($siteDir.'/data/users_class.php');
 require_once($siteDir.'/data/queued_email_class.php');
 

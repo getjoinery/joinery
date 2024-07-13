@@ -8,12 +8,12 @@ require_once($siteDir . '/includes/LibraryFunctions.php');
 require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
-
+/*
 require_once('jpgraph/jpgraph.php');
 require_once('jpgraph/jpgraph_line.php');
 require_once('jpgraph/jpgraph_bar.php');
 require_once('jpgraph/jpgraph_log.php');
-
+*/
 class AdminGraphException extends SystemClassException {}
 
 class AdminGraph extends SystemBase {

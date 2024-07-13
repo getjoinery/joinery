@@ -1339,10 +1339,10 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 			GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
 			error_log($debug_message);
 			if($errorpage == 'admin'){
-				$errorhandler->handle_admin_error($debug_message, ErrorHandler::INPUT_ERROR);
+				$errorhandler->handle_admin_error($debug_message, ErrorHandler::PERMANENT_ERROR);
 			}
 			else{
-				$errorhandler->handle_general_error($debug_message, ErrorHandler::INPUT_ERROR);
+				$errorhandler->handle_general_error($debug_message, ErrorHandler::PERMANENT_ERROR);
 			}				
 		} 
 		else {

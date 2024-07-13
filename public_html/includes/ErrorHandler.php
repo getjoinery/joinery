@@ -40,6 +40,7 @@ class ErrorHandler{
 		else { 
 			$title = "There was an error";
 		}
+
 	
 		if(!isset($_GLOBALS['page_header_loaded'])){
 			
