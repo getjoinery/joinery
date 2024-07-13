@@ -430,7 +430,16 @@ if($params[0] == 'admin'){
 	}
 }
 
-
+//PLUGINS
+$plugins = LibraryFunctions::list_plugins();
+foreach($plugins as $plugin){
+	$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
+	$site_file = $siteDir.'/plugins/'.$plugin.'/serve.php';
+	
+	if(file_exists($site_file)){
+		include_once($site_file);
+	}
+}	
 
 //ROOT PAGES
 if($params[0]){
