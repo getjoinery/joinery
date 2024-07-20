@@ -5,7 +5,7 @@ define('SKIP_DEFAULT_EXCEPTION_HANDLER', 1);
 
 function ajax_exception_handler($e) { 
 	require_once('Globalvars.php');
-	$debug = Globalvars::get_instance()->get_setting('show_errors');
+	$show_errors = Globalvars::get_instance()->get_setting('show_errors');
 	$msg = "";
 	if ($e instanceof SystemAjaxError) { 
 		$msg = $e->getMessage();	
@@ -14,7 +14,7 @@ function ajax_exception_handler($e) {
 		$msg = $e->getMessage();
 	} else {
 		error_log('EXCEPTION: ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
-		if ($debug) { 
+		if ($show_errors) { 
 			$msg = $e->getMessage() . ' ' . $e->getTraceAsString();
 		} else { 
 			$msg = "There was an error processing this operation.";
