@@ -156,12 +156,6 @@
 		echo $formwriter->textinput("Google Captcha Private Key", 'captcha_private', '', 20, $settings->get_setting('captcha_private'), "" , 255, "");
 
 		echo $formwriter->textinput("Mailchimp API Key", 'mailchimp_api_key', '', 20, $settings->get_setting('mailchimp_api_key'), "" , 255, "");
-		//DEPRECATED AND MOVED TO INDIVIDUAL MAILING LISTS
-		//echo $formwriter->textinput("Mailchimp List ID (Example: 9ed43f9abf)", 'mailchimp_list_id', '', 20, $settings->get_setting('mailchimp_list_id'), "" , 255, "");
-
-		echo $formwriter->textinput("Urbit Endpoint", 'urbit_endpoint', '', 20, $settings->get_setting('urbit_endpoint'), "" , 255, "");
-		echo $formwriter->textinput("Urbit Endpoint Password", 'urbit_endpoint_password', '', 20, $settings->get_setting('urbit_endpoint_password'), "" , 255, "");
-
 
 		echo $formwriter->textinput("Acuity API Key (Example: 7d97bfea536935sgd8b14d266b105ab1)", 'acuity_api_key', '', 20, $settings->get_setting('acuity_api_key'), "" , 255, "");
 		echo $formwriter->textinput("Acuity User ID (Example: 18623423)", 'acuity_user_id', '', 20, $settings->get_setting('acuity_user_id'), "" , 255, "");
