@@ -581,24 +581,6 @@ Welcome!
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		
-		$migration['database_version'] = '0.19';
-		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailchimp_list_id'";
-		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'mailchimp_list_id\', \'\', 1, \'now()\', \'now()\', \'general\');';
-		$migration['migration_file'] = NULL;
-		$migrations[] = $migration;	
-		
-		$migration['database_version'] = '0.19';
-		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'urbit_endpoint'";
-		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'urbit_endpoint\', \'\', 1, \'now()\', \'now()\', \'general\');';
-		$migration['migration_file'] = NULL;
-		$migrations[] = $migration;		
-		
-		$migration['database_version'] = '0.19';
-		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'urbit_endpoint_password'";
-		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'urbit_endpoint_password\', \'\', 1, \'now()\', \'now()\', \'general\');';
-		$migration['migration_file'] = NULL;
-		$migrations[] = $migration;
-		
 		
 		$migration['database_version'] = '0.19';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'stripe_api_key'";
