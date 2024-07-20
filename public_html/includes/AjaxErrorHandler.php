@@ -5,7 +5,7 @@ define('SKIP_DEFAULT_EXCEPTION_HANDLER', 1);
 
 function ajax_exception_handler($e) { 
 	require_once('Globalvars.php');
-	$debug = Globalvars::get_instance()->get_setting('debug');
+	$debug = Globalvars::get_instance()->get_setting('show_errors');
 	$msg = "";
 	if ($e instanceof SystemAjaxError) { 
 		$msg = $e->getMessage();	

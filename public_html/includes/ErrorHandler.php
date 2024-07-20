@@ -24,9 +24,7 @@ class ErrorHandler{
 
 	function __construct($secure=FALSE){
 		$settings = Globalvars::get_instance();
-		$debug = $settings->get_setting('debug');
 		$standard_error =  $settings->get_setting('standard_error');
-		$this->secure = $secure;
 	}
 
 	function handle_general_error($errortext, $error_type=self::DEFAULT_ERROR) {
@@ -44,7 +42,7 @@ class ErrorHandler{
 	
 		if(!isset($_GLOBALS['page_header_loaded'])){
 			
-			$page = new PublicPageTW($this->secure);
+			$page = new PublicPageTW(NULL);
 			$hoptions= array(
 				'title' => self::$ERROR_TYPE_TITLES[$error_type],
 				'showmap' => FALSE,
