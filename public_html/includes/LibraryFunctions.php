@@ -343,35 +343,6 @@ class LibraryFunctions {
 			throw new SystemDisplayablePermanentError('Could not find the specified theme file: '. $filename);					
 		}
 	}
-
-	/*
-	NOT NEEDED?
-	static function get_admin_file_path($filename, $plugin='', $path_format='system'){
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
-		$site_template = $settings->get_setting('site_template');
-		
-		$main_file = $siteDir.'/adm/'.$filename;
-
-		//CHECK IF IT IS IN A PLUGIN FIRST, THEN CHECK IN THE CORE ADMIN DIRECTORY
-		if($path = LibraryFunctions::get_plugin_file_path($filename, $plugin, '/admin', $path_format)){
-			return $path;
-		}
-		else if(file_exists($main_file)){
-			if($path_format == 'system'){
-				//WE WANT A FILE PATH
-				return $main_file;
-			}
-			else{
-				//WE WANT A URL
-				return '/logic/'.basename($filename, '.php');
-			}
-		}
-		else{
-			throw new SystemDisplayablePermanentError('Could not find the specified admin file: '. $filename);					
-		}
-	}
-	*/
 	
 	static function get_logic_file_path($filename, $path_format='system'){
 		$settings = Globalvars::get_instance();
@@ -488,11 +459,6 @@ class LibraryFunctions {
 	}
 
 
-	static function GenerateUrl($event_id, $title, $citystate) {
-		return '/' . LibraryFunctions::titleUrlSafe($title) . '-' .
-			LibraryFunctions::titleUrlSafe($citystate) .
-			'/event/' . $event_id;
-	}
 	
 	//CONVERT NESTED OBJECT TO PHP ARRAY
 	static function objToArray($obj, &$arr){ 
@@ -523,95 +489,6 @@ class LibraryFunctions {
 		return intval(time() / 86400) - intval($dt->format('U') / 86400);
 	}
 
-	static function ToUTF8($input, $ignore_invalid_chars=TRUE) {
-		// First take the string and convert it from our ISO-8859-1 encoding to UTF-8
-		$value = iconv('ISO-8859-1', 'UTF-8' . ($ignore_invalid_chars ? '//IGNORE' : ''), $input);
-
-		if ($ignore_invalid_chars) {
-			// Then using these functions (from http://webcollab.sourceforge.net/unicode.html)
-			// remove all invalid UTF-8 byte sequences
-			$value = preg_replace(
-				'/[\x00-\x08\x10\x0B\x0C\x0E-\x19\x7F]'.
-				'|[\x00-\x7F][\x80-\xBF]+' .
-				'|([\xC0\xC1]|[\xF0-\xFF])[\x80-\xBF]*' .
-				'|[\xC2-\xDF]((?![\x80-\xBF])|[\x80-\xBF]{2,})' .
-				'|[\xE0-\xEF](([\x80-\xBF](?![\x80-\xBF]))|(?![\x80-\xBF]{2})|[\x80-\xBF]{3,})/S',
-				'', $value );
-
-			$value = preg_replace(
-				'/\xE0[\x80-\x9F][\x80-\xBF]'.
-				'|\xED[\xA0-\xBF][\x80-\xBF]/S', '', $value );
-		}
-
-		return $value;
-	}
-
-	static function ArrayToUTF8($input) {
-		array_walk_recursive(
-			$input,
-			function(&$array_item) {
-				if (gettype($array_item) === 'string') {
-					$array_item = LibraryFunctions::ToUTF8($array_item, TRUE);
-				}
-			});
-		return $input;
-	}
-
-
-	static function Sanitize($value) {
-		return strip_tags($value);
-	}
-
-	static function HammerCheck($page, $hourly_limit) {
-		$hour = intval(time() / 3600);
-		$hammer_key = md5(
-			'hammer_check_' . $page . '_' . $_SERVER['REMOTE_ADDR'] . '_' . $hour);
-		$hour_count = apc_fetch($hammer_key);
-		if ($hour_count) {
-			if ($hour_count > $hourly_limit) {
-				return TRUE;
-			}
-			apc_store($hammer_key, $hour_count + 1, 3600);
-			return FALSE;
-		}
-		apc_add($hammer_key, 1, 3600);
-		return FALSE;
-	}
-
-
-	static function GetFileLock($locknames, $lock_dir='/var/run/') {
-		// returns true if the lock can be established
-		// $locknames can be a string or an array
-		// if it's an array, the function returns true if any
-		// of the locks can be established
-
-		if (!is_array($locknames)) {
-			$locknames = array($locknames);
-		}
-
-		foreach ($locknames as $lockname) {
-			$lockfile = $lock_dir . $lockname;
-
-			$global_lock_file_key = '_global_GetFileLock_' . $lockfile;
-
-			if (!file_exists($lockfile)) {
-				$GLOBALS[$global_lock_file_key] = fopen($lockfile, 'w');
-			} else {
-				$GLOBALS[$global_lock_file_key] = fopen($lockfile, 'r');
-			}
-
-			if ($GLOBALS[$global_lock_file_key] !== FALSE && flock($GLOBALS[$global_lock_file_key], LOCK_EX | LOCK_NB)) {
-				return $GLOBALS[$global_lock_file_key];
-			}
-		}
-
-		return FALSE;
-	}
-
-	static function ReleaseFileLock($lock) {
-		flock($lock, LOCK_UN);
-		fclose($lock);
-	}
 
 	static function VariableLengthHash($str, $len, $salt=NULL) {
 		if (!$salt) {
@@ -762,11 +639,6 @@ class LibraryFunctions {
 		return str_shuffle($string);
 	}
 
-	static function timezone_offset_to_name($offset) {
-
-		//TODO
-	}
-
 	static function any_state_to_abbr($state) {
 		if (strlen($state) == 2) {
 			return strtoupper($state);
@@ -851,9 +723,6 @@ class LibraryFunctions {
 
 	}
 
-	static function fix_price_string($price_string) {
-		return trim(str_replace(',', '.', str_replace('$', '', $price_string)));
-	}
 
 	//converts display time (HH:MM am/pm) to server time (HH:MM, 24 hour)
 	static function toDBTime($timeconv){
