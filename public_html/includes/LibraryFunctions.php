@@ -970,27 +970,6 @@ class LibraryFunctions {
 		
 	}	
 	
-	
-	
-
-	//RETURN A NEW DATETIME THAT IS 'SPAN' AHEAD OF THE ONE PASSED IN
-	/*
-	static function add_span_to_time($starttime, $spantext, $format='%Y-%m-%d %H:%M:%S'){
-		if(is_null($starttime)){
-			return FALSE;
-		}
-		require_once("Date.php");
-
-		$d = new Date();
-		$d->setDate($starttime);
-
-		$timespan = new Date_Span($spantext);
-		$d->addSpan($timespan);
-
-		return ($d->format($format));
-
-	}
-	*/
 
 	//RETURN DIFFERENCE BETWEEN TWO DATES
 	/*
@@ -1142,14 +1121,6 @@ class LibraryFunctions {
 	}
 
 
-
-	static function check_required($haystack, $needles) {
-		foreach($needles as $needle => $error) {
-			if (!array_key_exists($needle, $haystack) || !$haystack[$needle]) {
-				throw new SystemDisplayableError($error);
-			}
-		}
-	}
 
 	/*********************************************************************
 	//FETCH A VARIABLE FROM $_GET, $_POST, OR REQUEST
