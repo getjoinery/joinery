@@ -15,39 +15,8 @@ class AdminPage{
 
 	function __construct($secure=TRUE){
 		$this->rowcount=0;
-		$this->secure = $secure;
-
-		$settings = Globalvars::get_instance();
-
-		$debug = $settings->get_setting('debug');
-		if ($debug == 1) {
-			$secure = FALSE;
-			$this->secure = FALSE;
-		}
-
-		/*
-		// If secure is on, they are not HTTPS and on port 80, forward them to SSL
-		if ($secure && $_SERVER["SERVER_PORT"] == 80) {
-			header("HTTP/1.1 301 Moved Permanently");
-			header("Location: https://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-			exit;
-		} else if (!$secure && $_SERVER["SERVER_PORT"] == 443) {
-			// Likewise if they aren't secure and reading an SSLed page, redirect them to non-SSL
-			header("HTTP/1.1 301 Moved Permanently");
-			header("Location: http://" . $_SERVER["SERVER_NAME"] . $_SERVER["REQUEST_URI"]);
-			exit;
-		}
-		*/
-
-		$this->prefix = $this->secure ? 'https://' : 'http://';
-		$this->secure_prefix = ($debug == 0) ? $settings->get_setting('webDir') : $settings->get_setting('webDir');
+		
 	}	
-	
-
-	
-	
-	
-	
 	
 
 	function admin_header($pagevars, $display=TRUE) 
