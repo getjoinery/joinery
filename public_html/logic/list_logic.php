@@ -12,9 +12,8 @@
 		echo 'This feature is turned off';
 		exit();
 	}
+
 	
-	
-	$mailing_list = MailingList::get_by_link($static_routes_path);
 	if(!$mailing_list || !$mailing_list->get('mlt_is_active') || $mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PRIVATE){
 		require_once(LibraryFunctions::display_404_page());				
 	}
