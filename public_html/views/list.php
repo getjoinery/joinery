@@ -39,7 +39,7 @@
 	$validation_rules = FormWriterPublicTW::antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);		
 	
-	echo $formwriter->begin_form("", "post", $mailing_list->get_link(), true);
+	echo $formwriter->begin_form("", "post", $mailing_list->get_url(), true);
 
 	if(!$logged_in){
 		echo $formwriter->textinput("First Name", "usr_first_name", NULL, 30, '', "", 32, "");

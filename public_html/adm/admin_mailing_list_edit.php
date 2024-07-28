@@ -36,7 +36,7 @@
 				$mailing_list->set('mlt_link', $mailing_list->create_url($_POST['mlt_link']));
 			}
 			else{
-				$mailing_list->set('mlt_link', $mailing_list->create_url($event->get('mlt_name')));
+				$mailing_list->set('mlt_link', $mailing_list->create_url($mailing_list->get('mlt_name'))); 
 			}
 		}
 		
