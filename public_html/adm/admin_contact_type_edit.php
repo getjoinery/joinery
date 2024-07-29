@@ -17,7 +17,7 @@
 
 	if($_POST){
 
-		$editable_fields = array('ctt_description', 'ctt_mailchimp_list_id');
+		$editable_fields = array('ctt_description', 'ctt_mailchimp_list_id', 'ctt_name');
 
 		foreach($editable_fields as $field) {
 			$contact_type->set($field, $_POST[$field]);
@@ -61,7 +61,7 @@
 		echo $formwriter->hiddeninput('action', 'edit');
 	}
 	
-
+	echo $formwriter->textinput('Name', 'ctt_name', NULL, 100, $contact_type->get('ctt_name'), '', 255, '');
 	echo $formwriter->textinput('Description', 'ctt_description', NULL, 100, $contact_type->get('ctt_description'), '', 255, '');
 	echo $formwriter->textinput('Mailchimp List ID', 'ctt_mailchimp_list_id', NULL, 100, $contact_type->get('ctt_mailchimp_list_id'), '', 255, '');	
 	echo $formwriter->start_buttons();

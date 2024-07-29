@@ -85,7 +85,7 @@
 	echo $formwriter->textinput('Description', 'eml_description', NULL, 100, $email->get('eml_description'), '', 255, '');
 	echo $formwriter->textinput('Subject', 'eml_subject', NULL, 100, $email->get('eml_subject'), '', 255, '');	
 	
-	/*
+	
 	$contact_types = new MultiContactType(
 		array('deleted'=>false),
 		NULL,		//SORT BY => DIRECTION
@@ -93,8 +93,10 @@
 		NULL);  //OFFSET
 	$contact_types->load();
 	$optionvals = $contact_types->get_dropdown_array();
-	echo $formwriter->dropinput("Email content type (for unsubscribes)", "eml_ctt_contact_type_id", "ctrlHolder", $optionvals, $email->get('eml_ctt_contact_type_id'), '', TRUE);	
-	*/	
+	if($contact_types->count()){
+		echo $formwriter->dropinput("Email content type (for unsubscribes)", "eml_ctt_contact_type_id", "ctrlHolder", $optionvals, $email->get('eml_ctt_contact_type_id'), '', TRUE);	
+	}
+	
 
 	$mailing_lists = new MultiMailingList(
 		array('deleted'=>false, 'active'=> true),

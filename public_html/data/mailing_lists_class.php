@@ -50,6 +50,7 @@ class MailingList extends SystemBase {
 		'mlt_delete_time' => 'Time of deletion',
 		'mlt_emt_email_template_id' => 'Email template if the user gets a welcome email',
 		'mlt_fil_file_id' => 'File to be sent upon subscription',
+		'mlt_ctt_contact_type_id' => 'Contact type, if we are allowing unsubscribe by type',
 	); 
 
 	public static $field_specifications = array(
@@ -64,6 +65,7 @@ class MailingList extends SystemBase {
 		'mlt_delete_time' => array('type'=>'timestamp(6)'),
 		'mlt_emt_email_template_id' => array('type'=>'int4'),
 		'mlt_fil_file_id' => array('type'=>'int4'),
+		'mlt_ctt_contact_type_id' => array('type'=>'int4'),
 	); 
 			
 	public static $required_fields = array(

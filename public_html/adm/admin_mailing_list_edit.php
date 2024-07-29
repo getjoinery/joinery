@@ -17,7 +17,7 @@
 
 	if($_POST){
 
-		$editable_fields = array('mlt_name', 'mlt_description', 'mlt_mailchimp_list_id', 'mlt_is_active', 'mlt_visibility');
+		$editable_fields = array('mlt_name', 'mlt_description', 'mlt_mailchimp_list_id', 'mlt_is_active', 'mlt_visibility', 'mlt_ctt_contact_type_id');
 
 		if($mailing_list->get('mlt_fil_file_id')){
 			$mailing_list->set('mlt_fil_file_id', $_POST['mlt_fil_file_id']);
@@ -86,6 +86,18 @@
 	echo $formwriter->dropinput("Active?", "mlt_is_active", "ctrlHolder", $optionvals, $mailing_list->get('mlt_is_active'), '', FALSE);
 	$optionvals = array("Hidden (Only admins can add people)"=>0, "Public (Open for registration and listed)"=>1, "Public but unlisted (Can only register with the link)"=>2);
 	echo $formwriter->dropinput("Visibility", "mlt_visibility", "ctrlHolder", $optionvals, $mailing_list->get('mlt_visibility'), '', FALSE);
+
+
+	$contact_types = new MultiContactType(
+		array('deleted'=>false),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$contact_types->load();
+	$optionvals = $contact_types->get_dropdown_array();
+	if($contact_types->count()){
+		echo $formwriter->dropinput("Email content type (for unsubscribes)", "mlt_ctt_contact_type_id", "ctrlHolder", $optionvals, $mailing_list->get('mlt_ctt_contact_type_id'), '', TRUE);	
+	}
 
 	$templates = new MultiEmailTemplateStore(
 		array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_INNER),

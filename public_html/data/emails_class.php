@@ -56,7 +56,7 @@ class Email extends SystemBase {
 		'eml_scheduled_time' => 'Scheduled time to send',
 		'eml_type' => 'Type of email for opt out purposes',
 		'eml_delete_time' => 'Time of deletion',
-		'eml_ctt_contact_type_id' => 'The contact type of this email for unsubscribes',  //NOT USED YET
+		'eml_ctt_contact_type_id' => 'The contact type of this email for unsubscribes',  
 		'eml_mlt_mailing_list_id' => 'The mailing list for this email, null for custom',
 	);
 
