@@ -34,6 +34,81 @@ if($params[0] == 'robots.txt'){
 	}
 }
 
+//FAVICON.  TEMPORARY UNTIL WE FIGURE OUT HOW TO HANDLE
+if($params[0] == 'favicon.ico'){
+	$base_file = $_REQUEST['path'];
+	if(file_exists($base_file)){
+		$seconds_to_cache = 43200;
+		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+		header("Expires: $ts");
+		header("Pragma: cache");
+		header("Cache-Control: max-age=$seconds_to_cache");
+		$the_content_type = 'Content-type: '.mime_type($base_file);
+		header($the_content_type);
+		readfile($base_file);
+		exit();
+	}
+}
+
+//MAIN INCLUDE FILES.  LOAD ANYTHING UNDER /includes
+if($params[0] == 'includes'){
+	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+	if(file_exists($base_file)){
+		$seconds_to_cache = 43200;
+		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+		header("Expires: $ts");
+		header("Pragma: cache");
+		header("Cache-Control: max-age=$seconds_to_cache");
+		$the_content_type = 'Content-type: '.mime_type($base_file);
+		header($the_content_type);
+		readfile($base_file);
+		exit();
+	}
+	else{
+		LibraryFunctions::display_404_page();
+	}
+}
+
+//PLUGIN INCLUDE FILES.  LOAD ANYTHING UNDER /plugins/PLUGIN/includes
+if($params[0] == 'plugins' && $params[2] == 'includes'){
+	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+	if(file_exists($base_file)){
+		$seconds_to_cache = 43200;
+		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+		header("Expires: $ts");
+		header("Pragma: cache");
+		header("Cache-Control: max-age=$seconds_to_cache");
+		$the_content_type = 'Content-type: '.mime_type($base_file);
+		header($the_content_type);
+		readfile($base_file);
+		exit();
+	}
+	else{
+		LibraryFunctions::display_404_page();
+	}
+}
+
+//THEME INCLUDE FILES.  LOAD ANYTHING UNDER /theme/THEME/includes
+if($params[0] == 'theme' && $params[2] == 'includes'){
+	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+	if(file_exists($base_file)){
+		$seconds_to_cache = 43200;
+		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+		header("Expires: $ts");
+		header("Pragma: cache");
+		header("Cache-Control: max-age=$seconds_to_cache");
+		$the_content_type = 'Content-type: '.mime_type($base_file);
+		header($the_content_type);
+		readfile($base_file);
+		exit();
+	}
+	else{
+		LibraryFunctions::display_404_page();
+	}
+}
+
+
+//REDIRECT URLS
 if($settings->get_setting('urls_active')){
 
 	//CHECK REDIRECTS
@@ -84,6 +159,33 @@ if($params[0] == 'api' && $params[1] == 'v1'){
 		require_once($base_file); 
 		exit();		
 	}
+}
+
+//AJAX DIRECTORY
+if($params[0] == 'ajax'){
+	if($params[1]){
+		
+		//LOAD THE AJAX FILES FROM THE PLUGINS
+		$plugins = LibraryFunctions::list_plugins();
+		foreach($plugins as $plugin){
+			$plugin_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/ajax/'.$params[1], 'php');
+			if(file_exists($plugin_file)){
+				$is_valid_page = true;
+				require_once($plugin_file);
+				exit();
+			}
+		}	
+		
+		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/ajax/'.$params[1],'php');
+		if(file_exists($base_file)){
+			$is_valid_page = true;
+			require_once($base_file); 
+			exit();		
+		}
+	}
+	else{
+		LibraryFunctions::display_404_page();	
+	}  
 }
 
 //CHECK STATIC FILES DIRECTORY (/VAR/WWW/HTML/$SITE/STATIC_FILES)
@@ -220,8 +322,8 @@ if(!$params[0]){
 //PROFILE SECTION
 if($params[0] == 'profile'){
 	if($params[1]){
-		$template_file = $template_directory.'/profile/'.$params[1].'.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/profile/'.$params[1].'.php';
+		$template_file = ensure_extension($template_directory.'/profile/'.$params[1],'php');
+		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/views/profile/'.$params[1],'php');
 	}
 	else{
 		$template_file = $template_directory.'/profile/profile.php';
@@ -399,13 +501,34 @@ if($params[0] == 'product'){
 }
 
 //ADMIN AREA
+
+//ADMIN STYLING FILES.  TEMPORARY UNTIL WE FIGURE OUT HOW TO HANDLE.  LOAD ANY URL UNDER /adm/includes/
+if($params[0] == 'adm' && $params[1] == 'includes'){
+	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+	if(file_exists($base_file)){
+		$seconds_to_cache = 43200;
+		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+		header("Expires: $ts");
+		header("Pragma: cache");
+		header("Cache-Control: max-age=$seconds_to_cache");
+		$the_content_type = 'Content-type: '.mime_type($base_file);
+		header($the_content_type);
+		readfile($base_file);
+		exit();
+	}
+	else{
+		LibraryFunctions::display_404_page();
+	}
+}
+		
 if($params[0] == 'admin'){
+
 	if($params[1]){
 		
 		//LOAD THE ADMIN FILES FROM THE PLUGINS
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
-			$plugin_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/adm/'.$params[1].'.php';
+			$plugin_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/adm/'.$params[1],'php');
 			if(file_exists($plugin_file)){
 				$is_valid_page = true;
 				require_once($plugin_file);
@@ -413,7 +536,7 @@ if($params[0] == 'admin'){
 			}
 		}	
 		
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1].'.php';
+		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1],'php');
 		if(file_exists($base_file)){
 			$is_valid_page = true;
 			require_once($base_file); 
@@ -421,7 +544,7 @@ if($params[0] == 'admin'){
 		}
 	}
 	else{
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1].'.php';
+		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1],'php');
 		if(file_exists($base_file)){
 			$is_valid_page = true;
 			require_once($base_file); 
@@ -430,7 +553,7 @@ if($params[0] == 'admin'){
 	}
 }
 
-//PLUGINS
+//PLUGIN URLS
 $plugins = LibraryFunctions::list_plugins();
 foreach($plugins as $plugin){
 	$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
@@ -441,10 +564,37 @@ foreach($plugins as $plugin){
 	}
 }	
 
+//UTILS DIRECTORY
+if($params[0] == 'utils'){
+	if($params[1]){
+		
+		//LOAD THE ADMIN FILES FROM THE PLUGINS
+		$plugins = LibraryFunctions::list_plugins();
+		foreach($plugins as $plugin){
+			$plugin_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/utils/'.$params[1], 'php');
+			if(file_exists($plugin_file)){
+				$is_valid_page = true;
+				require_once($plugin_file);
+				exit();
+			}
+		}	
+		
+		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/utils/'.$params[1], 'php');
+		if(file_exists($base_file)){
+			$is_valid_page = true;
+			require_once($base_file); 
+			exit();		
+		}
+	}
+	else{
+		LibraryFunctions::display_404_page();	
+	}  
+}
+
 //ROOT PAGES
 if($params[0]){
-	$template_file = $template_directory.'/'.$params[0].'.php';
-	$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/'.$params[0].'.php';
+	$template_file = ensure_extension($template_directory.'/'.$params[0],'php');
+	$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/views/'.$params[0],'php');
 
 	if(file_exists($template_file)){
 		$is_valid_page = true;
@@ -458,10 +608,91 @@ if($params[0]){
 	}
 }
 
-
-
-
 	
 LibraryFunctions::display_404_page();		
 
+function ensure_extension($path, $extension){
+	if(str_ends_with($path, '.'.$extension)){
+		return $path;
+	}
+	else{
+		return $path.'.php';
+	}
+}
+
+
+function mime_type($filename) {
+
+	$mime_types = array(
+
+		'txt' => 'text/plain',
+		'htm' => 'text/html',
+		'html' => 'text/html',
+		'php' => 'text/html',
+		'css' => 'text/css',
+		'js' => 'application/javascript',
+		'json' => 'application/json',
+		'xml' => 'application/xml',
+		'swf' => 'application/x-shockwave-flash',
+		'flv' => 'video/x-flv',
+
+		// images
+		'png' => 'image/png',
+		'jpe' => 'image/jpeg',
+		'jpeg' => 'image/jpeg',
+		'jpg' => 'image/jpeg',
+		'gif' => 'image/gif',
+		'bmp' => 'image/bmp',
+		'ico' => 'image/vnd.microsoft.icon',
+		'tiff' => 'image/tiff',
+		'tif' => 'image/tiff',
+		'svg' => 'image/svg+xml',
+		'svgz' => 'image/svg+xml',
+
+		// archives
+		'zip' => 'application/zip',
+		'rar' => 'application/x-rar-compressed',
+		'exe' => 'application/x-msdownload',
+		'msi' => 'application/x-msdownload',
+		'cab' => 'application/vnd.ms-cab-compressed',
+
+		// audio/video
+		'mp3' => 'audio/mpeg',
+		'qt' => 'video/quicktime',
+		'mov' => 'video/quicktime',
+
+		// adobe
+		'pdf' => 'application/pdf',
+		'psd' => 'image/vnd.adobe.photoshop',
+		'ai' => 'application/postscript',
+		'eps' => 'application/postscript',
+		'ps' => 'application/postscript',
+
+		// ms office
+		'doc' => 'application/msword',
+		'rtf' => 'application/rtf',
+		'xls' => 'application/vnd.ms-excel',
+		'ppt' => 'application/vnd.ms-powerpoint',
+
+		// open office
+		'odt' => 'application/vnd.oasis.opendocument.text',
+		'ods' => 'application/vnd.oasis.opendocument.spreadsheet',
+	);
+
+	$ext = strtolower(array_pop(explode('.',$filename)));
+	if (array_key_exists($ext, $mime_types)) {
+		return $mime_types[$ext];
+	}
+	elseif (function_exists('finfo_open')) {
+		$finfo = finfo_open(FILEINFO_MIME);
+		$mimetype = finfo_file($finfo, $filename);
+		finfo_close($finfo);
+		return $mimetype;
+	}
+	else {
+		throw new SystemDisplayableError('Unknown file type.');
+		exit;
+		//return 'application/octet-stream';
+	}
+}
 ?>
