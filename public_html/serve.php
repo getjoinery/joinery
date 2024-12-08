@@ -568,7 +568,7 @@ foreach($plugins as $plugin){
 if($params[0] == 'utils'){
 	if($params[1]){
 		
-		//LOAD THE ADMIN FILES FROM THE PLUGINS
+		//LOAD THE UTILS FILES FROM THE PLUGINS
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
 			$plugin_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/utils/'.$params[1], 'php');
