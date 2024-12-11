@@ -73,23 +73,29 @@
 
 	
 			//SET RECURRING VALUE
-			if($_POST['pro_recurring']){
+			if($_POST['pro_recurring'] == 'year'){
+				$product->set('pro_recurring', 'year');
+			}
+			else if($_POST['pro_recurring'] == 'month'){
 				$product->set('pro_recurring', 'month');
+			}
+			else if($_POST['pro_recurring'] == 'week'){
+				$product->set('pro_recurring', 'week');
+			}
+			else if($_POST['pro_recurring'] == 'day'){
+				$product->set('pro_recurring', 'day');
 			}
 			else{
 				$product->set('pro_recurring', NULL);
 			}
 			
-			if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
-				$_POST['pro_link'] = $product->create_url($_POST['pro_link']);
-			}
 			
 			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_POST[$field]);
 			}
-
+			
 			if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
 				if($_POST['pro_link']){
 					$product->set('pro_link', $product->create_url($_POST['pro_link']));
@@ -259,9 +265,15 @@
 	//echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
 	echo $formwriter->textbox('Product Description', 'pro_description', 'ctrlHolder', 5, 80, $product->get('pro_description'), '', 'yes');
 	
-	$optionvals = array("Yes, it is a recurring monthly charge"=>1, 'No, it is a one time payment' => 0);
+	$optionvals = array(
+		'No, it is a one time payment' => 0, 
+		"Yes, recurring yearly charge"=>'year',
+		"Yes, recurring monthly charge"=>'month', 
+		//"Yes, recurring weekly charge"=>'week',
+		//"Yes, recurring daily charge"=>'day', 			
+		);
 	if($product->get('pro_recurring')){
-		$recurring=1;
+		$recurring=$product->get('pro_recurring');
 	}
 	else{
 		$recurring=0;
@@ -275,9 +287,13 @@
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
-	$events->load();
-	$optionvals = $events->get_dropdown_array();
-	echo $formwriter->dropinput("Event registration", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);	
+	$numevents = $events->count_all();
+	if($numevents){
+		$events->load();
+		$optionvals = $events->get_dropdown_array();
+		echo $formwriter->dropinput("Event registration", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);
+	}
+
 
 	$groups = new MultiGroup(
 		array('category'=>'event'),  //SEARCH CRITERIA
@@ -296,11 +312,21 @@
 	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);
 
 	echo $formwriter->textinput('Price ('.$currency_symbol.'no cents)', 'pro_price', 'ctrlHolder', 100, (int)$product->get('pro_price'), '', 5, '');
-	echo $formwriter->textinput('Total Number available for purchase (0 for unlimited):', 'pro_max_purchase_count', 'ctrlHolder', 100, $product->get('pro_max_purchase_count'), '', 3, '');
-
-	echo $formwriter->textinput('Max Number that can be added to cart per user (0 for unlimited):', 'pro_max_cart_count', 'ctrlHolder', 100, $product->get('pro_max_cart_count'), '', 3, '');
 	
-	echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $product->get('pro_expires'), '', 4, '');
+	if(!$pro_max_purchase_count_fill = $product->get('pro_max_purchase_count')){
+		$pro_max_purchase_count_fill = 0;
+	}
+	echo $formwriter->textinput('Total Number available for purchase (0 for unlimited):', 'pro_max_purchase_count', 'ctrlHolder', 100, $pro_max_purchase_count_fill, '', 3, '');
+
+	if(!$pro_max_cart_count_fill = $product->get('pro_max_cart_count')){
+		$pro_max_cart_count_fill = 0;
+	}
+	echo $formwriter->textinput('Max Number that can be added to cart per user (0 for unlimited):', 'pro_max_cart_count', 'ctrlHolder', 100, $pro_max_cart_count_fill, '', 3, '');
+	
+	if(!$pro_expires_fill = $product->get('pro_expires')){
+		$pro_expires_fill = 0;
+	}
+	echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $pro_expires_fill, '', 4, '');
 	
 	if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
 		echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir').'/product/', 'pro_link', NULL, 100, $product->get('pro_link'), '', 255, '');	

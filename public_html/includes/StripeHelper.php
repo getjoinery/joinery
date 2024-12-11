@@ -158,10 +158,52 @@ class StripeHelper {
 					'name' => $cart_item['name'],
 					'description' => $cart_item['name'].' ',
 				);
+
+				if($cart_item['recurring'] == 'year'){
+					$recurring = array(
+						'interval' => 'year',
+						'interval_count': 1,
+					);
+				}
+				else if($cart_item['recurring'] == 'month'){
+					$recurring = array(
+						'interval' => 'month',
+						'interval_count': 1,
+						'trial_period_days': null,
+					);
+				}
+				else if($cart_item['recurring'] == 1){  //HOW WE USED TO DO IT
+					$recurring = array(
+						'interval' => 'month',
+						'interval_count': 1,
+						'trial_period_days': null,
+					);
+				}		
+				else if($cart_item['recurring'] == 'week'){
+					$recurring = array(
+						'interval' => 'week',
+						'interval_count': 1,
+						'trial_period_days': null,
+					);
+				}	
+				else if($cart_item['recurring'] == 'day'){
+					$recurring = array(
+						'interval' => 'day',
+						'interval_count': 1,
+						'trial_period_days': null,
+					);
+				}	
+				else {
+					throw new SystemDisplayablePermanentError("This product (".$product->get('pro_name').") is not a subscription.");
+				}	
 				
-				$recurring = array(
-					'interval' => 'month'
-				);
+				if($cart_item['recurring'] && $cart_item['trial_period_days']){
+					$recurring['trial_period_days'] = $cart_item['trial_period_days'];
+				}
+				else{
+					$recurring['trial_period_days'] = null;
+				}
+
 				
 				$price_data = array(
 					'currency' => $currency_code,

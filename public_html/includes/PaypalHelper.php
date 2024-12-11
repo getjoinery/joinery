@@ -341,6 +341,26 @@ class PaypalHelper{
 	//PAYPAL PLAN CREATION
     public function createPlan($stripe_product_id, $product, $amount){
 		$access_token = $this->getAccessToken();
+		
+		if($product->get('pro_recurring') == 'year'){
+			$interval_unit = 'YEAR';
+		}
+		else if($product->get('pro_recurring') == 'month'){
+			$interval_unit = 'MONTH';
+		}
+		else if($product->get('pro_recurring') == 1){  //HOW WE USED TO DO IT
+			$interval_unit = 'MONTH';
+		}		
+		else if($product->get('pro_recurring') == 'week'){
+			$interval_unit = 'WEEK';
+		}	
+		else if($product->get('pro_recurring') == 'day'){
+			$interval_unit = 'DAY';
+		}	
+		else {
+			throw new SystemDisplayablePermanentError("This product (".$product->get('pro_name').") is not a subscription.");
+		}	
+		
 		$jsonData = array(
 			"product_id" => $stripe_product_id,
 			"name" => $product->get('pro_name') . '-' . $amount, // you can  change the plan name
@@ -379,7 +399,7 @@ class PaypalHelper{
 				),*/
 				array(
 					"frequency" => array(
-						"interval_unit" => "MONTH",
+						"interval_unit" => $interval_unit,
 						"interval_count" => 1
 					),
 					"tenure_type" => "REGULAR",
