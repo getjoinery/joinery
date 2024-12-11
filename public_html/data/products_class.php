@@ -651,6 +651,7 @@ class Product extends SystemBase {
 		'pro_num_remaining_calc' => 'Calculated field of number remaining in stock',
 		'pro_link' => 'Link to use for accessing',
 		'pro_delete_time' => 'time deleted',
+		'pro_trial_period_days' => 'Days until a recurring payment starts',
 	);
 
 	public static $field_specifications = array(
@@ -674,6 +675,7 @@ class Product extends SystemBase {
 		'pro_num_remaining_calc' => array('type'=>'int4'),
 		'pro_link' => array('type'=>'varchar(255)'),
 		'pro_delete_time' => array('type'=>'timestamp(6)'),
+		'pro_trial_period_days' => array('type'=>'int4'),
 	);
 			 
 	public static $required_fields = array('pro_link', 'pro_price', 'pro_name');

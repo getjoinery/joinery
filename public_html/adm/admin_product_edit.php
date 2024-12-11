@@ -279,6 +279,11 @@
 		$recurring=0;
 	}
 	echo $formwriter->dropinput("Subscription?", "pro_recurring", "ctrlHolder", $optionvals, $recurring, '', FALSE);	
+
+	if(!$pro_trial_period_days_fill = $product->get('pro_trial_period_days')){
+		$pro_trial_period_days_fill = 0;
+	}
+	echo $formwriter->textinput('Subscription trial period (days):', 'pro_trial_period_days', 'ctrlHolder', 100, $pro_trial_period_days_fill, '', 3, '');
 	
 	echo $formwriter->textinput('Digital item link', 'pro_digital_link', NULL, 100, $product->get('pro_digital_link'), '', 255, '');
 	

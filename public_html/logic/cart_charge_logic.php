@@ -256,7 +256,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			if($payment_service == 'stripe_regular'){
 				//CREATE A PLAN AND RUN THE SUBSCRIPTION
 				$final_price = $price - $discount;
-				$plan = $stripe_helper->get_or_create_subscription_plan($final_price);		
+				$plan = $stripe_helper->get_or_create_subscription_plan($final_price, $product->get('pro_recurring'), $product->get('pro_trial_period_days'));		
 				$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($plan, $order_item, $billing_user, $stripe_customer_id);	
 				//REFRESH THE ORDER ITEM
 				$order_item->set('odi_status', OrderItem::STATUS_PAID);

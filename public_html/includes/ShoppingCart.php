@@ -189,6 +189,7 @@ class ShoppingCart {
 				'quantity' => $quantity,
 				'total' => $quantity * $price,
 				'recurring' => $product->get('pro_recurring'),
+				'trial_period_days' => $product->get('pro_trial_period_days'),
 			);
 		}
 		return $detailed_items;
