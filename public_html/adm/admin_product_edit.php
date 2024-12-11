@@ -182,6 +182,17 @@
 			}			
 		}
 		
+		function set_subscription_choices(){
+			var value = $("#pro_recurring").val();
+			if(value == 0){  	
+				$("#pro_trial_period_days_container").hide();
+			}	
+			else { 
+				$("#pro_trial_period_days_container").show();				
+			}
+			
+		}
+		
 		<?php 
 		/*
 		function set_type_choices(){
@@ -218,6 +229,11 @@
 			set_expire_choices();
 			$("#pro_recurring").change(function() {	
 				set_expire_choices();
+			});
+
+			set_subscription_choices();
+			$("#pro_recurring").change(function() {	
+				set_subscription_choices();
 			});
 			
 			//set_type_choices();
