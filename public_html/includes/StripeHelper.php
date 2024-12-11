@@ -151,8 +151,6 @@ class StripeHelper {
 
 			if($cart_item['recurring']){
 				
-				$plan = $this->get_or_create_subscription_plan($final_price);
-				
 
 				$product_data = array(
 					'name' => $cart_item['name'],
@@ -162,35 +160,31 @@ class StripeHelper {
 				if($cart_item['recurring'] == 'year'){
 					$recurring = array(
 						'interval' => 'year',
-						'interval_count': 1,
+						'interval_count' => 1,
 					);
 				}
 				else if($cart_item['recurring'] == 'month'){
 					$recurring = array(
 						'interval' => 'month',
-						'interval_count': 1,
-						'trial_period_days': null,
+						'interval_count' => 1,
 					);
 				}
 				else if($cart_item['recurring'] == 1){  //HOW WE USED TO DO IT
 					$recurring = array(
 						'interval' => 'month',
-						'interval_count': 1,
-						'trial_period_days': null,
+						'interval_count' =>  1,
 					);
 				}		
 				else if($cart_item['recurring'] == 'week'){
 					$recurring = array(
 						'interval' => 'week',
-						'interval_count': 1,
-						'trial_period_days': null,
+						'interval_count' =>  1,
 					);
 				}	
 				else if($cart_item['recurring'] == 'day'){
 					$recurring = array(
 						'interval' => 'day',
-						'interval_count': 1,
-						'trial_period_days': null,
+						'interval_count' =>  1,
 					);
 				}	
 				else {
@@ -217,6 +211,8 @@ class StripeHelper {
 					'quantity' => $cart_item['quantity'],
 					//'metadata' => 
 				);
+				
+				$plan = $this->get_or_create_subscription_plan($final_price, $product->get('pro_recurring'), $product->get('pro_trial_period_days'));
 
 				
 				//TODO add description "metadata" => 
@@ -675,7 +671,12 @@ class StripeHelper {
 	
 	
 	//DEFAULT NAME IS 'subscription-price'
-	public function get_or_create_subscription_plan($amount){
+	public function get_or_create_subscription_plan($amount, $interval, $trial_period_days){
+		
+		if($interval == 1){  //HOW WE USED TO DO IT
+			$interval = 'month';
+		}
+		
 		$settings = Globalvars::get_instance();
 		$currency_code = $settings->get_setting('site_currency');
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
@@ -689,9 +690,10 @@ class StripeHelper {
 			$plan_params=array();
 			$plan_params['plan_name'] = $plan_name;
 			$plan_params['amount'] = $amount;
-			$plan_params['interval'] = 'month';
+			$plan_params['interval'] = $interval;
 			$plan_params['currency_symbol'] = $currency_symbol;
 			$plan_params['currency_code'] = $currency_code;
+			$plan_params['trial_period_days'] = $trial_period_days;
 			//CREATE NEW PLAN
 			$plan = $this->create_subscription_plan($plan_params); 	
 		}
