@@ -72,6 +72,7 @@ if($params[0] == 'includes'){
 //PLUGIN INCLUDE FILES.  LOAD ANYTHING UNDER /plugins/PLUGIN/includes
 if($params[0] == 'plugins' && $params[2] == 'includes'){
 	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+
 	if(file_exists($base_file)){
 		$seconds_to_cache = 43200;
 		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
@@ -222,7 +223,7 @@ if($params[0] == 'static_files'){
 		header("Expires: $ts");
 		header("Pragma: cache");
 		header("Cache-Control: max-age=$seconds_to_cache");
-		$the_content_type = 'Content-type: '.mime_content_type($file);
+		$the_content_type = 'Content-type: '.mime_type($file);
 		header($the_content_type);
 		readfile($file);
 		exit();
@@ -254,7 +255,7 @@ if($settings->get_setting('files_active')){
 				header("Expires: $ts");
 				header("Pragma: cache");
 				header("Cache-Control: max-age=$seconds_to_cache");
-				$the_content_type = 'Content-type: '.mime_content_type($file);
+				$the_content_type = 'Content-type: '.mime_type($file);
 				header($the_content_type);
 				readfile($file);
 				exit();

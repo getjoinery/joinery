@@ -33,19 +33,19 @@
 
 		$total = 0;
 		foreach($receipts as $rkey => $receipt) {
-			$total += $receipt[price];
+			$total += $receipt['price'];
 			$rowvalues = array();
 			
 			
 			//array_push($rowvalues, $rkey);
-			array_push($rowvalues, $receipt[pname] . ' ('. $receipt[name]. ') ');
-			array_push($rowvalues, '$' . money_format('%i', $receipt[price]));
-			//array_push($rowvalues, '<a href="'.$receipt[link].'">'.$receipt[link].'</a>');
+			array_push($rowvalues, $receipt['pname'] . ' ('. $receipt['name']. ') ');
+			array_push($rowvalues, '$' . number_format($receipt['price'], 2, '.', ','));
+			//array_push($rowvalues, '<a href="'.$receipt['link'].'">'.$receipt['link'].'</a>');
 			$page->disprow($rowvalues);
 		}
 			$rowvalues = array();	
 			array_push($rowvalues, '<b>Total</b>');
-			array_push($rowvalues, '<b>$' . money_format('%i', $total).'</b>');
+			array_push($rowvalues, '<b>$' . number_format($total, 2, '.', ',').'</b>');
 			$page->disprow($rowvalues);		
 		$page->endtable();
 

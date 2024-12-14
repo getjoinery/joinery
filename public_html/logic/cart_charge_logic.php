@@ -53,7 +53,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			$stripe_helper = new StripeHelper();
 		}
 	}
-	
+
 	$receipts = array();
 	
 	
@@ -183,7 +183,6 @@ function cart_charge_logic($get_vars, $post_vars){
 		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
 			$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
 
-
 			//CHECK CREDIT CARD INFO AND STORE IF PRESENT FOR REGULAR STRIPE CHECKOUT
 			//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
 			if(!isset($_REQUEST['stripeToken'])){
@@ -191,7 +190,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				$order->set('ord_error', 'The credit card was not submitted because the browser is not using https.');
 				$order->save();
 				
-				$log_error = "The credit card information was not submitted because your browser is not using https.  Go back to the previous page and make sure that you are accessing this page from https (look for the lock icon).  For help, contact us at ".$settings->get_setting('defaultemail')." .";
+				$log_error = "The credit card information was not submitted because your browser has javascript turned off or is not using https.  Go back to the previous page and make sure that you are accessing this page from https (look for the lock icon) and turn off any script blockers.  For help, contact us at ".$settings->get_setting('defaultemail')." .";
 
 				throw new SystemDisplayableError($log_error);
 				exit();					
@@ -374,9 +373,9 @@ function cart_charge_logic($get_vars, $post_vars){
 		
 			}	
 			
-			$receipts[$key+1][pname] = $product_name;
-			$receipts[$key+1][name] = $data['full_name_first']. ' ' .$data['full_name_last'];
-			$receipts[$key+1][price] = $price - $discount;				
+			$receipts[$key+1]['pname'] = $product_name;
+			$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
+			$receipts[$key+1]['price'] = $price - $discount;				
 
 		}
 		else{
@@ -514,12 +513,12 @@ function cart_charge_logic($get_vars, $post_vars){
 				$activation_email->send();
 			}	
 
-			$receipts[$key+1][pname] = $product->get('pro_name').' '. $product_version->prv_version_name;
-			$receipts[$key+1][name] = $data['full_name_first']. ' ' .$data['full_name_last'];
-			$receipts[$key+1][price] = $price - $discount;
+			$receipts[$key+1]['pname'] = $product->get('pro_name').' '. $product_version->prv_version_name;
+			$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
+			$receipts[$key+1]['price'] = $price - $discount;
 			
 			if($product->get('pro_digital_link')){			
-				$receipts[$key+1][link] = $product->get('pro_digital_link');	
+				$receipts[$key+1]['link'] = $product->get('pro_digital_link');	
 			}			
 			
 			

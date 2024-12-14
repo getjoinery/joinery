@@ -38,7 +38,7 @@
 				$coupon_discount_words = '';
 				//HANDLE COUPONS
 				if($discount){
-					$coupon_discount_words = ' ('.$currency_symbol.money_format('%i', $discount). ' discount)'; 
+					$coupon_discount_words = ' ('.$currency_symbol.number_format($discount, 2, '.', ','). ' discount)'; 
 				}
 				
 				?>
@@ -52,7 +52,7 @@
 						  echo '<a href="#">'.$product->get('pro_name').' '. $product_version->prv_version_name . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') '.'</a>';
 							?>
 						</h3>
-						<?php echo '<p class="text-gray-900">'.$currency_symbol . money_format('%i', $price). $coupon_discount_words.'</p>'; ?>
+						<?php echo '<p class="text-gray-900">'.$currency_symbol . number_format($price, 2, '.', ','). $coupon_discount_words.'</p>'; ?>
 						<!--<p class="hidden text-gray-500 sm:block">Gray</p>
 						<p class="hidden text-gray-500 sm:block">S</p>-->
 					  </div>
@@ -78,14 +78,14 @@
         <dl class="text-sm font-medium text-gray-500 mt-10 space-y-6">
           <div class="flex justify-between">
             <dt>Subtotal</dt>
-            <dd class="text-gray-900"><?php echo $currency_symbol; ?><?php echo  money_format('%i', $cart->get_total() - $total_discount); ?></dd>
+            <dd class="text-gray-900"><?php echo $currency_symbol; ?><?php echo  number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></dd>
           </div>
 		  <?php
 		  if($total_discount){
 			  echo '
 			  <div class="flex justify-between">
 				<dt>Taxes</dt>
-				<dd class="text-gray-900">'.$currency_symbol.money_format('%i', $total_discount).'</dd>
+				<dd class="text-gray-900">'.$currency_symbol.number_format($total_discount, 2, '.', ',').'</dd>
 			  </div>';
 		  }
 		  ?>
@@ -95,7 +95,7 @@
           </div>-->
           <div class="flex justify-between border-t border-gray-200 text-gray-900 pt-6">
             <dt class="text-base">Total</dt>
-            <dd class="text-base"><?php echo $currency_symbol; ?><?php echo  money_format('%i', $cart->get_total() - $total_discount); ?></dd>
+            <dd class="text-base"><?php echo $currency_symbol; ?><?php echo  number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></dd>
           </div>
         </dl>
       </div>

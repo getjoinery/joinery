@@ -122,7 +122,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
 					}
 					echo $formwriter->end_form(true);
-					$product->output_javascript(NULL);
+					$product->output_javascript(array());
 				}
 				else if(!$cart->can_add_to_cart($product)){
 					if($product->get('pro_recurring')){

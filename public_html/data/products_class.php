@@ -482,9 +482,8 @@ class UserPriceRequirement extends BasicProductRequirement {
 
 		
 		//CLEAN IT UP
-		//REMOVE ANYTHING BUT NUMBERS AND A DOT AND CAST TO INTEGER, DROPPING THE CENTS
-		//TODO NEED TO FIGURE OUT HOW TO HANDLE CENTS
-		$data['user_price'] = (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price'])); 
+		//REMOVE ANYTHING BUT NUMBERS AND A DOT
+		$data['user_price'] = str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price'])); 
 		
 		/*
 		if ($data['user_price'] == 0 || $data['user_price'] == '0.00') {
@@ -850,13 +849,13 @@ class Product extends SystemBase {
 		if($this->key == Product::PRODUCT_ID_OPTIONAL_DONATION){
 			//IT IS AN OPTIONAL DONATION
 			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
-			return (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price']));
+			return str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price']));
 		}		
 		else if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 	
 			if($data['user_price_override']){
 				//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
-				return (int)str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price_override']));
+				return str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price_override']));
 			}
 			else{
 				$error = 'This product is missing the price override.';
