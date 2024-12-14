@@ -93,9 +93,100 @@ class StripeHelper {
 					<!-- Used to display form errors. -->
 					<div id="card-errors" role="alert"></div>
 				  </div>
-				<br />'. $formwriter->new_form_button('Pay with Stripe', 'primary', 'full').'</form>					
+				<br />'. $formwriter->new_form_button('Pay with Stripe', 'primary', 'full').'</form>';
+
+
+	
+				$session = SessionControl::get_instance();
+				$settings = Globalvars::get_instance();
+				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+					$api_key = $settings->get_setting('stripe_api_key_test');
+					$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
+				}
+				else{
+					$api_key = $settings->get_setting('stripe_api_key');
+					$api_secret_key = $settings->get_setting('stripe_api_pkey');		
+				}
 				
-				<script language="javascript" src="'.LibraryFunctions::get_theme_file_path('stripe_payment_js.php', '/includes', 'web').'"></script>';	
+				if(!$api_key || !$api_secret_key){
+					throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
+					exit();			
+				}
+
+				$output .= '<script language="javascript"> var stripe = Stripe(\''.$api_secret_key.'\');';
+				
+				$output .= "				
+							var elements = stripe.elements();
+
+							// Custom styling can be passed to options when creating an Element.
+							// (Note that this demo uses a wider set of styles than the guide below.)
+							var style = {
+							  base: {
+								color: '#32325d',
+								fontFamily: '\"Helvetica Neue\", Helvetica, sans-serif',
+								fontSmoothing: 'antialiased',
+								fontSize: '16px',
+								'::placeholder': {
+								  color: '#aab7c4'
+								}
+							  },
+							  invalid: {
+								color: '#fa755a',
+								iconColor: '#fa755a'
+							  }
+							};
+
+							// Create an instance of the card Element.
+							var card = elements.create('card', {style: style});
+
+
+							// Add an instance of the card Element into the `card-element` <div>.
+							card.mount('#card-element');
+
+
+
+							// Handle real-time validation errors from the card Element.
+							card.on('change', function(event) {
+							  var displayError = document.getElementById('card-errors');
+							  if (event.error) {
+								displayError.textContent = event.error.message;
+							  } else {
+								displayError.textContent = '';
+							  }
+							});
+
+							// Handle form submission.
+							var form = document.getElementById('payment-form');
+							form.addEventListener('submit', function(event) {
+							  event.preventDefault();
+
+							  stripe.createToken(card).then(function(result) {
+								if (result.error) {
+								  // Inform the user if there was an error.
+								  var errorElement = document.getElementById('card-errors');
+								  errorElement.textContent = result.error.message;
+								} else {
+								  // Send the token to your server.
+								  stripeTokenHandler(result.token);
+								}
+							  });
+							});
+
+							// Submit the form with the token ID.
+							function stripeTokenHandler(token) {
+							  // Insert the token ID into the form so it gets submitted to the server
+							  var form = document.getElementById('payment-form');
+							  var hiddenInput = document.createElement('input');
+							  hiddenInput.setAttribute('type', 'hidden');
+							  hiddenInput.setAttribute('name', 'stripeToken');
+							  hiddenInput.setAttribute('value', token.id);
+							  form.appendChild(hiddenInput);
+
+							  // Submit the form
+							  form.submit();
+							}";		
+				
+				$output .= '</script>';	
 				
 				return $output;
 	}
@@ -202,7 +293,7 @@ class StripeHelper {
 				$price_data = array(
 					'currency' => $currency_code,
 					'product_data' => $product_data,
-					'unit_amount' => (int)($final_price) * 100,
+					'unit_amount' => $final_price * 100,
 					'recurring' => $recurring,
 				);
 				
@@ -236,7 +327,7 @@ class StripeHelper {
 				$price_data = array(
 					'currency' => $currency_code,
 					'product_data' => $product_data,
-					'unit_amount' => (int)($final_price) * 100,
+					'unit_amount' => $final_price * 100,
 				);
 				
 				$stripe_current_item = array(
@@ -304,24 +395,24 @@ class StripeHelper {
 		$stripe_customer = $this->stripe->customers->all(["email" => $user->get('usr_email')]);
 		if($return_type == 'object'){
 			if($this->test_mode){
-				$user->set('usr_stripe_customer_id_test', $stripe_customer[data][0][id]);
+				$user->set('usr_stripe_customer_id_test', $stripe_customer['data'][0]['id']);
 			}
 			else{
-				$user->set('usr_stripe_customer_id', $stripe_customer[data][0][id]);
+				$user->set('usr_stripe_customer_id', $stripe_customer['data'][0]['id']);
 			}		 
 			$user->save();
 			return $stripe_customer;
 		}
 		else if($return_type == 'id'){
-			if($stripe_customer[data][0][id]){
+			if($stripe_customer['data'][0]['id']){
 				if($this->test_mode){
-					$user->set('usr_stripe_customer_id_test', $stripe_customer[data][0][id]);
+					$user->set('usr_stripe_customer_id_test', $stripe_customer['data'][0]['id']);
 				}
 				else{
-					$user->set('usr_stripe_customer_id', $stripe_customer[data][0][id]);
+					$user->set('usr_stripe_customer_id', $stripe_customer['data'][0]['id']);
 				}		 
 				$user->save();
-				return $stripe_customer[data][0][id];
+				return $stripe_customer['data'][0]['id'];
 			}
 			else{
 				return false;
@@ -346,10 +437,10 @@ class StripeHelper {
 			]);
 			
 		if($this->test_mode){
-			$user->set('usr_stripe_customer_id_test', $stripe_customer[id]);
+			$user->set('usr_stripe_customer_id_test', $stripe_customer['id']);
 		}
 		else{
-			$user->set('usr_stripe_customer_id', $stripe_customer[id]);
+			$user->set('usr_stripe_customer_id', $stripe_customer['id']);
 		}
 		$user->save();
 
@@ -357,8 +448,8 @@ class StripeHelper {
 			return $stripe_customer;
 		}
 		else if($return_type == 'id'){
-			if($stripe_customer[id]){
-				return $stripe_customer[id];
+			if($stripe_customer['id']){
+				return $stripe_customer['id'];
 			}
 			else{
 				return false;
@@ -641,13 +732,13 @@ class StripeHelper {
 		
 		$plan_info = array(
 		[
-		  "amount" => (int)$params['amount'] * 100,
+		  "amount" => $params['amount'] * 100,
 		  "interval" => $params['interval'],
 		  "product" => [
 			"name" => $params['plan_name'],
 		  ],
 		  "currency" => $params['currency_code'],
-		  //"id" => 'subscription-' . (int)$params['amount'],
+		  //"id" => 'subscription-' . $params['amount'],
 		]		
 		);
 		
@@ -747,7 +838,7 @@ class StripeHelper {
 		
 
 		//IF THE SUBSCRIPTION FAILED MARK IT AS ERROR
-		if(!$subscription_result[id]){
+		if(!$subscription_result['id']){
 			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
 			$order_item->set('odi_status_change_time', 'now()');
 			$order_item->save();
@@ -755,8 +846,8 @@ class StripeHelper {
 		}
 		
 		//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT
-		$order_item->set('odi_stripe_subscription_id', $subscription_result[id]);
-		$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result[latest_invoice]);
+		$order_item->set('odi_stripe_subscription_id', $subscription_result['id']);
+		$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result['latest_invoice']);
 		$order_item->set('odi_is_subscription', true);
 		$order_item->set('odi_status', OrderItem::STATUS_PAID);
 		$order_item->set('odi_status_change_time', 'now()');
@@ -777,7 +868,7 @@ class StripeHelper {
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 		$billing_name = $billing_user->display_name();
 		
-		$amount = (int)$amount*100;
+		$amount = $amount*100;
 			
 		//CHARGE THE PURCHASE
 		
@@ -789,7 +880,7 @@ class StripeHelper {
 		$metadata['customer_email'] = $billing_user->get('usr_email');
 			 
 		$charge_params = array(
-		  'source' => $source[id],
+		  'source' => $source['id'],
 		  'amount' => $amount,
 		  'currency' => $currency_code,
 		  'customer' => $stripe_customer_id,

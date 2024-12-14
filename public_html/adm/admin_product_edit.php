@@ -60,7 +60,7 @@
 			
 			//PRICE MUST BE INTEGER
 			if($_POST['pro_price']){
-				$_POST['pro_price'] = (int)$_POST['pro_price'];
+				$_POST['pro_price'] = $_POST['pro_price'];
 			}
 	
 			//PRICE MUST BE INTEGER
@@ -332,7 +332,7 @@
 	$optionvals = array("One price"=>1, 'Multiple pricing levels' => 2, 'User chooses price'=>3);
 	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);
 
-	echo $formwriter->textinput('Price ('.$currency_symbol.'no cents)', 'pro_price', 'ctrlHolder', 100, (int)$product->get('pro_price'), '', 5, '');
+	echo $formwriter->textinput('Price ('.$currency_symbol.'no cents)', 'pro_price', 'ctrlHolder', 100, $product->get('pro_price'), '', 5, '');
 	
 	if(!$pro_max_purchase_count_fill = $product->get('pro_max_purchase_count')){
 		$pro_max_purchase_count_fill = 0;

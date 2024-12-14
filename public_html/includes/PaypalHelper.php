@@ -52,7 +52,7 @@ class PaypalHelper{
 
 				$amount = array();
 				$amount['currency_code'] = $this->currency;
-				$amount['value'] = (int)($item['price'] - $item['discount']);
+				$amount['value'] = ($item['price'] - $item['discount']);
 
 				$purchase_unit['amount'] = $amount;
 
