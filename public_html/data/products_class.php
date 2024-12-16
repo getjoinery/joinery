@@ -886,12 +886,26 @@ class Product extends SystemBase {
 			}
 		}	
 		else{
-			print_r($this);
-			exit;
 			$error = 'This product has no price.';
 			throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
 			exit;
 		}
+		
+	}
+	
+	public function total_coupon_discount($full_price, $coupon_codes){
+		$discount = 0;
+		foreach($coupon_codes as $coupon_code){
+			if($coupon_obj = $this->has_coupon($coupon_code)){
+				$discount += $coupon_obj->get_discount($full_price);
+			}
+		}
+		
+		if($discount > $full_price){
+			$discount = $full_price;
+		}
+
+		return $discount;
 		
 	}
 	
@@ -900,26 +914,27 @@ class Product extends SystemBase {
 		if(!$coupon_code){
 			return false;
 		}
+		
+		
 
-		$searches = array('coupon_code_id' => $coupon_code->key);	
+		$searches = array('coupon_code_id' => $coupon_code->key, 'product_id' => $this->key);	
 		$coupon_code_products = new MultiCouponCodeProduct($searches);
 		$coupon_code_products->load();
-		foreach($coupon_code_products as $coupon_code_product){
-			if($coupon_code_product->get('ccp_pro_product_id') == $this->key){
-				$coupon_code = new CouponCode($coupon_code_product->get('ccp_ccd_coupon_code_id'), TRUE);
-				//CHECK VALIDITY
-				if($coupon_code->get('ccd_is_active')){
-
-					$current_time = LibraryFunctions::get_current_time('UTC');
-					if($coupon_code->get('ccd_start_time') && $coupon_code->get('ccd_start_time') > $current_time){
-						continue;
-					}
-					
-					if($coupon_code->get('ccd_end_time') && $coupon_code->get('ccd_end_time') < $current_time){
-						continue;
-					}
-					return $coupon_code;
+		
+		foreach($coupon_code_products as $coupon_code_product){	
+			$coupon_code = new CouponCode($coupon_code_product->get('ccp_ccd_coupon_code_id'), TRUE);
+				
+			//CHECK VALIDITY
+			if($coupon_code->get('ccd_is_active')){
+				$current_time = LibraryFunctions::get_current_time('UTC');
+				if($coupon_code->get('ccd_start_time') && $coupon_code->get('ccd_start_time') > $current_time){
+					continue;
 				}
+				
+				if($coupon_code->get('ccd_end_time') && $coupon_code->get('ccd_end_time') < $current_time){
+					continue;
+				}
+				return $coupon_code;
 			}
 		}
 		return false;
