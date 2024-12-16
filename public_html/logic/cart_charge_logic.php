@@ -14,6 +14,8 @@ function cart_charge_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php'); 
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_codes_class.php'); 
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_code_uses_class.php'); 
 			
 	$page_vars = array();
 	
@@ -178,6 +180,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			$order->set('ord_status', Order::STATUS_PAID);
 			$order->save();
 				
+				
 			$payment_service = 'stripe_checkout';
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
@@ -247,6 +250,19 @@ function cart_charge_logic($get_vars, $post_vars){
 			$order_item->set('odi_is_subscription', true);
 			$order_item->save();	
 			$order_item->load();
+			
+			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
+			foreach($cart->coupon_codes as $coupon_code_name){
+				if($coupon_code = $product->has_coupon(trim($coupon_code_name))){
+					$coupon_code_use = new CouponCodeUse(NULL);
+					$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
+					$coupon_code_use->set('ccu_ccd_coupon_code_id', $coupon_code->key);
+					$coupon_code_use->set('ccu_amount_discount', $coupon_code->get('ccd_amount_discount'));
+					$coupon_code_use->set('ccu_percent_discount', $coupon_code->get('ccd_percent_discount'));
+					$coupon_code_use->prepare();
+					$coupon_code_use->save();
+				}
+			}
 			
 			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
 			$order_item->save_cart_data($data);
@@ -452,6 +468,19 @@ function cart_charge_logic($get_vars, $post_vars){
 			$order_item->set('odi_status_change_time', 'now()');
 			$order_item->save();				
 			$order_item->load();
+			
+			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
+			foreach($cart->coupon_codes as $coupon_code_name){
+				if($coupon_code = $product->has_coupon(trim($coupon_code_name))){
+					$coupon_code_use = new CouponCodeUse(NULL);
+					$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
+					$coupon_code_use->set('ccu_ccd_coupon_code_id', $coupon_code->key);
+					$coupon_code_use->set('ccu_amount_discount', $coupon_code->get('ccd_amount_discount'));
+					$coupon_code_use->set('ccu_percent_discount', $coupon_code->get('ccd_percent_discount'));
+					$coupon_code_use->prepare();
+					$coupon_code_use->save();
+				}
+			}
 			
 			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
 			$order_item->save_cart_data($data);

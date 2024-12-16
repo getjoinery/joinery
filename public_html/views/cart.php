@@ -172,8 +172,9 @@
 
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('coupons_active')){
-			//echo '<h2 class="text-lg font-medium text-gray-900">Coupon Code</h2>';
-			echo ' <div class="relative mt-8">
+			echo '<h2 class="text-lg font-medium text-gray-900">Coupon Codes</h2>';
+
+			/*echo ' <div class="relative mt-8">
 			  <div class="absolute inset-0 flex items-center" aria-hidden="true">
 				<div class="w-full border-t border-gray-200"></div>
 			  </div>
@@ -182,24 +183,24 @@
 				  <>
 				</span>
 			  </div>
-			</div>';
-			if($cart->coupon_code){
-				echo 'Applied: '.$cart->coupon_code.' <a href="/cart?clear_coupon_code=1">clear coupon</a><br><br>';
+			</div>';*/
+			foreach($cart->coupon_codes as $coupon_code){
+				echo 'Applied: '.$coupon_code.' <a href="/cart?clear_coupon_code=1">remove</a><br><br>';
 			}
-			else{
-				$formwriter = new FormWriterPublicTW("form_coupon", TRUE);
-				echo $formwriter->begin_form("mt-6", "get", '/cart');
+			
+			$formwriter = new FormWriterPublicTW("form_coupon", TRUE);
+			echo $formwriter->begin_form("mt-6", "get", '/cart');
 
-				echo $formwriter->textinput('Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
-				if($page_vars['coupon_error']){
-					echo '<p>'.$page_vars['coupon_error'].'</p>';
-				}
-				//echo $formwriter->start_buttons();
-				echo $formwriter->new_form_button('Add Coupon', 'secondary');
-				//echo $formwriter->end_buttons();
-
-				echo $formwriter->end_form();
+			echo $formwriter->textinput('Add Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
+			if($page_vars['coupon_error']){
+				echo '<p>'.$page_vars['coupon_error'].'</p>';
 			}
+			//echo $formwriter->start_buttons();
+			echo $formwriter->new_form_button('Add Coupon', 'secondary');
+			//echo $formwriter->end_buttons();
+
+			echo $formwriter->end_form();
+			
 		}
 		
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
@@ -216,7 +217,7 @@
 				
 			}
 			else{	
-			
+			/*
 				?>	
 				 <div class="relative mt-8">
 				  <div class="absolute inset-0 flex items-center" aria-hidden="true">
@@ -228,7 +229,7 @@
 					</span>
 				  </div>
 				</div>
-				<?php
+				<?php*/
 				echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Stripe</h5>';
 				echo $page_vars['stripe_helper']->output_stripe_regular_form();	
 			}
@@ -237,46 +238,16 @@
 
 				if($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0){
 					//PAYPAL
-					echo '<div class="relative mt-8">
-					  <div class="absolute inset-0 flex items-center" aria-hidden="true">
-						<div class="w-full border-t border-gray-200"></div>
-					  </div>
-					  <div class="relative flex justify-center">
-						<span class="px-4 bg-white text-sm font-medium text-gray-500">
-						  <>
-						</span>
-					  </div>
-					</div>';
 					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
 					echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id']);
 				}
 				else if($cart->get_num_recurring() == 0){
 					//PAYPAL
-					echo '<div class="relative mt-8">
-					  <div class="absolute inset-0 flex items-center" aria-hidden="true">
-						<div class="w-full border-t border-gray-200"></div>
-					  </div>
-					  <div class="relative flex justify-center">
-						<span class="px-4 bg-white text-sm font-medium text-gray-500">
-						  <>
-						</span>
-					  </div>
-					</div>';
 					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
 					echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
 				}
 				else{
 					//PAYPAL
-					echo '<div class="relative mt-8">
-					  <div class="absolute inset-0 flex items-center" aria-hidden="true">
-						<div class="w-full border-t border-gray-200"></div>
-					  </div>
-					  <div class="relative flex justify-center">
-						<span class="px-4 bg-white text-sm font-medium text-gray-500">
-						  <>
-						</span>
-					  </div>
-					</div>';
 					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
 					echo '<p><b>Paypal subscriptions must be purchased individually.  Remove all other items from your cart to pay with Paypal.</b></p>'; 				
 				}

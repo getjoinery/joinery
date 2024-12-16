@@ -41,14 +41,17 @@ function cart_logic($get_vars, $post_vars){
 	//COUPONS	
 	if($settings->get_setting('coupons_active')){
 		if($_GET['clear_coupon_code']){
-			$cart->coupon_code = NULL;
+			$cart->coupon_codes = array();
 			$cart->update_items_for_coupon();
 		}
 		else if($_GET['coupon_code']){
 			//CHECK IF VALID
-			$coupon_code_test = CouponCode::GetByColumn('ccd_code', $_GET['coupon_code']);
+
+			$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim($_GET['coupon_code']));
+
 			if($coupon_code_test){
-				$cart->coupon_code = $coupon_code_test->get('ccd_code');
+				$cart->coupon_codes[] = $coupon_code_test->get('ccd_code');
+				$cart->coupon_codes = array_unique($cart->coupon_codes);
 				$cart->update_items_for_coupon();
 			}
 			else{

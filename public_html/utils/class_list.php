@@ -181,7 +181,8 @@
 			'Upgrade',
 			'Item',
 			'ItemRelation',
-			'ItemRelationType'
+			'ItemRelationType', 
+			'CouponCodeUse'
 		);			
 
 

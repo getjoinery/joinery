@@ -20,6 +20,7 @@ class CouponCode extends SystemBase {
 	public static $permanent_delete_actions = array(
 		'ccd_coupon_code_id' => 'delete', 
 		'ccp_ccd_coupon_code_id' => 'prevent',
+		'ccu_cco_coupon_code_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
@@ -65,15 +66,23 @@ class CouponCode extends SystemBase {
 
 	
 	function get_discount($full_price){
+		$discount = 0;
 		if($this->get('ccd_amount_discount')){
-			return $this->get('ccd_amount_discount');
+			$discount = $this->get('ccd_amount_discount');
 		}
 		else if($this->get('ccd_percent_discount')){
-			return ($this->get('ccd_percent_discount') / 100) * $full_price;
+			$discount = round(($this->get('ccd_percent_discount') / 100) * $full_price, 2);
 		}
 		else{
-			return 0;
+			$discount = 0;
 		}
+
+		//NO DISCOUNTS GREATER THAN 100%
+		if($discount > $full_price){
+			$discount = $full_price;
+		}
+		
+		return $discount;
 	}
 
 	

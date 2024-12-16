@@ -16,7 +16,7 @@ class ShoppingCart {
 	public $items;
 	public $billing_user;
 	public $last_receipt;
-	public $coupon_code;
+	public $coupon_codes = array();
 
 	public function __construct() {
 		$this->items = array();
@@ -109,20 +109,7 @@ class ShoppingCart {
 
 		
 		//HANDLE COUPONS
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('coupons_active')){
-			$discount = 0;
-			if($this->coupon_code){
-				if($coupon_obj = $product->has_coupon($this->coupon_code)){
-					$discount = $coupon_obj->get_discount($price);
-					//NO COUPONS GREATER THAN THE ITEM PRICE
-					if($discount > $price){
-						$discount = $price;
-					}
-
-				}
-			}
-		}
+		$discount = $product->total_coupon_discount($price, $this->coupon_codes);
 
 		$this->items[] = array(1,	$product,	$form_data, $price, $discount);
 	}
@@ -134,18 +121,9 @@ class ShoppingCart {
 			$product_version = $product->get_product_version($data);
 			$price = $product->get_price($product_version, $data);
 
-			if($this->coupon_code){
-				if($coupon_obj = $product->has_coupon($this->coupon_code)){
-					$coupon_discount = $coupon_obj->get_discount($price);
-					//NO COUPONS GREATER THAN THE ITEM PRICE
-					if($coupon_discount > $price){
-						$coupon_discount = $price;
-					}
-				}
-			}
+			$discount = $product->total_coupon_discount($price, $this->coupon_codes);
 
-
-			$this->items[$key][4] = $coupon_discount;
+			$this->items[$key][4] = $discount;
 		}
 	}
 
@@ -296,7 +274,7 @@ class ShoppingCart {
 	public function clear_cart() {
 		$this->items = array();
 		$this->item_id = 0;
-		$this->coupon_code = NULL;
+		$this->coupon_codes = array();
 	}
 
 }

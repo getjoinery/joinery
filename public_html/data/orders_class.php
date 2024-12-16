@@ -21,7 +21,8 @@ class Order extends SystemBase {
 		'ord_order_id' => 'delete',	
 		'odi_ord_order_id' => 'delete',
 		'cls_ord_order_id' => 'delete',
-		'evr_ord_order_id' => 'null'
+		'evr_ord_order_id' => 'null',
+		'ccu_ord_order_id' => 'null',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
 	public const STATUS_UNPAID = 1;
