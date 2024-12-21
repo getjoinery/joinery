@@ -6,7 +6,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 
-	$PRODUCT_ID_TO_NAME_CACHE = array();
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
@@ -89,9 +88,9 @@
 	$results = array();
 	while ($user = $q->fetch()) {
 		$total_for_user = 0;
-		$results[$user->usr_user_id][name] = $user->usr_first_name . ' ' . $user->usr_last_name;
-		$results[$user->usr_user_id][email] = $user->usr_email;
-		$results[$user->usr_user_id][products] = array();	
+		$results[$user->usr_user_id]['name'] = $user->usr_first_name . ' ' . $user->usr_last_name;
+		$results[$user->usr_user_id]['email'] = $user->usr_email;
+		$results[$user->usr_user_id]['products'] = array();	
 			
 		$sql = "SELECT odi_price, odi_pro_product_id, odi_refund_amount FROM odi_order_items WHERE odi_usr_user_id = ".$user->usr_user_id." AND odi_status = 2 AND odi_price > 0 AND odi_status_change_time >= '".$startdate . "' and odi_status_change_time <= '" . $enddate . "'";
 		try {
@@ -104,30 +103,30 @@
 		
 		while($order_item = $r->fetch()){
 			$item_amount = $order_item->odi_price - $order_item->odi_refund_amount;
-			$results[$user->usr_user_id][products][$order_item->odi_pro_product_id][name] = $product_array[$order_item->odi_pro_product_id];
-			$results[$user->usr_user_id][products][$order_item->odi_pro_product_id][amount] += $item_amount;
+			$results[$user->usr_user_id]['products'][$order_item->odi_pro_product_id]['name'] = $product_array[$order_item->odi_pro_product_id];
+			$results[$user->usr_user_id]['products'][$order_item->odi_pro_product_id]['amount'] += $item_amount;
 			$total_for_user += $item_amount;
 		}
-		$results[$user->usr_user_id][total] = $total_for_user;
+		$results[$user->usr_user_id]['total'] = $total_for_user;
 	}
 	
 	foreach($results as $result){
-		if($result[total] > 0){
+		if($result['total'] > 0){
 			$rowvalues = array();
-			array_push($rowvalues, $result[name] . ' ('.$result[email].')');
+			array_push($rowvalues, $result['name'] . ' ('.$result['email'].')');
 			$page->disprow($rowvalues);
-			foreach($result[products] as $product){
+			foreach($result['products'] as $product){
 				$rowvalues = array();
 				array_push($rowvalues, '');
-				array_push($rowvalues, $product[name]);
-				array_push($rowvalues, $currency_symbol.$product[amount]);
+				array_push($rowvalues, $product['name']);
+				array_push($rowvalues, $currency_symbol.$product['amount']);
 				$page->disprow($rowvalues);				
 			}
 		
 			$rowvalues = array();
 			array_push($rowvalues, '');
 			array_push($rowvalues, '<b>Total:</b>');
-			array_push($rowvalues, '<b>'.$currency_symbol.$result[total].'</b>');
+			array_push($rowvalues, '<b>'.$currency_symbol.$result['total'].'</b>');
 			$page->disprow($rowvalues);		
 		}		
 	}

@@ -298,7 +298,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				foreach($notify_emails as $notify_email){
 					try {
 						$notify_user = User::GetByEmail($notify_email);
-						$body = 'Subscription '.$subscription_result[id].' (Order '. $order->key .') was started by '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
+						$body = 'Subscription '.$subscription_result['id'].' (Order '. $order->key .') was started by '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
 						$email_inner_template = $settings->get_setting('individual_email_inner_template');
 						$email = new EmailTemplate($email_inner_template, $notify_user);
 						$email->fill_template(array(

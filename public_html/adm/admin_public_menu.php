@@ -51,7 +51,7 @@
 	$page->tableheader($headers, $table_options, $pager);	
 
 	foreach ($menus as $menu){
-		if($menu[parent]){
+		if($menu['parent']){
 			$rowvalues = array();
 			array_push($rowvalues, $menu['name']);
 			if(empty($submenus)){	
@@ -64,10 +64,10 @@
 			
 			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_public_menu">
 			<input type="hidden" class="hidden" name="action" value="remove" />
-			<input type="hidden" class="hidden" name="pmu_public_menu_id" value="'.$menu[id].'" />
+			<input type="hidden" class="hidden" name="pmu_public_menu_id" value="'.$menu['id'].'" />
 			<button type="submit">Delete</button>
 			</form>';
-				$delform .= ' <a href="/admin/admin_public_menu_edit?pmu_public_menu_id='.$menu[id].'">edit</a>';
+				$delform .= ' <a href="/admin/admin_public_menu_edit?pmu_public_menu_id='.$menu['id'].'">edit</a>';
 			array_push($rowvalues, $delform);	
 			$page->disprow($rowvalues);		
 			
@@ -80,10 +80,10 @@
 					array_push($rowvalues, $submenu['order']);
 					$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_public_menu">
 					<input type="hidden" class="hidden" name="action" value="remove" />
-					<input type="hidden" class="hidden" name="pmu_public_menu_id" value="'.$submenu[id].'" />
+					<input type="hidden" class="hidden" name="pmu_public_menu_id" value="'.$submenu['id'].'" />
 					<button type="submit">Delete</button>
 					</form>';
-					$delform .= ' <a href="/admin/admin_public_menu_edit?pmu_public_menu_id='.$submenu[id].'">edit</a>';
+					$delform .= ' <a href="/admin/admin_public_menu_edit?pmu_public_menu_id='.$submenu['id'].'">edit</a>';
 					array_push($rowvalues, $delform);	
 					$page->disprow($rowvalues);					
 					

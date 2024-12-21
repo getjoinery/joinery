@@ -294,7 +294,7 @@ class EmailTemplate {
 				//CHANGED THIS TO NOT BE SO STRICT.  IF THE VARIABLE IN THE TEMPLATE DOESN'T EXIST, RETURN NULL INSTEAD OF AN ERROR
 				return NULL;
 				/*throw new EmailTemplateError(
-					'Template value <font style="color:black;">' . implode($value_levels, '->') . '</font> is invalid or not set.  Trace:' . print_r(debug_backtrace(), TRUE));*/
+					'Template value <font style="color:black;">' . implode('->'$value_levels) . '</font> is invalid or not set.  Trace:' . print_r(debug_backtrace(), TRUE));*/
 			}
 			$current_array_level = $current_array_level[$array_key];
 		}

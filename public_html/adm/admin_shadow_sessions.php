@@ -6,8 +6,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
 
-	$PRODUCT_ID_TO_NAME_CACHE = array();
-
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();

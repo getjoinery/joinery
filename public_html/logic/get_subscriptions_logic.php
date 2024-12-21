@@ -35,9 +35,9 @@
 
 		$stripe_customers = $stripe_helper->get_customers(["email" => $user->get('usr_email')]);	
 
-		foreach($stripe_customers[data] as $stripe_customer){
-			if(!in_array($stripe_customer[id], $customer_ids)){
-				$customer_ids[] = $stripe_customer[id];
+		foreach($stripe_customers['data'] as $stripe_customer){
+			if(!in_array($stripe_customer['id'], $customer_ids)){
+				$customer_ids[] = $stripe_customer['id'];
 			}
 		}
 	}

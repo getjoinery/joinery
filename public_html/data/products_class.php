@@ -1138,7 +1138,7 @@ class Product extends SystemBase {
 			$instances_validations = $this->get_requirement_validation();
 			foreach($instances_validations as $instance_validation){
 				foreach($instance_validation as $field=>$valuearray){
-						$value = $valuearray[required];
+						$value = $valuearray['required'];
 						$rules[$field] = array(key($valuearray)=>$value['value']);
 					
 				}
@@ -1154,7 +1154,7 @@ class Product extends SystemBase {
 			//ADD IN EXTRA DATA 
 			if(count($extra_data)){
 				foreach($extra_data as $field=>$valuearray){
-						$value = $valuearray[required];
+						$value = $valuearray['required'];
 						$rules[$field] = array(key($valuearray)=>$value['value']);
 					
 				}

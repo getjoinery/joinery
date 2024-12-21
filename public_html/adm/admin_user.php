@@ -202,7 +202,10 @@
 	}
 
 	$activations = $q->fetchAll();
+
 	*/
+	
+
 
 	$sql = 'SELECT * FROM log_logins WHERE log_usr_user_id='.$user->key.' ORDER BY log_login_time DESC LIMIT 10';
 
@@ -241,6 +244,9 @@
 		if(!$user->get('usr_delete_time')) {
 			if($_SESSION['permission'] > 7){
 				$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
+				if($settings->get_setting('checkout_type')){
+					$options['altlinks']['Payment Methods'] = '/admin/admin_user_payment_methods?usr_user_id='.$user->key;
+				}
 				if(!$user->get('usr_email_is_verified')){
 					$options['altlinks']['Resend activation email'] = '/admin/admin_email_verify?usr_user_id='.$user->key; 
 				}
@@ -329,6 +335,8 @@
 					echo 'Disabled';
 				}
 				else {	
+
+						
 					echo '<h4>Active Subscriptions</h4>';
 					foreach($active_subscriptions as $subscription){	
 						$status_words = 'active';
@@ -563,7 +571,7 @@
 
 
 
-
+	$PRODUCT_ID_TO_NAME_CACHE = array();
 
 	$headers = array('Order ID', 'Order Time', 'Products', 'Total');
 	$altlinks = array();
@@ -621,7 +629,7 @@
 
 	
 		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone()));
-		array_push($rowvalues, implode($order_items_out, '<br>'));
+		array_push($rowvalues, implode('<br>', $order_items_out));
 		array_push($rowvalues, '$'.$order->get('ord_total_cost'));
 		
 		//array_push($rowvalues, $status_to_html[$min_status ?: 1]);

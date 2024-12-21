@@ -128,7 +128,7 @@
 	$stripe_invoicenum = 0;
 	//SAFEGUARD, ONLY RUN 50 PAGES
 	while($pagenum <= 50){
-		echo '<b>Page '.$pagenum.', Count: '.count($stripe_invoices[data]).'</b><br>';
+		echo '<b>Page '.$pagenum.', Count: '.count($stripe_invoices['data']).'</b><br>';
 		$pagenum++;
 			
 		foreach($stripe_invoices as $stripe_invoice) {
@@ -211,8 +211,8 @@
 		
 		if($stripe_invoices->has_more){
 			$created = array();
-			$created[gte] = $startdate;
-			$created[lte] = $enddate;
+			$created['gte'] = $startdate;
+			$created['lte'] = $enddate;
 			$stripe_invoices = $stripe_helper->get_invoices(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 		}
 		else{
