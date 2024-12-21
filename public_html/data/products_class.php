@@ -896,8 +896,19 @@ class Product extends SystemBase {
 	public function total_coupon_discount($full_price, $coupon_codes){
 		$discount = 0;
 		foreach($coupon_codes as $coupon_code){
-			if($coupon_obj = $this->has_coupon($coupon_code)){
-				$discount += $coupon_obj->get_discount($full_price);
+			if($coupon_array = $this->has_coupons($coupon_code)){
+				foreach($coupon_array as $coupon){
+					//STACKABLE OR NOT 
+					if($coupon->get('ccd_is_stackable')){
+						$discount += $coupon->get_discount($full_price);
+					}
+					else{
+						$this_discount = $coupon->get_discount($full_price);
+						if($this_discount > $discount){
+							$discount = $this_discount;
+						}
+					}
+				}
 			}
 		}
 		
@@ -909,13 +920,10 @@ class Product extends SystemBase {
 		
 	}
 	
-	public function has_coupon($coupon_code_name){
+	public function has_coupons($coupon_code_name){
 		$coupon_code = CouponCode::GetByColumn('ccd_code', $coupon_code_name);
-		if(!$coupon_code){
-			return false;
-		}
 		
-		
+		$valid_coupon_codes = array();
 
 		$searches = array('coupon_code_id' => $coupon_code->key, 'product_id' => $this->key);	
 		$coupon_code_products = new MultiCouponCodeProduct($searches);
@@ -923,21 +931,11 @@ class Product extends SystemBase {
 		
 		foreach($coupon_code_products as $coupon_code_product){	
 			$coupon_code = new CouponCode($coupon_code_product->get('ccp_ccd_coupon_code_id'), TRUE);
-				
-			//CHECK VALIDITY
-			if($coupon_code->get('ccd_is_active')){
-				$current_time = LibraryFunctions::get_current_time('UTC');
-				if($coupon_code->get('ccd_start_time') && $coupon_code->get('ccd_start_time') > $current_time){
-					continue;
-				}
-				
-				if($coupon_code->get('ccd_end_time') && $coupon_code->get('ccd_end_time') < $current_time){
-					continue;
-				}
-				return $coupon_code;
+			if($coupon_code->is_valid()){
+				$valid_coupon_codes[] = $coupon_code;
 			}
 		}
-		return false;
+		return $valid_coupon_codes;
 	}
 	
 

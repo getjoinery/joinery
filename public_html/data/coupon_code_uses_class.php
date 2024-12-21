@@ -99,6 +99,11 @@ class MultiCouponCodeUse extends SystemMultiBase {
 		 	$bind_params[] = array($this->options['coupon_code_use_id'], PDO::PARAM_INT);
 		} 
 		
+		if (array_key_exists('coupon_code_id', $this->options)) {
+		 	$where_clauses[] = 'ccu_ccd_coupon_code_id = ?';
+		 	$bind_params[] = array($this->options['coupon_code_id'], PDO::PARAM_INT);
+		} 		
+		
 		if (array_key_exists('order_id', $this->options)) {
 		 	$where_clauses[] = 'ccu_ord_order_id = ?';
 		 	$bind_params[] = array($this->options['order_id'], PDO::PARAM_INT);

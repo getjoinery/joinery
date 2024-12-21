@@ -50,9 +50,14 @@ function cart_logic($get_vars, $post_vars){
 			$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim($_GET['coupon_code']));
 
 			if($coupon_code_test){
-				$cart->coupon_codes[] = $coupon_code_test->get('ccd_code');
-				$cart->coupon_codes = array_unique($cart->coupon_codes);
-				$cart->update_items_for_coupon();
+				if($coupon_code_test->is_valid()){
+					$cart->coupon_codes[] = $coupon_code_test->get('ccd_code');
+					$cart->coupon_codes = array_unique($cart->coupon_codes);
+					$cart->update_items_for_coupon();
+				}
+				else{
+					$page_vars['coupon_error'] = 'Coupon code not valid.';
+				}
 			}
 			else{
 				$page_vars['coupon_error'] = 'Coupon code not found.';
