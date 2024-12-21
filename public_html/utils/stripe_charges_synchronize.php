@@ -133,7 +133,7 @@
 	
 	//SAFEGUARD, ONLY RUN 50 PAGES
 	while($pagenum <= 50){
-		echo '<b>Page '.$pagenum.', Count: '.count($charges[data]).'</b><br>';
+		echo '<b>Page '.$pagenum.', Count: '.count($charges['data']).'</b><br>';
 		$pagenum++;
 			
 		foreach($charges as $charge) {
@@ -419,8 +419,8 @@
 
 		if($charges->has_more){
 			$created = array();
-			$created[gte] = $startdate;
-			$created[lte] = $enddate;
+			$created['gte'] = $startdate;
+			$created['lte'] = $enddate;
 			$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
 		}
 		else{

@@ -163,7 +163,7 @@
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id=' . $order_user->key . '">' . $order_user->display_name() . '</a>');
 
 		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone(), 'M j, Y'));
-		array_push($rowvalues, implode($order_items_out, '<br>'));
+		array_push($rowvalues, implode('<br>',$order_items_out));
 		
 		$refund_text = '';
 		if($order->get('ord_refund_amount')){

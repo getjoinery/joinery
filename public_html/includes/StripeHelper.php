@@ -401,7 +401,7 @@ class StripeHelper {
 				$user->set('usr_stripe_customer_id', $stripe_customer['data'][0]['id']);
 			}		 
 			$user->save();
-			return $stripe_customer;
+			return $stripe_customer['data'][0];
 		}
 		else if($return_type == 'id'){
 			if($stripe_customer['data'][0]['id']){
@@ -613,15 +613,15 @@ class StripeHelper {
 			try{		
 				$stripe_subscription = $this->get_subscription($order_item->get('odi_stripe_subscription_id'));	
 				
-				if($stripe_subscription[canceled_at]){
-					$canceled_at = gmdate("c", $stripe_subscription[canceled_at]);
+				if($stripe_subscription['canceled_at']){
+					$canceled_at = gmdate("c", $stripe_subscription['canceled_at']);
 					
 					//IF SUBSCRIPTION ENDED, REMOVE 
 					$order_item->set('odi_subscription_cancelled_time', $canceled_at);
 				}
 
-				//if($stripe_subscription[status] == 'canceled' || $stripe_subscription[status] == 'incomplete_expired'){
-				$order_item->set('odi_subscription_status', $stripe_subscription[status]);
+				//if($stripe_subscription['status'] == 'canceled' || $stripe_subscription['status'] == 'incomplete_expired'){
+				$order_item->set('odi_subscription_status', $stripe_subscription['status']);
 				$order_item->save();
 				//} 
 				return true;
@@ -722,9 +722,14 @@ class StripeHelper {
 		
 	}
 	
+	public function get_payment_methods($stripe_user_id){
+		$result = $this->stripe->customers->allPaymentMethods($stripe_user_id, ['limit' => 20]);
+		return $result;
+	}
+	
 	public function get_subscription_plan($plan_name){
-		$plan = $this->stripe->plans->retrieve($plan_name);
-		return $plan;
+		$result = $this->stripe->plans->retrieve($plan_name);
+		return $result;
 	}
 	
 	public function create_subscription_plan($params){
