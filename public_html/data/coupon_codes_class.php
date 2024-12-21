@@ -33,7 +33,9 @@ class CouponCode extends SystemBase {
 		'ccd_is_active' => 'Is it active?',
 		'ccd_published_time' => 'Time published',
 		'ccd_create_time' => 'Time Created',
-		'ccd_delete_time' => 'Time deleted'
+		'ccd_delete_time' => 'Time deleted',
+		'ccd_max_num_uses' => 'Number of uses',
+		'ccd_is_stackable' => 'Does it stack with other coupons?'
 	);
 
 	public static $field_specifications = array(
@@ -47,6 +49,8 @@ class CouponCode extends SystemBase {
 		'ccd_published_time' => array('type'=>'timestamp(6)'),
 		'ccd_create_time' => array('type'=>'timestamp(6)'),
 		'ccd_delete_time' => array('type'=>'timestamp(6)'),
+		'ccd_max_num_uses' => array('type'=>'int4'),
+		'ccd_is_stackable' => array('type'=>'bool'),
 	);
 			
 	public static $required_fields = array();
@@ -83,6 +87,35 @@ class CouponCode extends SystemBase {
 		}
 		
 		return $discount;
+	}
+	
+	//THIS FUNCTION DETERMINES IF THE COUPON CODE IS VALID, BUT DOES NOT CHECK IF IT'S APPLIES TO A CERTAIN PRODUCT
+	function is_valid(){
+		//CHECK VALIDITY
+		if(!$this->get('ccd_is_active')){
+			return false;
+		}
+		
+		$current_time = LibraryFunctions::get_current_time('UTC');
+		if($this->get('ccd_start_time') && $this->get('ccd_start_time') < $current_time){
+			return false;
+		}
+		
+		if($this->get('ccd_end_time') && $this->get('ccd_end_time') > $current_time){
+			return false;
+		}
+		
+		//CHECK NUMBER OF USES 
+		if($max_uses = $this->get('ccd_max_num_uses')){
+			$searches = array('coupon_code_id' => $this->key);	
+			$coupon_code_uses = new MultiCouponCodeUse($searches);
+			$num_uses = $coupon_code_uses->count_all();
+			if($num_uses > $max_uses){
+				return false;
+			}
+		}
+		
+		return true;
 	}
 
 	
