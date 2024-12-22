@@ -185,8 +185,27 @@
 			  </div>
 			</div>';*/
 			foreach($cart->coupon_codes as $coupon_code){
-				echo 'Applied: '.$coupon_code.' <a href="/cart?clear_coupon_code=1">remove</a><br><br>';
+				echo 'Applied: '.$coupon_code.' <a href="/cart?clear_coupon_code='.$coupon_code.'">remove</a><br><br>';
 			}
+
+
+			//DEBUG LIST ALL COUPONS
+			if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+				echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
+				foreach($page_vars['all_coupons'] as $coupon){
+					$formwriter = new FormWriterPublicTW("form_coupon", TRUE);
+					echo $formwriter->begin_form("mt-6", "get", '/cart');
+
+					echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
+					
+					echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary');
+
+
+					echo $formwriter->end_form();
+				}
+				echo '</div>';
+			}
+
 			
 			$formwriter = new FormWriterPublicTW("form_coupon", TRUE);
 			echo $formwriter->begin_form("mt-6", "get", '/cart');

@@ -37,6 +37,7 @@ class CouponCode extends SystemBase {
 		'ccd_max_num_uses' => 'Number of uses',
 		'ccd_is_stackable' => 'Does it stack with other coupons?',
 		'ccd_usr_user_id_affiliate' => 'User who gets credit for this code',
+		'ccd_applies_to' => 'Category of product that this coupon applies to ("All products"=>0, "Subscriptions only"=>1, "One time purchases only"=>2, "Custom"=>3)',
 	);
 
 	public static $field_specifications = array(
@@ -53,6 +54,7 @@ class CouponCode extends SystemBase {
 		'ccd_max_num_uses' => array('type'=>'int4'),
 		'ccd_is_stackable' => array('type'=>'bool'),
 		'ccd_usr_user_id_affiliate' => array('type'=>'int4'),
+		'ccd_applies_to' => array('type'=>'int4'),
 	);
 			
 	public static $required_fields = array();
@@ -126,6 +128,10 @@ class CouponCode extends SystemBase {
 			throw new CouponCodeException('That coupon code already exists.');
 		}		
 
+		if($this->get('ccd_amount_discount') && $this->get('ccd_percent_discount')){
+			throw new CouponCodeException('Coupon cannot have an amount and a percent.');
+		}
+		
 	}	
 	
 	
@@ -162,14 +168,24 @@ class MultiCouponCode extends SystemMultiBase {
 		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
 		} 
 		
+		if (array_key_exists('applies_to', $this->options)) {
+		 	$where_clauses[] = 'ccd_applies_to = ?';
+		 	$bind_params[] = array($this->options['applies_to'], PDO::PARAM_INT);
+		} 
+		
 		if (array_key_exists('link', $this->options)) {
 			$where_clauses[] = 'ccd_link = ?';
 			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
 		}			
 
-		if (array_key_exists('published', $this->options)) {
-		 	$where_clauses[] = 'ccd_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');
+		if (array_key_exists('active', $this->options)) {
+		 	$where_clauses[] = 'ccd_is_active = ' . ($this->options['active'] ? 'TRUE' : 'FALSE');
 		}
+
+		if (array_key_exists('published', $this->options)) {
+		 	$where_clauses[] = 'ccd_published_time IS ' . ($this->options['published'] ? 'NOT NULL' : 'NULL');
+		} 
+
 		
 		if (array_key_exists('deleted', $this->options)) {
 		 	$where_clauses[] = 'ccd_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');

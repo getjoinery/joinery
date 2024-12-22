@@ -40,9 +40,20 @@ function cart_logic($get_vars, $post_vars){
 	
 	//COUPONS	
 	if($settings->get_setting('coupons_active')){
+		
+		//FOR DEBUG
+		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			$searches = array();	
+			$coupon_codes = new MultiCouponCode($searches);
+			$coupon_codes->load();
+			$page_vars['all_coupons'] = $coupon_codes;
+		}
+		
+		
 		if($_GET['clear_coupon_code']){
-			$cart->coupon_codes = array();
+			unset($cart->coupon_codes[array_search(trim($_GET['clear_coupon_code']), $cart->coupon_codes)]);
 			$cart->update_items_for_coupon();
+			LibraryFunctions::Redirect('/cart');
 		}
 		else if($_GET['coupon_code']){
 			//CHECK IF VALID

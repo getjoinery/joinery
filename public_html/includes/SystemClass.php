@@ -720,7 +720,7 @@ abstract class SystemBase {
 		//IF NO PREVENT CONSTRAINT EXISTS, THEN DO THE DELETES
 		foreach($found_foreign_keys as $column=>$table_name){
 			
-			$action = 'skip';  //SKIP IS DEFAULT
+			$action = 'delete';  //SKIP IS DEFAULT
 			foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
 				if($pcolumn == $column){
 					$action = $paction;

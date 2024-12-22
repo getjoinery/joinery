@@ -263,15 +263,17 @@ function cart_charge_logic($get_vars, $post_vars){
 			
 			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
 			foreach($cart->coupon_codes as $coupon_code_name){
-				if($coupon_codes = $product->has_coupons(trim($coupon_code_name))){
-					foreach($coupon_codes as $coupon_code){
-						$coupon_code_use = new CouponCodeUse(NULL);
-						$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
-						$coupon_code_use->set('ccu_ccd_coupon_code_id', $coupon_code->key);
-						$coupon_code_use->set('ccu_amount_discount', $coupon_code->get('ccd_amount_discount'));
-						$coupon_code_use->set('ccu_percent_discount', $coupon_code->get('ccd_percent_discount'));
-						$coupon_code_use->prepare();
-						$coupon_code_use->save();
+				if($valid_coupons = $product->get_valid_coupons()){
+					foreach($valid_coupons as $valid_coupon){
+						if($coupon_code_name == $valid_coupon->get('ccd_code')){
+							$coupon_code_use = new CouponCodeUse(NULL);
+							$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
+							$coupon_code_use->set('ccu_ccd_coupon_code_id', $valid_coupon->key);
+							$coupon_code_use->set('ccu_amount_discount', $valid_coupon->get('ccd_amount_discount'));
+							$coupon_code_use->set('ccu_percent_discount', $valid_coupon->get('ccd_percent_discount'));
+							$coupon_code_use->prepare();
+							$coupon_code_use->save();
+						}
 					}
 				}
 			}
@@ -483,15 +485,17 @@ function cart_charge_logic($get_vars, $post_vars){
 			
 			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
 			foreach($cart->coupon_codes as $coupon_code_name){
-				if($coupon_codes = $product->has_coupons(trim($coupon_code_name))){
-					foreach($coupon_codes as $coupon_code){
-						$coupon_code_use = new CouponCodeUse(NULL);
-						$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
-						$coupon_code_use->set('ccu_ccd_coupon_code_id', $coupon_code->key);
-						$coupon_code_use->set('ccu_amount_discount', $coupon_code->get('ccd_amount_discount'));
-						$coupon_code_use->set('ccu_percent_discount', $coupon_code->get('ccd_percent_discount'));
-						$coupon_code_use->prepare();
-						$coupon_code_use->save();
+				if($valid_coupons = $product->get_valid_coupons()){
+					foreach($valid_coupons as $valid_coupon){
+						if($coupon_code_name == $valid_coupon->get('ccd_code')){
+							$coupon_code_use = new CouponCodeUse(NULL);
+							$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
+							$coupon_code_use->set('ccu_ccd_coupon_code_id', $valid_coupon->key);
+							$coupon_code_use->set('ccu_amount_discount', $valid_coupon->get('ccd_amount_discount'));
+							$coupon_code_use->set('ccu_percent_discount', $valid_coupon->get('ccd_percent_discount'));
+							$coupon_code_use->prepare();
+							$coupon_code_use->save();
+						}
 					}
 				}
 			}

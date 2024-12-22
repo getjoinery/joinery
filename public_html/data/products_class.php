@@ -895,9 +895,11 @@ class Product extends SystemBase {
 	
 	public function total_coupon_discount($full_price, $coupon_codes){
 		$discount = 0;
+		$valid_coupons = $this->get_valid_coupons();
+
 		foreach($coupon_codes as $coupon_code){
-			if($coupon_array = $this->has_coupons($coupon_code)){
-				foreach($coupon_array as $coupon){
+			foreach($valid_coupons as $coupon){
+				if($coupon_code == $coupon->get('ccd_code')){
 					//STACKABLE OR NOT 
 					if($coupon->get('ccd_is_stackable')){
 						$discount += $coupon->get_discount($full_price);
@@ -920,23 +922,81 @@ class Product extends SystemBase {
 		
 	}
 	
-	public function has_coupons($coupon_code_name){
-		$coupon_code = CouponCode::GetByColumn('ccd_code', $coupon_code_name);
-		
+	public function get_valid_coupons(){
 		$valid_coupon_codes = array();
 
-		$searches = array('coupon_code_id' => $coupon_code->key, 'product_id' => $this->key);	
+		//FIRST GET ANY COUPONS THAT ARE GLOBAL AND VALID 
+		$searches = array('deleted' => false, 'active' => true, 'applies_to' => 0);	
+		$coupon_codes = new MultiCouponCode($searches);
+		$coupon_codes->load();
+		foreach($coupon_codes as $coupon_code){	
+			if($coupon_code->is_valid()){
+				$found=0;
+				foreach($valid_coupon_codes as $valid_coupon_code){
+					if($valid_coupon_code->get('ccd_code') == $coupon_code->get('ccd_code')){
+						$found=1;
+					}
+				}
+				
+				if(!$found){
+					$valid_coupon_codes[] = $coupon_code;
+				}
+			}
+		}
+		
+		
+		//THEN GET ANY COUPONS THAT MATCH SUBSCRIPTION STATUS AND VALID 
+		if($this->get('pro_recurring')){
+			$searches = array('deleted' => false, 'active' => true, 'applies_to' => 1);	
+		}
+		else{
+			$searches = array('deleted' => false, 'active' => true, 'applies_to' => 2);	
+		}
+		$coupon_codes = new MultiCouponCode($searches);
+		$coupon_codes->load();
+		foreach($coupon_codes as $coupon_code){	
+			if($coupon_code->is_valid()){
+				$found=0;
+				foreach($valid_coupon_codes as $valid_coupon_code){
+					if($valid_coupon_code->get('ccd_code') == $coupon_code->get('ccd_code')){
+						$found=1;
+					}
+				}
+				
+				if(!$found){
+					$valid_coupon_codes[] = $coupon_code;
+				}
+			}
+		}		
+		
+		//THEN STORE ANY COUPONS THAT MATCH THE PRODUCT EXACTLY
+		$searches = array('product_id' => $this->key);	
 		$coupon_code_products = new MultiCouponCodeProduct($searches);
 		$coupon_code_products->load();
 		
 		foreach($coupon_code_products as $coupon_code_product){	
 			$coupon_code = new CouponCode($coupon_code_product->get('ccp_ccd_coupon_code_id'), TRUE);
-			if($coupon_code->is_valid()){
-				$valid_coupon_codes[] = $coupon_code;
+			if($coupon_code->get('ccd_applies_to') == 3){
+				if($coupon_code->is_valid()){
+					$found=0;
+					foreach($valid_coupon_codes as $valid_coupon_code){
+						if($valid_coupon_code->get('ccd_code') == $coupon_code->get('ccd_code')){
+							$found=1;
+						}
+					}
+					
+					if(!$found){
+						$valid_coupon_codes[] = $coupon_code;
+					}
+				}
 			}
 		}
+		
+		
 		return $valid_coupon_codes;
 	}
+	
+
 	
 
 	public function add_product_version($version_name, $version_price) {
