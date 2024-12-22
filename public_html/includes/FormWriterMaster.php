@@ -745,7 +745,7 @@ class FormWriterMaster {
 			$output .= '<script type="text/javascript">
 			$(document).ready(function() {
 			  $("#'.$id.'").select2({
-				placeholder: "Select an item",
+				placeholder: "None",
 				ajax: {
 				  url: "'.$ajaxendpoint.'",
 				  dataType: "json",

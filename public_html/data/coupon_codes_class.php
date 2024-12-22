@@ -35,7 +35,8 @@ class CouponCode extends SystemBase {
 		'ccd_create_time' => 'Time Created',
 		'ccd_delete_time' => 'Time deleted',
 		'ccd_max_num_uses' => 'Number of uses',
-		'ccd_is_stackable' => 'Does it stack with other coupons?'
+		'ccd_is_stackable' => 'Does it stack with other coupons?',
+		'ccd_usr_user_id_affiliate' => 'User who gets credit for this code',
 	);
 
 	public static $field_specifications = array(
@@ -51,6 +52,7 @@ class CouponCode extends SystemBase {
 		'ccd_delete_time' => array('type'=>'timestamp(6)'),
 		'ccd_max_num_uses' => array('type'=>'int4'),
 		'ccd_is_stackable' => array('type'=>'bool'),
+		'ccd_usr_user_id_affiliate' => array('type'=>'int4'),
 	);
 			
 	public static $required_fields = array();

@@ -16,6 +16,8 @@
 	$asdirection = LibraryFunctions::fetch_variable('asdirection', 'ASC', 0, '');
 
 	$searchterm = LibraryFunctions::fetch_variable('q', '', 0, '');
+	$includenone = LibraryFunctions::fetch_variable('includenone', 0, 0, '');
+	$searchdeleted = LibraryFunctions::fetch_variable('searchdeleted', 0, 0, '');
 
 	$search_criteria = array();
 	
@@ -42,6 +44,10 @@
 		}
 
 	}
+	
+	if($searchdeleted){
+		$search_criteria['deleted'] = false;
+	}
 
 	$users = new MultiUser(
 		$search_criteria,
@@ -60,12 +66,22 @@ foreach ($users as $user) {
 }
 
 $json = [];
+
+if($includenone){
+	$json[] = [
+		'id'=>0, 
+		'text'=> 'None'
+		];
+}
+
 foreach ($users as $user) {
-     $json[] = [
+    $json[] = [
 		'id'=>$user->key, 
 		'text'=> $user->display_name().' - '.$user->get('usr_email')
 		];
 }
+
+
 
 echo json_encode($json);
 exit();

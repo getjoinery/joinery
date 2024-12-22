@@ -77,7 +77,7 @@
 		$order_user = new User($order->get('ord_usr_user_id'), TRUE);
 	}
 	
-	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => ASC));
+	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => 'ASC'));
 	$users->load();
 	$optionvals = $users->get_dropdown_array();
 	

@@ -135,7 +135,7 @@
 		echo $formwriter->dropinput("Type of booking", "bkn_ety_booking_type_id", "ctrlHolder", $optionvals, $booking->get('bkn_ety_booking_type_id'), '', FALSE);	
 	} 
 	*/
-	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => ASC));
+	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => 'ASC'));
 	$users->load();
 	$optionvals = $users->get_dropdown_array();
 	
