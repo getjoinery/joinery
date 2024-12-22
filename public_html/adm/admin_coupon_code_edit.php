@@ -129,6 +129,9 @@
 	
 	echo $formwriter->textinput('or percent of discount', 'ccd_percent_discount', NULL, 100, $coupon_code->get('ccd_percent_discount'), '', 255, '');
 	
+	$optionvals = array("No"=>0, "Yes"=>1);
+	echo $formwriter->dropinput("Is this coupon stackable?", "ccd_is_stackable", "ctrlHolder", $optionvals, $coupon_code->get('ccd_is_stackable'), '', FALSE);
+	
 	//GET ALL PRODUCTS
 	$searches = array();
 	$sort = LibraryFunctions::fetch_variable('sort', 'product_id', 0, '');
@@ -161,7 +164,15 @@
 
 	 
 	echo $formwriter->datetimeinput('End time', 'ccd_end_time', 'ctrlHolder', LibraryFunctions::convert_time($coupon_code->get('ccd_end_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
+	
+	echo $formwriter->textinput('Maximum number of uses', 'ccd_max_num_uses', NULL, 10, $coupon_code->get('ccd_max_num_uses'), '', 255, '');
+	
+	//echo $formwriter->textinput('User ID of affiliate user', 'ccd_usr_user_id_affiliate', NULL, 10, $coupon_code->get('ccd_usr_user_id_affiliate'), '', 255, '');
 
+	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => 'ASC'));
+	$users->load();
+	$optionvals = $users->get_dropdown_array();
+	echo $formwriter->dropinput("Affiliate User for this coupon", "ccd_usr_user_id_affiliate", "ctrlHolder", $optionvals, $coupon_code->get('ccd_usr_user_id_affiliate'), '', TRUE, FALSE, '/ajax/user_search_ajax?includenone=1');	 
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
