@@ -121,14 +121,14 @@ class Activation {
 				break;
 			}
 		}	
-			
+		$expires_time_formatted = $expires_time->format(DATE_ATOM);
 		$statement = DbConnector::GetPreparedStatement(
 			'INSERT INTO act_activation_codes (act_usr_email, act_usr_user_id,act_code,act_expires_time, act_purpose, act_phn_phone_number_id)
 			VALUES (:act_usr_email, :usr_user_id,:act_code,:act_expires_time, :act_purpose, :act_phn_phone_number_id)');
 		$statement->bindParam(':act_usr_email', $email, PDO::PARAM_STR);
 		$statement->bindParam(':usr_user_id', $usr_user_id, PDO::PARAM_INT);
 		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
-		$statement->bindParam(':act_expires_time', $expires_time->format(DATE_ATOM), PDO::PARAM_STR);
+		$statement->bindParam(':act_expires_time', $expires_time_formatted, PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $purpose, PDO::PARAM_INT);
 		$statement->bindParam(':act_phn_phone_number_id', $phn_phone_number_id, PDO::PARAM_INT);
 		$statement->execute();
