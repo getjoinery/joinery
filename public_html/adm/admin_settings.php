@@ -124,8 +124,8 @@
 		
 
 		echo $formwriter->textinput("Base Path", 'baseDir', '', 20, $settings->get_setting('baseDir'), "" , 255, "");
-		echo $formwriter->textinput("Site Template", 'site_template', '', 20, $settings->get_setting('site_template'), "" , 255, "");
-		echo $formwriter->textinput("Alternate Theme Template (optional)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
+		echo $formwriter->textinput("Site folder (The site we are running, basically the folder at /var/www/html/x)", 'site_template', '', 20, $settings->get_setting('site_template'), "" , 255, "");
+		echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
 		echo $formwriter->textinput("Web URL (Example: https://getjoinery.com)", 'webDir', '', 20, $settings->get_setting('webDir'), "" , 255, "");
 		
 		echo '<div style="border: 3px solid black; padding: 10px; margin: 10px;">NOTE: If the following values are blank, they will be automatically filled with defaults</b>';
