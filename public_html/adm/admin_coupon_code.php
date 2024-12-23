@@ -43,19 +43,56 @@
 	$page->begin_box($options);
 
 
-	
+	echo '<br /><strong>Code:</strong> '.$coupon_code->get('ccd_code') . ' (' . LibraryFunctions::bool_to_english($coupon_code->get('ccd_is_active'), "Active", "Inactive") . ')<br />';		
 	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
-	echo '<br /><strong>Code:</strong> '.$coupon_code->get('ccd_code') . ' (' . LibraryFunctions::bool_to_english($coupon_code->get('ccd_is_active'), "Active", "Inactive") . ')<br />';	
 	
+	$settings = Globalvars::get_instance();
+	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 	
-	echo '<br /><strong>Discount amount:</strong> '.$coupon_code->get('ccd_amount_discount') .'<br />';	
-	echo '<br /><strong>Discount percent:</strong> '.$coupon_code->get('ccd_percent_discount') .'<br />';	
+	$stackable = '(Not stackable)';
+	if($coupon_code->get('ccd_is_stackable')){
+		$stackable = '(Stackable)';
+	}
 	
-	echo '<br /><strong>Start time:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_start_time'), 'UTC', $session->get_timezone());
+	echo '<br /><strong>Applies to:</strong> ';
+	if($coupon_code->get('ccd_applies_to') == 0){
+		echo 'All products';
+	}
+	else if($coupon_code->get('ccd_applies_to') == 1){
+		echo 'Subscriptions only';
+	}
+	else if($coupon_code->get('ccd_applies_to') == 2){
+		echo 'Single purchases only';
+	}
+	else if($coupon_code->get('ccd_applies_to') == 3){
+		echo 'Custom';
+	}
+	echo '<br />';
+	
+	echo '<br /><strong>Max uses:</strong> ';
+	if($coupon_code->get('ccd_max_uses') > 0){
+		echo $coupon_code->get('ccd_max_uses');
+	}	
+	else{
+		echo 'Unlimited';
+	}
+	
+	if($coupon_code->get('ccd_amount_discount')){
+		echo '<br /><strong>Discount:</strong> '.$currency_symbol.$coupon_code->get('ccd_amount_discount') .$stackable.'<br />';	
+	}
+	else{
+		echo '<br /><strong>Discount:</strong> '.$coupon_code->get('ccd_percent_discount') .'%'.$stackable.'<br />';	
+	}
+	
+	if($coupon_code->get('ccd_start_time')){
+		echo '<br /><strong>Start time:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_start_time'), 'UTC', $session->get_timezone());
+	}
 
-	echo '<br /><strong>End time:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_end_time'), 'UTC', $session->get_timezone());
+	if($coupon_code->get('ccd_start_time')){
+		echo '<br /><strong>End time:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_end_time'), 'UTC', $session->get_timezone());
+	}
 	
 	echo '<br />';
 	

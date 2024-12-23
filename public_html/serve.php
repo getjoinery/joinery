@@ -9,7 +9,15 @@ $static_routes_path = ltrim($static_routes_path, '/');
 
 $settings = Globalvars::get_instance();
 $site_template = $settings->get_setting('site_template');
-$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template;
+$theme_template = $settings->get_setting('theme_template');
+if($theme_template){
+	$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$theme_template;
+}
+else{
+	$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template;
+}
+
+
 
 //FOR STATS.  WE WILL ONLY RECORD HITS TO ACTUAL PAGES.
 $is_valid_page = false;
@@ -89,8 +97,9 @@ if($params[0] == 'plugins' && $params[2] == 'includes'){
 	}
 }
 
-//THEME INCLUDE FILES.  LOAD ANYTHING UNDER /theme/THEME/includes
-if($params[0] == 'theme' && $params[2] == 'includes'){
+//THEME INCLUDE FILES.  LOAD ANYTHING UNDER /theme/
+if($params[0] == 'theme'){
+
 	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
 	if(file_exists($base_file)){
 		$seconds_to_cache = 43200;
@@ -301,11 +310,11 @@ if($settings->get_setting('videos_active')){
 //HOMEPAGE
 if(!$params[0]){
 	if($settings->get_setting('use_blog_as_homepage')){
-		$template_file = $template_directory.'/blog.php';
+		$template_file = $template_directory.'/views/blog.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
 	}
 	else{
-		$template_file = $template_directory.'/index.php';
+		$template_file = $template_directory.'/views/index.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/index.php';		
 	}
 	$is_valid_page = true;

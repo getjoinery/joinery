@@ -66,7 +66,6 @@
 		array_push($rowvalues, "<a href='/admin/admin_coupon_code?ccd_coupon_code_id=$coupon_code->key'>".$coupon_code->get('ccd_code')."</a>");	
 		//array_push($rowvalues, $coupon_code->get('ccd_type'));
 		array_push($rowvalues, LibraryFunctions::convert_time($coupon_code->get('ccd_create_time'), 'UTC', $session->get_timezone()));
-		//array_push($rowvalues, LibraryFunctions::convert_time($coupon_code->get('ccd_published_time'), 'UTC', $session->get_timezone()));
 
 		if($coupon_code->get('ccd_delete_time')) {
 			$status = 'Deleted';

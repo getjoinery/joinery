@@ -31,7 +31,6 @@ class CouponCode extends SystemBase {
 		'ccd_start_time' => 'Start time of coupon',
 		'ccd_end_time' => 'End time of coupon',
 		'ccd_is_active' => 'Is it active?',
-		'ccd_published_time' => 'Time published',
 		'ccd_create_time' => 'Time Created',
 		'ccd_delete_time' => 'Time deleted',
 		'ccd_max_num_uses' => 'Number of uses',
@@ -48,7 +47,6 @@ class CouponCode extends SystemBase {
 		'ccd_start_time' => array('type'=>'timestamp(6)'),
 		'ccd_end_time' => array('type'=>'timestamp(6)'),
 		'ccd_is_active' => array('type'=>'bool'),
-		'ccd_published_time' => array('type'=>'timestamp(6)'),
 		'ccd_create_time' => array('type'=>'timestamp(6)'),
 		'ccd_delete_time' => array('type'=>'timestamp(6)'),
 		'ccd_max_num_uses' => array('type'=>'int4'),
@@ -181,10 +179,6 @@ class MultiCouponCode extends SystemMultiBase {
 		if (array_key_exists('active', $this->options)) {
 		 	$where_clauses[] = 'ccd_is_active = ' . ($this->options['active'] ? 'TRUE' : 'FALSE');
 		}
-
-		if (array_key_exists('published', $this->options)) {
-		 	$where_clauses[] = 'ccd_published_time IS ' . ($this->options['published'] ? 'NOT NULL' : 'NULL');
-		} 
 
 		
 		if (array_key_exists('deleted', $this->options)) {
