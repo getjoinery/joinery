@@ -8,13 +8,12 @@ $static_routes_path = rtrim($_REQUEST['path'], '/');
 $static_routes_path = ltrim($static_routes_path, '/');
 
 $settings = Globalvars::get_instance();
-$site_template = $settings->get_setting('site_template');
 $theme_template = $settings->get_setting('theme_template');
 if($theme_template){
 	$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$theme_template;
 }
 else{
-	$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$site_template;
+	$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/default';
 }
 
 
@@ -30,7 +29,7 @@ if(file_exists($template_file)){
 
 //ROBOTS.TXT
 if($params[0] == 'robots.txt'){
-	//$template_file = $template_directory.'/robots.php';
+	$template_file = $template_directory.'/views/robots.php';
 	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/views/robots.php';
 	if(file_exists($template_file)){
 		require_once($template_file);
@@ -286,7 +285,7 @@ if($settings->get_setting('videos_active')){
 		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 		$session = SessionControl::get_instance();
 		if($video && $video->authenticate_read(array('session'=>$session))){		
-				$template_file = $template_directory.'/video.php';
+				$template_file = $template_directory.'/views/video.php';
 				$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/video.php';
 				
 				$is_valid_page = true;
@@ -309,8 +308,8 @@ if($settings->get_setting('videos_active')){
 
 //HOMEPAGE
 if(!$params[0]){
-	if($settings->get_setting('use_blog_as_homepage')){
-		$template_file = $template_directory.'/views/blog.php';
+	if($alternate_page = $settings->get_setting('alternate_homepage')){
+		$template_file = $template_directory.'/views'.$alternate_page;
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
 	}
 	else{
@@ -332,11 +331,11 @@ if(!$params[0]){
 //PROFILE SECTION
 if($params[0] == 'profile'){
 	if($params[1]){
-		$template_file = ensure_extension($template_directory.'/profile/'.$params[1],'php');
+		$template_file = ensure_extension($template_directory.'/views/profile/'.$params[1],'php');
 		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/views/profile/'.$params[1],'php');
 	}
 	else{
-		$template_file = $template_directory.'/profile/profile.php';
+		$template_file = $template_directory.'/views/profile/profile.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/profile/profile.php';
 	}
 	
@@ -356,7 +355,7 @@ if($params[0] == 'profile'){
 if($settings->get_setting('blog_active')){
 	if($params[0] == 'posts'){
 		if(!$params[1] || $params[1] == 'tag'){
-			$template_file = $template_directory.'/blog.php';
+			$template_file = $template_directory.'/views/blog.php';
 			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
 			
 			if(file_exists($template_file)){
@@ -377,7 +376,7 @@ if($settings->get_setting('blog_active')){
 		
 		$post = Post::get_by_link($params[1], true);	
 
-		$template_file = $template_directory.'/post.php';
+		$template_file = $template_directory.'/views/post.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/post.php';
 		
 		if(file_exists($template_file)){
@@ -400,7 +399,7 @@ if($params[0] == 'page'){
 
 		$page = Page::get_by_link($params[1], true);		
 
-		$template_file = $template_directory.'/page.php';
+		$template_file = $template_directory.'/views/page.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
 		
 		if(file_exists($template_file)){
@@ -423,7 +422,7 @@ if($params[0] == 'location'){
 
 		$location = Location::get_by_link($params[1], true);		
 
-		$template_file = $template_directory.'/location.php';
+		$template_file = $template_directory.'/views/location.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/location.php';
 		
 		if(file_exists($template_file)){
@@ -446,7 +445,7 @@ if($params[0] == 'event'){
 
 		$event = Event::get_by_link($params[1], true);		
 
-		$template_file = $template_directory.'/event.php';
+		$template_file = $template_directory.'/views/event.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/event.php';
 
 		if(file_exists($template_file)){
@@ -469,7 +468,7 @@ if($params[0] == 'list'){
 
 		$mailing_list = MailingList::get_by_link($params[1], true);		
 
-		$template_file = $template_directory.'/list.php';
+		$template_file = $template_directory.'/views/list.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/list.php';
 		
 		if(file_exists($template_file)){
@@ -493,7 +492,7 @@ if($params[0] == 'product'){
 		$product = Product::get_by_link($params[1], true);	
 		$product_id = $product->key;
 		
-		$template_file = $template_directory.'/product.php';
+		$template_file = $template_directory.'/views/product.php';
 		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/product.php';
 		
 		
@@ -603,7 +602,7 @@ if($params[0] == 'utils'){
 
 //ROOT PAGES
 if($params[0]){
-	$template_file = ensure_extension($template_directory.'/'.$params[0],'php');
+	$template_file = ensure_extension($template_directory.'/views/'.$params[0],'php');
 	$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/views/'.$params[0],'php');
 
 	if(file_exists($template_file)){

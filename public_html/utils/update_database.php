@@ -272,7 +272,7 @@
 						}
 						if($live_column_info[$field]['character_maximum_length']){
 							if($live_column_info[$field]['character_maximum_length'] != $field_length){
-								echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field][character_maximum_length] .'<->spec: '. $field_length .")<br>\n";	
+								echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field]['character_maximum_length'] .'<->spec: '. $field_length .")<br>\n";	
 								$upgrade_field = true;								
 							}
 						}
@@ -373,6 +373,13 @@
 			echo 'Last Migration ' . $row['stg_value'] . "<br>\n";
 		}
 		
+		
+		$sql = "SELECT * FROM stg_settings WHERE stg_name='database_version'";
+		$q = $dblink->prepare($sql);
+		$q->execute();
+		$row = $q->fetch();		
+		echo 'Starting database version: '.$row['stg_value']. "<br>\n";
+		
 		$next_row = 0;
 		if($row['stg_value']){
 			$next_row = $row['stg_value'];
@@ -439,7 +446,7 @@
 					return 0;							
 				}
 				$result = call_user_func($function_name['filename']);
-				if(!result){
+				if(!$result){
 					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
 					return 0;					
 				}

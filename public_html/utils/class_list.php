@@ -191,8 +191,11 @@
 		//IT BAILS ON ERROR AND STOPS MIGRATIONS, IN CASE SOME LATER ONES ARE DEPENDENT ON EARLIER ONES
 		//IF THERE IS A TEST SQL AND IF IT RETURNS == 0, THEN WE RUN THE MIGRATION
 		//IF THERE IS NO TEST SQL, IT IS ASSUMED THAT WE ALWAYS RUN THE MIGRATION
+		//IF $migration['migration_file'] = 'SOME_FILE', THEN WE LOOK IN THE MIGRATIONS FOLDER AND RUN THAT MIGRATION
 		//ALSO UPDATES LAST SYSTEM VERSION
 		$migrations = array();
+		
+		
 		$migrations[0]['database_version'] = '0.5';
 		$migrations[0]['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_product_requirements'";
 		$migrations[0]['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon") VALUES (\'Product Requirements\', 5, \'admin_product_requirements\', 5, 8, 0, \'\');';
@@ -263,7 +266,8 @@ This email was sent to {~recipient}you{end}{recipient}*recipient->usr_email*{end
 		$migrations[11]['database_version'] = '0.7';
 		$migrations[11]['test'] = NULL;
 		$migrations[11]['migration_sql'] = NULL;
-		$migrations[11]['migration_file'] = 'test_migration.php';	
+		$migrations[11]['migration_file'] = NULL;	
+		//$migrations[11]['migration_file'] = 'test_migration.php';	
 		
 		$migrations[12]['database_version'] = '0.8';
 		$migrations[12]['test'] = 'SELECT count(1) as count FROM emt_email_templates WHERE emt_name = \'mailing_list_subscribe\'';
@@ -998,4 +1002,17 @@ Welcome!
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'blog_footer_text\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
+	
+ 		$migration['database_version'] = '0.45';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'pricing_page'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'pricing_page\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
+
+ 		$migration['database_version'] = '0.45';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'alternate_homepage'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'alternate_homepage\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;			
+		 
 		 
