@@ -651,6 +651,8 @@ class Product extends SystemBase {
 		'pro_link' => 'Link to use for accessing',
 		'pro_delete_time' => 'time deleted',
 		'pro_trial_period_days' => 'Days until a recurring payment starts',
+		'pro_plan_order_month' => 'Order for this product to appear on the monthly /plans page',
+		'pro_plan_order_year' => 'Order for this product to appear on the yearly /plans page'
 	);
 
 	public static $field_specifications = array(
@@ -675,6 +677,8 @@ class Product extends SystemBase {
 		'pro_link' => array('type'=>'varchar(255)'),
 		'pro_delete_time' => array('type'=>'timestamp(6)'),
 		'pro_trial_period_days' => array('type'=>'int4'),
+		'pro_plan_order_month' => array('type'=>'int4'),
+		'pro_plan_order_year' => array('type'=>'int4'),
 	);
 			 
 	public static $required_fields = array('pro_link', 'pro_price', 'pro_name');

@@ -122,24 +122,42 @@
 		$optionvals = array("Yes (show to screen)"=>1, 'No (logged)' => 0);
 		echo $formwriter->dropinput("Show errors", "show_errors", '', $optionvals, $settings->get_setting('show_errors'), '', FALSE);		
 		
-
+		echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
+		
+		
 		echo $formwriter->textinput("Base Path", 'baseDir', '', 20, $settings->get_setting('baseDir'), "" , 255, "");
 		echo $formwriter->textinput("Site folder (The site we are running, basically the folder at /var/www/html/x)", 'site_template', '', 20, $settings->get_setting('site_template'), "" , 255, "");
-		echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
+		
 		echo $formwriter->textinput("Web URL (Example: https://getjoinery.com)", 'webDir', '', 20, $settings->get_setting('webDir'), "" , 255, "");
 		
-		echo '<div style="border: 3px solid black; padding: 10px; margin: 10px;">NOTE: If the following values are blank, they will be automatically filled with defaults</b>';
-		echo $formwriter->textinput("Site Path (Default: ".$settings->get_setting('siteDir').")", 'siteDir', '', 20, $settings->get_setting('siteDir', false), "" , 255, "");
+		echo '<div style="border: 3px solid black; padding: 10px; margin: 10px;">NOTE: The following values are loaded from Globalvars_site.php</b>';
+		
+		echo '<p><b>Site path: </b> '.$settings->get_setting('siteDir').'</p>';
+		echo '<p><b>Static files path: </b> '.$settings->get_setting('static_files_dir').'</p>';
+		echo '<p><b>Upload path: </b> '.$settings->get_setting('upload_dir').'</p>';
+		echo '<p><b>Upload web directory: </b> '.$settings->get_setting('upload_web_dir').'</p>';
+		
+		/*echo $formwriter->textinput("Site Path (Default: ".$settings->get_setting('siteDir').")", 'siteDir', '', 20, $settings->get_setting('siteDir', false), "" , 255, "");
 		echo $formwriter->textinput("Static Files Path (Default: ".$settings->get_setting('static_files_dir').")", 'static_files_dir', '', 20, $settings->get_setting('static_files_dir', false), "" , 255, "");
 		echo $formwriter->textinput("Upload Path (Default: ".$settings->get_setting('upload_dir').")", 'upload_dir', '', 20, $settings->get_setting('upload_dir', false), "" , 255, "");
 		echo $formwriter->textinput("Upload Web URL (Default: ".$settings->get_setting('upload_web_dir').")", 'upload_web_dir', '', 20, $settings->get_setting('upload_web_dir', false), "" , 255, "");
+		*/
 		echo '</div>';
+		
+		
+		
+		
 		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', '', 20, $settings->get_setting('webmaster_email'), "" , 255, "");
 		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");
 		echo $formwriter->textinput("Default Email Name", 'defaultemailname', '', 20, $settings->get_setting('defaultemailname'), "" , 255, "");
 
+		
+		
+		
 		echo $formwriter->textinput("Site Name", 'site_name', '', 20, $settings->get_setting('site_name'), "" , 255, "");
 		echo $formwriter->textinput("Site Description", 'site_description', '', 20, $settings->get_setting('site_description'), "" , 255, "");
+		
+		
 		echo $formwriter->textinput("Link to Logo", 'logo_link', '', 20, $settings->get_setting('logo_link'), "" , 255, "");
 		
 		
@@ -237,9 +255,10 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Blog module active", "blog_active", '', $optionvals, $settings->get_setting('blog_active'), '', FALSE);
 
-
+	/*DEPRECATED
 	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Use blog as homepage", "use_blog_as_homepage", '', $optionvals, $settings->get_setting('use_blog_as_homepage'), '', FALSE);	
+	echo $formwriter->dropinput("Use blog as homepage", "use_blog_as_homepage", '', $optionvals, $settings->get_setting('use_blog_as_homepage'), '', FALSE);
+*/	
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Show comments", "show_comments", '', $optionvals, $settings->get_setting('show_comments'), '', FALSE);	
@@ -342,6 +361,9 @@
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Allow coupon codes", "coupons_active", '', $optionvals, $settings->get_setting('coupons_active'), '', FALSE);
+
+	$optionvals = array("Yes"=>1, 'No' => 0);
+	echo $formwriter->dropinput("Activate pricing (/pricing) page", "pricing_page", '', $optionvals, $settings->get_setting('pricing_page'), '', FALSE);
 	
 	echo '<hr>';
 
@@ -356,6 +378,10 @@
 	echo '<h3>CMS Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("CMS module active", "page_contents_active", '', $optionvals, $settings->get_setting('page_contents_active'), '', FALSE);
+	
+	echo $formwriter->textinput("Alternate page to use as homepage (optional)", 'alternate_homepage', '', 20, $settings->get_setting('alternate_homepage'), "" , 255, "");
+
+	
 
 	echo '<h3>Url Rewrite Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);

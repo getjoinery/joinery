@@ -146,10 +146,12 @@ class LibraryFunctions {
 	static function display_404_page(){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
-		$site_template = $settings->get_setting('site_template');	
-		$site_file = $siteDir . '/theme/'.$site_template.'/404.php';		
+
 		$theme_template = $settings->get_setting('theme_template');
-		$theme_file = $siteDir . '/theme/'.$theme_template.'/404.php';
+		$theme_file = $siteDir . '/theme/'.$theme_template.'/404.php';	
+			
+		$site_file = $siteDir . '/theme/default/views/404.php';		
+
 		$base_file = $siteDir . '/views/404.php';
 
 		header("HTTP/1.0 404 Not Found");
@@ -285,12 +287,13 @@ class LibraryFunctions {
 		return false;					
 	}
 
+	
+	//LOOK IN THE THEME DIRECTORY FIRST, THEN THE DEFAULT THEME, THEN THE MAIN FILES
 	//subdirectory starts with a slash
 	static function get_theme_file_path($filename, $subdirectory='', $path_format='system'){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
-		$site_template = $settings->get_setting('site_template');
-		$site_file = $siteDir.'/theme/'.$site_template.$subdirectory.'/'.$filename;
+
 		
 		$theme_template = $settings->get_setting('theme_template', true, true);
 		$theme_file = $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename;
@@ -307,16 +310,6 @@ class LibraryFunctions {
 			else{
 				//WE WANT A URL
 				return '/theme/'.$theme_template.$subdirectory.'/'.basename($filename, '.php');
-			}
-		}
-		else if(file_exists($site_file)){
-			if($path_format == 'system'){
-				//WE WANT A FILE PATH
-				return $site_file;
-			}
-			else{
-				//WE WANT A URL
-				return '/theme/'.$site_template.$subdirectory.'/'.basename($filename, '.php');
 			}
 		}
 		else if(file_exists($default_theme_file)){
@@ -344,15 +337,18 @@ class LibraryFunctions {
 		}
 	}
 	
+	
+	
 	static function get_logic_file_path($filename, $path_format='system'){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
-		$site_template = $settings->get_setting('site_template');
+		$theme_template = $settings->get_setting('theme_template');
 		
 		$theme_file = $siteDir.'/theme/'.$site_template.'/logic/'.$filename;
+		$default_theme_file = $siteDir.'/theme/default/logic/'.$filename;
 		$main_file = $siteDir.'/logic/'.$filename;
 
-		if(file_exists($theme_file)){
+		if($theme_template && file_exists($theme_file)){
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
 				return $theme_file;
@@ -360,6 +356,16 @@ class LibraryFunctions {
 			else{
 				//WE WANT A URL
 				return '/theme/'.$site_template.'/logic/'.basename($filename, '.php');
+			}
+		}
+		else if(file_exists($default_theme_file)){
+			if($path_format == 'system'){
+				//WE WANT A FILE PATH
+				return $main_file;
+			}
+			else{
+				//WE WANT A URL
+				return '/logic/'.basename($filename, '.php');
 			}
 		}
 		else if(file_exists($main_file)){

@@ -90,7 +90,7 @@
 			}
 			
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link', 'pro_plan_order_month', 'pro_plan_order_year');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_POST[$field]);
@@ -219,6 +219,7 @@
 				$("#pro_expires_container").show();				
 			}			
 		}	
+		
 	
 		$(document).ready(function() {
 			set_pricing_choices();
@@ -235,6 +236,7 @@
 			$("#pro_recurring").change(function() {	
 				set_subscription_choices();
 			});
+
 			
 			//set_type_choices();
 			//$("#pro_type").change(function() {	
@@ -302,6 +304,29 @@
 	echo $formwriter->textinput('Subscription trial period (days):', 'pro_trial_period_days', 'ctrlHolder', 100, $pro_trial_period_days_fill, '', 3, '');
 	
 	echo $formwriter->textinput('Digital item link', 'pro_digital_link', NULL, 100, $product->get('pro_digital_link'), '', 255, '');
+
+	//THIS SECTION IS FOR /PRICING PAGE.  USER CHOOSES WHICH PLAN AND THEN SETS AN ORDER
+	if($settings->get_setting('pricing_page')){
+		$optionvals = array(
+			'No' => 0, 
+			"Plan 1"=>1,
+			"Plan 2"=>2,
+			"Plan 3"=>3,
+			);
+		echo $formwriter->dropinput("Include on /pricing page?", "pro_plan_order_month", "ctrlHolder", $optionvals, $product->get('pro_plan_order_month'), '', FALSE);	
+		
+		$optionvals = array(
+			'No' => 0, 
+			"Plan 1"=>1,
+			"Plan 2"=>2,
+			"Plan 3"=>3,
+			);
+		echo $formwriter->dropinput("Include on /pricing page?", "pro_plan_order_month", "ctrlHolder", $optionvals, $product->get('pro_plan_order_month'), '', FALSE);	
+	}
+
+	
+	
+	
 	
 	$events = new MultiEvent(
 		array('deleted'=>false, 'past'=>false),
