@@ -1,5 +1,7 @@
 <?php
-	require_once(__DIR__.'/class_list.php');
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
+	require_once( __DIR__ . '/../migrations/migrations.php');
 	error_reporting(E_ERROR | E_PARSE);
 	ini_set('display_errors', 1);
 	ini_set('display_startup_errors', 1);
@@ -39,6 +41,75 @@
 	-IF CHARACTER LENGTH DOES NOT MATCH YOU WILL GET A WARNING BUT IT WILL NOT FIX
 	*/
 
+	//LOAD ALL CLASSES 
+	$path = $_SERVER['DOCUMENT_ROOT']."/data";
+	$classes = array();
+	if ($handle = opendir($path)) {
+		while (false !== ($file = readdir($handle))) {
+			if ('.' === $file) continue;
+			if ('..' === $file) continue;
+			$filepath = $path.'/'.$file;
+			
+			$file_parts = pathinfo($file);
+			if($file_parts['extension'] == 'php'){
+				if(file_exists($filepath)){
+					if (str_contains($file, '_class')) {					
+						require_once($filepath);
+						
+						
+						$fileContent = file_get_contents($filepath);
+						$tokens = token_get_all($fileContent);
+
+						for ($i = 0; $i < count($tokens); $i++) {
+							if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
+								$thisclass = $tokens[$i + 2][1];;
+								//TABLENAME AND FIELD SPECIFICATIONS ARE REQUIRED 
+								if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
+									$classes[] = $thisclass;
+								}
+							}
+						}						
+						
+					}
+				}
+			}
+		}
+		closedir($handle);
+	}
+	
+	
+	//LOAD ALL CLASSES FROM PLUGINS
+	$plugins = LibraryFunctions::list_plugins();
+	foreach($plugins as $plugin){
+		$plugin_data_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/data';
+
+		if ($handle = opendir($plugin_data_dir)) {
+			while (false !== ($file = readdir($handle))) {
+				if ('.' === $file) continue;
+				if ('..' === $file) continue;
+				$filepath = $plugin_data_dir.'/'.$file;
+				$file_parts = pathinfo($file);
+				if($file_parts['extension'] == 'php'){
+					if (str_contains($file, '_class')) {
+						require_once($filepath);
+
+						$fileContent = file_get_contents($filepath);
+						$tokens = token_get_all($fileContent);
+
+						for ($i = 0; $i < count($tokens); $i++) {
+							if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
+								$thisclass = $tokens[$i + 2][1];;
+								if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
+									$classes[] = $thisclass;
+								}
+							}
+						}	
+					}
+				}
+			}
+			closedir($handle);
+		}
+	}	
 	
 	
 
@@ -363,23 +434,30 @@
 		echo "-----MIGRATIONS-----<br>\n";
 
 		//GET THE LAST MIGRATION STOPPING POINT
-		
+		/*
 		$sql = "SELECT * FROM stg_settings WHERE stg_name='db_migration_version'";
 		$q = $dblink->prepare($sql);
 		$q->execute();
 		$row = $q->fetch();
-		
+		$starting_db_migration_version = $row['stg_value'];
+
 		if($verbose){
-			echo 'Last Migration ' . $row['stg_value'] . "<br>\n";
+			echo 'Starting database migration version: '.$starting_db_migration_version. "<br>\n";
 		}
+		*/
 		
 		
 		$sql = "SELECT * FROM stg_settings WHERE stg_name='database_version'";
 		$q = $dblink->prepare($sql);
 		$q->execute();
 		$row = $q->fetch();		
-		echo 'Starting database version: '.$row['stg_value']. "<br>\n";
+		$starting_database_version = $row['stg_value'];	
+				
 		
+		echo 'Starting database version: '.$starting_database_version. "<br>\n";
+
+		
+		/*
 		$next_row = 0;
 		if($row['stg_value']){
 			$next_row = $row['stg_value'];
@@ -387,16 +465,26 @@
 				echo 'Starting Migration  at ' . $next_row . "<br>\n";
 			}
 		}
-
+		*/
 		
+		$num_migrations_run = 0;
+		$num_migrations_skipped = 0;
 		foreach($migrations as $key=>$migration){
 			
-			if($next_row > $key){
+			//DO NOT RUN OLD DATABASE UPDATES
+			if($migration['database_version'] <= $starting_database_version){
 				continue;
 			}
+			
+			/* WE ARE NOT GOING TO USE ORDERED MIGRATIONS ANYMORE.  
+			if($key <= $starting_db_migration_version){
+				continue;
+			}
+			*/
 
 			if($verbose){
 				echo 'Checking Migration ' . $key . "<br>\n";
+				$num_migrations_run++;
 			}
 			
 			$run = true;
@@ -421,34 +509,98 @@
 				}
 				else{
 					$run = false;
+					$num_migrations_skipped++;
 				}
 			}
+			
 
 			
 			if($run && $migration['migration_sql']){
-				try{
-					$q = $dblink->prepare($migration['migration_sql']);
-					$q->execute();
-					echo 'Run: '.$migration['migration_sql']. "<br>\n";
+				$migration_log = new Migration(NULL);
+				$parts = explode('.', $migration['database_version']);
+				$migration_log->set('mig_major_version', $parts[0]);
+				$migration_log->set('mig_minor_version', $parts[1]);
+				$migration_log->set('mig_sql', $migration['migration_sql']);
+				$migration_hash = md5($migration['migration_sql']);
+				$migration_log->set('mig_hash', $migration_hash);
+				$migration_log->prepare();
+
+				$search_criteria = array('hash' => $migration_hash, 'successful' => true);
+				$past_migrations = new MultiMigration(
+					$search_criteria,
+					array($sort=>$sdirection),
+					$numperpage,
+					$offset);
+				$numrecords = $past_migrations->count_all();				
+				//IF WE GET SOMETHING BACK, THE MIGRATION HAS ALREADY BEEN run
+				if($numrecords){
+					$num_migrations_skipped++;
+					if($verbose){
+						echo 'Skipping migration.  Already run: '.$migration_hash. "<br>\n";
+					}
 				}
-				catch(PDOException $e){
-					echo $e->getMessage();
-					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
-					return 0;
-				}			
+				else{
+					try{
+						$q = $dblink->prepare($migration['migration_sql']);
+						$q->execute();
+						echo 'Run: '.$migration['migration_sql']. "<br>\n";
+					}
+					catch(PDOException $e){
+						echo $e->getMessage();
+						$migration_log->set('mig_output', $e->getMessage());
+						$migration_log->save();
+						echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
+						return 0;
+					}		
+					
+					$migration_log->set('mig_success', 1);
+					$migration_log->save();
+				}
 			}
 			else if($run && $migration['migration_file']){
 				//MIGRATION FUNCTION NAMES ARE THE SAME AS THE FILE NAME, MINUS THE .PHP, UNIQUE IS REQUIRED
 				require_once( __DIR__ . '/../migrations/'. $migration['migration_file']);
-				$function_name = pathinfo($migration['migration_file']);
-				if(!function_exists($function_name['filename'])){
-					echo 'ABORTING MIGRATIONS at Migration '. $key ." Function does not exist.<br>\n";
-					return 0;							
+				$migration_log = new Migration(NULL);
+				$parts = explode('.', $migration['database_version']);
+				$migration_log->set('mig_major_version', $parts[0]);
+				$migration_log->set('mig_minor_version', $parts[1]);
+				$migration_log->set('mig_file', $migration['migration_file']);
+				$migration_hash = md5_file(__DIR__ . '/../migrations/'. $migration['migration_file']);
+				$migration_log->set('mig_hash', $migration_hash);
+				$migration_log->prepare();
+
+				$search_criteria = array('hash' => $migration_hash, 'successful' => true);
+				$past_migrations = new MultiMigration(
+					$search_criteria,
+					array($sort=>$sdirection),
+					$numperpage,
+					$offset);
+				$numrecords = $past_migrations->count_all();				
+				//IF WE GET SOMETHING BACK, THE MIGRATION HAS ALREADY BEEN run
+				if($numrecords){
+					$num_migrations_skipped++;
+					if($verbose){
+						echo 'Skipping migration. Already run: '.$migration_hash. "<br>\n";
+					}
 				}
-				$result = call_user_func($function_name['filename']);
-				if(!$result){
-					echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
-					return 0;					
+				else{
+						
+					$function_name = pathinfo($migration['migration_file']);
+					if(!function_exists($function_name['filename'])){
+						$migration_log->set('mig_success', 0);
+						$migration_log->save();
+						echo 'ABORTING MIGRATIONS at Migration '. $key ." Function does not exist.<br>\n";
+						return 0;							
+					}
+					$result = call_user_func($function_name['filename']);
+					if(!$result){
+						$migration_log->set('mig_success', 0);
+						$migration_log->save();
+						echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
+						return 0;					
+					}
+					$migration_log->set('mig_success', 1);
+					$migration_log->save();
 				}
 			}
 			else{
@@ -475,8 +627,25 @@
 				
 			
 			$next_row = $key+1;
+
+
+			//UPDATE THE DB VERSION
+			$sql = "UPDATE stg_settings set stg_value=".$migrations[$key]['database_version']." WHERE stg_name='database_version'";
+			try{
+				$q = $dblink->prepare($sql);
+				$q->execute();
+				if($verbose){
+					echo 'Updating db version to : '.$migrations[$key]['database_version']. "<br>\n";
+				}
+			}
+			catch(PDOException $e){
+				echo $e->getMessage();
+				echo 'ABORTING MIGRATIONS.  Failed to set db version: '. $migrations[$key]['database_version'] ."<br>\n";
+				return 0;
+			}
 			
 			//UPDATE THE LAST DB MIGRATION POINT
+			/*
 			$sql = "UPDATE stg_settings set stg_value=".$next_row." WHERE stg_name='db_migration_version'";
 			try{
 				$q = $dblink->prepare($sql);
@@ -489,7 +658,8 @@
 				echo $e->getMessage();
 				echo 'ABORTING MIGRATIONS.  Failed to set next row: '. $key ."<br>\n";
 				return 0;
-			}				
+			}	
+			*/
 	
 		}
 
@@ -498,7 +668,7 @@
 		$q = $dblink->prepare($sql);
 		$q->execute();
 		$row = $q->fetch();		
-		echo 'Database migration complete.  Database version: '.$row['stg_value']. "<br>\n";
+		echo 'Database migration complete.<br>  #Run: '.$num_migrations_run.',<br> #Skipped: '.$num_migrations_skipped.'<br>Database version: '.$row['stg_value']. "<br>\n";
 			
 		return true;
 	}
@@ -513,6 +683,7 @@
 			exit(0);;
 		}
 	}
+
 
 
 ?>
