@@ -379,7 +379,7 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("CMS module active", "page_contents_active", '', $optionvals, $settings->get_setting('page_contents_active'), '', FALSE);
 	
-	echo $formwriter->textinput("Alternate page to use as homepage (optional)", 'alternate_homepage', '', 20, $settings->get_setting('alternate_homepage'), "" , 255, "");
+	echo $formwriter->textinput("Alternate page to use as homepage (optional, starts with slash and may need .php)", 'alternate_homepage', '', 20, $settings->get_setting('alternate_homepage'), "" , 255, "");
 
 	
 
