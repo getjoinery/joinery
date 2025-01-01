@@ -1,6 +1,7 @@
 <?php
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
+	require_once( __DIR__ . '/../data/Migrations.php');
 	require_once( __DIR__ . '/../migrations/migrations.php');
 	error_reporting(E_ERROR | E_PARSE);
 	ini_set('display_errors', 1);
