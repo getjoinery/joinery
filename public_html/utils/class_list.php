@@ -4,6 +4,33 @@
 	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
 
 
+/* THIS ENTIRE FILE IS DEPRECATED AND LEFT HERE FOR BACKWARDS COMPATIBILITY ONLY */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /*
 	require_once( __DIR__ . '/../data/activation_codes_class.php');	
