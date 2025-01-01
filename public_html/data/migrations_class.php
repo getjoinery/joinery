@@ -10,7 +10,7 @@ class MigrationException extends SystemClassException {}
 class MigrationNotSentException extends MigrationException {};
 
 class Migration extends SystemBase {
-	public static $prefix = 'upg';
+	public static $prefix = 'mig';
 	public static $tablename = 'mig_migrations';
 	public static $pkey_column = 'mig_migration_id';
 	public static $permanent_delete_actions = array(
