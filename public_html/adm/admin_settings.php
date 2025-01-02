@@ -453,7 +453,7 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Act as upgrade server", "upgrade_server_active", '', $optionvals, $settings->get_setting('upgrade_server_active'), '', FALSE);	
 	if(!$upgrade_source = $settings->get_setting('upgrade_source')){
-		$upgrade_source = 'https://jeremytunnell.com';
+		$upgrade_source = 'https://getjoinery.com';
 	}
 	echo $formwriter->textinput("Upgrade source", "upgrade_source", '', 20, $upgrade_source, "" , 255, "");
 
