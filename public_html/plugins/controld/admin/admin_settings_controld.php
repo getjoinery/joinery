@@ -69,7 +69,7 @@
 
 
 
-	echo $formwriter->begin_form('form', 'POST', '/plugins/controld/admin/admin_settings_plugin');
+	echo $formwriter->begin_form('form', 'POST', '/plugins/controld/admin/admin_settings_controld');
 	
 
  	echo '<h3>Controld Settings</h3>';

@@ -1019,11 +1019,14 @@ class ControlDHelper{
 
 	public function __construct() {
 		
-		$this->api_key = 'api.7b17760a718fccf10f522d50b8bd00c1e201749b57dd11ae8ceb99ffd6b8aac4';
-		/*
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
-
+		$this->api_key = $settings->get_setting('controld_key');
+		if(!$this->api_key){
+			throw new SystemDisplayablePermanentError("Controld api keys are not present.");
+			exit();			
+		}
+		/*
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 			$this->api_key = $settings->get_setting('paypal_api_key_test');
 			$this->api_secret_key = $settings->get_setting('paypal_api_secret_test');
