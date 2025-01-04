@@ -13,6 +13,8 @@
 	$settings = Globalvars::get_instance();
 
 	if($_POST){
+		
+		
 		if($settings->get_setting('preview_image') != $_POST['preview_image']){
 			//AUTO INCREMENT THE PREVIEW IMAGE INDEX IF IT HAS CHANGED
 			$search_criteria = array();
@@ -73,7 +75,7 @@
 	)
 	);	
 	
-
+ 
 
 
 	$pageoptions['altlinks'] = array('New Setting'=>'/admin/admin_setting_edit');
@@ -85,6 +87,21 @@
 	if($settings->get_setting('upgrade_server_active')){
 		$pageoptions['altlinks'] += array('Publish Upgrade'=>'/utils/publish_upgrade');
 	}
+	
+	//GET ALL OF THE PLUGIN SETTINGS PAGES
+	$plugins = LibraryFunctions::list_plugins();
+	foreach($plugins as $plugin){
+		$script_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/admin/';
+		if(is_dir($script_dir)){
+			$settings_files = LibraryFunctions::getFilesWithSubstring($script_dir, 'admin_settings');
+			if(!empty($settings_files)){
+				$pageoptions['altlinks'] += array($plugin.' settings' => '/plugins/'.$plugin.'/admin/'.$settings_files[0]);
+			}
+		}
+	}	
+
+	
+	
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
@@ -380,7 +397,6 @@
 	
 	echo $formwriter->textinput("Alternate page to use as homepage (optional, starts with slash and may need .php)", 'alternate_homepage', '', 20, $settings->get_setting('alternate_homepage'), "" , 255, "");
 
-	
 
 	echo '<h3>Url Rewrite Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);

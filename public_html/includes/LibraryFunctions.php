@@ -729,6 +729,30 @@ class LibraryFunctions {
 
 	}
 
+	/**
+	 * Get all files in a directory that contain a specific substring.
+	 *
+	 * @param string $directory The directory to search in.
+	 * @param string $substring The substring to match in file names.
+	 * @return array An array of matching file names.
+	 * @throws Exception If the directory cannot be read.
+	 */
+	static function getFilesWithSubstring($directory, $substring) {
+		if (!is_dir($directory)) {
+			throw new Exception("Invalid directory: $directory");
+		}
+
+		$matchingFiles = [];
+		$files = scandir($directory); // Get all files and directories
+
+		foreach ($files as $file) {
+			if (is_file($directory . DIRECTORY_SEPARATOR . $file) && strpos($file, $substring) !== false) {
+				$matchingFiles[] = $file; // Add matching file to the array
+			}
+		}
+
+		return $matchingFiles;
+	}
 
 	//converts display time (HH:MM am/pm) to server time (HH:MM, 24 hour)
 	static function toDBTime($timeconv){

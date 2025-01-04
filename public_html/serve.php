@@ -532,18 +532,7 @@ if($params[0] == 'adm' && $params[1] == 'includes'){
 		
 if($params[0] == 'admin'){
 
-	if($params[1]){
-		
-		//LOAD THE ADMIN FILES FROM THE PLUGINS
-		$plugins = LibraryFunctions::list_plugins();
-		foreach($plugins as $plugin){
-			$plugin_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/adm/'.$params[1],'php');
-			if(file_exists($plugin_file)){
-				$is_valid_page = true;
-				require_once($plugin_file);
-				exit();
-			}
-		}	
+	if($params[1]){	
 		
 		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1],'php');
 		if(file_exists($base_file)){
