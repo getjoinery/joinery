@@ -1,5 +1,5 @@
 <?php
-	require_once('../includes/Globalvars.php');
+	/*require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -16,6 +16,145 @@
 	require_once($siteDir . '/data/event_registrants_class.php');
 	require_once($siteDir . '/includes/EmailTemplate.php');
 	require_once($siteDir . '/data/email_templates_class.php');
+*/
+	require_once($siteDir . '/includes/ControlDHelper.php');
+
+
+
+	//LOAD ALL CLASSES 
+	$path = $_SERVER['DOCUMENT_ROOT']."/data";
+	$classNames = array();
+	if ($handle = opendir($path)) {
+		while (false !== ($file = readdir($handle))) {
+			if ('.' === $file) continue;
+			if ('..' === $file) continue;
+			$filepath = $path.'/'.$file;
+			
+			$file_parts = pathinfo($file);
+			if($file_parts['extension'] == 'php'){
+				if(file_exists($filepath)){
+					if (str_contains($file, '_class')) {					
+						require_once($filepath);
+						
+						
+						$fileContent = file_get_contents($filepath);
+						$tokens = token_get_all($fileContent);
+
+						//$classNames = [];
+						for ($i = 0; $i < count($tokens); $i++) {
+							if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
+								$classNames[] = $tokens[$i + 2][1];
+							}
+						}						
+						
+					}
+				}
+			}
+		}
+		closedir($handle);
+	}
+	
+	
+	
+	$plugins = LibraryFunctions::list_plugins();
+	$pluginClasses = array();
+	foreach($plugins as $plugin){
+		$plugin_data_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/data';
+
+		if ($handle = opendir($plugin_data_dir)) {
+			while (false !== ($file = readdir($handle))) {
+				if ('.' === $file) continue;
+				if ('..' === $file) continue;
+				$filepath = $plugin_data_dir.'/'.$file;
+				$file_parts = pathinfo($file);
+				if($file_parts['extension'] == 'php'){
+					if (str_contains($file, '_class')) {
+						require_once($filepath);
+
+						$fileContent = file_get_contents($filepath);
+						$tokens = token_get_all($fileContent);
+
+						//$classNames = [];
+						for ($i = 0; $i < count($tokens); $i++) {
+							if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
+								$pluginClasses[] = $tokens[$i + 2][1];
+							}
+						}	
+					}
+				}
+			}
+			closedir($handle);
+		}
+	}	
+	
+	foreach($pluginClasses as $class){
+		if(isset($class::$tablename)){
+			echo $class."<br>\n";
+		}
+		
+	}
+exit;
+
+
+
+
+
+
+
+
+
+
+
+exit;
+
+
+
+
+
+    $cd = new ControlDHelper();
+	
+	$data = array('name'=>'Testprofile6');
+	print_r($cd->listSchedules());
+	exit;
+	//$result = $cd->createProfile($data);
+	
+	
+
+	//prevent_deactivation_pin
+	$success = $result['success'];
+	$profile_key = $result['body']['profiles'][0]['PK'];
+	$profile_key = '665222jfk3qk';
+	$device_id = 'qbe2yv8az8';
+	$org_id = '2116jfkhk4';
+
+	$data = array(
+		'prevent_deactivation_pin' => '1234'
+		);
+	print_r($cd->modifyDevice($device_id, $data));
+
+exit;
+
+
+//print_r($cd->listRuleFolders($profile_key));
+//print_r($cd->createRuleFolder($profile_key, 'test1', 1, 0));
+//print_r($cd->getRuleFolderIdFromName($profile_key, 'test1'));
+//print_r($cd->deleteRuleFolder($profile_key, 'test', 1));
+// print_r($cd->listRules($profile_key, 0));
+// print_r($cd->deleteRule($profile_key, 'drudgereport.com'));
+ //print_r($cd->createRule($profile_key, 1, array('drudgereport.com'), 0));
+// print_r($cd->listRules($profile_key, 0));
+  //print_r($cd->listServicesOnProfile($profile_key));
+	//print_r($cd->modifyProfileFilter($profile_key, 'ads', 0));
+	//print_r($cd->modifyProfileFilter($profile_key, 'ads_small', 1));
+	
+	
+	//print_r($cd->listNativeFilters($profile_key));
+	//print_r($cd->deleteDevice('h5xtge0va1'));
+	//print_r($cd->listProfiles());
+
+	
+
+exit;
 	use Mailgun\Mailgun;
 	
 	$settings = Globalvars::get_instance();
@@ -396,7 +535,7 @@ $(".itemSearch").select2({
 			else{
 				//echo ' searching ';
 				//$stripe_customer = \Stripe\Customer::all(["email" => $billing_user->get('usr_email')]);
-				//$stripe_id = $stripe_customer[data][0][id];
+				//$stripe_id = $stripe_customer['data'][0]['id'];
 				
 				//if($stripe_id){	
 				//	$billing_user->set('usr_stripe_customer_id', $stripe_id);
@@ -507,7 +646,7 @@ exit();
 		if(count($results) > 1){
 			$numsubs = 0;
 			foreach($results as $result){
-				$subs = \Stripe\Subscription::all(['limit' => 5, 'customer' => $result[id], 'status' => 'all']);
+				$subs = \Stripe\Subscription::all(['limit' => 5, 'customer' => $result['id'], 'status' => 'all']);
 				foreach($subs as $sub) {
 					$numsubs++;
 				}

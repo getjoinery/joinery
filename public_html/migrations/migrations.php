@@ -13,6 +13,7 @@
 		//ALSO UPDATES LAST SYSTEM VERSION
 		$migrations = array();
 
+	
 		$migration['database_version'] = '0.12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'blog_active'";
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'blog_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
@@ -602,4 +603,11 @@
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		 
-		 
+		//REQUIRE ALL OF THE PLUGIN MIGRATION SCRIPTS
+		$plugins = LibraryFunctions::list_plugins();
+		foreach($plugins as $plugin){
+			$product_script_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/migrations/migrations.php';
+			if(file_exists($product_script_file)){
+				require_once($product_script_file);
+			}
+		}

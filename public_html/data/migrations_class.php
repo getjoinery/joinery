@@ -19,8 +19,7 @@ class Migration extends SystemBase {
 
 	public static $fields = array(
 		'mig_migration_id' => 'Migration id',
-		'mig_major_version' => 'Major Version',
-		'mig_minor_version' => 'Minor Version',
+		'mig_version' => 'Minor Version',
 		'mig_name' => 'Name of this release',
 		'mig_release_notes' => 'Release notes',
 		'mig_sql' => 'Sql of the migration',
@@ -33,8 +32,7 @@ class Migration extends SystemBase {
 
 	public static $field_specifications = array(
 		'mig_migration_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'mig_major_version' => array('type'=>'int4'),
-		'mig_minor_version' => array('type'=>'int4'),
+		'mig_version' => array('type'=>'int4'),
 		'mig_name' => array('type'=>'varchar(64)'),
 		'mig_release_notes' => array('type'=>'text'),
 		'mig_sql' => array('type'=>'text'),
@@ -45,7 +43,7 @@ class Migration extends SystemBase {
 		'mig_create_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $required_fields = array('mig_major_version', 'mig_minor_version');
+	public static $required_fields = array('mig_version');
 
 	public static $field_constraints = array();	
 	
@@ -71,14 +69,10 @@ class MultiMigration extends SystemMultiBase {
 		$where_clauses = array();
 		$bind_params = array();
 	
-		if (array_key_exists('major_version', $this->options)) {
-			$where_clauses[] = 'mig_major_version = ?';
-			$bind_params[] = array($this->options['major_version'], PDO::PARAM_INT);
-		}	
 		
-		if (array_key_exists('minor_version', $this->options)) {
-			$where_clauses[] = 'mig_minor_version = ?';
-			$bind_params[] = array($this->options['minor_version'], PDO::PARAM_INT);
+		if (array_key_exists('version', $this->options)) {
+			$where_clauses[] = 'mig_version = ?';
+			$bind_params[] = array($this->options['version'], PDO::PARAM_INT);
 		}	
 
 		if (array_key_exists('hash', $this->options)) {
@@ -113,12 +107,9 @@ class MultiMigration extends SystemMultiBase {
 					$sql .= ' mig_migration_id ' . $this->order_by['migration_id'];
 				}
 				
-				if (array_key_exists('major_version', $this->order_by)) {
-					$sql .= ' mig_major_version ' . $this->order_by['major_version'];
-				}	
 
-				if (array_key_exists('minor_version', $this->order_by)) {
-					$sql .= ' mig_minor_version ' . $this->order_by['minor_version'];
+				if (array_key_exists('version', $this->order_by)) {
+					$sql .= ' mig_version ' . $this->order_by['version'];
 				}					
 			}
 				
