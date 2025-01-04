@@ -100,8 +100,7 @@
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings');
 	
 	if($_SESSION['permission'] == 10){
-		echo 'System Version: '.$settings->get_setting('system_version').'<br>';
-		echo 'Database Version: '.$settings->get_setting('database_version').'<br>';
+		echo 'Database Version: '.$settings->get_setting('database_version').'<br><br>';
 		
 		echo '<b>NOTE: These settings will not override the settings if they are located in the Globalvars_site.php file in the /config directory</b><br>';
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
