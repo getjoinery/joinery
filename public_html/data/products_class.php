@@ -652,7 +652,8 @@ class Product extends SystemBase {
 		'pro_delete_time' => 'time deleted',
 		'pro_trial_period_days' => 'Days until a recurring payment starts',
 		'pro_plan_order_month' => 'Order for this product to appear on the monthly /pricing page',
-		'pro_plan_order_year' => 'Order for this product to appear on the yearly /pricing page'
+		'pro_plan_order_year' => 'Order for this product to appear on the yearly /pricing page',
+		'pro_product_scripts' => 'Comma separated list of scripts to run upon purchase',
 	);
 
 	public static $field_specifications = array(
@@ -679,6 +680,7 @@ class Product extends SystemBase {
 		'pro_trial_period_days' => array('type'=>'int4'),
 		'pro_plan_order_month' => array('type'=>'int4'),
 		'pro_plan_order_year' => array('type'=>'int4'),
+		'pro_product_scripts' => array('type'=>'text'),
 	);
 			 
 	public static $required_fields = array('pro_link', 'pro_price', 'pro_name');
