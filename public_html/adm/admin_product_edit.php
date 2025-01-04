@@ -89,6 +89,11 @@
 				$product->set('pro_recurring', NULL);
 			}
 			
+			//STORE THE PRODUCT SCRIPTS
+			$product->set('pro_product_scripts', NULL);
+			if(is_array($_POST['product_scripts'])){
+				$product->set('pro_product_scripts', implode(',', $_POST['product_scripts']));
+			}
 			
 			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link', 'pro_plan_order_month', 'pro_plan_order_year');
 
@@ -419,6 +424,26 @@
 	echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 
 
+	//PRODUCT SCRIPTS
+	$optionvals = array();
+	$optionvals = array_merge($optionvals, getFunctionNamesFromFile($_SERVER['DOCUMENT_ROOT'] . '/logic/product_scripts_logic.php'));
+	
+	$plugins = LibraryFunctions::list_plugins();
+	foreach($plugins as $plugin){
+		$product_script_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
+		if(file_exists($product_script_file)){
+			$optionvals = array_merge($optionvals, getFunctionNamesFromFile($product_script_file));
+		}
+	}
+	if(!empty($optionvals)){
+		$optionvals = array_combine($optionvals, $optionvals);
+		$readonlyvals = array(); 
+		$checkedvals = explode(',', $product->get('pro_product_scripts'));
+		$disabledvals = array();
+		echo $formwriter->checkboxList("Run these scripts upon purchase", 'product_scripts', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+	}
+
+
 	$instances = $product->get_requirement_instances(false);
 
 	$product_requirements = new MultiProductRequirement(
@@ -477,4 +502,39 @@
 
 	$page->admin_footer();
 
+
+	/**
+	 * Extracts function names from a given PHP file.
+	 *
+	 * @param string $filePath The path to the PHP file.
+	 * @return array An array of function names found in the file.
+	 * @throws Exception If the file cannot be read.
+	 */
+	function getFunctionNamesFromFile($filePath) {
+		if (!file_exists($filePath)) {
+			throw new Exception("File does not exist: $filePath");
+		}
+
+		$fileContent = file_get_contents($filePath);
+		if ($fileContent === false) {
+			throw new Exception("Failed to read the file: $filePath");
+		}
+
+		$tokens = token_get_all($fileContent);
+		$functions = [];
+		$isFunction = false;
+
+		foreach ($tokens as $token) {
+			if (is_array($token)) {
+				if ($token[0] === T_FUNCTION) {
+					$isFunction = true; // Next string token will be the function name
+				} elseif ($isFunction && $token[0] === T_STRING) {
+					$functions[] = $token[1]; // Add function name to the list
+					$isFunction = false;
+				}
+			}
+		}
+
+		return $functions;
+	}
 ?>

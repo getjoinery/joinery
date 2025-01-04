@@ -518,9 +518,7 @@
 			
 			if($run && $migration['migration_sql']){
 				$migration_log = new Migration(NULL);
-				$parts = explode('.', $migration['database_version']);
-				$migration_log->set('mig_major_version', $parts[0]);
-				$migration_log->set('mig_minor_version', $parts[1]);
+				$migration_log->set('mig_version', $migration['database_version']);
 				$migration_log->set('mig_sql', $migration['migration_sql']);
 				$migration_hash = md5($migration['migration_sql']);
 				$migration_log->set('mig_hash', $migration_hash);
@@ -562,9 +560,7 @@
 				//MIGRATION FUNCTION NAMES ARE THE SAME AS THE FILE NAME, MINUS THE .PHP, UNIQUE IS REQUIRED
 				require_once( __DIR__ . '/../migrations/'. $migration['migration_file']);
 				$migration_log = new Migration(NULL);
-				$parts = explode('.', $migration['database_version']);
-				$migration_log->set('mig_major_version', $parts[0]);
-				$migration_log->set('mig_minor_version', $parts[1]);
+				$migration_log->set('mig_version', $migration['database_version']);
 				$migration_log->set('mig_file', $migration['migration_file']);
 				$migration_hash = md5_file(__DIR__ . '/../migrations/'. $migration['migration_file']);
 				$migration_log->set('mig_hash', $migration_hash);

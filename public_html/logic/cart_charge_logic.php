@@ -16,6 +16,17 @@ function cart_charge_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php'); 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_codes_class.php'); 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_code_uses_class.php'); 
+	
+	//REQUIRE ALL OF THE PRODUCT SCRIPTS, THE MAIN ONE AND ALL OF THE PLUGINS
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/logic/product_scripts_logic.php');
+
+	$plugins = LibraryFunctions::list_plugins();
+	foreach($plugins as $plugin){
+		$product_script_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
+		if(file_exists($product_script_file)){
+			require_once($product_script_file);
+		}
+	}
 			
 	$page_vars = array();
 	
@@ -403,6 +414,14 @@ function cart_charge_logic($get_vars, $post_vars){
 		
 			}	
 			
+			//RUN THE PRODUCT SCRIPTS
+			if($product_scripts_list = $product->get('pro_product_scripts')){
+				$product_scripts = explode(',', $product_scripts_list);
+				foreach($product_scripts as $product_script){
+					$product_script($user, $product, $order, $order_item, $cart);
+				}
+			}
+			
 			$receipts[$key+1]['pname'] = $product_name;
 			$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
 			$receipts[$key+1]['price'] = $price - $discount;				
@@ -559,6 +578,14 @@ function cart_charge_logic($get_vars, $post_vars){
 				$activation_email->fill_template($final_fill);
 				$activation_email->send();
 			}	
+			
+			//RUN THE PRODUCT SCRIPTS
+			if($product_scripts_list = $product->get('pro_product_scripts')){
+				$product_scripts = explode(',', $product_scripts_list);
+				foreach($product_scripts as $product_script){
+					$product_script($user, $product, $order, $order_item, $cart);
+				}
+			}
 
 			$receipts[$key+1]['pname'] = $product->get('pro_name').' '. $product_version->prv_version_name;
 			$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
@@ -601,7 +628,10 @@ function cart_charge_logic($get_vars, $post_vars){
 			$product->set('pro_num_remaining_calc', $remaining);
 			$product->save();
 		}		
-	}			
+	}
+
+	
+	
 	
 
 	
