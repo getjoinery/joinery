@@ -651,8 +651,8 @@ class Product extends SystemBase {
 		'pro_link' => 'Link to use for accessing',
 		'pro_delete_time' => 'time deleted',
 		'pro_trial_period_days' => 'Days until a recurring payment starts',
-		'pro_plan_order_month' => 'Order for this product to appear on the monthly /plans page',
-		'pro_plan_order_year' => 'Order for this product to appear on the yearly /plans page'
+		'pro_plan_order_month' => 'Order for this product to appear on the monthly /pricing page',
+		'pro_plan_order_year' => 'Order for this product to appear on the yearly /pricing page'
 	);
 
 	public static $field_specifications = array(
@@ -1388,10 +1388,18 @@ class MultiProduct extends SystemMultiBase {
 			$bind_params[] = array('%'.$this->options['name_like'].'%', PDO::PARAM_STR);
 		}		
 		
-		if (array_key_exists('is_active', $this->options)) {
-			$where_clauses[] = 'pro_is_active = ?';
-			$bind_params[] = array($this->options['is_active'], PDO::PARAM_BOOL);
+		//THIS IS FOR PULLING STUFF FOR THE /PRICING PAGE
+		if (array_key_exists('is_monthly_plan', $this->options)) {
+			$where_clauses[] = 'pro_plan_order_month > 0';
 		}			
+
+		if (array_key_exists('is_yearly_plan', $this->options)) {
+			$where_clauses[] = 'pro_plan_order_year > 0';
+		}	
+		
+		if (array_key_exists('is_active', $this->options)) {
+			$where_clauses[] = 'pro_is_active = TRUE';
+		}	
 
 		if (array_key_exists('is_recurring', $this->options)) {
 			if($this->options['is_recurring']){
@@ -1433,8 +1441,7 @@ class MultiProduct extends SystemMultiBase {
 
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-
-
+			
 		if ($this->order_by) {
 			if (array_key_exists('product_id', $this->order_by)) {
 				$order_by_string = ' pro_product_id '. $this->order_by['product_id'];
@@ -1451,6 +1458,14 @@ class MultiProduct extends SystemMultiBase {
 			if (array_key_exists('Name', $this->order_by)) {
 				$order_by_string = ' pro_name ASC';
 			}			
+			
+			if (array_key_exists('plan_order_month', $this->order_by)) {
+				$order_by_string = ' pro_plan_order_month '. $this->order_by['plan_order_month'];
+			}	
+
+			if (array_key_exists('plan_order_year', $this->order_by)) {
+				$order_by_string = ' pro_plan_order_year '. $this->order_by['plan_order_year'];
+			}
 		}
 		else {
 			$order_by_string = ' pro_product_id '. $this->order_by['product_id'];

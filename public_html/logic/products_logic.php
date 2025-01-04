@@ -56,7 +56,7 @@ function products_logic($get_vars, $post_vars){
 	$searchterm = $get_vars['searchterm'];
 	
 	$searches = array();
-	$searches['active'] = TRUE;
+	$searches['is_active'] = TRUE;
 	
 	if($get_vars['subscriptions'] == 'all'){
 		//NO FILTER

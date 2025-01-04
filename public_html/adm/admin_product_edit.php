@@ -309,19 +309,19 @@
 	if($settings->get_setting('pricing_page')){
 		$optionvals = array(
 			'No' => 0, 
-			"Plan 1"=>1,
-			"Plan 2"=>2,
-			"Plan 3"=>3,
+			"Monthly Plan 1"=>1,
+			"Monthly Plan 2"=>2,
+			"Monthly Plan 3"=>3,
 			);
-		echo $formwriter->dropinput("Include on /pricing page?", "pro_plan_order_month", "ctrlHolder", $optionvals, $product->get('pro_plan_order_month'), '', FALSE);	
+		echo $formwriter->dropinput("Include on monthly /pricing page?", "pro_plan_order_month", "ctrlHolder", $optionvals, $product->get('pro_plan_order_month'), '', FALSE);	
 		
 		$optionvals = array(
 			'No' => 0, 
-			"Plan 1"=>1,
-			"Plan 2"=>2,
-			"Plan 3"=>3,
+			"Yearly Plan 1"=>1,
+			"Yearly Plan 2"=>2,
+			"Yearly Plan 3"=>3,
 			);
-		echo $formwriter->dropinput("Include on /pricing page?", "pro_plan_order_month", "ctrlHolder", $optionvals, $product->get('pro_plan_order_month'), '', FALSE);	
+		echo $formwriter->dropinput("Include on yearly /pricing page?", "pro_plan_order_year", "ctrlHolder", $optionvals, $product->get('pro_plan_order_year'), '', FALSE);	
 	}
 
 	
