@@ -473,7 +473,7 @@
 		foreach($migrations as $key=>$migration){
 			
 			//DO NOT RUN OLD DATABASE UPDATES
-			if($migration['database_version'] <= $starting_database_version){
+			if($migration['database_version'] < $starting_database_version){
 				continue;
 			}
 			

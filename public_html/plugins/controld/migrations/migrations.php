@@ -10,7 +10,7 @@
 		
  		$migration['database_version'] = '20250104';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'controld_key'";
-		$migration['migration_sql'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'controld_key'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'controld_key\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		 
