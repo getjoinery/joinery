@@ -750,7 +750,7 @@ class FormWriterMasterTW {
 			checkedval
 			readonlyvals(single dimensional array)
 	********************************/
-	function radioinput($label, $id, $class, &$optionvals, $checkedval, $disabledvals, $readonlyvals, $hint) {
+	function radioinput($label, $id, $class, &$optionvals, $checkedval, $disabledvals=array(), $readonlyvals=array(), $hint) {
 		
 		if(empty($class)){
 			$class='sm:col-span-6';

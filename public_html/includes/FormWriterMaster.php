@@ -291,7 +291,7 @@ class FormWriterMaster {
 	
 	//DEPRECATED
 	function start_buttons($class = '') {
-		return '<div class="buttonHolder '.$class.'">';
+		return '<div class="row '.$class.'">';
 	}
 
 	function new_form_button($label='Submit', $class='uk-button uk-button-primary', $id=NULL) {
@@ -411,11 +411,11 @@ class FormWriterMaster {
 			$value = str_replace('"', '&quot;', $value );
 		}
 		
-		/*
+		
 		if($hint){ 
 			$hint_text = 'placeholder="'.$hint.'" onfocus="this.placeholder = \'\'" onblur="this.placeholder = \''.$hint.'\'"';
 		}	
-		*/
+		
 		
 		$output = '<div id="'.$id . '_container" class="errorplacement '.$containerclass.'">';
 		
