@@ -338,27 +338,39 @@ class LibraryFunctions {
 	}
 	
 	
-	
-	static function get_logic_file_path($filename, $path_format='system'){
+	static function get_logic_file_path($filename, $path_format='system', $debug=0){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
 		$theme_template = $settings->get_setting('theme_template');
-		
-		$theme_file = $siteDir.'/theme/'.$site_template.'/logic/'.$filename;
+
+		$theme_file = $siteDir.'/theme/'.$theme_template.'/logic/'.$filename;
 		$default_theme_file = $siteDir.'/theme/default/logic/'.$filename;
 		$main_file = $siteDir.'/logic/'.$filename;
 
+		if($debug){
+			echo 'Looking for theme logic file: '. $theme_file.'<br>';
+			echo 'Looking for default theme logic file: '. $default_theme_file.'<br>';
+			echo 'Looking for main logic file: '. $main_file.'<br>';
+		}
 		if($theme_template && file_exists($theme_file)){
+			if($debug){
+				echo 'Found: '. $theme_file.'<br>';
+				exit;
+			}
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
 				return $theme_file;
 			}
 			else{
 				//WE WANT A URL
-				return '/theme/'.$site_template.'/logic/'.basename($filename, '.php');
+				return '/theme/'.$theme_template.'/logic/'.basename($filename, '.php');
 			}
 		}
 		else if(file_exists($default_theme_file)){
+			if($debug){
+				echo 'Found: '. $default_theme_file.'<br>';
+				exit;
+			}
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
 				return $main_file;
@@ -369,6 +381,10 @@ class LibraryFunctions {
 			}
 		}
 		else if(file_exists($main_file)){
+			if($debug){
+				echo 'Found: '. $main_file.'<br>';
+				exit;
+			}
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
 				return $main_file;
