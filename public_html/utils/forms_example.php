@@ -72,7 +72,9 @@
 	echo $formwriter->dateinput("Date only", "startdate", NULL, 30, NULL, "", 10);
 	
 	$optionvals = array("Day"=>"0", "Week"=>"1", "Month"=>"2", "Quarter"=>"3", "Year"=>"4");
-	echo $formwriter->radioinput("Group by:", "interval", NULL, $optionvals, $interval, "BlockLabel", "", TRUE);	
+	$disabledvals = array();
+	$readonlyvals = array();
+	echo $formwriter->radioinput("Group by:", "interval", NULL, $optionvals, $interval, $disabledvals, $readonlyvals, 'hint');	
 
 	echo $formwriter->textinput('City', 'city', 'sm:col-span-2', 100, NULL, '', 255, '');	
 	echo $formwriter->textinput('State', 'state', 'sm:col-span-2', 100, NULL, '', 255, '');	
@@ -319,7 +321,7 @@
             City
           </label>
           <div class="mt-1">
-            <input type="text" name="city" id="city" autocomplete="address-level2" class="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md">
+            <input type="text" name="cityb" id="cityb" autocomplete="address-level2" class="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md">
           </div>
         </div>
 
