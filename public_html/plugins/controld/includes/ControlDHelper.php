@@ -5,6 +5,7 @@
 class ControlDHelper{
 	
 	private $api_key;
+	private $debug;
 	public $test_mode;
 	
 	public static $profile_options = array (
@@ -27,7 +28,6 @@ class ControlDHelper{
 		'ads' => 'Ads & Trackers (Strict)',
 		'porn' => 'Adult content',
 		'porn_strict' => 'Adult content (Strict)',
-		'porn' => 'Adult Content',
 		'noai' => 'Artificial intelligence',
 		'fakenews' => 'Hoaxes and disinformation',
 		'cryptominers' => 'Cryptocurrency',
@@ -1017,7 +1017,7 @@ class ControlDHelper{
 		),
 	);
 
-	public function __construct() {
+	public function __construct($debug=0) {
 		
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
@@ -1073,7 +1073,14 @@ class ControlDHelper{
 			$data['clone_profile_id'] = $clone_profile_id;
 		}
 		
-		return $this->postRequest('https://api.controld.com/profiles', $data);
+		$endpoint = 'https://api.controld.com/profiles';
+
+		if($debug){
+			echo 'createProfile: '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
+		return $this->postRequest($endpoint, $data);
 	}
 
 	public function modifyProfile($profile_id, $name, $password, $data=array()){
@@ -1084,7 +1091,12 @@ class ControlDHelper{
 			$data['value'] = $value;
 		}
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/options'.$name;
-			
+
+		if($debug){
+			echo 'createProfile:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
 		return $this->putRequest($endpoint, $data);
 	}
 
@@ -1100,12 +1112,24 @@ class ControlDHelper{
 			$data['value'] = $value;
 		}
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/options'.$name;
-			
+
+		if($debug){
+			echo 'modifyProfileOptions:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
 		return $this->putRequest($endpoint, $data);
 	}
 	
 	public function deleteProfile($device_id){
-		return $this->deleteRequest('https://api.controld.com/profiles/'.$device_id);
+		$endpoint = 'https://api.controld.com/profiles/'.$device_id;
+		
+		if($debug){
+			echo 'deleteRuleFolder:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
+		return $this->deleteRequest($endpoint);
 	}	
 	
 	//FILTERS
@@ -1122,7 +1146,12 @@ class ControlDHelper{
 			'status' => $status,
 		);
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/filter/'.$filter_key;
-			
+
+		if($debug){
+			echo 'modifyProfileFilter:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
 		return $this->putRequest($endpoint, $data);
 	}
 	
@@ -1138,6 +1167,11 @@ class ControlDHelper{
 			'do' => $action, //Rule type. 0 = BLOCK. 1 = BYPASS, 2 = SPOOF, 3 = REDIRECT.
 		);
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/groups';
+
+		if($debug){
+			echo 'createRuleFolder:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
 			
 		return $this->postRequest($endpoint, $data);
 	}
@@ -1159,7 +1193,12 @@ class ControlDHelper{
 		);
 
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/groups/'.$folder_id;
-			
+
+		if($debug){
+			echo 'deleteRuleFolder:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
 		return $this->deleteRequest($endpoint, $data);
 	}	
 	
@@ -1185,7 +1224,13 @@ class ControlDHelper{
 			$data['group'] = $rule_folder_id;
 		}
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/rules';
-			
+	
+		if($debug){
+			echo 'createRule:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+
+	
 		return $this->postRequest($endpoint, $data);
 	}	
 	
@@ -1200,7 +1245,12 @@ class ControlDHelper{
 			$data['group'] = $rule_folder_id;
 		}
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/rules';
-			
+
+		if($debug){
+			echo 'modifyRule:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
 		return $this->putRequest($endpoint, $data);
 	}	
 	
@@ -1209,7 +1259,12 @@ class ControlDHelper{
 		);
 
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/rules/'.$hostname;
-			
+
+		if($debug){
+			echo 'deleteRule:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
 		return $this->deleteRequest($endpoint, $data);
 	}	
 	
@@ -1226,7 +1281,12 @@ class ControlDHelper{
 		);
 		
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/default';
-			
+ 
+		if($debug){
+			echo 'modifyDefaultRule:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}
+		
 		return $this->putRequest($endpoint, $data);
 	}	
 	
@@ -1243,6 +1303,12 @@ class ControlDHelper{
 			'do' => 0, //Rule type. 0 = BLOCK. 1 = BYPASS, 2 = SPOOF, 3 = REDIRECT.
 		);
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/services/'.$service_key;
+		
+		if($debug){
+			echo 'modifyService:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}		
+		
 		return $this->putRequest($endpoint, $data);
 	}
 	
@@ -1294,16 +1360,38 @@ class ControlDHelper{
 	}
 	
 	public function createDevice($data){
-		return $this->postRequest('https://api.controld.com/devices', $data);
+		
+		$endpoint = 'https://api.controld.com/devices';
+		
+		if($debug){
+			echo 'createDevice:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}			
+		
+		return $this->postRequest($endpoint, $data);
 	}
 
 	public function modifyDevice($device_id, $data){
 		$endpoint = 'https://api.controld.com/devices/'.$device_id;
+		
+		if($debug){
+			echo 'modifyDevice:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}			
+		
 		return $this->putRequest($endpoint, $data);
 	}
 	
 	public function deleteDevice($device_id){
-		return $this->deleteRequest('https://api.controld.com/devices/'.$device_id);
+		
+		$endpoint = 'https://api.controld.com/devices/'.$device_id;
+		
+		if($debug){
+			echo 'deleteDevice:  '.$endpoint.' '.print_r($data).'<br>';
+			return true;
+		}			
+		
+		return $this->deleteRequest($endpoint);
 	}
 	
 	

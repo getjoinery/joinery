@@ -8,7 +8,9 @@ require_once($siteDir . '/includes/LibraryFunctions.php');
 require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
-
+require_once($siteDir . '/plugins/controld/includes/ControlDHelper.php');
+require_once($siteDir . '/plugins/controld/data/ctldfilters_class.php');
+require_once($siteDir . '/plugins/controld/data/ctldservices_class.php');
 
 class CtldProfileException extends SystemClassException {}
 
@@ -56,9 +58,11 @@ class CtldProfile extends SystemBase {
 
 	
 	function prepare() {
+		/*
 		if(CtldProfile::GetByColumn('cdp_profile_id', $this->get('cdp_profile_id')) && !$this->key){
 			throw new CtldProfileException('That profile id already exists.');
-		}		
+		}
+*/		
 		
 	}	
 	
@@ -72,6 +76,179 @@ class CtldProfile extends SystemBase {
 					'Current user does not have permission to edit this entry in '. static::$tablename.'-'.$data['current_user_permission'] );
 			}
 		}
+	}
+	
+	function update_remote_filters($newvalues){
+		$numchanges = 0;
+		$cd = new ControlDHelper('debug');
+		$all_filters = ControlDHelper::$filters;
+		
+		//FIRST WE DO CACHED FILTERS
+		$filters = new MultiCtldFilter(
+			array(
+				'profile_id' => $this->get('cdp_ctldprofile_id'),
+			),
+		);
+		//$num_filters = $filters->count_all();
+		$filters->load();
+		$cached_filters = array();
+		foreach($filters as $filter){
+			$cached_filters[$filter->get('cdf_filter_pk')] = $filter->get('cdf_is_active');
+		}
+
+
+		foreach($all_filters as $all_filter_key=>$all_filter_desc){
+			if(isset($newvalues['block_'.$all_filter_key])){
+				//FORM VALUE WAS SUBMITTED
+				if(isset($cached_filters[$all_filter_key])){
+					//CACHED FILTER EXISTS
+					if($cached_filters[$all_filter_key] != $newvalues['block_'.$all_filter_key]){
+						//CHANGED, UPDATE REMOTE AND LOCAL
+						$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, $newvalues['block_'.$all_filter_key]);
+						
+						foreach($filters as $filter){
+							if($filter->get('cdf_filter_pk') == $all_filter_key){
+								$filter->set('cdf_is_active',$newvalues['block_'.$all_filter_key]);
+								$filter->prepare();
+								$filter->save();								
+							}
+						}
+						$numchanges++;
+					}
+					else{
+						//NO NEED TO DO ANYTHING
+					}
+				}
+				else{
+					//CACHED FILTER DOES NOT EXIST, UPDATE REMOTE FIRST AND THEN ADD LOCALLY
+					$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, $newvalues['block_'.$all_filter_key]);
+					
+					$new_cached_filter = new CtldFilter(NULL);
+					$new_cached_filter->set('cdf_cdp_ctldprofile_id',$this->key);
+					$new_cached_filter->set('cdf_filter_pk',$all_filter_key);
+					$new_cached_filter->set('cdf_is_active',$newvalues['block_'.$all_filter_key]);
+					$new_cached_filter->prepare();
+					$new_cached_filter->save();
+					$numchanges++;
+				}
+			}
+			else{
+				//POST VALUE WAS NOT SUBMITTED. IT IS "OFF"
+				if(isset($cached_filters[$all_filter_key])){
+					//CACHED FILTER EXISTS
+					if($cached_filters[$all_filter_key]){
+						//CACHED IS NOT ZERO, SO UPDATE CACHE AND UPDATE REMOTE
+						$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, 0);
+						
+						foreach($filters as $filter){
+							if($filter->get('cdf_filter_pk') == $all_filter_key){
+								$filter->set('cdf_is_active',0);
+								$filter->prepare();
+								$filter->save();								
+							}
+						}
+						$numchanges++;						
+						
+					}
+					else{
+						//NO NEED TO DO ANYTHING
+					}
+				}
+			}
+
+		}
+		return $numchanges;
+		
+	}
+	
+
+
+	function update_remote_services($newvalues){
+		$numchanges = 0;
+		$cd = new ControlDHelper('debug');
+		
+		$all_services = [];
+		foreach (ControlDHelper::$services as $category => $items) {
+			$all_services = array_merge($all_services, $items);
+		}		
+
+		//FIRST WE DO CACHED FILTERS
+		$services = new MultiCtldService(
+			array(
+				'profile_id' => $this->get('cdp_ctldprofile_id'),
+			),
+		);
+		//$num_services = $services->count_all();
+		$services->load();
+		$cached_services = array();
+		foreach($services as $service){
+			$cached_services[$service->get('cds_service_pk')] = $service->get('cds_is_active');
+		}
+
+
+		foreach($all_services as $all_service_key=>$all_service_desc){
+			if(isset($newvalues['block_'.$all_service_key])){
+				
+				//FORM VALUE WAS SUBMITTED
+				if(isset($cached_services[$all_service_key])){
+					//CACHED FILTER EXISTS
+					if($cached_services[$all_service_key] != $newvalues['block_'.$all_service_key]){
+						//CHANGED, UPDATE REMOTE AND LOCAL
+						$result = $cd->modifyService($this->get('cdp_profile_id'), $all_service_key, $newvalues['block_'.$all_service_key]);
+						
+						foreach($services as $service){
+							if($service->get('cds_service_pk') == $all_service_key){
+								$service->set('cds_is_active',$newvalues['block_'.$all_service_key]);
+								$service->prepare();
+								$service->save();								
+							}
+						}
+						$numchanges++;
+					}
+					else{
+						//NO NEED TO DO ANYTHING
+					}
+				}
+				else{
+					//CACHED FILTER DOES NOT EXIST, UPDATE REMOTE FIRST AND THEN ADD LOCALLY
+					$result = $cd->modifyService($this->get('cdp_profile_id'), $all_service_key, $newvalues['block_'.$all_service_key]);
+					
+					$new_cached_service = new CtldService(NULL);
+					$new_cached_service->set('cds_cdp_ctldprofile_id',$this->key);
+					$new_cached_service->set('cds_service_pk',$all_service_key);
+					$new_cached_service->set('cds_is_active',$newvalues['block_'.$all_service_key]);
+					$new_cached_service->prepare();
+					$new_cached_service->save();
+					$numchanges++;
+				}
+			}
+			else{
+				//POST VALUE WAS NOT SUBMITTED. IT IS "OFF"
+				if(isset($cached_services[$all_service_key])){
+					//CACHED FILTER EXISTS
+					if($cached_services[$all_service_key]){
+						//CACHED IS NOT ZERO, SO UPDATE CACHE AND UPDATE REMOTE
+						$result = $cd->modifyService($this->get('cdp_profile_id'), $all_service_key, 0);
+						
+						foreach($services as $service){
+							if($service->get('cds_service_pk') == $all_service_key){
+								$service->set('cds_is_active',0);
+								$service->prepare();
+								$service->save();								
+							}
+						}
+						$numchanges++;						
+						
+					}
+					else{
+						//NO NEED TO DO ANYTHING
+					}
+				}
+			}
+
+		}
+		return $numchanges;
+		
 	}
 	
 }

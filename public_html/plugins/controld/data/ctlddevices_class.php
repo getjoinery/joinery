@@ -21,10 +21,21 @@ class CtldDevice extends SystemBase {
 		'cdd_ctlddevice_id' => 'delete', 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
+	public const DEVICE_TYPE_MOBILE_IOS = 1;
+	public const DEVICE_TYPE_MOBILE_ANDROID = 2;	
+	public const DEVICE_TYPE_WINDOWS = 3;
+	public const DEVICE_TYPE_MAC = 4;
+	
+	
 	public static $fields = array(
 		'cdd_ctlddevice_id' => 'ID of the ctlddevice',
+		'cdd_device_id' => 'ID from controld',
+		'cdd_device_name' => 'Name of device',
+		'cdd_device_type' => 'Type of OS on the device',
 		'cdd_profile_id_primary' => 'ID from controld',
 		'cdd_profile_id_secondary' => 'ID from controld',
+		'cdd_cdp_ctldprofile_id_primary' => 'Local foreign key',
+		'cdd_cdp_ctldprofile_id_secondary' => 'Local foreign key',
 		'cdd_schedule_id' => 'Schedule applied to the device',
 		'cdd_usr_user_id' => 'User id this profile is assigned to',
 		'cdd_is_active' => 'Is it active?',
@@ -34,8 +45,13 @@ class CtldDevice extends SystemBase {
 
 	public static $field_specifications = array(
 		'cdd_ctlddevice_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'cdd_device_id' => array('type'=>'varchar(64)'),
+		'cdd_device_name' => array('type'=>'varchar(64)'),
+		'cdd_device_type' => array('type'=>'varchar(32)'),
 		'cdd_profile_id_primary' => array('type'=>'varchar(64)'),
 		'cdd_profile_id_secondary' => array('type'=>'varchar(64)'),
+		'cdd_cdp_ctldprofile_id_primary' => array('type'=>'int4'),
+		'cdd_cdp_ctldprofile_id_secondary' => array('type'=>'int4'),
 		'cdd_schedule_id' => array('type'=>'varchar(64)'),
 		'cdd_usr_user_id' => array('type'=>'int4'),
 		'cdd_is_active' => array('type'=>'bool'),
@@ -60,12 +76,24 @@ class CtldDevice extends SystemBase {
 
 	
 	function prepare() {
-		if(CtldDevice::GetByColumn('cdd_profile_id', $this->get('cdd_profile_id')) && !$this->key){
+		/*
+		if(CtldDevice::GetByColumn('cdd_device_id', $this->get('cdd_device_id')) && !$this->key){
 			throw new CtldDeviceException('That profile id already exists.');
-		}		
+		}	
+*/		
 		
 	}	
 	
+	function authenticate_read($data) {
+		if ($this->get('cdd_usr_user_id') != $data['current_user_id']) {
+			// If the user's ID doesn't match, we have to make
+			// sure they have admin access, otherwise denied.
+			if ($data['current_user_permission'] < 5) {
+				throw new SystemAuthenticationError(
+					'Current user does not have permission to see this entry in '. static::$tablename.'-'.$data['current_user_permission'] );
+			}
+		}
+	}
 	
 	function authenticate_write($data) {
 		if ($this->get('cdd_usr_user_id') != $data['current_user_id']) {
