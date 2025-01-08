@@ -1026,6 +1026,11 @@ class ControlDHelper{
 			throw new SystemDisplayablePermanentError("Controld api keys are not present.");
 			exit();			
 		}
+		
+		if($debug){
+			$this->debug = $debug;
+		}
+		
 		/*
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 			$this->api_key = $settings->get_setting('paypal_api_key_test');
@@ -1075,12 +1080,18 @@ class ControlDHelper{
 		
 		$endpoint = 'https://api.controld.com/profiles';
 
-		if($debug){
-			echo 'createProfile: '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'createProfile: '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
-		return $this->postRequest($endpoint, $data);
+		$output = $this->postRequest($endpoint, $data);
+		if($this->debug){
+			echo 'New Profile ID: '.$output['body']['profiles'][0]['PK'].'<br>';
+		}
+		return $output;
 	}
 
 	public function modifyProfile($profile_id, $name, $password, $data=array()){
@@ -1092,9 +1103,11 @@ class ControlDHelper{
 		}
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/options'.$name;
 
-		if($debug){
-			echo 'createProfile:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'createProfile:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
 		return $this->putRequest($endpoint, $data);
@@ -1113,20 +1126,24 @@ class ControlDHelper{
 		}
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/options'.$name;
 
-		if($debug){
-			echo 'modifyProfileOptions:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'modifyProfileOptions:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
 		return $this->putRequest($endpoint, $data);
 	}
 	
-	public function deleteProfile($device_id){
-		$endpoint = 'https://api.controld.com/profiles/'.$device_id;
+	public function deleteProfile($profile_id){
+		$endpoint = 'https://api.controld.com/profiles/'.$profile_id;
 		
-		if($debug){
-			echo 'deleteRuleFolder:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'deleteProfile:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
 		return $this->deleteRequest($endpoint);
@@ -1147,9 +1164,11 @@ class ControlDHelper{
 		);
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/filter/'.$filter_key;
 
-		if($debug){
-			echo 'modifyProfileFilter:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'modifyProfileFilter:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
 		return $this->putRequest($endpoint, $data);
@@ -1168,9 +1187,11 @@ class ControlDHelper{
 		);
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/groups';
 
-		if($debug){
-			echo 'createRuleFolder:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'createRuleFolder:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 			
 		return $this->postRequest($endpoint, $data);
@@ -1194,9 +1215,11 @@ class ControlDHelper{
 
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/groups/'.$folder_id;
 
-		if($debug){
-			echo 'deleteRuleFolder:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'deleteRuleFolder:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
 		return $this->deleteRequest($endpoint, $data);
@@ -1225,9 +1248,11 @@ class ControlDHelper{
 		}
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/rules';
 	
-		if($debug){
-			echo 'createRule:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'createRule:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 
 	
@@ -1246,9 +1271,11 @@ class ControlDHelper{
 		}
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/rules';
 
-		if($debug){
-			echo 'modifyRule:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'modifyRule:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
 		return $this->putRequest($endpoint, $data);
@@ -1260,9 +1287,11 @@ class ControlDHelper{
 
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/rules/'.$hostname;
 
-		if($debug){
-			echo 'deleteRule:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'deleteRule:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
 		return $this->deleteRequest($endpoint, $data);
@@ -1282,9 +1311,11 @@ class ControlDHelper{
 		
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/default';
  
-		if($debug){
-			echo 'modifyDefaultRule:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'modifyDefaultRule:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}
 		
 		return $this->putRequest($endpoint, $data);
@@ -1304,9 +1335,11 @@ class ControlDHelper{
 		);
 		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/services/'.$service_key;
 		
-		if($debug){
-			echo 'modifyService:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'modifyService:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}		
 		
 		return $this->putRequest($endpoint, $data);
@@ -1329,15 +1362,17 @@ class ControlDHelper{
 	
 	
 	//DOESN'T WORK?
-	public function createSchedule($org_id, $device_id, $profile_id, $action, $enforcing, $time_start, $time_end, $time_zone, $weekdays){
+	public function createSchedule($profile_id, $device_id, $name, $enforcing, $time_start, $time_end, $time_zone, $weekdays){
+		//"name":"iphone","time_start":"09:00","time_end":"17:00","weekdays":["mon","tue","wed"],"time_zone":"America/Toronto","profile_id":"ID_OF_PROFILE_BEING_SCHEDULED","device_id":"ENDPOINT_ID"}
+		
 		$data = array( 
-			'org' => $org_id,
-			'device' => $device_id,
+			'profile_id' => $profile_id,
+			'device_id' => $device_id,
 			'enforcing' => $status,
-			'name' => $action, 
-			'time_start' => $hostnames,
-			'time_end' => $hostnames,
-			'time_zone' => $hostnames,
+			'name' => $name, 
+			'time_start' => $time_start,
+			'time_end' => $time_end,
+			'time_zone' => $time_zone,
 			'weekdays' => $weekdays,
 			
 		);
@@ -1346,11 +1381,40 @@ class ControlDHelper{
 			$data['group'] = $rule_folder_id;
 		}
 		$endpoint = 'https://api.controld.com/schedules';
-			
-		return $this->postRequest($endpoint, $data);
+
+		if($this->debug){
+			echo 'createSchedule:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
+		}	
+		
+		$output = $this->postRequest($endpoint, $data);
+		if($this->debug){
+			echo 'Schedule ID: '.$output['body']['PK'].'<br>';
+		}
+		return $output;
 	}	
 	
+	public function deleteSchedule($schedule_id){
+		
+		$endpoint = 'https://api.controld.com/schedules/'.$schedule_id;
+		
+		if($this->debug){
+			echo 'deleteSchedule:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
+		}			
+		
+		return $this->deleteRequest($endpoint);
+	}
+	
 	//DEVICES
+	public function listDevice($device_id){
+		return $this->getRequest('https://api.controld.com/devices/'.$device_id);
+	}	
+	
 	public function listDevices(){
 		return $this->getRequest('https://api.controld.com/devices');
 	}
@@ -1363,20 +1427,28 @@ class ControlDHelper{
 		
 		$endpoint = 'https://api.controld.com/devices';
 		
-		if($debug){
-			echo 'createDevice:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'createDevice:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}			
 		
-		return $this->postRequest($endpoint, $data);
+		$output = $this->postRequest($endpoint, $data);
+		if($this->debug){
+			echo 'Device ID: '.$output['body']['PK'].'<br>';
+		}
+		return $output;
 	}
 
 	public function modifyDevice($device_id, $data){
 		$endpoint = 'https://api.controld.com/devices/'.$device_id;
 		
-		if($debug){
-			echo 'modifyDevice:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'modifyDevice:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}			
 		
 		return $this->putRequest($endpoint, $data);
@@ -1386,9 +1458,11 @@ class ControlDHelper{
 		
 		$endpoint = 'https://api.controld.com/devices/'.$device_id;
 		
-		if($debug){
-			echo 'deleteDevice:  '.$endpoint.' '.print_r($data).'<br>';
-			return true;
+		if($this->debug){
+			echo 'deleteDevice:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
 		}			
 		
 		return $this->deleteRequest($endpoint);
@@ -1426,7 +1500,8 @@ class ControlDHelper{
 			return $result;
 		}
 		else{
-			echo 'Error: '. $result['error']['message'];
+			throw new SystemDisplayablePermanentError('Error POST: '.$url.print_r($data, true) . ' '. $result['error']['message']);
+			//echo 'Error: '. $result['error']['message'];
 		}		
 	}
 	
@@ -1460,7 +1535,8 @@ class ControlDHelper{
 			return $result;
 		}
 		else{
-			echo 'Error: '. $result['error']['message'];
+			throw new SystemDisplayablePermanentError('Error PUT: '.$url.print_r($data, true) . ' '. $result['error']['message']);
+			//echo 'Error: '. $result['error']['message'];
 		}		
 	}
 	
@@ -1488,7 +1564,8 @@ class ControlDHelper{
 			return $result;
 		}
 		else{
-			echo 'Error: '. $result['error']['message'];
+			throw new SystemDisplayablePermanentError('Error GET: '.$url . ' '. $result['error']['message']);
+			//echo 'Error: '. $result['error']['message'];
 		}			
 	}
 	
@@ -1516,7 +1593,8 @@ class ControlDHelper{
 			return $result;
 		}
 		else{
-			echo 'Error: '. $result['error']['message'];
+			throw new SystemDisplayablePermanentError('Error DELETE: '.$url . ' '. $result['error']['message']);
+			//echo 'Error: '. $result['error']['message'];
 		}			
 	}
 	

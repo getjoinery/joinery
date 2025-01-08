@@ -30,6 +30,7 @@ class CtldProfile extends SystemBase {
 		'cdp_is_active' => 'Is it active?',
 		'cdp_create_time' => 'Time Created',
 		'cdp_delete_time' => 'Time deleted',
+
 	);
 
 	public static $field_specifications = array(
@@ -39,6 +40,7 @@ class CtldProfile extends SystemBase {
 		'cdp_is_active' => array('type'=>'bool'),
 		'cdp_create_time' => array('type'=>'timestamp(6)'),
 		'cdp_delete_time' => array('type'=>'timestamp(6)'),
+
 	);
 			
 	public static $required_fields = array();
@@ -80,7 +82,7 @@ class CtldProfile extends SystemBase {
 	
 	function update_remote_filters($newvalues){
 		$numchanges = 0;
-		$cd = new ControlDHelper('debug');
+		$cd = new ControlDHelper();
 		$all_filters = ControlDHelper::$filters;
 		
 		//FIRST WE DO CACHED FILTERS
@@ -165,7 +167,7 @@ class CtldProfile extends SystemBase {
 
 	function update_remote_services($newvalues){
 		$numchanges = 0;
-		$cd = new ControlDHelper('debug');
+		$cd = new ControlDHelper();
 		
 		$all_services = [];
 		foreach (ControlDHelper::$services as $category => $items) {

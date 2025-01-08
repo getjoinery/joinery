@@ -41,6 +41,14 @@ class CtldDevice extends SystemBase {
 		'cdd_is_active' => 'Is it active?',
 		'cdd_create_time' => 'Time Created',
 		'cdd_delete_time' => 'Time deleted',
+		'cdd_controld_resolver' => 'Link/code to provision this device at controld',
+		'cdd_deactivation_pin' => 'Pin to turn off the service',
+		'cdd_schedule_start' => 'Time this profile turns on xx:xx (24 hour time)',
+		'cdd_schedule_end' => 'Time this profile turns on xx:xx (24 hour time)',
+		'cdd_schedule_days' => 'Days of the week, serialized list of 3 letter abbreviations',
+		'cdd_schedule_timezone' => 'Timezone for the schedule in America/New_York format',
+		'cdd_schedule_id' => 'Schedule id at Controld',
+
 	);
 
 	public static $field_specifications = array(
@@ -57,6 +65,13 @@ class CtldDevice extends SystemBase {
 		'cdd_is_active' => array('type'=>'bool'),
 		'cdd_create_time' => array('type'=>'timestamp(6)'),
 		'cdd_delete_time' => array('type'=>'timestamp(6)'),
+		'cdd_controld_resolver' => array('type'=>'varchar(128)'),
+		'cdd_deactivation_pin' => array('type'=>'varchar(10)'),
+		'cdd_schedule_start' => array('type'=>'varchar(5)'),
+		'cdd_schedule_end' => array('type'=>'varchar(5)'),
+		'cdd_schedule_days' => array('type'=>'varchar(64)'),
+		'cdd_schedule_timezone' => array('type'=>'varchar(64)'),
+		'cdd_schedule_id' => array('type'=>'varchar(64)'),
 	);
 			
 	public static $required_fields = array();
