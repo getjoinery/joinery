@@ -82,7 +82,7 @@ class MultiCtldService extends SystemMultiBase {
 		} 
 
 		if (array_key_exists('active', $this->options)) {
-		 	$where_clauses[] = 'cds_is_active = ' . ($this->options['active'] ? 'TRUE' : 'FALSE');
+		 	$where_clauses[] = 'cds_is_active = ' . ($this->options['active'] ? 1 : 0);
 		}
 
 				

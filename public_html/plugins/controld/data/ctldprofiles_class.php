@@ -30,7 +30,11 @@ class CtldProfile extends SystemBase {
 		'cdp_is_active' => 'Is it active?',
 		'cdp_create_time' => 'Time Created',
 		'cdp_delete_time' => 'Time deleted',
-
+		'cdp_schedule_start' => 'Time this profile turns on xx:xx (24 hour time)',
+		'cdp_schedule_end' => 'Time this profile turns on xx:xx (24 hour time)',
+		'cdp_schedule_days' => 'Days of the week, serialized list of 3 letter abbreviations',
+		'cdp_schedule_timezone' => 'Timezone for the schedule in America/New_York format',
+		'cdp_schedule_id' => 'Schedule id at Controld',
 	);
 
 	public static $field_specifications = array(
@@ -40,7 +44,11 @@ class CtldProfile extends SystemBase {
 		'cdp_is_active' => array('type'=>'bool'),
 		'cdp_create_time' => array('type'=>'timestamp(6)'),
 		'cdp_delete_time' => array('type'=>'timestamp(6)'),
-
+		'cdp_schedule_start' => array('type'=>'varchar(5)'),
+		'cdp_schedule_end' => array('type'=>'varchar(5)'),
+		'cdp_schedule_days' => array('type'=>'varchar(64)'),
+		'cdp_schedule_timezone' => array('type'=>'varchar(64)'),
+		'cdp_schedule_id' => array('type'=>'varchar(64)'),
 	);
 			
 	public static $required_fields = array();

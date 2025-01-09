@@ -82,7 +82,7 @@ class MultiCtldFilter extends SystemMultiBase {
 		} 
 
 		if (array_key_exists('active', $this->options)) {
-		 	$where_clauses[] = 'cdf_is_active = ' . ($this->options['active'] ? 'TRUE' : 'FALSE');
+		 	$where_clauses[] = 'cdf_is_active = ' . ($this->options['active'] ? 1 : 0);
 		}
 
 				
