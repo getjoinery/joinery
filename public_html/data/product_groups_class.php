@@ -12,6 +12,10 @@ require_once($siteDir . '/includes/Validator.php');
 class ProductGroupException extends SystemClassException {}
 
 class ProductGroup extends SystemBase {
+	
+	//const TYPE_CATEGORY=1;
+	//const TYPE_PLAN=2;
+	
 	public static $prefix = 'prg';
 	public static $tablename = 'prg_product_groups';
 	public static $pkey_column = 'prg_product_group_id';
@@ -26,6 +30,7 @@ class ProductGroup extends SystemBase {
 		'prg_error' => 'Error message associated with too many items in the cart',
 		'prg_name' => 'Name of the product group',
 		'prg_description' => 'Description of the product group',
+		'prg_type' => 'Type of group, like category or product plan group',
 	);
 
 	public static $field_specifications = array(
@@ -34,15 +39,16 @@ class ProductGroup extends SystemBase {
 		'prg_error' => array('type'=>'text'),
 		'prg_name' => array('type'=>'varchar(100)'),
 		'prg_description' => array('type'=>'text'),
+		'prg_type' => array('type'=>'int4'),
 	);
 
-	public static $required_fields = array('prg_max_items');
+	public static $required_fields = array('prg_name');
 
 	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();
 	
-	public static $initial_default_values = array();
+	public static $initial_default_values = array('prg_max_items' => 0);
 
 }
 
@@ -64,6 +70,11 @@ class MultiProductGroup extends SystemMultiBase {
 		$where_clauses = array();
 		$bind_params = array();
 
+		if (array_key_exists('type', $this->options)) {
+		 	$where_clauses[] = 'prg_type = ?';
+		 	$bind_params[] = array($this->options['type'], PDO::PARAM_INT);
+		} 	
+		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
 		} else {

@@ -99,7 +99,7 @@ class ShoppingCart {
 				}
 			}
 
-			if ($current_count >= $product_group->get('prg_max_items')) {
+			if ($product_group->get('prg_max_items') && $current_count >= $product_group->get('prg_max_items')) {
 				throw new ShoppingCartException($product_group->get('prg_error'));
 			}
 		}

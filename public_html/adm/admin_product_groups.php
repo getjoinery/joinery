@@ -27,7 +27,7 @@
 	$product_groups = new MultiProductGroup();
 	$product_groups->load();
 
-	$headers = array('Product Group Name');
+	$headers = array('Name', 'Type');
 	$altlinks = array();
 	if($_SESSION['permission'] > 7){
 		$altlinks['New Product Group'] = '/admin/admin_product_group_edit';
@@ -41,6 +41,13 @@
 	foreach($product_groups as $product_group) {
 		$rowvalues=array();
 		array_push($rowvalues, $product_group->get('prg_name'));
+		if($product_group->get('prg_type') == ProductGroup::TYPE_CATEGORY){
+			array_push($rowvalues, 'Category');
+		}
+		else if($product_group->get('prg_type') == ProductGroup::TYPE_PLAN){
+			array_push($rowvalues, 'Plan');
+		}
+		
 		$page->disprow($rowvalues);
 	}
 
