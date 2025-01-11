@@ -58,10 +58,22 @@
 			$product->set('pro_expires', (int)$_POST['pro_expires']);
 			$product->set('pro_prg_product_group_id', (int)$_POST['pro_prg_product_group_id']);
 			
-			//PRICE MUST BE INTEGER
-			if($_POST['pro_price']){
+			//PRICE
+			if($_POST['pro_price_type'] == Product::PRICE_TYPE_MULTIPLE){
+				$_POST['pro_price'] = NULL;
+			}
+
+			if($_POST['pro_price'] == ''){
+				$_POST['pro_price'] = NULL;
+			}
+			else{
 				$_POST['pro_price'] = $_POST['pro_price'];
 			}
+
+			
+
+
+
 	
 			//PRICE MUST BE INTEGER
 			if($_POST['pro_grp_group_id']){
@@ -95,7 +107,7 @@
 				$product->set('pro_product_scripts', implode(',', $_POST['product_scripts']));
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link', 'pro_plan_order_month', 'pro_plan_order_year');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link', 'pro_plan_order_month', 'pro_plan_order_year', 'pro_short_description');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_POST[$field]);
@@ -286,7 +298,8 @@
 
 
 	//echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
-	echo $formwriter->textbox('Product Description', 'pro_description', 'ctrlHolder', 5, 80, $product->get('pro_description'), '', 'yes');
+	echo $formwriter->textbox('Short Description', 'pro_short_description', 'ctrlHolder', 5, 80, $product->get('pro_short_description'), '', 'yes');
+	echo $formwriter->textbox('Description', 'pro_description', 'ctrlHolder', 5, 80, $product->get('pro_description'), '', 'yes');
 	
 	$optionvals = array(
 		'No, it is a one time payment' => 0, 
@@ -310,28 +323,6 @@
 	
 	echo $formwriter->textinput('Digital item link', 'pro_digital_link', NULL, 100, $product->get('pro_digital_link'), '', 255, '');
 
-	//THIS SECTION IS FOR /PRICING PAGE.  USER CHOOSES WHICH PLAN AND THEN SETS AN ORDER
-	if($settings->get_setting('pricing_page')){
-		$optionvals = array(
-			'No' => 0, 
-			"Monthly Plan 1"=>1,
-			"Monthly Plan 2"=>2,
-			"Monthly Plan 3"=>3,
-			);
-		echo $formwriter->dropinput("Include on monthly /pricing page?", "pro_plan_order_month", "ctrlHolder", $optionvals, $product->get('pro_plan_order_month'), '', FALSE);	
-		
-		$optionvals = array(
-			'No' => 0, 
-			"Yearly Plan 1"=>1,
-			"Yearly Plan 2"=>2,
-			"Yearly Plan 3"=>3,
-			);
-		echo $formwriter->dropinput("Include on yearly /pricing page?", "pro_plan_order_year", "ctrlHolder", $optionvals, $product->get('pro_plan_order_year'), '', FALSE);	
-	}
-
-	
-	
-	
 	
 	$events = new MultiEvent(
 		array('deleted'=>false, 'past'=>false),
@@ -362,7 +353,7 @@
 	$optionvals = array("One price"=>1, 'Multiple pricing levels' => 2, 'User chooses price'=>3);
 	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);
 
-	echo $formwriter->textinput('Price ('.$currency_symbol.'no cents)', 'pro_price', 'ctrlHolder', 100, $product->get('pro_price'), '', 5, '');
+	echo $formwriter->textinput('Price ('.$currency_symbol.')', 'pro_price', 'ctrlHolder', 100, $product->get('pro_price'), '', 5, '');
 	
 	if(!$pro_max_purchase_count_fill = $product->get('pro_max_purchase_count')){
 		$pro_max_purchase_count_fill = 0;
@@ -394,6 +385,25 @@
 		$pgs->load();
 		$optionvals = $pgs->get_dropdown_array();
 		echo $formwriter->dropinput("Product Group", "pro_prg_product_group_id", "ctrlHolder", $optionvals, $product->get('pro_prg_product_group_id'), '', TRUE);	
+	}
+	
+	//THIS SECTION IS FOR /PRICING PAGE.  USER CHOOSES WHICH PLAN AND THEN SETS AN ORDER
+	if($settings->get_setting('pricing_page')){
+		$optionvals = array(
+			'No' => 0, 
+			"Monthly Plan 1"=>1,
+			"Monthly Plan 2"=>2,
+			"Monthly Plan 3"=>3,
+			);
+		echo $formwriter->dropinput("Include on monthly /pricing page?", "pro_plan_order_month", "ctrlHolder", $optionvals, $product->get('pro_plan_order_month'), '', FALSE);	
+		
+		$optionvals = array(
+			'No' => 0, 
+			"Yearly Plan 1"=>1,
+			"Yearly Plan 2"=>2,
+			"Yearly Plan 3"=>3,
+			);
+		echo $formwriter->dropinput("Include on yearly /pricing page?", "pro_plan_order_year", "ctrlHolder", $optionvals, $product->get('pro_plan_order_year'), '', FALSE);	
 	}
 	
 	$optionvals = array(

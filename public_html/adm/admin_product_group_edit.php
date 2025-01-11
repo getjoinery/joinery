@@ -12,12 +12,13 @@
 		$product_group = new ProductGroup($_REQUEST['prg_product_group_id'], TRUE);
 	} else {
 		$product_group = new ProductGroup(NULL);
+
 	}
 
 	if ($_POST) {
 		// Submitting a product edit
 
-		$editable_fields = array('prg_max_items', 'prg_error', 'prg_name', 'prg_description');
+		$editable_fields = array('prg_max_items', 'prg_error', 'prg_name', 'prg_description', 'prg_subtitle', 'prg_type');
 
 		foreach($editable_fields as $field) {
 			$product_group->set($field, $_POST[$field]);
@@ -59,8 +60,15 @@
 	
 	
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_group_edit');
-	echo $formwriter->hiddeninput('prg_product_group_id', $product_group->key);
+	if($product_group->key){
+		echo $formwriter->hiddeninput('prg_product_group_id', $product_group->key);
+	}
 	echo $formwriter->textinput('Product Group Name', 'prg_name', NULL, 100, $product_group->get('prg_name'), '', 255, '');
+	/*
+	$optionvals = array("Category (For /events grouping)"=>ProductGroup::TYPE_CATEGORY,"Subscription Plan (For /pricing page)"=>ProductGroup::TYPE_PLAN);
+	echo $formwriter->dropinput("Type of group", "prg_type", "", $optionvals, $product_group->get('prg_type'), '', FALSE);	
+*/
+	
 	echo $formwriter->textinput('Max Number of items in this product group that can be added to cart:', 'prg_max_items', 'ctrlHolder', 100, $product_group->get('prg_max_items'), '', 255, '');
 
 	echo $formwriter->textbox('Error message if they add too many items:', 'prg_error', 'ctrlHolder', 10, 80, $product_group->get('prg_error'), '');

@@ -43,6 +43,7 @@ class CtldDevice extends SystemBase {
 		'cdd_delete_time' => 'Time deleted',
 		'cdd_controld_resolver' => 'Link/code to provision this device at controld',
 		'cdd_deactivation_pin' => 'Pin to turn off the service',
+		'cdd_timezone' => 'Timezone for this device for use in controld',
 	);
 
 	public static $field_specifications = array(
@@ -61,6 +62,7 @@ class CtldDevice extends SystemBase {
 		'cdd_delete_time' => array('type'=>'timestamp(6)'),
 		'cdd_controld_resolver' => array('type'=>'varchar(128)'),
 		'cdd_deactivation_pin' => array('type'=>'varchar(10)'),
+		'cdd_timezone' => array('type'=>'varchar(64)'),
 	);
 			
 	public static $required_fields = array();

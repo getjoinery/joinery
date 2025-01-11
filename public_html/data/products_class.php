@@ -632,6 +632,7 @@ class Product extends SystemBase {
 	public static $fields = array(
 		'pro_product_id' => 'Product ID',
 		'pro_name' => 'Product name',
+		'pro_short_description' => 'Product Description',
 		'pro_description' => 'Product Description',
 		'pro_price' => 'Price',
 		'pro_requirements' => 'Requirements of this product',
@@ -659,6 +660,7 @@ class Product extends SystemBase {
 	public static $field_specifications = array(
 		'pro_product_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'pro_name' => array('type'=>'varchar(255)'),
+		'pro_short_description' => array('type'=>'text'),
 		'pro_description' => array('type'=>'text'),
 		'pro_price' => array('type'=>'numeric(10,2)'),
 		'pro_requirements' => array('type'=>'int4'),
@@ -683,7 +685,7 @@ class Product extends SystemBase {
 		'pro_product_scripts' => array('type'=>'text'),
 	);
 			 
-	public static $required_fields = array('pro_link', 'pro_price', 'pro_name');
+	public static $required_fields = array('pro_link', 'pro_name');
 
 	public static $field_constraints = array();	
 	
@@ -813,30 +815,36 @@ class Product extends SystemBase {
 			return false;
 		}
 		else if($this->get('pro_price_type') == Product::PRICE_TYPE_MULTIPLE){
-			$versions = $this->get_product_versions();
+			$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
 			if(!count($versions)){
 				return false;
 			}
-			$low_price = NULL;
-			$high_price = NULL;
-			foreach ($versions as $version) {
-				if ($version->prv_status == ProductVersion::ACTIVE) {
-					
-					if(!$low_price || $version->prv_version_price < $low_price){
-						$low_price = $version->prv_version_price;
-					}
-					
-					if(!$high_price || $version->prv_version_price > $high_price){
-						$high_price = $version->prv_version_price;
-					}
-				} 
-			}
-			
-			if($low_price && $high_price){
-				return $currency_symbol.$low_price . ' - ' . $currency_symbol.$high_price;
+			else if(count($versions) == 1){
+				$version = $versions[0];
+				return $currency_symbol.$version->prv_version_price;
 			}
 			else{
-				return false;
+				$low_price = NULL;
+				$high_price = NULL;
+				foreach ($versions as $version) {
+					if ($version->prv_status == ProductVersion::ACTIVE) {
+						
+						if(!$low_price || $version->prv_version_price < $low_price){
+							$low_price = $version->prv_version_price;
+						}
+						
+						if(!$high_price || $version->prv_version_price > $high_price){
+							$high_price = $version->prv_version_price;
+						}
+					} 
+				}
+				
+				if($low_price && $high_price){
+					return $currency_symbol.$low_price . ' - ' . $currency_symbol.$high_price;
+				}
+				else{
+					return false;
+				}
 			}
 
 		}
@@ -1279,7 +1287,11 @@ class Product extends SystemBase {
 		}
 	
 		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
-		if ($versions) {
+		if (count($versions) == 1) {
+			$version = $versions[0];
+			echo $formwriter->hiddeninput('product_version', $version->prv_product_version_id);
+		}
+		else if (count($versions) > 1) {
 			$version_dropdown = array();
 			foreach ($versions as $version) {
 				$output_string = $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price;
