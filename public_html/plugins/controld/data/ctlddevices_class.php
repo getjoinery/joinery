@@ -112,6 +112,33 @@ class CtldDevice extends SystemBase {
 		}
 	}
 	
+	function are_filters_editable(){
+		
+		//IF PROFILES HAVE NOT BEEN CREATED, ALLOW EDITING
+		if(!$this->get('cdd_cdp_ctldprofile_id_primary')){
+			return true;
+		}
+		
+		$weekday = 'Sunday';
+		if($this->get('cdd_timezone')){
+			$timezone = $this->get('cdd_timezone');
+		}
+		else{
+			$timezone = 'America/New_York';
+		}
+		function isToday($weekday, $timezone = 'UTC') {
+			date_default_timezone_set($timezone);
+
+			$weekday = strtolower($weekday);
+			// Get the current day in the specified timezone, in lowercase
+			$currentDay = strtolower(date('l')); // 'l' returns full weekday name
+
+			// Check if the input day matches the current day
+			return $weekday === $currentDay;
+		}		
+		
+	}
+	
 }
 
 class MultiCtldDevice extends SystemMultiBase {
