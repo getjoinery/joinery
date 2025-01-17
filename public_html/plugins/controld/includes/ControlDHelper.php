@@ -1394,6 +1394,27 @@ class ControlDHelper{
 			echo 'Schedule ID: '.$output['body']['PK'].'<br>';
 		}
 		return $output;
+	}
+
+	public function modifySchedule($schedule_id, $enforcing, $time_start, $time_end, $time_zone, $weekdays){
+		$data = array( 
+			'enforcing' => $status,
+			'time_start' => $time_start,
+			'time_end' => $time_end,
+			'time_zone' => $time_zone,
+			'weekdays' => $weekdays,
+			
+		);
+		$endpoint = 'https://api.controld.com/schedules/'.$schedule_id;
+		
+		if($this->debug){
+			echo 'modifySchedule:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+			if($this->debug == 'debug_nosend'){
+				return true;
+			}
+		}		
+		
+		return $this->putRequest($endpoint, $data);
 	}	
 	
 	public function deleteSchedule($schedule_id){
