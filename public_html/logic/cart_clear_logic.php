@@ -1,6 +1,6 @@
 <?php
 
-function cart_clear($get_vars, $post_vars){
+function cart_clear_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
 	
 	$page_vars = array();

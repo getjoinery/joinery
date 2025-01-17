@@ -865,8 +865,6 @@ class StripeHelper {
 			
 			$subscription_result = $this->create_subscription($subscription_params);
 			
-			print_r($subscription_result);
-			exit;
 
 
 		}
