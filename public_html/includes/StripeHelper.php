@@ -730,11 +730,23 @@ class StripeHelper {
 	public function get_subscription_plan($plan_name){
 		$result = $this->stripe->plans->retrieve($plan_name);
 		return $result;
-	}
+	}	
+	
 	
 	public function create_subscription_plan($params){
 		//CREATE NEW PLAN
-		
+		if(!isset($params['amount'])){
+			throw new SystemDisplayablePermanentError('Missing parameters passed to create_subscription_plan.  Amount:'. $params['amount'] );
+		}
+		else if(!isset($params['plan_name'])){
+			throw new SystemDisplayablePermanentError('Missing parameters passed to create_subscription_plan.  Plan name:'. $params['plan_name'] );
+		} 
+		else if(!isset($params['interval'])){
+			throw new SystemDisplayablePermanentError('Missing parameters passed to create_subscription_plan.  Interval:'. $params['interval'] );
+		} 		
+		else if(!isset($params['currency_code'])){
+			throw new SystemDisplayablePermanentError('Missing parameters passed to create_subscription_plan.  Currency code:'. $params['currency_code'] );
+		}
 
 		if($params['trial_period_days']){
 			$plan_info = array(
@@ -746,7 +758,6 @@ class StripeHelper {
 			  ],
 			  "currency" => $params['currency_code'],
 			  "trial_period_days" => $params['trial_period_days'],
-			  //"id" => 'subscription-' . $params['amount'],
 			]		
 			);
 		}
@@ -759,7 +770,6 @@ class StripeHelper {
 				"name" => $params['plan_name'],
 			  ],
 			  "currency" => $params['currency_code'],
-			  //"id" => 'subscription-' . $params['amount'],
 			]		
 			);
 		}
@@ -774,6 +784,31 @@ class StripeHelper {
 		return $subscription;
 	}
 
+	/*
+	public function update_subscription($subscription_id, $params){
+		$subscription = $this->stripe->subscriptions->update(
+			$subscription_id,
+			$params
+		);
+		return $subscription;
+	}
+	*/
+
+	public function update_subscription_plan($subscription_id, $item_id_to_update, $new_plan_id){
+		$subscription = $this->stripe->subscriptions->update(
+			$subscription_id,
+			[
+				'items' => [
+					[
+						'id' => $item_id_to_update, // Specify the subscription item ID
+						'plan' => $new_plan_id, // Specify the new plan ID
+					],
+				],
+			]
+		);
+		return $subscription;
+	}
+	
 
 	public function create_charge($params){
 		//CHARGE THE PURCHASE
@@ -820,6 +855,54 @@ class StripeHelper {
 		}
 		return $plan;
 	}
+	
+	/*
+	public function update_stripe_regular_subscription_from_order_item($subscription_id, $plan, $order_item){
+		$order = $order_item->get_order();
+		
+		$plan_items = array(
+			'plan' => $plan['id'],
+		);
+				
+		
+		$plan_items['metadata'] = array(
+			"ord_order_id" => $order->key, 
+			"odi_order_item_id" => $order_item->key, 
+		);
+		$plan_items_wrap = array($plan_items);
+		
+		
+		//UPDATE DOES NOT WORK WITH TRIAL PERIODS
+		try{
+			$subscription_params = array([
+			  'items' => $plan_items_wrap,
+			  'metadata' => [
+				 "ord_order_id" => $order->key, 
+				 "odi_order_item_id" => $order_item->key,
+				],
+			]);
+			
+			$subscription_result = $this->update_subscription($subscription_id, $subscription_params);
+
+		}
+		catch (Exception $e) {		  
+			$stored_error = "Subscription change failed.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
+			print_r($stored_error);
+			exit;;  //SKIP THE REST OF THE ITEM
+		}				
+		
+
+		
+		//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT
+
+		//$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result['latest_invoice']);
+		//$order_item->save();		
+		
+		return $subscription_result;
+		
+	}
+	*/
+	
 	
 	public function process_stripe_regular_subscription_from_order_item($plan, $order_item, $billing_user, $stripe_customer_id){
 		$billing_name = $billing_user->display_name();

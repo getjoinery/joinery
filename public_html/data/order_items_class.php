@@ -11,6 +11,7 @@ require_once($siteDir . '/includes/Validator.php');
 
 require_once($siteDir . '/data/address_class.php');
 require_once($siteDir . '/data/order_item_requirements_class.php');
+require_once($siteDir . '/data/products_class.php');
 
 class OrderItemException extends SystemClassException {}
 
@@ -186,7 +187,6 @@ class OrderItem extends SystemBase {
 	}
 
 	function get_product_version($product_id){
-		require_once($siteDir . '/data/products_class.php');
 		
 		if($this->get('odi_prv_product_version_id')){
 			return ProductVersion::GetActiveProductVersion($product_id, $this->get('odi_prv_product_version_id'));
