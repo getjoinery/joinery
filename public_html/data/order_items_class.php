@@ -46,7 +46,7 @@ class OrderItem extends SystemBase {
 		'odi_refund_note' => 'Note for the refund',
 		'odi_refund_time' => 'Time of last refund',
 		'odi_stripe_foreign_invoice_id' => 'Stripe invoice id if it is the first of a subscription', 
-		'odi_subscription_status' => 'Status if it is a subscription'
+		'odi_subscription_status' => 'Status if it is a subscription',
 	);
 
 	public static $field_specifications = array(

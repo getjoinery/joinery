@@ -735,20 +735,36 @@ class StripeHelper {
 	public function create_subscription_plan($params){
 		//CREATE NEW PLAN
 		
-		$plan_info = array(
-		[
-		  "amount" => $params['amount'] * 100,
-		  "interval" => $params['interval'],
-		  "product" => [
-			"name" => $params['plan_name'],
-		  ],
-		  "currency" => $params['currency_code'],
-		  //"id" => 'subscription-' . $params['amount'],
-		]		
-		);
+
+		if($params['trial_period_days']){
+			$plan_info = array(
+			[
+			  "amount" => $params['amount'] * 100,
+			  "interval" => $params['interval'],
+			  "product" => [
+				"name" => $params['plan_name'],
+			  ],
+			  "currency" => $params['currency_code'],
+			  "trial_period_days" => $params['trial_period_days'],
+			  //"id" => 'subscription-' . $params['amount'],
+			]		
+			);
+		}
+		else{		
+			$plan_info = array(
+			[
+			  "amount" => $params['amount'] * 100,
+			  "interval" => $params['interval'],
+			  "product" => [
+				"name" => $params['plan_name'],
+			  ],
+			  "currency" => $params['currency_code'],
+			  //"id" => 'subscription-' . $params['amount'],
+			]		
+			);
+		}
+
 		
-		//print_r($plan_info);
-		//exit;
 		$plan = $this->stripe->plans->create($plan_info); 	
 		return $plan;
 	}
@@ -778,7 +794,13 @@ class StripeHelper {
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 		
 		//CHECK FOR EXISTING PLAN
-		$plan_name = 'subscription-' . $amount;
+		if($trial_period_days){
+			$plan_name = 'subscription-' . $amount. '-trial'.$trial_period_days;
+		}
+		else{
+			$plan_name = 'subscription-' . $amount;
+		}
+		
 		try{
 			$plan = $this->get_subscription_plan($plan_name);
 		}
@@ -789,9 +811,12 @@ class StripeHelper {
 			$plan_params['interval'] = $interval;
 			$plan_params['currency_symbol'] = $currency_symbol;
 			$plan_params['currency_code'] = $currency_code;
-			$plan_params['trial_period_days'] = $trial_period_days;
+			if($trial_period_days){
+				$plan_params['trial_period_days'] = $trial_period_days;
+			}
 			//CREATE NEW PLAN
 			$plan = $this->create_subscription_plan($plan_params); 	
+
 		}
 		return $plan;
 	}
@@ -814,17 +839,34 @@ class StripeHelper {
 		$plan_items_wrap = array($plan_items);
 		
 		try{
-			$subscription_params = array([
-			  'customer' => $stripe_customer_id,
-			  'items' => $plan_items_wrap,
-			  'metadata' => [
-				 "ord_order_id" => $order->key, 
-				 "odi_order_item_id" => $order_item->key,
-				 "customer_name" => $billing_name,
-				 "customer_email" => $billing_user->get('usr_email')],
-			]);
+			if($plan['trial_period_days']){
+				$subscription_params = array([
+				  'customer' => $stripe_customer_id,
+				  'items' => $plan_items_wrap,
+				  'trial_from_plan' => true,
+				  'metadata' => [
+					 "ord_order_id" => $order->key, 
+					 "odi_order_item_id" => $order_item->key,
+					 "customer_name" => $billing_name,
+					 "customer_email" => $billing_user->get('usr_email')],
+				]);			
+			}
+			else{
+				$subscription_params = array([
+				  'customer' => $stripe_customer_id,
+				  'items' => $plan_items_wrap,
+				  'metadata' => [
+					 "ord_order_id" => $order->key, 
+					 "odi_order_item_id" => $order_item->key,
+					 "customer_name" => $billing_name,
+					 "customer_email" => $billing_user->get('usr_email')],
+				]);
+			}
 			
 			$subscription_result = $this->create_subscription($subscription_params);
+			
+			print_r($subscription_result);
+			exit;
 
 
 		}

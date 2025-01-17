@@ -107,7 +107,7 @@
 				$product->set('pro_product_scripts', implode(',', $_POST['product_scripts']));
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link', 'pro_plan_order_month', 'pro_plan_order_year', 'pro_short_description');
+			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link', 'pro_plan_order_month', 'pro_plan_order_year', 'pro_short_description', 'pro_trial_period_days');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_POST[$field]);
