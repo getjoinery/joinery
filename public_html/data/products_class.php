@@ -1041,7 +1041,7 @@ class Product extends SystemBase {
 			$version = $this->get_product_version_details(intval($form_data['product_version']));
 			if (!$version) {
 				throw new BasicProductRequirementException(
-					'Sorry, one of the products in your cart is invalid.  Please clear your cart and try again.');
+					'Sorry, one of the products in your cart does not have a correct version.  Please clear your cart and try again.');
 			}
 			return $version;
 		}
