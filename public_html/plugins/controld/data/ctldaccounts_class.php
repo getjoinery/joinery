@@ -86,6 +86,20 @@ class CtldAccount extends SystemBase {
 		}
 	}
 	
+	function readable_plan_name(){
+		if($this->get('cda_plan') == CtldAccount::BASIC_PLAN){
+			return 'Basic Plan';	
+		}
+		else if($this->get('cda_plan') == CtldAccount::PREMIUM_PLAN){
+			return 'Premium Plan';	
+		}
+		else if($this->get('cda_plan') == CtldAccount::PRO_PLAN){
+			return 'Pro Plan';	
+		}			
+		
+		return false;
+	}
+	
 }
 
 class MultiCtldAccount extends SystemMultiBase {

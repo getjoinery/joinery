@@ -72,7 +72,7 @@ class OrderItem extends SystemBase {
 		'odi_subscription_status' => array('type'=>'varchar(64)'),
 	);
 
-	public static $required_fields = array('odi_ord_order_id', 'odi_pro_product_id', 'odi_price');
+	public static $required_fields = array('odi_ord_order_id', 'odi_pro_product_id');
 
 	public static $field_constraints = array();	
 	
@@ -196,7 +196,35 @@ class OrderItem extends SystemBase {
 		}
 		
 	}
+	
+	function readable_subscription_status(){
+		$settings = Globalvars::get_instance(); 
+		$session = SessionControl::get_instance();
 
+		if(!$this->get('odi_subscription_status')){
+			throw new SystemDisplayablePermanentError("Subscripton ".$this->key." does not have a status.");
+			exit;
+		}
+
+		if($this->get('odi_subscription_cancelled_time')){
+			$status = 'Canceled on '. LibraryFunctions::convert_time($this->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
+			return $status;
+		}
+		else{
+
+			$status = 'active';
+			if($this->get('odi_subscription_status')){
+				$status = $this->get('odi_subscription_status');
+			}
+			$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+			
+			$product = new Product($this->get('odi_pro_product_id'), TRUE);
+			
+			
+			return $currency_symbol . $this->get('odi_price') . '/'. $product->get('pro_recurring');
+			
+		}		
+	}
 }
 
 

@@ -2,10 +2,10 @@
 /* THIS FILE CONTAINS ALL SCRIPTS THAT ARE RUN UPON A PRODUCT PURCHASE
 SET THE FUNCTION NAME WHEN CREATING THE PRODUCT  
 ALL FUNCTIONS END WITH PRODUCT_SCRIPT
-ALL FUNCTIONS MUST TAKE USER/PRODUCT/ORDER/ORDER_ITEM/CART  
+ALL FUNCTIONS MUST TAKE USER/ORDER_ITEM 
 */
 
-function controld_subscription_product_script($user, $product, $order, $order_item, $cart){
+function controld_subscription_product_script($user, $order_item){
 	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');

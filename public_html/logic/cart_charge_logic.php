@@ -314,6 +314,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			}	
 			
 			$order_item->load();
+			
 
 			
 			
@@ -418,13 +419,18 @@ function cart_charge_logic($get_vars, $post_vars){
 			if($product_scripts_list = $product->get('pro_product_scripts')){
 				$product_scripts = explode(',', $product_scripts_list);
 				foreach($product_scripts as $product_script){
-					$product_script($user, $product, $order, $order_item, $cart);
+					$product_script($user, $order_item);
 				}
 			}
 			
 			$receipts[$key+1]['pname'] = $product_name;
 			$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
-			$receipts[$key+1]['price'] = $price - $discount;				
+			if($product->get('pro_trial_period_days')){
+				$receipts[$key+1]['price'] = $price - $discount . ' (' . $product->get('pro_trial_period_days') . ' day free trial)';	
+			}
+			else{
+				$receipts[$key+1]['price'] = $price - $discount;
+			}
 
 		}
 		else{
@@ -583,7 +589,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			if($product_scripts_list = $product->get('pro_product_scripts')){
 				$product_scripts = explode(',', $product_scripts_list);
 				foreach($product_scripts as $product_script){
-					$product_script($user, $product, $order, $order_item, $cart);
+					$product_script($user, $order_item);
 				}
 			}
 
