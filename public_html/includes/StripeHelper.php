@@ -783,7 +783,19 @@ class StripeHelper {
 		$subscription = $this->stripe->subscriptions->create($params);	
 		return $subscription;
 	}
+	
+	public function create_product($params){
+		$product = $this->stripe->products->create($params);	
+		return $product;
+	}
 
+	public function create_price($params){
+		$price = $this->stripe->prices->create($params);	
+		return $price;
+	}
+	
+
+	
 	/*
 	public function update_subscription($subscription_id, $params){
 		$subscription = $this->stripe->subscriptions->update(
@@ -794,6 +806,24 @@ class StripeHelper {
 	}
 	*/
 
+	public function change_subscription($subscription_id, $item_id_to_update, $new_stripe_price){
+		$subscription = $this->stripe->subscriptions->update(
+			$subscription_id,
+			[
+				'items' => [
+					[
+						'id' => $item_id_to_update, // Specify the subscription item ID
+						'price' => $new_stripe_price, // Specify the new stripe price id
+					],
+				],
+			]
+		);
+		return $subscription;
+	}
+	
+	
+	//THIS FUNCTION IS NOW DEPRECATED
+	/*
 	public function update_subscription_plan($subscription_id, $item_id_to_update, $new_plan_id){
 		$subscription = $this->stripe->subscriptions->update(
 			$subscription_id,
@@ -808,6 +838,7 @@ class StripeHelper {
 		);
 		return $subscription;
 	}
+	*/
 	
 
 	public function create_charge($params){
@@ -815,9 +846,90 @@ class StripeHelper {
 		$charge = $this->stripe->charges->create($params); 
 		return $charge;
 	}
+
+
+	
+	public function get_or_create_price($product, $price){
+
+		
+		if($interval == 1){  //HOW WE USED TO DO IT
+			$interval = 'month';
+		}
+		
+		$settings = Globalvars::get_instance();
+		$currency_code = $settings->get_setting('site_currency');
+		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+		
+		//CHECK FOR EXISTING PLAN
+		if($this->test_mode){
+			$stripe_product_id = $product->get('pro_stripe_product_id_test');
+		}
+		else{
+			$stripe_product_id = $product->get('pro_stripe_product_id');
+		}
+		
+		if($product->get('pro_recurring')){
+			$stripe_type = 'recurring';
+		}
+		else{
+			$stripe_type = 'one_time';
+		}
+	
+		//GET ALL PRICES FOR PRODUCT
+		$stripe_prices = $this->stripe->prices->all([
+			'product' => $stripe_product_id,
+			'active' => 'true',
+			'type' => $stripe_type,
+			]);
+	
+		$found_price = NULL;
+		foreach ($stripe_prices->data as $stripe_price) {
+			if($stripe_price->unit_amount / 100 == $price){
+				return $stripe_price;
+			}
+		}
+		
+		//IF WE GOT HERE WE NEED TO CREATE ONE
+		if($product->get('pro_trial_period_days')){
+			$nickname = $amount. '-trial'.$product->get('pro_trial_period_days');
+		}
+		else{
+			$nickname = $amount;
+		}
+		
+
+	
+		try{
+			$stripe_params=array();
+			$stripe_params['nickname'] = $nickname;
+			$stripe_params['unit_amount'] = $price * 100;
+			$stripe_params['currency'] = $currency_code;
+			$stripe_params['product'] = $stripe_product_id;
+			if($product->get('pro_recurring')){
+				
+				if($product->get('pro_trial_period_days')){
+					$stripe_params['recurring'] = array(
+						'interval' => $product->get('pro_recurring'),
+						'trial_period_days' => $product->get('pro_trial_period_days')
+						);
+				}
+				else{
+					$stripe_params['recurring'] = array('interval' => $product->get('pro_recurring'));
+				}
+			}
+
+			$stripe_price = $this->create_price($stripe_params);
+		}
+		catch (Exception $e) {
+			
+			throw new SystemDisplayablePermanentError("Stripe price creation failed.  Message: ".$e->getMessage()); 
+		}
+		return $stripe_price;
+	}
+
 	
 	
-	//DEFAULT NAME IS 'subscription-price'
+	//THIS IS NOW DEPRECATED, USE PRICES INSTEAD
 	public function get_or_create_subscription_plan($amount, $interval, $trial_period_days){
 		
 		if($interval == 1){  //HOW WE USED TO DO IT
@@ -902,8 +1014,75 @@ class StripeHelper {
 		
 	}
 	*/
-	
-	
+
+
+
+	public function process_stripe_regular_subscription_from_order_item($price, $order_item, $billing_user, $stripe_customer_id){
+		$billing_name = $billing_user->display_name();
+		$order = $order_item->get_order();
+		
+		$price_items = array(
+			'price' => $price['id'],
+		);
+				
+		//START THE SUBSCRIPTION
+		
+		$price_items_wrap = array($price_items);
+
+		try{
+
+			$params = array([
+			  'customer' => $stripe_customer_id,
+			  'items' => $price_items_wrap,
+			  'metadata' => [
+				 "ord_order_id" => $order->key, 
+				 "odi_order_item_id" => $order_item->key,
+				 "customer_name" => $billing_name,
+				 "customer_email" => $billing_user->get('usr_email')],
+			]);
+			
+			
+			$subscription_result = $this->create_subscription($params);
+			
+
+
+		}
+		catch (Exception $e) {		  
+			$stored_error = "Subscription failed.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
+			
+			$error = "Sorry, we weren't able to create your subscription. <strong>" . $e->getMessage()."</strong> ";
+			
+			$order->set('ord_error', substr($stored_error, 0, 250));
+			$order->save();	
+			
+			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
+			$order_item->set('odi_status_change_time', 'now()');
+			$order_item->save();
+			throw new SystemDisplayablePermanentError($error);
+			exit;;  //SKIP THE REST OF THE ITEM
+		}				
+		
+
+		//IF THE SUBSCRIPTION FAILED MARK IT AS ERROR
+		if(!$subscription_result['id']){
+			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
+			$order_item->set('odi_status_change_time', 'now()');
+			$order_item->save();
+			exit;  //SKIP THE REST OF THE ITEM
+		}
+		
+		//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT
+		$order_item->set('odi_stripe_subscription_id', $subscription_result['id']);
+		$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result['latest_invoice']);
+		$order_item->set('odi_is_subscription', true);
+		$order_item->set('odi_status', OrderItem::STATUS_PAID);
+		$order_item->set('odi_status_change_time', 'now()');
+		$order_item->save();		
+		
+		return $subscription_result;
+		
+	}	
+	/*
 	public function process_stripe_regular_subscription_from_order_item($plan, $order_item, $billing_user, $stripe_customer_id){
 		$billing_name = $billing_user->display_name();
 		$order = $order_item->get_order();
@@ -984,6 +1163,7 @@ class StripeHelper {
 		return $subscription_result;
 		
 	}
+	*/
 	
 	public function process_charge($source, $amount, $stripe_customer_id, $item_list, $billing_user, $order=NULL){
 		
