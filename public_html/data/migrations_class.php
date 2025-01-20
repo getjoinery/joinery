@@ -26,6 +26,7 @@ class Migration extends SystemBase {
 		'mig_file' => 'The file that was run',
 		'mig_output' => 'Output of the migration',
 		'mig_hash' => 'The hash of the migration_sql or migration_file',
+		'mig_db_hash' => 'The hash of all of the database structure',
 		'mig_success' => 'Was it successful?',
 		'mig_create_time' => 'Time run',
 	);
@@ -39,11 +40,12 @@ class Migration extends SystemBase {
 		'mig_file' => array('type'=>'varchar(128)'),
 		'mig_output' => array('type'=>'text'),
 		'mig_hash' => array('type'=>'varchar(33)'),
+		'mig_db_hash' => array('type'=>'varchar(33)'),
 		'mig_success' => array('type'=>'bool'),
 		'mig_create_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $required_fields = array('mig_version');
+	public static $required_fields = array();
 
 	public static $field_constraints = array();	
 	
