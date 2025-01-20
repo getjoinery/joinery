@@ -42,79 +42,98 @@
 	-IF CHARACTER LENGTH DOES NOT MATCH YOU WILL GET A WARNING BUT IT WILL NOT FIX
 	*/
 
-	//LOAD ALL CLASSES 
-	$path = $_SERVER['DOCUMENT_ROOT']."/data";
-	$classes = array();
-	if ($handle = opendir($path)) {
-		while (false !== ($file = readdir($handle))) {
-			if ('.' === $file) continue;
-			if ('..' === $file) continue;
-			$filepath = $path.'/'.$file;
-			
-			$file_parts = pathinfo($file);
-			if($file_parts['extension'] == 'php'){
-				if(file_exists($filepath)){
-					if (str_contains($file, '_class')) {					
-						require_once($filepath);
-						
-						
-						$fileContent = file_get_contents($filepath);
-						$tokens = token_get_all($fileContent);
 
-						for ($i = 0; $i < count($tokens); $i++) {
-							if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
-								$thisclass = $tokens[$i + 2][1];;
-								//TABLENAME AND FIELD SPECIFICATIONS ARE REQUIRED 
-								if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
-									$classes[] = $thisclass;
-								}
-							}
-						}						
-						
-					}
-				}
-			}
-		}
-		closedir($handle);
-	}
 	
 	
-	//LOAD ALL CLASSES FROM PLUGINS
-	$plugins = LibraryFunctions::list_plugins();
-	foreach($plugins as $plugin){
-		$plugin_data_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/data';
 
-		if ($handle = opendir($plugin_data_dir)) {
+	function update_database($classes, $migrations, $verbose=false, $upgrade=false, $cleanup=false){
+
+
+		//LOAD ALL CLASSES 
+		$db_structure_contents = '';
+		$path = $_SERVER['DOCUMENT_ROOT']."/data";
+		$classes = array();
+		if ($handle = opendir($path)) {
 			while (false !== ($file = readdir($handle))) {
 				if ('.' === $file) continue;
 				if ('..' === $file) continue;
-				$filepath = $plugin_data_dir.'/'.$file;
+				$filepath = $path.'/'.$file;
+				
 				$file_parts = pathinfo($file);
 				if($file_parts['extension'] == 'php'){
-					if (str_contains($file, '_class')) {
-						require_once($filepath);
+					if(file_exists($filepath)){
+						if (str_contains($file, '_class')) {
+							require_once($filepath);
+							
+							
+							$fileContent = file_get_contents($filepath);
+							$tokens = token_get_all($fileContent);
 
-						$fileContent = file_get_contents($filepath);
-						$tokens = token_get_all($fileContent);
-
-						for ($i = 0; $i < count($tokens); $i++) {
-							if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
-								$thisclass = $tokens[$i + 2][1];;
-								if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
-									$classes[] = $thisclass;
+							for ($i = 0; $i < count($tokens); $i++) {
+								if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
+									$thisclass = $tokens[$i + 2][1];;
+									//TABLENAME AND FIELD SPECIFICATIONS ARE REQUIRED 
+									if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
+										$classes[] = $thisclass;
+										$db_structure_contents .= serialize($thisclass::$field_specifications);
+									}
 								}
-							}
-						}	
+							}						
+							
+						}
 					}
 				}
 			}
 			closedir($handle);
 		}
-	}	
-	
-	
+		
+		
+		//LOAD ALL CLASSES FROM PLUGINS
+		
+		$plugins = LibraryFunctions::list_plugins();
+		foreach($plugins as $plugin){
+			$plugin_data_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/data';
 
-	function update_database($classes, $migrations, $verbose=false, $upgrade=false, $cleanup=false){
+			if ($handle = opendir($plugin_data_dir)) {
+				while (false !== ($file = readdir($handle))) {
+					if ('.' === $file) continue;
+					if ('..' === $file) continue;
+					$filepath = $plugin_data_dir.'/'.$file;
+					$file_parts = pathinfo($file);
+					if($file_parts['extension'] == 'php'){
+						if (str_contains($file, '_class')) {
+							require_once($filepath);
+
+							$fileContent = file_get_contents($filepath);
+							$tokens = token_get_all($fileContent);
+
+							for ($i = 0; $i < count($tokens); $i++) {
+								if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
+									$thisclass = $tokens[$i + 2][1];;
+									if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
+										$classes[] = $thisclass;
+										$db_structure_contents .= serialize($thisclass::$field_specifications);
+									}
+								}
+							}	
+						}
+					}
+				}
+				closedir($handle);
+			}
+		}	
+
+
+		$db_structure_hash = md5($db_structure_contents);
+		$sql_commands = '';
+		$sql_output = '';
+		echo 'DB Hash: '. $db_structure_hash."<br>\n";
+
+
+
+
+
+
 		error_reporting(E_ERROR | E_PARSE);
 		ini_set('display_errors', 1);
 		ini_set('display_startup_errors', 1);
@@ -138,13 +157,16 @@
 					NO MINVALUE
 					CACHE 1;';
 				echo $sql."<br>\n";
+				$sql_commands .= $sql;
 
 				try{
 					$q = $dblink->prepare($sql);
 					$q->execute();
 				}
 				catch(PDOException $e){
-					echo $e->getMessage();
+					$sql_error = $e->getMessage();
+					echo $sql_error;
+					$sql_output .= $sql_error;
 				}				
 					
 				$sql = '
@@ -168,25 +190,31 @@
 				$sql .= ');';
 				
 				echo $sql."<br>\n";
+				$sql_commands .= $sql;
 				
 				try{
 					$q = $dblink->prepare($sql);
 					$q->execute();
 				}
 				catch(PDOException $e){
-					echo $e->getMessage();
+					$sql_error = $e->getMessage();
+					echo $sql_error;
+					$sql_output .= $sql_error;
 				}	
 				
 					
 				$sql = 'ALTER TABLE "public"."'.$table_name.'" ADD CONSTRAINT "'.$table_name.'_pkey" PRIMARY KEY ("'.$pkey_column.'");';
 				echo $sql."<br>\n";
+				$sql_commands .= $sql;
 				
 				try{
 					$q = $dblink->prepare($sql);
 					$q->execute();
 				}
 				catch(PDOException $e){
-					echo $e->getMessage();
+					$sql_error = $e->getMessage();
+					echo $sql_error;
+					$sql_output .= $sql_error;
 				}	
 				
 				
@@ -218,7 +246,9 @@
 					$q->setFetchMode(PDO::FETCH_OBJ);
 				}
 				catch(PDOException $e){
-					echo $e->getMessage();
+					$sql_error = $e->getMessage();
+					echo $sql_error;
+					$sql_output .= $sql_error;
 				}	
 				
 				
@@ -253,7 +283,9 @@
 						$q->execute();
 					}
 					catch(PDOException $e){
-						echo $e->getMessage();
+						$sql_error = $e->getMessage();
+						echo $sql_error;
+						$sql_output .= $sql_error;
 					}	
 					$row = $q->fetch();
 
@@ -273,7 +305,9 @@
 							$q->execute();
 						}
 						catch(PDOException $e){
-							echo $e->getMessage();
+							$sql_error = $e->getMessage();
+							echo $sql_error;
+							$sql_output .= $sql_error;
 						}	
 						$row = $q->fetch();
 						$max_val = $row['max_val'];
@@ -289,26 +323,32 @@
 							NO MINVALUE
 							CACHE 1;';
 						echo $sql."<br>\n";
+						$sql_commands .= $sql;
 
 						try{
 							$q = $dblink->prepare($sql);
 							$q->execute();
 						}
 						catch(PDOException $e){
-							echo $e->getMessage();
+							$sql_error = $e->getMessage();
+							echo $sql_error;
+							$sql_output .= $sql_error;
 						}	
 
 						//ADD IT TO THE COLUMN
 						$sql = 'ALTER TABLE '.$table_name.' 
 							ALTER COLUMN '.$field_name.' SET DEFAULT nextval(\''.$sequence_name.'\'::regclass);';
 						echo $sql."<br>\n";
+						$sql_commands .= $sql;
 
 						try{
 							$q = $dblink->prepare($sql);
 							$q->execute();
 						}
 						catch(PDOException $e){
-							echo $e->getMessage();
+							$sql_error = $e->getMessage();
+							echo $sql_error;
+							$sql_output .= $sql_error;
 						}							
 					
 						
@@ -365,7 +405,9 @@
 							catch(PDOException $e){
 								//DO NOT HALT THE PROGRAM, JUST NOTE IT
 								echo 'ERROR: Could not alter column '.$field.' ('.$sql.')'. "<br>\n";
-								//echo $e->getMessage();
+								$sql_error = $e->getMessage();
+								echo $sql_error;
+								$sql_output .= $sql_error;
 							}								
 							
 						}
@@ -393,7 +435,9 @@
 						$q->execute();
 					}
 					catch(PDOException $e){
-						echo $e->getMessage();
+						$sql_error = $e->getMessage();
+						echo $sql_error;
+						$sql_output .= $sql_error;
 					}	
 
 				}
@@ -422,13 +466,35 @@
 								$q->execute();
 							}
 							catch(PDOException $e){
-								echo $e->getMessage();
+								$sql_error = $e->getMessage();
+								echo $sql_error;
+								$sql_output .= $sql_error;
 							}							
 						}
 					}
 				}
 			}
 		}
+
+
+
+		//STORE THE DB CHANGE LOG 
+		
+		$migration_log = new Migration(NULL);
+		//$migration_log->set('mig_version', $migration['database_version']);
+		$migration_log->set('mig_db_hash', $db_structure_hash);
+		$migration_log->set('mig_sql', $sql_commands);
+		$migration_log->set('mig_output', $sql_output);
+		if($sql_output == ''){
+			$migration_log->set('mig_success', 1);
+		}
+		else{
+			$migration_log->set('mig_success', 0);
+		}
+		$migration_log->prepare();
+		$migration_log->save();
+
+
 
 
 		
@@ -447,7 +513,7 @@
 		}
 		*/
 		
-		
+		/*
 		$sql = "SELECT * FROM stg_settings WHERE stg_name='database_version'";
 		$q = $dblink->prepare($sql);
 		$q->execute();
@@ -456,7 +522,7 @@
 				
 		
 		echo 'Starting database version: '.$starting_database_version. "<br>\n";
-
+		*/
 		
 		/*
 		$next_row = 0;
@@ -473,9 +539,14 @@
 		foreach($migrations as $key=>$migration){
 			
 			//DO NOT RUN OLD DATABASE UPDATES
+			/*
 			if($migration['database_version'] < $starting_database_version){
+				if($verbose){
+					echo 'Skipping: '.$migration['test']. "<br>\n";
+				}				
 				continue;
 			}
+			*/
 			
 			/* WE ARE NOT GOING TO USE ORDERED MIGRATIONS ANYMORE.  
 			if($key <= $starting_db_migration_version){
@@ -491,7 +562,7 @@
 			$run = true;
 			if($migration['test']){
 				if($verbose){
-					echo 'Test: '.$migration['test']. "<br>\n";
+					echo 'Test: ('.$key.') '.$migration['test']. "<br>\n";
 				}
 				
 				try{
@@ -518,10 +589,11 @@
 			
 			if($run && $migration['migration_sql']){
 				$migration_log = new Migration(NULL);
-				$migration_log->set('mig_version', $migration['database_version']);
+				//$migration_log->set('mig_version', $migration['database_version']);
 				$migration_log->set('mig_sql', $migration['migration_sql']);
 				$migration_hash = md5($migration['migration_sql']);
 				$migration_log->set('mig_hash', $migration_hash);
+				$migration_log->set('mig_db_hash', $db_structure_hash);
 				$migration_log->prepare();
 
 				$search_criteria = array('hash' => $migration_hash, 'successful' => true);
@@ -560,10 +632,11 @@
 				//MIGRATION FUNCTION NAMES ARE THE SAME AS THE FILE NAME, MINUS THE .PHP, UNIQUE IS REQUIRED
 				require_once( __DIR__ . '/../migrations/'. $migration['migration_file']);
 				$migration_log = new Migration(NULL);
-				$migration_log->set('mig_version', $migration['database_version']);
+				//$migration_log->set('mig_version', $migration['database_version']);
 				$migration_log->set('mig_file', $migration['migration_file']);
 				$migration_hash = md5_file(__DIR__ . '/../migrations/'. $migration['migration_file']);
 				$migration_log->set('mig_hash', $migration_hash);
+				$migration_log->set('mig_db_hash', $db_structure_hash);
 				$migration_log->prepare();
 
 				$search_criteria = array('hash' => $migration_hash, 'successful' => true);
@@ -607,6 +680,7 @@
 			}
 
 			//UPDATE THE DATABASE VERSION
+			/*
 			$sql = "UPDATE stg_settings set stg_value='".$migrations[$key]['database_version']."' WHERE stg_name='database_version'";
 			try{
 				$q = $dblink->prepare($sql);
@@ -621,12 +695,13 @@
 				echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $migrations[$key]['database_version'] ."<br>\n";
 				return 0;
 			}	
-				
+			*/
 			
 			$next_row = $key+1;
 
 
 			//UPDATE THE DB VERSION
+			/*
 			$sql = "UPDATE stg_settings set stg_value=".$migrations[$key]['database_version']." WHERE stg_name='database_version'";
 			try{
 				$q = $dblink->prepare($sql);
@@ -640,6 +715,7 @@
 				echo 'ABORTING MIGRATIONS.  Failed to set db version: '. $migrations[$key]['database_version'] ."<br>\n";
 				return 0;
 			}
+			*/
 			
 			//UPDATE THE LAST DB MIGRATION POINT
 			/*
@@ -660,13 +736,14 @@
 	
 		}
 
-
+		/*
 		$sql = "SELECT * FROM stg_settings WHERE stg_name='database_version'";
 		$q = $dblink->prepare($sql);
 		$q->execute();
 		$row = $q->fetch();		
 		echo 'Database migration complete.<br>  #Run: '.$num_migrations_run.',<br> #Skipped: '.$num_migrations_skipped.'<br>Database version: '.$row['stg_value']. "<br>\n";
-			
+		*/
+		echo 'Database migration complete.<br>  #Run: '.$num_migrations_run.',<br> #Skipped: '.$num_migrations_skipped."<br>\n";			
 		return true;
 	}
 	

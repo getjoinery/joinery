@@ -602,6 +602,21 @@
 		$migration['migration_sql'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'random_test_value'";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
+		
+ 		$migration['database_version'] = '0.47';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'max_subscriptions_per_user'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'max_subscriptions_per_user\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;			
+		
+		
+		
+		
+		
+		
+		
+		
+		
 		 
 		//REQUIRE ALL OF THE PLUGIN MIGRATION SCRIPTS
 		$plugins = LibraryFunctions::list_plugins();
