@@ -381,6 +381,12 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Activate pricing (/pricing) page", "pricing_page", '', $optionvals, $settings->get_setting('pricing_page'), '', FALSE);
 	
+	$max_subscriptions_per_user = 0;
+	if($settings->get_setting('max_subscriptions_per_user')){
+		$max_subscriptions_per_user = $settings->get_setting('max_subscriptions_per_user');
+	}
+	echo $formwriter->textinput("Max number of subscriptions per user (0 for no limit)", 'max_subscriptions_per_user', '', 20, $max_subscriptions_per_user, "" , 255, "");
+	
 	echo '<hr>';
 
 	echo '<h3>File Hosting Settings</h3>';

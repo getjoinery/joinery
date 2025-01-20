@@ -60,13 +60,30 @@ class ShoppingCart {
 	}
 	
 
-	public function add_item($product, $form_data) {
+	public function add_item($product, $form_data, $user) {
 
 		// First lets validate we can add this item to the cart!
 		// DO NOT ALLOW THE CART TO HOLD RECURRING AND NON RECURRING AT THE SAME time 
 		if(!$this->can_add_to_cart($product)){
 			throw new ShoppingCartException(
 					'Sorry, the cart may contain only one subscription, and it cannot be mixed with other items.  Remove the other items or the subscription or check out with those first. <a href="/cart">Return to the cart</a>');
+		}
+		
+		//ENFORCE THE RESTRICTION OF MAXIMUM NUMBER OF SUBSCRIPTIONS PER USER
+		//DO NOT CHECK IF THERE IS NO USER PASSED IN
+		$settings = Globalvars::get_instance();
+		if($user && $product->get('pro_recurring') && $max_subscriptions = $settings->get_setting('max_subscriptions_per_user')){
+			$active_subscriptions = new MultiOrderItem(
+			array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
+			array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+			15, //NUMBER PER PAGE
+			NULL //OFFSET
+			);
+			$num_subscriptions = $active_subscriptions->count_all();	
+			if($num_subscriptions >= $max_subscriptions){
+				throw new ShoppingCartException(
+					'Sorry, you can not have more than ' . $max_subscriptions . ' subscriptions.');				
+			}
 		}
 		
 		$current_count = 0;
