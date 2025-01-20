@@ -22,14 +22,21 @@ function subscription_edit_logic($get_vars, $post_vars){
 
 
 	if($_POST['new_plan']){
-		$product = new Product($_POST['new_plan'], TRUE);
+		$new_plan = LibraryFunctions::fetch_variable_local($post_vars, 'new_plan', 0, 'notrequired', '', 'safemode', 'int');
+		$order_item_id = LibraryFunctions::fetch_variable_local($post_vars, 'order_item_id', 0, 'notrequired', '', 'safemode', 'int');
+		$page_vars['order_item_id'] = $order_item_id;
+		$product = new Product($new_plan, TRUE);
 		$page_vars['product'] = $product;
 		
 	}
 	else if(isset($_POST['product_id'])){
-		$product = new Product($_POST['product_id'], TRUE);
-		$order_item = new OrderItem($_POST['order_item'], TRUE);
+		$order_item_id = LibraryFunctions::fetch_variable_local($post_vars, 'order_item_id', 0, 'notrequired', '', 'safemode', 'int');
+		$product_id = LibraryFunctions::fetch_variable_local($post_vars, 'product_id', 0, 'notrequired', '', 'safemode', 'int');
+		
+		$product = new Product($product_id, TRUE);
+		$order_item = new OrderItem($order_item_id, TRUE);
 		$subscription_id = $order_item->get('odi_stripe_subscription_id');
+
 		$product_version = $product->get_product_version(array('product_version' => $_POST['product_version']));
 		$price = $product->get_price($product_version, $_POST);
 		$user = new User($session->get_user_id(), TRUE);
@@ -40,8 +47,9 @@ function subscription_edit_logic($get_vars, $post_vars){
 
 		$stripe_helper = new StripeHelper();
 		//THIS PLAN CHANGE ONLY WORKS WITH SUBSCRIPTIONS AND DOES NOT WORK WITH TRIAL PERIODS
-		$plan = $stripe_helper->get_or_create_subscription_plan($price, 1, 0);
-		$new_plan_id = $plan['id']; 
+		//$plan = $stripe_helper->get_or_create_subscription_plan($price, 1, 0);
+		$stripe_price = $stripe_helper->get_or_create_price($product, $price);	
+		$new_price_id = $stripe_price['id']; 
 
 		// Retrieve the subscription
 		$subscription = $stripe_helper->get_subscription($subscription_id);
@@ -49,11 +57,11 @@ function subscription_edit_logic($get_vars, $post_vars){
 		// Find the subscription item to update
 		$item_id_to_update = $subscription->items->data[0]->id; // Assuming you want to update the first item
 
+		
+		$subscription_result = $stripe_helper->change_subscription($subscription_id, $item_id_to_update, $new_price_id);
 
-		$subscription_result = $stripe_helper->update_subscription_plan($subscription_id, $item_id_to_update, $new_plan_id);
 
 
-	
 		//CANCEL THE OLD ONE
 		$order_item->set('odi_subscription_cancelled_time', 'now()');
 		$order_item->save();
@@ -84,20 +92,16 @@ function subscription_edit_logic($get_vars, $post_vars){
 		$order_item->set('odi_status', OrderItem::STATUS_PAID);
 		$order_item->set('odi_status_change_time', 'now()');
 		$order_item->set('odi_is_subscription', true);
+		$order_item->set('odi_stripe_subscription_id', $subscription_result['id']);
+		$order_item->set('odi_subscription_status', 'active');
 		$order_item->save();
 
 		//RUN THE PRODUCT SCRIPTS
-		if($product_scripts_list = $product->get('pro_product_scripts')){
-			$product_scripts = explode(',', $product_scripts_list);
-			foreach($product_scripts as $product_script){
-				$product_script($user, $order_item);
-			}
-		}
+		$product->run_product_scripts($user, $order_item);
 
-		//$subscription_result = $stripe_helper->update_stripe_regular_subscription_from_order_item($subscription_id, $plan, $order_item);	
-		print_r($subscription_result);
+			
+		LibraryFunctions::redirect('/profile');
 		exit;
-
 
 	}
 

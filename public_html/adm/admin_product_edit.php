@@ -2,6 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
@@ -123,6 +124,34 @@
 			}
 		
 			$product->prepare();
+			
+			
+			//IF STRIPE IS ENABLED, CREATE A PRODUCT 
+			if($settings->get_setting('checkout_type') == 'stripe_regular'){
+				$stripe_helper = new StripeHelper();
+				$product_info=array();
+				$product_info['name'] = $product->get('pro_name');
+				//$product_info['description'] = '';
+
+				if($stripe_helper->test_mode){
+					if(!$product->get('pro_stripe_product_id_test')){
+						$stripe_product = $stripe_helper->create_product($product_info);
+						$product->set('pro_stripe_product_id_test', $stripe_product['id']);
+					}
+				}
+				else{
+					if(!$product->get('pro_stripe_product_id')){				
+						$stripe_product = $stripe_helper->create_product($product_info);
+						$product->set('pro_stripe_product_id', $stripe_product['id']);
+					}
+				}
+				
+			}
+			
+			
+			
+			
+			
 			$product->save();
 			$product->load();
 			

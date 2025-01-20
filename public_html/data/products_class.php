@@ -655,6 +655,8 @@ class Product extends SystemBase {
 		'pro_plan_order_month' => 'Order for this product to appear on the monthly /pricing page',
 		'pro_plan_order_year' => 'Order for this product to appear on the yearly /pricing page',
 		'pro_product_scripts' => 'Comma separated list of scripts to run upon purchase',
+		'pro_stripe_product_id' => 'Product ID at Stripe',
+		'pro_stripe_product_id_test' => 'Product ID at Stripe in test mode',
 	);
 
 	public static $field_specifications = array(
@@ -683,6 +685,8 @@ class Product extends SystemBase {
 		'pro_plan_order_month' => array('type'=>'int4'),
 		'pro_plan_order_year' => array('type'=>'int4'),
 		'pro_product_scripts' => array('type'=>'text'),
+		'pro_stripe_product_id' =>  array('type'=>'varchar(64)'),
+		'pro_stripe_product_id_test' =>  array('type'=>'varchar(64)'),
 	);
 			 
 	public static $required_fields = array('pro_link', 'pro_name');
@@ -728,7 +732,29 @@ class Product extends SystemBase {
 		$pri_lists->load();	
 		return $pri_lists;
 	}
+	
+	function run_product_scripts($user, $order_item){
+		//REQUIRE ALL OF THE PRODUCT SCRIPTS, THE MAIN ONE AND ALL OF THE PLUGINS
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/logic/product_scripts_logic.php');
 
+		$plugins = LibraryFunctions::list_plugins();
+		foreach($plugins as $plugin){
+			$product_script_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
+			if(file_exists($product_script_file)){
+				require_once($product_script_file);
+			}
+		}
+		
+		//RUN THE PRODUCT SCRIPTS
+		if($product_scripts_list = $this->get('pro_product_scripts')){
+			$product_scripts = explode(',', $product_scripts_list);
+			foreach($product_scripts as $product_script){
+				$product_script($user, $order_item);
+			}
+		}
+		
+		return true;
+	}
 
 	//SAVE THE SET OF NEW REQUIREMENT INSTANCES
 	function save_requirement_instances($requirements){
@@ -1276,7 +1302,7 @@ class Product extends SystemBase {
 	}
 	
 
-	function output_product_form($formwriter, $user, $extra_data=array()) {
+	function output_product_form($formwriter, $user, $exclude_requirements=false) {
 		$settings = Globalvars::get_instance(); 
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
@@ -1307,28 +1333,29 @@ class Product extends SystemBase {
 				FALSE);
 		}
 
+		if(!$exclude_requirements){
+			
+			$form_javascript = array();
+			foreach ($this->get_product_requirements() as $product_requirement) {
+				$product_requirement->get_form($formwriter, $user);	
+			}
 
-		
-		$form_javascript = array();
-		foreach ($this->get_product_requirements() as $product_requirement) {
-			$product_requirement->get_form($formwriter, $user);	
-		}
+			
+			//GET EXTRA PRODUCT REQUIREMENTS, HERE WE OUTPUT THE FORM.  THE VALIDATION HAPPENS ELSEWHERE
+			$instances = $this->get_requirement_instances();
 
-		
-		//GET EXTRA PRODUCT REQUIREMENTS, HERE WE OUTPUT THE FORM.  THE VALIDATION HAPPENS ELSEWHERE
-		$instances = $this->get_requirement_instances();
-
-		foreach($instances as $instance){
-			$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
-			if($requirement->get('prq_qst_question_id')){
-				$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
-				//$validation_rules = array();
-				//$validation_rules = $question->output_js_validation($validation_rules);
-				//echo $formwriter->set_validate($validation_rules);
-				if($link_append = $requirement->get_link_to_append()){
-					$link_append = ' (<a target="_blank" href="'.$link_append.'">'.$link_append.'</a>)';
+			foreach($instances as $instance){
+				$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
+				if($requirement->get('prq_qst_question_id')){
+					$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
+					//$validation_rules = array();
+					//$validation_rules = $question->output_js_validation($validation_rules);
+					//echo $formwriter->set_validate($validation_rules);
+					if($link_append = $requirement->get_link_to_append()){
+						$link_append = ' (<a target="_blank" href="'.$link_append.'">'.$link_append.'</a>)';
+					}
+					echo $question->output_question($formwriter, NULL, $link_append);		
 				}
-				echo $question->output_question($formwriter, NULL, $link_append);		
 			}
 		}
 		
