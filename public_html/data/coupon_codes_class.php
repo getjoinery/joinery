@@ -91,6 +91,24 @@ class CouponCode extends SystemBase {
 		return $discount;
 	}
 	
+	function get_readable_discount(){
+		$settings = Globalvars::get_instance();
+		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+		$discount = 0;
+		if($this->get('ccd_amount_discount')){
+			$discount = $currency_symbol . $this->get('ccd_amount_discount');
+		}
+		else if($this->get('ccd_percent_discount')){
+			$discount = $this->get('ccd_percent_discount') . '%';
+		}
+		else{
+			$discount = 0;
+		}
+		
+		return $discount;		
+		
+	}
+	
 	//THIS FUNCTION DETERMINES IF THE COUPON CODE IS VALID, BUT DOES NOT CHECK IF IT'S APPLIES TO A CERTAIN PRODUCT
 	function is_valid(){
 		//CHECK VALIDITY

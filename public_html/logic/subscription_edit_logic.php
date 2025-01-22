@@ -21,20 +21,30 @@ function subscription_edit_logic($get_vars, $post_vars){
 	}
 
 
-	if($_POST['new_plan']){
-		$new_plan = LibraryFunctions::fetch_variable_local($post_vars, 'new_plan', 0, 'notrequired', '', 'safemode', 'int');
-		$order_item_id = LibraryFunctions::fetch_variable_local($post_vars, 'order_item_id', 0, 'notrequired', '', 'safemode', 'int');
+	if($_GET['new_plan']){
+		$new_plan = LibraryFunctions::fetch_variable_local($get_vars, 'new_plan', 0, 'notrequired', '', 'safemode', 'int');
 		$page_vars['order_item_id'] = $order_item_id;
 		$product = new Product($new_plan, TRUE);
 		$page_vars['product'] = $product;
 		
 	}
 	else if(isset($_POST['product_id'])){
-		$order_item_id = LibraryFunctions::fetch_variable_local($post_vars, 'order_item_id', 0, 'notrequired', '', 'safemode', 'int');
 		$product_id = LibraryFunctions::fetch_variable_local($post_vars, 'product_id', 0, 'notrequired', '', 'safemode', 'int');
+
+		//SUBSCRIPTIONS
+		$subscriptions = new MultiOrderItem(
+		array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
+		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+		5, //NUMBER PER PAGE
+		NULL //OFFSET
+		);
+		$subscriptions->load();	
+		$order_item = $subscriptions->get(0);
+
+
 		
 		$product = new Product($product_id, TRUE);
-		$order_item = new OrderItem($order_item_id, TRUE);
+		//$order_item = new OrderItem($order_item_id, TRUE);
 		$subscription_id = $order_item->get('odi_stripe_subscription_id');
 
 		$product_version = $product->get_product_version(array('product_version' => $_POST['product_version']));
