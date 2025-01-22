@@ -193,7 +193,7 @@
 			if($_SESSION['test_mode'] || $settings->get_setting('debug')){
 				echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
 				foreach($page_vars['all_coupons'] as $coupon){
-					$formwriter = new FormWriterPublicTW("form_coupon", TRUE);
+					$formwriter = new FormWriterPublicTW("form_test_coupon", TRUE);
 					echo $formwriter->begin_form("mt-6", "get", '/cart');
 
 					echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
@@ -250,7 +250,7 @@
 				</div>
 				<?php*/
 				echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Stripe</h5>';
-				echo $page_vars['stripe_helper']->output_stripe_regular_form();	
+				echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, '');	
 			}
 			
 			if($settings->get_setting('use_paypal_checkout') && $page_vars['paypal_helper']){

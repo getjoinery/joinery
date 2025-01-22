@@ -73,8 +73,7 @@ class StripeHelper {
 		}
 	}
 	
-	public function output_stripe_regular_form(){
-				$formwriter = new FormWriterPublicTW("form_submit", TRUE);
+	public function output_stripe_regular_form($formwriter, $button_class=''){
 				
 				$output = '
 				<script>
@@ -93,7 +92,7 @@ class StripeHelper {
 					<!-- Used to display form errors. -->
 					<div id="card-errors" role="alert"></div>
 				  </div>
-				<br />'. $formwriter->new_form_button('Pay with Stripe', 'primary', 'full').'</form>';
+				<br />'. $formwriter->new_form_button('Pay with Stripe', 'primary', 'full', $button_class).'</form>';
 
 
 	
@@ -121,19 +120,21 @@ class StripeHelper {
 							// Custom styling can be passed to options when creating an Element.
 							// (Note that this demo uses a wider set of styles than the guide below.)
 							var style = {
+								
 							  base: {
-								color: '#32325d',
+								color: '#32325d', 
 								fontFamily: '\"Helvetica Neue\", Helvetica, sans-serif',
 								fontSmoothing: 'antialiased',
-								fontSize: '16px',
-								'::placeholder': {
+								fontSize: '24px',
+								 '::placeholder': {
 								  color: '#aab7c4'
-								}
+								} 
 							  },
 							  invalid: {
 								color: '#fa755a',
 								iconColor: '#fa755a'
 							  }
+							  
 							};
 
 							// Create an instance of the card Element.
