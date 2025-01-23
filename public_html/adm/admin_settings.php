@@ -107,6 +107,39 @@
 
 	$formwriter = new FormWriterMaster('form1');
 	
+	
+		?>
+		<script type="text/javascript">
+	
+		function set_choices(){
+			var value = $("#use_paypal_checkout").val();
+			if(value == 0 || value == ''){  
+				$("#paypal_api_key_container").hide();
+				$("#paypal_api_secret_container").hide();
+				$("#paypal_api_key_test_container").hide();
+				$("#paypal_api_secret_test_container").hide();	
+
+			}	
+			else{ 
+				$("#paypal_api_key_container").show();
+				$("#paypal_api_secret_container").show();
+				$("#paypal_api_key_test_container").show();
+				$("#paypal_api_secret_test_container").show();	
+			}		
+		}
+		
+	
+		$(document).ready(function() {
+			set_choices();
+			$("#use_paypal_checkout").change(function() {	
+				set_choices();
+			});	
+		});
+	
+		
+		</script>
+		<?php
+	
 	$validation_rules = array();
 	$validation_rules['stg_value']['required']['value'] = 'true';
 	$validation_rules['stg_name']['required']['value'] = 'true';	
@@ -117,7 +150,6 @@
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings');
 	
 	if($_SESSION['permission'] == 10){
-		echo 'Database Version: '.$settings->get_setting('database_version').'<br><br>';
 		
 		echo '<b>NOTE: These settings will not override the settings if they are located in the Globalvars_site.php file in the /config directory</b><br>';
 		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
@@ -138,8 +170,16 @@
 		$optionvals = array("Yes (show to screen)"=>1, 'No (logged)' => 0);
 		echo $formwriter->dropinput("Show errors", "show_errors", '', $optionvals, $settings->get_setting('show_errors'), '', FALSE);		
 		
-		echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
+		$theme_dir = $_SERVER['DOCUMENT_ROOT'].'/theme/';
+		$directories = LibraryFunctions::list_directories_in_directory($theme_dir, 'filename');
+		$optionvals = array();
+		foreach($directories as $directory){
+			$optionvals[$directory] = $directory;
+		}
 		
+		
+		//echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
+		echo $formwriter->dropinput("Active theme", "theme_template", '', $optionvals, $settings->get_setting('theme_template'), '', FALSE);
 		
 		echo $formwriter->textinput("Base Path", 'baseDir', '', 20, $settings->get_setting('baseDir'), "" , 255, "");
 		echo $formwriter->textinput("Site folder (The site we are running, basically the folder at /var/www/html/x)", 'site_template', '', 20, $settings->get_setting('site_template'), "" , 255, "");
