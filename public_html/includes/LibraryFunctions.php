@@ -216,6 +216,34 @@ class LibraryFunctions {
 	}
 	
 	
+	static function get_formwriter_object($form_id = 'form1', $override_path=NULL){
+		//IF OVERRIDE IS PRESENT, GET THE SPECIFIC 
+		if($override_path){
+			require_once($override_path);
+			$formwriter = new FormWriter($form_id);
+			return $formwriter;
+		}	
+		
+		
+		//FIRST CHECK THE CURRENT ACTIVE THEME
+
+		$theme_form = LibraryFunctions::get_theme_file_path('FormWriter.php',  'includes', 'system');
+
+		if($theme_form){
+			require_once($theme_form);
+			$formwriter = new FormWriter($form_id);
+			return $formwriter;		
+		}				
+		
+		
+		//FINALLY GRAB THE DEFAULT FORM
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+		$formwriter = new FormWriterMaster($form_id);
+		return $formwriter;		
+							
+	}
+	
+	
 	//RETURNS THE PATH OF A FILE IN A PLUGIN, PLUGIN IS OPTIONAL, SUBDIRECTORY IS OPTIONAL
 	static function get_plugin_file_path($filename, $plugin='', $subdirectory='', $path_format='system'){
 		$settings = Globalvars::get_instance();
@@ -293,7 +321,11 @@ class LibraryFunctions {
 	static function get_theme_file_path($filename, $subdirectory='', $path_format='system'){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
-
+		
+		//SUBDIRECTORY WORKS WITH OR WITHOUT SLASH
+		if (substr($subdirectory, 0, 1) !== '/') {
+			$subdirectory = '/' . $subdirectory; // Add a forward slash if it doesn't exist
+		}
 		
 		$theme_template = $settings->get_setting('theme_template', true, true);
 		$theme_file = $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename;
@@ -333,7 +365,7 @@ class LibraryFunctions {
 			}
 		}
 		else{
-			throw new SystemDisplayablePermanentError('Could not find the specified theme file: '. $filename);					
+			throw new SystemDisplayablePermanentError('Could not find the specified theme file: '. $theme_file);					
 		}
 	}
 	
