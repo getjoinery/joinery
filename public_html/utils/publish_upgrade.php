@@ -2,7 +2,6 @@
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
 	require_once( __DIR__ . '/../includes/AdminPage-uikit3.php');
-	require_once( __DIR__ . '/../includes/FormWriterMaster.php');
 	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
 	require_once( __DIR__ . '/../data/upgrades_class.php');
 
@@ -128,7 +127,7 @@
 
 
 		// Editing an existing order
-		$formwriter = new FormWriterMaster('form1');	
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');	
 		
 		
 		echo $formwriter->begin_form('form1', 'POST', '/utils/publish_upgrade');

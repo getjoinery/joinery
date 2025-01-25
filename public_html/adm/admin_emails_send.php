@@ -1,7 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/FormWriterMaster.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipients_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/messages_class.php');

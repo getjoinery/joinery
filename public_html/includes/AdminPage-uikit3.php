@@ -3,7 +3,6 @@ $settings = Globalvars::get_instance();
 $siteDir = $settings->get_setting('siteDir');
 require_once($siteDir . '/includes/SessionControl.php');
 require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/FormWriterMaster.php');
 require_once($siteDir . '/includes/Pager.php');
 
 require_once($siteDir . '/data/admin_menus_class.php');
@@ -669,7 +668,9 @@ class AdminPage{
 		if($search_on){
 			
 			echo '<div id="example1_filter" class="uk-align-right">';
-			$formwriter = new FormWriterMaster("search_form");
+
+			$formwriter = LibraryFunctions::get_formwriter_object('search_form', 'admin');
+
 			echo $formwriter->begin_form("search_form", "get", $pager->base_url());
 			echo $pager->url_vars_as_hidden_input(array('searchterm'));
 			echo '<label for="searchterm">Search: </label>

@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/settings_class.php');
@@ -60,7 +60,7 @@
 	$pageoptions['title'] = "Controld Settings";
 	$page->begin_box($pageoptions);
 
-	$formwriter = new FormWriterMaster('form1');
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
 	$validation_rules['stg_value']['required']['value'] = 'true';

@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/videos_class.php');
@@ -122,7 +122,7 @@
 			?><p>We currently support YouTube and Vimeo.</p><?php
 		}
 		
-		$formwriter = new FormWriterMaster('form1');
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 		
 		$validation_rules = array();
 		$validation_rules['vid_title']['required']['value'] = 'true'; 

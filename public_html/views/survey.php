@@ -15,7 +15,8 @@
 	echo PublicPageTW::BeginPage($survey->get('svy_name'));
 	echo PublicPageTW::BeginPanel();
 
-	$formwriter = new FormWriterMasterTW('form1');
+
+	$formwriter = LibraryFunctions::get_formwriter_object();
 	echo $formwriter->begin_form('form1', 'POST', '/survey', true);
 
 	if($invalid_messages){

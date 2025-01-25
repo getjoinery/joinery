@@ -2,7 +2,6 @@
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
 	require_once( __DIR__ . '/../includes/ErrorHandler.php');
-	require_once( __DIR__ . '/../includes/FormWriterMaster.php');
 	require_once( __DIR__ . '/../includes/AdminPage-uikit3.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
 	
@@ -496,7 +495,7 @@ $world_ex = (($perms & 0x0001) ?
 		$page->begin_box($pageoptions);
 
 
-		$formwriter = new FormWriterMaster("form1");
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 		echo $formwriter->begin_form("form", "post", "/utils/upgrade");
 
 		echo 'Local system Version: '.$settings->get_setting('system_version').'<br>';

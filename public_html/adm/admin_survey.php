@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
@@ -143,7 +143,7 @@
 	
 	if($numquestions){
 		echo '<tr><td colspan="3">';
-		$formwriter = new FormWriterMaster('form3');
+		$formwriter = LibraryFunctions::get_formwriter_object('form3, 'admin');
 		//$validation_rules = array();
 		//$validation_rules['evt_event_id']['required']['value'] = 'true';
 		//echo $formwriter->set_validate($validation_rules);

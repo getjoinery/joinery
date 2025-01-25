@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
@@ -147,7 +147,7 @@
 
 
 	// Editing an existing event
-	$formwriter = new FormWriterMaster('form1');
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
 	$validation_rules['evt_name']['required']['value'] = 'true';
@@ -351,7 +351,7 @@
 	$optionvals = $content_versions->get_dropdown_array(FALSE, $session);
 
 	if(count($optionvals)){
-		$formwriter = new FormWriterMaster('form_load_version');
+		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
 		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_event_edit');
 		echo $formwriter->hiddeninput('evt_event_id', $event->key);
 		echo $formwriter->dropinput("Load another description", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);

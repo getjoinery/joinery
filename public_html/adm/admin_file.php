@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
@@ -90,7 +90,7 @@
 	
 	$page->begin_box($options);
 
-	$formwriter = new FormWriterMaster("form1");
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 
 	if($file->is_image()){
 		echo '<div style="float:left; margin-right:30px; margin-bottom:30px;"><img src="/uploads/small/'.$file->get('fil_name').'"/></div>';
@@ -180,7 +180,7 @@
 		
 	}
 	echo '<tr><td colspan="2">';
-	$formwriter = new FormWriterMaster('form2');
+	$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
 	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_file?fil_file_id='. $file->key);
 
 	

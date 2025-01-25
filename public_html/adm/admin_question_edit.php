@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/questions_class.php');
@@ -192,7 +192,7 @@
 	<?php
 	
 
-	$formwriter = new FormWriterMaster('form1');
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
 	$validation_rules['qst_question']['required']['value'] = 'true';
@@ -302,7 +302,7 @@
 		}
 		else{
 			echo '<h4>Add New Question Option</h4>';
-			$formwriter = new FormWriterMaster('form2');
+			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
 			
 			$validation_rules = array();
 			$validation_rules['qop_question_option_label']['required']['value'] = 'true';

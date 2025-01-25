@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
@@ -64,7 +64,7 @@
     <div class="uk-width-2-3@m"><div style="padding: 20px">';
 
 	// Editing an existing email
-	$formwriter = new FormWriterMaster('form1');
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
 	$validation_rules['emt_body']['required']['value'] = 'true';
@@ -113,7 +113,7 @@
 	$optionvals = $content_versions->get_dropdown_array(FALSE, $session);
 
 	if(count($optionvals)){
-		$formwriter = new FormWriterMaster('form_load_version');
+		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
 		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_post_edit');
 		echo $formwriter->hiddeninput('emt_email_template_id', $email_template->key);
 		echo $formwriter->dropinput("Load another version", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);

@@ -108,7 +108,7 @@ else{
 	$pageoptions['title'] = 'Refund charge';
 	$page->begin_box($pageoptions);
 
-	$formwriter = new FormWriterMaster("form1");
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 
 	$validation_rules = array();

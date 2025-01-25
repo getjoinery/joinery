@@ -6,7 +6,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SystemClass.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/FormWriterMaster.php');
 	
 
 	$session = SessionControl::get_instance();
@@ -61,7 +60,7 @@
 
 				<?php
 				
-				$formwriter = new FormWriterMaster("form1");
+				$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 				
 				$validation_rules = array();
 				$validation_rules['usa_type']['required']['value'] = 'true';

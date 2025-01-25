@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
@@ -216,7 +216,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing event
-	$formwriter = new FormWriterMaster('form1');
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
 	//$validation_rules['evs_start_time_time']['required']['value'] = 'true';
@@ -328,7 +328,7 @@
 		$page->begin_box($pageoptions);
 
 		// Editing an existing event
-		$formwriter = new FormWriterMaster('form2');
+		$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
 		
 		echo $formwriter->begin_form('form2', 'POST', '/admin/admin_event_session_edit');
 		
@@ -366,7 +366,8 @@
 
 		//$page->begin_box();
 		echo '<hr><div style="margin-left:20px"><h4>Bulk upload</h4>';
-		$formwriter = new FormWriterMaster("fileupload");
+		$formwriter = LibraryFunctions::get_formwriter_object('fileupload', 'admin');
+		form_load_version
 		FormWriterMaster::file_upload_full(array('evs_event_session_id'=> $event_session->key));
 		$formwriter->end_form();
 		echo '</div>';
