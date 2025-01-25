@@ -41,19 +41,19 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 			$user = new User($session->get_user_id(), TRUE);
 		}
 		else{
-	
-			if(!FormWriterPublicTW::honeypot_check($post_vars)){
+			$formwriter = LibraryFunctions::get_formwriter_object();
+			if(!$formwriter->honeypot_check($post_vars)){
 				throw new SystemDisplayableError(
 					'Please leave the "Extra email" field blank.');			
 			}
 			
-			if(!FormWriterPublicTW::antispam_question_check($post_vars)){
+			if(!$formwriter->antispam_question_check($post_vars)){
 				throw new SystemDisplayableError(
 					'Please type the correct value into the anti-spam field.');			
 			}		
 		
 	
-			$captcha_success = FormWriterPublicTW::captcha_check($post_vars);
+			$captcha_success = $formwriter->captcha_check($post_vars);
 			if (!$captcha_success) {
 				$errormsg = 'Sorry, '.strip_tags($post_vars['usr_first_name']).' '.strip_tags($post_vars['usr_last_name']).', you must click the CAPTCHA to submit the form.';
 				throw new SystemDisplayableError($errormsg);	

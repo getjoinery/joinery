@@ -50,7 +50,7 @@
 	
 	
 	$formwriter = LibraryFunctions::get_formwriter_object('fileupload', 'admin');
-	FormWriterMaster::file_upload_full();
+	$formwriter->file_upload_full();
 	$formwriter->end_form();
 	
 	$page->end_box();

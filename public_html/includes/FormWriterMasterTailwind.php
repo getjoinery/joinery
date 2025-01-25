@@ -2,9 +2,11 @@
 require_once('DbConnector.php');
 require_once('Globalvars.php');
 
+//THIS FORMWRITER MASTER IS FOR TAILWIND FORM STYLING
+
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriterMasterTW {
+class FormWriterMaster {
 
 	public static $tab_count = 0;
 
@@ -95,7 +97,7 @@ class FormWriterMasterTW {
 		}
 	}
 
-	static function antispam_question_validate($validation_rules, $type=NULL){
+	function antispam_question_validate($validation_rules, $type=NULL){
 		$settings = Globalvars::get_instance();
 		if($type == 'blog'){
 			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
@@ -112,7 +114,7 @@ class FormWriterMasterTW {
 		return $validation_rules;
 	}	
 	
-	static function antispam_question_check($postvars){
+	function antispam_question_check($postvars){
 		$settings = Globalvars::get_instance();
 		if($type == 'blog'){
 			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
@@ -152,7 +154,7 @@ class FormWriterMasterTW {
 	}
 	
 	
-	static function honeypot_check($postvars, $name='email'){
+	function honeypot_check($postvars, $name='email'){
 		$settings = Globalvars::get_instance();
 		$use_honeypot = $settings->get_setting('use_honeypot');	
 		if($use_honeypot){		
@@ -217,7 +219,7 @@ class FormWriterMasterTW {
 	}
 
 	
-	static function captcha_check($captcha_full_response, $type=NULL){
+	function captcha_check($captcha_full_response, $type=NULL){
 		$settings = Globalvars::get_instance();
 		if($type == 'blog'){
 			$use_captcha = $settings->get_setting('use_captcha_comments');
@@ -1000,7 +1002,7 @@ class FormWriterMasterTW {
 
 
 
-	static function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
+	function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
 		$getargs = '';
 		if($getvars){ 
 			foreach($getvars as $getvar=>$getval){

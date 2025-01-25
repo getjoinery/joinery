@@ -1,7 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('password-reset-1_logic.php'));
 
 	$page_vars = password_reset_1_logic($_GET, $_POST);
@@ -19,7 +18,7 @@
 		echo PublicPageTW::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
 	}
 	else{
-		$formwriter = new FormWriterPublicTW("form1");
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 		echo $formwriter->begin_form("", "post", "/password-reset-1", true); 
 		echo $formwriter->textinput("Enter the Email Address you registered with", "email", NULL, 20, htmlspecialchars($email), '', 64, NULL);
 		echo $formwriter->new_form_button('Submit');

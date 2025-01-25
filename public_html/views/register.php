@@ -1,7 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('register_logic.php'));
 
 	$page_vars = register_logic($_GET, $_POST);
@@ -30,7 +29,7 @@
 			
 	$nickname_display = $settings->get_setting('nickname_display_as');
 
-	$formwriter = new FormWriterPublicTW("form1", TRUE);
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 
 	$validation_rules = array();
 	$validation_rules['usr_first_name']['required']['value'] = 'true';
@@ -55,7 +54,7 @@
 	if($nickname_display){
 		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
 	}
-	$validation_rules = FormWriterPublicTW::antispam_question_validate($validation_rules);
+	$validation_rules = $formwriter->antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);
 	
 	echo $formwriter->begin_form("form1", "post", "/register", TRUE);

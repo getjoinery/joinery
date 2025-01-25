@@ -2,7 +2,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('event_logic.php'));
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	
 	$page_vars = event_logic($_GET, $_POST, $event);
 	$event = $page_vars['event'];
@@ -230,7 +229,8 @@
 
 
 							foreach($page_vars['register_urls'] as $register_url){
-								$formwriter = new FormWriterPublicTW("form1", TRUE, TRUE);
+								
+								$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 								echo $formwriter->new_button($register_url['label'], $register_url['link'], 'primary', 'full');	
 								echo $formwriter->end_form();
 							}			

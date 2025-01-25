@@ -2,7 +2,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('contact_preferences_logic.php'));	
 
 	$page_vars = contact_preferences_logic($_GET, $_POST);
@@ -31,7 +30,7 @@
 	}    
 
 	if(!$_REQUEST['type'] == 'ocu'){		
-		$formwriter = new FormWriterPublicTW("form1");
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 		echo $formwriter->begin_form("", "post", "/profile/contact_preferences");
 		
 		if(empty($page_vars['optionvals'])){

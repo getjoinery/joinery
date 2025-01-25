@@ -1,6 +1,5 @@
 <?php
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('page_logic.php'));
 
 	$page_vars = page_logic($_GET, $_POST, $page, $params);

@@ -2,7 +2,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('address_edit_logic.php'));
 	
 	$page_vars = address_edit_logic($_GET, $_POST);
@@ -22,7 +21,7 @@
 
 	echo PublicPageTW::tab_menu($page_vars['tab_menus']);
 	
-	$formwriter = new FormWriterPublicTW("form1");
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 	
 	$validation_rules = array();
 	$validation_rules['usa_type']['required']['value'] = 'true';

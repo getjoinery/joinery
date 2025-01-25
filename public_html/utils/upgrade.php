@@ -34,6 +34,11 @@
 	$location_of_themes = $stage_directory.'/theme';
 	$live_themes = $live_directory.'/theme';
 
+	$plugin_directory = $full_site_dir.'/plugins';
+	$plugin_directory_contents = $plugin_directory.'/*';
+	$location_of_plugins = $stage_directory.'/plugin';
+	$live_plugins = $live_directory.'/plugins';
+	
 	//CHECK FOR EXISTENCE OF ALL NEEDED DIRECTORIES 
 	if(!file_exists($live_directory)){
 		echo $live_directory. ' (live_directory) does not exist or is not readable by www-data.';
@@ -47,6 +52,15 @@
 		echo $theme_directory. ' (theme_directory) is empty.';
 		exit;
 	}
+	
+	if(!file_exists($plugin_directory)){
+		echo $plugin_directory. ' (plugin_directory) does not exist or is not readable by www-data.';
+		exit;
+	}
+	if (is_dir_empty($plugin_directory)) {
+		echo $plugin_directory. ' (plugin_directory) is empty.';
+		exit;
+	}	
 	
 /*
 $perms = fileperms($stage_location);
@@ -113,17 +127,17 @@ $world_ex = (($perms & 0x0001) ?
 
 
 
-
+	//THIS SECTION RELOADS THEMES AND PLUGINS ONLY
 	if(isset($_GET['theme-only']) && $_GET['theme-only']){
 		//REMOVE OLD THEMES
-		exec ("rm -rf $live_themes".'/*');
+		//exec ("rm -rf $live_themes".'/*');
 		
 		//COPY THE THEME FILES 
 		exec("cp -r $theme_directory_contents $live_themes");
 		if(!file_exists($live_themes)){
 			echo "Failed to move theme files ($theme_directory to $live_themes...aborting.<br>";
 			
-			if(substr(sprintf('%o', fileperms($live_themes)), -3) != '770'){
+			if(substr(sprintf('%o', fileperms($live_themes)), -3) != '770' || substr(sprintf('%o', fileperms($live_themes)), -3) != '777'){
 				echo $live_themes . ' (live_themes) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
 				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
 				exit;
@@ -138,6 +152,31 @@ $world_ex = (($perms & 0x0001) ?
 		else{
 			echo "Theme files copied from $theme_directory to $live_themes.<br>";
 		}
+
+
+		//REMOVE OLD PLUGINS
+		//exec ("rm -rf $live_plugins".'/*');
+		//COPY THE PLUGIN FILES 
+		exec("cp -r $plugin_directory_contents $live_plugins");
+		if(!file_exists($live_plugins)){
+			echo "Failed to move plugin files ($plugin_directory to $live_plugins...aborting.<br>";
+			
+			if(substr(sprintf('%o', fileperms($live_plugins)), -3) != '770' || substr(sprintf('%o', fileperms($live_plugins)), -3) != '777'){
+				echo $live_plugins . ' (live_plugins) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+				echo 'Instead, it has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
+				exit;
+			}
+			if(posix_getpwuid(fileowner($live_plugins))['name'] != 'www-data'){
+				echo $live_plugins . ' (live_plugins) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].'<br>';
+				exit;		
+			}
+			exit;
+		}
+		else{
+			echo "Theme files copied from $plugin_directory to $live_plugins.<br>";
+		}
+
 
 		exit;
 	}
@@ -306,7 +345,7 @@ $world_ex = (($perms & 0x0001) ?
 
 		
 		//COPY THE THEME FILES 
-		$location_of_themes = $stage_directory.'/theme';
+		//$location_of_themes = $stage_directory.'/theme';
 		//print_r($location_of_themes);
 		//echo 'copying '. $theme_directory. ' to ' .$stage_directory ;
 		
@@ -357,6 +396,27 @@ $world_ex = (($perms & 0x0001) ?
 		else{
 			echo "Theme files copied from $theme_directory to $stage_directory.<br>";
 		}
+
+
+
+		if(!file_exists($location_of_plugins)){
+			echo 'Directory does not exist: '.$location_of_plugins. "\n<br>";
+			echo "Failed to move plugin files ($plugin_directory to $location_of_plugins...aborting.<br>";
+			exit;
+		}
+
+
+		exec("cp -r $plugin_directory $stage_directory");
+		if (is_dir_empty($location_of_plugins)) {
+			echo $location_of_plugins. ' (plugin_directory) failed to copy.';
+			exit;
+		}
+		else{
+			echo "Theme files copied from $plugin_directory to $stage_directory.<br>";
+		}
+
+
+
 
 		//RUN THE DEPLOY
 		echo 'Clearing backup area: '.$backup_directory.'<br>';

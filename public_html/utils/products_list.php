@@ -2,7 +2,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('products_logic.php'));
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 	//OVERRIDE GET VARS
 	$_GET['numperpage'] = 100;
@@ -57,8 +56,7 @@
 			echo 'sold out<br>';
 		}
 		else{
-	
-			$formwriter = new FormWriterPublicTW("product_form".$product->key, TRUE);
+			$formwriter = LibraryFunctions::get_formwriter_object("product_form".$product->key, 'tailwind');
 			echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 			echo $formwriter->hiddeninput('product_id', $product->key);
 			if ($product->output_product_form($formwriter, $page_vars['user'], null)) {

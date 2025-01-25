@@ -4,7 +4,6 @@ $siteDir = $settings->get_setting('siteDir');
 require_once($siteDir . '/includes/DbConnector.php');
 require_once($siteDir . '/includes/LibraryFunctions.php');
 require_once($siteDir . '/includes/SystemClass.php');
-require_once($siteDir . '/includes/FormWriterMaster.php');	
 
 class CommentException extends SystemClassException {}
 class CommentNotSentException extends CommentException {};
@@ -107,21 +106,22 @@ class Comment extends SystemBase {
 					'Please leave the extra comment field blank.');			
 			}		
 		
+			$formwriter = LibraryFunctions::get_formwriter_object();
 
-			if(!FormWriterMaster::honeypot_check($data)){
+			if(!$formwriter->honeypot_check($data)){
 				throw new SystemDisplayableError(
 					'Please leave the "Extra email" field blank.');			
 			}
 			
 
-			if(!FormWriterMaster::antispam_question_check($data, 'blog')){
+			if(!$formwriter->antispam_question_check($data, 'blog')){
 				throw new SystemDisplayableError(
 					'Please type the correct value into the anti-spam field.');			
 			}
 					
 			
 			
-			$captcha_success = FormWriterMaster::captcha_check($data, 'blog');
+			$captcha_success = $formwriter->captcha_check($data, 'blog');
 			if (!$captcha_success) {
 				$errormsg = 'Sorry, you must click the CAPTCHA to submit the form.';
 				throw new SystemDisplayableError($errormsg);	

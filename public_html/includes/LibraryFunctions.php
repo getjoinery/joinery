@@ -229,6 +229,11 @@ class LibraryFunctions {
 			$formwriter = new FormWriterMaster($form_id);
 			return $formwriter;	
 		}
+		else if($override_name == 'tailwind'){
+			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMasterTailwind.php');
+			$formwriter = new FormWriterMaster($form_id);
+			return $formwriter;	
+		}
 		
 		
 		//FIRST CHECK THE CURRENT ACTIVE THEME

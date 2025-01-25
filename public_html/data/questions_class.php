@@ -12,8 +12,6 @@ require_once($siteDir . '/includes/Validator.php');
 require_once($siteDir . '/data/question_options_class.php');
 require_once($siteDir . '/data/survey_answers_class.php');
 
-require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
-
 class QuestionException extends SystemClassException {}
 
 class Question extends SystemBase {
