@@ -1,7 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
 
 	$page_vars = post_logic($_GET, $_POST, $post);
@@ -65,14 +64,14 @@
 
 							
 								<?php
-								$formwriter = new FormWriterPublicTW("form1");
+								$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 								$validation_rules = array();
 								$validation_rules['cmt']['required']['value'] = 'true';
 								$validation_rules['cmt']['minlength']['value'] = 20;
 								$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
 								$validation_rules['name']['required']['value'] = 'true';
 								$validation_rules['name']['minlength']['value'] = 2;
-								$validation_rules = FormWriterPublicTW::antispam_question_validate($validation_rules, 'blog');
+								$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
 								echo $formwriter->set_validate($validation_rules);			
 								
 
@@ -153,14 +152,15 @@
 							
 									if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
 											echo '<div id="comment'.$comment->key.'container" style="display:none;">';
-											$formwriter = new FormWriterPublicTW('form'.$comment->key);
+											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key, 'tailwind');
+	
 											$validation_rules = array();
 											$validation_rules['cmt']['required']['value'] = 'true';
 											$validation_rules['cmt']['minlength']['value'] = 20;
 											$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
 											$validation_rules['name']['required']['value'] = 'true';
 											$validation_rules['name']['minlength']['value'] = 2;
-											$validation_rules = FormWriterPublicTW::antispam_question_validate($validation_rules, 'blog');
+											$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
 											echo $formwriter->set_validate($validation_rules);			
 											
 

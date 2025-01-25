@@ -2,7 +2,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('list_logic.php'));
 
 	$page = new PublicPageTW();
@@ -23,7 +22,7 @@
 		}
 	}
 	
-	$formwriter = new FormWriterPublicTW("form1", TRUE);
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 	
 	$validation_rules = array();
 	$validation_rules['usr_first_name']['required']['value'] = 'true';
@@ -36,7 +35,7 @@
 	$validation_rules['usr_email']['required']['value'] = 'true';
 	$validation_rules['usr_email']['email']['value'] = 'true';
 	$validation_rules['usr_email']['maxlength']['value'] = 64;
-	$validation_rules = FormWriterPublicTW::antispam_question_validate($validation_rules);
+	$validation_rules = $formwriter->antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);		
 	
 	echo $formwriter->begin_form("", "post", $mailing_list->get_url(), true);

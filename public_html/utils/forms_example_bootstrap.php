@@ -17,8 +17,7 @@
 	echo PublicPageTW::BeginPage('Log In');
 	
 	
-
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
+	$formwriter = LibraryFunctions::get_formwriter_object('form1');
 	
 	
 	?>

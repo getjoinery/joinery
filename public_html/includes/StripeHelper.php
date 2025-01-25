@@ -193,7 +193,7 @@ class StripeHelper {
 	}
 	
 	public function output_stripe_checkout_form($cart_hash){
-				$formwriter = new FormWriterPublicTW("form3", TRUE);
+				$formwriter = LibraryFunctions::get_formwriter_object('form3', 'tailwind');
 				$output = '
 				<script src="https://js.stripe.com/v3/"></script>
 				<script language="javascript">

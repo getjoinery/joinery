@@ -8,7 +8,6 @@ require_once($siteDir . '/includes/SessionControl.php');
 require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
-require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 require_once($siteDir . '/data/order_items_class.php');
 require_once($siteDir . '/data/questions_class.php');
@@ -1276,7 +1275,7 @@ class Product extends SystemBase {
 							rules: " . str_replace('"', '', json_encode($rules)) . ",
 							messages: " . str_replace('"', '', json_encode($messages)) . ",";
 					
-					$formwriter = new FormWriterPublicTW('form1', true);
+					$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 					echo $formwriter->validate_style_info;
 					/*echo 'errorElement: "span",
 							errorClass: "text-red-500",

@@ -2,7 +2,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 
 	$settings = Globalvars::get_instance();
 
@@ -33,17 +32,18 @@
 	if($_POST){
 	
 		if(!$session->get_user_id()){
-			if(!FormWriterPublicTW::honeypot_check($_POST)){
+			$formwriter = LibraryFunctions::get_formwriter_object();
+			if(!$formwriter->honeypot_check($_POST)){
 				throw new SystemDisplayableError(
 					'Please leave the "Extra email" field blank.');			
 			}
 			
-			if(!FormWriterPublicTW::antispam_question_check($_POST)){
+			if(!$formwriter->antispam_question_check($_POST)){
 				throw new SystemDisplayableError(
 					'Please type the correct value into the anti-spam field.');			
 			}		
 			
-			$captcha_success = FormWriterPublicTW::captcha_check($_POST);
+			$captcha_success = $formwriter->captcha_check($_POST);
 			if (!$captcha_success) {
 				$errormsg = 'Sorry, '.strip_tags($_POST['usr_first_name']).' '.strip_tags($_POST['usr_last_name']).', you must click the CAPTCHA to submit the form.';
 				throw new SystemDisplayableError($errormsg);	

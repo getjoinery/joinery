@@ -1,6 +1,5 @@
 <?php
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('video_logic.php'));
 
 	$page_vars = video_logic($_GET, $_POST, $video, $params);

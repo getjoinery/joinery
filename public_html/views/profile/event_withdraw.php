@@ -2,7 +2,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('event_withdraw_logic.php'));
 
 
@@ -19,7 +18,7 @@
 		echo 'You are not registered for this course, or you have already withdrawn.';
 	}
 	else if(!$event->get('evt_end_time') || $event->get('evt_end_time') > date('Y-m-d H:i:s')){
-		$formwriter = new FormWriterPublicTW("form1");
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 		echo $formwriter->begin_form("form", "post", "/profile/event_withdraw");
 
 		echo '<h4>Confirm withdrawal from '.$event->get('evt_name').'</h4>';

@@ -2,7 +2,6 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('event_register_finish_logic.php'));
 
 	$settings = Globalvars::get_instance();
@@ -17,7 +16,7 @@
 			
 	echo '<h3>Please fill out this extra info for your registration in the <strong>'. $event->get('evt_name') . '</strong> event.</h3>';
 
-	$formwriter = new FormWriterPublicTW("form1");
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 	$validation_rules = array();
 	$validation_rules['phn_phone_number']['required']['value'] = 'true';
 	$validation_rules['privacy_policy']['required']['value'] = 'true';

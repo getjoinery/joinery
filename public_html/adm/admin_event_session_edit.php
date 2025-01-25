@@ -367,8 +367,8 @@
 		//$page->begin_box();
 		echo '<hr><div style="margin-left:20px"><h4>Bulk upload</h4>';
 		$formwriter = LibraryFunctions::get_formwriter_object('fileupload', 'admin');
-		form_load_version
-		FormWriterMaster::file_upload_full(array('evs_event_session_id'=> $event_session->key));
+	
+		$formwriter->file_upload_full(array('evs_event_session_id'=> $event_session->key));
 		$formwriter->end_form();
 		echo '</div>';
 		//$page->end_box();
