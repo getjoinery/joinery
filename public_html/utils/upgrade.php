@@ -53,6 +53,7 @@
 		exit;
 	}
 	
+	/*
 	if(!file_exists($plugin_directory)){
 		echo $plugin_directory. ' (plugin_directory) does not exist or is not readable by www-data.';
 		exit;
@@ -61,6 +62,7 @@
 		echo $plugin_directory. ' (plugin_directory) is empty.';
 		exit;
 	}	
+	*/
 	
 /*
 $perms = fileperms($stage_location);
@@ -139,12 +141,12 @@ $world_ex = (($perms & 0x0001) ?
 			
 			if(substr(sprintf('%o', fileperms($live_themes)), -3) != '770' || substr(sprintf('%o', fileperms($live_themes)), -3) != '777'){
 				echo $live_themes . ' (live_themes) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
-				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
+				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_themes))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_themes)), -3).'<br>';
 				exit;
 			}
 			if(posix_getpwuid(fileowner($live_themes))['name'] != 'www-data'){
 				echo $live_themes . ' (live_themes) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
-				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].' and has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
+				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_themes))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_themes)), -3).'<br>';
 				exit;		
 			}
 			exit;
@@ -157,26 +159,30 @@ $world_ex = (($perms & 0x0001) ?
 		//REMOVE OLD PLUGINS
 		//exec ("rm -rf $live_plugins".'/*');
 		//COPY THE PLUGIN FILES 
-		exec("cp -r $plugin_directory_contents $live_plugins");
-		if(!file_exists($live_plugins)){
-			echo "Failed to move plugin files ($plugin_directory to $live_plugins...aborting.<br>";
-			
-			if(substr(sprintf('%o', fileperms($live_plugins)), -3) != '770' || substr(sprintf('%o', fileperms($live_plugins)), -3) != '777'){
-				echo $live_plugins . ' (live_plugins) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
-				echo 'Instead, it has permissions '.substr(sprintf('%o', fileperms($stage_location)), -3).'<br>';
+		if(file_exists($plugin_directory)){
+			exec("cp -r $plugin_directory_contents $live_plugins");
+			if(!file_exists($live_plugins)){
+				echo "Failed to move plugin files ($plugin_directory to $live_plugins...aborting.<br>";
+				
+				if(substr(sprintf('%o', fileperms($live_plugins)), -3) != '770' || substr(sprintf('%o', fileperms($live_plugins)), -3) != '777'){
+					echo $live_plugins . ' (live_plugins) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+					echo 'Instead, it has permissions '.substr(sprintf('%o', fileperms($live_plugins)), -3).'<br>';
+					exit;
+				}
+				if(posix_getpwuid(fileowner($live_plugins))['name'] != 'www-data'){
+					echo $live_plugins . ' (live_plugins) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
+					echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_plugins))['name'].'<br>';
+					exit;		
+				}
 				exit;
 			}
-			if(posix_getpwuid(fileowner($live_plugins))['name'] != 'www-data'){
-				echo $live_plugins . ' (live_plugins) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
-				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($stage_location))['name'].'<br>';
-				exit;		
+			else{
+				echo "Plugin files copied from $plugin_directory to $live_plugins.<br>";
 			}
-			exit;
 		}
 		else{
-			echo "Theme files copied from $plugin_directory to $live_plugins.<br>";
+			echo "Plugin files are empty and nothing was copied.<br>";
 		}
-
 
 		exit;
 	}
