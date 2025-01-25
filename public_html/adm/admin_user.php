@@ -2,7 +2,7 @@
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
@@ -438,7 +438,7 @@
 	}
 	
 	echo '<tr><td colspan="4">';
-	$formwriter = new FormWriterMaster('form3');
+	$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
 	$validation_rules = array();
 	$validation_rules['evt_event_id']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);
@@ -494,7 +494,8 @@
 	}
 	
 	echo '<tr><td colspan="2">';
-	$formwriter = new FormWriterMaster('form5');
+	$formwriter = LibraryFunctions::get_formwriter_object('form5', 'admin');
+
 	$validation_rules = array();
 	$validation_rules['grp_group_id']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	

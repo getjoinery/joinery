@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
@@ -146,7 +146,7 @@
 		}
 		
 		echo '<tr><td colspan="3">';
-		$formwriter = new FormWriterMaster('form3');
+		$formwriter = LibraryFunctions::get_formwriter_object('form3, 'admin');
 		echo $formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
 
 		
@@ -178,7 +178,7 @@
 			NULL);  //OFFSET
 		$events->load();
 
-		$formwriter = new FormWriterMaster('form4');
+		$formwriter = LibraryFunctions::get_formwriter_object('form4', 'admin');
 		echo $formwriter->begin_form('form4', 'POST', '/admin/admin_email_recipients_modify');
 		$optionvals = $events->get_dropdown_array();
 

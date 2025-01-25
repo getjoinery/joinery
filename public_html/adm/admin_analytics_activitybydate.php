@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
@@ -49,7 +49,7 @@ $session->check_permission(10);
 
 
 
-$formwriter = new FormWriterMaster("form1");
+$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_activitybydate");
 
 echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);

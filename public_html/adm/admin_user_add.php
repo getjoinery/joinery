@@ -1,6 +1,6 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
@@ -67,7 +67,7 @@ else{
 	$pageoptions['title'] = 'Add User';
 	$page->begin_box($pageoptions);
 
-	$formwriter = new FormWriterMaster("form1");
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
 	$validation_rules['usr_first_name']['required']['value'] = 'true';

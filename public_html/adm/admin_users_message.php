@@ -1,7 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/FormWriterMaster.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipients_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
@@ -389,7 +388,8 @@
 	$page->begin_box();
 
 
-	$formwriter = new FormWriterMaster("form1", TRUE);
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+
 
 	$validation_rules = array();
 	$validation_rules['eml_subject']['required']['value'] = 'true';

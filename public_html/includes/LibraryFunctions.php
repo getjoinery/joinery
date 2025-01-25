@@ -216,19 +216,23 @@ class LibraryFunctions {
 	}
 	
 	
-	static function get_formwriter_object($form_id = 'form1', $override_path=NULL){
-		//IF OVERRIDE IS PRESENT, GET THE SPECIFIC 
+	static function get_formwriter_object($form_id = 'form1', $override_name=NULL, $override_path=NULL){
+		//IF OVERRIDE IS PRESENT, GET THE SPECIFIC ONE
 		if($override_path){
 			require_once($override_path);
 			$formwriter = new FormWriter($form_id);
 			return $formwriter;
 		}	
 		
+		if($override_name == 'admin'){
+			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+			$formwriter = new FormWriterMaster($form_id);
+			return $formwriter;	
+		}
+		
 		
 		//FIRST CHECK THE CURRENT ACTIVE THEME
-
 		$theme_form = LibraryFunctions::get_theme_file_path('FormWriter.php',  'includes', 'system');
-
 		if($theme_form){
 			require_once($theme_form);
 			$formwriter = new FormWriter($form_id);
@@ -237,7 +241,7 @@ class LibraryFunctions {
 		
 		
 		//FINALLY GRAB THE DEFAULT FORM
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+		require_once($_SERVER['DOCUMENT_ROOT'].'/includes/FormWriterMaster.php');
 		$formwriter = new FormWriterMaster($form_id);
 		return $formwriter;		
 							

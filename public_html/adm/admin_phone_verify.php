@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
@@ -38,7 +38,8 @@
 		<?php 
 	}
 	
-	$formwriter = new FormWriterMaster("form7");
+	$formwriter = LibraryFunctions::get_formwriter_object('form7', 'admin');
+
 	echo $formwriter->begin_form("uniForm", "post", "/profile/phone_verify_send?disptype=returnadmin");
 
 	$optionvals = array();
@@ -53,7 +54,9 @@
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();												
 
-	$formwriter = new FormWriterMaster("form8");
+
+	$formwriter = LibraryFunctions::get_formwriter_object('form8', 'admin');
+
 	echo $formwriter->begin_form("uniForm", "post", "/profile/phone_verify_check?disptype=returnadmin");
 	echo $formwriter->textinput("Verification Code", "act_code", "ctrlHolder", 20, @$act_code, '',255, '');
 	echo $formwriter->start_buttons();

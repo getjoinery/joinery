@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
@@ -62,7 +62,7 @@
 
 
 	// Editing an existing order
-	$formwriter = new FormWriterMaster('form1');	
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');	
 	
 	
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_order_edit');

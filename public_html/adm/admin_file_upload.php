@@ -1,7 +1,7 @@
 <?php
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 
@@ -36,7 +36,7 @@
 	echo '<p>Maximum upload file size is 40 megabytes</p>';
 	
 	/*
-	$formwriter = new FormWriterMaster("fileupload2");
+	$formwriter = LibraryFunctions::get_formwriter_object('fileupload2', 'admin');
 	echo '<form id="fileupload2"  name="fileupload2" method="post" action="/admin/admin_file_upload_process" enctype="multipart/form-data">';			
 	echo '<fieldset class="inlineLabels">';
 	echo $formwriter->fileinput("File to Upload", "files[]", "ctrlHolder", 30, '');
@@ -49,7 +49,7 @@
 	*/
 	
 	
-	$formwriter = new FormWriterMaster("fileupload");
+	$formwriter = LibraryFunctions::get_formwriter_object('fileupload', 'admin');
 	FormWriterMaster::file_upload_full();
 	$formwriter->end_form();
 	

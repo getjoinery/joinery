@@ -1,5 +1,5 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/data/admin_analytics_users_data.php');
 
@@ -45,7 +45,7 @@ $mintotal = 2;
 
 <?php
 
-$formwriter = new FormWriterMaster("form1");
+$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_users");
 
 echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);

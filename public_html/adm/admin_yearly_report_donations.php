@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
@@ -39,7 +39,7 @@
 	)
 	);	
 
-	$formwriter = new FormWriterMaster("form1");
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	echo $formwriter->begin_form("", "get", "/admin/admin_yearly_report_donations");
 	echo $formwriter->dateinput("Start Date (UTC Time)", "startdate", "dateinput", 30, $startdate, "", 10);
 	echo $formwriter->dateinput("End Date (UTC Time)", "enddate", "dateinput", 30, $enddate, "", 10);
