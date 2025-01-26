@@ -1017,6 +1017,7 @@ class ControlDHelper{
 		),
 	);
 
+	//DEBUG CAN BE 'debug_nosend' or 'debug_send' DEPENDING ON WHETHER YOU WANT TO SEND THE REQUEST OR JUST SEE IT
 	public function __construct($debug=0) {
 		
 		$settings = Globalvars::get_instance();
@@ -1101,7 +1102,7 @@ class ControlDHelper{
 		if($value){
 			$data['value'] = $value;
 		}
-		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/options'.$name;
+		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/options/'.$name;
 
 		if($this->debug){
 			echo 'createProfile:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
@@ -1117,14 +1118,18 @@ class ControlDHelper{
 		return $this->getRequest('https://api.controld.com/profiles/options');
 	}
 	
-	public function modifyProfileOptions($profile_id, $name, $status, $value=null){
+	public function modifyProfileOptions($profile_id, $name, $status, $value=null, $custom_value=null){
 		$data = array( 
 			'status' => $status,  // 0 or 1
 		);
 		if($value){
 			$data['value'] = $value;
 		}
-		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/options'.$name;
+		if($custom_value){
+			$data['custom_value'] = $custom_value;
+		}		
+		
+		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/options/'.$name;
 
 		if($this->debug){
 			echo 'modifyProfileOptions:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
