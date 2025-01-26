@@ -6,6 +6,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/settings_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -441,8 +442,17 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("CMS module active", "page_contents_active", '', $optionvals, $settings->get_setting('page_contents_active'), '', FALSE);
 	
-	echo $formwriter->textinput("Alternate page to use as homepage (optional, starts with slash and may need .php)", 'alternate_homepage', '', 20, $settings->get_setting('alternate_homepage'), "" , 255, "");
 
+	$pages = new MultiPage(
+		array('deleted' => false),
+		NULL,		//SORT BY => DIRECTION
+		NULL,  //NUM PER PAGE
+		NULL);  //OFFSET
+	$pages->load();
+	$optionvals = $pages->get_dropdown_array_link();
+	$optionvals['Blog homepage'] = '/blog';
+	echo $formwriter->dropinput("Alternate page to use as homepage (optional)", "alternate_homepage", '', $optionvals, $settings->get_setting('alternate_homepage'), '', TRUE);	
+	
 
 	echo '<h3>Url Rewrite Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);

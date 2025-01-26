@@ -20,11 +20,11 @@ function page_logic($get_vars, $post_vars, $page, $params){
 	}
 	
 	$page_vars['page'] = $page;
-	
-	if($params[0] != 'page' || !$page){
+
+	if(!$page){
 		require_once(LibraryFunctions::display_404_page());	
 	}
-	
+
 	if ($session->get_user_id() && $session->get_permission() > 4) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
