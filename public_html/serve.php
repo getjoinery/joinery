@@ -309,8 +309,27 @@ if($settings->get_setting('videos_active')){
 //HOMEPAGE
 if(!$params[0]){
 	if($alternate_page = $settings->get_setting('alternate_homepage')){
-		$template_file = $template_directory.'/views'.$alternate_page;
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+		$page_pieces = explode('/', $alternate_page);
+
+		//IF IT IS THE BLOG
+		if($page_pieces[1] == 'blog'){
+			$template_file = $template_directory.'/views/blog.php';
+			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+
+		}
+		else if($page_pieces[1] == 'page'){
+			//IF IT IS A PAGE
+			if($settings->get_setting('page_contents_active')){
+				require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
+
+				$page = Page::get_by_link($page_pieces[2], true);		
+
+				$template_file = $template_directory.'/views/page.php';
+				$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
+						
+			}	
+		}		
+		
 	}
 	else{
 		$template_file = $template_directory.'/views/index.php';
