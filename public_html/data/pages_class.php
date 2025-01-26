@@ -158,7 +158,11 @@ class MultiPage extends SystemMultiBase {
 		
 		if (array_key_exists('deleted', $this->options)) {
 			$where_clauses[] = 'pag_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}		
+		}	
+
+		if (array_key_exists('published', $this->options)) {
+			$where_clauses[] = 'pag_published_time IS ' . ($this->options['published'] ? 'NOT NULL' : 'NULL');
+		}			
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
