@@ -30,10 +30,10 @@ function subscription_edit_logic($get_vars, $post_vars){
 	}
 	else if(isset($_POST['product_id'])){
 		$product_id = LibraryFunctions::fetch_variable_local($post_vars, 'product_id', 0, 'notrequired', '', 'safemode', 'int');
-
+		$user_id = $session->get_user_id();
 		//SUBSCRIPTIONS
 		$subscriptions = new MultiOrderItem(
-		array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
+		array('user_id' => $user_id, 'is_active_subscription' => true), //SEARCH CRITERIA
 		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
 		5, //NUMBER PER PAGE
 		NULL //OFFSET
@@ -148,6 +148,19 @@ function subscription_edit_logic($get_vars, $post_vars){
 	$numrecords = $products->count_all();		
 	$page_vars['numrecords'] = $numrecords;
 
+	//SUBSCRIPTIONS
+	$user_id = $session->get_user_id();
+	$subscriptions = new MultiOrderItem(
+	array('user_id' => $user_id, 'is_active_subscription' => true), //SEARCH CRITERIA
+	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+	5, //NUMBER PER PAGE
+	NULL //OFFSET
+	);
+	$subscriptions->load();	
+	$order_item = $subscriptions->get(0);
+
+	$current_plan_id = $order_item->get('odi_pro_product_id');
+	$page_vars['current_plan_id'] = $current_plan_id;
 
 	
 	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')]; 
