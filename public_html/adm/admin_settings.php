@@ -444,7 +444,7 @@
 	
 
 	$pages = new MultiPage(
-		array('deleted' => false),
+		array('deleted' => false, 'published' => true),
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
