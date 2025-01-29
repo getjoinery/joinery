@@ -122,6 +122,12 @@ function cart_logic($get_vars, $post_vars){
 
 	if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
 		$billing_user = $cart->get_or_create_billing_user(); 
+		//ADD TO THE MAILING LIST IF CHOSEN
+		if(isset($data['newsletter']) && $data['newsletter']){
+			if($settings->get_setting('default_mailing_list')){
+				$status = $billing_user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
+			}
+		}	
 		if($settings->get_setting('use_paypal_checkout')){
 			//HANDLE SUBSCRIPTION PREP FIRST
 			$paypal = new PaypalHelper();

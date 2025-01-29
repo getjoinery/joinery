@@ -12,7 +12,7 @@
 	$page->public_header($hoptions);
 	
 
-	$options['subtitle'] = 'Get updates on upcoming retreats, online classes, and other news.';
+	$options['subtitle'] = 'Get updates from us.';
 	echo PublicPageTW::BeginPage('Lists', $options);
 	echo PublicPageTW::BeginPanel();
 
@@ -54,7 +54,7 @@
 			if($nickname_display){
 				echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, NULL, "" , 32, "");
 			}
-			echo $formwriter->textinput("Email", "usr_email", NULL, 30, '', "", 64, "");
+			echo $formwriter->textinput("Email", "usr_email", NULL, 30, strip_tags($_GET['email']), "", 64, "");
 			
 			$optionvals = Address::get_timezone_drop_array();
 			$default_timezone = $settings->get_setting('default_timezone');
