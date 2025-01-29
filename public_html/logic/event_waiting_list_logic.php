@@ -80,7 +80,8 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 
 			if($post_vars['newsletter']){
 				if($settings->get_setting('default_mailing_list')){
-					$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
+					$messages = $user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
+					//$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));		
 				}
 			}				
 		}			
