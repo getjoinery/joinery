@@ -434,6 +434,11 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("File hosting module active", "files_active", '', $optionvals, $settings->get_setting('files_active'), '', FALSE);	
 
+	if(!$settings->get_setting('allowed_upload_extensions')){
+		$allowed_upload_extensions = 'gif,jpeg,jpg,png,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a';
+	}
+	echo $formwriter->textinput("Allowed file upload extensions (comma separated)", 'allowed_upload_extensions', '', 20, $allowed_upload_extensions, "" , 255, "");
+
 	echo '<h3>Video Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Video module active", "videos_active", '', $optionvals, $settings->get_setting('videos_active'), '', FALSE);

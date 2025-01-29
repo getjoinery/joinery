@@ -27,6 +27,8 @@ class CtldDevice extends SystemBase {
 	public const DEVICE_TYPE_MAC = 4;
 	
 	
+	
+	
 	public static $fields = array(
 		'cdd_ctlddevice_id' => 'ID of the ctlddevice',
 		'cdd_device_id' => 'ID from controld',
@@ -44,7 +46,7 @@ class CtldDevice extends SystemBase {
 		'cdd_controld_resolver' => 'Link/code to provision this device at controld',
 		'cdd_deactivation_pin' => 'Pin to turn off the service',
 		'cdd_timezone' => 'Timezone for this device for use in controld',
-		'allow_device_edits' => 'Override for the edit restrictions',
+		'cdd_allow_device_edits' => 'Override for the edit restrictions',
 	);
 
 	public static $field_specifications = array(
@@ -64,7 +66,7 @@ class CtldDevice extends SystemBase {
 		'cdd_controld_resolver' => array('type'=>'varchar(128)'),
 		'cdd_deactivation_pin' => array('type'=>'varchar(10)'),
 		'cdd_timezone' => array('type'=>'varchar(64)'),
-		'allow_device_edits' => array('type'=>'int4'),
+		'cdd_allow_device_edits' => array('type'=>'int4'),
 	);
 			
 	public static $required_fields = array();
@@ -116,7 +118,7 @@ class CtldDevice extends SystemBase {
 	
 	function are_filters_editable(){
 		
-		if($this->get('allow_device_edits')){
+		if($this->get('cdd_allow_device_edits')){
 			return true;
 		}
 		
