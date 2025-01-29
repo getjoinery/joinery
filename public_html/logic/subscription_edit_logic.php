@@ -157,10 +157,16 @@ function subscription_edit_logic($get_vars, $post_vars){
 	NULL //OFFSET
 	);
 	$subscriptions->load();	
-	$order_item = $subscriptions->get(0);
+	if($subscriptions->count_all()){
+		$order_item = $subscriptions->get(0);
+		$current_plan_id = $order_item->get('odi_pro_product_id');
+		$page_vars['current_plan_id'] = $current_plan_id;
+	}
+	else{
+		$page_vars['current_plan_id'] = NULL;
+	}
 
-	$current_plan_id = $order_item->get('odi_pro_product_id');
-	$page_vars['current_plan_id'] = $current_plan_id;
+
 
 	
 	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')]; 

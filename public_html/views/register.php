@@ -78,8 +78,8 @@
 	//echo $formwriter->textinput("Zip Code", "usa_zip_code_id", NULL, 20, @$form_fields->usa_zip_code_id, "", 255,"");
 
 
-	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy-policy'>privacy policy</a>", "privacy", "sm:col-span-6", "normal", NULL, "yes", '');
-	echo $formwriter->checkboxinput("Please add me to the mailing list", "mailing_list", "sm:col-span-6", "normal", NULL, "yes", '');	
+	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy'>privacy policy</a>", "privacy", "sm:col-span-6", "normal", NULL, "yes", '');
+	echo $formwriter->checkboxinput("Please add me to the mailing list", "newsletter", "sm:col-span-6", "normal", NULL, "yes", '');	
 	echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "sm:col-span-6", "normal", 'yes', "yes", '');
 	echo $formwriter->honeypot_hidden_input();	
 
