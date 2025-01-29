@@ -182,6 +182,94 @@ class User extends SystemBase {
 	    return $string;
 	}
 	
+	
+	public function add_user_to_mailing_lists($mailing_list_ids){
+		if(empty($mailing_list_ids)){
+			$mailing_list_ids = array();
+		}
+		
+		if(!is_array($mailing_list_ids)){
+			$mailing_list_ids = array($mailing_list_ids);
+		}
+		
+		
+		
+		$search_criteria = array();
+		$mailing_lists = new MultiMailingList(
+			$search_criteria,
+			array('name'=>'ASC'));	
+		$mailing_lists->load();		
+		
+		
+		$messages = array();
+		$thismessage = array();
+		foreach ($mailing_lists as $mailing_list){
+			if(empty($_POST['new_list_subscribes'])){
+				$new_list_subscribes = array();
+			}
+			else{
+				$new_list_subscribes = $_POST['new_list_subscribes'];
+			}
+			
+			//IF IT IS A CHOICE AND SELECTED
+			if(in_array($mailing_list->key, $mailing_list_ids)){
+
+				if($mailing_list->is_user_in_list($this->key)){
+					//IF USER IS ALREADY SUBSCRIBED
+					$thismessage['message_type'] = 'warn';
+					$thismessage['message_title'] = 'Notice';
+					$thismessage['message'] = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+					$messages[] = $thismessage;
+				}
+				else{
+					//IF USER IS NOT SUBSCRIBED
+					$status = $mailing_list->add_registrant($this->key);
+					if($status){
+						$thismessage['message_type'] = 'success';
+						$thismessage['message_title'] = 'Success';
+						$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+						$messages[] = $thismessage;
+					}
+					else{
+						$thismessage['message_type'] = 'error';
+						$thismessage['message_title'] = 'Error';
+						$thismessage['message'] = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
+						$messages[] = $thismessage;
+					}
+				}
+			}
+			else{
+
+				//IF IT IS A CHOICE AND NOT SELECTED
+				if($mailing_list->is_user_in_list($this->key)){
+					//IF USER IS SUBSCRIBED
+					$status = $mailing_list->remove_registrant($this->key);
+					if($status){
+						$thismessage['message_type'] = 'success';
+						$thismessage['message_title'] = 'Success';
+						$thismessage['message'] = 'You are UNSUBSCRIBED from the following lists: ' . $mailing_list->get('mlt_name');
+						$messages[] = $thismessage;
+					}
+					else{
+						$thismessage['message_type'] = 'error';
+						$thismessage['message_title'] = 'Error';
+						$thismessage['message'] = 'There was an error removing you from the following lists: ' . $mailing_list->get('mlt_name');
+						$messages[] = $thismessage;
+					}
+				}	
+			}				
+		}		
+		
+		return $messages;
+		
+		
+		
+	}
+	
+	
+	
+	
+	
 	//RETURNS AN ARRAY OF CONTACT TYPES THE USER HAS UNSUBSCRIBED FROM
 	public function get_contact_type_unsubscribes(){
 		return json_decode($this->get('usr_contact_type_unsubscribes'));

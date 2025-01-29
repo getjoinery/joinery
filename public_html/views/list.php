@@ -4,6 +4,11 @@
 	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('list_logic.php'));
 
+	$page_vars = list_logic($_GET, $_POST, $mailing_list, $params);
+	$messages = $page_vars['messages'];
+	$member_of_list = $page_vars['member_of_list'];
+	$session = $page_vars['session'];
+	
 	$page = new PublicPageTW();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
@@ -40,7 +45,7 @@
 	
 	echo $formwriter->begin_form("", "post", $mailing_list->get_url(), true);
 
-	if(!$logged_in){
+	if(!$session->get_user_id()){
 		echo $formwriter->textinput("First Name", "usr_first_name", NULL, 30, '', "", 32, "");
 		echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 30, '', "", 32, "");
 		$settings = Globalvars::get_instance();
@@ -65,7 +70,7 @@
 		echo $formwriter->checkboxinput("Unsubscribe from this list.", "mlt_mailing_list_id_unsubscribe", "sm:col-span-6", "left", 1, NULL, "");
 	}
 	
-	if(!$logged_in){
+	if(!$session->get_user_id()){
 		echo $formwriter->antispam_question_input();
 		echo $formwriter->honeypot_hidden_input();
 		echo $formwriter->captcha_hidden_input();

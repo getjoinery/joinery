@@ -1,10 +1,12 @@
 <?php
+
+function list_logic($get_vars, $post_vars, $mailing_list, $params){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
 
 	$settings = Globalvars::get_instance();
-
+	$page_vars['settings'] = $settings;
 	
 	if(!$settings->get_setting('mailing_lists_active')){
 		header("HTTP/1.0 404 Not Found");
@@ -20,7 +22,7 @@
 
 	$session = SessionControl::get_instance();
 	$session->set_return();
-
+	$page_vars['session'] = $session;
 
 	
 	if($_POST){
@@ -68,61 +70,16 @@
 		$user->prepare();
 		$user->save();
 		
-		$messages = array();
-		if($_POST['mlt_mailing_list_id_subscribe']){
-			$mailing_list = new MailingList($_POST['mlt_mailing_list_id_subscribe'], TRUE);
-			if($mailing_list->is_user_in_list($user->key)){
-				//IF USER IS ALREADY SUBSCRIBED
-				$thismessage['message_type'] = 'warn';
-				$thismessage['message_title'] = 'Notice';
-				$thismessage['message'] = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-				$messages[] = $thismessage;
-			}
-			else{
-				//IF USER IS NOT SUBSCRIBED
-				$status = $mailing_list->add_registrant($user->key);
-				if($status){
-					$thismessage['message_type'] = 'success';
-					$thismessage['message_title'] = 'Success';
-					$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-				else{
-					$thismessage['message_type'] = 'error';
-					$thismessage['message_title'] = 'Error';
-					$thismessage['message'] = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-			}			
-		}
-		else if($_POST['mlt_mailing_list_id_unsubscribe']){
-			$mailing_list = new MailingList($_POST['mlt_mailing_list_id_unsubscribe'], TRUE);
-			//IF IT IS A CHOICE AND NOT SELECTED
-			if($mailing_list->is_user_in_list($user->key)){
-				//IF USER IS SUBSCRIBED
-				$status = $mailing_list->remove_registrant($user->key);
-				if($status){
-					$thismessage['message_type'] = 'success';
-					$thismessage['message_title'] = 'Success';
-					$thismessage['message'] = 'You are UNSUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-				else{
-					$thismessage['message_type'] = 'error';
-					$thismessage['message_title'] = 'Error';
-					$thismessage['message'] = 'There was an error removing you from the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-			}			
-		}
-		
+		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['mlt_mailing_list_id_subscribe']);
 				
 	}
 	
 	
-	$logged_in = $session->get_user_id();
 	$member_of_list = false;
-	if($logged_in){
-		$member_of_list = $mailing_list->is_user_in_list($session->get_user_id());
+	if($session->get_user_id()){
+		$page_vars['member_of_list'] = $mailing_list->is_user_in_list($session->get_user_id());
 	}	
+	
+	return $page_vars;
+}
 ?>
