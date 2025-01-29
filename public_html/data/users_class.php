@@ -187,8 +187,10 @@ class User extends SystemBase {
 		if(empty($mailing_list_ids)){
 			$mailing_list_ids = array();
 		}
-		
-		if(!is_array($mailing_list_ids)){
+		else if($mailing_list_ids == 'all'){
+			$mailing_list_ids = 'all';
+		}	
+		else if(!is_array($mailing_list_ids)){
 			$mailing_list_ids = array($mailing_list_ids);
 		}
 		
@@ -204,16 +206,34 @@ class User extends SystemBase {
 		$messages = array();
 		$thismessage = array();
 		foreach ($mailing_lists as $mailing_list){
-			if(empty($_POST['new_list_subscribes'])){
-				$new_list_subscribes = array();
+					
+			if($mailing_list_ids = 'all'){
+				if($mailing_list->is_user_in_list($this->key)){
+					//IF USER IS ALREADY SUBSCRIBED
+					$thismessage['message_type'] = 'warn';
+					$thismessage['message_title'] = 'Notice';
+					$thismessage['message'] = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+					$messages[] = $thismessage;
+				}
+				else{
+					//IF USER IS NOT SUBSCRIBED
+					$status = $mailing_list->add_registrant($this->key);
+					if($status){
+						$thismessage['message_type'] = 'success';
+						$thismessage['message_title'] = 'Success';
+						$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
+						$messages[] = $thismessage;
+					}
+					else{
+						$thismessage['message_type'] = 'error';
+						$thismessage['message_title'] = 'Error';
+						$thismessage['message'] = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
+						$messages[] = $thismessage;
+					}
+				}				
 			}
-			else{
-				$new_list_subscribes = $_POST['new_list_subscribes'];
-			}
-			
-			//IF IT IS A CHOICE AND SELECTED
-			if(in_array($mailing_list->key, $mailing_list_ids)){
-
+			else if(in_array($mailing_list->key, $mailing_list_ids)){
+				//IF IT IS A CHOICE AND SELECTED
 				if($mailing_list->is_user_in_list($this->key)){
 					//IF USER IS ALREADY SUBSCRIBED
 					$thismessage['message_type'] = 'warn';
@@ -268,7 +288,7 @@ class User extends SystemBase {
 	
 	
 	
-	
+	//ALL CONTACT TYPE FUNCTIONS BELOW ARE UNUSED
 	
 	//RETURNS AN ARRAY OF CONTACT TYPES THE USER HAS UNSUBSCRIBED FROM
 	public function get_contact_type_unsubscribes(){

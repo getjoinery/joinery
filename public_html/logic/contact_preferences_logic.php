@@ -31,85 +31,12 @@ function contact_preferences_logic($get_vars, $post_vars){
 		$search_criteria,
 		array('name'=>'ASC'));	
 	$mailing_lists->load();
-
-	if (isset($get_vars['zone']) && $get_vars['action'] == 'ocu') {
-		// One click unsubscribe
-		//IF WE DON'T HAVE A CONTACT TYPE, ASSUME IT'S AN UNSUBSCRIBE FROM NEWSLETTERS
-		if($get_vars['mailing_list_id']){
-			$mailing_list_id = $get_vars['mailing_list_id'];
-			$mailing_list = new MailingList($mailing_list_id, TRUE);
-		}
-		else{
-			throw new SystemDisplayableError('You must pass a mailing list to unsubscribe.');
-			exit;
-		}
-
-		$mailing_list->remove_registrant($user->key);
-		
-		$msgtxt = 'You have been unsubscribed from ' . $mailing_list->get('mlt_name') . ' emails.  If you unsubscribed by mistake, you can choose "Subscribe" below and press the "Submit" button.';
-		$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/contact_preferences.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "contactbox", TRUE);
-		$session->save_message($message);	
-	}
 	
 	
 	if($post_vars){
 		
-		if ($post_vars['zone'] == 'optional') {
-
-			//HANDLE THE USERS'S MAILING LISTS
-
-			foreach ($mailing_lists as $mailing_list){
-				if(empty($post_vars['new_list_subscribes'])){
-					$new_list_subscribes = array();
-				}
-				else{
-					$new_list_subscribes = $post_vars['new_list_subscribes'];
-				}
-				
-				//IF IT IS A CHOICE AND SELECTED
-				if(in_array($mailing_list->key, $post_vars['new_list_subscribes'])){
-
-					if($mailing_list->is_user_in_list($user->key)){
-						//IF USER IS ALREADY SUBSCRIBED
-						$msgtxt = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-						$message = new DisplayMessage($msgtxt, 'Notice', '/\/profile\/contact_preferences.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "contactbox", TRUE);
-						$session->save_message($message);
-					}
-					else{
-						//IF USER IS NOT SUBSCRIBED
-						$status = $mailing_list->add_registrant($user->key);
-						if($status){
-							$msgtxt = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-							$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/contact_preferences.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "contactbox", TRUE);
-							$session->save_message($message);
-						}
-						else{
-							$msgtxt = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
-							$message = new DisplayMessage($msgtxt, 'Error', '/\/profile\/contact_preferences.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "contactbox", TRUE);
-							$session->save_message($message);
-						}
-					}
-				}
-				else{
-					//IF IT IS A CHOICE AND NOT SELECTED
-					if($mailing_list->is_user_in_list($user->key)){
-						//IF USER IS SUBSCRIBED
-						$status = $mailing_list->remove_registrant($user->key);
-						if($status){
-							$msgtxt =  'You are UNSUBSCRIBED from the following lists: ' . $mailing_list->get('mlt_name');
-							$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/contact_preferences.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "contactbox", TRUE);
-							$session->save_message($message);							
-						}
-						else{
-							$msgtxt =  'There was an error removing you from the following lists: ' . $mailing_list->get('mlt_name');
-							$message = new DisplayMessage($msgtxt, 'Error', '/\/profile\/contact_preferences.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "contactbox", TRUE);
-							$session->save_message($message);
-						}
-					}	
-				}				
-			}
-
-		}
+		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['new_list_subscribes']);
+	
 	}
 
 
@@ -140,7 +67,7 @@ function contact_preferences_logic($get_vars, $post_vars){
 	
 
 	
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
+	//$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 	
 	$page_vars['tab_menus'] = array(
 		'Edit Account' => '/profile/account_edit',

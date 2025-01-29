@@ -470,7 +470,8 @@
 		NULL);  //OFFSET
 	$templates->load();
 	$numtemplates = $templates->count_all();
-	$outer_optionvals = $templates->get_dropdown_array();
+	$outer_optionvals = array('All Lists' => 'all');
+	$outer_optionvals = array_merge($outer_optionvals, $templates->get_dropdown_array());
 	
 	if($settings->get_setting('default_mailing_list')){
 		echo $formwriter->dropinput("Default mailing list", "default_mailing_list", '', $outer_optionvals, $settings->get_setting('default_mailing_list'), '', TRUE);	
