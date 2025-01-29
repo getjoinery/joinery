@@ -125,8 +125,8 @@ function cart_logic($get_vars, $post_vars){
 		//ADD TO THE MAILING LIST IF CHOSEN
 		if(isset($data['newsletter']) && $data['newsletter']){
 			if($settings->get_setting('default_mailing_list')){
-				$messages = $user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
-				//$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
+				$messages = $billing_user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
+				//$status = $billing_user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
 			}
 		}	
 		if($settings->get_setting('use_paypal_checkout')){
