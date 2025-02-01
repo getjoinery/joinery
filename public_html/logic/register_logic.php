@@ -129,22 +129,17 @@ function register_logic($get_vars, $post_vars){
 		}
 
 		try {
+
 			$data = array(
 				'usr_first_name' => $fixed_fields['usr_first_name'],
 				'usr_last_name' => $fixed_fields['usr_last_name'],
 				'usr_email' => $fixed_fields['usr_email'],
+				'usr_nickname' => $fixed_fields['usr_nickname'],
+				'usr_timezone' => $fixed_fields['usr_timezone'],
 				'password' => $fixed_fields['usr_password'],
 				'send_emails' => TRUE
 			);
 			$user = User::CreateNew($data);	
-			
-			if($post_vars['usr_nickname']){
-				$user->set('usr_nickname', $post_vars['usr_nickname']);
-			}
-			
-			$user->set('usr_timezone', $post_vars['usr_timezone']);
-			$user->prepare();
-			$user->save();
 			
 			//ADD TO THE MAILING LIST IF CHOSEN
 			if($post_vars['newsletter']){

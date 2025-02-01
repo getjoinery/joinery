@@ -32,6 +32,7 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
+	$session->set_return();
 
 
 	$user = new User($_GET['usr_user_id'], TRUE);
@@ -338,13 +339,23 @@
 
 						
 					echo '<h4>Active Subscriptions</h4>';
-					foreach($active_subscriptions as $subscription){	
+					foreach($active_subscriptions as $subscription){
+						$stripe_helper = new StripeHelper();						
+						$stripe_helper->update_subscription_in_order_item($subscription);
 						$status_words = 'active';
 						if($subscription->get('odi_subscription_status')){
 							$status_words = $subscription->get('odi_subscription_status');
 						}
 						
-						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month, Status: '.$status_words.' <a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
+						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month, Status: '.$status_words;
+						
+						
+
+						if($subscription->get('odi_subscription_period_end')){
+							$status .= ' period ends on '.LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone());
+						}
+						
+						$status .= ' <a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
 						
 						?><span><?php echo $status; ?></span><br />
 						<?php
@@ -355,6 +366,9 @@
 							
 						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
 						
+						if($subscription->get('odi_subscription_period_end')){
+							$status .= ' last day is '.LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone());
+						}
 						?><span><?php echo $status; ?></span><br />
 						<?php
 					}

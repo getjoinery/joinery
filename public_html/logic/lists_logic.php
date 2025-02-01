@@ -57,7 +57,6 @@ function lists_logic($get_vars, $post_vars, $params){
 		}
 		
 		//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
-		$user = NULL;
 		if($session->get_user_id()){ 
 			$user = new User($session->get_user_id(), TRUE);
 		}
@@ -66,17 +65,12 @@ function lists_logic($get_vars, $post_vars, $params){
 				'usr_first_name' => $_POST['usr_first_name'],
 				'usr_last_name' => $_POST['usr_last_name'],
 				'usr_email' => $_POST['usr_email'],
-				'password' => NULL,
+				'usr_nickname' => $_POST['usr_nickname'],
+				'usr_timezone' => $_POST['usr_timezone'],
+				'password' => $_POST['usr_password'],
 				'send_emails' => false
 			);
 			$user = User::CreateNew($data);	
-
-			if($_POST['usr_nickname']){
-				$user->set('usr_nickname', $_POST['usr_nickname']);
-			}
-			$user->set('usr_timezone', $_POST['usr_timezone']);
-			$user->prepare();
-			$user->save();
 		}
 		$page_vars['user'] = $user;
 

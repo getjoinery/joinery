@@ -35,7 +35,7 @@ class CtldAccount extends SystemBase {
 		'cda_plan_max_devices' => 'Max devices allowed',
 		'cda_usr_user_id' => 'User id this profile is assigned to',
 		'cda_is_active' => 'Is it active?',
-		'cda_renewal_time' => 'Time this user is up for renewal',
+		'cda_period_end' => 'Time this user is up for renewal',
 		'cda_create_time' => 'Time Created',
 		'cda_delete_time' => 'Time deleted',
 	);
@@ -46,7 +46,7 @@ class CtldAccount extends SystemBase {
 		'cda_plan_max_devices' => array('type'=>'int4'),
 		'cda_usr_user_id' => array('type'=>'int4'),
 		'cda_is_active' => array('type'=>'bool'),
-		'cda_renewal_time' => array('type'=>'timestamp(6)'),
+		'cda_period_end' => array('type'=>'timestamp(6)'),
 		'cda_create_time' => array('type'=>'timestamp(6)'),
 		'cda_delete_time' => array('type'=>'timestamp(6)'),
 	);

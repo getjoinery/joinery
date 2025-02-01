@@ -24,21 +24,13 @@
 	$order = $order_item->get_order();
 	$order_item->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 
-	$result = $stripe_helper->update_subscription_in_order_item($order_item);
-	
-	//REFRESH THE ORDER ITEM
-	$order_item = new OrderItem($order_item_id, TRUE);
+	$stripe_subscription = $stripe_helper->update_subscription_in_order_item($order_item);
+	if(!$stripe_subscription){
+		throw new SystemDisplayablePermanentError("We were unable to retrieve that subscription (".$order_item->get('odi_stripe_subscription_id').") Please contact the webmaster.");
+		exit;		
+	}
 
 	if(!$order_item->get('odi_subscription_cancelled_time')){
-
-		try {
-			$stripe_subscription = $stripe_helper->get_subscription($order_item->get('odi_stripe_subscription_id'));
-			
-		}					
-		catch (Exception $e) {
-			throw new SystemDisplayablePermanentError("We were unable to retrieve that subscription (".$order_item->get('odi_stripe_subscription_id').") Please contact the webmaster.");
-			exit;
-		}	
 				
 		if(!$stripe_subscription->canceled_at){
 		
