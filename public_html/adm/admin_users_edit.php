@@ -27,7 +27,7 @@ if ($_POST){
 	$user->set('usr_first_name', trim($_POST['usr_first_name']));
 	$user->set('usr_last_name', trim($_POST['usr_last_name']));
 	$user->set('usr_password_recovery_disabled', (bool)$_POST['usr_password_recovery_disabled']);
-
+	$user->set('usr_timezone', $_POST['usr_timezone']);
 	$user->set('usr_nickname', trim($_POST['usr_nickname']));
 
 	if($_POST['usr_organization_name']){
@@ -49,67 +49,6 @@ if ($_POST){
 		}
 	}
 
-	//HANDLE THE USERS'S MAILING LISTS
-	$messages = array();
-	$thismessage = array();
-	foreach ($mailing_lists as $mailing_list){
-		if(empty($_POST['new_list_subscribes'])){
-			$new_list_subscribes = array();
-		}
-		else{
-			$new_list_subscribes = $_POST['new_list_subscribes'];
-		}
-		
-		//IF IT IS A CHOICE AND SELECTED
-		if(in_array($mailing_list->key, $_POST['new_list_subscribes'])){
-
-			if($mailing_list->is_user_in_list($user->key)){
-				//IF USER IS ALREADY SUBSCRIBED
-				$thismessage['message_type'] = 'warn';
-				$thismessage['message_title'] = 'Notice';
-				$thismessage['message'] = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-				$messages[] = $thismessage;
-			}
-			else{
-				//IF USER IS NOT SUBSCRIBED
-				$status = $mailing_list->add_registrant($user->key);
-				if($status){
-					$thismessage['message_type'] = 'success';
-					$thismessage['message_title'] = 'Success';
-					$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-				else{
-					$thismessage['message_type'] = 'error';
-					$thismessage['message_title'] = 'Error';
-					$thismessage['message'] = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-			}
-		}
-		else{
-			//IF IT IS A CHOICE AND NOT SELECTED
-			if($mailing_list->is_user_in_list($user->key)){
-				//IF USER IS SUBSCRIBED
-				$status = $mailing_list->remove_registrant($user->key);
-				if($status){
-					$thismessage['message_type'] = 'success';
-					$thismessage['message_title'] = 'Success';
-					$thismessage['message'] = 'You are UNSUBSCRIBED from the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-				else{
-					$thismessage['message_type'] = 'error';
-					$thismessage['message_title'] = 'Error';
-					$thismessage['message'] = 'There was an error removing you from the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-			}	
-		}				
-	}
-
-	
-	$user->set('usr_timezone', $_POST['usr_timezone']);
 	
 	if($_SESSION['permission'] == 10){
 		$user->set('usr_permission', $_POST['usr_permission']);
@@ -117,6 +56,11 @@ if ($_POST){
 
 	$user->prepare();
 	$user->save();
+	
+	//HANDLE THE USERS'S MAILING LISTS
+	$messages = $user->add_user_to_mailing_lists($_POST['new_list_subscribes']);
+
+
 
 
 	//NOW REDIRECT

@@ -13,27 +13,18 @@ $session->check_permission(8);
 
 if ($_POST){
 	
-
-	if($_POST['usr_password']){
-		$password = $_POST['usr_password'];
-	}
-	else{
-		$password = NULL;
-	}
 	
+
 	$data = array(
 		'usr_first_name' => $_POST['usr_first_name'],
 		'usr_last_name' => $_POST['usr_last_name'],
 		'usr_email' => $_POST['usr_email'],
-		'password' => $password,
-		'send_emails' => $_POST['send_activation_email']
+		'usr_nickname' => $_POST['usr_nickname'],
+		'usr_timezone' => $_POST['usr_timezone'],
+		'password' => $_POST['usr_password'],
+		'send_emails' => $_POST['send_activation_email'],
 	);
-	$user = User::CreateNew($data);
-	
-	$user->set('usr_nickname', trim($_POST['usr_nickname']));
-	$user->set('usr_timezone', $_POST['usr_timezone']);
-	$user->prepare();
-	$user->save();
+	$user = User::CreateNew($data);	
 
 	if($_POST['mailing_list']){
 		if($settings->get_setting('default_mailing_list')){

@@ -19,35 +19,23 @@ function account_edit_logic($get_vars, $post_vars){
 	if (!empty($post_vars)) {
 
 		
-		
-		if(!isset($post_vars['usr_first_name']) || !isset($post_vars['usr_last_name']) || !isset($post_vars['usr_timezone'])){
-				throw new SystemDisplayableError(
-					'The following required fields were not set: first name, last name, timezone');
-		}	
-		
-		
-		$user->set('usr_first_name', trim($post_vars['usr_first_name']));
-		$user->set('usr_last_name', trim($post_vars['usr_last_name']));
-		$user->set('usr_nickname', trim($post_vars['usr_nickname']));
-
-		
-		// Check the timezone is valid
-		try {
-			new DateTimeZone($post_vars['usr_timezone']);
-			$user->set('usr_timezone', $post_vars['usr_timezone']);
-		} catch (Exception $e) {
-			$errorhandler = new ErrorHandler();
-			$errorhandler->handle_general_error('The timezone you entered in invalid.');
+		//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
+		if($session->get_user_id()){ 
+			$user = new User($session->get_user_id(), TRUE);
+		}
+		else if(!$user = User::GetByEmail($post_vars['usr_email'])){
+			$data = array(
+				'usr_first_name' => $post_vars['usr_first_name'],
+				'usr_last_name' => $post_vars['usr_last_name'],
+				'usr_email' => $post_vars['usr_email'],
+				'usr_nickname' => $post_vars['usr_nickname'],
+				'usr_timezone' => $post_vars['usr_timezone'],
+				'password' => $post_vars['usr_password'],
+				'send_emails' => false
+			);
+			$user = User::CreateNew($data);	
 		}
 
-
-		try {
-			$user->prepare();
-			$user->save();
-		} catch (TTClassException $e) {
-			$errorhandler = new ErrorHandler();
-			$errorhandler->handle_general_error($e->getMessage());
-		}
 
 		$session->set_timezone($user->get('usr_timezone'));
 

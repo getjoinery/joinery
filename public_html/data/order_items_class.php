@@ -48,6 +48,7 @@ class OrderItem extends SystemBase {
 		'odi_refund_time' => 'Time of last refund',
 		'odi_stripe_foreign_invoice_id' => 'Stripe invoice id if it is the first of a subscription', 
 		'odi_subscription_status' => 'Status if it is a subscription',
+		'odi_subscription_period_end' => 'End date of the subscription period',
 	);
 
 	public static $field_specifications = array(
@@ -70,6 +71,7 @@ class OrderItem extends SystemBase {
 		'odi_refund_time' => array('type'=>'timestamp(6)'),
 		'odi_stripe_foreign_invoice_id' => array('type'=>'varchar(64)'),
 		'odi_subscription_status' => array('type'=>'varchar(64)'),
+		'odi_subscription_period_end' => array('type'=>'timestamp(6)'),
 	);
 
 	public static $required_fields = array('odi_ord_order_id', 'odi_pro_product_id');

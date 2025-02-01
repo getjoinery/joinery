@@ -87,28 +87,7 @@ if (($handle = fopen("/var/www/html/uploads/temp/unsubscribed_members_export_343
 			$country_code_id = $r->cco_country_code_id;
 			$country_code_2 = $r->cco_code;
 			$region = $data[15];
-			
-			//NOW GET THE TIMEZONE
-			//LOOK UP COUNTRY
-			/*
-			$sql = "SELECT zone_name FROM zone
-				WHERE lower(country_code) = :code";
-
-			try{
-				$q = $dblink->prepare($sql);
-				$q->bindValue(':code', strtolower($country_code_2), PDO::PARAM_STR);
-				$q->execute();
-				$q->setFetchMode(PDO::FETCH_OBJ);
-			}
-			catch(PDOException $e){
-				$dbhelper->handle_query_error($e);
-			}
-
-			$r = $q->fetch();			
-			$timezone = $r->zone_name;
-			echo 'TIMEZONE: '. $timezone. '<br>';
-			$user->set('usr_timezone', $timezone);
-			*/
+		
 			
 			
 			

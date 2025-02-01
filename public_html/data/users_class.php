@@ -141,7 +141,7 @@ class User extends SystemBase {
 
 
 	public static $required_fields = array(
-		'usr_first_name', 'usr_first_name', 'usr_email');
+		'usr_first_name', 'usr_first_name', 'usr_email', 'usr_timezone');
 
 	public static $field_constraints = array(
 	/*
@@ -334,19 +334,18 @@ class User extends SystemBase {
 
 
 
-
 	static function CreateNew($data){   
 	
 			if(!$first_name = $data['usr_first_name']){
-				throw new SystemDisplayablePermanentError("All items must be passed to create user.");
+				throw new SystemDisplayablePermanentError("Missing first name in create user.");
 			}
 			
 			if(!$last_name = $data['usr_last_name']){
-				throw new SystemDisplayablePermanentError("All items must be passed to create user.");
+				throw new SystemDisplayablePermanentError("Missing last name in create user.");
 			}
 				
 			if(!$email = $data['usr_email']){
-				throw new SystemDisplayablePermanentError("All items must be passed to create user.");
+				throw new SystemDisplayablePermanentError("Missing email in create user.");
 			}
 					
 			if(!$password = $data['password']){
@@ -380,11 +379,24 @@ class User extends SystemBase {
 			}
 	
 			$user = new User(NULL);
-			$user->set('usr_email', trim(strtolower($email)));
-			$user->set('usr_first_name', trim($first_name));
-			$user->set('usr_last_name', trim($last_name));	
+			$user->set('usr_email', strip_tags(trim(strtolower($email))));
+			$user->set('usr_first_name', strip_tags(trim($first_name)));
+			$user->set('usr_last_name', strip_tags(trim($last_name)));	
 			$user->set('usr_password', $temp_password_hashed);	
-			$user->set('usr_signup_ip', $_SERVER['REMOTE_ADDR']);			
+			$user->set('usr_signup_ip', $_SERVER['REMOTE_ADDR']);
+			if($data['usr_nickname']){
+				$user->set('usr_nickname', strip_tags(trim($data['usr_nickname'])));
+			}		
+
+			if($data['usr_timezone']){
+				try {
+					new DateTimeZone($data['usr_timezone']);
+					$user->set('usr_timezone', $data['usr_timezone']);
+				} catch (Exception $e) {
+					$errorhandler = new ErrorHandler();
+					$errorhandler->handle_general_error('The timezone you entered in invalid.');
+				}
+			}
 			
 			$user->prepare();
 			$user->save();
@@ -405,7 +417,12 @@ class User extends SystemBase {
 				Activation::email_activate_send($user);
 			}
 			
-			return $user;
+			if($user){
+				return $user;
+			}
+			else{
+				throw new SystemDisplayablePermanentError("Failed to create user.");
+			}
 	}
 
 
