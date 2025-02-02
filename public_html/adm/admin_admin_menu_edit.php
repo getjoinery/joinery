@@ -23,7 +23,7 @@
 			$admin_menu->set('amu_parent_menu_id', NULL);
 		}
 		
-		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission', 'amu_icon', 'amu_disable', 'amu_slug');
+		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission', 'amu_icon', 'amu_disable', 'amu_slug', 'amu_setting_activate');
 
 		foreach($editable_fields as $field) {
 			$admin_menu->set($field, $_POST[$field]);
@@ -72,7 +72,7 @@
 	
 	echo $formwriter->textinput('Menu name', 'amu_menudisplay', NULL, 100, $admin_menu->get('amu_menudisplay'), '', 255, '');	
 	echo $formwriter->textinput('Slug', 'amu_slug', NULL, 100, $admin_menu->get('amu_slug'), '', 255, '');	
-	echo $formwriter->textinput('Default page', 'amu_defaultpage', NULL, 100, $admin_menu->get('amu_defaultpage'), '', 255, '');
+	echo $formwriter->textinput('Page (if starts with "/" full path, otherwise "/admin/")', 'amu_defaultpage', NULL, 100, $admin_menu->get('amu_defaultpage'), '', 255, '');
 	
 	$menulist = new MultiAdminMenu(
 		array('has_no_parent_menu_id'=>true),
@@ -90,6 +90,8 @@
 	echo $formwriter->dropinput("Enabled", "amu_disable", "ctrlHolder", $optionvals, $admin_menu->get('amu_disable'), '', FALSE);
 	
 	echo $formwriter->textinput('Icon name', 'amu_icon', NULL, 100, $admin_menu->get('amu_icon'), '', 255, '');
+	
+	echo $formwriter->textinput('Activate on setting (optional)', 'amu_setting_activate', NULL, 100, $admin_menu->get('amu_setting_activate'), '', 255, '');
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

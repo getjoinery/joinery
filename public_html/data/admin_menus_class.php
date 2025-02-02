@@ -131,8 +131,14 @@ class MultiAdminMenu extends SystemMultiBase {
 				}
 			}			
 			
+			if($entry->amu_defaultpage[0] === '/'){
+				$defaultpage_link = $entry->amu_defaultpage;
+			}
+			else{
+				$defaultpage_link = '/admin/'.$entry->amu_defaultpage;
+			}
 			
-			$finalmenu[$entry->amu_admin_menu_id] = array('parent'=>$entry->amu_parent_menu_id, 'currentmain'=>FALSE, 'currentsub'=>FALSE, 'defaultpage'=>$entry->amu_defaultpage, 'display'=>$entry->amu_menudisplay, 'icon'=>$entry->amu_icon, 'has_subs'=>$has_subs);
+			$finalmenu[$entry->amu_admin_menu_id] = array('parent'=>$entry->amu_parent_menu_id, 'currentmain'=>FALSE, 'currentsub'=>FALSE, 'defaultpage'=>$defaultpage_link, 'display'=>$entry->amu_menudisplay, 'icon'=>$entry->amu_icon, 'has_subs'=>$has_subs);
 		
 		
 			if($current_menu_slug == $entry->amu_slug){

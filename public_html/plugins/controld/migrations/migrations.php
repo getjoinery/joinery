@@ -14,4 +14,9 @@
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;		
 		 
-		 
+
+ 		$migration['database_version'] = '20250201;
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = '/plugins/controld/admin/admin_ctld_accounts'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Accounts\', NULL, \'/plugins/controld/admin/admin_ctld_accounts\', 5, 8, 0, \'\', \'accounts\', \'controld_key\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;		 

@@ -48,7 +48,7 @@
 	);
 		
 
-	$headers = array("User",  "Plan", "Created", "Status");
+	$headers = array("User",  "Plan", "Subscription", "Created", "Status", "Renewal");
 	$altlinks = array();
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));	
 	$table_options = array(
@@ -63,14 +63,33 @@
 	foreach ($accounts as $account){
 		$user = new User($account->get('cda_usr_user_id'), TRUE);
 		
+		//SUBSCRIPTIONS
+		$subscriptions = new MultiOrderItem(
+		array('user_id' => $account->get('cda_usr_user_id')), //SEARCH CRITERIA
+		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+		5, //NUMBER PER PAGE
+		NULL //OFFSET
+		);
+		$subscriptions->load();	
+		$numsubscriptions = $subscriptions->count_all();
+		$subscription_list = array();
+		foreach($subscriptions as $subscription){
+			$subscription_list[] = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">'.$subscription->readable_subscription_status().'</a>';
+		}
+			
+		
+		
+		
 		$title = $account->get('cda_title');
 		if(!$title){
 			$title = 'Untitled';
 		}
 		
 		$rowvalues = array();
-		array_push($rowvalues, $user->display_name());	
+		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name().'</a>');	
 		array_push($rowvalues, $account->readable_plan_name());	
+		
+		array_push($rowvalues, '('.$numsubscriptions.') <br>'.implode('<br>', $subscription_list));	
 		
 
 		array_push($rowvalues, LibraryFunctions::convert_time($account->get('cda_create_time'), 'UTC', $session->get_timezone()));
@@ -89,6 +108,14 @@
 		}		
 		array_push($rowvalues, $status);
 
+		if($account->get('cda_renewal_time')){
+			array_push($rowvalues, LibraryFunctions::convert_time($account->get(cda_renewal_time), 'UTC', $session->get_timezone()));
+		}
+		else{
+			array_push($rowvalues, 'n/a');
+		}
+
+/*
 		if($account->get('cda_delete_time')){
 			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_account?cda_account_id='. $account->key.'">
 			<input type="hidden" class="hidden" name="action" id="action" value="undelete" />
@@ -120,6 +147,7 @@
 			</form>';			
 		}
 		array_push($rowvalues, $delform);	
+		*/
 
 		$page->disprow($rowvalues);
 	}
