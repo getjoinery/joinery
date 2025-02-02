@@ -1,20 +1,20 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 		
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
 		'title'=>'Log In'
 		);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPageTW::BeginPage('Log In');
+	echo PublicPage::BeginPage('Log In');
 	
 	
 	$formwriter = LibraryFunctions::get_formwriter_object('form1');
@@ -442,7 +442,7 @@
 
 	<?php
 	
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 	
 ?>

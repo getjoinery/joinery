@@ -24,7 +24,7 @@ function cart_logic($get_vars, $post_vars){
 	
 	if (count($cart->get_items()) === 0) {
 		// Cart is empty, can't checkout!
-		PublicPageTW::OutputGenericPublicPage('Cart Empty', NULL, '<p>Your shopping cart is currently empty.</p>');
+		PublicPage::OutputGenericPublicPage('Cart Empty', NULL, '<p>Your shopping cart is currently empty.</p>');
 		exit();
 	} 	
 

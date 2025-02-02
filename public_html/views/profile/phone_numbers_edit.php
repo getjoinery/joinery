@@ -1,12 +1,12 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('phone_numbers_edit_logic.php'));
 
 	$page_vars = phone_numbers_edit_logic($_GET, $_POST);
 	
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 		$hoptions=array(
 			'title'=>'Edit Phone Number',
 			'breadcrumbs' => array(
@@ -15,10 +15,10 @@
 			),
 			);
 	$page->public_header($hoptions);
-	echo PublicPageTW::BeginPage('Add/Edit Phone Number', $hoptions);
+	echo PublicPage::BeginPage('Add/Edit Phone Number', $hoptions);
 
 
-	echo PublicPageTW::tab_menu($page_vars['tab_menus']);
+	echo PublicPage::tab_menu($page_vars['tab_menus']);
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
 	
@@ -32,7 +32,7 @@
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'phonebox') {	
-			echo PublicPageTW::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}
 
@@ -45,7 +45,7 @@
 
 	$page->endtable();
 	
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 
 ?>

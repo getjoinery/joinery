@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 
 
@@ -13,13 +13,13 @@
 	$cart = $session->get_shopping_cart();
 	$receipts = $cart->last_receipt;
 	
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
 		'title' => "Checkout confirmation"
 	));
-	echo PublicPageTW::BeginPage('Checkout confirmation');
-	echo PublicPageTW::BeginPanel();	
+	echo PublicPage::BeginPage('Checkout confirmation');
+	echo PublicPage::BeginPanel();	
 
 	if($receipts){
 		
@@ -64,7 +64,7 @@
 	}
 
 
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>

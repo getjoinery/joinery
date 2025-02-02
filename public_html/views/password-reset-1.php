@@ -1,21 +1,21 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('password-reset-1_logic.php'));
 
 	$page_vars = password_reset_1_logic($_GET, $_POST);
 
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
 		'title'=>'Password Reset', 
 	);	
 	$page->public_header($hoptions,NULL);
-	echo PublicPageTW::BeginPage('Reset Password - Step 1 of 2');
-	echo PublicPageTW::BeginPanel();
+	echo PublicPage::BeginPage('Reset Password - Step 1 of 2');
+	echo PublicPage::BeginPanel();
 
 	if($page_vars['message']){
-		echo PublicPageTW::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
+		echo PublicPage::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
 	}
 	else{
 		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
@@ -25,8 +25,8 @@
 		echo $formwriter->end_form();
 	}
 
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 
 

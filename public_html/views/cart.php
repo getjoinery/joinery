@@ -1,6 +1,6 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('cart_logic.php'));
 
 	$page_vars = cart_logic($_GET, $_POST);
@@ -8,13 +8,13 @@
 	$currency_symbol = $page_vars['currency_symbol'];
 	$page_vars['currency_code'] = $currency_code;
 
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Checkout'
 	));
 
-	echo PublicPageTW::BeginPage('Checkout');
+	echo PublicPage::BeginPage('Checkout');
 
 	?>
 
@@ -290,7 +290,7 @@
 
 					
 	<?php
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 

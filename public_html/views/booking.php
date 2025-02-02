@@ -1,13 +1,13 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('booking_logic.php'));
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	
 	$page_vars = booking_logic($_GET, $_POST);
 	$booking_type = $page_vars['booking_type'];
 	$client_user = $page_vars['client_user'];
 
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions = array(
 		'title' => 'Book an appointment',
 		'description' => 'Book an appointment',
@@ -18,8 +18,8 @@
 	
 
 	
-	echo PublicPageTW::BeginPage('Book an appointment');
-	echo PublicPageTW::BeginPanel();
+	echo PublicPage::BeginPage('Book an appointment');
+	echo PublicPage::BeginPanel();
 
 					
 	echo '<!-- Calendly inline widget begin -->
@@ -27,8 +27,8 @@
 	<script type="text/javascript" src="https://assets.calendly.com/assets/external/widget.js" async></script>
 	<!-- Calendly inline widget end -->';
 
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();	
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();	
 
 
 	$page->public_footer(array('track'=>TRUE));

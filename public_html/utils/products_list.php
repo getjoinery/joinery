@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('products_logic.php'));
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 	//OVERRIDE GET VARS
 	$_GET['numperpage'] = 100;
@@ -12,13 +12,13 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Products'
 	));
-	echo PublicPageTW::BeginPage('Products');
-	echo PublicPageTW::BeginPanel();
+	echo PublicPage::BeginPage('Products');
+	echo PublicPage::BeginPanel();
 	
 	?>
 	<script language="javascript">
@@ -70,8 +70,8 @@
 	}
 	
   
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 

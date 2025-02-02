@@ -1,17 +1,17 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('pricing_logic.php'));
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 	$page_vars = pricing_logic($_GET, $_POST);
 	
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Pricing'
 	));
-	echo PublicPageTW::BeginPage('Pricing');
-	echo PublicPageTW::BeginPanel();
+	echo PublicPage::BeginPage('Pricing');
+	echo PublicPage::BeginPanel();
 ?>
 <div class="max-w-2xl mx-auto pb-16 px-4 sm:py-24 sm:px-6 lg:max-w-7xl lg:px-8">
     <h2 class="sr-only">Products</h2>
@@ -57,8 +57,8 @@
 
 		<?php
   
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 

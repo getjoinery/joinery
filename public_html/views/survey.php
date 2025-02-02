@@ -1,19 +1,19 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('survey_logic.php'));
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 
 	$page_vars = survey_logic($_GET, $_POST);
 	$survey = $page_vars['survey'];
 
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Surveys'
 	));
-	echo PublicPageTW::BeginPage($survey->get('svy_name'));
-	echo PublicPageTW::BeginPanel();
+	echo PublicPage::BeginPage($survey->get('svy_name'));
+	echo PublicPage::BeginPanel();
 
 
 	$formwriter = LibraryFunctions::get_formwriter_object();
@@ -54,8 +54,8 @@
 	echo $formwriter->new_form_button('Submit');	
 	echo $formwriter->end_form();
   
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 

@@ -1,20 +1,20 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
 
 	$page_vars = post_logic($_GET, $_POST, $post);
 	$post = $page_vars['post'];
 
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => $post->get('pst_title')
 	);
 	$page->public_header($hoptions); 
 	
-	echo PublicPageTW::BeginPage();	
-	echo PublicPageTW::BeginPanel();
+	echo PublicPage::BeginPage();	
+	echo PublicPage::BeginPanel();
 ?>
 
 
@@ -284,7 +284,7 @@
 	?>
 	</div>
 	<?php
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
 	$page->public_footer(array('track'=>TRUE));
 ?>

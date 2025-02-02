@@ -1,12 +1,10 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/PublicPageMaster.php');
+require_once('PublicPageMaster.php');
 
-class PublicPageTW extends PublicPageMaster {
+class PublicPageTailwind extends PublicPageMaster {
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
-		$page = new PublicPageTW();
+		$page = new PublicPage();
 		$page->public_header(
 			array_merge(
 				array(
@@ -14,14 +12,14 @@ class PublicPageTW extends PublicPageMaster {
 					'showheader' => TRUE
 				),
 				$options));
-		echo PublicPageTW::BeginPage($title);
-		echo PublicPageTW::BeginPanel();
+		echo PublicPage::BeginPage($title);
+		echo PublicPage::BeginPanel();
 		echo '<div class="text-lg max-w-prose mx-auto">';
 		echo '<div>'.$body.'</div>';
 		echo '</div>';
 		
-		echo PublicPageTW::EndPanel();
-		echo PublicPageTW::EndPage();
+		echo PublicPage::EndPanel();
+		echo PublicPage::EndPage();
 		$page->public_footer();
 		exit;
 	}
@@ -176,7 +174,7 @@ class PublicPageTW extends PublicPageMaster {
 		
 		$notification_menu = NULL;
 
-		$menus = PublicPageTW::get_public_menu();
+		$menus = PublicPage::get_public_menu();
 			
 
 		?>

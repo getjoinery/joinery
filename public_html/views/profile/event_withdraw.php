@@ -1,18 +1,18 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('event_withdraw_logic.php'));
 
 
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Withdraw from Event/Course'
 		);
 	$page->public_header($hoptions);
 
 
-	echo PublicPageTW::BeginPage('Withdraw from Event/Course', $hoptions);
+	echo PublicPage::BeginPage('Withdraw from Event/Course', $hoptions);
 
 	if(!$event_registrant){
 		echo 'You are not registered for this course, or you have already withdrawn.';
@@ -38,7 +38,7 @@
 		echo 'You cannot withdraw from an event in the past.';
 	}
 
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer();
 
 ?>

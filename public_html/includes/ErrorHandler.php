@@ -3,7 +3,7 @@ require_once('Globalvars.php');
 require_once('SessionControl.php');
 require_once('DbConnector.php');
 require_once('LibraryFunctions.php');
-require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 
 class ErrorHandler{
@@ -42,7 +42,7 @@ class ErrorHandler{
 	
 		if(!isset($_GLOBALS['page_header_loaded'])){
 			
-			$page = new PublicPageTW(NULL);
+			$page = new PublicPage();
 			$hoptions= array(
 				'title' => self::$ERROR_TYPE_TITLES[$error_type],
 				'showmap' => FALSE,
@@ -54,7 +54,7 @@ class ErrorHandler{
 			);
 			$page->public_header($hoptions,NULL);
 			
-			echo PublicPageTW::BeginPage($title);
+			echo PublicPage::BeginPage($title);
 		}
 		if ($errortext) {
 			echo '<div class="form-error"><strong>'.$errortext.'</strong></div>';
@@ -66,7 +66,7 @@ class ErrorHandler{
 		echo '<p>If you need quick help, you can contact the webmaster at '.$email.'.</p>';	
 		echo '<p>Press your Back button or <a href="#" onclick="history.go(-1);return false;">click here</a> to go to the last page</p>';
 		
-		echo PublicPageTW::EndPage();
+		echo PublicPage::EndPage();
 		$page->public_footer($foptions=array('track'=>FALSE));
 		exit;
 	}

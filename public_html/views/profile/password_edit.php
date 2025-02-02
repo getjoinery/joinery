@@ -1,12 +1,12 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('password_edit_logic.php'));
 
 	$page_vars = password_edit_logic($_GET, $_POST);
 
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>$page_vars['page_title'], 
 		'breadcrumbs' => array(
@@ -15,9 +15,9 @@
 		),
 	);
 	$page->public_header($hoptions);
-	echo PublicPageTW::BeginPage($page_vars['page_title'], $hoptions);
+	echo PublicPage::BeginPage($page_vars['page_title'], $hoptions);
 
-	echo PublicPageTW::tab_menu($page_vars['tab_menus']);
+	echo PublicPage::tab_menu($page_vars['tab_menus']);
 	
 	
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
@@ -38,7 +38,7 @@
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'addressbox') {	
-			echo PublicPageTW::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}
 
@@ -53,7 +53,7 @@
 	echo $formwriter->end_form();		
 	
 
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 
 ?>
