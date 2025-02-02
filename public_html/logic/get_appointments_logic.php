@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AcuityScheduling.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));	
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));	
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	
@@ -12,7 +12,7 @@
 	
 	$user = new User($session->get_user_id(), TRUE);
 	
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 
 	try{
 		$settings = Globalvars::get_instance();

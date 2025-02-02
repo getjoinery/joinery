@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('lists_logic.php'));
 
 	$page_vars = lists_logic($_GET, $_POST, $params);
@@ -10,7 +10,7 @@
 	$mailing_lists = $page_vars['mailing_lists'];
 	$numlists = $page_vars['numlists'];
 	
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Newsletter',
@@ -19,13 +19,13 @@
 	
 
 	$options['subtitle'] = 'Get updates from us.';
-	echo PublicPageTW::BeginPage('Lists', $options);
-	echo PublicPageTW::BeginPanel();
+	echo PublicPage::BeginPage('Lists', $options);
+	echo PublicPage::BeginPanel();
 
 	
 	if(!empty($messages)){
 		foreach ($messages as $message){
-			echo PublicPageTW::alert($message['message_title'], $message['message'], $message['message_type']);
+			echo PublicPage::alert($message['message_title'], $message['message'], $message['message_type']);
 		}
 	}
 	
@@ -91,7 +91,7 @@
 		
 	}
 	
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
 	$page->public_footer(array('track'=>TRUE));
 ?>

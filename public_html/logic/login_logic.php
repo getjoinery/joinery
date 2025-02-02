@@ -121,7 +121,7 @@ function login_logic($get_vars, $post_vars){
 		if($settings->get_setting('activation_required_login')){
 			if(!$user->get('usr_is_activated')){
 				$message = 'This site requires email activation before you can log in.  An activation email has been sent to '.$user->get('usr_email').'. Please click on the link inside to activate';
-				PublicPageTW::OutputGenericPublicPage('Email verification required', 'Email verification required', $message);
+				PublicPage::OutputGenericPublicPage('Email verification required', 'Email verification required', $message);
 				Activation::email_activate_send($user);
 				exit();
 			}

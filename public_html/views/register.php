@@ -1,12 +1,12 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('register_logic.php'));
 
 	$page_vars = register_logic($_GET, $_POST);
 
 
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
 		'title'=>'Register',
@@ -18,12 +18,12 @@
 		$extra = '?m='.htmlspecialchars($_GET['m']); 
 	}
 	$options['subtitle'] = '<a href="/login'.$extra.'">Already a member? Log in</a>';
-	echo PublicPageTW::BeginPage('Register', $options);
+	echo PublicPage::BeginPage('Register', $options);
 
 			
 	if(isset($_GET['msgtext'])){
 		if (array_key_exists($_GET['msgtext'], $page_vars['LOGIN_MESSAGES'])) {
-			echo PublicPageTW::alert('Login warning', htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]), 'warn');
+			echo PublicPage::alert('Login warning', htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]), 'warn');
 		}
 	}		
 			
@@ -90,7 +90,7 @@
 	//echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);
 
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'fbconnect'=>TRUE));
 
 ?>

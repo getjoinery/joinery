@@ -35,7 +35,7 @@ class EventUnviewableDisplayException extends EventException implements CustomEr
 	}
 
 	function display_error_page() {
-		PublicPageTW::OutputGenericPublicPage(
+		PublicPage::OutputGenericPublicPage(
 			$this->title,
 			$this->title,
 			$this->error_message,

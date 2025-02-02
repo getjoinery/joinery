@@ -657,14 +657,14 @@ class StripeHelper {
 			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
 			$order->set('ord_error', substr($error, 0, 250));
 			$order->save();	
-			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
 		} 
 		catch(\Stripe\Error\CardException $e) {
 			// Since it's a decline, \Stripe\Exception\Card will be caught
 			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
 			$order->set('ord_error', substr($error, 0, 250));
 			$order->save();	
-			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
 		}
 		catch (\Stripe\Exception\RateLimitException $e) {
 		  // Too many requests made to the API too quickly
@@ -694,7 +694,7 @@ class StripeHelper {
 		catch (Exception $e) {	
 			$error = "Sorry, we weren't able to store your card. " . $e->getMessage();
 			error_log($error);
-			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);	
+			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);	
 			exit;
 			/*		
 			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
@@ -702,7 +702,7 @@ class StripeHelper {
 			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
 			$order->set('ord_error', substr($stored_error, 0, 250));
 			$order->save();	
-			PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
 			
 			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
 			exit;

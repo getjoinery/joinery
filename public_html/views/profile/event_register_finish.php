@@ -1,17 +1,17 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('event_register_finish_logic.php'));
 
 	$settings = Globalvars::get_instance();
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Edit Event Info'
 		);
 	$page->public_header($hoptions);
 
-	echo PublicPageTW::BeginPage('Edit Registrant Info');
+	echo PublicPage::BeginPage('Edit Registrant Info');
 
 			
 	echo '<h3>Please fill out this extra info for your registration in the <strong>'. $event->get('evt_name') . '</strong> event.</h3>';
@@ -66,7 +66,7 @@
 
 	$page->endtable();
 
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 
 ?>

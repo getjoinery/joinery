@@ -1,12 +1,12 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('profile_logic.php'));
 
 	$page_vars = profile_logic($_GET, $_POST);
 	
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'My Profile', 
@@ -16,12 +16,12 @@
 	);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPageTW::BeginPage('My Profile', $hoptions);
+	echo PublicPage::BeginPage('My Profile', $hoptions);
 	
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'profilebox') {	
-			echo PublicPageTW::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}	
 		
@@ -622,6 +622,6 @@
 		*/
 		
 
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

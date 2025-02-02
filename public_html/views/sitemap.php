@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/pages_class.php');
@@ -10,15 +10,15 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
 
-	$paged = new PublicPageTW();
+	$paged = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Sitemap',
 	
 	);
 	$paged->public_header($hoptions);
-	echo PublicPageTW::BeginPage('Sitemap');
-	echo PublicPageTW::BeginPanel();
+	echo PublicPage::BeginPage('Sitemap');
+	echo PublicPage::BeginPanel();
 			
 	$settings = Globalvars::get_instance();
 	if($settings->get_setting('page_contents_active')){
@@ -107,7 +107,7 @@
 		echo '</ul>';	
 	}
 
-	echo PublicPageTW::EndPanel();
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
 	$paged->public_footer(array('track'=>TRUE));
 ?>

@@ -80,7 +80,7 @@ class PublicPageMaster {
 	}
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
-		$page = new PublicPageTW();
+		$page = new PublicPage();
 		$page->public_header(
 			array_merge(
 				array(
@@ -88,11 +88,11 @@ class PublicPageMaster {
 					'showheader' => TRUE
 				),
 				$options));
-		echo PublicPageTW::BeginPage($header);
+		echo PublicPage::BeginPage($header);
 	
 		echo '<p>'.$body.'</p>';
 		
-		echo PublicPageTW::EndPage();
+		echo PublicPage::EndPage();
 		$page->public_footer();
 		exit;
 	}

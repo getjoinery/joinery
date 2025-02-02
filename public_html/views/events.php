@@ -1,16 +1,16 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('events_logic.php'));
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 	$page_vars = events_logic($_GET, $_POST);
 	
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
 		'title' => $page_vars['events_label']
 	));
-	echo PublicPageTW::BeginPage($page_vars['events_label']);
+	echo PublicPage::BeginPage($page_vars['events_label']);
 
 
 	
@@ -151,7 +151,7 @@
 
 		<?php
   
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
 

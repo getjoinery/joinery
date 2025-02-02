@@ -447,7 +447,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->set('ord_error', substr($stored_error, 0, 250));
 				$order->save();	
-				PublicPageTW::OutputGenericPublicPage("Card Error", "Card Error", $error);
+				PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
 
 				exit;
 			}

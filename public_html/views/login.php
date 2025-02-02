@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('login_logic.php'));
 	
 	$page_vars = login_logic($_GET, $_POST);
@@ -12,14 +12,14 @@
 		$forgot_link = '/password-reset-1';
 	}
 
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
 		'title'=>'Log In'
 		);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPageTW::BeginPage('Log In');
+	echo PublicPage::BeginPage('Log In');
 
 ?>
 	<script type="text/javascript">
@@ -39,7 +39,7 @@
 
 		foreach($page_vars['display_messages'] AS $display_message) {
 			if($display_message->identifier == 'loginbox') {	
-				echo PublicPageTW::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+				echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 			}
 		}   		
 		
@@ -77,7 +77,7 @@
 </div>
 
 	<?php
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 
 ?>

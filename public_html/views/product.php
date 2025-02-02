@@ -1,13 +1,13 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
 	$page_vars = product_logic($_GET, $_POST, $product);
 	$product = $page_vars['product'];
 	$cart = $page_vars['cart'];
 
-	$page = new PublicPageTW(TRUE);
+	$page = new PublicPage();
 	$page->public_header(array(
 	'is_valid_page' => $is_valid_page,
 	'title' => $product->get('pro_name')
@@ -15,10 +15,10 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 	
 
 	if(!$product->get('pro_is_active')){
-		PublicPageTW::OutputGenericPublicPage('Product not available', 'Product not available', '<p>Sorry, this item is currently not available for purchase/registration.</p>');	
+		PublicPage::OutputGenericPublicPage('Product not available', 'Product not available', '<p>Sorry, this item is currently not available for purchase/registration.</p>');	
 	}
 	
-	echo PublicPageTW::BeginPage('Add to Cart');
+	echo PublicPage::BeginPage('Add to Cart');
 	
 	if (!$page_vars['display_empty_form']) {
 		echo '<p>Is everything correct?</p>';
@@ -34,7 +34,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
 		echo $formwriter->new_form_button('Next Step');
 		echo $formwriter->end_form();
-		echo PublicPageTW::EndPage();
+		echo PublicPage::EndPage();
 		$page->public_footer($foptions=array('track'=>TRUE));
 		exit;
 	} 
@@ -456,6 +456,6 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 	
 
 		<?php
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 $page->public_footer($foptions=array('track'=>TRUE));
 ?>

@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
+	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once(LibraryFunctions::get_logic_file_path('contact_preferences_logic.php'));	
 
 	$page_vars = contact_preferences_logic($_GET, $_POST);
@@ -9,7 +9,7 @@
 
 
 	
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Contact Preferences',
 		'breadcrumbs' => array(
@@ -18,10 +18,10 @@
 		),
 	);
 	$page->public_header($hoptions);
-	echo PublicPageTW::BeginPage('Contact Preferences', $hoptions);
+	echo PublicPage::BeginPage('Contact Preferences', $hoptions);
 
 	
-	echo PublicPageTW::tab_menu($page_vars['tab_menus']);
+	echo PublicPage::tab_menu($page_vars['tab_menus']);
 	
              
 	echo '<p>You can opt-out of mailing lists, but course or event emails cannot be disabled.  If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p><br>';
@@ -29,7 +29,7 @@
 	/*
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'contactbox') {	
-			echo PublicPageTW::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}
 	*/
@@ -37,7 +37,7 @@
 
 
 	foreach ($messages as $message){
-		echo PublicPageTW::alert($message['message_title'], $message['message'], $message['message_type']);
+		echo PublicPage::alert($message['message_title'], $message['message'], $message['message_type']);
 	}
 	  
 
@@ -60,6 +60,6 @@
 	echo $formwriter->end_form();
 	
 
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array());
 ?>
