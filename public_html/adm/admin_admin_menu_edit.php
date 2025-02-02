@@ -72,7 +72,7 @@
 	
 	echo $formwriter->textinput('Menu name', 'amu_menudisplay', NULL, 100, $admin_menu->get('amu_menudisplay'), '', 255, '');	
 	echo $formwriter->textinput('Slug', 'amu_slug', NULL, 100, $admin_menu->get('amu_slug'), '', 255, '');	
-	echo $formwriter->textinput('Page (if starts with "/" full path, otherwise "/admin/")', 'amu_defaultpage', NULL, 100, $admin_menu->get('amu_defaultpage'), '', 255, '');
+	echo $formwriter->textinput('Page (Full path starting with /)', 'amu_defaultpage', NULL, 100, $admin_menu->get('amu_defaultpage'), '', 255, '');
 	
 	$menulist = new MultiAdminMenu(
 		array('has_no_parent_menu_id'=>true),
