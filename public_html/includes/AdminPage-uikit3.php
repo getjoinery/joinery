@@ -292,10 +292,10 @@ class AdminPage{
 								foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
 									if($iterate_menu_info['parent'] == $menu_id){
 										if($iterate_menu_info['currentsub']){
-											echo '<li class="uk-active"><a title="'.$iterate_menu_info['display'].'" href="/admin/'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';
+											echo '<li class="uk-active"><a title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';
 										}
 										else{
-											echo '<li><a title="'.$iterate_menu_info['display'].'" href="/admin/'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';									
+											echo '<li><a title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';									
 										}
 									}
 								}
@@ -313,17 +313,17 @@ class AdminPage{
 								foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
 									if($iterate_menu_info['parent'] == $menu_id){
 										if($iterate_menu_info['currentsub']){
-											echo '<li class="uk-active"><a title="'.$iterate_menu_info['display'].'" href="/admin/'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';
+											echo '<li class="uk-active"><a title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';
 										}
 										else{
-											echo '<li><a title="'.$iterate_menu_info['display'].'" href="/admin/'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';									
+											echo '<li><a title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';									
 										}
 									}
 								}
 								echo '</ul>';
 								echo '</li>';							}
 							else{
-								echo '<li><a href="/admin/'.$menu_info['defaultpage'].'"><span data-uk-icon="icon: '.$menu_info['icon'].'" class="uk-margin-small-right"></span>'.$menu_info['display'].'</a></li>';									
+								echo '<li><a href="'.$menu_info['defaultpage'].'"><span data-uk-icon="icon: '.$menu_info['icon'].'" class="uk-margin-small-right"></span>'.$menu_info['display'].'</a></li>';									
 							}
 						}
 					}		
@@ -425,15 +425,15 @@ class AdminPage{
 					if(!$menu_info['parent']){
 						if($menu_info['currentmain']){
 							if($menu_info['has_subs']){
-								echo '<li class="uk-parent uk-open"><a href="/admin/'.$menu_info['defaultpage'].'">'.$menu_info['display'].'</a>';
+								echo '<li class="uk-parent uk-open"><a href="'.$menu_info['defaultpage'].'">'.$menu_info['display'].'</a>';
 								echo '<ul class="uk-nav-sub">';
 								foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
 									if($iterate_menu_info['parent'] == $menu_id){
 										if($iterate_menu_info['currentsub']){
-											echo '<li><a title="'.$iterate_menu_info['display'].'" href="/admin/'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';
+											echo '<li><a title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';
 										}
 										else{
-											echo '<li><a title="'.$iterate_menu_info['display'].'" href="/admin/'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';									
+											echo '<li><a title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';									
 										}
 									}
 								}
@@ -441,20 +441,20 @@ class AdminPage{
 								echo '</li>';
 							}
 							else{
-								echo '<li><a href="/admin/'.$menu_info['defaultpage'].'">'.$menu_info['display'].'</a></li>';	
+								echo '<li><a href="'.$menu_info['defaultpage'].'">'.$menu_info['display'].'</a></li>';	
 							}
 						}
 						else{
 							if($menu_info['has_subs']){
-								echo '<li class="uk-parent"><a href="/admin/'.$menu_info['defaultpage'].'">'.$menu_info['display'].'</a>';
+								echo '<li class="uk-parent"><a href="'.$menu_info['defaultpage'].'">'.$menu_info['display'].'</a>';
 								echo '<ul class="uk-nav-sub">';
 								foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
 									if($iterate_menu_info['parent'] == $menu_id){
 										if($iterate_menu_info['currentsub']){
-											echo '<li><a title="'.$iterate_menu_info['display'].'" href="/admin/'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';
+											echo '<li><a title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';
 										}
 										else{
-											echo '<li><a title="'.$iterate_menu_info['display'].'" href="/admin/'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';									
+											echo '<li><a title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'">'.$iterate_menu_info['display'].'</a></li>';									
 										}
 									}
 								} 
@@ -462,7 +462,7 @@ class AdminPage{
 								echo '</li>';							
 							}
 							else{
-								echo '<li><a href="/admin/'.$menu_info['defaultpage'].'">'.$menu_info['display'].'</a></li>';									
+								echo '<li><a href="'.$menu_info['defaultpage'].'">'.$menu_info['display'].'</a></li>';									
 							}
 						}
 					}		
