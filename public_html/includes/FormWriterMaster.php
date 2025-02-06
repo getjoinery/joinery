@@ -11,7 +11,7 @@ class FormWriterMaster {
 	protected $formid;
 	protected $captcha_public;
 	protected $captcha_private;
-	protected $validate_style_info = 'errorElement: "p",
+	public $validate_style_info = 'errorElement: "p",
 							errorClass: "error help-block text-red uk-form-danger",
 							highlight: function(element, errorClass) {
 								//REMOVE BRACKETS FOR CHECKBOX LISTS

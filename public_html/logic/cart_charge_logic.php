@@ -398,10 +398,10 @@ function cart_charge_logic($get_vars, $post_vars){
 				
 			}
 			else{
-				//RECURRING DONATION
+				//SUBSCRIPTION
 				$email_fill['purchase_amount'] = ($price - $discount);
 				$final_fill = array_merge($default_fill, $email_fill);
-				$activation_email = new EmailTemplate('monthly_donation_reciept', $user);
+				$activation_email = new EmailTemplate('subscription_reciept', $user);
 				$activation_email->fill_template($final_fill);
 				$activation_email->send();
 				
@@ -569,10 +569,10 @@ function cart_charge_logic($get_vars, $post_vars){
 				}
 			}
 			else{
-				//SINGLE DONATION
-				$email_fill['donation_amount'] = $price - $discount;
+				//SUBSCRIPTION
+				$email_fill['purchase_amount'] = $price - $discount;
 				$final_fill = array_merge($default_fill, $email_fill);
-				$activation_email = new EmailTemplate('single_donation_reciept', $user);
+				$activation_email = new EmailTemplate('purchase_reciept', $user);
 				$activation_email->fill_template($final_fill);
 				$activation_email->send();
 			}	
