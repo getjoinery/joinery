@@ -48,7 +48,7 @@
 					  <div class="flex-auto text-sm font-medium space-y-1">
 						<h3 class="text-gray-900">
 							<?php
-						  echo '<a href="#">'.$product->get('pro_name').' '. $product_version->prv_version_name . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') '.'</a>';
+						  echo '<a href="#">'.$product->get('pro_name').' '. $product_version->get('prv_version_name') . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') '.'</a>';
 							?>
 						</h3>
 						<?php echo '<p class="text-gray-900">'.$currency_symbol . number_format($price, 2, '.', ','). $coupon_discount_words.'</p>'; ?>

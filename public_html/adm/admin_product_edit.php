@@ -163,10 +163,10 @@
 			$product->add_product_version($_REQUEST['version_name'], $_REQUEST['version_price']);
 		} 
 		else if ($_REQUEST['action'] == 'remove_version') {
-			$product->change_product_version_status($_REQUEST['v'], ProductVersion::INACTIVE);
+			$product->change_product_version_status($_REQUEST['v'], 0);
 		} 
 		else if ($_REQUEST['action'] == 'activate_version') {
-			$product->change_product_version_status($_REQUEST['v'], ProductVersion::ACTIVE); 
+			$product->change_product_version_status($_REQUEST['v'], 1); 
 		}
 		
 		LibraryFunctions::redirect('/admin/admin_product?pro_product_id='. $product->key);

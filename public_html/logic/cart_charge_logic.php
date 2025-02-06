@@ -234,9 +234,8 @@ function cart_charge_logic($get_vars, $post_vars){
 	foreach($cart->items as $key => $cart_item) {
 		$email_fill = array();
 		list($quantity, $product, $data, $price, $discount) = $cart_item;
-		$product_version = $product->get_product_version($data);
-		//$price = $product->get_price($product_version, $data);
-		$product_name = $product->get('pro_name').' '. $product_version->prv_version_name;
+		$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+		$product_name = $product->get('pro_name').' '. $product_version->get('prv_version_name');
 		$email_fill['purchase_amount'] = $price - $discount;
 
 		//HANDLE SUBSCRIPTIONS
@@ -255,7 +254,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				$order_item->set('odi_comment', $data['comment']);	
 			}
 			if ($product_version) {
-				$order_item->set('odi_prv_product_version_id', $product_version->prv_product_version_id);
+				$order_item->set('odi_prv_product_version_id', $product_version->key);
 			}			
 			$order_item->set('odi_status', OrderItem::STATUS_UNPAID);
 			$order_item->set('odi_status_change_time', 'now()');
@@ -466,8 +465,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	foreach($cart->items as $key => $cart_item) {
 		$email_fill = array();
 		list($quantity, $product, $data, $price, $discount) = $cart_item;
-		$product_version = $product->get_product_version($data);
-		//$price = $product->get_price($product_version, $data);
+		$product_version = $product->get_product_versions(TRUE, $data['product_version']);
 		$email_fill['purchase_amount'] = $price - $discount;
 
 		//ONLY NON RECURRING
@@ -487,7 +485,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			$order_item->set('odi_price', $price - $discount);
 			$order_item->set('odi_is_subscription', false);			
 			if ($product_version) {
-				$order_item->set('odi_prv_product_version_id', $product_version->prv_product_version_id);
+				$order_item->set('odi_prv_product_version_id', $product_version->key);
 			}
 		
 			//STORE COMMENT IF ENTERED
@@ -580,7 +578,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			//RUN THE PRODUCT SCRIPTS
 			$product->run_product_scripts($user, $order_item);
 
-			$receipts[$key+1]['pname'] = $product->get('pro_name').' '. $product_version->prv_version_name;
+			$receipts[$key+1]['pname'] = $product->get('pro_name').' '. $product_version->get('prv_version_name');
 			$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
 			$receipts[$key+1]['price'] = $price - $discount;
 			

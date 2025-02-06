@@ -145,14 +145,14 @@
 			echo '<ul>';
 			foreach ($versions as $version) {
 
-				if ($version->prv_status == ProductVersion::ACTIVE) {
-					echo '<li>' . $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price . 
-						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
+				if ($version->get('prv_status')) {
+					echo '<li>' . $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') . 
+						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->key .
 						'&action=remove_version">[Make Inactive]</a>' .
 						'</li>';
 				} else {
-					echo '<li style="text-decoration: line-through;">' . $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price . 
-						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->prv_product_version_id .
+					echo '<li style="text-decoration: line-through;">' . $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') . 
+						' <a href="/admin/admin_product_edit?p=' . $product->key . '&v=' . $version->key .
 						'&action=activate_version">[Make Active]</a>' .
 						'</li>';
 				}

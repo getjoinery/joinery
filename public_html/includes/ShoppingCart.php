@@ -121,7 +121,7 @@ class ShoppingCart {
 			}
 		}
 
-		$product_version = $product->get_product_version($form_data);
+		$product_version = $product->get_product_versions(TRUE, $form_data['product_version']);
 		$price = $product->get_price($product_version, $form_data);
 
 		
@@ -135,7 +135,7 @@ class ShoppingCart {
 
 		foreach($this->items as $key => $cart_item) {
 			list($quantity, $product, $data, $price, $discount) = $cart_item;
-			$product_version = $product->get_product_version($data);
+			$product_version = $product->get_product_versions(TRUE, $data['product_version']);
 			$price = $product->get_price($product_version, $data);
 
 			$discount = $product->total_coupon_discount($price, $this->coupon_codes);
@@ -169,9 +169,9 @@ class ShoppingCart {
 		$detailed_items = array();
 		foreach ($this->items as $key => $cart_item) {
 			list($quantity, $product, $data, $price, $discount) = $cart_item; 
-			$product_version = $product->get_product_version($data);
+			$product_version = $product->get_product_versions(TRUE, $data['product_version']);
 			if ($product_version !== NULL) {
-				$name = $product->get('pro_name') . ' - ' . $product_version->prv_version_name;
+				$name = $product->get('pro_name') . ' - ' . $product_version->get('prv_version_name');
 			} else {
 				$name = $product->get('pro_name');
 			}
