@@ -63,7 +63,7 @@
 				echo $formwriter->new_form_button('Add to Cart', 'primary','full');
 			}
 			echo $formwriter->end_form(true);
-			$product->output_javascript(NULL, "product_form".$product->key);
+			$product->output_javascript(NULL, "product_form".$product->key, $formwriter);
 	
 		}
 		echo '<hr>';

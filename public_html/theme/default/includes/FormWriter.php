@@ -8,7 +8,7 @@ require_once( __DIR__ . '/../../../includes/FormWriterMaster.php');
 
 class FormWriter extends FormWriterMaster {
 
-	protected $validate_style_info = 'errorElement: "p",
+	public $validate_style_info = 'errorElement: "p",
 							errorClass: "form-container",
 							highlight: function(element, errorClass) {
 								//REMOVE BRACKETS FOR CHECKBOX LISTS

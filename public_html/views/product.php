@@ -5,6 +5,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
 	$page_vars = product_logic($_GET, $_POST, $product);
 	$product = $page_vars['product'];
+	$product_version = $page_vars['product_version'];
 	$cart = $page_vars['cart'];
 
 	$page = new PublicPage();
@@ -117,11 +118,11 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 						$validation_rules['user_price_override']['required']['value'] = 'true';
 						echo $formwriter->textinput('Amount to pay ('.$page_vars['currency_symbol'].')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
 					}*/
-					if ($product->output_product_form($formwriter, $page_vars['user'], null)) {
+					if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
 						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
 					}
 					echo $formwriter->end_form(true);
-					$product->output_javascript(array());
+					$product->output_javascript(array(), $formwriter);
 				}
 				else if(!$cart->can_add_to_cart($product)){
 					if($product->get('pro_recurring')){

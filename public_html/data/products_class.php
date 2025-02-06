@@ -827,7 +827,7 @@ class Product extends SystemBase {
 	}
 	
 	//THIS FUNCTION GIVES AN ESTIMATE OF PRICE FOR DISPLAY PURPOSES
-	public function get_readable_price(){
+	public function get_readable_price($product_version_name=NULL){
 		$settings = Globalvars::get_instance(); 
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 		
@@ -847,6 +847,14 @@ class Product extends SystemBase {
 			else if(count($versions) == 1){
 				$version = $versions[0];
 				return $currency_symbol.$version->prv_version_price;
+			}
+			else if($product_version_name){
+				//WE WANT ONLY THE PRICE OF A SPECIFIC PRODUCT VERSION
+				foreach ($versions as $version) {
+					if (strtolower($version->prv_version_name) == strtolower($product_version_name)) {	
+						return $currency_symbol.$version->prv_version_price;
+					} 
+				}				
 			}
 			else{
 				$low_price = NULL;
@@ -1198,7 +1206,8 @@ class Product extends SystemBase {
 		return array($form_data, $form_display_data);
 	}
 
-	function output_javascript($extra_data=array(), $form_id='product_form') {
+	function output_javascript($extra_data=array(), $formwriter, $form_id='product_form') {
+		
 		$validation_info = array();
 
 		echo '<script type="text/javascript">';
@@ -1274,24 +1283,8 @@ class Product extends SystemBase {
 					$('#".$form_id."').validate({
 							rules: " . str_replace('"', '', json_encode($rules)) . ",
 							messages: " . str_replace('"', '', json_encode($messages)) . ",";
-					
-					$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
+
 					echo $formwriter->validate_style_info;
-					/*echo 'errorElement: "span",
-							errorClass: "text-red-500",
-							highlight: function(element, errorClass) {
-								//REMOVE BRACKETS FOR CHECKBOX LISTS
-								var name = element.name.replace(/[\[\]]/gi, "");
-								$("#"+name).addClass("border-red-500 focus:border-red-500");
-							  },
-							  unhighlight: function(element, errorClass) {
-								//REMOVE BRACKETS FOR CHECKBOX LISTS
-								var name = element.name.replace(/[\[\]]/gi, "");
-								  $("#"+name).removeClass("border-red-500 focus:border-red-500");
-							  },
-							errorPlacement: function(error, element) {
-								error.appendTo(element.parents(".errorplacement").eq(0));
-							}';*/
 					echo "
 					});
 			});
@@ -1301,7 +1294,7 @@ class Product extends SystemBase {
 	}
 	
 
-	function output_product_form($formwriter, $user, $exclude_requirements=false) {
+	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL) {
 		$settings = Globalvars::get_instance(); 
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
@@ -1317,6 +1310,10 @@ class Product extends SystemBase {
 			echo $formwriter->hiddeninput('product_version', $version->prv_product_version_id);
 		}
 		else if (count($versions) > 1) {
+			if($product_version_id){
+				$selected = $product_version_id;
+			}
+			
 			$version_dropdown = array();
 			foreach ($versions as $version) {
 				$output_string = $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price;
@@ -1327,9 +1324,10 @@ class Product extends SystemBase {
 				'product_version',
 				NULL,
 				$version_dropdown,
-				'',
+				$selected,
 				'',
 				FALSE);
+			
 		}
 
 		if(!$exclude_requirements){

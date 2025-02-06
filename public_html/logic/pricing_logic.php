@@ -31,10 +31,12 @@ function pricing_logic($get_vars, $post_vars){
 	if($page_choice == 'year'){
 		$page_vars['page_choice'] = 'year';
 		$searches['is_yearly_plan'] = TRUE;
+		$page_vars['product_version'] = ProductVersion::GetByColumn('prv_version_name', 'Yearly');
 	}
 	else{
 		$page_vars['page_choice'] = 'month';
 		$searches['is_monthly_plan'] = TRUE;
+		$page_vars['product_version'] = ProductVersion::GetByColumn('prv_version_name', 'Monthly');
 		
 	}
 	

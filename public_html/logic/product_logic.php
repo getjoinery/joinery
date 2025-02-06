@@ -39,6 +39,12 @@ function product_logic($get_vars, $post_vars, $product){
 		require_once(LibraryFunctions::display_404_page());	
 	}
 	
+	if($get_vars['product_version_id']){
+		$product_version_id = LibraryFunctions::fetch_variable_local($get_vars, 'product_version_id', NULL, FALSE, '', TRUE, 'int');
+		$product_version = new Product($product_version_id, TRUE);
+		$page_vars['product_version'] = $product_version;
+	}
+	
 	if ($product && $session->get_user_id() && $session->get_permission() > 4) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
