@@ -191,7 +191,13 @@ class OrderItem extends SystemBase {
 	function get_product_version($product_id){
 		
 		if($this->get('odi_prv_product_version_id')){
-			return ProductVersion::GetActiveProductVersion($product_id, $this->get('odi_prv_product_version_id'));
+			$product_version = new ProductVersion($this->get('odi_prv_product_version_id'), TRUE);
+			if(!$product_version->get('prv_status')){
+				return false;
+			}
+			else{
+				return $product_version;
+			}
 		}
 		else{
 			return FALSE;

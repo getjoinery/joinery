@@ -16,10 +16,6 @@ class ProductVersion extends SystemBase {
 	public static $tablename = 'prv_product_versions';
 	public static $pkey_column = 'prv_product_version_id';
 	
-	// Constants for prv_status
-	const ACTIVE = 1;
-	const INACTIVE = 2;
-	
 	public static $permanent_delete_actions = array(
 		'prv_product_version_id' => 'delete',		
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -29,7 +25,7 @@ class ProductVersion extends SystemBase {
 		'prv_pro_product_id' => 'Product this version is attached to',
 		'prv_version_name' => 'Name of the product version',
 		'prv_version_price' => 'Price of this version',
-		'prv_status' => 'Status',
+		'prv_status' => 'Status, 0 or 1',
 		'prv_order' => 'Order of display',
 		'prv_percent_tax_deductible' => 'Percent that is tax deductible',
 	);
@@ -53,118 +49,6 @@ class ProductVersion extends SystemBase {
 	
 	public static $initial_default_values = array();
 	
-	public static function StoreProductVersion($product_id, $version_name, $version_price, $state) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'INSERT INTO prv_product_versions ' .
-			'(prv_pro_product_id, prv_version_name, prv_version_price, prv_status)
-				VALUES (?, ?, ?, ?)';
-
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $product_id, PDO::PARAM_INT);
-			$q->bindValue(2, $version_name, PDO::PARAM_STR);
-			$q->bindValue(3, $version_price, PDO::PARAM_STR);	
-			$q->bindValue(4, $state, PDO::PARAM_INT);				
-			
-			$q->execute();
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
-	public static function GetActiveProductVersion($product_id, $product_version_id) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'SELECT * FROM prv_product_versions WHERE 
-			prv_pro_product_id = ? AND prv_product_version_id = ? AND prv_status = ?';
-
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $product_id, PDO::PARAM_INT);
-			$q->bindValue(2, $product_version_id, PDO::PARAM_INT);
-			$q->bindValue(3, self::ACTIVE, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-
-			if ($q->rowCount()) {
-				return $q->fetch();
-			} else {
-				return NULL;
-			}
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
-	public static function GetAnyProductVersion($product_id, $product_version_id) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'SELECT * FROM prv_product_versions WHERE 
-			prv_pro_product_id = ? AND prv_product_version_id = ?';
-
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $product_id, PDO::PARAM_INT);
-			$q->bindValue(2, $product_version_id, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-
-			if ($q->rowCount()) {
-				return $q->fetch();
-			} else {
-				return NULL;
-			}
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
-	public static function ChangeProductVersionState($product_id, $product_version_id, $new_state) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'UPDATE prv_product_versions SET prv_status = ? WHERE 
-			prv_pro_product_id = ? AND prv_product_version_id = ?';
-
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $new_state, PDO::PARAM_INT);
-			$q->bindValue(2, $product_id, PDO::PARAM_INT);
-			$q->bindValue(3, $product_version_id, PDO::PARAM_INT);
-			$q->execute();
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-	}
-
-	public static function GetProductVersionsForProduct($product_id, $valid_states=NULL) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = 'SELECT * FROM prv_product_versions
-			WHERE prv_pro_product_id = ? ORDER BY prv_product_version_id ASC';
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $product_id, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		$versions = array();
-		foreach ($q->fetchall() as $product_version) {
-			if ($valid_states === NULL || in_array($product_version->prv_status, $valid_states)) {
-				$versions[] = $product_version;
-			}
-		}
-		return $versions;
-	}
 	
 }
 
@@ -174,10 +58,14 @@ class MultiProductVersion extends SystemMultiBase {
 		$where_clauses = array();
 		$bind_params = array();
 
-		if (array_key_exists('file_id', $this->options)) {
-		 	$where_clauses[] = 'prv_fil_file_id = ?';
-		 	$bind_params[] = array($this->options['file_id'], PDO::PARAM_INT);
+		if (array_key_exists('product_id', $this->options)) {
+		 	$where_clauses[] = 'prv_pro_product_id = ?';
+		 	$bind_params[] = array($this->options['product_id'], PDO::PARAM_INT);
 		} 
+		
+		if (array_key_exists('is_active', $this->options)) {
+			$where_clauses[] = 'prv_status > 0';
+		}	
 				
 		
 		if ($where_clauses) {
@@ -229,7 +117,7 @@ class MultiProductVersion extends SystemMultiBase {
 		$q = $this->_get_results(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new ProductVersion($row->prv_product_version_id);
-			$child->load_from_data($row, array_keys(ProductVersionFile::$fields));
+			$child->load_from_data($row, array_keys(ProductVersion::$fields));
 			$this->add($child);
 		}
 	}

@@ -41,7 +41,7 @@
             <!--<p class="text-sm italic text-gray-500">8 colors</p>-->
             <p class="text-base font-medium text-gray-900">
 			<?php 
-			if(!$product->num_versions() && $product->get('pro_price_type') != Product::PRICE_TYPE_USER_CHOOSE){
+			if(!$product->count_product_versions() && $product->get('pro_price_type') != Product::PRICE_TYPE_USER_CHOOSE){
 				echo $page_vars['currency_symbol'].$product->get('pro_price');
 			} 			
 			?></p>

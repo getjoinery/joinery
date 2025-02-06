@@ -840,19 +840,19 @@ class Product extends SystemBase {
 			return false;
 		}
 		else if($this->get('pro_price_type') == Product::PRICE_TYPE_MULTIPLE){
-			$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
-			if(!count($versions)){
+			$versions = $this->get_product_versions();
+			if(!$this->count_product_versions()){
 				return false;
 			}
-			else if(count($versions) == 1){
+			else if($this->count_product_versions() == 1){
 				$version = $versions[0];
-				return $currency_symbol.$version->prv_version_price;
+				return $currency_symbol.$version->get('prv_version_price');
 			}
 			else if($product_version_name){
 				//WE WANT ONLY THE PRICE OF A SPECIFIC PRODUCT VERSION
 				foreach ($versions as $version) {
-					if (strtolower($version->prv_version_name) == strtolower($product_version_name)) {	
-						return $currency_symbol.$version->prv_version_price;
+					if (strtolower($version->get('prv_version_name')) == strtolower($product_version_name)) {	
+						return $currency_symbol.$version->get('prv_version_price');
 					} 
 				}				
 			}
@@ -860,14 +860,14 @@ class Product extends SystemBase {
 				$low_price = NULL;
 				$high_price = NULL;
 				foreach ($versions as $version) {
-					if ($version->prv_status == ProductVersion::ACTIVE) {
+					if ($version->get('prv_status')) {
 						
-						if(!$low_price || $version->prv_version_price < $low_price){
-							$low_price = $version->prv_version_price;
+						if(!$low_price || $version->get('prv_version_price') < $low_price){
+							$low_price = $version->get('prv_version_price');
 						}
 						
-						if(!$high_price || $version->prv_version_price > $high_price){
-							$high_price = $version->prv_version_price;
+						if(!$high_price || $version->get('prv_version_price') > $high_price){
+							$high_price = $version->get('prv_version_price');
 						}
 					} 
 				}
@@ -913,7 +913,7 @@ class Product extends SystemBase {
 		else if($this->get('pro_price_type') == Product::PRICE_TYPE_MULTIPLE){
 			if ($product_version) {
 				//THIS PRODUCT HAS A VERSION THAT WE SHOULD PULL TO GET THE PRICE
-				return $product_version->prv_version_price;		
+				return $product_version->get('prv_version_price');		
 			} 
 			else{
 				$error = 'This product is missing a version.';
@@ -1047,39 +1047,52 @@ class Product extends SystemBase {
 	
 
 	public function add_product_version($version_name, $version_price) {
-		ProductVersion::StoreProductVersion(
-			$this->key, $version_name, $version_price, ProductVersion::ACTIVE);
+		$product_version = new ProductVersion();
+		$product_version->set('prv_pro_product_id', $this->key);
+		$product_version->set('prv_version_name', $version_name);
+		$product_version->set('prv_version_price', $version_price);
+		$product_version->set('prv_status', 1);
+		$product_version->prepare();
+		$product_version->save();
+		return $product_version;
+
 	}
 
 	public function change_product_version_status($version_id, $status) {
-		ProductVersion::ChangeProductVersionState(
-			$this->key, $version_id, $status);
+		$product_version = new ProductVersion($version_id, TRUE);
+		$product_version->set('prv_status', $status);
+		$product_version->prepare();
+		$product_version->save();
+		return $product_version;
 	}
 
-	public function get_product_versions($valid_states=NULL) {
-		return ProductVersion::GetProductVersionsForProduct($this->key, $valid_states);
-	}
-
-	public function get_product_version_details($product_version_id) {
-		return ProductVersion::GetActiveProductVersion($this->key, $product_version_id);	
-	}
-
-	public function get_product_version($form_data) {
-		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE)); 
-		if ($versions) {
-			if (!array_key_exists('product_version', $form_data)) {
-				throw new BasicProductRequirementException(
-					'Sorry, one of the products in your cart is invalid.  Please clear your cart and try again.');
+	public function get_product_versions($active=TRUE, $product_version_id=NULL) {
+		$product_versions = new MultiProductVersion(
+			array('product_id' => $this->key, 'is_active' => $active), 
+			NULL
+		);
+		$product_versions->load();
+		
+		if($product_version_id){
+			foreach($product_versions as $product_version){
+				if($product_version->key == $product_version_id){
+					return $product_version;
+				}
 			}
-			$version = $this->get_product_version_details(intval($form_data['product_version']));
-			if (!$version) {
-				throw new BasicProductRequirementException(
+			throw new BasicProductRequirementException(
 					'Sorry, one of the products in your cart does not have a correct version.  Please clear your cart and try again.');
-			}
-			return $version;
 		}
-		return NULL;
+		return $product_versions;
 	}
+	
+	public function count_product_versions($active=TRUE) {
+		$product_versions = new MultiProductVersion(
+			array('product_id' => $this->key, 'is_active' => $active), 
+			NULL
+		);
+		return $product_versions->count_all();
+	}
+
 	
 	function get_number_purchased($status = OrderItem::STATUS_PAID){
 		//COUNT THE NUMBER OF PRODUCTS PURCHASED SO FAR
@@ -1098,47 +1111,31 @@ class Product extends SystemBase {
 		return $sold_out;
 	}
 
-	function GetProductById($product_id) {
-		$data = SingleRowFetch('pro_products', 'pro_product_id',
-			$product_id, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
-
-			$product = new Product($data->pro_product_id);
-			$product->load_from_data($data, array_keys(Product::$fields));
-			return $product;
-
-	}
-
 	
 	function get_product_requirements() {
 		return BasicProductRequirement::GetRequirements($this->get('pro_requirements'));
 	}
 
-	function clean_variables($data) {
-		foreach($data as $key => $value) {
-			$data[$key] = htmlspecialchars($value);
-		}
-		return $data;
-	}
 
 	function validate_form($form_data, $session) {
 		$form_display_data = array();
 
 		// If the product has active product verisons, one of them must be selected!
-		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
+		$versions = $this->get_product_versions();
 		if ($versions) {
 			if (!isset($form_data['product_version']) || !is_numeric($form_data['product_version'])) {
 				throw new BasicProductRequirementException(
 					'You must select which version of the product you would like to purchase.');
 			}
 
-			$version = $this->get_product_version_details(intval($form_data['product_version']));
-			if ($version === NULL) {
+			$product_version = new ProductVersion(intval($form_data['product_version']), TRUE);
+			if (!$product_version) {
 				throw new BasicProductRequirementException(
 					'Sorry, the product you have selected is not valid.  Please try again.');
 			}
 
-			$form_display_data['Product'] = $version->prv_version_name;
-			$form_data['product_version'] = $version->prv_product_version_id;
+			$form_display_data['Product'] = $product_version->get('prv_version_name');
+			$form_data['product_version'] = $product_version->get('prv_product_version_id');
 		}
 
 		//IF NO ITEMS REMAINING, SHOW ERROR
@@ -1304,20 +1301,22 @@ class Product extends SystemBase {
 			echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
 		}
 	
-		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
-		if (count($versions) == 1) {
-			$version = $versions[0];
-			echo $formwriter->hiddeninput('product_version', $version->prv_product_version_id);
+		$versions = $this->get_product_versions();
+
+		if ($this->count_product_versions() == 1) {
+			$version = $versions->get(0);
+			echo $formwriter->hiddeninput('product_version', $version->get('prv_product_version_id'));
 		}
-		else if (count($versions) > 1) {
+		else if ($this->count_product_versions() > 1) {
 			if($product_version_id){
 				$selected = $product_version_id;
 			}
+
 			
 			$version_dropdown = array();
 			foreach ($versions as $version) {
-				$output_string = $version->prv_version_name . ' - '.$currency_symbol . $version->prv_version_price;
-				$version_dropdown[$output_string] = $version->prv_product_version_id;
+				$output_string = $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price');
+				$version_dropdown[$output_string] = $version->key;
 			}
 			echo $formwriter->dropinput(
 				'Product',
@@ -1359,15 +1358,7 @@ class Product extends SystemBase {
 		return TRUE;
 	}
 	
-
-	function num_versions($type = 'active') {
-		$versions = $this->get_product_versions(array(ProductVersion::ACTIVE));
-		$count = 0;
-		foreach($versions as $version){
-			$count++;
-		}
-		return $count;
-	}	
+	
 	
 	function prepare(){
 		parent::prepare();

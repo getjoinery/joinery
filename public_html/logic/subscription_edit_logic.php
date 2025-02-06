@@ -47,7 +47,7 @@ function subscription_edit_logic($get_vars, $post_vars){
 		//$order_item = new OrderItem($order_item_id, TRUE);
 		$subscription_id = $order_item->get('odi_stripe_subscription_id');
 
-		$product_version = $product->get_product_version(array('product_version' => $_POST['product_version']));
+		$product_version = $product->get_product_versions(TRUE, $_POST['product_version']);
 		$price = $product->get_price($product_version, $_POST);
 		$user = new User($session->get_user_id(), TRUE);
 
@@ -97,7 +97,7 @@ function subscription_edit_logic($get_vars, $post_vars){
 		//$order_item->set('odi_product_info', base64_encode(serialize($data)));
 		$order_item->set('odi_price', $price);	
 		if ($product_version) {
-			$order_item->set('odi_prv_product_version_id', $product_version->prv_product_version_id);
+			$order_item->set('odi_prv_product_version_id', $product_version->key);
 		}			
 		$order_item->set('odi_status', OrderItem::STATUS_PAID);
 		$order_item->set('odi_status_change_time', 'now()');
