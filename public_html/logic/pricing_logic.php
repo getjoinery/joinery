@@ -27,18 +27,15 @@ function pricing_logic($get_vars, $post_vars){
 	$searches = array();
 	$page_choice = $get_vars['page'];
 	
-	$sort = 'plan_order_year';
-	$sdirection = 'ASC';
 
 	if($page_choice == 'year'){
+		$sort = 'plan_order_year';
+		$sdirection = 'ASC';
 		$page_vars['page_choice'] = 'year';
 		$searches['is_yearly_plan'] = TRUE;
 
 		$searches['is_active'] = TRUE;
 		$searches['deleted'] = FALSE;
-		
-		$sort = 'plan_order_month';
-		$sdirection = 'ASC';
 
 		$product_versions = new MultiProductVersion(
 			$searches,
@@ -51,6 +48,8 @@ function pricing_logic($get_vars, $post_vars){
 
 	}
 	else{
+		$sort = 'plan_order_month';
+		$sdirection = 'ASC';
 		$page_vars['page_choice'] = 'month';
 		$searches['is_monthly_plan'] = TRUE;
 

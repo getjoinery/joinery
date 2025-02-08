@@ -44,6 +44,8 @@
 			$product_version->set('prv_price_type', $_REQUEST['prv_price_type']);
 			$product_version->set('prv_trial_period_days', $_REQUEST['prv_trial_period_days']);
 			$product_version->set('prv_status', 1);
+			$product_version->set('prv_plan_order_year', $_REQUEST['prv_plan_order_year']);
+			$product_version->set('prv_plan_order_month', $_REQUEST['prv_plan_order_month']);
 			$product_version->prepare();
 			$product_version->save();
 			$product_version->load();
@@ -53,7 +55,6 @@
 				$stripe_price = $stripe_helper->get_or_create_price($product_version, NULL);	
 			}
 		} 
-		
 		else if ($_REQUEST['action'] == 'remove_version') {
 			$product_version = new ProductVersion($_REQUEST['product_version_id'], TRUE);
 			$product_version->set('prv_status', 0);
@@ -65,6 +66,14 @@
 			$product_version->set('prv_status', 1);
 			$product_version->prepare();
 			$product_version->save(); 
+		}
+		else{
+			
+			$product_version->set('prv_version_name', $_REQUEST['version_name']);
+			$product_version->set('prv_plan_order_year', $_REQUEST['prv_plan_order_year']);
+			$product_version->set('prv_plan_order_month', $_REQUEST['prv_plan_order_month']);
+			$product_version->prepare();
+			$product_version->save();			
 		}
 		
 		LibraryFunctions::redirect('/admin/admin_product?pro_product_id='. $product->key);
