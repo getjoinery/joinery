@@ -339,27 +339,12 @@ class PaypalHelper{
 	}
 
 	//PAYPAL PLAN CREATION
-    public function createPlan($stripe_product_id, $product, $amount){
+    public function createPlan($stripe_product_id, $product_version, $amount){
+		$product = new Product($product_version->get('prv_pro_product_id'), TRUE);
 		$access_token = $this->getAccessToken();
 		
-		if($product->get('pro_recurring') == 'year'){
-			$interval_unit = 'YEAR';
-		}
-		else if($product->get('pro_recurring') == 'month'){
-			$interval_unit = 'MONTH';
-		}
-		else if($product->get('pro_recurring') == 1){  //HOW WE USED TO DO IT
-			$interval_unit = 'MONTH';
-		}		
-		else if($product->get('pro_recurring') == 'week'){
-			$interval_unit = 'WEEK';
-		}	
-		else if($product->get('pro_recurring') == 'day'){
-			$interval_unit = 'DAY';
-		}	
-		else {
-			throw new SystemDisplayablePermanentError("This product (".$product->get('pro_name').") is not a subscription.");
-		}	
+		
+		$interval_unit = strtoupper($product_version->is_subscription());
 		
 		$jsonData = array(
 			"product_id" => $stripe_product_id,

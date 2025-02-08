@@ -145,7 +145,7 @@ function cart_logic($get_vars, $post_vars){
 					$paypal_product_id = $paypal_product['id'];
 					$amount = $price - $discount;
 					if(!$paypal_plan = $paypal->searchPlans($product->get('pro_name') . '-' . $amount)){
-						$paypal_plan = $paypal->createPlan($paypal_product_id, $product, $amount);
+						$paypal_plan = $paypal->createPlan($paypal_product_id, $product_version, $amount);
 					}
 					$page_vars['plan_id'] = $paypal_plan['id'];
 					//$result = $paypal->createSubscription($page_vars['plan_id']);
