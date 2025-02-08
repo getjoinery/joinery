@@ -27,7 +27,10 @@ class ProductVersion extends SystemBase {
 		'prv_version_price' => 'Price of this version',
 		'prv_status' => 'Status, 0 or 1',
 		'prv_order' => 'Order of display',
-		'prv_percent_tax_deductible' => 'Percent that is tax deductible',
+		'prv_price_type' => 'Type of price...values:  "single", "user", "day", "week", "month", "year"',
+		'prv_trial_period_days' => 'Trial period for subscriptions',
+		'prv_plan_order_month' => 'Order for this product version to appear on the monthly /pricing page',
+		'prv_plan_order_year' => 'Order for this product version to appear on the yearly /pricing page',
 	);
 
 	public static $field_specifications = array(
@@ -37,7 +40,10 @@ class ProductVersion extends SystemBase {
 		'prv_version_price' => array('type'=>'numeric(10,2)'),
 		'prv_status' => array('type'=>'int2'),
 		'prv_order' => array('type'=>'int4'),
-		'prv_percent_tax_deductible' => array('type'=>'int4'),
+		'prv_price_type' => array('type'=>'varchar(10)'),
+		'prv_trial_period_days' => array('type'=>'int4'),
+		'prv_plan_order_month' => array('type'=>'int4'),
+		'prv_plan_order_year' => array('type'=>'int4'),
 	);
 	
 	
@@ -49,6 +55,12 @@ class ProductVersion extends SystemBase {
 	
 	public static $initial_default_values = array();
 	
+	public function is_subscription(){
+		if($this->get('prv_price_type') == 'day' || $this->get('prv_price_type') == 'week' || $this->get('prv_price_type') == 'month' || $this->get('prv_price_type') == 'year'){
+			return $this->get('prv_price_type');
+		}
+		return false;
+	}	
 	
 }
 
@@ -64,9 +76,21 @@ class MultiProductVersion extends SystemMultiBase {
 		} 
 		
 		if (array_key_exists('is_active', $this->options)) {
-			$where_clauses[] = 'prv_status > 0';
+			if($this->options['is_active']){
+				$where_clauses[] = 'prv_status > 0';
+			}
 		}	
-				
+
+		//THIS IS FOR PULLING STUFF FOR THE /PRICING PAGE
+		if (array_key_exists('is_monthly_plan', $this->options)) {
+			$where_clauses[] = 'prv_plan_order_month > 0';
+		}			
+
+		if (array_key_exists('is_yearly_plan', $this->options)) {
+			$where_clauses[] = 'prv_plan_order_year > 0';
+		}	
+		
+			
 		
 		if ($where_clauses) {
 			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
@@ -86,9 +110,18 @@ class MultiProductVersion extends SystemMultiBase {
 				$sql .= " prv_product_version_id ASC ";
 			}
 			else {
+
 				if (array_key_exists('product_version_id', $this->order_by)) {
 					$sql .= ' prv_product_version_id ' . $this->order_by['product_version_id'];
-				}			
+				}
+				
+				if (array_key_exists('plan_order_month', $this->order_by)) {
+					$sql .= ' prv_plan_order_month '. $this->order_by['plan_order_month'];
+				}	
+
+				if (array_key_exists('plan_order_year', $this->order_by)) {
+					$sql .= ' prv_plan_order_year '. $this->order_by['plan_order_year'];
+				}					
 			}
 			
 			$sql .= ' '.$this->generate_limit_and_offset();	

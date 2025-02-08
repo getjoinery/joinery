@@ -45,7 +45,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	$page_vars['cart'] = $cart;
 	$charge_total = $cart->get_total();
 	
-	
+
 
 	if($charge_total){
 		if($settings->get_setting('use_paypal_checkout')){
@@ -239,7 +239,7 @@ function cart_charge_logic($get_vars, $post_vars){
 		$email_fill['purchase_amount'] = $price - $discount;
 
 		//HANDLE SUBSCRIPTIONS
-		if($product->get('pro_recurring')){
+		if($product_version->is_subscription()){
 
 			//CREATE THE ORDER ITEM
 			$order_item = new OrderItem(NULL);
@@ -264,7 +264,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			
 			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
 			foreach($cart->coupon_codes as $coupon_code_name){
-				if($valid_coupons = $product->get_valid_coupons()){
+				if($valid_coupons = $product->get_valid_coupons($product_version)){
 					foreach($valid_coupons as $valid_coupon){
 						if($coupon_code_name == $valid_coupon->get('ccd_code')){
 							$coupon_code_use = new CouponCodeUse(NULL);
@@ -287,7 +287,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				//CREATE A PLAN AND RUN THE SUBSCRIPTION
 				$final_price = $price - $discount;
 				
-				$stripe_price = $stripe_helper->get_or_create_price($product, $final_price);		
+				$stripe_price = $stripe_helper->get_or_create_price($product_version, $final_price);		
 				$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($stripe_price, $order_item, $billing_user, $stripe_customer_id);	
 				//REFRESH THE ORDER ITEM
 				$order_item->set('odi_subscription_status', $subscription_result['status']);
@@ -412,8 +412,8 @@ function cart_charge_logic($get_vars, $post_vars){
 
 
 
-			if($product->get('pro_trial_period_days')){
-				$trial = ' (' . $product->get('pro_trial_period_days') . ' day free trial)';	
+			if($product_version->get('prv_trial_period_days')){
+				$trial = ' (' . $product_version->get('prv_trial_period_days') . ' day free trial)';	
 			}
 			else{
 				$trial = '';
@@ -470,7 +470,7 @@ function cart_charge_logic($get_vars, $post_vars){
 
 		//ONLY NON RECURRING
 		$one_time_purchase_exists = 0;
-		if(!$product->get('pro_recurring')){
+		if(!$product_version->is_subscription()){
 			$one_time_purchase_exists = 1;
 			
 			
@@ -500,7 +500,7 @@ function cart_charge_logic($get_vars, $post_vars){
 			
 			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
 			foreach($cart->coupon_codes as $coupon_code_name){
-				if($valid_coupons = $product->get_valid_coupons()){
+				if($valid_coupons = $product->get_valid_coupons($product_version)){
 					foreach($valid_coupons as $valid_coupon){
 						if($coupon_code_name == $valid_coupon->get('ccd_code')){
 							$coupon_code_use = new CouponCodeUse(NULL);

@@ -61,12 +61,7 @@ function products_logic($get_vars, $post_vars){
 	if($get_vars['subscriptions'] == 'all'){
 		//NO FILTER
 	}
-	else if($get_vars['subscriptions'] == TRUE){
-		$searches['is_recurring'] = TRUE;
-	}
-	else if($get_vars['subscriptions'] == FALSE){
-		$searches['is_recurring'] = FALSE;
-	}
+
 	 
 	
 	

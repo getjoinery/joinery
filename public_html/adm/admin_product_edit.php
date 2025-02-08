@@ -59,21 +59,6 @@
 			$product->set('pro_expires', (int)$_POST['pro_expires']);
 			$product->set('pro_prg_product_group_id', (int)$_POST['pro_prg_product_group_id']);
 			
-			//PRICE
-			if($_POST['pro_price_type'] == Product::PRICE_TYPE_MULTIPLE){
-				$_POST['pro_price'] = NULL;
-			}
-
-			if($_POST['pro_price'] == ''){
-				$_POST['pro_price'] = NULL;
-			}
-			else{
-				$_POST['pro_price'] = $_POST['pro_price'];
-			}
-
-			
-
-
 
 	
 			//PRICE MUST BE INTEGER
@@ -85,22 +70,6 @@
 			}
 
 	
-			//SET RECURRING VALUE
-			if($_POST['pro_recurring'] == 'year'){
-				$product->set('pro_recurring', 'year');
-			}
-			else if($_POST['pro_recurring'] == 'month'){
-				$product->set('pro_recurring', 'month');
-			}
-			else if($_POST['pro_recurring'] == 'week'){
-				$product->set('pro_recurring', 'week');
-			}
-			else if($_POST['pro_recurring'] == 'day'){
-				$product->set('pro_recurring', 'day');
-			}
-			else{
-				$product->set('pro_recurring', NULL);
-			}
 			
 			//STORE THE PRODUCT SCRIPTS
 			$product->set('pro_product_scripts', NULL);
@@ -108,7 +77,7 @@
 				$product->set('pro_product_scripts', implode(',', $_POST['product_scripts']));
 			}
 			
-			$editable_fields = array('pro_name', 'pro_price', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_receipt_template', 'pro_receipt_subject', 'pro_price_type', 'pro_grp_group_id', 'pro_type', 'pro_digital_link', 'pro_plan_order_month', 'pro_plan_order_year', 'pro_short_description', 'pro_trial_period_days');
+			$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_grp_group_id', 'pro_digital_link', 'pro_short_description');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_POST[$field]);
@@ -148,10 +117,6 @@
 				
 			}
 			
-			
-			
-			
-			
 			$product->save();
 			$product->load();
 			
@@ -159,14 +124,27 @@
 		} 
 		
 		if ($_REQUEST['action'] == 'new_version') {
-			
-			$product->add_product_version($_REQUEST['version_name'], $_REQUEST['version_price']);
+			$product_version = new ProductVersion(NULL);
+			$product_version->set('prv_pro_product_id', $product->key);
+			$product_version->set('prv_version_name', $_REQUEST['version_name']);
+			$product_version->set('prv_version_price', $_REQUEST['version_price']);
+			$product_version->set('prv_price_type', $_REQUEST['prv_price_type']);
+			$product_version->set('prv_trial_period_days', $_REQUEST['prv_trial_period_days']);
+			$product_version->set('prv_status', 1);
+			$product_version->prepare();
+			$product_version->save();
 		} 
 		else if ($_REQUEST['action'] == 'remove_version') {
-			$product->change_product_version_status($_REQUEST['v'], 0);
+			$product_version = new ProductVersion($_REQUEST['v'], TRUE);
+			$product_version->set('prv_status', 0);
+			$product_version->prepare();
+			$product_version->save();
 		} 
 		else if ($_REQUEST['action'] == 'activate_version') {
-			$product->change_product_version_status($_REQUEST['v'], 1); 
+			$product_version = new ProductVersion($_REQUEST['v'], TRUE);
+			$product_version->set('prv_status', 1);
+			$product_version->prepare();
+			$product_version->save(); 
 		}
 		
 		LibraryFunctions::redirect('/admin/admin_product?pro_product_id='. $product->key);
@@ -214,7 +192,7 @@
 
 	?>
 	<script type="text/javascript">
-	
+	/*
 		function set_pricing_choices(){
 			var value = $("#pro_price_type").val();
 			if(value == 1){  //ONE PRICE	
@@ -228,68 +206,15 @@
 			}			
 		}
 		
-		function set_subscription_choices(){
-			var value = $("#pro_recurring").val();
-			if(value == 0){  	
-				$("#pro_trial_period_days_container").hide();
-			}	
-			else { 
-				$("#pro_trial_period_days_container").show();				
-			}
-			
-		}
-		
-		<?php 
-		/*
-		function set_type_choices(){
-			var value = $("#pro_type").val();
-			if(value == 1){  //EVENT TICKET	
-				$("#pro_evt_event_id_container").show();
-				$("#pro_digital_link").hide();
-			}	
-			else if(value == 2){  //ITEM
-				$("#pro_evt_event_id_container").hide();
-				$("#pro_digital_link").show();			
-			}		
-		}
-		*/
-		?>
-	
-		function set_expire_choices(){
-			var value = $("#pro_recurring").val(); 
-			if(value == 1){  //SUBSCRIPTION	
-				$("#pro_expires_container").hide();
-				$("#pro_expires").val(0)
-			}	
-			else if(value == 0){  //ONE TIME
-				$("#pro_expires_container").show();				
-			}			
-		}	
-		
 	
 		$(document).ready(function() {
 			set_pricing_choices();
 			$("#pro_price_type").change(function() {	
 				set_pricing_choices();
 			});	
-			
-			set_expire_choices();
-			$("#pro_recurring").change(function() {	
-				set_expire_choices();
-			});
 
-			set_subscription_choices();
-			$("#pro_recurring").change(function() {	
-				set_subscription_choices();
-			});
-
-			
-			//set_type_choices();
-			//$("#pro_type").change(function() {	
-			//	set_type_choices();
-			//});	
 		});
-	
+	*/
 		
 	</script>
 	<?php
@@ -314,41 +239,12 @@
 	echo $formwriter->dropinput("Active?", "pro_is_active", "ctrlHolder", $optionvals, $product_status, '', FALSE);
 	echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
 
-	/*
-	if($product->key && $product->get('pro_type') == 0){
-		$optionvals = array('System (do not change)' => 0);
-		echo $formwriter->dropinput("Product type", "pro_type", "ctrlHolder", $optionvals, $product->get('pro_type'), '', FALSE);	
-	}
-	else{
-		$optionvals = array("Event ticket"=>Product::PRODUCT_TYPE_EVENT, 'Other Item' => Product::PRODUCT_TYPE_ITEM);	
-		echo $formwriter->dropinput("Product type", "pro_type", "ctrlHolder", $optionvals, $product->get('pro_type'), '', FALSE);			
-	}
-	*/
 
 
-	//echo $formwriter->textinput('Product Description', 'pro_description', 'ctrlHolder', 100, $product->get('pro_description'), '', 255, '');
 	echo $formwriter->textbox('Short Description', 'pro_short_description', 'ctrlHolder', 5, 80, $product->get('pro_short_description'), '', 'yes');
 	echo $formwriter->textbox('Description', 'pro_description', 'ctrlHolder', 5, 80, $product->get('pro_description'), '', 'yes');
 	
-	$optionvals = array(
-		'No, it is a one time payment' => 0, 
-		"Yes, recurring yearly charge"=>'year',
-		"Yes, recurring monthly charge"=>'month', 
-		//"Yes, recurring weekly charge"=>'week',
-		//"Yes, recurring daily charge"=>'day', 			
-		);
-	if($product->get('pro_recurring')){
-		$recurring=$product->get('pro_recurring');
-	}
-	else{
-		$recurring=0;
-	}
-	echo $formwriter->dropinput("Subscription?", "pro_recurring", "ctrlHolder", $optionvals, $recurring, '', FALSE);	
 
-	if(!$pro_trial_period_days_fill = $product->get('pro_trial_period_days')){
-		$pro_trial_period_days_fill = 0;
-	}
-	echo $formwriter->textinput('Subscription trial period (days):', 'pro_trial_period_days', 'ctrlHolder', 100, $pro_trial_period_days_fill, '', 3, '');
 	
 	echo $formwriter->textinput('Digital item link', 'pro_digital_link', NULL, 100, $product->get('pro_digital_link'), '', 255, '');
 
@@ -379,10 +275,6 @@
 		echo $formwriter->dropinput("Event Bundle", "pro_grp_group_id", "ctrlHolder", $optionvals, $product->get('pro_grp_group_id'), '', TRUE);
 	}
 	
-	$optionvals = array("One price"=>1, 'Multiple pricing levels' => 2, 'User chooses price'=>3);
-	echo $formwriter->dropinput("Pricing", "pro_price_type", "ctrlHolder", $optionvals, $product->get('pro_price_type'), '', FALSE);
-
-	echo $formwriter->textinput('Price ('.$currency_symbol.')', 'pro_price', 'ctrlHolder', 100, $product->get('pro_price'), '', 5, '');
 	
 	if(!$pro_max_purchase_count_fill = $product->get('pro_max_purchase_count')){
 		$pro_max_purchase_count_fill = 0;
@@ -414,25 +306,6 @@
 		$pgs->load();
 		$optionvals = $pgs->get_dropdown_array();
 		echo $formwriter->dropinput("Product Group", "pro_prg_product_group_id", "ctrlHolder", $optionvals, $product->get('pro_prg_product_group_id'), '', TRUE);	
-	}
-	
-	//THIS SECTION IS FOR /PRICING PAGE.  USER CHOOSES WHICH PLAN AND THEN SETS AN ORDER
-	if($settings->get_setting('pricing_page')){
-		$optionvals = array(
-			'No' => 0, 
-			"Monthly Plan 1"=>1,
-			"Monthly Plan 2"=>2,
-			"Monthly Plan 3"=>3,
-			);
-		echo $formwriter->dropinput("Include on monthly /pricing page?", "pro_plan_order_month", "ctrlHolder", $optionvals, $product->get('pro_plan_order_month'), '', FALSE);	
-		
-		$optionvals = array(
-			'No' => 0, 
-			"Yearly Plan 1"=>1,
-			"Yearly Plan 2"=>2,
-			"Yearly Plan 3"=>3,
-			);
-		echo $formwriter->dropinput("Include on yearly /pricing page?", "pro_plan_order_year", "ctrlHolder", $optionvals, $product->get('pro_plan_order_year'), '', FALSE);	
 	}
 	
 	$optionvals = array(

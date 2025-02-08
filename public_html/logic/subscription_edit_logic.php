@@ -57,8 +57,7 @@ function subscription_edit_logic($get_vars, $post_vars){
 
 		$stripe_helper = new StripeHelper();
 		//THIS PLAN CHANGE ONLY WORKS WITH SUBSCRIPTIONS AND DOES NOT WORK WITH TRIAL PERIODS
-		//$plan = $stripe_helper->get_or_create_subscription_plan($price, 1, 0);
-		$stripe_price = $stripe_helper->get_or_create_price($product, $price);	
+		$stripe_price = $stripe_helper->get_or_create_price($product_version, $price);	
 		$new_price_id = $stripe_price['id']; 
 
 		// Retrieve the subscription

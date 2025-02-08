@@ -226,10 +226,10 @@ class OrderItem extends SystemBase {
 			}
 			$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 			
-			$product = new Product($this->get('odi_pro_product_id'), TRUE);
+			$product_version = new Product($this->get('odi_prv_product_version_id'), TRUE);
 			
 			
-			return $currency_symbol . $this->get('odi_price') . '/'. $product->get('pro_recurring');
+			return $currency_symbol . $this->get('odi_price') . '/'. $product_version->is_subscription();
 			
 		}		
 	}
