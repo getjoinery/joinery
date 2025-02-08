@@ -30,8 +30,13 @@ function cart_logic($get_vars, $post_vars){
 
 	if (isset($_REQUEST['r']) && is_numeric($_REQUEST['r'])) {
 		$cart->remove_item(intval($_REQUEST['r']));
+		LibraryFunctions::redirect('/cart');
 	}
 	
+	if (isset($_REQUEST['rc'])) {
+		$cart->remove_coupon($_REQUEST['rc']);
+		LibraryFunctions::redirect('/cart');
+	}
 	
 	$currency_code = $settings->get_setting('site_currency');
 	$page_vars['currency_code'] = $currency_code;

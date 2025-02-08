@@ -139,6 +139,15 @@ class ShoppingCart {
 		$this->items[] = array(1,	$product,	$form_data, $price, $discount);
 	}
 	
+	public function remove_coupon($coupon){
+		$key = array_search($coupon, $this->coupon_codes); // Find the key of value 3
+		if ($key !== false) {
+			unset($this->coupon_codes[$key]);
+			$this->update_items_for_coupon();
+		}
+		return true;
+	}
+	
 	public function update_items_for_coupon(){
 
 		foreach($this->items as $key => $cart_item) {

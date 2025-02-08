@@ -21,10 +21,11 @@ function subscription_edit_logic($get_vars, $post_vars){
 	}
 
 
-	if($_GET['new_plan']){
-		$new_plan = LibraryFunctions::fetch_variable_local($get_vars, 'new_plan', 0, 'notrequired', '', 'safemode', 'int');
+	if($_GET['new_version']){
+		$new_version = LibraryFunctions::fetch_variable_local($get_vars, 'new_version', 0, 'notrequired', '', 'safemode', 'int');
 		$page_vars['order_item_id'] = $order_item_id;
-		$product = new Product($new_plan, TRUE);
+		$product_version = new ProductVersion($new_version, TRUE);
+		$product = new Product($product_version->get('prv_pro_product_id'), TRUE);
 		$page_vars['product'] = $product;
 		
 	}
@@ -114,38 +115,7 @@ function subscription_edit_logic($get_vars, $post_vars){
 
 	}
 
-	
-	$sort = 'plan_order_month';
-	$sdirection = 'ASC';
-	
-	
-	$searches = array();
-	$page_choice = $get_vars['page'];
 
-	if($page_choice == 'year'){
-		$page_vars['page_choice'] = 'year';
-		$searches['is_yearly_plan'] = TRUE;
-	}
-	else{
-		$page_vars['page_choice'] = 'month';
-		$searches['is_monthly_plan'] = TRUE;
-		
-	}
-	
-	$searches['is_active'] = TRUE;
-	$searches['deleted'] = FALSE;
-	$searches['in_stock'] = true;	
-
-	$products = new MultiProduct(
-		$searches,
-		array($sort=>$sdirection),
-		10,
-		0,
-		'AND');
-	$products->load();
-	$page_vars['products'] = $products;
-	$numrecords = $products->count_all();		
-	$page_vars['numrecords'] = $numrecords;
 
 	//SUBSCRIPTIONS
 	$user_id = $session->get_user_id();
