@@ -108,24 +108,20 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
         </div>-->
 					<?php
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT OR IF IT CANNOT BE ADDED TO THE CART
-				if(!$product->is_sold_out() && $cart->can_add_to_cart($product)){
+				if(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)){
 
 					$formwriter = LibraryFunctions::get_formwriter_object('product_form', 'tailwind');
 					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 					echo $formwriter->hiddeninput('product_id', $product_id);
-					/*if($product->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
-						$validation_rules = array();
-						$validation_rules['user_price_override']['required']['value'] = 'true';
-						echo $formwriter->textinput('Amount to pay ('.$page_vars['currency_symbol'].')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
-					}*/
+	
 					if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
 						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
 					}
 					echo $formwriter->end_form(true);
 					$product->output_javascript(array(), $formwriter);
 				}
-				else if(!$cart->can_add_to_cart($product)){
-					if($product->get('pro_recurring')){
+				else if(!$cart->can_add_to_cart($product_version)){
+					if($product_version->is_subscription()){
 						if($cart->get_num_recurring()){
 							echo 'You cannot add more than one subscription to the cart.  Please check out first or clear your cart.';
 						}

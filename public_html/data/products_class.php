@@ -633,26 +633,20 @@ class Product extends SystemBase {
 		'pro_name' => 'Product name',
 		'pro_short_description' => 'Product Description',
 		'pro_description' => 'Product Description',
-		'pro_price' => 'Price',
 		'pro_requirements' => 'Requirements of this product',
 		'pro_max_cart_count' => 'Maximum number of this item that can be bought at one time',
 		'pro_max_purchase_count' => 'Maximum number of this item that can be bought total',
 		'pro_prg_product_group_id' => 'Product group this product is part of',
 		'pro_after_purchase_message' => 'Message shown after purchase of the item',
 		'pro_evt_event_id' => 'Event id if the order is for an event',
-		'pro_recurring' => 'This charge is a recurring charge, valid values are "day", "week", "month", or "year"',
 		'pro_expires' => 'How much time until the purchase expires.',
 		'pro_is_active' => 'Active or disabled',
-		'pro_price_type' => 'The pricing type',
 		'pro_grp_group_id' => 'The group id of the bundle if the product is for a bundle',
 		'pro_type' => 'Type of product e.g. event ticket or digital item',
 		'pro_digital_link' => 'Link for a digital download',
 		'pro_num_remaining_calc' => 'Calculated field of number remaining in stock',
 		'pro_link' => 'Link to use for accessing',
 		'pro_delete_time' => 'time deleted',
-		'pro_trial_period_days' => 'Days until a recurring payment starts',
-		'pro_plan_order_month' => 'Order for this product to appear on the monthly /pricing page',
-		'pro_plan_order_year' => 'Order for this product to appear on the yearly /pricing page',
 		'pro_product_scripts' => 'Comma separated list of scripts to run upon purchase',
 		'pro_stripe_product_id' => 'Product ID at Stripe',
 		'pro_stripe_product_id_test' => 'Product ID at Stripe in test mode',
@@ -663,26 +657,20 @@ class Product extends SystemBase {
 		'pro_name' => array('type'=>'varchar(255)'),
 		'pro_short_description' => array('type'=>'text'),
 		'pro_description' => array('type'=>'text'),
-		'pro_price' => array('type'=>'numeric(10,2)'),
 		'pro_requirements' => array('type'=>'int4'),
 		'pro_max_cart_count' => array('type'=>'int4'),
 		'pro_max_purchase_count' => array('type'=>'int4'),
 		'pro_prg_product_group_id' => array('type'=>'int4'),
 		'pro_after_purchase_message' =>  array('type'=>'text'),
 		'pro_evt_event_id' => array('type'=>'int4'),
-		'pro_recurring' => array('type'=>'varchar(10)'),
 		'pro_expires' =>  array('type'=>'int4'),
 		'pro_is_active' => array('type'=>'bool'),
-		'pro_price_type' => array('type'=>'int4'),
 		'pro_grp_group_id' => array('type'=>'int4'),
 		'pro_type' => array('type'=>'int4'),
 		'pro_digital_link' =>  array('type'=>'varchar(255)'),
 		'pro_num_remaining_calc' => array('type'=>'int4'),
 		'pro_link' => array('type'=>'varchar(255)'),
 		'pro_delete_time' => array('type'=>'timestamp(6)'),
-		'pro_trial_period_days' => array('type'=>'int4'),
-		'pro_plan_order_month' => array('type'=>'int4'),
-		'pro_plan_order_year' => array('type'=>'int4'),
 		'pro_product_scripts' => array('type'=>'text'),
 		'pro_stripe_product_id' =>  array('type'=>'varchar(64)'),
 		'pro_stripe_product_id_test' =>  array('type'=>'varchar(64)'),
@@ -827,7 +815,7 @@ class Product extends SystemBase {
 	}
 	
 	//THIS FUNCTION GIVES AN ESTIMATE OF PRICE FOR DISPLAY PURPOSES
-	public function get_readable_price($product_version_name=NULL){
+	public function get_readable_price($product_version_id=NULL){
 		$settings = Globalvars::get_instance(); 
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 		
@@ -836,26 +824,24 @@ class Product extends SystemBase {
 			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
 			return false;
 		}		
-		else if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
-			return false;
-		}
-		else if($this->get('pro_price_type') == Product::PRICE_TYPE_MULTIPLE){
+		else{
 			$versions = $this->get_product_versions();
 			if(!$this->count_product_versions()){
 				return false;
 			}
-			else if($this->count_product_versions() == 1){
-				$version = $versions[0];
-				return $currency_symbol.$version->get('prv_version_price');
-			}
-			else if($product_version_name){
+			else if($product_version_id){
 				//WE WANT ONLY THE PRICE OF A SPECIFIC PRODUCT VERSION
 				foreach ($versions as $version) {
-					if (strtolower($version->get('prv_version_name')) == strtolower($product_version_name)) {	
+					if ($version->key == $product_version_id) {	
 						return $currency_symbol.$version->get('prv_version_price');
 					} 
 				}				
 			}
+			else if($this->count_product_versions() == 1){
+				$version = $versions->get(0);
+				return $currency_symbol.$version->get('prv_version_price');
+			}
+			 
 			else{
 				$low_price = NULL;
 				$high_price = NULL;
@@ -880,9 +866,6 @@ class Product extends SystemBase {
 				}
 			}
 
-		}
-		else if($this->get('pro_price_type') == Product::PRICE_TYPE_ONE){	
-			return $currency_symbol . $this->get('pro_price'); 	
 		}	
 	
 	}
@@ -898,7 +881,7 @@ class Product extends SystemBase {
 			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
 			return str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price']));
 		}		
-		else if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
+		else if($product_version->get('prv_price_type') == 'user'){
 	
 			if($data['user_price_override']){
 				//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
@@ -910,28 +893,10 @@ class Product extends SystemBase {
 				exit;
 			}
 		}
-		else if($this->get('pro_price_type') == Product::PRICE_TYPE_MULTIPLE){
-			if ($product_version) {
-				//THIS PRODUCT HAS A VERSION THAT WE SHOULD PULL TO GET THE PRICE
-				return $product_version->get('prv_version_price');		
-			} 
-			else{
-				$error = 'This product is missing a version.';
-				throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
-				exit;
-			}
+		else if($product_version){
+			//THIS PRODUCT HAS A VERSION THAT WE SHOULD PULL TO GET THE PRICE
+			return $product_version->get('prv_version_price');		
 		}
-		else if($this->get('pro_price_type') == Product::PRICE_TYPE_ONE){
-	
-			if($this->get('pro_price')){
-				return $this->get('pro_price'); 	
-			}
-			else{
-				$error = 'This product is missing a price.';
-				throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
-				exit;
-			}
-		}	
 		else{
 			$error = 'This product has no price.';
 			throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
@@ -940,9 +905,9 @@ class Product extends SystemBase {
 		
 	}
 	
-	public function total_coupon_discount($full_price, $coupon_codes){
+	public function total_coupon_discount($full_price, $product_version, $coupon_codes){
 		$discount = 0;
-		$valid_coupons = $this->get_valid_coupons();
+		$valid_coupons = $this->get_valid_coupons($product_version);
 
 		foreach($coupon_codes as $coupon_code){
 			foreach($valid_coupons as $coupon){
@@ -969,7 +934,7 @@ class Product extends SystemBase {
 		
 	}
 	
-	public function get_valid_coupons(){
+	public function get_valid_coupons($product_version){
 		$valid_coupon_codes = array();
 
 		//FIRST GET ANY COUPONS THAT ARE GLOBAL AND VALID 
@@ -993,7 +958,7 @@ class Product extends SystemBase {
 		
 		
 		//THEN GET ANY COUPONS THAT MATCH SUBSCRIPTION STATUS AND VALID 
-		if($this->get('pro_recurring')){
+		if($product_version->is_subscription()){
 			$searches = array('deleted' => false, 'active' => true, 'applies_to' => 1);	
 		}
 		else{
@@ -1045,27 +1010,7 @@ class Product extends SystemBase {
 	
 
 	
-
-	public function add_product_version($version_name, $version_price) {
-		$product_version = new ProductVersion();
-		$product_version->set('prv_pro_product_id', $this->key);
-		$product_version->set('prv_version_name', $version_name);
-		$product_version->set('prv_version_price', $version_price);
-		$product_version->set('prv_status', 1);
-		$product_version->prepare();
-		$product_version->save();
-		return $product_version;
-
-	}
-
-	public function change_product_version_status($version_id, $status) {
-		$product_version = new ProductVersion($version_id, TRUE);
-		$product_version->set('prv_status', $status);
-		$product_version->prepare();
-		$product_version->save();
-		return $product_version;
-	}
-
+	
 	public function get_product_versions($active=TRUE, $product_version_id=NULL) {
 		$product_versions = new MultiProductVersion(
 			array('product_id' => $this->key, 'is_active' => $active), 
@@ -1122,21 +1067,28 @@ class Product extends SystemBase {
 
 		// If the product has active product verisons, one of them must be selected!
 		$versions = $this->get_product_versions();
-		if ($versions) {
-			if (!isset($form_data['product_version']) || !is_numeric($form_data['product_version'])) {
-				throw new BasicProductRequirementException(
-					'You must select which version of the product you would like to purchase.');
-			}
 
-			$product_version = new ProductVersion(intval($form_data['product_version']), TRUE);
-			if (!$product_version) {
-				throw new BasicProductRequirementException(
-					'Sorry, the product you have selected is not valid.  Please try again.');
-			}
-
-			$form_display_data['Product'] = $product_version->get('prv_version_name');
-			$form_data['product_version'] = $product_version->get('prv_product_version_id');
+		if (!isset($form_data['product_version']) || !is_numeric($form_data['product_version'])) {
+			throw new BasicProductRequirementException(
+				'You must select which version of the product you would like to purchase.');
 		}
+
+		$product_version = new ProductVersion(intval($form_data['product_version']), TRUE);
+		if (!$product_version) {
+			throw new BasicProductRequirementException(
+				'Sorry, the product you have selected is not valid.  Please try again.');
+		}
+
+		$form_display_data['Product'] = $product_version->get('prv_version_name');
+		$form_data['product_version'] = $product_version->get('prv_product_version_id');
+
+		//VALIDATE THE USER PRICE OVERRIDE IF THAT EXISTS
+		if($product_version->get('prv_price_type') == 'user' && isset($form_data['user_price_override'])){	
+			if(!$form_data['user_price_override']){
+				throw new SystemDisplayableErrorNoLog(
+					'You must enter an amount in the "Price to pay" field.');
+			}
+		}		
 
 		//IF NO ITEMS REMAINING, SHOW ERROR
 		if($this->get('pro_max_purchase_count') > 0){
@@ -1159,13 +1111,6 @@ class Product extends SystemBase {
 			}
 		}
 		
-		//VALIDATE THE USER PRICE OVERRIDE IF THAT EXISTS
-		if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE && isset($form_data['user_price_override'])){	
-			if(!$form_data['user_price_override']){
-				throw new SystemDisplayableErrorNoLog(
-					'You must enter an amount in the "Price to pay" field.');
-			}
-		}
 		
 		//NOW VALIDATE THE ADDITIONAL PRODUCT REQUIREMENTS
 		$instances = $this->get_requirement_instances();
@@ -1249,9 +1194,11 @@ class Product extends SystemBase {
 			
 			
 			//ADD IN REQUIRED PRICE OVERRIDE
+			/*
 			if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 				$rules['user_price_override'] = array('required' => 'true');
 			}
+			*/
 
 
 			//ADD IN EXTRA DATA 
@@ -1294,18 +1241,21 @@ class Product extends SystemBase {
 	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL) {
 		$settings = Globalvars::get_instance(); 
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
-
-		if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
-			$validation_rules = array();
-			$validation_rules['user_price_override']['required']['value'] = 'true';
-			echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
-		}
 	
 		$versions = $this->get_product_versions();
 
+
 		if ($this->count_product_versions() == 1) {
 			$version = $versions->get(0);
-			echo $formwriter->hiddeninput('product_version', $version->get('prv_product_version_id'));
+			
+			if($version->get('prv_price_type') == 'user'){
+				$validation_rules = array();
+				$validation_rules['user_price_override']['required']['value'] = 'true';
+				echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
+			}
+			else{
+				echo $formwriter->hiddeninput('product_version', $version->get('prv_product_version_id'));
+			}
 		}
 		else if ($this->count_product_versions() > 1) {
 			if($product_version_id){
@@ -1370,15 +1320,6 @@ class Product extends SystemBase {
 			}
 		}	
 		
-		//DO NOT ALLOW RECURRING ITEMS TO ALSO ALLOW "OPTIONAL ONE TIME DONATION"
-		if($this->get('pro_recurring')){
-			foreach ($this->get_product_requirements() as $product_requirement) {
-				if(get_class($product_requirement) == 'UserPriceRequirement'){
-					throw new SystemDisplayableError('Sorry, due to the limitations of Stripe and Paypal, you cannot have a subscription also contain an "Optional one-time donation".');
-					exit;
-				}
-			}
-		}
 	}
 	
 }
@@ -1417,27 +1358,10 @@ class MultiProduct extends SystemMultiBase {
 			$bind_params[] = array('%'.$this->options['name_like'].'%', PDO::PARAM_STR);
 		}		
 		
-		//THIS IS FOR PULLING STUFF FOR THE /PRICING PAGE
-		if (array_key_exists('is_monthly_plan', $this->options)) {
-			$where_clauses[] = 'pro_plan_order_month > 0';
-		}			
-
-		if (array_key_exists('is_yearly_plan', $this->options)) {
-			$where_clauses[] = 'pro_plan_order_year > 0';
-		}	
 		
 		if (array_key_exists('is_active', $this->options)) {
 			$where_clauses[] = 'pro_is_active = TRUE';
-		}	
-
-		if (array_key_exists('is_recurring', $this->options)) {
-			if($this->options['is_recurring']){
-				$where_clauses[] = 'pro_recurring IS NOT NULL';
-			}
-			else{
-				$where_clauses[] = '(pro_recurring IS NULL OR pro_recurring = \'\')';
-			}
-		}		
+		}			
 		
 		if (array_key_exists('link', $this->options)) {
 			$where_clauses[] = 'pro_link = ?';
@@ -1475,26 +1399,11 @@ class MultiProduct extends SystemMultiBase {
 			if (array_key_exists('product_id', $this->order_by)) {
 				$order_by_string = ' pro_product_id '. $this->order_by['product_id'];
 			}	
-			
-			if (array_key_exists('price_low', $this->order_by)) {
-				$order_by_string = ' pro_price ASC';
-			}		
-			
-			if (array_key_exists('price_high', $this->order_by)) {
-				$order_by_string = ' pro_price DESC';
-			}	
 
 			if (array_key_exists('Name', $this->order_by)) {
 				$order_by_string = ' pro_name ASC';
 			}			
 			
-			if (array_key_exists('plan_order_month', $this->order_by)) {
-				$order_by_string = ' pro_plan_order_month '. $this->order_by['plan_order_month'];
-			}	
-
-			if (array_key_exists('plan_order_year', $this->order_by)) {
-				$order_by_string = ' pro_plan_order_year '. $this->order_by['plan_order_year'];
-			}
 		}
 		else {
 			$order_by_string = ' pro_product_id '. $this->order_by['product_id'];

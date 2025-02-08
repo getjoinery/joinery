@@ -21,39 +21,68 @@ function pricing_logic($get_vars, $post_vars){
 	}
 
 
-	$sort = 'plan_order_month';
-	$sdirection = 'ASC';
+
 	
 	
 	$searches = array();
 	$page_choice = $get_vars['page'];
+	
+	$sort = 'plan_order_year';
+	$sdirection = 'ASC';
 
 	if($page_choice == 'year'){
 		$page_vars['page_choice'] = 'year';
 		$searches['is_yearly_plan'] = TRUE;
-		$page_vars['product_version'] = ProductVersion::GetByColumn('prv_version_name', 'Yearly');
+
+		$searches['is_active'] = TRUE;
+		$searches['deleted'] = FALSE;
+		
+		$sort = 'plan_order_month';
+		$sdirection = 'ASC';
+
+		$product_versions = new MultiProductVersion(
+			$searches,
+			array($sort=>$sdirection),
+			10,
+			0,
+			'AND');
+		$product_versions->load();
+
+
 	}
 	else{
 		$page_vars['page_choice'] = 'month';
 		$searches['is_monthly_plan'] = TRUE;
-		$page_vars['product_version'] = ProductVersion::GetByColumn('prv_version_name', 'Monthly');
+
+		$searches['is_active'] = TRUE;
+		$searches['deleted'] = FALSE;
+
+		$product_versions = new MultiProductVersion(
+			$searches,
+			array($sort=>$sdirection),
+			10,
+			0,
+			'AND');
+		$product_versions->load();
 		
 	}
-	
-	$searches['is_active'] = TRUE;
-	$searches['deleted'] = FALSE;
-	$searches['in_stock'] = true;	
 
-	$products = new MultiProduct(
-		$searches,
-		array($sort=>$sdirection),
-		10,
-		0,
-		'AND');
-	$products->load();
-	$page_vars['products'] = $products;
-	$numrecords = $products->count_all();		
-	$page_vars['numrecords'] = $numrecords;
+	$page_vars['product_versions'] = $product_versions;	
+	
+	$count = 0;
+	foreach($product_versions as $product_version){
+		$product = new Product($product_version->get('prv_pro_product_id'), TRUE);
+		
+		if($product->get('pro_is_active') && !$product->get('pro_delete_time')){
+			
+			$products = new MultiProduct();
+			$products->add($product);
+			$count++;
+		}
+	}
+
+	$page_vars['products'] = $products;	
+	$page_vars['numrecords'] = $count;
 
 
 	

@@ -135,7 +135,8 @@ function cart_logic($get_vars, $post_vars){
 			$page_vars['paypal_helper'] = $paypal;
 			foreach($cart->items as $key => $cart_item) {
 				list($quantity, $product, $data, $price, $discount) = $cart_item;
-				if($product->get('pro_recurring')){
+				$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+				if($product_version->is_subscription()){
 					//TODO:
 					if(!$paypal_product = $paypal->searchProduct($product->get('pro_name'))){
 						$paypal_product = $paypal->createProduct($product);

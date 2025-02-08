@@ -40,11 +40,18 @@ class ShoppingCart {
 		return $this->extras;
 	}
 	
-	public function can_add_to_cart($product){
+	public function can_add_to_cart($product_version){
+		//PRODUCT MUST HAVE A PRODUCT VERSION 
+		if(!$product_version->key){
+			return false;
+		}
+		
+		
+		
 		//PAYPAL CHECKOUT CAN ONLY DO ONE SUBSCRIPTION AT A TIME, OR ONLY NON SUBSCRIPTION ITEMS.  ENFORCE THIS IF PAYPAL IS ENABLED.
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('use_paypal_checkout')){
-			if($this->count_items() > 0 && $product->get('pro_recurring')){
+			if($this->count_items() > 0 && $product_version->is_subscription()){
 				return false;
 			}
 			else if($this->get_recurring_total() > 0){
@@ -61,6 +68,7 @@ class ShoppingCart {
 	
 
 	public function add_item($product, $form_data, $user) {
+		$product_version = $product->get_product_versions(TRUE, $form_data['product_version']);
 
 		// First lets validate we can add this item to the cart!
 		// DO NOT ALLOW THE CART TO HOLD RECURRING AND NON RECURRING AT THE SAME time 
@@ -72,7 +80,7 @@ class ShoppingCart {
 		//ENFORCE THE RESTRICTION OF MAXIMUM NUMBER OF SUBSCRIPTIONS PER USER
 		//DO NOT CHECK IF THERE IS NO USER PASSED IN
 		$settings = Globalvars::get_instance();
-		if($user && $product->get('pro_recurring') && $max_subscriptions = $settings->get_setting('max_subscriptions_per_user')){
+		if($user && $product_version->is_subscription() && $max_subscriptions = $settings->get_setting('max_subscriptions_per_user')){
 			$active_subscriptions = new MultiOrderItem(
 			array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
 			array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
@@ -121,12 +129,12 @@ class ShoppingCart {
 			}
 		}
 
-		$product_version = $product->get_product_versions(TRUE, $form_data['product_version']);
+		
 		$price = $product->get_price($product_version, $form_data);
 
 		
 		//HANDLE COUPONS
-		$discount = $product->total_coupon_discount($price, $this->coupon_codes);
+		$discount = $product->total_coupon_discount($price, $product_version, $this->coupon_codes);
 
 		$this->items[] = array(1,	$product,	$form_data, $price, $discount);
 	}
@@ -138,7 +146,7 @@ class ShoppingCart {
 			$product_version = $product->get_product_versions(TRUE, $data['product_version']);
 			$price = $product->get_price($product_version, $data);
 
-			$discount = $product->total_coupon_discount($price, $this->coupon_codes);
+			$discount = $product->total_coupon_discount($price, $product_version, $this->coupon_codes);
 
 			$this->items[$key][4] = $discount;
 		}
@@ -170,12 +178,8 @@ class ShoppingCart {
 		foreach ($this->items as $key => $cart_item) {
 			list($quantity, $product, $data, $price, $discount) = $cart_item; 
 			$product_version = $product->get_product_versions(TRUE, $data['product_version']);
-			if ($product_version !== NULL) {
-				$name = $product->get('pro_name') . ' - ' . $product_version->get('prv_version_name');
-			} else {
-				$name = $product->get('pro_name');
-			}
-
+			$name = $product->get('pro_name') . ' - ' . $product_version->get('prv_version_name');
+			
 			$detailed_items[] = array(
 				'id' => $key,
 				'name' => $name,
@@ -183,8 +187,9 @@ class ShoppingCart {
 				'discount' => $discount,
 				'quantity' => $quantity,
 				'total' => $quantity * $price,
-				'recurring' => $product->get('pro_recurring'),
-				'trial_period_days' => $product->get('pro_trial_period_days'),
+				'recurring' => $product_version->is_subscription(),
+				'trial_period_days' => $product_version->get('prv_trial_period_days'),
+				'product_version' => $product_version,
 			);
 		}
 		return $detailed_items;
