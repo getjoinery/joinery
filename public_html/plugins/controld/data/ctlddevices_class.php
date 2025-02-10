@@ -9,6 +9,12 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldaccounts_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldprofiles_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldfilters_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldservices_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctlddevice_backups_class.php');
+
 
 class CtldDeviceException extends SystemClassException {}
 
@@ -21,14 +27,8 @@ class CtldDevice extends SystemBase {
 		'cdd_ctlddevice_id' => 'delete', 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public const DEVICE_TYPE_MOBILE_IOS = 1;
-	public const DEVICE_TYPE_MOBILE_ANDROID = 2;	
-	public const DEVICE_TYPE_WINDOWS = 3;
-	public const DEVICE_TYPE_MAC = 4;
-	
-	
-	
-	
+
+
 	public static $fields = array(
 		'cdd_ctlddevice_id' => 'ID of the ctlddevice',
 		'cdd_device_id' => 'ID from controld',
@@ -152,6 +152,94 @@ class CtldDevice extends SystemBase {
 		// Check if the input day matches the current day
 		return $weekday === $currentDay;
 
+	}
+	
+	//PROFILE CHOICE IS PRIMARY OR SECONDARY
+	function permanent_delete_profile($profile_choice){
+		$cd = new ControlDHelper();
+		if($profile_choice == 'primary'){
+			$cd_profile_id_primary = $this->get('cdd_profile_id_primary');
+			$profile_id_primary = $this->get('cdd_cdp_ctldprofile_id_primary');
+		}
+		else if ($profile_choice == 'secondary'){
+			$cd_profile_id_secondary = $this->get('cdd_profile_id_secondary');
+			$profile_id_secondary = $this->get('cdd_cdp_ctldprofile_id_secondary');			
+		}
+		
+		$result = $cd->deleteProfile($cd_profile_id_primary);
+		$profile = new CtldProfile($profile_id_primary, TRUE);
+
+
+		$filters = new MultiCtldFilter(
+				array(
+					'profile_id' => $profile_id_primary,
+				),
+			);
+			$filters->load();
+
+		foreach($filters as $filter){
+			$filter->permanent_delete();
+		}
+		
+		$services = new MultiCtldService(
+				array(
+					'profile_id' => $profile_id_primary,
+				),
+			);
+			$services->load();
+		foreach($services as $service){
+			$service->permanent_delete();
+		}
+
+		$profile->permanent_delete();
+
+		if($profile_choice == 'primary'){
+			$this->set('cdd_profile_id_primary', NULL);
+			
+		}
+		else if ($profile_choice == 'secondary'){
+			$this->set('cdd_profile_id_primary', NULL);			
+		}
+		
+		$this->save();
+		
+		return true;
+	}
+	
+	
+	function permanent_delete($debug = false){
+		$cd = new ControlDHelper();
+		//DELETE THE SCHEDULE
+		if($this->get('cdd_schedule_id')){
+			$cd->deleteSchedule($this->get('cdd_schedule_id'));
+			$this->set('cdd_schedule_id', NULL);
+			$this->save();
+		}
+		
+		//COPY THE PIN AND SAVE IT
+		$device_backup = new CtldDeviceBackup(NULL);
+		$device_backup->set('cdb_device_backup_name', $this->get('cdd_device_name'));		
+		$device_backup->set('cdb_usr_user_id', $this->get('cdd_usr_user_id'));	
+		$device_backup->set('cdb_deactivation_pin', $this->get('cdd_deactivation_pin'));
+		$device_backup->save();
+
+		//NOW DELETE THE DEVICE AT REMOTE
+		$result = $cd->deleteDevice($this->get('cdd_device_id'));		
+				
+		
+		//DELETE THE PROFILES 
+		if($cd_profile_id_primary){
+			$this->permanent_delete_profile('primary');
+		}
+
+		if($cd_profile_id_secondary){
+			$this->permanent_delete_profile('secondary');
+		}			
+		
+		parent::permanent_delete();	
+		
+		return true;
+		
 	}
 	
 }
