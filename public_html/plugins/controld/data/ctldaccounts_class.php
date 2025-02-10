@@ -9,6 +9,8 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
+require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctlddevices_class.php');
+
 
 class CtldAccountException extends SystemClassException {}
 
@@ -114,6 +116,27 @@ class CtldAccount extends SystemBase {
 		
 		return true;
 	}
+	
+	
+	function can_add_device(){
+		if(!$this->is_active()){
+			return false;
+		}
+
+		$devices = new MultiCtldDevice(
+			array(
+			'user_id' => $this->get('cda_usr_user_id'), 
+			'deleted' => false
+			), 
+			
+		);
+		$num_devices = $devices->count_all();
+		if($num_devices >= $this->get('cda_plan_max_devices')){
+			return false;
+		}	
+		return true;
+	}
+	
 	
 	//RETURNS THE ORDER ITEM THAT CORRESPONDS TO THIS USER'S SUBSCRIPTION
 	static function GetPlanOrderItem($user_id){
