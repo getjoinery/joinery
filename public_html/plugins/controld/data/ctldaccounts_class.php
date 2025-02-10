@@ -100,6 +100,43 @@ class CtldAccount extends SystemBase {
 		return false;
 	}
 	
+	function is_active(){
+
+		if(!$this->get('cda_is_active')){
+			return false;
+		}
+		
+		$end_time = strtotime($this->get('cda_period_end'));
+		$current_time = time();
+		if($end_time < $current_time){
+			return false;
+		}
+		
+		return true;
+	}
+	
+	//RETURNS THE ORDER ITEM THAT CORRESPONDS TO THIS USER'S SUBSCRIPTION
+	static function GetPlanOrderItem($user_id){
+		//SUBSCRIPTIONS
+		$subscriptions = new MultiOrderItem(
+		array('user_id' => $user_id, 'is_active_subscription' => true), //SEARCH CRITERIA
+		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+		5, //NUMBER PER PAGE
+		NULL //OFFSET
+		);
+		$subscriptions->load();	
+		
+		if($subscriptions->count_all()){
+			$order_item = $subscriptions->get(0);
+			return $order_item;
+		}
+		else{
+			return false;
+		}
+
+		
+	}
+	
 }
 
 class MultiCtldAccount extends SystemMultiBase {

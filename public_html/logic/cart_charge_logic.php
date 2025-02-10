@@ -228,9 +228,53 @@ function cart_charge_logic($get_vars, $post_vars){
 	
 	//REFRESH THE ORDER 
 	$order->load();
+		
+
 	
-	//PROCESS RECURRING ITEMS
-	$stripe_item_list = array();
+	//NOW CHARGE THE CREDIT CARD FOR THE REMAINING AMOUNT
+	if($cart->get_non_recurring_total()){
+		if($payment_service == 'stripe_regular'){
+
+			//PROCESS RECURRING ITEMS
+			$stripe_item_list = array();
+			foreach($cart->items as $key => $cart_item) {
+				$email_fill = array();
+				list($quantity, $product, $data, $price, $discount) = $cart_item;
+				$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+				$product_name = $product->get('pro_name').' '. $product_version->get('prv_version_name');
+				$email_fill['purchase_amount'] = $price - $discount;
+
+				//ASSEMBLE THE STRIPE CHARGE DESCRIPTION
+				$stripe_current_item = substr($product_name, 0, 40) .' ('.$quantity.') - $'. ($price - $discount). ' ';
+				array_push($stripe_item_list, $stripe_current_item);		
+			}	
+
+			try{
+				$charge_result = $stripe_helper->process_charge($source_result, $cart->get_non_recurring_total(), $stripe_customer_id, $stripe_item_list, $billing_user, $order);
+			}
+			catch (Exception $e) {		  
+				$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
+
+				$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+				$order->set('ord_status', Order::STATUS_ERROR);
+				$order->set('ord_error', substr($stored_error, 0, 250));
+				$order->save();	
+				PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
+
+				exit;
+			}
+
+			//STORE THE CHARGE ID
+			$order->set('ord_stripe_charge_id', $charge_result->id);
+			$order->save();	
+		}	
+	}	
+	
+	
+	
+	
+	
+	
 	foreach($cart->items as $key => $cart_item) {
 		$email_fill = array();
 		list($quantity, $product, $data, $price, $discount) = $cart_item;
@@ -238,53 +282,65 @@ function cart_charge_logic($get_vars, $post_vars){
 		$product_name = $product->get('pro_name').' '. $product_version->get('prv_version_name');
 		$email_fill['purchase_amount'] = $price - $discount;
 
-		//HANDLE SUBSCRIPTIONS
-		if($product_version->is_subscription()){
 
-			//CREATE THE ORDER ITEM
-			$order_item = new OrderItem(NULL);
-			$order_item->set('odi_ord_order_id', $order->key);
-			$order_item->set('odi_pro_product_id', $product->key);
-			$order_item->set('odi_usr_user_id', $user->key);
-			$order_item->set('odi_product_info', base64_encode(serialize($data)));
-			$order_item->set('odi_price', $price - $discount);	
-			
-			//STORE COMMENT IF ENTERED
-			if(isset($data['comment'])){
-				$order_item->set('odi_comment', $data['comment']);	
-			}
-			if ($product_version) {
-				$order_item->set('odi_prv_product_version_id', $product_version->key);
-			}			
-			$order_item->set('odi_status', OrderItem::STATUS_UNPAID);
-			$order_item->set('odi_status_change_time', 'now()');
+
+		//CREATE THE ORDER ITEM
+		$order_item = new OrderItem(NULL);
+		$order_item->set('odi_ord_order_id', $order->key);
+		$order_item->set('odi_pro_product_id', $product->key);
+		$order_item->set('odi_usr_user_id', $user->key);
+		$order_item->set('odi_product_info', base64_encode(serialize($data)));
+		$order_item->set('odi_price', $price - $discount);
+		$order_item->set('odi_prv_product_version_id', $product_version->key);
+		
+		if($product_version->is_subscription()){
 			$order_item->set('odi_is_subscription', true);
-			$order_item->save();	
-			$order_item->load();
-			
-			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
-			foreach($cart->coupon_codes as $coupon_code_name){
-				if($valid_coupons = $product->get_valid_coupons($product_version)){
-					foreach($valid_coupons as $valid_coupon){
-						if($coupon_code_name == $valid_coupon->get('ccd_code')){
-							$coupon_code_use = new CouponCodeUse(NULL);
-							$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
-							$coupon_code_use->set('ccu_ccd_coupon_code_id', $valid_coupon->key);
-							$coupon_code_use->set('ccu_amount_discount', $valid_coupon->get('ccd_amount_discount'));
-							$coupon_code_use->set('ccu_percent_discount', $valid_coupon->get('ccd_percent_discount'));
-							$coupon_code_use->prepare();
-							$coupon_code_use->save();
-						}
+		}
+		else{
+			$order_item->set('odi_is_subscription', false);	
+		}
+		
+		//STORE COMMENT IF ENTERED
+		if(isset($data['comment'])){
+			$order_item->set('odi_comment', $data['comment']);	
+		}
+
+		$order_item->set('odi_prv_product_version_id', $product_version->key);	
+		$order_item->set('odi_status', OrderItem::STATUS_UNPAID);
+		$order_item->set('odi_status_change_time', 'now()');
+		
+		$order_item->save();	
+		$order_item->load();
+
+		//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
+		$order_item->save_cart_data($data);
+
+
+		//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
+		foreach($cart->coupon_codes as $coupon_code_name){
+			if($valid_coupons = $product->get_valid_coupons($product_version)){
+				foreach($valid_coupons as $valid_coupon){
+					if($coupon_code_name == $valid_coupon->get('ccd_code')){
+						$coupon_code_use = new CouponCodeUse(NULL);
+						$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
+						$coupon_code_use->set('ccu_ccd_coupon_code_id', $valid_coupon->key);
+						$coupon_code_use->set('ccu_amount_discount', $valid_coupon->get('ccd_amount_discount'));
+						$coupon_code_use->set('ccu_percent_discount', $valid_coupon->get('ccd_percent_discount'));
+						$coupon_code_use->prepare();
+						$coupon_code_use->save();
 					}
 				}
 			}
-			
-			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
-			$order_item->save_cart_data($data);
+		}
 
+
+
+
+		//HANDLE SUBSCRIPTIONS
+		if($product_version->is_subscription()){
 
 			if($payment_service == 'stripe_regular'){
-				//CREATE A PLAN AND RUN THE SUBSCRIPTION
+				//CREATE A PRICE AND RUN THE SUBSCRIPTION
 				$final_price = $price - $discount;
 				
 				$stripe_price = $stripe_helper->get_or_create_price($product_version, $final_price);		
@@ -304,11 +360,7 @@ function cart_charge_logic($get_vars, $post_vars){
 				$order->save();
 				
 			}	
-			
-			$order_item->load();
-			
-
-			
+					
 			
 			//SEND NOTIFICATION
 			if($settings->get_setting('subscription_notification_emails')){
@@ -331,265 +383,12 @@ function cart_charge_logic($get_vars, $post_vars){
 					}
 				}
 			}
-			
-	
-			//ATTACH USERS TO THE RIGHT EVENTS/COURSES
-			if($product->get('pro_evt_event_id')){					
-				$event = new Event($product->get('pro_evt_event_id'), TRUE);
-				
-				//ADD THE USER TO THE EVENT, SUBSCRIPTIONS CANNOT BE TIME LIMITED
-				$event_registrant = $event->add_registrant($user->key, $order_item, NULL, NULL);
-
-				//THE RECORDING CONSENT BOX
-				if(isset($data['record_terms'])){ 
-					$event_registrant->set('evr_recording_consent', TRUE);	
-					$event_registrant->save();	
-				}
-				
-				//LINK THE ORDER ITEM AND THE EVENT REGISTRATION
-				$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
-				$order_item->save();								
-				
-				//SEND THE EMAIL
-				$email_fill['event_name'] = $event->get('evt_name');			
-				$email_fill['more_info_required'] = false;
-				if($event->get('evt_collect_extra_info')){
-					$email_fill['more_info_required'] = true;	
-				}
-				$email_fill['event_registrant_id'] = $event_registrant->key;
-
-				$template = 'event_reciept_content';
-				
-				$final_fill = array_merge($default_fill, $email_fill);
-				$activation_email = new EmailTemplate($template, $user);
-				$activation_email->fill_template($final_fill);
-				$activation_email->send();
-				
-
-			}
-			else if($product->get('pro_grp_group_id')){
-				
-				//IT IS AN EVENT BUNDLE
-				$group = new Group($product->get('pro_grp_group_id'), TRUE);
-				$group_members = $group->get_member_list();
-				$event_list = array();
-				foreach ($group_members as $group_member){
-					$event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
-					$event_list[] = $event->get('evt_name');
-					//ADD THE USER TO THE EVENT, SUBSCRIPTIONS CANNOT BE TIME LIMITED
-					$event_registrant = $event->add_registrant($user->key, $order_item, $product->get('pro_grp_group_id'), NULL);
-					
-					//THE RECORDING CONSENT BOX
-					if(isset($data['record_terms'])){ 
-						$event_registrant->set('evr_recording_consent', TRUE);	
-					}
-
-					$event_registrant->save();	
-					
-				}
-				
-				//SEND THE EMAIL
-				$email_fill['event_list'] = implode('<br>', $event_list);
-				$final_fill = array_merge($default_fill, $email_fill);
-				$activation_email = new EmailTemplate('event_bundle_content', $user);
-				$activation_email->fill_template($final_fill);
-				$activation_email->send();					
-				
-			}
-			else{
-				//SUBSCRIPTION
-				$email_fill['purchase_amount'] = ($price - $discount);
-				$final_fill = array_merge($default_fill, $email_fill);
-				$activation_email = new EmailTemplate('subscription_reciept', $user);
-				$activation_email->fill_template($final_fill);
-				$activation_email->send();
-				
-		
-			}	
-			
-			//RUN THE PRODUCT SCRIPTS
-			$product->run_product_scripts($user, $order_item);
-
-
-
-			if($product_version->get('prv_trial_period_days')){
-				$trial = ' (' . $product_version->get('prv_trial_period_days') . ' day free trial)';	
-			}
-			else{
-				$trial = '';
-			}
-		
-			$receipts[$key+1]['pname'] = $product_name . $trial;
-			$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
-			$receipts[$key+1]['price'] = $price - $discount;
-
 		}
 		else{
-			//ASSEMBLE THE STRIPE CHARGE DESCRIPTION
-			$stripe_current_item = substr($product_name, 0, 40) .' ('.$quantity.') - $'. ($price - $discount). ' ';
-			array_push($stripe_item_list, $stripe_current_item);		
-		}
-	}		
-
-
-	//NOW CHARGE THE CREDIT CARD FOR THE REMAINING AMOUNT
-	if($cart->get_non_recurring_total()){
-		if($payment_service == 'stripe_regular'){
-
-			try{
-				$charge_result = $stripe_helper->process_charge($source_result, $cart->get_non_recurring_total(), $stripe_customer_id, $stripe_item_list, $billing_user, $order);
-			}
-			catch (Exception $e) {		  
-				$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
-
-				$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-				$order->set('ord_status', Order::STATUS_ERROR);
-				$order->set('ord_error', substr($stored_error, 0, 250));
-				$order->save();	
-				PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
-
-				exit;
-			}
-
-			//STORE THE CHARGE ID
-			$order->set('ord_stripe_charge_id', $charge_result->id);
-			
-			//MARK THE ORDER PAID
-			$order->set('ord_status', Order::STATUS_PAID);
-			$order->save();	
-		}	
-	}	
-	
-	
-	//NOW HANDLE ALL OF THE NON RECURRING ITEMS
-	foreach($cart->items as $key => $cart_item) {
-		$email_fill = array();
-		list($quantity, $product, $data, $price, $discount) = $cart_item;
-		$product_version = $product->get_product_versions(TRUE, $data['product_version']);
-		$email_fill['purchase_amount'] = $price - $discount;
-
-		//ONLY NON RECURRING
-		$one_time_purchase_exists = 0;
-		if(!$product_version->is_subscription()){
-			$one_time_purchase_exists = 1;
-			
-			
-			
-			
-			//CREATE THE ORDER ITEM
-			$order_item = new OrderItem(NULL);
-			$order_item->set('odi_ord_order_id', $order->key);
-			$order_item->set('odi_pro_product_id', $product->key);
-			$order_item->set('odi_usr_user_id', $user->key);
-			$order_item->set('odi_product_info', base64_encode(serialize($data)));
-			$order_item->set('odi_price', $price - $discount);
-			$order_item->set('odi_is_subscription', false);			
-			if ($product_version) {
-				$order_item->set('odi_prv_product_version_id', $product_version->key);
-			}
-		
-			//STORE COMMENT IF ENTERED
-			if(isset($data['comment'])){
-				$order_item->set('odi_comment', $data['comment']);	
-			}
-			
+			//IT WAS PAID ABOVE
 			$order_item->set('odi_status', OrderItem::STATUS_PAID);
-			$order_item->set('odi_status_change_time', 'now()');
-			$order_item->save();				
-			$order_item->load();
-			
-			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
-			foreach($cart->coupon_codes as $coupon_code_name){
-				if($valid_coupons = $product->get_valid_coupons($product_version)){
-					foreach($valid_coupons as $valid_coupon){
-						if($coupon_code_name == $valid_coupon->get('ccd_code')){
-							$coupon_code_use = new CouponCodeUse(NULL);
-							$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
-							$coupon_code_use->set('ccu_ccd_coupon_code_id', $valid_coupon->key);
-							$coupon_code_use->set('ccu_amount_discount', $valid_coupon->get('ccd_amount_discount'));
-							$coupon_code_use->set('ccu_percent_discount', $valid_coupon->get('ccd_percent_discount'));
-							$coupon_code_use->prepare();
-							$coupon_code_use->save();
-						}
-					}
-				}
-			}
-			
-			//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
-			$order_item->save_cart_data($data);
-			
-			//ATTACH USERS TO THE RIGHT EVENTS/COURSES
-			if($product->get('pro_evt_event_id')){
-								
-				$event = new Event($product->get('pro_evt_event_id'), TRUE);
-				$email_fill['event_name'] = $event->get('evt_name');	
+			$order_item->save();	
 
-				//ADD THE USER TO THE EVENT
-				$event_registrant = $event->add_registrant($user->key, $order_item, NULL, $product->get('pro_expires'));
-				$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
-				$order_item->save();
-
-				//THE RECORDING CONSENT BOX
-				if(isset($data['record_terms'])){ 
-					$event_registrant->set('evr_recording_consent', TRUE);
-					$event_registrant->save();		
-				} 				
-				
-				//SEND THE EMAIL
-				$email_fill['more_info_required'] = false;
-				if($event->get('evt_collect_extra_info')){
-					$email_fill['more_info_required'] = true;	
-				}
-				$email_fill['event_registrant_id'] = $event_registrant->key;
-
-				$template = 'event_reciept_content';
-				
-				$final_fill = array_merge($default_fill, $email_fill);
-				$activation_email = new EmailTemplate($template, $user);
-				$activation_email->fill_template($final_fill);
-				$activation_email->send();
-				
-
-			}
-			else if($product->get('pro_grp_group_id')){
-				//IT IS AN EVENT BUNDLE
-				$group = new Group($product->get('pro_grp_group_id'), TRUE);
-				$group_members = $group->get_member_list();
-				foreach ($group_members as $group_member){
-					$event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
-					$event_registrant = $event->add_registrant($user->key, $order_item, NULL, $product->get('pro_expires'));
-
-					//THE RECORDING CONSENT BOX
-					if(isset($data['record_terms'])){ 
-						$event_registrant->set('evr_recording_consent', TRUE);	
-					}
-					$event_registrant->save();
-				}
-			}
-			else{
-				//SUBSCRIPTION
-				$email_fill['purchase_amount'] = $price - $discount;
-				$final_fill = array_merge($default_fill, $email_fill);
-				$activation_email = new EmailTemplate('purchase_reciept', $user);
-				$activation_email->fill_template($final_fill);
-				$activation_email->send();
-			}	
-			
-			//RUN THE PRODUCT SCRIPTS
-			$product->run_product_scripts($user, $order_item);
-
-			$receipts[$key+1]['pname'] = $product->get('pro_name').' '. $product_version->get('prv_version_name');
-			$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
-			$receipts[$key+1]['price'] = $price - $discount;
-			
-			if($product->get('pro_digital_link')){			
-				$receipts[$key+1]['link'] = $product->get('pro_digital_link');	
-			}			
-			
-			
-		}
-		
-		if($one_time_purchase_exists){
 			//SEND NOTIFICATION
 			if($settings->get_setting('single_purchase_notification_emails')){
 				$notify_emails = explode(',', $settings->get_setting('single_purchase_notification_emails'));
@@ -611,20 +410,116 @@ function cart_charge_logic($get_vars, $post_vars){
 					}
 				}
 			}
+
 		}
+			
+		//ATTACH USERS TO THE RIGHT EVENTS/COURSES
+		if($product->get('pro_evt_event_id')){
+							
+			$event = new Event($product->get('pro_evt_event_id'), TRUE);
+			$email_fill['event_name'] = $event->get('evt_name');	
+
+			//ADD THE USER TO THE EVENT
+			$event_registrant = $event->add_registrant($user->key, $order_item, NULL, $product->get('pro_expires'));
+			$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
+			$order_item->save();
+
+			//THE RECORDING CONSENT BOX
+			if(isset($data['record_terms'])){ 
+				$event_registrant->set('evr_recording_consent', TRUE);
+				$event_registrant->save();		
+			} 				
+			
+			//SEND THE EMAIL
+			$email_fill['more_info_required'] = false;
+			if($event->get('evt_collect_extra_info')){
+				$email_fill['more_info_required'] = true;	
+			}
+			$email_fill['event_registrant_id'] = $event_registrant->key;
+
+			$template = 'event_reciept_content';
+			
+			$final_fill = array_merge($default_fill, $email_fill);
+			$activation_email = new EmailTemplate($template, $user);
+			$activation_email->fill_template($final_fill);
+			$activation_email->send();
+			
+
+		}	
+		else if($product->get('pro_grp_group_id')){
+			
+			//IT IS AN EVENT BUNDLE
+			$group = new Group($product->get('pro_grp_group_id'), TRUE);
+			$group_members = $group->get_member_list();
+			$event_list = array();
+			foreach ($group_members as $group_member){
+				$event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
+				$event_list[] = $event->get('evt_name');
+				//ADD THE USER TO THE EVENT, SUBSCRIPTIONS CANNOT BE TIME LIMITED
+				$event_registrant = $event->add_registrant($user->key, $order_item, $product->get('pro_grp_group_id'), NULL);
+				
+				//THE RECORDING CONSENT BOX
+				if(isset($data['record_terms'])){ 
+					$event_registrant->set('evr_recording_consent', TRUE);	
+				}
+
+				$event_registrant->save();	
+				
+			}
+			
+			//SEND THE EMAIL
+			$email_fill['event_list'] = implode('<br>', $event_list);
+			$final_fill = array_merge($default_fill, $email_fill);
+			$activation_email = new EmailTemplate('event_bundle_content', $user);
+			$activation_email->fill_template($final_fill);
+			$activation_email->send();					
+			
+		}
+		else{
+
+			/* DONATION CODE.  NOT NEEDED ANYMORE?
+			$email_fill['purchase_amount'] = $price - $discount;
+			$final_fill = array_merge($default_fill, $email_fill);
+			$activation_email = new EmailTemplate('subscription_reciept', $user);
+			$activation_email->fill_template($final_fill);
+			$activation_email->send();
+			*/
+			
+	
+		}	
+			
+		//RUN THE PRODUCT SCRIPTS
+		$product->run_product_scripts($user, $order_item);
+
+
+
+		if($product_version->get('prv_trial_period_days')){
+			$trial = ' (' . $product_version->get('prv_trial_period_days') . ' day free trial)';	
+		}
+		else{
+			$trial = '';
+		}
+	
+		$receipts[$key+1]['pname'] = $product_name . $trial;
+		$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
+		$receipts[$key+1]['price'] = $price - $discount;
+
+		if($product->get('pro_digital_link')){			
+			$receipts[$key+1]['link'] = $product->get('pro_digital_link');	
+		}	
 		
 		//UPDATE THE CALCULATED STILL AVAILABLE FIELD
 		if($product->get('pro_max_purchase_count') > 0){
 			$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
 			$product->set('pro_num_remaining_calc', $remaining);
 			$product->save();
-		}		
-	}
+		}			
 
+	}		
 	
-	
-	
-
+	//MARK THE ORDER PAID
+	$order->set('ord_status', Order::STATUS_PAID);
+	$order->save();	
 	
 	$cart->last_receipt = $receipts;
 	$cart->clear_cart();

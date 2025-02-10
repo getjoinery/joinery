@@ -5,6 +5,7 @@ function subscription_edit_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Pager.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldaccounts_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
@@ -31,21 +32,9 @@ function subscription_edit_logic($get_vars, $post_vars){
 	}
 	else if(isset($_POST['product_id'])){
 		$product_id = LibraryFunctions::fetch_variable_local($post_vars, 'product_id', 0, 'notrequired', '', 'safemode', 'int');
-		$user_id = $session->get_user_id();
-		//SUBSCRIPTIONS
-		$subscriptions = new MultiOrderItem(
-		array('user_id' => $user_id, 'is_active_subscription' => true), //SEARCH CRITERIA
-		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-		5, //NUMBER PER PAGE
-		NULL //OFFSET
-		);
-		$subscriptions->load();	
-		$order_item = $subscriptions->get(0);
+		$order_item = CtldAccount::GetPlanOrderItem($user_id);
 
-
-		
 		$product = new Product($product_id, TRUE);
-		//$order_item = new OrderItem($order_item_id, TRUE);
 		$subscription_id = $order_item->get('odi_stripe_subscription_id');
 
 		$product_version = $product->get_product_versions(TRUE, $_POST['product_version']);
@@ -119,24 +108,15 @@ function subscription_edit_logic($get_vars, $post_vars){
 
 	//SUBSCRIPTIONS
 	$user_id = $session->get_user_id();
-	$subscriptions = new MultiOrderItem(
-	array('user_id' => $user_id, 'is_active_subscription' => true), //SEARCH CRITERIA
-	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	5, //NUMBER PER PAGE
-	NULL //OFFSET
-	);
-	$subscriptions->load();	
-	if($subscriptions->count_all()){
-		$order_item = $subscriptions->get(0);
+	$order_item = CtldAccount::GetPlanOrderItem($user_id);
+	if($order_item){
 		$current_plan_id = $order_item->get('odi_pro_product_id');
 		$page_vars['current_plan_id'] = $current_plan_id;
 	}
 	else{
 		$page_vars['current_plan_id'] = NULL;
-	}
-
-
-
+	}	
+	
 	
 	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')]; 
 	

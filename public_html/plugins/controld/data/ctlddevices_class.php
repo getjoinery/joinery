@@ -116,6 +116,11 @@ class CtldDevice extends SystemBase {
 		}
 	}
 	
+	function get_readable_name(){
+		return preg_replace('/^user\d+-/', '', $this->get('cdd_device_name'));
+		
+	}
+	
 	function are_filters_editable(){
 		
 		if($this->get('cdd_allow_device_edits')){
@@ -126,6 +131,7 @@ class CtldDevice extends SystemBase {
 		if(!$this->get('cdd_cdp_ctldprofile_id_primary')){
 			return true;
 		}
+
 		
 		$weekday = 'Sunday';
 		if($this->get('cdd_timezone')){
@@ -134,17 +140,18 @@ class CtldDevice extends SystemBase {
 		else{
 			$timezone = 'America/New_York';
 		}
-		function isToday($weekday, $timezone = 'UTC') {
-			date_default_timezone_set($timezone);
 
-			$weekday = strtolower($weekday);
-			// Get the current day in the specified timezone, in lowercase
-			$currentDay = strtolower(date('l')); // 'l' returns full weekday name
+		date_default_timezone_set($timezone);
 
-			// Check if the input day matches the current day
-			return $weekday === $currentDay;
-		}		
-		
+		$weekday = strtolower($weekday);
+		// Get the current day in the specified timezone, in lowercase
+		$currentDay = strtolower(date('l')); // 'l' returns full weekday name
+
+
+
+		// Check if the input day matches the current day
+		return $weekday === $currentDay;
+
 	}
 	
 }
