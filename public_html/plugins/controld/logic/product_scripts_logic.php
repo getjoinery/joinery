@@ -17,7 +17,6 @@ function controld_subscription_product_script($user, $order_item){
 	if(!$ctld_account){
 		$ctld_account = new CtldAccount(NULL);
 		$ctld_account->set('cda_usr_user_id', $user->key);
-		$ctld_account->set('cda_is_active', true);
 	}
 	
 	$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
@@ -25,14 +24,18 @@ function controld_subscription_product_script($user, $order_item){
 	if($product->key == 19){
 		$ctld_account->set('cda_plan', CtldAccount::BASIC_PLAN);
 		$ctld_account->set('cda_plan_max_devices', CtldAccount::BASIC_PLAN_MAX_DEVICES);
+		$ctld_account->set('cda_is_active', true);
+		$ctld_account->set('cda_period_end', NULL);
 	}
 	else if($product->key == 20){
 		$ctld_account->set('cda_plan', CtldAccount::PREMIUM_PLAN);
 		$ctld_account->set('cda_plan_max_devices', CtldAccount::PREMIUM_PLAN_MAX_DEVICES);
+		$ctld_account->set('cda_period_end', NULL);
 	}
 	else if($product->key == 21){
 		$ctld_account->set('cda_plan', CtldAccount::PRO_PLAN);
 		$ctld_account->set('cda_plan_max_devices', CtldAccount::PRO_PLAN_MAX_DEVICES);
+		$ctld_account->set('cda_period_end', NULL);
 	}
 	
 	
