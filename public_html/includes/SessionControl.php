@@ -631,6 +631,15 @@ class SessionControl{
 		return isset($_SESSION['location_info']) ? $_SESSION['location_info'] : FALSE;
 	}
 
+
+	function is_logged_in(){
+		if(isset($_SESSION['loggedin'])){
+			return true;
+		}
+		return false;
+	}
+
+
 	function get_permission() {
 		
 		return $_SESSION['permission'];	
@@ -644,7 +653,6 @@ class SessionControl{
 		// Otherwise return their permission level
 		return $_SESSION['permission'];
 	}
-
 
 	function check_permission($level, $msgtext=NULL){
 		//IF NOT LOGGED IN OR IF IP ADDRESS HAS CHANGED FOR LOGGED IN USER, REDIRECT TO LOGIN SCREEN

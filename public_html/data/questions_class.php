@@ -199,7 +199,7 @@ class Question extends SystemBase {
 			$truevalue = $options->get(0)->get('qop_question_option_value');
 			
 			//TODO ERROR CHECKING HERE 
-			echo $formwriter->checkboxinput($question_text, $field_name, 'sm:col-span-6', NULL, $truevalue, $value, '');			
+			echo $formwriter->checkboxinput($question_text, $field_name, '', NULL, $truevalue, $value, '');			
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(

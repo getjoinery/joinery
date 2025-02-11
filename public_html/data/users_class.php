@@ -394,7 +394,7 @@ class User extends SystemBase {
 					$user->set('usr_timezone', $data['usr_timezone']);
 				} catch (Exception $e) {
 					$errorhandler = new ErrorHandler();
-					$errorhandler->handle_general_error('The timezone you entered in invalid.');
+					$errorhandler->handle_general_error('The timezone you entered is invalid.');
 				}
 			}
 			
