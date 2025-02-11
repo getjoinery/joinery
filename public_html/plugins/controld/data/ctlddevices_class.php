@@ -131,8 +131,14 @@ class CtldDevice extends SystemBase {
 		if(!$this->get('cdd_cdp_ctldprofile_id_primary')){
 			return true;
 		}
-
 		
+		//IF IT IS THE DAY OF CREATION
+		if(date('Y-m-d', strtotime($this->get('cdd_create_time'))) === date("Y-m-d")){
+			return true;
+		}
+		
+
+		//IF IT IS SUNDAY 
 		$weekday = 'Sunday';
 		if($this->get('cdd_timezone')){
 			$timezone = $this->get('cdd_timezone');

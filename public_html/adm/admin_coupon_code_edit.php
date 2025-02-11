@@ -50,6 +50,7 @@
 		
 		$_POST['ccd_is_active'] = (bool)$_POST['ccd_is_active'];
 		$_POST['ccd_is_stackable'] = (bool)$_POST['ccd_is_stackable'];
+		$_POST['ccd_code'] = strtolower($_POST['ccd_code']);
 
 		if(!$_POST['ccd_max_num_uses']){
 			$_POST['ccd_max_num_uses'] = 0;

@@ -140,6 +140,12 @@ class CtldAccount extends SystemBase {
 	
 	//RETURNS THE ORDER ITEM THAT CORRESPONDS TO THIS USER'S SUBSCRIPTION
 	static function GetPlanOrderItem($user_id){
+		
+		if(!$user_id){
+			throw new SystemDisplayablePermanentError('User was not provided to get Plan.');
+			exit;
+		}
+		
 		//SUBSCRIPTIONS
 		$subscriptions = new MultiOrderItem(
 		array('user_id' => $user_id, 'is_active_subscription' => true), //SEARCH CRITERIA

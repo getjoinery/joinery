@@ -63,7 +63,7 @@ function cart_logic($get_vars, $post_vars){
 		else if($_GET['coupon_code']){
 			//CHECK IF VALID
 
-			$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim($_GET['coupon_code']));
+			$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim(strtolower($_GET['coupon_code'])));
 
 			if($coupon_code_test){
 				if($coupon_code_test->is_valid()){

@@ -27,6 +27,13 @@ if(file_exists($template_file)){
 	require_once($template_file);
 }
 
+/*
+if($_GET['act_code']){
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+	$activated = Activation::ActivateUser($act_code);
+}
+*/
+
 //ROBOTS.TXT
 if($params[0] == 'robots.txt'){
 	$template_file = $template_directory.'/views/robots.php';

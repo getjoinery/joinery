@@ -525,16 +525,7 @@ class NewsletterSignupRequirement extends BasicProductRequirement {
     }
 	
 	public function get_form($formwriter, $user=NULL) {
-		echo '<div id="newsletter_container" class="sm:col-span-6 errorplacement">
-					<div class="relative flex items-start">
-						<div class="flex items-center h-5">
-							<input class="" type="checkbox" id="newsletter" name="newsletter" value="1"   />
-						</div>
-						<div class="ml-3 text-sm">
-							<label class="font-medium text-gray-700" for="newsletter">Please add me to the newsletter.</label>      
-						</div>
-					</div>
-				</div>';
+		echo $formwriter->checkboxinput("Keep me updated by email", "newsletter", "checkbox", "", NULL, 1, "");
 
 	}
 
