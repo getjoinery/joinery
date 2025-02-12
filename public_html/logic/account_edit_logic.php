@@ -22,6 +22,10 @@ function account_edit_logic($get_vars, $post_vars){
 		//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
 		if($session->get_user_id()){ 
 			$user = new User($session->get_user_id(), TRUE);
+			$user->set('usr_first_name', preg_replace("/[^a-zA-Z'-]/", "", $post_vars['usr_first_name']));
+			$user->set('usr_last_name', preg_replace("/[^a-zA-Z'-]/", "", $post_vars['usr_last_name']));
+			$user->set('usr_timezone', preg_replace("/[^a-zA-Z\/_-]/", "", $post_vars['usr_timezone']));
+			$user->save();
 		}
 		else if(!$user = User::GetByEmail($post_vars['usr_email'])){
 			$data = array(
@@ -36,8 +40,8 @@ function account_edit_logic($get_vars, $post_vars){
 			$user = User::CreateNew($data);	
 		}
 
-
 		$session->set_timezone($user->get('usr_timezone'));
+		
 
 		if(isset($post_vars['usr_email_new']) && $post_vars['usr_email_new'] != $user->get('usr_email')) {
 			
