@@ -6,28 +6,28 @@
 	error_reporting(E_ERROR | E_PARSE);
 	ini_set('display_errors', 1);
 	ini_set('display_startup_errors', 1);
-	//error_reporting(E_ALL);
+	error_reporting(E_ALL);
 	
 	//THIS SCRIPT ACCEPTS THREE POSSIBLE ARGUMENTS
 	//VERBOSE PRINTS MISMATCHES TO THE SCREEN
 	//UPGRADE FIXES MISMATCHES IN COLUMN TYPES
 	//CLEANUP DELETES SUPERFLUOUS COLUMNS
 	
-	if($_REQUEST['verbose']){
+	if(isset($_REQUEST['verbose']) && $_REQUEST['verbose']){
 		$verbose=$_REQUEST['verbose'];
 	}
 	else{
 		$verbose=false;
 	}
 
-	if($_REQUEST['upgrade']){
+	if(isset($_REQUEST['upgrade']) && $_REQUEST['upgrade']){
 		$upgrade=$_REQUEST['upgrade'];
 	}
 	else{
 		$upgrade=false;
 	}
 	
-	if($_REQUEST['cleanup']){
+	if(isset($_REQUEST['cleanup']) && $_REQUEST['cleanup']){
 		$cleanup=$_REQUEST['cleanup'];
 	}
 	else{
@@ -46,7 +46,7 @@
 	
 	
 
-	function update_database($classes, $migrations, $verbose=false, $upgrade=false, $cleanup=false){
+	function update_database($migrations, $verbose=false, $upgrade=false, $cleanup=false){
 
 
 		//LOAD ALL CLASSES 
@@ -64,7 +64,9 @@
 					if(file_exists($filepath)){
 						if (str_contains($file, '_class')) {
 							require_once($filepath);
-							
+							if($verbose){
+								echo 'Requiring '.$filepath.'<br>';
+							}
 							
 							$fileContent = file_get_contents($filepath);
 							$tokens = token_get_all($fileContent);
@@ -74,6 +76,9 @@
 									$thisclass = $tokens[$i + 2][1];;
 									//TABLENAME AND FIELD SPECIFICATIONS ARE REQUIRED 
 									if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
+											if($verbose){
+											echo 'Loading '.$thisclass.'<br>';
+										}
 										$classes[] = $thisclass;
 										$db_structure_contents .= serialize($thisclass::$field_specifications);
 									}
@@ -93,36 +98,46 @@
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
 			$plugin_data_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/data';
-
+			if($verbose){
+				echo 'Loading classes from plugin '.$plugin.'<br>';
+			}
 			if ($handle = opendir($plugin_data_dir)) {
 				while (false !== ($file = readdir($handle))) {
 					if ('.' === $file) continue;
 					if ('..' === $file) continue;
 					$filepath = $plugin_data_dir.'/'.$file;
 					$file_parts = pathinfo($file);
-					if($file_parts['extension'] == 'php'){
-						if (str_contains($file, '_class')) {
-							require_once($filepath);
+					if ($file_parts['extension'] === 'php' && str_contains($file, '_class')) {
 
-							$fileContent = file_get_contents($filepath);
-							$tokens = token_get_all($fileContent);
+						require_once(realpath($filepath));
+						if($verbose){
+							echo 'Requiring '.$filepath.'<br>';
+						}
+						$fileContent = file_get_contents($filepath);
+						$tokens = token_get_all($fileContent);
 
-							for ($i = 0; $i < count($tokens); $i++) {
-								if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
-									$thisclass = $tokens[$i + 2][1];;
-									if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
-										$classes[] = $thisclass;
-										$db_structure_contents .= serialize($thisclass::$field_specifications);
+						for ($i = 0; $i < count($tokens); $i++) {
+							if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
+								$thisclass = $tokens[$i + 2][1];;
+								if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
+									$classes[] = $thisclass;
+									$db_structure_contents .= serialize($thisclass::$field_specifications);
+									if($verbose){
+										echo 'Loading plugin class '.$thisclass.'<br>';
 									}
 								}
-							}	
-						}
+							}
+						}	
 					}
+
 				}
 				closedir($handle);
 			}
 		}	
 
+		if($verbose){
+			echo 'Finished loading classes<br>';
+		}
 
 		$db_structure_hash = md5($db_structure_contents);
 		$sql_commands = '';
@@ -748,7 +763,7 @@
 	}
 	
 	if(!isset($noautorun)){
-		if(update_database($classes, $migrations, $verbose, $upgrade, $cleanup)){
+		if(update_database($migrations, $verbose, $upgrade, $cleanup)){
 			echo 'Database update script successful'. "<br>\n";
 			exit(1);;  //RETURN 1 FOR THE DEPLOY SCRIPT
 		}
