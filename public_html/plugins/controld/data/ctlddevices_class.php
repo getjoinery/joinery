@@ -38,7 +38,6 @@ class CtldDevice extends SystemBase {
 		'cdd_profile_id_secondary' => 'ID from controld',
 		'cdd_cdp_ctldprofile_id_primary' => 'Local foreign key',
 		'cdd_cdp_ctldprofile_id_secondary' => 'Local foreign key',
-		'cdd_schedule_id' => 'Schedule applied to the device',
 		'cdd_usr_user_id' => 'User id this profile is assigned to',
 		'cdd_is_active' => 'Is it active?',
 		'cdd_create_time' => 'Time Created',
@@ -58,7 +57,6 @@ class CtldDevice extends SystemBase {
 		'cdd_profile_id_secondary' => array('type'=>'varchar(64)'),
 		'cdd_cdp_ctldprofile_id_primary' => array('type'=>'int4'),
 		'cdd_cdp_ctldprofile_id_secondary' => array('type'=>'int4'),
-		'cdd_schedule_id' => array('type'=>'varchar(64)'),
 		'cdd_usr_user_id' => array('type'=>'int4'),
 		'cdd_is_active' => array('type'=>'bool'),
 		'cdd_create_time' => array('type'=>'timestamp(6)'),
@@ -116,6 +114,57 @@ class CtldDevice extends SystemBase {
 		}
 	}
 	
+	
+	static function createDevice($device, $profile1, $profile2, $post_vars){
+			$cd = new ControlDHelper();
+			$user = new User($profile1->get('cdp_usr_user_id'), TRUE);
+
+			$deactivation_pin = rand(100000, 999999);
+			
+			//CREATE THE DEVICE
+			$device_name = 'user'.$user->key . '-' . trim(preg_replace("/[^a-zA-Z0-9\s'-]/", "", $post_vars['device_name']));
+			$device_type = trim(preg_replace("/[^a-zA-Z0-9\s'-]/", "", $post_vars['device_type']));;
+			$data = array(
+				'name' => $device_name,
+				'icon' => $post_vars['device_type'],
+				'profile_id' => $profile1->get('cdp_profile_id'),
+				'stats' => 0,
+				'desc' => 'User '.$user->key . '-' . $user->get('usr_last_name'),
+				'deactivation_pin' => $deactivation_pin,
+				
+			);
+
+			
+			$result = $cd->createDevice($data);
+			$success = $result['success'];			
+			
+			if($success){
+			
+				//CREATE A NEW DEVICE LOCALLY
+				$device->set('cdd_timezone',strip_tags($post_vars['cdd_timezone']));
+				$device->set('cdd_usr_user_id', $user->key);
+				$device->set('cdd_is_active', false);
+				$device->set('cdd_allow_device_edits', $post_vars['cdd_allow_device_edits']);
+				$device->set('cdd_deactivation_pin', $deactivation_pin);
+				$device->set('cdd_cdp_ctldprofile_id_primary', $profile1->key);
+				$device->set('cdd_profile_id_primary', $profile1->get('cdp_profile_id'));
+				$device->set('cdd_cdp_ctldprofile_id_secondary', $profile2->key);
+				$device->set('cdd_profile_id_secondary', $profile2->get('cdp_profile_id'));
+				$device->set('cdd_device_id', $result['body']['PK']);
+				$device->set('cdd_device_type', $post_vars['device_type']);
+				$device->set('cdd_device_name', $device_name);
+				$device->set('cdd_controld_resolver', $result['body']['resolvers']['uid']);
+				
+				$device->prepare();
+				$device->save();	
+				return $device;
+			}
+			else{
+				throw new SystemDisplayablePermanentError('Unable to create a device.');
+				exit;
+			}
+	}
+	
 	function get_readable_name(){
 		return preg_replace('/^user\d+-/', '', $this->get('cdd_device_name'));
 		
@@ -164,21 +213,41 @@ class CtldDevice extends SystemBase {
 	function permanent_delete_profile($profile_choice){
 		$cd = new ControlDHelper();
 		if($profile_choice == 'primary'){
-			$cd_profile_id_primary = $this->get('cdd_profile_id_primary');
-			$profile_id_primary = $this->get('cdd_cdp_ctldprofile_id_primary');
+			$cd_profile_id = $this->get('cdd_profile_id_primary');
+			$profile_id = $this->get('cdd_cdp_ctldprofile_id_primary');
 		}
 		else if ($profile_choice == 'secondary'){
-			$cd_profile_id_secondary = $this->get('cdd_profile_id_secondary');
-			$profile_id_secondary = $this->get('cdd_cdp_ctldprofile_id_secondary');			
+			$cd_profile_id = $this->get('cdd_profile_id_secondary');
+			$profile_id = $this->get('cdd_cdp_ctldprofile_id_secondary');			
 		}
 		
-		$result = $cd->deleteProfile($cd_profile_id_primary);
-		$profile = new CtldProfile($profile_id_primary, TRUE);
+		$profile = new CtldProfile($profile_id, TRUE);
+
+		//DELETE THE SCHEDULE IF PRESENT
+		if($profile->get('cdp_schedule_id')){
+
+			$result = $cd->deleteSchedule($profile->get('cdp_schedule_id'));
+			if(!$result['success']){
+				throw new SystemDisplayablePermanentError('Unable to delete schedule.');
+				exit;
+			}
+			$profile->set('cdp_schedule_id', NULL);
+			$profile->set('cdp_schedule_start', NULL);
+			$profile->set('cdp_schedule_end', NULL);
+			$profile->set('cdp_schedule_days', NULL);
+			$profile->set('cdp_schedule_timezone', NULL);
+			$profile->save();
+		}
+		$result = $cd->deleteProfile($cd_profile_id);
+		if(!$result['success']){
+			throw new SystemDisplayablePermanentError('Unable to delete profile.');
+			exit;
+		}		
 
 
 		$filters = new MultiCtldFilter(
 				array(
-					'profile_id' => $profile_id_primary,
+					'profile_id' => $profile_id,
 				),
 			);
 			$filters->load();
@@ -189,7 +258,7 @@ class CtldDevice extends SystemBase {
 		
 		$services = new MultiCtldService(
 				array(
-					'profile_id' => $profile_id_primary,
+					'profile_id' => $profile_id,
 				),
 			);
 			$services->load();
@@ -200,13 +269,14 @@ class CtldDevice extends SystemBase {
 		$profile->permanent_delete();
 
 		if($profile_choice == 'primary'){
-			$this->set('cdd_profile_id_primary', NULL);
-			
+			$this->set('cdd_profile_id_primary', NULL);	
+			$this->set('cdd_cdp_ctldprofile_id_primary', NULL);	
 		}
 		else if ($profile_choice == 'secondary'){
-			$this->set('cdd_profile_id_primary', NULL);			
+			$this->set('cdd_profile_id_secondary', NULL);
+			$this->set('cdd_cdp_ctldprofile_id_secondary', NULL);				
 		}
-		
+				
 		$this->save();
 		
 		return true;
@@ -215,37 +285,39 @@ class CtldDevice extends SystemBase {
 	
 	function permanent_delete($debug = false){
 		$cd = new ControlDHelper();
-		//DELETE THE SCHEDULE
-		if($this->get('cdd_schedule_id')){
-			$cd->deleteSchedule($this->get('cdd_schedule_id'));
-			$this->set('cdd_schedule_id', NULL);
-			$this->save();
-		}
 		
-		//COPY THE PIN AND SAVE IT
-		$device_backup = new CtldDeviceBackup(NULL);
-		$device_backup->set('cdb_device_backup_name', $this->get('cdd_device_name'));		
-		$device_backup->set('cdb_usr_user_id', $this->get('cdd_usr_user_id'));	
-		$device_backup->set('cdb_deactivation_pin', $this->get('cdd_deactivation_pin'));
-		$device_backup->save();
+		//DELETE THE PROFILES
+		if($this->get('cdd_profile_id_secondary')){
+			$result = $this->permanent_delete_profile('secondary');
+		}	
+		
+
+
+
 
 		//NOW DELETE THE DEVICE AT REMOTE
-		$result = $cd->deleteDevice($this->get('cdd_device_id'));		
-				
+		$result = $cd->deleteDevice($this->get('cdd_device_id'));	
+		if($result['success']){
+			
+			if($this->get('cdd_profile_id_primary')){
+				$result = $this->permanent_delete_profile('primary');
+			}
 		
-		//DELETE THE PROFILES 
-		if($cd_profile_id_primary){
-			$this->permanent_delete_profile('primary');
+			//COPY THE PIN AND SAVE IT
+			$device_backup = new CtldDeviceBackup(NULL);
+			$device_backup->set('cdb_device_backup_name', $this->get('cdd_device_name'));		
+			$device_backup->set('cdb_usr_user_id', $this->get('cdd_usr_user_id'));	
+			$device_backup->set('cdb_deactivation_pin', $this->get('cdd_deactivation_pin'));
+			$device_backup->save();				
+
+			parent::permanent_delete();		
+			return true;			
+		}
+		else{
+			throw new SystemDisplayablePermanentError('Unable to delete device.');
+			exit;			
 		}
 
-		if($cd_profile_id_secondary){
-			$this->permanent_delete_profile('secondary');
-		}			
-		
-		parent::permanent_delete();	
-		
-		return true;
-		
 	}
 	
 }

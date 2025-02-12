@@ -88,6 +88,85 @@ class CtldProfile extends SystemBase {
 		}
 	}
 	
+	static function createProfile($name, $user){
+			$cd = new ControlDHelper();
+			$result = $cd->createProfile($name);
+			$profile1_key = $result['body']['profiles'][0]['PK'];
+			
+			//SET THE BLOCK RESPONSE TO AN IP 
+			/* [0] => 0.0.0.0 / ::
+			[3] => NXDOMAIN
+			[5] => REFUSED
+			[7] => Custom
+			[9] => Branded
+			*/
+			$result = $cd->modifyProfileOptions($profile1_key, 'b_resp', 1, 7, '66.228.37.49');
+			
+			if($result['success']){
+				$profile1 = new CtldProfile(NULL);
+				$profile1->set('cdp_profile_id', $profile1_key);
+				$profile1->set('cdp_usr_user_id', $user->key);
+				$profile1->set('cdp_is_active', true);
+				$profile1->prepare();
+				$profile1->save();
+				$profile1->load();	
+				return $profile1;
+			}
+			else{
+				throw new SystemDisplayablePermanentError('Unable to create a profile.');
+				exit;
+			}
+	}
+	
+	function add_or_edit_schedule($device, $post_vars){
+		$user = new User($this->get('cdp_usr_user_id'), TRUE);
+		$cd = new ControlDHelper();
+
+		if(!$this->get('cdp_schedule_id')){
+			//CREATE A SCHEDULE
+			if($post_vars['start_time'] && $post_vars['end_time'] && count($post_vars['days_blocked'])){
+				$name = $user->key . '-' . $user->get('usr_last_name') .'-'. $this->key;
+				$result = $cd->createSchedule($this->get('cdp_profile_id'), $device->get('cdd_device_id'), $name, 1, $post_vars['start_time'], $post_vars['end_time'], $device->get('cdd_timezone'), $post_vars['days_blocked']);
+				
+				if($result['success']){
+					$this->set('cdp_schedule_start', strip_tags($post_vars['start_time']));
+					$this->set('cdp_schedule_end', strip_tags($post_vars['end_time']));
+					$this->set('cdp_schedule_id', $result['body']['PK']);
+					$this->set('cdp_schedule_days', serialize($post_vars['days_blocked']));
+					$this->set('cdp_schedule_timezone', $device->get('cdd_timezone'));
+					$this->save();
+				}
+				return true;
+			}
+			else{
+				//USER DIDN'T PUT IN A WHOLE SCHEDULE, DO NOTHING
+				return false;
+			}
+		}
+		else{
+			//EDIT THE SCHEDULE IF NECESSARY
+			if($post_vars['start_time'] != $this->get('cdp_schedule_start') || $post_vars['end_time'] != $this->get('cdp_schedule_end') || serialize($post_vars['days_blocked']) != $this->get('cdp_schedule_days') || $device->get('cdd_timezone') != $this->get('cdp_schedule_timezone')) {
+			
+					
+					$result = $cd->modifySchedule($this->get('cdp_schedule_id'), 1, $post_vars['start_time'], $post_vars['end_time'], $device->get('cdd_timezone'), $post_vars['days_blocked']);
+					
+					if($result['success']){
+						$this->set('cdp_schedule_start', strip_tags($post_vars['start_time']));
+						$this->set('cdp_schedule_end', strip_tags($post_vars['end_time']));
+						$this->set('cdp_schedule_days', serialize($post_vars['days_blocked']));
+						$this->set('cdp_schedule_timezone', $device->get('cdd_timezone'));
+						$this->save();	
+					}							
+				}
+			return true;
+		}
+		
+	}
+	
+	function remove_schedule(){
+		
+	}
+	
 	function update_remote_filters($newvalues){
 		$numchanges = 0;
 		$cd = new ControlDHelper();
