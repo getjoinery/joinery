@@ -1090,6 +1090,122 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		}
 	}
 
+	protected function _get_resultsv2($table, $filters = [], $sorts = [], $only_count = false, $debug = false) {
+		$where_clauses = [];
+		$bind_params = [];
+		$operation = $this->operation;
+
+
+		foreach ($filters as $column => $condition) {
+			if (is_array($condition)) {
+				// If an array is passed, assume it contains [value, PDO type]
+				$where_clauses[] = "$column = ?";
+				$bind_params[] = [$condition[0], $condition[1]];
+			} else {
+				// Assume the caller is passing a raw SQL condition
+				$where_clauses[] = "$column $condition";
+			}
+		}
+
+		$where_sql = !empty($where_clauses) ? 'WHERE ' . implode(" $operation ", $where_clauses) : '';
+		$order_sql = !empty($sorts) ? 'ORDER BY ' . implode(', ', array_map(fn($col, $dir) => "$col $dir", array_keys($sorts), $sorts)) : '';
+
+		$sql = $only_count ? "SELECT COUNT(*) FROM $table $where_sql" : "SELECT * FROM $table $where_sql $order_sql";
+
+		if ($debug) {
+			echo "SQL Query: $sql";
+		}
+
+		// Prepare and execute query
+		$q = DbConnector::GetPreparedStatement($sql);
+		foreach ($bind_params as $index => $param) {
+			$q->bindValue($index + 1, $param[0], $param[1]);
+		}
+
+		$q->execute();
+		return $only_count ? $q->fetchColumn() : $q->fetchAll(PDO::FETCH_ASSOC);
+	}
+/*
+    public function get_results($table, $filters = [], $sorts = [], $only_count = false, $debug = false) {
+        $where_clauses = [];
+        $bind_params = [];
+
+		foreach ($filters as $column => $value) {
+			if (is_array($value) && isset($value['raw']) && $value['raw'] === true) {
+				// Directly insert raw SQL conditions like IS NULL or IS NOT NULL
+				$where_clauses[] = "$column " . $value['value'];
+			} elseif ($value === null) {
+				// Handle NULL values properly
+				$where_clauses[] = "$column IS NULL";
+			} elseif ($value === 'NOT NULL') {
+				// Handle NOT NULL values properly
+				$where_clauses[] = "$column IS NOT NULL";
+			} else {
+				// Default case: use parameterized binding
+				$where_clauses[] = "$column = ?";
+				$bind_params[] = [$value, PDO::PARAM_STR];
+			}
+		}
+
+        $where_sql = count($where_clauses) ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
+		
+		$order_sql = '';
+		if (!empty($sorts)) {
+			$order_clauses = [];
+			foreach ($sorts as $column => $direction) {
+				$direction = strtoupper($direction) === 'DESC' ? 'DESC' : 'ASC'; // Ensure only ASC or DESC
+				$order_clauses[] = "$column $direction";
+			}
+			$order_sql = 'ORDER BY ' . implode(', ', $order_clauses);
+		}
+        
+        $sql = $only_count ? "SELECT COUNT(*) FROM $table $where_sql" : "SELECT * FROM $table $where_sql $order_sql";
+
+        if ($debug) {
+            echo "SQL Query: $sql";
+        }
+
+        // Assuming a DB connection exists as $this->db
+		$q = DbConnector::GetPreparedStatement($sql);
+        foreach ($bind_params as $index => $param) {
+            $q->bindValue($index + 1, $param[0], $param[1]);
+        }
+
+        $q->execute();
+        return $only_count ? $q->fetchColumn() : $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+	*/
+	
+	/*
+    protected function get_results($table, $only_count = false, $debug = false) {
+        $where_clauses = [];
+        $bind_params = [];
+
+        foreach ($this->filters as $column => $value) {
+            $where_clauses[] = "$column = ?";
+            $bind_params[] = [$value, PDO::PARAM_STR];
+        }
+
+        $where_sql = count($where_clauses) ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
+        $order_sql = count($this->sorts) ? 'ORDER BY ' . implode(', ', $this->sorts) : '';
+        
+        $sql = $only_count ? "SELECT COUNT(*) FROM $table $where_sql" : "SELECT * FROM $table $where_sql $order_sql";
+
+        if ($debug) {
+            echo "SQL Query: $sql";
+        }
+
+        // Assuming a DB connection exists as $this->db
+        $q = DbConnector::GetPreparedStatement($sql);
+        foreach ($bind_params as $index => $param) {
+            $q->bindValue($index + 1, $param[0], $param[1]);
+        }
+
+        $q->execute();
+        return $only_count ? $q->fetchColumn() : $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+	*/
+
 	function get_sql_builder() {
 		return new SQLBuilder(static::$table_name, static::$table_primary_key, $this->limit, $this->offset, $this->operation, $this->write_lock);
 	}

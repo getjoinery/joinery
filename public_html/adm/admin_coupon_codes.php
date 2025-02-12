@@ -27,9 +27,10 @@
 	
 	$coupon_codes = new MultiCouponCode(
 		$search_criteria,
-		array($sort=>$sdirection),
+		array('ccd_coupon_code_id'=>'DESC'),
 		$numperpage,
-		$offset);	
+		$offset,
+		'AND');	
 	$numrecords = $coupon_codes->count_all();	
 	$coupon_codes->load();
 	

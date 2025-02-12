@@ -108,10 +108,12 @@ class CtldAccount extends SystemBase {
 			return false;
 		}
 		
-		$end_time = strtotime($this->get('cda_period_end'));
-		$current_time = time();
-		if($end_time < $current_time){
-			return false;
+		if($this->get('cda_period_end')){
+			$end_time = strtotime($this->get('cda_period_end'));
+			$current_time = time();
+			if($end_time < $current_time){
+				return false;
+			}
 		}
 		
 		return true;

@@ -174,88 +174,51 @@ class MultiCouponCode extends SystemMultiBase {
 		return $items;
 
 	}
+	
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
 
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'ccd_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('applies_to', $this->options)) {
-		 	$where_clauses[] = 'ccd_applies_to = ?';
-		 	$bind_params[] = array($this->options['applies_to'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'ccd_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
-		}			
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('active', $this->options)) {
-		 	$where_clauses[] = 'ccd_is_active = ' . ($this->options['active'] ? 'TRUE' : 'FALSE');
-		}
+        if (isset($this->options['user_id'])) {
+            $filters['ccd_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
 
-		
-		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'ccd_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		} 
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
+        if (isset($this->options['applies_to'])) {
+            $filters['ccd_applies_to'] = [$this->options['applies_to'], PDO::PARAM_INT];
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM ccd_coupon_codes ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM ccd_coupon_codes
-				' . $where_clause . '
-				ORDER BY ';
+		/*
+        if (isset($this->options['link'])) {
+            $filters['ccd_link'] = "'".$this->options['link']."'"; // Wrap in quotes for raw SQL
+        }
+		*/
 
-			if (empty($this->order_by)) {
-				$sql .= " ccd_coupon_code_id ASC ";
-			}
-			else {
-				if (array_key_exists('coupon_code_id', $this->order_by)) {
-					$sql .= ' ccd_coupon_code_id ' . $this->order_by['coupon_code_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
+        if (isset($this->options['active'])) {
+            $filters['ccd_is_active'] = "= " . ($this->options['active'] ? 'TRUE' : 'FALSE'); // Ensure valid SQL
+        }
 
-		$q = DbConnector::GetPreparedStatement($sql);
+        if (isset($this->options['deleted'])) {
+            $filters['ccd_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
 
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('ccd_coupon_codes', $filters, $this->order_by, $only_count, $debug);
+    }
+	
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
+		$q = $this->getMultiResults(false, $debug);
+		foreach($q as $row) {
 			$child = new CouponCode($row->ccd_coupon_code_id);
 			$child->load_from_data($row, array_keys(CouponCode::$fields));
 			$this->add($child);
 		}
+	}
+	
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }
