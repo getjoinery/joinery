@@ -32,14 +32,15 @@ function subscription_edit_logic($get_vars, $post_vars){
 	}
 	else if(isset($_POST['product_id'])){
 		$product_id = LibraryFunctions::fetch_variable_local($post_vars, 'product_id', 0, 'notrequired', '', 'safemode', 'int');
-		$order_item = CtldAccount::GetPlanOrderItem($user_id);
+		$user = new User($session->get_user_id(), TRUE);
+		$order_item = CtldAccount::GetPlanOrderItem($user->key);
 
 		$product = new Product($product_id, TRUE);
 		$subscription_id = $order_item->get('odi_stripe_subscription_id');
 
 		$product_version = $product->get_product_versions(TRUE, $_POST['product_version']);
 		$price = $product->get_price($product_version, $_POST);
-		$user = new User($session->get_user_id(), TRUE);
+		
 
 
 		//CHECK THE PERMISSIONS
