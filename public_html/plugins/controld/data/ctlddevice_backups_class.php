@@ -48,12 +48,7 @@ class CtldDeviceBackup extends SystemBase {
 			
 	public static $required_fields = array();
 
-	public static $field_constraints = array(
-		/*'cdb_code' => array(
-			array('WordLength', 0, 64),
-			'NoCaps',
-			),*/
-	);	
+	public static $field_constraints = array();	
 	
 	public static $zero_variables = array();
 	
