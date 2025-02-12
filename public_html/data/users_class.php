@@ -207,7 +207,7 @@ class User extends SystemBase {
 		$thismessage = array();
 		foreach ($mailing_lists as $mailing_list){
 					
-			if($mailing_list_ids = 'all'){
+			if($mailing_list_ids == 'all'){
 				if($mailing_list->is_user_in_list($this->key)){
 					//IF USER IS ALREADY SUBSCRIBED
 					$thismessage['message_type'] = 'warn';

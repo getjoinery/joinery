@@ -34,7 +34,6 @@ function contact_preferences_logic($get_vars, $post_vars){
 	
 	
 	if($post_vars){
-		
 		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['new_list_subscribes']);
 	
 	}
