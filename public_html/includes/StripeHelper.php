@@ -830,14 +830,6 @@ class StripeHelper {
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 		
 		
-		if($this->test_mode){
-			$stripe_product_id = $product->get('pro_stripe_product_id_test');
-		}
-		else{
-			$stripe_product_id = $product->get('pro_stripe_product_id');
-		}
-		
-		
 		if($product_version->is_subscription()){
 			$stripe_type = 'recurring';
 		}
@@ -845,6 +837,19 @@ class StripeHelper {
 			$stripe_type = 'one_time';
 		}
 	
+	
+		if($this->test_mode){
+			$stripe_product_id = $product->get('pro_stripe_product_id_test');
+		}
+		else{
+			$stripe_product_id = $product->get('pro_stripe_product_id');
+		}	
+		
+		if(!$stripe_product_id){
+			throw new SystemDisplayablePermanentError("This product does not have a stripe product id."); 
+			exit;
+		}
+		
 		//GET ALL PRICES FOR PRODUCT
 		$stripe_prices = $this->stripe->prices->all([
 			'product' => $stripe_product_id,

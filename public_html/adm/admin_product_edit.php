@@ -96,7 +96,7 @@
 			
 			
 			//IF STRIPE IS ENABLED, CREATE A PRODUCT 
-			if($settings->get_setting('checkout_type') == 'stripe_regular'){
+			if($settings->get_setting('checkout_type') != 'none'){
 				$stripe_helper = new StripeHelper();
 				$product_info=array();
 				$product_info['name'] = $product->get('pro_name');
@@ -106,11 +106,19 @@
 					if(!$product->get('pro_stripe_product_id_test')){
 						$stripe_product = $stripe_helper->create_product($product_info);
 						$product->set('pro_stripe_product_id_test', $stripe_product['id']);
+						if(!$stripe_product['id']){
+							throw new SystemDisplayablePermanentError("Unable to create a stripe product."); 
+							exit;
+						}
 					}
 				}
 				else{
 					if(!$product->get('pro_stripe_product_id')){				
 						$stripe_product = $stripe_helper->create_product($product_info);
+						if(!$stripe_product['id']){
+							throw new SystemDisplayablePermanentError("Unable to create a stripe product."); 
+							exit;
+						}
 						$product->set('pro_stripe_product_id', $stripe_product['id']);
 					}
 				}
