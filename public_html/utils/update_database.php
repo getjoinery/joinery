@@ -49,6 +49,10 @@
 	function update_database($migrations, $verbose=false, $upgrade=false, $cleanup=false){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
+		if(!$siteDir){
+			echo 'ERROR:  Site directory not loaded.<br>';
+			exit;
+		}
 		$data_dir = $siteDir . '/data';
 		$plugin_dir = $siteDir . '/plugins';
 
