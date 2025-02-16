@@ -51,7 +51,7 @@
 
 		//LOAD ALL CLASSES 
 		$db_structure_contents = '';
-		$path = $_SERVER['DOCUMENT_ROOT']."/data";
+		$path =  __DIR__ . '/../data';
 		$classes = array();
 		if ($handle = opendir($path)) {
 			while (false !== ($file = readdir($handle))) {
@@ -97,7 +97,7 @@
 		
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
-			$plugin_data_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/data';
+			$plugin_data_dir = __DIR__ .'/../plugins/'.$plugin.'/data';
 			if($verbose){
 				echo 'Loading classes from plugin '.$plugin.'<br>';
 			}
