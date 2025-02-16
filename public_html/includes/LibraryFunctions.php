@@ -207,7 +207,8 @@ class LibraryFunctions {
 	//PATH FORMAT IS EITHER FULL OR FILENAME
 	static function list_directories_in_directory($directory, $path_format='full'){
 		if(!is_dir($directory)){
-			throw new SystemDisplayablePermanentError('This directory does not exist: '. $directory);	
+			echo 'ERROR: Directory does not exist: '.$directory;
+			exit;
 		}		
 		
 		
