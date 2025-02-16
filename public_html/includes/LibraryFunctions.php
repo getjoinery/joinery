@@ -181,11 +181,11 @@ class LibraryFunctions {
 	//PATH FORMAT IS EITHER FULL OR FILENAME
 	static function list_files_in_directory($directory, $path_format='full'){
 		$files_list = array();
-		
+
 		if(!is_dir($directory)){
-			return false;
-		}
-		
+			echo 'ERROR: This directory does not exist: '. $directory;
+			exit;
+		}		
 		
 		if ($handle = opendir($directory)) {
 			while (false !== ($file = readdir($handle))) {
@@ -205,12 +205,12 @@ class LibraryFunctions {
 	
 	//RETURNS A LIST OF FULL PATHS FOR ALL DIRECTORIES IN A DIRECTORY
 	//PATH FORMAT IS EITHER FULL OR FILENAME
-	static function list_directories_in_directory($directory, $path_format='full'){
-		if(!is_dir($directory)){
-			echo 'ERROR: Directory does not exist: '.$directory;
-			exit;
-		}		
+	static function list_directories_in_directory($directory, $path_format='full'){	
 		
+		if(!is_dir($directory)){
+			echo 'ERROR: This directory does not exist: '. $directory;
+			exit;
+		}
 		
 		$directories = array();
 		$files = LibraryFunctions::list_files_in_directory($directory, 'full');
@@ -226,6 +226,7 @@ class LibraryFunctions {
 		if(!$plugin_dir){
 			$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
 		}
+
 		return LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
 	}
 	
