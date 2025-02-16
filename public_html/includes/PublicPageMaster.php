@@ -27,8 +27,6 @@ class PublicPageMaster {
 	//SECURE ARGUMENT HAS BEEN DEPRECATED
 	public function __construct($secure=FALSE) {
 		$this->rowcount = 0;
-		$this->server = $_SERVER['PHP_SELF'];
-		$this->remote_addr = $_SERVER['REMOTE_ADDR'];
 
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
