@@ -59,7 +59,7 @@
 			while (false !== ($file = readdir($handle))) {
 				if ('.' === $file) continue;
 				if ('..' === $file) continue;
-				$filepath = $path.'/'.$file;
+				$filepath = $data_dir.'/'.$file;
 				
 				$file_parts = pathinfo($file);
 				if($file_parts['extension'] == 'php'){
@@ -99,7 +99,7 @@
 		
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
-			$plugin_data_dir = __DIR__ .'/../plugins/'.$plugin.'/data';
+			$plugin_data_dir = $plugin_dir.'/'.$plugin.'/data';
 			if($verbose){
 				echo 'Loading classes from plugin '.$plugin.'<br>';
 			}
