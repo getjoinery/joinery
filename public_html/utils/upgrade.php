@@ -405,22 +405,16 @@ $world_ex = (($perms & 0x0001) ?
 
 
 
-		if(!file_exists($location_of_plugins)){
-			echo 'Directory does not exist: '.$location_of_plugins. "\n<br>";
-			echo "Failed to move plugin files ($plugin_directory to $location_of_plugins...aborting.<br>";
-			exit;
+		if(file_exists($location_of_plugins)){
+			exec("cp -r $plugin_directory $stage_directory");
+			if (is_dir_empty($location_of_plugins)) {
+				echo $location_of_plugins. ' (plugin_directory) failed to copy.';
+				exit;
+			}
+			else{
+				echo "Theme files copied from $plugin_directory to $stage_directory.<br>";
+			}
 		}
-
-
-		exec("cp -r $plugin_directory $stage_directory");
-		if (is_dir_empty($location_of_plugins)) {
-			echo $location_of_plugins. ' (plugin_directory) failed to copy.';
-			exit;
-		}
-		else{
-			echo "Theme files copied from $plugin_directory to $stage_directory.<br>";
-		}
-
 
 
 
