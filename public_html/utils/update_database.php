@@ -95,44 +95,56 @@
 		
 		//LOAD ALL CLASSES FROM PLUGINS
 		
-		$plugins = LibraryFunctions::list_plugins();
-		foreach($plugins as $plugin){
-			$plugin_data_dir = __DIR__ .'/../plugins/'.$plugin.'/data';
-			if($verbose){
-				echo 'Loading classes from plugin '.$plugin.'<br>';
-			}
-			if ($handle = opendir($plugin_data_dir)) {
-				while (false !== ($file = readdir($handle))) {
-					if ('.' === $file) continue;
-					if ('..' === $file) continue;
-					$filepath = $plugin_data_dir.'/'.$file;
-					$file_parts = pathinfo($file);
-					if ($file_parts['extension'] === 'php' && str_contains($file, '_class')) {
-
-						require_once(realpath($filepath));
-						if($verbose){
-							echo 'Requiring '.$filepath.'<br>';
-						}
-						$fileContent = file_get_contents($filepath);
-						$tokens = token_get_all($fileContent);
-
-						for ($i = 0; $i < count($tokens); $i++) {
-							if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
-								$thisclass = $tokens[$i + 2][1];;
-								if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
-									$classes[] = $thisclass;
-									$db_structure_contents .= serialize($thisclass::$field_specifications);
-									if($verbose){
-										echo 'Loading plugin class '.$thisclass.'<br>';
-									}
-								}
-							}
-						}	
-					}
-
+		$plugins = LibraryFunctions::list_plugins( __DIR__ . '/../plugins');
+		if($plugins){
+			foreach($plugins as $plugin){
+				$plugin_data_dir = __DIR__ .'/../plugins/'.$plugin.'/data';
+				if($verbose){
+					echo 'Loading classes from plugin '.$plugin.'<br>';
 				}
-				closedir($handle);
+				if(is_dir($plugin_data_dir)){
+					if ($handle = opendir($plugin_data_dir)) {
+						while (false !== ($file = readdir($handle))) {
+							if ('.' === $file) continue;
+							if ('..' === $file) continue;
+							$filepath = $plugin_data_dir.'/'.$file;
+							$file_parts = pathinfo($file);
+							if ($file_parts['extension'] === 'php' && str_contains($file, '_class')) {
+
+								require_once(realpath($filepath));
+								if($verbose){
+									echo 'Requiring '.$filepath.'<br>';
+								}
+								$fileContent = file_get_contents($filepath);
+								$tokens = token_get_all($fileContent);
+
+								for ($i = 0; $i < count($tokens); $i++) {
+									if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
+										$thisclass = $tokens[$i + 2][1];;
+										if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
+											$classes[] = $thisclass;
+											$db_structure_contents .= serialize($thisclass::$field_specifications);
+											if($verbose){
+												echo 'Loading plugin class '.$thisclass.'<br>';
+											}
+										}
+									}
+								}	
+							}
+
+						}
+						closedir($handle);
+					}
+				}
+				else{
+					if($verbose){
+						echo 'Requiring '.$filepath.'<br>';
+					}
+				}
 			}
+		}
+		else{
+			echo 'WARNING: Plugin directory does not exist:  
 		}	
 
 		if($verbose){
