@@ -1037,6 +1037,11 @@ class Product extends SystemBase {
 	}
 	
 	function is_sold_out(){
+		
+		if($this->get('pro_max_purchase_count') == 0){
+			return false;
+		}
+		
 		//CHECK AGAINST MAX NUMBER ALLOWED
 		$sold_out = false;
 		if($this->get('pro_max_purchase_count')){
@@ -1234,7 +1239,6 @@ class Product extends SystemBase {
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 	
 		$versions = $this->get_product_versions();
-
 
 		if ($this->count_product_versions() == 1) {
 			$version = $versions->get(0);
