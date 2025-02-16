@@ -91,6 +91,10 @@ class CtldProfile extends SystemBase {
 	static function createProfile($name, $user){
 			$cd = new ControlDHelper();
 			$result = $cd->createProfile($name);
+			if(!$result['success']){
+				throw new SystemDisplayablePermanentError('Unable to create profile.');
+				exit;
+			}
 			$profile1_key = $result['body']['profiles'][0]['PK'];
 			
 			//SET THE BLOCK RESPONSE TO AN IP 
