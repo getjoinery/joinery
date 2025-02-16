@@ -46,7 +46,7 @@ class CtldProfile extends SystemBase {
 		'cdp_delete_time' => array('type'=>'timestamp(6)'),
 		'cdp_schedule_start' => array('type'=>'varchar(5)'),
 		'cdp_schedule_end' => array('type'=>'varchar(5)'),
-		'cdp_schedule_days' => array('type'=>'varchar(64)'),
+		'cdp_schedule_days' => array('type'=>'varchar(128)'),
 		'cdp_schedule_timezone' => array('type'=>'varchar(64)'),
 		'cdp_schedule_id' => array('type'=>'varchar(64)'),
 	);
@@ -194,12 +194,13 @@ class CtldProfile extends SystemBase {
 					if($cached_filters[$all_filter_key] != $newvalues['block_'.$all_filter_key]){
 						//CHANGED, UPDATE REMOTE AND LOCAL
 						$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, $newvalues['block_'.$all_filter_key]);
-						
-						foreach($filters as $filter){
-							if($filter->get('cdf_filter_pk') == $all_filter_key){
-								$filter->set('cdf_is_active',$newvalues['block_'.$all_filter_key]);
-								$filter->prepare();
-								$filter->save();								
+						if($result['success']){
+							foreach($filters as $filter){
+								if($filter->get('cdf_filter_pk') == $all_filter_key){
+									$filter->set('cdf_is_active',$newvalues['block_'.$all_filter_key]);
+									$filter->prepare();
+									$filter->save();								
+								}
 							}
 						}
 						$numchanges++;
@@ -211,14 +212,15 @@ class CtldProfile extends SystemBase {
 				else{
 					//CACHED FILTER DOES NOT EXIST, UPDATE REMOTE FIRST AND THEN ADD LOCALLY
 					$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, $newvalues['block_'.$all_filter_key]);
-					
-					$new_cached_filter = new CtldFilter(NULL);
-					$new_cached_filter->set('cdf_cdp_ctldprofile_id',$this->key);
-					$new_cached_filter->set('cdf_filter_pk',$all_filter_key);
-					$new_cached_filter->set('cdf_is_active',$newvalues['block_'.$all_filter_key]);
-					$new_cached_filter->prepare();
-					$new_cached_filter->save();
-					$numchanges++;
+					if($result['success']){
+						$new_cached_filter = new CtldFilter(NULL);
+						$new_cached_filter->set('cdf_cdp_ctldprofile_id',$this->key);
+						$new_cached_filter->set('cdf_filter_pk',$all_filter_key);
+						$new_cached_filter->set('cdf_is_active',$newvalues['block_'.$all_filter_key]);
+						$new_cached_filter->prepare();
+						$new_cached_filter->save();
+						$numchanges++;
+					}
 				}
 			}
 			else{
@@ -228,12 +230,13 @@ class CtldProfile extends SystemBase {
 					if($cached_filters[$all_filter_key]){
 						//CACHED IS NOT ZERO, SO UPDATE CACHE AND UPDATE REMOTE
 						$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, 0);
-						
-						foreach($filters as $filter){
-							if($filter->get('cdf_filter_pk') == $all_filter_key){
-								$filter->set('cdf_is_active',0);
-								$filter->prepare();
-								$filter->save();								
+						if($result['success']){
+							foreach($filters as $filter){
+								if($filter->get('cdf_filter_pk') == $all_filter_key){
+									$filter->set('cdf_is_active',0);
+									$filter->prepare();
+									$filter->save();								
+								}
 							}
 						}
 						$numchanges++;						
@@ -284,15 +287,16 @@ class CtldProfile extends SystemBase {
 					if($cached_services[$all_service_key] != $newvalues['block_'.$all_service_key]){
 						//CHANGED, UPDATE REMOTE AND LOCAL
 						$result = $cd->modifyService($this->get('cdp_profile_id'), $all_service_key, $newvalues['block_'.$all_service_key]);
-						
-						foreach($services as $service){
-							if($service->get('cds_service_pk') == $all_service_key){
-								$service->set('cds_is_active',$newvalues['block_'.$all_service_key]);
-								$service->prepare();
-								$service->save();								
+						if($result['success']){
+							foreach($services as $service){
+								if($service->get('cds_service_pk') == $all_service_key){
+									$service->set('cds_is_active',$newvalues['block_'.$all_service_key]);
+									$service->prepare();
+									$service->save();								
+								}
 							}
+							$numchanges++;
 						}
-						$numchanges++;
 					}
 					else{
 						//NO NEED TO DO ANYTHING
@@ -301,14 +305,15 @@ class CtldProfile extends SystemBase {
 				else{
 					//CACHED FILTER DOES NOT EXIST, UPDATE REMOTE FIRST AND THEN ADD LOCALLY
 					$result = $cd->modifyService($this->get('cdp_profile_id'), $all_service_key, $newvalues['block_'.$all_service_key]);
-					
-					$new_cached_service = new CtldService(NULL);
-					$new_cached_service->set('cds_cdp_ctldprofile_id',$this->key);
-					$new_cached_service->set('cds_service_pk',$all_service_key);
-					$new_cached_service->set('cds_is_active',$newvalues['block_'.$all_service_key]);
-					$new_cached_service->prepare();
-					$new_cached_service->save();
-					$numchanges++;
+					if($result['success']){
+						$new_cached_service = new CtldService(NULL);
+						$new_cached_service->set('cds_cdp_ctldprofile_id',$this->key);
+						$new_cached_service->set('cds_service_pk',$all_service_key);
+						$new_cached_service->set('cds_is_active',$newvalues['block_'.$all_service_key]);
+						$new_cached_service->prepare();
+						$new_cached_service->save();
+						$numchanges++;
+					}
 				}
 			}
 			else{
@@ -318,16 +323,16 @@ class CtldProfile extends SystemBase {
 					if($cached_services[$all_service_key]){
 						//CACHED IS NOT ZERO, SO UPDATE CACHE AND UPDATE REMOTE
 						$result = $cd->modifyService($this->get('cdp_profile_id'), $all_service_key, 0);
-						
-						foreach($services as $service){
-							if($service->get('cds_service_pk') == $all_service_key){
-								$service->set('cds_is_active',0);
-								$service->prepare();
-								$service->save();								
+						if($result['success']){
+							foreach($services as $service){
+								if($service->get('cds_service_pk') == $all_service_key){
+									$service->set('cds_is_active',0);
+									$service->prepare();
+									$service->save();								
+								}
 							}
+							$numchanges++;						
 						}
-						$numchanges++;						
-						
 					}
 					else{
 						//NO NEED TO DO ANYTHING
