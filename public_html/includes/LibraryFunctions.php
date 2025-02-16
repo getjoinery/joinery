@@ -222,11 +222,10 @@ class LibraryFunctions {
 		return $directories;	
 	}
 	
-	static function list_plugins(){
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
-		$plugin_dir = $siteDir . '/plugins';
-		
+	static function list_plugins($plugin_dir = NULL){
+		if(!$plugin_dir){
+			$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
+		}
 		return LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
 	}
 	
