@@ -36,7 +36,7 @@
 
 	$plugin_directory = $full_site_dir.'/plugins';
 	$plugin_directory_contents = $plugin_directory.'/*';
-	$location_of_plugins = $stage_directory.'/plugin';
+	$location_of_plugins = $stage_directory.'/plugins';
 	$live_plugins = $live_directory.'/plugins';
 	
 
