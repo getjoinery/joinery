@@ -358,6 +358,7 @@ class LibraryFunctions {
 		$default_file = $siteDir.$subdirectory.'/'.$filename;
 
 
+
 		if($theme_template && file_exists($theme_file)){
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
