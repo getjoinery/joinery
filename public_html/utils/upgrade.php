@@ -39,92 +39,7 @@
 	$location_of_plugins = $stage_directory.'/plugin';
 	$live_plugins = $live_directory.'/plugins';
 	
-	//CHECK FOR EXISTENCE OF ALL NEEDED DIRECTORIES 
-	if(!file_exists($live_directory)){
-		echo $live_directory. ' (live_directory) does not exist or is not readable by www-data.';
-		exit;
-	}
-	if(!file_exists($theme_directory)){
-		echo $theme_directory. ' (theme_directory) does not exist or is not readable by www-data.';
-		exit;
-	}
-	if (is_dir_empty($theme_directory)) {
-		echo $theme_directory. ' (theme_directory) is empty.';
-		exit;
-	}
-	
-	/*
-	if(!file_exists($plugin_directory)){
-		echo $plugin_directory. ' (plugin_directory) does not exist or is not readable by www-data.';
-		exit;
-	}
-	if (is_dir_empty($plugin_directory)) {
-		echo $plugin_directory. ' (plugin_directory) is empty.';
-		exit;
-	}	
-	*/
-	
-/*
-$perms = fileperms($stage_location);
 
-// Owner
-$info .= (($perms & 0x0100) ? 'r' : '-');
-$info .= (($perms & 0x0080) ? 'w' : '-');
-$info .= (($perms & 0x0040) ?
-            (($perms & 0x0800) ? 's' : 'x' ) :
-            (($perms & 0x0800) ? 'S' : '-'));
-
-// Group
-$info .= (($perms & 0x0020) ? 'r' : '-');
-$info .= (($perms & 0x0010) ? 'w' : '-');
-$info .= (($perms & 0x0008) ?
-            (($perms & 0x0400) ? 's' : 'x' ) :
-            (($perms & 0x0400) ? 'S' : '-'));
-
-// World
-$info .= (($perms & 0x0004) ? 'r' : '-');
-$info .= (($perms & 0x0002) ? 'w' : '-');
-$info .= (($perms & 0x0001) ?
-            (($perms & 0x0200) ? 't' : 'x' ) :
-            (($perms & 0x0200) ? 'T' : '-'));
-
-echo $info;
-*/
-
-
-	
-	$perms = fileperms($live_directory);
-$user_read = (($perms & 0x0100) ? 'r' : '-');
-$user_write = (($perms & 0x0080) ? 'w' : '-');
-$user_ex = (($perms & 0x0040) ?
-            (($perms & 0x0800) ? 's' : 'x' ) :
-            (($perms & 0x0800) ? 'S' : '-'));
-
-// Group
-$group_read = (($perms & 0x0020) ? 'r' : '-');
-$group_write = (($perms & 0x0010) ? 'w' : '-');
-$group_ex = (($perms & 0x0008) ?
-            (($perms & 0x0400) ? 's' : 'x' ) :
-            (($perms & 0x0400) ? 'S' : '-'));
-
-// World
-$world_read = (($perms & 0x0004) ? 'r' : '-');
-$world_write = (($perms & 0x0002) ? 'w' : '-');
-$world_ex = (($perms & 0x0001) ?
-            (($perms & 0x0200) ? 't' : 'x' ) :
-            (($perms & 0x0200) ? 'T' : '-'));
-	if(!($user_read && $user_write)){
-		echo $live_directory . ' (live_directory)must be writable by user1.  Aborting upgrade.<br>';
-		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
-		exit;
-	}
-	
-	
-	if(posix_getpwuid(fileowner($live_directory))['name'] != 'www-data'){
-		echo $live_directory . ' (live_directory) must be owned by www-data.  Aborting upgrade.<br>';
-		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
-		exit;		
-	}
 
 
 
@@ -208,6 +123,96 @@ $world_ex = (($perms & 0x0001) ?
 		exit;		
 	}
 	
+	
+	//CHECK FOR EXISTENCE OF ALL NEEDED DIRECTORIES 
+	if(!file_exists($live_directory)){
+		echo $live_directory. ' (live_directory) does not exist or is not readable by www-data.';
+		exit;
+	}
+	if(!file_exists($theme_directory)){
+		echo $theme_directory. ' (theme_directory) does not exist or is not readable by www-data.';
+		exit;
+	}
+	if (is_dir_empty($theme_directory)) {
+		echo $theme_directory. ' (theme_directory) is empty.';
+		exit;
+	}
+	
+	/*
+	if(!file_exists($plugin_directory)){
+		echo $plugin_directory. ' (plugin_directory) does not exist or is not readable by www-data.';
+		exit;
+	}
+	if (is_dir_empty($plugin_directory)) {
+		echo $plugin_directory. ' (plugin_directory) is empty.';
+		exit;
+	}	
+	*/
+	
+	/*
+	$perms = fileperms($stage_location);
+
+	// Owner
+	$info .= (($perms & 0x0100) ? 'r' : '-');
+	$info .= (($perms & 0x0080) ? 'w' : '-');
+	$info .= (($perms & 0x0040) ?
+				(($perms & 0x0800) ? 's' : 'x' ) :
+				(($perms & 0x0800) ? 'S' : '-'));
+
+	// Group
+	$info .= (($perms & 0x0020) ? 'r' : '-');
+	$info .= (($perms & 0x0010) ? 'w' : '-');
+	$info .= (($perms & 0x0008) ?
+				(($perms & 0x0400) ? 's' : 'x' ) :
+				(($perms & 0x0400) ? 'S' : '-'));
+
+	// World
+	$info .= (($perms & 0x0004) ? 'r' : '-');
+	$info .= (($perms & 0x0002) ? 'w' : '-');
+	$info .= (($perms & 0x0001) ?
+				(($perms & 0x0200) ? 't' : 'x' ) :
+				(($perms & 0x0200) ? 'T' : '-'));
+
+	echo $info;
+	*/
+
+
+		
+		$perms = fileperms($live_directory);
+	$user_read = (($perms & 0x0100) ? 'r' : '-');
+	$user_write = (($perms & 0x0080) ? 'w' : '-');
+	$user_ex = (($perms & 0x0040) ?
+				(($perms & 0x0800) ? 's' : 'x' ) :
+				(($perms & 0x0800) ? 'S' : '-'));
+
+	// Group
+	$group_read = (($perms & 0x0020) ? 'r' : '-');
+	$group_write = (($perms & 0x0010) ? 'w' : '-');
+	$group_ex = (($perms & 0x0008) ?
+				(($perms & 0x0400) ? 's' : 'x' ) :
+				(($perms & 0x0400) ? 'S' : '-'));
+
+	// World
+	$world_read = (($perms & 0x0004) ? 'r' : '-');
+	$world_write = (($perms & 0x0002) ? 'w' : '-');
+	$world_ex = (($perms & 0x0001) ?
+				(($perms & 0x0200) ? 't' : 'x' ) :
+				(($perms & 0x0200) ? 'T' : '-'));
+	if(!($user_read && $user_write)){
+		echo $live_directory . ' (live_directory)must be writable by user1.  Aborting upgrade.<br>';
+		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
+		exit;
+	}
+	
+	
+	if(posix_getpwuid(fileowner($live_directory))['name'] != 'www-data'){
+		echo $live_directory . ' (live_directory) must be owned by www-data.  Aborting upgrade.<br>';
+		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
+		exit;		
+	}	
+	
+	
+
 	
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
