@@ -47,13 +47,15 @@
 	
 
 	function update_database($migrations, $verbose=false, $upgrade=false, $cleanup=false){
-
+		$settings = Globalvars::get_instance();
+		$siteDir = $settings->get_setting('siteDir');
+		$data_dir = $siteDir . '/data';
+		$plugin_dir = $siteDir . '/plugins';
 
 		//LOAD ALL CLASSES 
 		$db_structure_contents = '';
-		$path =  __DIR__ . '/../data';
 		$classes = array();
-		if ($handle = opendir($path)) {
+		if ($handle = opendir($data_dir)) {
 			while (false !== ($file = readdir($handle))) {
 				if ('.' === $file) continue;
 				if ('..' === $file) continue;
@@ -95,7 +97,7 @@
 		
 		//LOAD ALL CLASSES FROM PLUGINS
 		
-		$plugins = LibraryFunctions::list_plugins( __DIR__ . '/../plugins');
+		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
 			$plugin_data_dir = __DIR__ .'/../plugins/'.$plugin.'/data';
 			if($verbose){
