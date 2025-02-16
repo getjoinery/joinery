@@ -616,17 +616,3 @@
 		$migrations[] = $migration;			
 		
 		
-		
-		
-		
-		
-		
-		 
-		//REQUIRE ALL OF THE PLUGIN MIGRATION SCRIPTS
-		$plugins = LibraryFunctions::list_plugins();
-		foreach($plugins as $plugin){
-			$product_script_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/migrations/migrations.php';
-			if(file_exists($product_script_file)){
-				require_once($product_script_file);
-			}
-		}

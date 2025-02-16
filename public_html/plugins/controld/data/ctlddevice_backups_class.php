@@ -9,10 +9,10 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldaccounts_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldprofiles_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldfilters_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldservices_class.php');
+	require_once($siteDir . '/plugins/controld/data/ctldaccounts_class.php');
+	require_once($siteDir . '/plugins/controld/data/ctldprofiles_class.php');
+	require_once($siteDir . '/plugins/controld/data/ctldfilters_class.php');
+	require_once($siteDir . '/plugins/controld/data/ctldservices_class.php');
 
 
 class CtldDeviceBackupException extends SystemClassException {}

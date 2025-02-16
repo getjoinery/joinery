@@ -3,11 +3,12 @@
 	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
 	require_once( __DIR__ . '/../data/migrations_class.php');
 	require_once( __DIR__ . '/../migrations/migrations.php');
+	//error_reporting(E_ERROR | E_PARSE);
 	error_reporting(E_ERROR | E_PARSE);
 	ini_set('display_errors', 1);
 	ini_set('display_startup_errors', 1);
-	error_reporting(E_ALL);
-	
+	///error_reporting(E_ALL);
+
 	//THIS SCRIPT ACCEPTS THREE POSSIBLE ARGUMENTS
 	//VERBOSE PRINTS MISMATCHES TO THE SCREEN
 	//UPGRADE FIXES MISMATCHES IN COLUMN TYPES
@@ -47,32 +48,25 @@
 	
 
 	function update_database($migrations, $verbose=false, $upgrade=false, $cleanup=false){
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
-		if(!$siteDir){
-			echo 'ERROR:  Site directory not loaded.<br>';
-			exit;
-		}
-		$data_dir = $siteDir . '/data';
-		$plugin_dir = $siteDir . '/plugins';
 
 		//LOAD ALL CLASSES 
-		$db_structure_contents = '';
+		$db_structure_contents = ''; 
+		$path =  realpath(__DIR__ . '/../data');
 		$classes = array();
-		if ($handle = opendir($data_dir)) {
+		if ($handle = opendir($path)) {
 			while (false !== ($file = readdir($handle))) {
 				if ('.' === $file) continue;
 				if ('..' === $file) continue;
-				$filepath = $data_dir.'/'.$file;
+				$filepath = $path.'/'.$file;
 				
 				$file_parts = pathinfo($file);
 				if($file_parts['extension'] == 'php'){
 					if(file_exists($filepath)){
 						if (str_contains($file, '_class')) {
 							require_once($filepath);
-							if($verbose){
-								echo 'Requiring '.$filepath.'<br>';
-							}
+							//if($verbose){
+								echo 'Requiring '.$filepath.'<br>'."\n";
+							//}
 							
 							$fileContent = file_get_contents($filepath);
 							$tokens = token_get_all($fileContent);
@@ -100,12 +94,12 @@
 		
 		
 		//LOAD ALL CLASSES FROM PLUGINS
-		
-		$plugins = LibraryFunctions::list_plugins();
+		$plugin_dir = realpath(__DIR__ . '/../plugins');
+		$plugins = LibraryFunctions::list_plugins($plugin_dir);
 		foreach($plugins as $plugin){
 			$plugin_data_dir = $plugin_dir.'/'.$plugin.'/data';
 			if($verbose){
-				echo 'Loading classes from plugin '.$plugin.'<br>';
+				echo 'Loading classes from plugin '.$plugin.'<br>'."\n";
 			}
 			if(is_dir($plugin_data_dir)){
 				if ($handle = opendir($plugin_data_dir)) {
@@ -115,10 +109,9 @@
 						$filepath = $plugin_data_dir.'/'.$file;
 						$file_parts = pathinfo($file);
 						if ($file_parts['extension'] === 'php' && str_contains($file, '_class')) {
-
-							require_once(realpath($filepath));
+							require_once($filepath);
 							if($verbose){
-								echo 'Requiring '.$filepath.'<br>';
+								echo 'Requiring '.$filepath.'<br>'."\n";
 							}
 							$fileContent = file_get_contents($filepath);
 							$tokens = token_get_all($fileContent);
@@ -134,7 +127,8 @@
 										}
 									}
 								}
-							}	
+							}
+						
 						}
 
 					}
@@ -529,6 +523,18 @@
 		
 		echo "-----MIGRATIONS-----<br>\n";
 
+		
+		 
+		//REQUIRE ALL OF THE PLUGIN MIGRATION SCRIPTS
+		$plugin_dir = realpath(__DIR__ . '/../plugins');
+		$plugins = LibraryFunctions::list_plugins($plugin_dir);
+		foreach($plugins as $plugin){
+			$product_script_file = $plugin_dir. '/'.$plugin.'/migrations/migrations.php';
+			if(file_exists($product_script_file)){
+				require_once($product_script_file);
+			}
+		}
+		
 		//GET THE LAST MIGRATION STOPPING POINT
 		/*
 		$sql = "SELECT * FROM stg_settings WHERE stg_name='db_migration_version'";
@@ -582,10 +588,9 @@
 				continue;
 			}
 			*/
-
 			if($verbose){
 				echo 'Checking Migration ' . $key . "<br>\n";
-				$num_migrations_run++;
+				
 			}
 			
 			$run = true;
@@ -643,6 +648,7 @@
 					try{
 						$q = $dblink->prepare($migration['migration_sql']);
 						$q->execute();
+						$num_migrations_run++;
 						echo 'Run: '.$migration['migration_sql']. "<br>\n";
 					}
 					catch(PDOException $e){
@@ -698,6 +704,7 @@
 						echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
 						return 0;					
 					}
+					$num_migrations_run++;
 					$migration_log->set('mig_success', 1);
 					$migration_log->save();
 				}
@@ -775,6 +782,8 @@
 		echo 'Database migration complete.<br>  #Run: '.$num_migrations_run.',<br> #Skipped: '.$num_migrations_skipped."<br>\n";			
 		return true;
 	}
+	
+
 	
 	if(!isset($noautorun)){
 		if(update_database($migrations, $verbose, $upgrade, $cleanup)){

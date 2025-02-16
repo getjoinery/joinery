@@ -9,7 +9,7 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctlddevices_class.php');
+require_once($siteDir . '/plugins/controld/data/ctlddevices_class.php');
 
 
 class CtldAccountException extends SystemClassException {}

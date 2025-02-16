@@ -9,7 +9,7 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/includes/ControlDHelper.php');
+require_once($siteDir . '/plugins/controld/includes/ControlDHelper.php');
 
 
 class CtldServiceException extends SystemClassException {}
