@@ -233,6 +233,8 @@ class LibraryFunctions {
 	
 	static function get_formwriter_object($form_id = 'form1', $override_name=NULL, $override_path=NULL){
 		//IF OVERRIDE IS PRESENT, GET THE SPECIFIC ONE
+		
+
 		if($override_path){
 			require_once($override_path);
 			$formwriter = new FormWriter($form_id);
@@ -253,9 +255,13 @@ class LibraryFunctions {
 		
 		//FIRST CHECK THE CURRENT ACTIVE THEME
 		$theme_form = LibraryFunctions::get_theme_file_path('FormWriter.php',  'includes', 'system');
+
 		if($theme_form){
+
 			require_once($theme_form);
+		
 			$formwriter = new FormWriter($form_id);
+
 			return $formwriter;		
 		}				
 		
