@@ -499,8 +499,8 @@
 
 		//DO THE MIGRATION
 		$noautorun = 1;  //DO NOT AUTORUN THE update_database include
-		require_once(__DIR__.'/update_database.php');
-		$migration_result = update_database($classes, $migrations, $verbose, $upgrade, $cleanup);
+		require_once('update_database.php');
+		$migration_result = update_database($migrations, $verbose, $upgrade, $cleanup);
 		if(!$migration_result){
 			echo 'Migration failed...reverting upgrade.<br>';
 			exec("mv $backup_directory_contents $live_directory");
