@@ -64,9 +64,9 @@
 					if(file_exists($filepath)){
 						if (str_contains($file, '_class')) {
 							require_once($filepath);
-							//if($verbose){
+							if($verbose){
 								echo 'Requiring '.$filepath.'<br>'."\n";
-							//}
+							}
 							
 							$fileContent = file_get_contents($filepath);
 							$tokens = token_get_all($fileContent);
@@ -76,7 +76,7 @@
 									$thisclass = $tokens[$i + 2][1];;
 									//TABLENAME AND FIELD SPECIFICATIONS ARE REQUIRED 
 									if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
-											if($verbose){
+										if($verbose){
 											echo 'Loading '.$thisclass.'<br>';
 										}
 										$classes[] = $thisclass;

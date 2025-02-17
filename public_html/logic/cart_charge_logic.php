@@ -318,6 +318,7 @@ function cart_charge_logic($get_vars, $post_vars){
 
 		//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
 		foreach($cart->coupon_codes as $coupon_code_name){
+			
 			if($valid_coupons = $product->get_valid_coupons($product_version)){
 				foreach($valid_coupons as $valid_coupon){
 					if($coupon_code_name == $valid_coupon->get('ccd_code')){
