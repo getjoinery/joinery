@@ -286,7 +286,7 @@
 	echo $formwriter->dropinput("Default timezone", "default_timezone", '', $optionvals, $settings->get_setting('default_timezone'), '', FALSE); 
 
 	echo $formwriter->textinput("Nickname display as (blank for no nicknames)", "nickname_display_as", '', 20, $settings->get_setting('nickname_display_as'), "" , 255, "");	
-
+	echo $formwriter->textinput("Form styling (blank for default)", "form_style", '', 20, $settings->get_setting('form_style'), "" , 255, "");	
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Require email activation to log on", "activation_required_login", '', $optionvals, $settings->get_setting('activation_required_login'), '', FALSE);	

@@ -18,7 +18,8 @@
 		echo PublicPage::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
 	}
 	else{
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
+		$settings = Globalvars::get_instance();
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
 		echo $formwriter->begin_form("", "post", "/password-reset-1", true); 
 		echo $formwriter->textinput("Enter the Email Address you registered with", "email", NULL, 20, htmlspecialchars($email), '', 64, NULL);
 		echo $formwriter->new_form_button('Submit');

@@ -7,6 +7,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 	$product = $page_vars['product'];
 	$product_version = $page_vars['product_version'];
 	$cart = $page_vars['cart'];
+	$settings = Globalvars::get_instance();
 
 	$page = new PublicPage();
 	$page->public_header(array(
@@ -23,7 +24,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 	
 	if (!$page_vars['display_empty_form']) {
 		echo '<p>Is everything correct?</p>';
-		$formwriter = LibraryFunctions::get_formwriter_object('product_form', 'tailwind');
+		$formwriter = LibraryFunctions::get_formwriter_object('product_form', $settings->get_setting('form_style'));
 		echo $formwriter->begin_form("", "POST", "/product"); 
 
 		echo $formwriter->hiddeninput('product_id', $product_id);
@@ -110,7 +111,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT OR IF IT CANNOT BE ADDED TO THE CART
 				if(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)){
 
-					$formwriter = LibraryFunctions::get_formwriter_object('product_form', 'tailwind');
+					$formwriter = LibraryFunctions::get_formwriter_object('product_form', $settings->get_setting('form_style'));
 					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 					echo $formwriter->hiddeninput('product_id', $product_id);
 	

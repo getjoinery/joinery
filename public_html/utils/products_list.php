@@ -56,7 +56,8 @@
 			echo 'sold out<br>';
 		}
 		else{
-			$formwriter = LibraryFunctions::get_formwriter_object("product_form".$product->key, 'tailwind');
+			$settings = Globalvars::get_instance();
+			$formwriter = LibraryFunctions::get_formwriter_object("product_form".$product->key, $settings->get_setting('form_style'));
 			echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 			echo $formwriter->hiddeninput('product_id', $product->key);
 			if ($product->output_product_form($formwriter, $page_vars['user'], null)) {

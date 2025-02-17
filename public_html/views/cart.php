@@ -7,6 +7,7 @@
 	$cart = $page_vars['cart'];
 	$currency_symbol = $page_vars['currency_symbol'];
 	$page_vars['currency_code'] = $currency_code;
+	$settings = Globalvars::get_instance();
 
 	$page = new PublicPage();
 	$page->public_header(array(
@@ -108,7 +109,7 @@
 		if($cart->billing_user){	
 			echo '<h2 class="text-lg font-medium text-gray-900">Billing User</h2>';
 			echo '<p>'.$cart->billing_user['billing_first_name'] . ' ' . $cart->billing_user['billing_last_name'] . ' ('. $cart->billing_user['billing_email'].')</p>';
-			$formwriter = LibraryFunctions::get_formwriter_object('form_billing_user', 'tailwind');
+			$formwriter = LibraryFunctions::get_formwriter_object('form_billing_user', $settings->get_setting('form_style'));
 			
 			//echo $formwriter->start_buttons();
 			echo $formwriter->new_button('Change billing user', '/cart?newbilling=1', 'secondary');
@@ -131,7 +132,7 @@
 			});
 			</script>
 			<?php	
-			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'tailwind');
+			$formwriter = LibraryFunctions::get_formwriter_object('form2', $settings->get_setting('form_style'));
 			$validation_rules = array();
 			$validation_rules['billing_email']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
 			$validation_rules['billing_email']['required']['value'] = 'true';
@@ -170,7 +171,7 @@
 				
 		}
 
-		$settings = Globalvars::get_instance();
+		
 		if($settings->get_setting('coupons_active')){
 			echo '<h2 class="text-lg font-medium text-gray-900">Coupon Codes</h2>';
 
@@ -194,7 +195,7 @@
 				echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
 				foreach($page_vars['all_coupons'] as $coupon){
 
-					$formwriter = LibraryFunctions::get_formwriter_object('form_test_coupon', 'tailwind');
+					$formwriter = LibraryFunctions::get_formwriter_object('form_test_coupon', $settings->get_setting('form_style'));
 					echo $formwriter->begin_form("mt-6", "get", '/cart');
 
 					echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
@@ -207,7 +208,7 @@
 				echo '</div>';
 			}
 
-			$formwriter = LibraryFunctions::get_formwriter_object('form_coupon', 'tailwind');
+			$formwriter = LibraryFunctions::get_formwriter_object('form_coupon', $settings->get_setting('form_style'));
 			echo $formwriter->begin_form("mt-6", "get", '/cart');
 
 			echo $formwriter->textinput('Add Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
@@ -273,7 +274,7 @@
 			}
 		}			
 		else if($cart->billing_user){					
-			$formwriter = LibraryFunctions::get_formwriter_object('form4', 'tailwind');
+			$formwriter = LibraryFunctions::get_formwriter_object('form4', $settings->get_setting('form_style'));
 			echo $formwriter->begin_form("mt-6", "post", '/cart_charge');
 			echo $formwriter->hiddeninput('novalue', '');
 			echo $formwriter->start_buttons();
