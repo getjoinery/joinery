@@ -28,7 +28,8 @@
 	echo PublicPage::tab_menu($page_vars['tab_menus']);
 	
 	
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
+	$settings = Globalvars::get_instance();
+	$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
 	echo $formwriter->begin_form("", "post", "/profile/account_edit");
 
 	echo $formwriter->textinput("First Name", "usr_first_name", NULL, 20, $page_vars['user']->get('usr_first_name'), "",255, "");

@@ -18,7 +18,8 @@
 		echo 'You are not registered for this course, or you have already withdrawn.';
 	}
 	else if(!$event->get('evt_end_time') || $event->get('evt_end_time') > date('Y-m-d H:i:s')){
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
+		$settings = Globalvars::get_instance();
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
 		echo $formwriter->begin_form("form", "post", "/profile/event_withdraw");
 
 		echo '<h4>Confirm withdrawal from '.$event->get('evt_name').'</h4>';

@@ -18,7 +18,8 @@
 		echo PublicPage::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
 	}
 	else{
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'tailwind');
+		$settings = Globalvars::get_instance();
+		$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
 
 		$validation_rules = array();
 		$validation_rules['usr_password']['required']['value'] = 'true';
