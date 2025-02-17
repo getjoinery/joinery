@@ -1123,7 +1123,13 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		}
 
 		$q->execute();
-		return $only_count ? $q->fetchColumn() : $q->fetchAll(PDO::FETCH_ASSOC);
+		$q->setFetchMode(PDO::FETCH_OBJ);
+		if($only_count){
+			return $q->fetchColumn();
+		}
+		else{
+			return $q;
+		}
 	}
 /*
     public function get_results($table, $filters = [], $sorts = [], $only_count = false, $debug = false) {

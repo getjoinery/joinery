@@ -941,7 +941,7 @@ class Product extends SystemBase {
 					}
 				}
 				
-				if(!$found){
+				if(!$found){	
 					$valid_coupon_codes[] = $coupon_code;
 				}
 			}

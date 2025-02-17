@@ -209,7 +209,7 @@ class MultiCouponCode extends SystemMultiBase {
 	function load($debug = false) {
 		parent::load();
 		$q = $this->getMultiResults(false, $debug);
-		foreach($q as $row) {
+		foreach($q->fetchAll() as $row) {
 			$child = new CouponCode($row->ccd_coupon_code_id);
 			$child->load_from_data($row, array_keys(CouponCode::$fields));
 			$this->add($child);
