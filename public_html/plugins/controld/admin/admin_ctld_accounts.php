@@ -54,7 +54,7 @@
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
 		'altlinks' => $altlinks,
-		'title' => $title,
+		'title' => 'Scrolldaddy accounts',
 		//'search_on' => TRUE
 	);
 	$page->tableheader($headers, $table_options, $pager);
@@ -86,7 +86,7 @@
 		}
 		
 		$rowvalues = array();
-		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name().'</a>');	
+		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name().'</a> (<a href="/plugins/controld/admin/admin_ctld_account?account_id='.$account->key.'">Info page</a>)');	
 		array_push($rowvalues, $account->readable_plan_name());	
 		
 		array_push($rowvalues, '('.$numsubscriptions.') <br>'.implode('<br>', $subscription_list));	
