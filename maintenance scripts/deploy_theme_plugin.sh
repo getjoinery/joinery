@@ -103,7 +103,7 @@ rm -rf "$STAGING_DIR/theme_old"
 mv "$STAGING_DIR/theme" "$STAGING_DIR/theme_old"
 mv "$STAGING_DIR/theme_stage/"* "$STAGING_DIR/theme"
 chown -R :www-data "$STAGING_DIR/theme"
-chmod -R g+rw "$STAGING_DIR/theme"
+chmod -R g+rw "$STAGING_DIR/theme" 
 
 exit 1
 
