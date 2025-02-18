@@ -371,7 +371,7 @@
 		
 		array_push($rowvalues, $num_blocks_scheduled[$device->key]. ' ('.implode(', ', $secondary_out).')' . ' (Remote: '.implode(', ', $secondary_array).')' );
 		
-		array_push($rowvalues, $scheduled_string[$device->key]);
+		array_push($rowvalues, $scheduled_string[$device->key]. ' (' . $device->get('cdd_timezone').')');
 
 		
 
