@@ -38,7 +38,7 @@
 	}
 
 
-	if($settings->get_setting('events_active')){
+	if($settings->get_setting('events_active')){ 
 		echo '<h2>Events</h2>';
 		
 		$sort = 'start_time';
