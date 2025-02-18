@@ -1,0 +1,299 @@
+#SITENAME_PLACEHOLDER
+apt list --upgradable
+sudo apt update && sudo apt upgrade
+
+#Create a user
+adduser user1
+adduser user1 sudo
+adduser user1 www-data
+su user1
+
+#Disallow root logins over SSH
+sudo pico /etc/ssh/sshd_config
+SET PermitRootLogin no
+
+#Install Fail2Ban
+sudo apt -y install fail2ban
+sudo systemctl enable fail2ban
+
+#firewall 
+#https://help.ubuntu.com/lts/serverguide/firewall.html
+sudo ufw enable
+sudo ufw allow 22
+sudo ufw allow 80
+sudo ufw allow 8080
+sudo ufw allow 8001 # use this for node.js
+sudo ufw allow 443
+sudo ufw allow 5432
+sudo ufw allow https
+
+
+#Install Apache
+#https://www.linode.com/docs/web-servers/lamp/install-lamp-stack-on-ubuntu-18-04/
+#https://www.lifewire.com/restart-apache-web-server-3464025
+sudo apt install apache2
+
+
+#activate mod_rewrite
+sudo a2enmod rewrite
+
+
+
+
+#Install Postgresql
+https://rlopzc.com/posts/securing-your-postgresql-db-with-roles--privileges/
+sudo apt-get install postgresql
+sudo cp /etc/postgresql/12/main/postgresql.conf /etc/postgresql/12/main/postgresql.conf.bak
+#uncomment and change field value in postgres conf
+sudo sed -i '/listen_addresses/s/^#//g' /etc/postgresql/12/main/postgresql.conf
+sudo sed -i "/listen_addresses =/ s/= .*/= \'*'/" /etc/postgresql/12/main/postgresql.conf
+sudo /etc/init.d/postgresql restart
+
+#Install the Zip utility (for composer)
+sudo apt-get install zip unzip
+
+#INSTALL CERTBOT
+#https://certbot.eff.org/lets-encrypt/ubuntufocal-apache
+sudo snap install core; sudo snap refresh core
+sudo snap install --classic certbot
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
+sudo certbot --apache -d SITENAME_PLACEHOLDER.org -d www.SITENAME_PLACEHOLDER.org
+#test sudo certbot certonly --apache -d SITENAME_PLACEHOLDER.org -d www.SITENAME_PLACEHOLDER.org --dry-run
+#sudo certbot renew  //how to renew
+
+#Install PHP
+sudo apt-get install php-pear php-fpm php-dev php-zip php-curl php-xmlrpc php-gd php-mbstring php-xml libapache2-mod-php php-curl php-json php-imagick php-dom php-pgsql php-cli -y --allow-unauthenticated
+
+TODO: Set php errors to ignore notice and warnings. (error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT & ~E_WARNING & ~E_NOTICE
+)
+sudo cp /etc/php/7.4/apache2/php.ini /etc/php/7.4/apache2/php.ini.bak
+sudo sed -i 's,^post_max_size =.*$,post_max_size = 50M,' /etc/php/7.4/apache2/php.ini
+sudo sed -i 's,^upload_max_filesize =.*$,upload_max_filesize = 50M,' /etc/php/7.4/apache2/php.ini
+sudo sed -i 's,^;extension=pdo_pgsql,extension=pdo_pgsql,' /etc/php/7.4/apache2/php.ini
+
+##TODO:  Set error reporting in php.ini:  error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT & ~E_NOTICE & ~E_WARNING
+
+
+#Install Composer
+#https://www.digitalocean.com/community/tutorials/how-to-install-and-use-composer-on-ubuntu-20-04
+cd /home/user1
+sudo apt install composer -y  
+curl -sS https://getcomposer.org/installer -o composer-setup.php
+HASH=`curl -sS https://composer.github.io/installer.sig`
+echo $HASH
+php -r "if (hash_file('SHA384', 'composer-setup.php') === '$HASH') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;"
+sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+
+#mailgun composer
+composer require "mailgun/mailgun-php:2.8.1" kriswallsmith/buzz nyholm/psr7
+
+#mailchimp composer
+composer require jhut89/mailchimp3php
+
+#calendly composer
+#composer require zenapply/php-calendly  NO LONGER USING
+
+#stripe composer
+#composer require "stripe/stripe-php:6.40.0"
+composer require "stripe/stripe-php:10.16.0"
+
+#class upload composer
+#https://github.com/verot/class.upload.php
+composer require verot/class.upload.php
+
+#add your username to the group
+sudo usermod -a -G www-data user1
+
+
+#Web root permissions
+#give user1 ownership
+sudo chown -R www-data /var/www/
+#Make sure the group is www-data on '/var/www'.
+sudo chgrp -R user1 /var/www
+#Make it writable
+sudo chmod 775 /var/www
+#set group id for subfolders
+sudo chmod g+s /var/www
+
+
+
+#OLD Web root permissions (deprecated)
+#Make sure the group is www-data on '/var/www'.
+#sudo chgrp -R www-data /var/www
+#Make it writable
+#sudo chmod 775 /var/www
+#set group id for subfolders
+#sudo chmod g+s /var/www
+#give yourself ownership
+#sudo chown -R user1 /var/www/
+
+
+#Further Postgres config
+#https://stackoverflow.com/questions/1471571/how-to-configure-postgresql-for-the-first-time
+sudo -u postgres psql template1
+ALTER USER postgres with encrypted password 'xxxxxxx';
+sudo pico /etc/postgresql/12/main/pg_hba.conf
+local all postgres md5
+sudo createuser -U postgres -d -e -E -l -P -r -s user1
+sudo pico /etc/postgresql/12/main/pg_hba.conf
+local all all md5
+host   all              all             0.0.0.0/0               md5
+sudo /etc/init.d/postgresql restart
+#TODO map the os user to the postgres user 
+#https://postgreshelp.com/postgresql-user-authentication-demystified/
+
+
+#Set up a website
+#sudo cp /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/000-default.conf
+sudo pico /etc/apache2/sites-available/SITENAME_PLACEHOLDER.conf
+mkdir -p /var/www/html/SITENAME_PLACEHOLDER/{public_html,theme, static_files, config,logs,uploads}
+mkdir -p /var/www/html/SITENAME_PLACEHOLDER_test/{public_html,theme, static_files, config,logs,uploads}
+sudo rm /var/www/html/index.html
+
+sudo chmod -R 755 /var/www/html/SITENAME_PLACEHOLDER/theme
+
+#TODO figure out uploads folder
+sudo chmod -R 777 /var/www/html/SITENAME_PLACEHOLDER/uploads
+sudo chown -R www-data /var/www/html/SITENAME_PLACEHOLDER/uploads
+
+#Link your virtual host file from the sites-available directory to the sites-enabled directory:
+sudo a2ensite SITENAME_PLACEHOLDER.conf
+#Disable the default virtual host to minimize security risks:
+sudo a2dissite 000-default.conf
+
+
+systemctl reload apache2
+systemctl restart apache2
+
+
+#set AllowOverride and Options -Indexes
+sudo pico /etc/apache2/apache2.conf
+#<Directory /var/www/>
+#        Options Indexes FollowSymLinks
+#        AllowOverride All
+#        Require all granted
+#</Directory>
+systemctl restart apache2
+
+
+#manually add the virtual host
+sudo pico /etc/apache2/sites-available/SITENAME_PLACEHOLDER.conf
+
+Listen 45.79.219.72:8080
+
+<Directory /var/www/html/integralzen/public_html>
+        Options -Indexes -FollowSymLinks -MultiViews
+        AllowOverride All
+        Require all granted
+
+	# Turn mod_rewrite on
+	RewriteEngine On
+	RewriteBase /
+
+	# For LocalHost !.php
+	#RewriteCond %{HTTP_HOST} !=localhost
+	#RewriteCond %{HTTP_HOST} !=127.0.0.1
+	#RewriteCond %{REMOTE_ADDR} !=127.0.0.1
+	#RewriteCond %{REMOTE_ADDR} !=::1
+
+	## hide .php extension
+	# To externally redirect /dir/foo.php to /dir/foo
+	RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s([^.]+)\.php [NC]
+	RewriteRule ^ %1 [R=302,L]
+
+	# To internally forward /dir/foo to /dir/foo.php
+	RewriteCond %{REQUEST_FILENAME} !-d
+	RewriteCond %{REQUEST_FILENAME}.php -f
+	RewriteRule ^(.*?)/?$ $1.php [L]
+	
+	#redirect www to non www
+	RewriteCond %{HTTP_HOST} ^www\.(.*)$ [NC]
+	RewriteRule ^(.*)$ http://%1/$1 [R=301,L]
+
+	#Use a php file to manage urls
+	#RewriteCond %{SCRIPT_FILENAME} !-f
+	RewriteRule ^(.*)$ serve.php?path=$1 [QSA]
+</Directory>
+
+
+<Directory /var/www/html/SITENAME_PLACEHOLDER_test/public_html>
+        Options -Indexes -FollowSymLinks -MultiViews
+        AllowOverride All
+        Require all granted
+
+	# Turn mod_rewrite on
+	RewriteEngine On
+	RewriteBase /
+
+	# For LocalHost !.php
+	#RewriteCond %{HTTP_HOST} !=localhost
+	#RewriteCond %{HTTP_HOST} !=127.0.0.1
+	#RewriteCond %{REMOTE_ADDR} !=127.0.0.1
+	#RewriteCond %{REMOTE_ADDR} !=::1
+
+	## hide .php extension
+	# To externally redirect /dir/foo.php to /dir/foo
+	RewriteCond %{THE_REQUEST} ^[A-Z]{3,}\s([^.]+)\.php [NC]
+	RewriteRule ^ %1 [R=302,L]
+
+	# To internally forward /dir/foo to /dir/foo.php
+	RewriteCond %{REQUEST_FILENAME} !-d
+	RewriteCond %{REQUEST_FILENAME}.php -f
+	RewriteRule ^(.*?)/?$ $1.php [L]
+
+	#Use a php file to manage urls
+	#RewriteCond %{SCRIPT_FILENAME} !-f
+	RewriteRule ^(.*)$ serve.php?path=$1 [QSA]
+</Directory>
+
+<VirtualHost 45.79.219.72:80>
+        ServerName SITENAME_PLACEHOLDER.org
+        DirectoryIndex index.php index.html
+        DocumentRoot /var/www/html/SITENAME_PLACEHOLDER/public_html
+        LogLevel error
+        ErrorLog /var/www/html/SITENAME_PLACEHOLDER/logs/error.log
+        #CustomLog /var/www/html/SITENAME_PLACEHOLDER/logs/access.log combined
+</VirtualHost>
+
+<VirtualHost 45.79.219.72:8080>
+        ServerName SITENAME_PLACEHOLDER_test.com
+        DirectoryIndex index.php index.html
+        DocumentRoot /var/www/html/SITENAME_PLACEHOLDER_test/public_html
+        LogLevel error
+        ErrorLog /var/www/html/SITENAME_PLACEHOLDER_test/logs/error.log
+        #CustomLog /var/www/html/SITENAME_PLACEHOLDER_test/logs/access.log combined
+</VirtualHost>
+
+
+############################
+#Common commands
+#systemctl reload apache2
+#systemctl restart apache2  OR sudo /etc/init.d/apache2 restart
+#sudo pico /etc/apache2/sites-available/SITENAME_PLACEHOLDER.conf
+#apachectl configtest
+#sudo tail -n 10 /var/log/apache2/error.log
+#Error log:#sudo journalctl -u apache2.service --since today --no-pager
+#sudo apache2ctl -S
+
+#sudo /etc/init.d/postgresql restart
+#sudo pico /etc/postgresql/12/main/postgresql.conf
+#sudo pico /etc/postgresql/12/main/pg_hba.conf
+
+#sudo pico /etc/php/7.4/apache2/php.ini
+#sudo pico /etc/apache2/apache2.conf
+#crontab -e 
+
+####################################
+#Install Node, npm, and azimuth.js
+
+sudo apt install nodejs
+sudo apt install npm
+npm install web3
+npm install build
+npm install azimuth-solidity
+npm install azimuth-js
+
+node azimuth-test.js #in test directory
+or run the node-test.js from the browser
+
+

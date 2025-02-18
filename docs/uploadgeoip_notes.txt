@@ -1,0 +1,14 @@
+http://www.siafoo.net/article/53
+
+SET client_encoding to "LATIN1";
+
+COPY geoip.locations (id, country, region, city, postal_code, latitude, longitude, metro_code, area_code)
+FROM '/var/www/html/test/GeoLiteCity-Location.csv' WITH CSV HEADER;
+
+COPY geoip.blocks
+FROM '/var/www/html/test/GeoLiteCity-Blocks.csv' WITH CSV HEADER;
+
+CREATE INDEX ix_start_end_ip ON geoip.blocks
+    USING btree (start_ip, end_ip) WITH (FILLFACTOR=100);
+CREATE INDEX ix_end_start_ip ON geoip.blocks
+    USING btree (end_ip, start_ip) WITH (FILLFACTOR=100);
