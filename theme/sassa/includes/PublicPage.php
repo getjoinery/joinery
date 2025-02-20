@@ -315,6 +315,17 @@ Career Area
     <!-- Theme Custom CSS -->
     <link rel="stylesheet" href="/theme/sassa/assets/css/style.css">
 
+    <!-- Facebook Open Graph Meta Tags -->
+    <meta property="og:title" content="Scrolldaddy - Take Control of Your Browsing">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://scrolldaddy.app">
+    <meta property="og:image" content="https://scrolldaddy.app/static_files/scrolldaddylogonopadding.svg">
+    <meta property="og:description" content="Block distractions, filter harmful content, and take back control of your browsing with Scrolldaddy.">
+    <meta property="og:site_name" content="Scrolldaddy">
+    <meta property="og:locale" content="en_US">
+    <!--<meta property="fb:app_id" content="YOUR_FACEBOOK_APP_ID">--> <!-- Optional -->
+
+
 </head>
 
 <body>
