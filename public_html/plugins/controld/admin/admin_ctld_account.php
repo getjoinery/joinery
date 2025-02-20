@@ -295,7 +295,7 @@
 
 			$primary_array = array();
 			$secondary_array = array();
-		if($_GET['remotestatus'] == 60){
+		if($_GET['remotestatus'] == $device->key){
 			$cd = new ControlDHelper();
 			$profile_primary = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_primary'), TRUE);
 			$profile_secondary = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
