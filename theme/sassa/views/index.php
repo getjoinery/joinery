@@ -35,7 +35,7 @@ Hero Area
                     <div class="hero-style1">
                         <span class="sub-title">Welcome to ScrollDaddy</span>
                         <h1 class="hero-title">Save your sanity online</h1>
-                        <p class="hero-text">Block social media, gambling, porn, news, and more before it gets to your computer.</p>
+                        <p class="hero-text">Block social media, gambling, porn, news, and more before it gets to you.</p>
                         <div class="btn-group">
                             <a href="/pricing" class="th-btn">Get Started</a>
 							<!--
@@ -72,7 +72,7 @@ Hero Area
                 </div>
                 <div class="col-xl-6">
                     <div class="hero-img tilt-active">
-                        <img src="/theme/sassa/assets/img/hero/hero_1_1.png" alt="Hero Image">
+                        <img src="/static_files/peopleonphones.png" width="859" alt="Scrolldaddy people on phones">
                     </div>
                 </div>
             </div>
@@ -94,85 +94,7 @@ Hero Area
     </div>
 	
 	
-    <!--======== / Hero Section ========--><!--==============================
-Brand Area  
-==============================-->
-<!--
-    <div class="brand-sec4 overflow-hidden space">
-        <div class="container">
-            <div class="title-area mb-60 text-center">
-                <h3 class=" mt-n1">Trusted by millions of customers.</h3>
-            </div>
-            <div class="slider-area text-center">
-                <div class="swiper th-slider brand-slider1" id="brandSlider1" data-slider-options='{"breakpoints":{"0":{"slidesPerView":2},"576":{"slidesPerView":"2"},"768":{"slidesPerView":"3"},"992":{"slidesPerView":"4"},"1200":{"slidesPerView":"5"},"1400":{"slidesPerView":"6"}}}'>
-                    <div class="swiper-wrapper">
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_1.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_2.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_3.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_4.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_5.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_6.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_1.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_2.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_3.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_4.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_5.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                        <div class="swiper-slide">
-                            <a href="about.html" class="brand-box">
-                                <img src="/theme/sassa/assets/img/brand/brand_1_6.svg" alt="Brand Logo">
-                            </a>
-                        </div>
-                    </div>
 
-                </div>
-            </div>
-        </div>
-    </div>
-	-->
 	
 	
 	<!--==============================
@@ -250,8 +172,8 @@ About Area
                         <p class="mt-n2 mb-35">ScrollDaddy works as a DNS server and sits between you and the internet's system that converts domain names into locations.  It is not limited by app permissions on your phone or computer.</p>
                         <div class="about-feature-wrap">
                             <div class="about-feature">
-                                <div class="box-icon">
-                                    <img src="/theme/sassa/assets/img/icon/about_1_1.svg" alt="Icon">
+                                <div>
+                                    <i class="fa-regular fa-check fa-5x"></i>
                                 </div>
                                 <div class="media-body">
                                     <h3 class="box-title">Powerful</h3>
@@ -259,8 +181,8 @@ About Area
                                 </div>
                             </div>
                             <div class="about-feature">
-                                <div class="box-icon">
-                                    <img src="/theme/sassa/assets/img/icon/about_1_2.svg" alt="Icon">
+                                <div>
+                                    <i class="fa-regular fa-shield fa-5x"></i>
                                 </div>
                                 <div class="media-body">
                                     <h3 class="box-title">Safe</h3>
@@ -268,27 +190,30 @@ About Area
                                 </div>
                             </div>
                             <div class="about-feature">
-                                <div class="box-icon">
-                                    <img src="/theme/sassa/assets/img/icon/about_1_2.svg" alt="Icon">
+                                <div>
+                                    <i class="fa-regular fa-lock fa-5x"></i>
                                 </div>
                                 <div class="media-body">
                                     <h3 class="box-title">Private</h3>
                                     <p class="box-text">ScrollDaddy has no access to your web traffic or files on your computer, and does not log by default.</p>
                                 </div>
                             </div>
+                  
                         </div>
                     </div>
                 </div>
                 <div class="col-xl-6 mb-30 mb-xl-0">
                     <div class="img-box1">
                         <div class="img1">
-                            <img src="/theme/sassa/assets/img/normal/about_1_1.png" alt="About">
+                            <img src="/static_files/switches2_resized.png" width="684" height="548" alt="Screenshot of features">
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div><!--==============================
+    </div>
+	
+	<!--==============================
 Process Area  
 ==============================-->
     <section class="space" id="process-sec">
@@ -301,207 +226,35 @@ Process Area
                     </div>
                 </div>
             </div>
-            <div class="process-tabs-wrapper">
-                <div class="nav nav-tabs process-tabs" id="nav-tab" role="tablist">
-                    <button class="nav-link th-btn active" id="nav-step1-tab" data-bs-toggle="tab" data-bs-target="#nav-step1" type="button">1. Create account</button>
-                    <button class="nav-link th-btn" id="nav-step2-tab" data-bs-toggle="tab" data-bs-target="#nav-step2" type="button">2. Install our app</button>
-                    <button class="nav-link th-btn" id="nav-step3-tab" data-bs-toggle="tab" data-bs-target="#nav-step3" type="button">3. Choose your block schedule</button>
-                </div>
-                <div class="tab-content" id="nav-tabContent">
-                    <div class="tab-pane fade show active" id="nav-step1" role="tabpanel">
-                        <div class="process-wrapp">
-                            <div class="process-content">
-                                <div class="process-title-area">
-                                    <div class="process-icon">
-                                        <img src="/theme/sassa/assets/img/icon/user.svg" alt="">
-                                    </div>
-                                    <h3 class="">Create your account</h3>
-                                </div>
-                                <p class="process-text">We need only your a name and email...use a pseudonym and an anyonymous email if you like.
-                                </p>
-                                <a href="/pricing" class="th-btn style2">Get Started Now</a>
-                            </div>
-                            <div class="process-image">
-                                <img src="/theme/sassa/assets/img/normal/process-img.png" alt="">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="tab-pane fade" id="nav-step2" role="tabpanel">
-                        <div class="process-wrapp">
-                            <div class="process-content">
-                                <div class="process-title-area">
-                                    <div class="process-icon">
-                                        <img src="/theme/sassa/assets/img/icon/code.svg" alt="">
-                                    </div>
-                                    <h3 class="">Install our app</h3>
-                                </div>
-                                <p class="process-text">We use very simple apps that do nothing at all except change the proper DNS settings on your device.
-                                </p>
-                                <a href="/pricing" class="th-btn style2">Get Started Now</a>
-                            </div>
-                            <div class="process-image">
-                                <img src="/theme/sassa/assets/img/normal/process-img-2.png" alt="">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="tab-pane fade" id="nav-step3" role="tabpanel">
-                        <div class="process-wrapp">
-                            <div class="process-content">
-                                <div class="process-title-area">
-                                    <div class="process-icon">
-                                        <img src="/theme/sassa/assets/img/icon/search.svg" alt="">
-                                    </div>
-                                    <h3 class="">Choose your list of blocked sites</h3>
-                                </div>
-                                <p class="process-text">Pick which web content to block with simple switches.  Have two separate blocklists...one list that is always on and another that works on a schedule you pick. </p>
-                                <a href="/pricing" class="th-btn style2">Get Started</a>
-                            </div>
-                            <div class="process-image">
-                                <img src="/theme/sassa/assets/img/normal/process-img-3.png" alt="">
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div class="container py-5">
+    <div class="row text-center">
+        <div class="col-md-4">
+            <div class="p-4 border rounded shadow">
+                <h3>Create your account</h3>
+                <p>We need only your a name and email...use a pseudonym and an anyonymous email if you like.</p>
             </div>
         </div>
-    </section>
-	<!--==============================
-Customiization Area  
-==============================-->
-<!--
-    <div class="customiization-area space">
-        <div class="container">
-            <div class="row gy-5 flex-row-reverse align-items-center">
-                <div class="col-xl-5">
-                    <div class="">
-                        <div class="title-area mb-35">
-                            <span class="sub-title">Customizations & Analysis</span>
-                            <h2 class="sec-title">Advanced Features & Functionality of Sassa</h2>
-                        </div>
-                        <p class="mt-n2 mb-25">Highlight the main features and functionalities of your SaaS product. This could include things like automation tools, analytics dashboards, collaboration features, integrations.</p>
-                        <div class="about-feature-wrap">
-                            <div class="about-feature style2">
-                                <div class="box-icon">
-                                    <img src="/theme/sassa/assets/img/icon/about_2_1.svg" alt="Icon">
-                                </div>
-                                <div class="media-body">
-                                    <h3 class="box-title">Advanced Analytics</h3>
-                                    <p class="box-text">Ensure that your landing page is optimized for mobile devices and tablets. </p>
-                                </div>
-                            </div>
-                            <div class="about-feature style2">
-                                <div class="box-icon">
-                                    <img src="/theme/sassa/assets/img/icon/about_2_2.svg" alt="Icon">
-                                </div>
-                                <div class="media-body">
-                                    <h3 class="box-title">Powerful Automation</h3>
-                                    <p class="box-text">Visuals help to make the landing page more engaging and provide users.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-xl-7 mb-30 mb-xl-0">
-                    <div class="img-box2">
-                        <div class="img1">
-                            <img src="/theme/sassa/assets/img/normal/customization_2_1.png" alt="About">
-                        </div>
-                        <div class="img2">
-                            <img src="/theme/sassa/assets/img/normal/customization_2_2.png" alt="About">
-                        </div>
-                    </div>
-                </div>
+        <div class="col-md-4">
+            <div class="p-4 border rounded shadow">
+                <h3>Install our app</h3>
+                <p>We use very simple apps that do nothing at all except change the proper DNS settings on your device.</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="p-4 border rounded shadow">
+                <h3>Choose your list of blocked sites</h3>
+                <p>Pick which web content to block with simple switches.  Have two separate blocklists...one list that is always on and another that works on a schedule you pick.</p>
             </div>
         </div>
     </div>
-	-->
-	
-	
-	
-	<!--==============================
-Counter Area  
-==============================-->
-<!--
-    <div class="space">
-        <div class="container">
-            <div class="row justify-content-center">
-                <div class="col-xl-7">
-                    <div class="title-area text-center">
-                        <span class="sub-title">Our Advertisement</span>
-                        <h2 class="sec-title">Revolutionize Your Workflow with SaaS Excellence</h2>
-                    </div>
-                </div>
-            </div>
-            <div class="counter-area">
-                <div class="row justify-content-md-between justify-content-center">
-                    <div class="col-xl-3 col-md-6">
-                        <div class="counter-card">
-                            <h3 class="box-number"><span class="counter-number">16</span>k<span class="plus">+</span></h3>
-                            <div class="media-body">
-                                <p class=" counter-text mb-n2">Completed Our<span>Projects</span></p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-xl-3 col-md-6">
-                        <div class="counter-card">
-                            <h3 class="box-number"><span class="counter-number">150</span><span class="plus">+</span></h3>
-                            <div class="media-body">
-                                <p class=" counter-text mb-n2">Our Expert Support<span>Team Members</span> </p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-xl-3 col-md-6">
-                        <div class="counter-card">
-                            <h3 class="box-number"><span class="counter-number">1</span>k<span class="plus">+</span></h3>
-                            <div class="media-body">
-                                <p class=" counter-text mb-n2">Our Worldwide <span>Clients</span></p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-xl-3 col-md-6">
-                        <div class="counter-card">
-                            <h3 class="box-number"><span class="counter-number">16</span><span class="plus">+</span></h3>
-                            <div class="media-body">
-                                <p class=" counter-text mb-n2">We are Winning <span>Awards</span></p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+</div>
         </div>
-    </div>
-	-->
+    </section>	
 	
-	<!--==============================
-Download Area 1 
-==============================-->
-<!--
-    <section class=" bg-theme" data-bg-src="/theme/sassa/assets/img/bg/download-shape-1.png">
-        <div class="container">
-            <div class="row align-items-center flex-row-reverse">
-                <div class="col-xl-7">
-                    <div class="img-box3">
-                        <div class="img1 tilt-active">
-                            <img src="/theme/sassa/assets/img/normal/download-1-1.png" alt="img">
-                        </div>
-                    </div>
-                </div>
-                <div class="col-xl-5">
-                    <div class="pb-5 pb-xl-0 mb-5 mb-xl-0">
-                        <div class="title-area mb-30 text-center text-xl-start">
-                            <span class="sub-title download-title">Project Management App</span>
-                            <h2 class="sec-title text-white">Download our app and start your free trail to get started today!
-                            </h2>
-                        </div>
-                        <div class="btn-wrap download-btn justify-content-center justify-content-xl-start">
-                            <a href="contact.html" class="th-btn style3 style-radius"><img src="/theme/sassa/assets/img/icon/apple-logo.svg" alt="">Playstore</a>
-                            <a href="contact.html" class="th-btn style4 style-radius"><i class="far fa-cloud-arrow-down me-2"></i>Download app</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>-->
+	
+	
+	
+	
 	
 <!--==============================
 Price Area  
@@ -613,324 +366,6 @@ Price Area
         </div>
     </section>
 	
-	<!--==============================
-Testimonial Area  
-==============================-->
-<!--
-    <section class="testi-area  overflow-hidden space">
-        <div class="container">
-            <div class="row align-items-center">
-                <div class="col-xl-6">
-                    <div class="title-area mb-35">
-                        <span class="sub-title">Testimonials</span>
-                        <h2 class="sec-title">What our clients say?</h2>
-                    </div>
-
-                    <div class="testi-thumb" data-slider-tab="#testi-thumb">
-                        <div class="tab-btn active"></div>
-                        <div class="tab-btn"></div>
-                        <div class="tab-btn"></div>
-                        <div class="tab-btn"></div>
-                    </div>
-                    <div class="swiper th-slider testi-slider" id="testi-thumb" data-slider-options='{"effect":"slide","loop":false,"mousewheel":true,"spaceBetween":10,"paginationType":"progressbar","breakpoints":{"0":{"direction":"horizontal"},"1199":{"direction":"vertical"}}}'>
-                        <div class="swiper-wrapper">
-                            <div class="swiper-slide">
-                                <div class="testi-card">
-                                    <div class="box-review">
-                                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                                    </div>
-                                    <p class="box-text">“There are so many wonderful things to say about Quere. Their staff genuinely cares about their clients and is competent and professional. They assisted me in locating the ideal house for my household.”</p>
-                                    <div class="box-wrapp">
-                                        <div class="box-profile">
-                                            <div class="box-author">
-                                                <img src="/theme/sassa/assets/img/testimonial/testi_1_1.jpg" alt="Avater">
-                                            </div>
-                                            <div class="box-info">
-                                                <h3 class="box-title">Janny Muna</h3>
-                                                <span class="box-desig">CEO of Company</span>
-                                            </div>
-                                        </div>
-                                        <div class="box-quote">
-                                            <img src="/theme/sassa/assets/img/icon/quote.svg" alt="quote">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="swiper-slide">
-                                <div class="testi-card">
-                                    <div class="box-review">
-                                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                                    </div>
-                                    <p class="box-text">“It sounds like you had a great experience with Quere! It's wonderful to hear that their staff is caring, competent, and professional, and that they helped you find the perfect home for your family”</p>
-                                    <div class="box-wrapp">
-                                        <div class="box-profile">
-                                            <div class="box-author">
-                                                <img src="/theme/sassa/assets/img/testimonial/testi_1_2.jpg" alt="Avater">
-                                            </div>
-                                            <div class="box-info">
-                                                <h3 class="box-title">Mary Crispy</h3>
-                                                <span class="box-desig">CEO of Company</span>
-                                            </div>
-                                        </div>
-                                        <div class="box-quote">
-                                            <img src="/theme/sassa/assets/img/icon/quote.svg" alt="quote">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="swiper-slide">
-                                <div class="testi-card">
-                                    <div class="box-review">
-                                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                                    </div>
-                                    <p class="box-text">“Their staff genuinely cares about their clients and is both competent and professional. It's fantastic that they assisted you in locating the ideal house for your household.”</p>
-                                    <div class="box-wrapp">
-                                        <div class="box-profile">
-                                            <div class="box-author">
-                                                <img src="/theme/sassa/assets/img/testimonial/testi_1_3.jpg" alt="Avater">
-                                            </div>
-                                            <div class="box-info">
-                                                <h3 class="box-title">Abraham Khalil</h3>
-                                                <span class="box-desig">CEO of Company</span>
-                                            </div>
-                                        </div>
-                                        <div class="box-quote">
-                                            <img src="/theme/sassa/assets/img/icon/quote.svg" alt="quote">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="swiper-slide">
-                                <div class="testi-card">
-                                    <div class="box-review">
-                                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                                    </div>
-                                    <p class="box-text">“Their caring, competent, and professional staff helped you find the perfect home for your family. If you need assistance drafting a testimonial or review to share your positive experience”</p>
-                                    <div class="box-wrapp">
-                                        <div class="box-profile">
-                                            <div class="box-author">
-                                                <img src="/theme/sassa/assets/img/testimonial/testi_1_4.jpg" alt="Avater">
-                                            </div>
-                                            <div class="box-info">
-                                                <h3 class="box-title">Jenifer Lopez</h3>
-                                                <span class="box-desig">CEO of Company</span>
-                                            </div>
-                                        </div>
-                                        <div class="box-quote">
-                                            <img src="/theme/sassa/assets/img/icon/quote.svg" alt="quote">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="swiper-slide">
-                                <div class="testi-card">
-                                    <div class="box-review">
-                                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                                    </div>
-                                    <p class="box-text">“There are so many wonderful things to say about Quere. Their staff genuinely cares about their clients and is competent and professional. They assisted me in locating the ideal house for my household.”</p>
-                                    <div class="box-wrapp">
-                                        <div class="box-profile">
-                                            <div class="box-author">
-                                                <img src="/theme/sassa/assets/img/testimonial/testi_1_1.jpg" alt="Avater">
-                                            </div>
-                                            <div class="box-info">
-                                                <h3 class="box-title">Janny Muna</h3>
-                                                <span class="box-desig">CEO of Company</span>
-                                            </div>
-                                        </div>
-                                        <div class="box-quote">
-                                            <img src="/theme/sassa/assets/img/icon/quote.svg" alt="quote">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="swiper-slide">
-                                <div class="testi-card">
-                                    <div class="box-review">
-                                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                                    </div>
-                                    <p class="box-text">“It sounds like you had a great experience with Quere! It's wonderful to hear that their staff is caring, competent, and professional, and that they helped you find the perfect home for your family”</p>
-                                    <div class="box-wrapp">
-                                        <div class="box-profile">
-                                            <div class="box-author">
-                                                <img src="/theme/sassa/assets/img/testimonial/testi_1_2.jpg" alt="Avater">
-                                            </div>
-                                            <div class="box-info">
-                                                <h3 class="box-title">Mary Crispy</h3>
-                                                <span class="box-desig">CEO of Company</span>
-                                            </div>
-                                        </div>
-                                        <div class="box-quote">
-                                            <img src="/theme/sassa/assets/img/icon/quote.svg" alt="quote">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="swiper-slide">
-                                <div class="testi-card">
-                                    <div class="box-review">
-                                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                                    </div>
-                                    <p class="box-text">“Their staff genuinely cares about their clients and is both competent and professional. It's fantastic that they assisted you in locating the ideal house for your household.”</p>
-                                    <div class="box-wrapp">
-                                        <div class="box-profile">
-                                            <div class="box-author">
-                                                <img src="/theme/sassa/assets/img/testimonial/testi_1_3.jpg" alt="Avater">
-                                            </div>
-                                            <div class="box-info">
-                                                <h3 class="box-title">Abraham Khalil</h3>
-                                                <span class="box-desig">CEO of Company</span>
-                                            </div>
-                                        </div>
-                                        <div class="box-quote">
-                                            <img src="/theme/sassa/assets/img/icon/quote.svg" alt="quote">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="swiper-slide">
-                                <div class="testi-card">
-                                    <div class="box-review">
-                                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                                    </div>
-                                    <p class="box-text">“Their caring, competent, and professional staff helped you find the perfect home for your family. If you need assistance drafting a testimonial or review to share your positive experience”</p>
-                                    <div class="box-wrapp">
-                                        <div class="box-profile">
-                                            <div class="box-author">
-                                                <img src="/theme/sassa/assets/img/testimonial/testi_1_4.jpg" alt="Avater">
-                                            </div>
-                                            <div class="box-info">
-                                                <h3 class="box-title">Jenifer Lopez</h3>
-                                                <span class="box-desig">CEO of Company</span>
-                                            </div>
-                                        </div>
-                                        <div class="box-quote">
-                                            <img src="/theme/sassa/assets/img/icon/quote.svg" alt="quote">
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="slider-pagination"></div>
-                    </div>
-                </div>
-                <div class="col-xl-6">
-                    <div class="testi-img">
-                        <div class="img1">
-                            <img src="/theme/sassa/assets/img/normal/testi_1_1.png" alt="">
-                        </div>
-                        <div class="img2">
-                            <img src="/theme/sassa/assets/img/normal/testi_1_2.png" alt="">
-                        </div>
-                        <div class="img3">
-                            <img src="/theme/sassa/assets/img/normal/testi_1_3.png" alt="">
-                        </div>
-                        <div class="img4">
-                            <img src="/theme/sassa/assets/img/normal/testi_1_4.png" alt="">
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="ripple-shape">
-            <span class="ripple-1"></span>
-            <span class="ripple-2"></span>
-            <span class="ripple-3"></span>
-            <span class="ripple-4"></span>
-            <span class="ripple-5"></span>
-        </div>
-    </section>
-	-->
-	<!--==============================
-Blog Area  
-==============================-->
-<!--
-    <section class="overflow-hidden space" id="blog-sec">
-        <div class="container">
-            <div class="title-area text-center">
-                <span class="sub-title">News & Articles</span>
-                <h2 class="sec-title">Latest Release News & Articles</h2>
-            </div>
-
-            <div class="slider-area">
-                <div class="swiper th-slider has-shadow" id="blogSlider1" data-slider-options='{"loop":true,"breakpoints":{"0":{"slidesPerView":1},"576":{"slidesPerView":"1"},"768":{"slidesPerView":"2"},"992":{"slidesPerView":"2"},"1200":{"slidesPerView":"2"}}}'>
-                    <div class="swiper-wrapper">
-                        <div class="swiper-slide">
-                            <div class="blog-card">
-                                <div class="box-img global-img">
-                                    <img src="/theme/sassa/assets/img/blog/blog_1_1.jpg" alt="blog image">
-                                </div>
-                                <div class="box-content">
-                                    <div class="blog-meta">
-                                        <a href="blog.html"><i class="fa-regular fa-calendar"></i>10 July,
-                                            2024</a>
-                                        <a href="blog.html"><i class="fa-regular fa-clock"></i>08 min read</a>
-                                    </div>
-                                    <h3 class="box-title"><a href="blog-details.html">What trends do we expect to start growing in the coming future?</a></h3>
-                                    <a href="blog-details.html" class="th-btn">Read More</a>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="swiper-slide">
-                            <div class="blog-card">
-                                <div class="box-img global-img">
-                                    <img src="/theme/sassa/assets/img/blog/blog_1_2.jpg" alt="blog image">
-                                </div>
-                                <div class="box-content">
-                                    <div class="blog-meta">
-                                        <a href="blog.html"><i class="fa-regular fa-calendar"></i>10 July,
-                                            2024</a>
-                                        <a href="blog.html"><i class="fa-regular fa-clock"></i>08 min read</a>
-                                    </div>
-                                    <h3 class="box-title"><a href="blog-details.html">The shift towards online shopping is expected to persist, driven</a></h3>
-                                    <a href="blog-details.html" class="th-btn">Read More</a>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="swiper-slide">
-                            <div class="blog-card">
-                                <div class="box-img global-img">
-                                    <img src="/theme/sassa/assets/img/blog/blog_1_1.jpg" alt="blog image">
-                                </div>
-                                <div class="box-content">
-                                    <div class="blog-meta">
-                                        <a href="blog.html"><i class="fa-regular fa-calendar"></i>10 July,
-                                            2024</a>
-                                        <a href="blog.html"><i class="fa-regular fa-clock"></i>08 min read</a>
-                                    </div>
-                                    <h3 class="box-title"><a href="blog-details.html">What trends do we expect to start growing in the coming future?</a></h3>
-                                    <a href="blog-details.html" class="th-btn">Read More</a>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="swiper-slide">
-                            <div class="blog-card">
-                                <div class="box-img global-img">
-                                    <img src="/theme/sassa/assets/img/blog/blog_1_2.jpg" alt="blog image">
-                                </div>
-                                <div class="box-content">
-                                    <div class="blog-meta">
-                                        <a href="blog.html"><i class="fa-regular fa-calendar"></i>10 July,
-                                            2024</a>
-                                        <a href="blog.html"><i class="fa-regular fa-clock"></i>08 min read</a>
-                                    </div>
-                                    <h3 class="box-title"><a href="blog-details.html">The shift towards online shopping is expected to persist, driven</a></h3>
-                                    <a href="blog-details.html" class="th-btn">Read More</a>
-                                </div>
-                            </div>
-                        </div>
-
-                    </div>
-                </div>
-                <button data-slider-prev="#blogSlider1" class="slider-arrow style3 slider-prev"><i class="far fa-arrow-left"></i></button>
-                <button data-slider-next="#blogSlider1" class="slider-arrow style3 slider-next"><i class="far fa-arrow-right"></i></button>
-            </div>
-        </div>
-    </section>
-	-->
 <?php
 
 	echo PublicPage::EndPage();
