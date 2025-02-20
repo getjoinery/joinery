@@ -9,6 +9,8 @@ require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 
+require_once($siteDir . '/data/coupon_code_uses_class.php');
+
 
 class CouponCodeException extends SystemClassException {}
 
@@ -121,15 +123,17 @@ class CouponCode extends SystemBase {
 			return false;
 		}
 		
-		if($this->get('ccd_end_time') && $this->get('ccd_end_time') > $current_time){
+		if($this->get('ccd_end_time') && $this->get('ccd_end_time') < $current_time){
 			return false;
 		}
-		
+
 		//CHECK NUMBER OF USES 
+
 		if($max_uses = $this->get('ccd_max_num_uses')){
 			$searches = array('coupon_code_id' => $this->key);	
 			$coupon_code_uses = new MultiCouponCodeUse($searches);
 			$num_uses = $coupon_code_uses->count_all();
+
 			if($num_uses > $max_uses){
 				return false;
 			}
