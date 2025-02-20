@@ -46,6 +46,46 @@
 
 	//THIS SECTION RELOADS THEMES AND PLUGINS ONLY
 	if(isset($_GET['theme-only']) && $_GET['theme-only']){
+		
+		function is_writable_by_www_data($directory) {
+			// Get file permissions
+			$perms = fileperms($directory);
+			
+			// Get file owner information
+			$ownerInfo = posix_getpwuid(fileowner($directory));
+			$ownerName = $ownerInfo['name'];
+
+			// Get group permissions (for `www-data` group access)
+			$group_read = ($perms & 0x0020) ? true : false;
+			$group_write = ($perms & 0x0010) ? true : false;
+			
+			// Check if owner is `www-data`
+			$isOwnedByWwwData = ($ownerName === 'www-data');
+
+			// Check if `www-data` has write permissions (owner OR group)
+			$isWritableByWwwData = ($isOwnedByWwwData && ($perms & 0x0080)) || $group_write;
+
+			// Return result as a boolean
+			return $isWritableByWwwData;
+		}
+
+
+		if (!is_writable_by_www_data($theme_directory)) {
+			echo "$theme_directory must be writable by www-data. Aborting upgrade.<br>";
+			echo "Instead, it is owned by " . posix_getpwuid(fileowner($theme_directory))['name'] . 
+				 " and has permissions " . substr(sprintf('%o', fileperms($theme_directory)), -3) . "<br>";
+			exit;
+		} 
+	
+		if (!is_writable_by_www_data($plugin_directory)) {
+			echo "$plugin_directory must be writable by www-data. Aborting upgrade.<br>";
+			echo "Instead, it is owned by " . posix_getpwuid(fileowner($plugin_directory))['name'] . 
+				 " and has permissions " . substr(sprintf('%o', fileperms($plugin_directory)), -3) . "<br>";
+			exit;
+		} 		
+		
+		
+		
 		//REMOVE OLD THEMES
 		//exec ("rm -rf $live_themes".'/*');
 		
