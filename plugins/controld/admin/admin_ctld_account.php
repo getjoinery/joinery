@@ -239,7 +239,7 @@
 */
 
 
-	$headers = array("Device Name", "Status", "Always on Blocks", "Scheduled Blocks",  "Schedule", "Action");
+	$headers = array("Device Name", "Status", "Always on Blocks", "Scheduled Blocks",  "Schedule", "Editable");
 	$altlinks = array();
 	/*
 	if(!$event->get('evt_delete_time')) {
@@ -295,7 +295,7 @@
 
 			$primary_array = array();
 			$secondary_array = array();
-		if($_GET['remotestatus'] == 60){
+		if($_GET['remotestatus'] == $device->key){
 			$cd = new ControlDHelper();
 			$profile_primary = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_primary'), TRUE);
 			$profile_secondary = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
@@ -372,6 +372,18 @@
 		array_push($rowvalues, $num_blocks_scheduled[$device->key]. ' ('.implode(', ', $secondary_out).')' . ' (Remote: '.implode(', ', $secondary_array).')' );
 		
 		array_push($rowvalues, $scheduled_string[$device->key]. ' (' . $device->get('cdd_timezone').')');
+		
+		if($device->get('cdd_allow_device_edits')){
+			array_push($rowvalues, 'Edits All');
+		}
+		else{
+			if($device->are_filters_editable()){
+				array_push($rowvalues, 'Edits Sunday (ON now)');
+			}
+			else{
+				array_push($rowvalues, 'Edits Sunday (OFF now)');
+			}
+		}
 
 		
 

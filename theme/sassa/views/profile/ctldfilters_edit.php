@@ -71,7 +71,7 @@
 	echo $formwriter->hiddeninput('profile_choice', $profile_choice);
 	
 	//ONLY ALLOW EDITS IF IT IS EDIT DAY OR IF USER IS NEW
-	if($device->are_filters_editable() || $_SESSION['permission'] > 8){
+	if($device->are_filters_editable()){
 		echo '<h5>Social Media</h5>';
 		echo $formwriter->toggleinput("Facebook", "block_facebook", '', $services['facebook'], 1, '');
 		echo $formwriter->toggleinput("Youtube", "block_youtube", '', $services['youtube'], 1, '');
@@ -105,6 +105,12 @@
 		echo '<h5>Online Dating</h5>';
 		echo $formwriter->toggleinput("All Dating sites", "block_dating", '', $filters['dating'], 1, '');
 	}
+	else{
+		echo '<div class="alert alert-warning" role="alert">
+		  Since you have chosen to allow edits only on Sunday.  Edits are disabled, except for ad and malware blocking.
+		</div>';
+	}
+
 	
 	if($account->get('cda_plan') == CtldAccount::PREMIUM_PLAN || $account->get('cda_plan') == CtldAccount::PRO_PLAN ){
 		echo '<h5>Ad and Malware</h5>';

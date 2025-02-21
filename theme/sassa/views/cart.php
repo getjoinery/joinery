@@ -8,6 +8,7 @@
 	$currency_symbol = $page_vars['currency_symbol'];
 	$currency_code = $page_vars['currency_code'];
 	$session = $page_vars['session'];
+	$require_login = $page_vars['require_login'];
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
@@ -81,15 +82,22 @@ Contact Area
 		 <br>
 		 <div class=" contact-item-wrap">
 		<?php
-		if($cart->get_total() > 0){			
+		if($require_login){
+				echo '<div class="alert alert-warning" role="alert">
+				  The email ('.strip_tags($cart->billing_user['billing_email']).') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
+				</div>';
+		}
+		else{
+			if($cart->get_total() > 0){			
 
 
-				echo '<h4>Pay with Stripe</h4>';
-				$formwriter = LibraryFunctions::get_formwriter_object('form_stripe');
-				echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, 'th-btn');	
-			
-			
-			
+					echo '<h4>Pay with Stripe</h4>';
+					$formwriter = LibraryFunctions::get_formwriter_object('form_stripe');
+					echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, 'th-btn');	
+				
+				
+				
+			}		
 		}			
 				
 		?>								
