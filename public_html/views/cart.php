@@ -8,6 +8,7 @@
 	$currency_symbol = $page_vars['currency_symbol'];
 	$page_vars['currency_code'] = $currency_code;
 	$settings = Globalvars::get_instance();
+	$require_login = $page_vars['require_login'];
 
 	$page = new PublicPage();
 	$page->public_header(array(
@@ -114,7 +115,6 @@
 			//echo $formwriter->start_buttons();
 			echo $formwriter->new_button('Change billing user', '/cart?newbilling=1', 'secondary');
 			//echo $formwriter->end_buttons();
-			$billing_user = User::GetByEmail(trim($cart->billing_user['billing_email']));
 			echo '<br><br>';
 		}
 		else{
@@ -227,61 +227,67 @@
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
 		}
 		
-		
-		if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
+		if($require_login){
+				echo '<div class="alert alert-warning" role="alert">
+				  The email ('.strip_tags($cart->billing_user['billing_email']).') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
+				</div>';
+		}
+		else{
+			if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
 
 
-			if($settings->get_setting('checkout_type') == 'stripe_checkout'){	
-				echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Stripe</h5>';
-				echo $page_vars['stripe_helper']->output_stripe_checkout_form($cart->get_hash());									
+				if($settings->get_setting('checkout_type') == 'stripe_checkout'){	
+					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Stripe</h5>';
+					echo $page_vars['stripe_helper']->output_stripe_checkout_form($cart->get_hash());									
+					
+				}
+				else{	
+				/*
+					?>	
+					 <div class="relative mt-8">
+					  <div class="absolute inset-0 flex items-center" aria-hidden="true">
+						<div class="w-full border-t border-gray-200"></div>
+					  </div>
+					  <div class="relative flex justify-center">
+						<span class="px-4 bg-white text-sm font-medium text-gray-500">
+						  <>
+						</span>
+					  </div>
+					</div>
+					<?php*/
+					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Stripe</h5>';
+					echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, '');	
+				}
 				
-			}
-			else{	
-			/*
-				?>	
-				 <div class="relative mt-8">
-				  <div class="absolute inset-0 flex items-center" aria-hidden="true">
-					<div class="w-full border-t border-gray-200"></div>
-				  </div>
-				  <div class="relative flex justify-center">
-					<span class="px-4 bg-white text-sm font-medium text-gray-500">
-					  <>
-					</span>
-				  </div>
-				</div>
-				<?php*/
-				echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Stripe</h5>';
-				echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, '');	
-			}
-			
-			if($settings->get_setting('use_paypal_checkout') && $page_vars['paypal_helper']){
+				if($settings->get_setting('use_paypal_checkout') && $page_vars['paypal_helper']){
 
-				if($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0){
-					//PAYPAL
-					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
-					echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id']);
+					if($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0){
+						//PAYPAL
+						echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
+						echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id']);
+					}
+					else if($cart->get_num_recurring() == 0){
+						//PAYPAL
+						echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
+						echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
+					}
+					else{
+						//PAYPAL
+						echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
+						echo '<p><b>Paypal subscriptions must be purchased individually.  Remove all other items from your cart to pay with Paypal.</b></p>'; 				
+					}
 				}
-				else if($cart->get_num_recurring() == 0){
-					//PAYPAL
-					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
-					echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
-				}
-				else{
-					//PAYPAL
-					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Paypal</h5>';
-					echo '<p><b>Paypal subscriptions must be purchased individually.  Remove all other items from your cart to pay with Paypal.</b></p>'; 				
-				}
-			}
-		}			
-		else if($cart->billing_user){					
-			$formwriter = LibraryFunctions::get_formwriter_object('form4', $settings->get_setting('form_style'));
-			echo $formwriter->begin_form("mt-6", "post", '/cart_charge');
-			echo $formwriter->hiddeninput('novalue', '');
-			echo $formwriter->start_buttons();
-			echo $formwriter->new_form_button('Submit', 'primary', 'full');
-			echo $formwriter->end_buttons();
-			echo $formwriter->end_form();						
-		}		
+			}			
+			else if($cart->billing_user){					
+				$formwriter = LibraryFunctions::get_formwriter_object('form4', $settings->get_setting('form_style'));
+				echo $formwriter->begin_form("mt-6", "post", '/cart_charge');
+				echo $formwriter->hiddeninput('novalue', '');
+				echo $formwriter->start_buttons();
+				echo $formwriter->new_form_button('Submit', 'primary', 'full');
+				echo $formwriter->end_buttons();
+				echo $formwriter->end_form();						
+			}		
+		}
 		?>			
 
       </div>

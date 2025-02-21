@@ -81,13 +81,15 @@ function cart_logic($get_vars, $post_vars){
 		}
 	}
 
+	
 	$newbilling = 0;
 	if($_GET['newbilling'] == 1){
+		//IF WE ARE CLEARING THE BILLING USER
 		$cart->billing_user = NULL;
 		$newbilling = 1;
 	}	
-
-	if($_POST['existing_billing_email']){
+	else if($_POST['existing_billing_email']){
+		//IF THE USER TYPED IN A NEW BILLING USER
 		$billing_user = array();
 		if($_POST['existing_billing_email'] == 'A different person'){
 			$billing_user['billing_first_name'] = $_POST['billing_first_name'];
@@ -110,7 +112,7 @@ function cart_logic($get_vars, $post_vars){
 		}
 		
 	}				
-	else if($cart->count_items() > 0 && !$cart->billing_user && !$newbilling){
+	else if($cart->count_items() > 0 && !$cart->billing_user){
 		//IF AT LEAST ONE ITEM IN CART, LOAD FIRST AS BILLING USER
 		foreach($cart->items as $key => $cart_item) {}  //SHORTCUT TO GET ONLY ONE
 		list($quantity, $product, $data, $price, $discount) = $cart_item;
@@ -125,15 +127,9 @@ function cart_logic($get_vars, $post_vars){
 	
 	
 
-	if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
-		$billing_user = $cart->get_or_create_billing_user(); 
-		//ADD TO THE MAILING LIST IF CHOSEN
-		if(isset($data['newsletter']) && $data['newsletter']){
-			if($settings->get_setting('default_mailing_list')){
-				$messages = $billing_user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
-				//$status = $billing_user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
-			}
-		}	
+	if($cart->get_total() > 0 && $cart->billing_user['billing_email']){	
+
+		
 		if($settings->get_setting('use_paypal_checkout')){
 			//HANDLE SUBSCRIPTION PREP FIRST
 			$paypal = new PaypalHelper();
@@ -167,8 +163,14 @@ function cart_logic($get_vars, $post_vars){
 		if($settings->get_setting('checkout_type') == 'stripe_checkout'){
 			$stripe_helper = new StripeHelper();
 			$page_vars['stripe_helper'] = $stripe_helper;
-			$existing_billing_user = User::GetByEmail($cart->billing_user['billing_email']);
-			$create_list = $stripe_helper->build_checkout_item_array($cart, $existing_billing_user);								
+			if($session->get_user_id()){
+				$existing_billing_user = User::GetByEmail($session->get_user_id());
+				$create_list = $stripe_helper->build_checkout_item_array($cart, $existing_billing_user);
+			}
+			else{
+				$create_list = $stripe_helper->build_checkout_item_array($cart, NULL);
+			}
+											
 			$stripe_session = $stripe_helper->create_stripe_checkout_session($create_list);
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
@@ -178,8 +180,15 @@ function cart_logic($get_vars, $post_vars){
 	}
 
 
-
-
+	$require_login = 0;
+	if(!$session->get_user_id()){
+		//IF NOT LOGGED IN, CHECK TO SEE IF EMAIL EXISTS AND IF SO ASK TO LOG IN
+		$user = User::GetByEmail($cart->billing_user['billing_email']);
+		if($user){
+			$require_login = 1;
+		}
+	}
+	$page_vars['require_login'] = $require_login;
 
 
 	$page_vars['cart'] = $cart;
