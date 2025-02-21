@@ -65,9 +65,6 @@
 			echo "    </url>\n";
 		}
 
-
-
-		echo '<h2>Locations</h2>';
 		
 		$sort = 'location_id';
 		$sdirection = 'ASC';
@@ -96,8 +93,6 @@
 	
 
 	if($settings->get_setting('blog_active')){
-	
-		echo '<h2>Blog Posts</h2>';
 	
 		$page_sort = LibraryFunctions::fetch_variable('page_sort', 'post_id', 0, '');	
 		$page_direction = LibraryFunctions::fetch_variable('page_direction', 'DESC', 0, '');
