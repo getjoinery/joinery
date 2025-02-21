@@ -10,35 +10,36 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
 
-	header("Content-Type: application/xml; charset=UTF-8");
-
-	echo "<?xml version='1.0' encoding='UTF-8'?>\n";
-	echo "<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>\n";
+	$paged = new PublicPage();
+	$hoptions = array(
+		'is_valid_page' => $is_valid_page,
+		'title' => 'Sitemap',
 	
-
-	
+	);
+	$paged->public_header($hoptions);
+	echo PublicPage::BeginPage('Sitemap');
+	echo PublicPage::BeginPanel();
+			
 	$settings = Globalvars::get_instance();
-	$webDir = $settings->get_setting('webDir');
-	
 	if($settings->get_setting('page_contents_active')){
+		echo '<h2>Pages</h2>';
+
 
 		$search_criteria = array('published' => TRUE, 'deleted' => false, 'has_link' => TRUE);
 		$pages = new MultiPage(
 			$search_criteria);	
 		$pages->load();
-		
+
+		echo '<ul>';
 		foreach ($pages as $page){
-			echo "    <url>\n";
-			echo "        <loc>" . $webDir.htmlspecialchars($page->get_url(), ENT_XML1, 'UTF-8') . "</loc>\n";
-			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
-			echo "        <changefreq>monthly</changefreq>\n";
-			echo "        <priority>0.8</priority>\n";
-			echo "    </url>\n";
+			echo '<li><a href="/page/'.$page->get_url().'">'.$page->get('pag_title').'</a></li>';
 		}
+		echo '</ul>';
 	}
 
 
 	if($settings->get_setting('events_active')){   
+		echo '<h2>Events</h2>';
 		
 		$sort = 'start_time';
 		$sdirection = 'ASC';
@@ -55,16 +56,11 @@
 			'AND');
 		$events->load();	
 
-
+		echo '<ul>';
 		foreach ($events as $event){
-			echo "    <url>\n";
-			echo "        <loc>" . $webDir.htmlspecialchars($event->get_url(), ENT_XML1, 'UTF-8') . "</loc>\n";
-			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
-			echo "        <changefreq>monthly</changefreq>\n";
-			echo "        <priority>0.8</priority>\n";
-			echo "    </url>\n";
+			echo '<li><a href="'.$event->get_url().'">'.$event->get('evt_name').'</a></li>';
 		}
-
+		echo '</ul>';
 
 
 		echo '<h2>Locations</h2>';
@@ -83,14 +79,11 @@
 			'AND');
 		$locations->load();	
 
+		echo '<ul>';
 		foreach ($locations as $location){
-			echo "    <url>\n";
-			echo "        <loc>" . $webDir.htmlspecialchars($location->get_url(), ENT_XML1, 'UTF-8') . "</loc>\n";
-			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
-			echo "        <changefreq>monthly</changefreq>\n";
-			echo "        <priority>0.8</priority>\n";
-			echo "    </url>\n";
+			echo '<li><a href="'.$location->get_url().'">'.$location->get('loc_name').'</a></li>';
 		}
+		echo '</ul>';
 	}
 
 	
@@ -107,15 +100,14 @@
 			$search_criteria);	
 		$posts->load();		
 		
+		echo '<ul>';
 		foreach ($posts as $post){
-			echo "    <url>\n";
-			echo "        <loc>" . $webDir.htmlspecialchars($post->get_url(), ENT_XML1, 'UTF-8') . "</loc>\n";
-			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
-			echo "        <changefreq>monthly</changefreq>\n";
-			echo "        <priority>0.8</priority>\n";
-			echo "    </url>\n";
-		}	
+			echo '<li><a href="'.$post->get_url().'">'.$post->get('pst_title').'</a></li>';
+		}
+		echo '</ul>';	
 	}
 
-	echo "</urlset>\n";
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
+	$paged->public_footer(array('track'=>TRUE));
 ?>
