@@ -306,6 +306,7 @@ class ShoppingCart {
 		$this->items = array();
 		$this->item_id = 0;
 		$this->coupon_codes = array();
+		$this->billing_user = array();
 	}
 
 }
