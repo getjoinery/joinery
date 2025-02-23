@@ -104,7 +104,7 @@ class CtldProfile extends SystemBase {
 			[7] => Custom
 			[9] => Branded
 			*/
-			$result = $cd->modifyProfileOptions($profile1_key, 'b_resp', 1, 7, '66.228.37.49');
+			$result = $cd->modifyProfileOptions($profile1_key, 'b_resp', 1, 3, NULL);
 			
 			if($result['success']){
 				$profile1 = new CtldProfile(NULL);
