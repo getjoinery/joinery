@@ -122,6 +122,67 @@ class CtldProfile extends SystemBase {
 			}
 	}
 	
+	function add_rule($hostname, $action){
+			//STRIP HTTP, HTTPS
+			$hostname = preg_replace('/^https?:\/\//', '', $hostname);
+			function isValidUrlWithoutScheme($url) {
+				// Add http:// to validate properly
+				$testUrl = "http://$url";
+
+				// Validate using FILTER_VALIDATE_URL
+				if (!filter_var($testUrl, FILTER_VALIDATE_URL)) {
+					return false;
+				}
+
+				// Extract host and validate domain format
+				$parsedUrl = parse_url($testUrl);
+				if (!isset($parsedUrl['host'])) {
+					return false;
+				}
+
+				// Check valid domain pattern (allows subdomains)
+				$domainPattern = '/^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/';
+				return preg_match($domainPattern, $parsedUrl['host']) === 1;
+			}
+		
+			if(!isValidUrlWithoutScheme($hostname)){
+				return false;
+			}
+		
+			$hostnames_array = array();
+			$hostnames_array[] = $hostname;
+			$cd = new ControlDHelper();
+			$result = $cd->createRule($this->get('cdp_profile_id'), 1, $hostnames_array, null, $action);
+			if($result['success']){
+				$rule = new CtldRule(NULL);
+				$rule->set('cdr_cdp_ctldprofile_id', $this->key);
+				$rule->set('cdr_rule_hostname', $hostname);
+				$rule->set('cdr_is_active', $status);
+				$rule->set('cdr_rule_action', $action);
+				$rule->prepare();
+				$rule->save();
+				$rule->load();	
+				return $rule;
+			}
+			else{
+				return false;
+			}
+			
+	}
+	
+	function delete_rule($cdr_ctldrule_id){
+		$cd = new ControlDHelper();
+		$rule = new CtldRule($cdr_ctldrule_id, TRUE);
+		$result = $cd->deleteRule($this->get('cdp_profile_id'), $rule->get('cdr_rule_hostname'));
+		if($result['success']){
+			$rule->permanent_delete();
+			return true;
+		}
+		else{
+			return false;
+		}
+	}
+	
 	function add_or_edit_schedule($device, $post_vars){
 		$user = new User($this->get('cdp_usr_user_id'), TRUE);
 		$cd = new ControlDHelper();

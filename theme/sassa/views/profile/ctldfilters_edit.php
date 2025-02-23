@@ -56,7 +56,12 @@
                             <div class="job-post_date">
 								<h3><?php echo $name; ?></h3>
                                 <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
-                                <div class="icon"><a href="/profile/ctlddevice_delete?device_id=<?php echo $device->key; ?>"><i class="fa-regular fa-trash"></i> Delete</a></div>
+                                <div class="icon"><a href="/profile/rules?device_id=<?php echo $device->key; ?>&profile_choice=<?php echo $profile_choice; ?>"><i class="fa-regular fa-list"></i> Custom Rules</a>
+								
+								<?php if($account->get('cda_plan') == CtldAccount::PRO_PLAN){ ?>
+								&nbsp;&nbsp;&nbsp;<a href="/profile/ctlddevice_delete?device_id=<?php echo $device->key; ?>"><i class="fa-regular fa-trash"></i> Delete</a>
+								<?php } ?>
+								</div>
                             </div>
                         </div>
 	<?php
