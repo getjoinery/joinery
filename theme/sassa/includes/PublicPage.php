@@ -469,7 +469,11 @@ Career Area
 					echo '<li><a href="/pricing">Sign up</a></li>';
 				}
 				echo '<li><a href="/login">Log in</a></li>';
-			}		
+			}	
+			$cart = $session->get_shopping_cart();
+			if($cart->count_items()){
+				echo '<li><a href="/cart">Cart</a></li>';
+			}			
 		
 			foreach ($menus as $menu){
 				if($menu['parent'] == true){
@@ -566,6 +570,10 @@ Career Area
 								else{
 									//echo '<a href="/register" class="th-btn">Sign up</a>';
 									echo '<a href="/login" class="th-btn">Log in</a>';
+								}
+								$cart = $session->get_shopping_cart();
+								if($cart->count_items()){
+									echo '<a href="/cart" class="icon-btn"><i class="fa-light fa-cart-shopping"></i></a>';
 								}
 								?>
                                 

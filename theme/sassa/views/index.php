@@ -117,7 +117,7 @@ About Area
                         <!--<div class="box-icon">
                             <img src="/theme/sassa/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
-                        <h3 class="box-title"><a href="service-details.html">Block Social Media</a></h3>
+                        <h3 class="box-title"><a href="#">Block Social Media</a></h3>
                         <p class="box-text">Block Facebook, Instagram, TikTok, and more.</p>
                     </div>
                 </div>
@@ -127,7 +127,7 @@ About Area
                          <!--<div class="box-icon">
                             <img src="/theme/sassa/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
-                        <h3 class="box-title"><a href="service-details.html">Protect yourself online</a></h3>
+                        <h3 class="box-title"><a href="#">Protect yourself online</a></h3>
                         <p class="box-text">Block known malware, phishing, and virus related sites.</p>
                     </div>
                 </div>
@@ -137,7 +137,7 @@ About Area
                          <!--<div class="box-icon">
                             <img src="/theme/sassa/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
-                        <h3 class="box-title"><a href="service-details.html">Filter what you consume</a></h3>
+                        <h3 class="box-title"><a href="#">Filter what you consume</a></h3>
                         <p class="box-text">Integrated ad blocker that works before content even gets to your computer.</p>
                     </div>
                 </div>
@@ -147,7 +147,7 @@ About Area
                          <!--<div class="box-icon">
                             <img src="/theme/sassa/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
-                        <h3 class="box-title"><a href="service-details.html">Block full time or scheduled</a></h3>
+                        <h3 class="box-title"><a href="#">Block full time or scheduled</a></h3>
                         <p class="box-text">Choose to block full time, and on a schedule separately.</p>
                     </div>
                 </div>
