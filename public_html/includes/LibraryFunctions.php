@@ -832,6 +832,26 @@ class LibraryFunctions {
 
 		return $matchingFiles;
 	}
+	
+	static function convertToAmPmManual($militaryTime) {
+		// Split the time into hours and minutes
+		list($hours, $minutes) = explode(":", $militaryTime);
+
+		// Validate input
+		if (!is_numeric($hours) || !is_numeric($minutes) || $hours < 0 || $hours > 23 || $minutes < 0 || $minutes > 59) {
+			return "Invalid time format";
+		}
+
+		// Determine AM or PM
+		$period = $hours >= 12 ? "PM" : "AM";
+
+		// Convert hours to 12-hour format
+		$hours = $hours % 12;
+		$hours = $hours == 0 ? 12 : $hours; // Handle midnight and noon
+
+		// Format the time
+		return sprintf("%d:%02d %s", $hours, $minutes, $period);
+	}
 
 	//converts display time (HH:MM am/pm) to server time (HH:MM, 24 hour)
 	static function toDBTime($timeconv){

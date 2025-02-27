@@ -13,6 +13,7 @@ require_once($siteDir . '/includes/Validator.php');
 	require_once($siteDir . '/plugins/controld/data/ctldprofiles_class.php');
 	require_once($siteDir . '/plugins/controld/data/ctldfilters_class.php');
 	require_once($siteDir . '/plugins/controld/data/ctldservices_class.php');
+	require_once($siteDir . '/plugins/controld/data/ctldrules_class.php');
 	require_once($siteDir . '/plugins/controld/data/ctlddevice_backups_class.php');
 
 
@@ -46,6 +47,7 @@ class CtldDevice extends SystemBase {
 		'cdd_deactivation_pin' => 'Pin to turn off the service',
 		'cdd_timezone' => 'Timezone for this device for use in controld',
 		'cdd_allow_device_edits' => 'Override for the edit restrictions',
+		'cdd_activate_time' => 'Time this was activated',
 	);
 
 	public static $field_specifications = array(
@@ -65,6 +67,7 @@ class CtldDevice extends SystemBase {
 		'cdd_deactivation_pin' => array('type'=>'varchar(10)'),
 		'cdd_timezone' => array('type'=>'varchar(64)'),
 		'cdd_allow_device_edits' => array('type'=>'int4'),
+		'cdd_activate_time' => array('type'=>'timestamp(6)'),
 	);
 			
 	public static $required_fields = array();
@@ -165,6 +168,91 @@ class CtldDevice extends SystemBase {
 			}
 	}
 	
+	function check_activate(){
+		if(!$this->get('cdd_is_active')){
+			$cd = new ControlDHelper();
+			$result = $cd->listDevice($this->get('cdd_device_id'));
+			$cd_device = $result['body']['devices'][0];
+			if($cd_device['status'] == 1){
+				$this->set('cdd_is_active', 1);
+				$this->set('cdd_activate_time', 'now()');
+				$this->save();
+				$this->load();
+			}
+		}
+		return true;
+	}
+	
+	function get_schedule_string($profile_choice){
+			$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+			
+			if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
+				return '';
+			}
+			
+			$all_days = array('mon', 'tue','wed','thu','fri','sat','sun');
+
+			if($profile_choice == 'primary'){
+				$string = LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_end')) . ' - ' . LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_start')) . ' ' . implode(', ', unserialize($profile->get('cdp_schedule_days')));
+				$string .= ', All day '.implode(', ', array_diff($all_days,  unserialize($profile->get('cdp_schedule_days'))));
+				return $string;
+				
+			}
+			else if ($profile_choice == 'secondary'){
+						
+				return LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_start')) . ' - ' . LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_end')) . ' ' . implode(', ', unserialize($profile->get('cdp_schedule_days')));					
+			}
+
+	}
+	
+	function get_active_profile($readable=false){
+		$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+		
+		if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
+			return 'primary';
+		}
+
+		// Get current time and day
+		$current_time = date("H:i");  // Current time in 24-hour format
+		$current_day = strtolower(date("D")); // Current day in 'mon', 'tue', etc.
+
+		// Check if today is in the active days list
+		if (!in_array($current_day, unserialize($profile->get('cdp_schedule_days')))) {
+			return false;
+		}
+
+		// Convert times to comparable formats
+		$start_timestamp = $profile->get('cdp_schedule_start');
+		$end_timestamp = $profile->get('cdp_schedule_end');
+		$current_timestamp = strtotime($current_time);
+
+		// Handle overnight schedules (e.g., 22:00 - 04:00)
+		if ($end_timestamp < $start_timestamp) {
+			// If current time is **after start OR before end**, it is active
+			return ($current_timestamp >= $start_timestamp || $current_timestamp < $end_timestamp);
+		}
+
+		// Normal time range check
+		$is_in_schedule = ($current_timestamp >= $start_timestamp && $current_timestamp < $end_timestamp);
+		
+		if($is_in_schedule){
+			if($readable == 'readable'){
+				return 'Scheduled blocklist';
+			}
+			else{
+				return 'secondary';
+			}
+		}
+		else{
+			if($readable){
+				return 'Default blocklist';
+			}
+			else{
+				return 'primary';
+			}
+		}
+	}
+	
 	function get_readable_name(){
 		return preg_replace('/^user\d+-/', '', $this->get('cdd_device_name'));
 		
@@ -180,6 +268,19 @@ class CtldDevice extends SystemBase {
 		if(!$this->get('cdd_cdp_ctldprofile_id_primary')){
 			return true;
 		}
+
+
+
+		// IF WITHIN 24 HOURS OF ACTIVATION
+		if($this->get('cdd_activate_time')){
+			$current_timestamp = time();
+			$future_24_hours = $current_timestamp + (24 * 60 * 60);
+			if($this->get('cdd_activate_time') > $current_timestamp && $this->get('cdd_activate_time') <= $future_24_hours){
+				return true;
+			}
+		}
+	
+		
 		
 		//IF IT IS THE DAY OF CREATION
 		if(date('Y-m-d', strtotime($this->get('cdd_create_time'))) === date("Y-m-d")){
@@ -238,6 +339,23 @@ class CtldDevice extends SystemBase {
 			$profile->set('cdp_schedule_timezone', NULL);
 			$profile->save();
 		}
+		
+		//DELETE THE CUSTOM RULES
+		$rules = new MultiCtldRule(
+				array(
+					'profile_id' => $profile_id,
+				),
+			);
+		$rules->load();		
+		foreach($rules as $rule){
+			$result = $profile->delete_rule($rule->key);
+			if(!$result){
+				throw new SystemDisplayablePermanentError('Unable to delete custom rule.');
+				exit;
+			}
+		}		
+		
+		
 		$result = $cd->deleteProfile($cd_profile_id);
 		if(!$result['success']){
 			throw new SystemDisplayablePermanentError('Unable to delete profile.');
