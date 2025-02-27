@@ -776,18 +776,18 @@ class FormWriterMaster {
 			if($showdefault){
 				if($showdefault === true){
 					if(is_null($input)){
-						$output .=  '<option value="" selected="selected">Choose One';
+						$output .=  '<option value="" selected="selected">Choose One</option>';
 					}
 					else{
-						$output .= '<option value="">Choose One';
+						$output .= '<option value="">Choose One</option>';
 					}
 				}
 				else{
 					if(is_null($input)){
-						$output .=  '<option value="" selected="selected">'.$showdefault;
+						$output .=  '<option value="" selected="selected">'.$showdefault.'</option>';
 					}
 					else{
-						$output .= '<option value="">'.$showdefault;
+						$output .= '<option value="">'.$showdefault.'</option>';
 					}						
 				}
 			}
