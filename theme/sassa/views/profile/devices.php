@@ -137,12 +137,20 @@ else{
 	foreach($devices as $device){
 
 		if($device->get('cdd_is_active')){	
+			if($device->get_active_profile() == 'primary'){
+				$primary_icon = 'fa-shield-check';
+				$secondary_icon = 'fa-shield-slash';
+			}
+			else{
+				$primary_icon = 'fa-shield-slash';
+				$secondary_icon = 'fa-shield-check';
+			}
 			echo '
 						<div class="col-lg-6 col-xxl-4">
 						<div class="job-post style2">
 							<div class="job-content">
 								<div class="job-post_date">
-									<span class="date"><i class="fa-regular fa-check"></i>Active</span>
+									<span class="date"><i class="fa-regular fa-check"></i>Active: '.$device->get_active_profile('readable').'</span>
 									<div class="icon"><a href="/profile/device_edit?device_id='.$device->key.'"><i class="fa-regular fa-edit"></i></a></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
@@ -152,11 +160,12 @@ else{
 							<div class="job-post_author">
 								<div class="job-wrapp">
 									<div class="job-author">
-										<i class="fa-regular fa-lock"></i>
+										<i class="fa-regular '.$primary_icon.'"></i>
 									</div>
 									<div class="author-info">
-										<h3 class="company-name">Always on blocks</h3>
+										<h3 class="company-name">Default blocklist</h3>
 										<h5 class="price">'.$num_blocks_always[$device->key].' services blocked<!-- <span class="duration">Mon, Th, Fr, Sun</span>--></h5>
+										<h5 class="price">'.$scheduled_string['primary'][$device->key].'</h5>
 
 									</div>
 								</div>
@@ -166,13 +175,13 @@ else{
 							<div class="job-post_author">
 								<div class="job-wrapp">
 									<div class="job-author">
-										<i class="fa-regular fa-clock"></i>
+										<i class="fa-regular '.$secondary_icon.'"></i>
 									</div>
 									<div class="author-info">
-										<h3 class="company-name">Scheduled blocks</h3>
+										<h3 class="company-name">Scheduled blocklist</h3>
 										
 										<h5 class="price">'.$num_blocks_scheduled[$device->key].' services blocked</h5>
-										<h5 class="price">'.$scheduled_string[$device->key].'</h5>
+										<h5 class="price">'.$scheduled_string['secondary'][$device->key].'</h5>
 
 									</div>
 								</div>

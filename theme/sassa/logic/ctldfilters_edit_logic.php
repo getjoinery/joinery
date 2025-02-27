@@ -85,7 +85,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 			$profile->update_remote_services($_POST);
 					
 					
-			$profile->add_or_edit_schedule($device, $_POST);
+			$result = $profile->add_or_edit_schedule($device, $_POST);
 
 			
 		}

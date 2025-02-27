@@ -39,13 +39,13 @@
 	$formwriter = LibraryFunctions::get_formwriter_object();
 	
 
-	
+
+
 	$validation_rules = array();
-	$validation_rules['device_name']['required']['value'] = 'true';
-	/*$validation_rules['ccd_is_active']['required']['value'] = 'true';	
-	$validation_rules['cmt_body']['required']['value'] = 'true';	
-	$validation_rules['"products_list[]"']['required']['value'] = 'true';	
-	$validation_rules['single_checkbox']['required']['value'] = 'true';*/
+	$validation_rules['start_time']['required']['value'] = 'true';
+	$validation_rules['end_time']['required']['value'] = 'true';	
+	$validation_rules['days_blocked']['required']['value'] = 'true';	
+
 	echo $formwriter->set_validate($validation_rules);	
 
 
@@ -106,6 +106,11 @@
 
 		echo $formwriter->toggleinput("All Adult sites", "block_porn", '', $filters['porn'], 1, '');
 		echo $formwriter->toggleinput("All Drug sites", "block_drugs", '', $filters['drugs'], 1, '');
+		
+		echo '<h5>News and Shopping</h5>';
+
+		echo $formwriter->toggleinput("All News sites", "block_news", '', $filters['news'], 1, '');
+		echo $formwriter->toggleinput("All Shopping sites", "block_shop", '', $filters['shop'], 1, '');
 
 		echo '<h5>Online Dating</h5>';
 		echo $formwriter->toggleinput("All Dating sites", "block_dating", '', $filters['dating'], 1, '');
@@ -171,7 +176,7 @@
 			echo $formwriter->dropinput("Time to end blocking", "end_time", '', $optionvals, $profile->get('cdp_schedule_end'), '', TRUE);	
 			echo '</div>';
 			echo '</div>';
-			
+	
 
 			$optionvals = array(
 				'Monday' => 'mon',

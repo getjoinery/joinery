@@ -11,6 +11,7 @@ require_once($siteDir . '/includes/Validator.php');
 require_once($siteDir . '/plugins/controld/includes/ControlDHelper.php');
 require_once($siteDir . '/plugins/controld/data/ctldfilters_class.php');
 require_once($siteDir . '/plugins/controld/data/ctldservices_class.php');
+require_once($siteDir . '/plugins/controld/data/ctldrules_class.php');
 
 class CtldProfileException extends SystemClassException {}
 
@@ -122,6 +123,35 @@ class CtldProfile extends SystemBase {
 			}
 	}
 	
+	function count_blocks(){
+		$filters = new MultiCtldFilter(
+			array(
+				'profile_id' => $this->key,
+				'active' => true,
+			),
+		);
+		$num_blocks = $filters->count_all();
+
+		$services = new MultiCtldService(
+			array(
+				'profile_id' => $this->key,
+				'active' => true,
+			),
+		);
+		$num_blocks += $services->count_all();	
+		
+		$rules = new MultiCtldRule(
+			array(
+				'profile_id' => $this->key,
+				'rule_action' => 0,
+			),
+		);
+		$num_blocks += $rules->count_all();	
+
+		return $num_blocks;
+		
+	}
+	
 	function add_rule($hostname, $action){
 			//STRIP HTTP, HTTPS
 			$hostname = preg_replace('/^https?:\/\//', '', $hostname);
@@ -186,10 +216,17 @@ class CtldProfile extends SystemBase {
 	function add_or_edit_schedule($device, $post_vars){
 		$user = new User($this->get('cdp_usr_user_id'), TRUE);
 		$cd = new ControlDHelper();
+		
+		
 
 		if(!$this->get('cdp_schedule_id')){
 			//CREATE A SCHEDULE
-			if($post_vars['start_time'] && $post_vars['end_time'] && count($post_vars['days_blocked'])){
+			if($post_vars['start_time'] != '' && $post_vars['end_time'] != '' && count($post_vars['days_blocked'])){
+				if($post_vars['start_time'] >= $post_vars['end_time']){
+					return false;
+				}
+				
+				
 				$name = $user->key . '-' . $user->get('usr_last_name') .'-'. $this->key;
 				$result = $cd->createSchedule($this->get('cdp_profile_id'), $device->get('cdd_device_id'), $name, 1, $post_vars['start_time'], $post_vars['end_time'], $device->get('cdd_timezone'), $post_vars['days_blocked']);
 				
@@ -209,21 +246,32 @@ class CtldProfile extends SystemBase {
 			}
 		}
 		else{
-			//EDIT THE SCHEDULE IF NECESSARY
-			if($post_vars['start_time'] != $this->get('cdp_schedule_start') || $post_vars['end_time'] != $this->get('cdp_schedule_end') || serialize($post_vars['days_blocked']) != $this->get('cdp_schedule_days') || $device->get('cdd_timezone') != $this->get('cdp_schedule_timezone')) {
 			
-					
-					$result = $cd->modifySchedule($this->get('cdp_schedule_id'), 1, $post_vars['start_time'], $post_vars['end_time'], $device->get('cdd_timezone'), $post_vars['days_blocked']);
-					
-					if($result['success']){
-						$this->set('cdp_schedule_start', strip_tags($post_vars['start_time']));
-						$this->set('cdp_schedule_end', strip_tags($post_vars['end_time']));
-						$this->set('cdp_schedule_days', serialize($post_vars['days_blocked']));
-						$this->set('cdp_schedule_timezone', $device->get('cdd_timezone'));
-						$this->save();	
-					}							
+			
+			if($post_vars['start_time'] != '' && $post_vars['end_time'] != '' && count($post_vars['days_blocked'])){
+				if($post_vars['start_time'] >= $post_vars['end_time']){
+					return false;
 				}
-			return true;
+				//EDIT THE SCHEDULE IF NECESSARY
+				if($post_vars['start_time'] != $this->get('cdp_schedule_start') || $post_vars['end_time'] != $this->get('cdp_schedule_end') || serialize($post_vars['days_blocked']) != $this->get('cdp_schedule_days') || $device->get('cdd_timezone') != $this->get('cdp_schedule_timezone')) {
+				
+						
+						$result = $cd->modifySchedule($this->get('cdp_schedule_id'), 1, $post_vars['start_time'], $post_vars['end_time'], $device->get('cdd_timezone'), $post_vars['days_blocked']);
+						
+						if($result['success']){
+							$this->set('cdp_schedule_start', strip_tags($post_vars['start_time']));
+							$this->set('cdp_schedule_end', strip_tags($post_vars['end_time']));
+							$this->set('cdp_schedule_days', serialize($post_vars['days_blocked']));
+							$this->set('cdp_schedule_timezone', $device->get('cdd_timezone'));
+							$this->save();	
+						}							
+					}
+				return true;
+			}
+			else{
+				//USER DIDN'T PUT IN A WHOLE SCHEDULE, DO NOTHING
+				return false;
+			}			
 		}
 		
 	}

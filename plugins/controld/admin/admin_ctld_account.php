@@ -20,26 +20,6 @@
 	$session->check_permission(8);
 	$session->set_return();
 	
-	function convertToAmPmManual($militaryTime) {
-		// Split the time into hours and minutes
-		list($hours, $minutes) = explode(":", $militaryTime);
-
-		// Validate input
-		if (!is_numeric($hours) || !is_numeric($minutes) || $hours < 0 || $hours > 23 || $minutes < 0 || $minutes > 59) {
-			return "Invalid time format";
-		}
-
-		// Determine AM or PM
-		$period = $hours >= 12 ? "PM" : "AM";
-
-		// Convert hours to 12-hour format
-		$hours = $hours % 12;
-		$hours = $hours == 0 ? 12 : $hours; // Handle midnight and noon
-
-		// Format the time
-		return sprintf("%d:%02d %s", $hours, $minutes, $period);
-	}
-	
 	$account = new CtldAccount($_REQUEST['account_id'], TRUE);
 	
 
@@ -71,62 +51,27 @@
 	//COUNT THE ALWAYS ON BLOCKS
 	$num_blocks_always = array();
 	foreach($devices as $device){
-		$filters = new MultiCtldFilter(
-			array(
-				'profile_id' => $device->get('cdd_cdp_ctldprofile_id_primary'),
-				'active' => true,
-			),
-		);
-		$num_blocks_always[$device->key] = $filters->count_all();
-
-		$services = new MultiCtldService(
-			array(
-				'profile_id' => $device->get('cdd_cdp_ctldprofile_id_primary'),
-				'active' => true,
-			),
-		);
-		$num_blocks_always[$device->key] += $services->count_all();	
-
+		$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_primary'), TRUE);
+		$num_blocks_always[$device->key] += $profile->count_blocks();
 	}
 	$page_vars['num_blocks_always'] = $num_blocks_always;
-	
-	
-	
 
-	
-	
-	
-	
-	
-	
-	
-	
 
 	//COUNT THE SCHEDULED BLOCKS
 	$num_blocks_scheduled = array();
 	
 	foreach($devices as $device){
-		$filters = new MultiCtldFilter(
-			array(
-				'profile_id' => $device->get('cdd_cdp_ctldprofile_id_secondary'),
-				'active' => true,
-			),
-		);
-		$num_blocks_scheduled[$device->key] = $filters->count_all();
-
-		$services = new MultiCtldService(
-			array(
-				'profile_id' => $device->get('cdd_cdp_ctldprofile_id_secondary'),
-				'active' => true,
-			),
-		);
-		$num_blocks_scheduled[$device->key] += $services->count_all();	
-
+		//CHECK FOR ACTIVATION
+		$device->check_activate();
+		
 		$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+		$num_blocks_scheduled[$device->key] += $profile->count_blocks();
+
 		$scheduled_string[$device->key] = 'No schedule set';
 		if($profile->get('cdp_schedule_start')){
 			
-			$scheduled_string[$device->key] = '<span class="duration">'.convertToAmPmManual($profile->get('cdp_schedule_start')) . ' - ' . convertToAmPmManual($profile->get('cdp_schedule_end')) . '</span> '. implode(', ', unserialize($profile->get('cdp_schedule_days'))) ;
+			$scheduled_string['primary'][$device->key] = '<span class="duration">'.$device->get_schedule_string('primary').'</span>';
+			$scheduled_string['secondary'][$device->key] = '<span class="duration">'.$device->get_schedule_string('secondary').'</span>';
 		}
 	}
 	$page_vars['scheduled_string'] = $scheduled_string;
@@ -239,7 +184,7 @@
 */
 
 
-	$headers = array("Device Name", "Status", "Always on Blocks", "Scheduled Blocks",  "Schedule", "Editable");
+	$headers = array("Device Name", "Status", "Default blocklist", "Scheduled blocklist",  "Schedule", "Active profile", "Editable");
 	$altlinks = array();
 	/*
 	if(!$event->get('evt_delete_time')) {
@@ -257,6 +202,9 @@
 
 	$registrant_emails = '';
 	foreach($devices as $device){
+		
+		//CHECK FOR ACTIVATION
+		$device->check_activate();
 
 		$filters_primary = new MultiCtldFilter(
 				array(
@@ -274,7 +222,13 @@
 			);
 			//$num_services = $services->count_all();
 			$services_primary->load();
-
+			
+		$rules_primary = new MultiCtldRule(
+			array(
+				'profile_id' =>  $device->get('cdd_cdp_ctldprofile_id_primary'),
+			),
+		);
+		$rules_primary->load();
 
 		$filters_secondary = new MultiCtldFilter(
 				array(
@@ -291,7 +245,14 @@
 				),
 			);
 			//$num_services = $services->count_all();
-			$services_secondary->load();		
+			$services_secondary->load();	
+
+		$rules_secondary = new MultiCtldRule(
+			array(
+				'profile_id' =>  $device->get('cdd_cdp_ctldprofile_id_secondary'),
+			),
+		);
+		$rules_secondary->load();			
 
 			$primary_array = array();
 			$secondary_array = array();
@@ -303,19 +264,39 @@
 
 			$r_services_primary = $cd->listServicesOnProfile($profile_primary->get('cdp_profile_id'));
 			foreach($r_services_primary['body']['services'] as $r){
-				$primary_array[] = $r['PK'];
+				if($r['action']['status']){
+					$primary_array[] = $r['PK'];
+				}
 			}
 			$r_services_secondary = $cd->listServicesOnProfile($profile_secondary->get('cdp_profile_id'));
 			foreach($r_services_secondary['body']['services'] as $r){
-				$secondary_array[] = $r['PK'];
+				if($r['action']['status']){
+					$secondary_array[] = $r['PK'];
+				}
 			}	
-			
+
 			$r_filters_primary = $cd->listNativeFilters($profile_primary->get('cdp_profile_id'));
-			foreach($r_filters_primary['body']['services'] as $r){
-				$primary_array[] = $r['PK'];
+			foreach($r_filters_primary['body']['filters'] as $r){
+				if($r['action']){
+					$primary_array[] = $r['PK'];
+				}
 			}			
 			$r_filters_secondary = $cd->listNativeFilters($profile_secondary->get('cdp_profile_id'));
-			foreach($r_filters_secondary['body']['services'] as $r){
+
+			foreach($r_filters_secondary['body']['filters'] as $r){
+				if($r['status']){
+					$secondary_array[] = $r['PK'];
+				}
+			}	
+
+			$r_rules_primary = $cd->listRules($profile_primary->get('cdp_profile_id'));
+			foreach($r_rules_primary['body']['rules'] as $r){
+				$primary_array[] = $r['PK'];
+			}	
+	
+			$r_rules_secondary = $cd->listRules($profile_secondary->get('cdp_profile_id'));
+
+			foreach($r_rules_secondary['body']['rules'] as $r){
 				$secondary_array[] = $r['PK'];
 			}	
 		}
@@ -354,7 +335,16 @@
 				$primary_out[] =$service->get('cds_service_pk');
 			}
 		}
-		array_push($rowvalues, $num_blocks_always[$device->key]. ' ('.implode(', ', $primary_out).')' . ' (Remote: '.implode(', ', $primary_array).')' );
+		
+		foreach($rules_primary as $rule){
+			if($rule->get('cdr_rule_action') == 0){
+				$primary_out[] =$rule->get('cdr_rule_hostname') . '(blocked)';
+			}
+			else if($rule->get('cdr_rule_action') == 1){
+				$primary_out[] =$rule->get('cdr_rule_hostname') . '(allowed)';
+			}
+		}
+		array_push($rowvalues, $num_blocks_always[$device->key]. ' ('.implode(', ', $primary_out).')' . ' <br>(Remote: '.implode(', ', $primary_array).')' );
 
 
 		$secondary_out = array();
@@ -368,10 +358,22 @@
 				$secondary_out[] =$service->get('cds_service_pk');
 			}
 		}
+
+		foreach($rules_secondary as $rule){
+			if($rule->get('cdr_rule_action') == 0){
+				$secondary_out[] =$rule->get('cdr_rule_hostname') . '(blocked)';
+			}
+			else if($rule->get('cdr_rule_action') == 1){
+				$secondary_out[] =$rule->get('cdr_rule_hostname') . '(allowed)';
+			}
+		}
+
 		
-		array_push($rowvalues, $num_blocks_scheduled[$device->key]. ' ('.implode(', ', $secondary_out).')' . ' (Remote: '.implode(', ', $secondary_array).')' );
+		array_push($rowvalues, $num_blocks_scheduled[$device->key]. ' ('.implode(', ', $secondary_out).')' . ' <br>(Remote: '.implode(', ', $secondary_array).')' );
 		
-		array_push($rowvalues, $scheduled_string[$device->key]. ' (' . $device->get('cdd_timezone').')');
+		array_push($rowvalues, $scheduled_string['secondary'][$device->key]. ' (' . $device->get('cdd_timezone').')');
+		
+		array_push($rowvalues, $device->get_active_profile('readable'));
 		
 		if($device->get('cdd_allow_device_edits')){
 			array_push($rowvalues, 'Edits All');

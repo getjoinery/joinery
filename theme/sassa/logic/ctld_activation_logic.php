@@ -37,14 +37,8 @@ function ctld_activation_logic($get_vars, $post_vars){
 
 	$device = new CtldDevice($device_id, TRUE);
 	
-	$cd = new ControlDHelper();
-	$result = $cd->listDevice($device->get('cdd_device_id'));
-	$cd_device = $result['body']['devices'][0];
-	if($cd_device['status'] == 1){
-		$device->set('cdd_is_active', 1);
-		$device->save();
-		$device->load();
-	}
+	$device->check_activate();
+	
 
 	$page_vars['device'] = $device;
 	
