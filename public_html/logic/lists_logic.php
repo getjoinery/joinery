@@ -40,8 +40,7 @@ function lists_logic($get_vars, $post_vars, $params){
 		if(!$session->get_user_id()){
 			$formwriter = LibraryFunctions::get_formwriter_object();
 			if(!$formwriter->honeypot_check($_POST)){
-				throw new SystemDisplayableError(
-					'Please leave the "Extra email" field blank.');			
+				LibraryFunctions::display_404_page();			
 			}
 			
 			if(!$formwriter->antispam_question_check($_POST)){

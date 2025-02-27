@@ -65,7 +65,6 @@ class ShoppingCart {
 			return true;
 		}
 	}
-	
 
 	public function add_item($product, $form_data, $user) {
 		$product_version = $product->get_product_versions(TRUE, $form_data['product_version']);
@@ -77,23 +76,36 @@ class ShoppingCart {
 					'Sorry, the cart may contain only one subscription, and it cannot be mixed with other items.  Remove the other items or the subscription or check out with those first. <a href="/cart">Return to the cart</a>');
 		}
 		
+		$settings = Globalvars::get_instance();
+		$max_subscriptions = $settings->get_setting('max_subscriptions_per_user');
+
+		
 		//ENFORCE THE RESTRICTION OF MAXIMUM NUMBER OF SUBSCRIPTIONS PER USER
 		//DO NOT CHECK IF THERE IS NO USER PASSED IN
-		$settings = Globalvars::get_instance();
-		if($user && $product_version->is_subscription() && $max_subscriptions = $settings->get_setting('max_subscriptions_per_user')){
-			$active_subscriptions = new MultiOrderItem(
-			array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
-			array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-			15, //NUMBER PER PAGE
-			NULL //OFFSET
-			);
-			$num_subscriptions = $active_subscriptions->count_all();	
+		
+		if($product_version->is_subscription() && $max_subscriptions){
+			$num_subscriptions = 0;
+			
+			if($user->key){
+				$active_subscriptions = new MultiOrderItem(
+				array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
+				array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+				15, //NUMBER PER PAGE
+				NULL //OFFSET
+				);
+				$num_subscriptions = $active_subscriptions->count_all();	
+			}
+			
+		
+			$num_subscriptions += $this->get_num_recurring();
+			
 			if($num_subscriptions >= $max_subscriptions){
 				throw new ShoppingCartException(
-					'Sorry, you can not have more than ' . $max_subscriptions . ' subscriptions.');				
+					'Sorry, you can not have more than ' . $max_subscriptions . ' subscriptions.  Go back to the <a href="/cart">shopping cart</a> and remove a subscription to add another.');				
 			}
 		}
-		
+
+			
 		$current_count = 0;
 		if ($product->get('pro_max_cart_count')) {
 			// Check to make sure we haven't gone over this item's maximum purchase count
@@ -139,13 +151,33 @@ class ShoppingCart {
 		$this->items[] = array(1,	$product,	$form_data, $price, $discount);
 	}
 	
-	public function remove_coupon($coupon){
-		$key = array_search($coupon, $this->coupon_codes); // Find the key of value 3
-		if ($key !== false) {
-			unset($this->coupon_codes[$key]);
-			$this->update_items_for_coupon();
+	public function add_coupon($coupon_code){
+			$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim(strtolower($coupon_code)));
+
+			if($coupon_code_test){
+				if($coupon_code_test->is_valid()){
+					$cart->coupon_codes[] = $coupon_code_test->get('ccd_code');
+					$cart->coupon_codes = array_unique($cart->coupon_codes);
+					$cart->update_items_for_coupon();
+					return 1;
+				}
+				else{
+					return 'Coupon code not valid.';
+				}
+			}
+			else{
+				return 'Coupon code not found.';
+			}		
+	}
+	
+	public function remove_coupon($coupon_code){
+		unset($this->coupon_codes[array_search(trim($coupon_code), $this->coupon_codes)]);
+		$cart->update_items_for_coupon();
+		
+		//IF THERE ARE NONE LEFT, CLEAR THE BILLING USER
+		if(count($this->coupon_codes) == 0){
+			$this->billing_user = NULL;
 		}
-		return true;
 	}
 	
 	public function update_items_for_coupon(){

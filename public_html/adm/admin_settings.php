@@ -458,6 +458,7 @@
 	$optionvals['Blog homepage'] = '/blog';
 	echo $formwriter->dropinput("Alternate page to use as homepage (optional)", "alternate_homepage", '', $optionvals, $settings->get_setting('alternate_homepage'), '', TRUE);	
 	
+	echo $formwriter->textinput("Alternate page to use as logged in homepage (optional)", 'alternate_loggedin_homepage', '', 20, $settings->get_setting('alternate_loggedin_homepage'), "" , 255, "");
 
 	echo '<h3>Url Rewrite Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);

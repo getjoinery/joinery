@@ -98,19 +98,16 @@ class Comment extends SystemBase {
 		$settings = Globalvars::get_instance();
 		if(!$session->get_user_id()){
 			if(strlen($data['email'] > 0)){
-				throw new SystemDisplayableError(
-					'Please leave the "Extra email" field blank.');			
+				LibraryFunctions::display_404_page();			
 			}
 			if(strlen($data['comment'] > 0)){
-				throw new SystemDisplayableError(
-					'Please leave the extra comment field blank.');			
+				LibraryFunctions::display_404_page();			
 			}		
 		
 			$formwriter = LibraryFunctions::get_formwriter_object();
 
 			if(!$formwriter->honeypot_check($data)){
-				throw new SystemDisplayableError(
-					'Please leave the "Extra email" field blank.');			
+				LibraryFunctions::display_404_page();		
 			}
 			
 

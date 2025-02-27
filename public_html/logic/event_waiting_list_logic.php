@@ -43,8 +43,7 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 		else{
 			$formwriter = LibraryFunctions::get_formwriter_object();
 			if(!$formwriter->honeypot_check($post_vars)){
-				throw new SystemDisplayableError(
-					'Please leave the "Extra email" field blank.');			
+				LibraryFunctions::display_404_page();		
 			}
 			
 			if(!$formwriter->antispam_question_check($post_vars)){
