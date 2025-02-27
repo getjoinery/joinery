@@ -56,27 +56,15 @@ function cart_logic($get_vars, $post_vars){
 		
 		
 		if($_GET['clear_coupon_code']){
-			unset($cart->coupon_codes[array_search(trim($_GET['clear_coupon_code']), $cart->coupon_codes)]);
-			$cart->update_items_for_coupon();
+			$cart->remove_coupon($_GET['clear_coupon_code']);
 			LibraryFunctions::Redirect('/cart');
 		}
 		else if($_GET['coupon_code']){
 			//CHECK IF VALID
-
-			$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim(strtolower($_GET['coupon_code'])));
-
-			if($coupon_code_test){
-				if($coupon_code_test->is_valid()){
-					$cart->coupon_codes[] = $coupon_code_test->get('ccd_code');
-					$cart->coupon_codes = array_unique($cart->coupon_codes);
-					$cart->update_items_for_coupon();
-				}
-				else{
-					$page_vars['coupon_error'] = 'Coupon code not valid.';
-				}
-			}
-			else{
-				$page_vars['coupon_error'] = 'Coupon code not found.';
+			$result = $cart->add_coupon($_GET['coupon_code']);
+			
+			if($result != 1){
+				$page_vars['coupon_error'] = $result;
 			}
 		}
 	}

@@ -8,6 +8,7 @@ $static_routes_path = rtrim($_REQUEST['path'], '/');
 $static_routes_path = ltrim($static_routes_path, '/');
 
 $settings = Globalvars::get_instance();
+$session = SessionControl::get_instance();
 $theme_template = $settings->get_setting('theme_template');
 if($theme_template){
 	$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$theme_template;
@@ -262,7 +263,7 @@ if($settings->get_setting('files_active')){
 			$file_obj = File::get_by_name(basename($file));
 
 			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-			$session = SessionControl::get_instance();		
+					
 			if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){	
 				
 				$seconds_to_cache = 43200;
@@ -315,7 +316,9 @@ if($settings->get_setting('videos_active')){
 
 //HOMEPAGE
 if(!$params[0]){
-	if($alternate_page = $settings->get_setting('alternate_homepage')){
+	$alternate_page = $settings->get_setting('alternate_loggedin_homepage');
+	if($alternate_page && $session->is_logged_in()){
+		
 		$page_pieces = explode('/', $alternate_page);
 
 		//IF IT IS THE BLOG
@@ -335,6 +338,38 @@ if(!$params[0]){
 				$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
 						
 			}	
+		}
+		else{
+			$template_file = $template_directory.$alternate_page;
+			$base_file = $_SERVER['DOCUMENT_ROOT'].$alternate_page;			
+			
+		}
+		
+	}
+	else if($alternate_page = $settings->get_setting('alternate_homepage')){
+		$page_pieces = explode('/', $alternate_page);
+
+		//IF IT IS THE BLOG
+		if($page_pieces[1] == 'blog'){
+			$template_file = $template_directory.'/views/blog.php';
+			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+
+		}
+		else if($page_pieces[1] == 'page'){
+			//IF IT IS A PAGE
+			if($settings->get_setting('page_contents_active')){
+				require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
+
+				$page = Page::get_by_link($page_pieces[2], true);		
+
+				$template_file = $template_directory.'/views/page.php';
+				$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
+						
+			}	
+		}
+		else{
+			$template_file = $template_directory.$alternate_page;
+			$base_file = $_SERVER['DOCUMENT_ROOT'].$alternate_page;			
 		}		
 		
 	}
