@@ -25,7 +25,7 @@ Contact Area
     <div class="space">
         <div class="container">
             <div class="row gy-4 flex-row-reverse">
-                <div class="col-lg-6 col-xl-7">
+                <div class="col-lg-6 col-xl-7 order-2">
                     <div class="contact-item-wrap">
 
 						
@@ -144,7 +144,7 @@ Contact Area
                         <p class="form-messages mb-0 mt-3"></p>
 
                 </div>
-                <div class="col-lg-6 col-xl-5">
+                <div class="col-lg-6 col-xl-5 order-1">
                     <div class="contact-item-wrap">
                         <div class="title-area mt-n2 mb-40">
 							<h4>Cart</h4>
