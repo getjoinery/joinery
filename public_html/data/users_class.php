@@ -424,6 +424,101 @@ class User extends SystemBase {
 				throw new SystemDisplayablePermanentError("Failed to create user.");
 			}
 	}
+	
+	
+	static function CreateCompleteNew($data, $send_emails, $log_in, $set_cookie){
+		$settings = Globalvars::get_instance();
+		$session = SessionControl::get_instance();
+		
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+		$dblink->beginTransaction();
+		
+		try {
+		
+			$user = User::GetByEmail(trim($data['email']));
+			if(!$user){
+				$tdata = array(
+					'usr_first_name' => $data['usr_first_name'],
+					'usr_last_name' => $data['usr_last_name'],
+					'usr_email' => $data['usr_email'],
+					'send_emails' => $send_emails
+				);
+				
+				if($data['password']){
+					$tdata['password'] = $data['password'];
+				}
+				
+				if($data['usr_nickname']){
+					$tdata['usr_nickname'] = $data['usr_nickname'];
+				}			
+				
+				if($data['usr_timezone']){
+					$tdata['usr_timezone'] = $data['usr_timezone'];
+				}			
+				
+
+				$user = User::CreateNew($tdata);
+				
+			}
+		
+			$dblink->commit();
+		} 
+		catch (TTClassException $e) {
+			$dblink->rollBack();
+			throw $e;
+		}
+
+
+		/*
+		$address = new Address(NULL);
+		$address->set('usa_city', $zip_data->zip_city);
+		$address->set('usa_state', $zip_data->zip_state);
+		$address->set('usa_zip_code_id', $zip_data->zip_code_id);
+		$address->set('usa_type', 'HM');
+		$address->set('usa_usr_user_id', $user->key);
+		$address->set('usa_is_default', TRUE);
+		$address->set('usa_privacy', 2);
+		$address->save();
+		$address->update_coordinates();
+		*/
+
+		if($log_in){
+			$session->clear_formfields();
+			$session->store_session_variables($user);
+			$session->set_initial_user_id($user->key);
+			if ($set_cookie) {
+				$session->save_user_to_cookie();
+			}
+		}
+		
+
+		
+
+		//ADD TO THE MAILING LIST IF CHOSEN
+		if(isset($data['newsletter']) && $data['newsletter']){
+			if($settings->get_setting('default_mailing_list')){
+				$messages = $user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
+				//$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));		
+			}
+		}		
+
+		//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
+		if(!$user->phone() && $data['phn_phone_number']){
+			$phone_number = PhoneNumber::CreateFromForm($data, $user->key, NULL, FALSE);
+		}
+		
+		//IF THE USER ENTERED AN ADDRESS, SAVE THAT
+		if(!$user->address() && $data['address']){
+			$address = $data['address'];
+			if(!$address->get('usa_usr_user_id')){
+				$address->set('usa_usr_user_id', $user->key);
+				$address->save();
+			}
+		}		
+		
+	}
 
 
 

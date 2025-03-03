@@ -48,9 +48,9 @@
 	$validation_rules['usr_email']['maxlength']['value'] = 64;
 	$validation_rules['usr_email']['remote']['value'] = "'/ajax/email_check_ajax'";	
 	$validation_rules['usr_email']['remote']['message'] = "'This email already exists.'";
-	$validation_rules['usr_password']['required']['value'] = 'true';
-	$validation_rules['usr_password']['minlength']['value'] = 5;	
-	$validation_rules['usr_password']['minlength']['message'] = "'Password must be at least {0} characters'";
+	$validation_rules['password']['required']['value'] = 'true';
+	$validation_rules['password']['minlength']['value'] = 5;	
+	$validation_rules['password']['minlength']['message'] = "'Password must be at least {0} characters'";
 	$validation_rules['privacy']['required']['value'] = 'true';	
 	if($nickname_display){
 		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
@@ -69,7 +69,7 @@
 	}
 	echo $formwriter->textinput("Email", "usr_email", 'sm:col-span-2', 20, '', "" , 64, "");
 
-	echo $formwriter->passwordinput("Create Password", "usr_password", 'sm:col-span-2', 20, "" , "", 255,"");
+	echo $formwriter->passwordinput("Create Password", "password", 'sm:col-span-2', 20, "" , "", 255,"");
 
 	$optionvals = Address::get_timezone_drop_array();
 	$default_timezone = $settings->get_setting('default_timezone');

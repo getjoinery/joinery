@@ -64,14 +64,7 @@ class StripeHelper {
 		return $this->api_secret_key;
 	}
 
-	public function get_stripe_customer_id($user) {
-		if($this->test_mode){
-			return $user->get('usr_stripe_customer_id_test');
-		}
-		else{
-			return $user->get('usr_stripe_customer_id');
-		}
-	}
+
 	
 	public function output_stripe_regular_form($formwriter, $button_class=''){
 				
@@ -423,6 +416,15 @@ class StripeHelper {
 	public function get_customers($params){
 		$stripe_customers = $this->stripe->customers->all($params);
 		return $stripe_customers;
+	}
+
+	public function get_stripe_customer_id($user) {
+		if($this->test_mode){
+			return $user->get('usr_stripe_customer_id_test');
+		}
+		else{
+			return $user->get('usr_stripe_customer_id');
+		}
 	}
 
 	public function create_customer_at_stripe($user, $return_type='object') {

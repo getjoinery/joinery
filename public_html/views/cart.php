@@ -10,6 +10,7 @@
 	$settings = Globalvars::get_instance();
 	$require_login = $page_vars['require_login'];
 
+
 	$page = new PublicPage();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
@@ -104,8 +105,6 @@
       <div class="max-w-lg mx-auto w-full">
 	  
 
-        <!--<form class="mt-6">-->
-
 		<?php									
 		if($cart->billing_user){	
 			echo '<h2 class="text-lg font-medium text-gray-900">Billing User</h2>';
@@ -118,6 +117,7 @@
 			echo '<br><br>';
 		}
 		else{
+			/*
 			?>
 			<script>
 			$(document).ready(function() {
@@ -132,16 +132,18 @@
 			});
 			</script>
 			<?php	
+			*/
 			$formwriter = LibraryFunctions::get_formwriter_object('form2', $settings->get_setting('form_style'));
 			$validation_rules = array();
 			$validation_rules['billing_email']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
 			$validation_rules['billing_email']['required']['value'] = 'true';
 			$validation_rules['billing_first_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
-			$validation_rules['billing_last_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";										  
+			$validation_rules['billing_last_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";		
+			$validation_rules['password']['required']['value'] = 'true';
 			echo $formwriter->set_validate($validation_rules);									
 
 			echo $formwriter->begin_form("mt-6", "post", "/cart");
-			
+			/*
 			$optionvals = array();
 			$selected = '';
 			foreach($cart->items as $key => $cart_item) {
@@ -153,13 +155,16 @@
 				}				
 			}
 			$optionvals['A different person'] = 'A different person';
-			echo $formwriter->dropinput("Billing User", "existing_billing_email", NULL, $optionvals, $selected, '', FALSE);
-			echo '<div id="new_billing">';
-			echo $formwriter->textinput("Billing First Name", "billing_first_name", NULL, 30, '', "", 255, "");
-			echo $formwriter->textinput("Billing Last Name", "billing_last_name", NULL, 30, '', "", 255, "");
-			echo $formwriter->textinput("Billing Email", "billing_email", NULL, 30, '', "", 255, ""); 
 			
-			echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "sm:col-span-6", "left", NULL, 1, "");
+			echo $formwriter->dropinput("Choose one", "existing_billing_email", NULL, $optionvals, $selected, '', FALSE);
+			*/
+			echo '<div id="new_billing">';
+			echo $formwriter->textinput("Billing First Name", "billing_first_name", NULL, 30, $cart->billing_user['first_name'], "", 255, "");
+			echo $formwriter->textinput("Billing Last Name", "billing_last_name", NULL, 30, $cart->billing_user['last_name'], "", 255, "");
+			echo $formwriter->textinput("Billing Email", "billing_email", NULL, 30, $cart->billing_user['email'], "", 255, ""); 
+			echo $formwriter->passwordinput("Create Password", "password", 'sm:col-span-2', 20, "" , "", 255,"");
+			
+			echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "sm:col-span-6", "left", NULL, 1, "");
 
 			echo '</div>';
 			echo $formwriter->start_buttons();

@@ -72,8 +72,27 @@ function cart_charge_logic($get_vars, $post_vars){
 	}
 	*/
 
+
 	//HANDLE THE BILLING USER
-	$billing_user = $cart->get_or_create_billing_user(); 
+	$billing_user = User::GetByEmail($cart->billing_user['email']); 
+	if(!$billing_user){
+		$user_data = array(
+			'usr_first_name' => $cart->billing_user['first_name'],
+			'usr_last_name' => $cart->billing_user['last_name'],
+			'usr_email' => $cart->billing_user['email'],		
+		);
+		
+		if($_POST['password']){
+			$user_data['password'] = $_POST['password'];
+		}
+		$billing_user = User::CreateCompleteNew($user_data, true, true, false);
+	}
+	
+	if($settings->get_setting('checkout_type') == 'stripe_regular' || $settings->get_setting('checkout_type') == 'stripe_checkout'){
+		$stripe_helper = new StripeHelper();
+		$stripe_customer_id = $stripe_helper->get_or_create_stripe_customer($billing_user);
+	}
+
 	
 	//GET THE ORDER IF IT WAS CREATED EARLIER
 	if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
@@ -100,52 +119,6 @@ function cart_charge_logic($get_vars, $post_vars){
 		$order->load();		
 	}
 	
-	
-	//CREATE ALL OF THE NEEDED USERS 
-	foreach($cart->items as $key => $cart_item) {
-		list($quantity, $product, $data, $price, $discount) = $cart_item;
-
-		//DEAL WITH CREATING USERS FOR EACH PRODUCT ITEM
-		$user = User::GetByEmail($data['email']);
-		if(!$user){
-			$data = array(
-				'usr_first_name' => $data['full_name_first'],
-				'usr_last_name' => $data['full_name_last'],
-				'usr_email' => $data['email'],
-				'password' => NULL,
-				'send_emails' => true
-			);
-			$user = User::CreateNew($data);
-		}
-		
-		$act_code = Activation::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));	
-		$default_fill = array(
-			'act_code' => $act_code,
-			'user_id' => $user->key,
-		);
-		
-		//ADD TO THE MAILING LIST IF CHOSEN
-		if(isset($data['newsletter']) && $data['newsletter']){
-			if($settings->get_setting('default_mailing_list')){
-				$messages = $user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
-				//$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));		
-			}
-		}		
-
-		//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
-		if(!$user->phone() && $data['phn_phone_number']){
-			$phone_number = PhoneNumber::CreateFromForm($data, $user->key, NULL, FALSE);
-		}
-		
-		//IF THE USER ENTERED AN ADDRESS, SAVE THAT
-		if(!$user->address() && $data['address']){
-			$address = $data['address'];
-			if(!$address->get('usa_usr_user_id')){
-				$address->set('usa_usr_user_id', $user->key);
-				$address->save();
-			}
-		}
-	}
 	
 	
 	//CHECK THE COUPON CODES BEFORE WE CHARGE
@@ -187,7 +160,6 @@ function cart_charge_logic($get_vars, $post_vars){
 			}	
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
-			$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
 			
 			$order->set('ord_status', Order::STATUS_PAID);
 			$order->save();
@@ -196,7 +168,6 @@ function cart_charge_logic($get_vars, $post_vars){
 			$payment_service = 'stripe_checkout';
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
-			$stripe_customer_id = $stripe_helper->get_stripe_customer_id($billing_user);
 
 			//CHECK CREDIT CARD INFO AND STORE IF PRESENT FOR REGULAR STRIPE CHECKOUT
 			//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
@@ -283,6 +254,24 @@ function cart_charge_logic($get_vars, $post_vars){
 		$email_fill['purchase_amount'] = $price - $discount;
 
 
+		//GET OR CREATE THE USER, OR USE THE BILLING USER
+		if($data['email']){
+			$user = User::GetByEmail($data['email']);
+			if(!$user){
+				$user_data = array(
+					'usr_first_name' => $data['full_name_first'],
+					'usr_last_name' => $data['full_name_last'],
+					'usr_email' => $data['email'],	
+				);
+				$user = User::CreateCompleteNew($user_data, true, false, false);
+			}
+		}
+		else{
+			$user = $billing_user;
+		}
+		$default_fill = array(
+			'user_id' => $user->key,
+		);
 
 		//CREATE THE ORDER ITEM
 		$order_item = new OrderItem(NULL);

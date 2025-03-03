@@ -14,24 +14,7 @@ $session->check_permission(8);
 if ($_POST){
 	
 	
-
-	$data = array(
-		'usr_first_name' => $_POST['usr_first_name'],
-		'usr_last_name' => $_POST['usr_last_name'],
-		'usr_email' => $_POST['usr_email'],
-		'usr_nickname' => $_POST['usr_nickname'],
-		'usr_timezone' => $_POST['usr_timezone'],
-		'password' => $_POST['usr_password'],
-		'send_emails' => $_POST['send_activation_email'],
-	);
-	$user = User::CreateNew($data);	
-
-	if($_POST['mailing_list']){
-		if($settings->get_setting('default_mailing_list')){
-			$messages = $user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
-			//$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
-		}
-	}
+	$user = User::CreateCompleteNew($_POST, $_POST['send_activation_email'], false, false);
 
 
 	//NOW REDIRECT
@@ -89,12 +72,12 @@ else{
 		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 32, "");
 	}
 	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, NULL, "" , 64, "");
-	echo $formwriter->textinput("Password ", "usr_password", "ctrlHolder", 20, NULL, "" , 255, "");
+	echo $formwriter->textinput("Password ", "password", "ctrlHolder", 20, NULL, "" , 255, "");
 	$optionvals = Address::get_timezone_drop_array();
 	$default_timezone = $settings->get_setting('default_timezone');
 	echo $formwriter->dropinput("Time Zone", "usr_timezone", "ctrlHolder", $optionvals, $default_timezone, '', FALSE);	
 	
-	echo $formwriter->checkboxinput("Add to the mailing list", "mailing_list", "ctrlHolder", "normal", NULL, "yes", '');	
+	echo $formwriter->checkboxinput("Add to the mailing list", "newsletter", "ctrlHolder", "normal", NULL, "yes", '');	
 	echo $formwriter->checkboxinput("Send an activation email", "send_activation_email", "ctrlHolder", "normal", "yes", "yes", '');
 
 	echo $formwriter->start_buttons();
