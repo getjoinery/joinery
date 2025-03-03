@@ -68,7 +68,7 @@ function register_logic($get_vars, $post_vars){
 			'usr_first_name' => 'First Name',
 			'usr_last_name' => 'Last Name',
 			//'usa_zip_code_id' => 'Zip Code',
-			'usr_password' => 'Password'
+			'password' => 'Password'
 		);
 		
 
@@ -114,67 +114,15 @@ function register_logic($get_vars, $post_vars){
 		*/
 
 
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$dblink->beginTransaction();
-
 		if (User::GetByEmail($fixed_fields['usr_email'])) {
 			throw new SystemDisplayableError(
 				'An account has already been registered with this email address.  Please go back and double
 				check the email you entered or <a href="/password-reset-1.php">click here</a> if you forgot
 				your password.');
 		}
-
-		try {
-
-			$data = array(
-				'usr_first_name' => $fixed_fields['usr_first_name'],
-				'usr_last_name' => $fixed_fields['usr_last_name'],
-				'usr_email' => $fixed_fields['usr_email'],
-				'usr_nickname' => $fixed_fields['usr_nickname'],
-				'usr_timezone' => $fixed_fields['usr_timezone'],
-				'password' => $fixed_fields['usr_password'],
-				'send_emails' => TRUE
-			);
-			$user = User::CreateNew($data);	
-			
-			//ADD TO THE MAILING LIST IF CHOSEN
-			if($post_vars['newsletter']){
-				if($settings->get_setting('default_mailing_list')){
-					$messages = $user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
-					//$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));	
-				}
-			} 
-
-			
-			/*
-			$address = new Address(NULL);
-			$address->set('usa_city', $zip_data->zip_city);
-			$address->set('usa_state', $zip_data->zip_state);
-			$address->set('usa_zip_code_id', $zip_data->zip_code_id);
-			$address->set('usa_type', 'HM');
-			$address->set('usa_usr_user_id', $user->key);
-			$address->set('usa_is_default', TRUE);
-			$address->set('usa_privacy', 2);
-			$address->save();
-			$address->update_coordinates();
-			*/
-
-			$session->clear_formfields();
-			$session->store_session_variables($user);
-			$session->set_initial_user_id($user->key);
-			if ($fixed_fields['setcookie']) {
-				$session->save_user_to_cookie();
-			}
-
-			$dblink->commit();
-		} catch (TTClassException $e) {
-			$dblink->rollBack();
-			throw $e;
+		else{
+			$user = User::CreateCompleteNew($fixed_fields, true, true, $fixed_fields['setcookie']);
 		}
-		
 
 		if ($ajax) { 
 			echo json_encode(array('success' => 1));	

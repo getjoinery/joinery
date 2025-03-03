@@ -69,53 +69,17 @@ function cart_logic($get_vars, $post_vars){
 		}
 	}
 
-	
-	$newbilling = 0;
-	if($_GET['newbilling'] == 1){
-		//IF WE ARE CLEARING THE BILLING USER
-		$cart->billing_user = NULL;
-		$newbilling = 1;
-	}	
-	else if($_POST['existing_billing_email']){
-		//IF THE USER TYPED IN A NEW BILLING USER
-		$billing_user = array();
-		if($_POST['existing_billing_email'] == 'A different person'){
-			$billing_user['billing_first_name'] = $_POST['billing_first_name'];
-			$billing_user['billing_last_name'] = $_POST['billing_last_name'];
-			$billing_user['billing_email'] = strtolower(trim($_POST['billing_email']));
-			$cart->billing_user = $billing_user;
-			
-		}
-		else{
-			foreach($cart->items as $key => $cart_item) {
-				list($quantity, $product, $data, $price, $discount) = $cart_item;
-				if(strtolower(trim($_POST['existing_billing_email'])) == strtolower(trim($data['email']))){								
-					$billing_user['billing_first_name'] = $data['full_name_first'];
-					$billing_user['billing_last_name'] = $data['full_name_last'];
-					$billing_user['billing_email'] = strtolower(trim($data['email']));
-					$cart->billing_user = $billing_user;
-				}				
-			}
-			
-		}
-		
-	}				
-	else if($cart->count_items() > 0 && !$cart->billing_user){
-		//IF AT LEAST ONE ITEM IN CART, LOAD FIRST AS BILLING USER
-		foreach($cart->items as $key => $cart_item) {}  //SHORTCUT TO GET ONLY ONE
-		list($quantity, $product, $data, $price, $discount) = $cart_item;
-		
-		$billing_user['billing_first_name'] = $data['full_name_first'];
-		$billing_user['billing_last_name'] = $data['full_name_last'];
-		$billing_user['billing_email'] = strtolower(trim($data['email']));
-		$cart->billing_user = $billing_user;
-	}	
-	
-	
-	
-	
 
-	if($cart->get_total() > 0 && $cart->billing_user['billing_email']){	
+	if($_GET['newbilling'] == 1){
+		$cart->determine_billing_user($_POST, true);
+		LibraryFunctions::Redirect('/cart');
+	}
+	else{
+		$cart->determine_billing_user($_POST, false);
+	}
+
+
+	if($cart->get_total() > 0){	
 
 		
 		if($settings->get_setting('use_paypal_checkout')){

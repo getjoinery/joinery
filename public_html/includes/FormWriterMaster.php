@@ -310,12 +310,25 @@ class FormWriterMaster {
 		return '</div>';
 	}
 	
-	function set_validate($validation_rules){
+	function set_validate($validation_rules, $custom_js = NULL, $debug=false){
+		$debugtext = '';
+		if($debug){
+			$debugtext = ',
+			
+        invalidHandler: function(event, validator) {
+            if (validator.numberOfInvalids()) {
+                let errorList = "Please fix the following errors:\n\n";
+                $.each(validator.errorList, function(index, error) {
+                    errorList += "- " + error.element.name + ": " + error.message + "\n";
+                });
+                alert(errorList);
+            }
+        }';
+		}
 		
 		$output = '
 		<script type="text/javascript">
 			$(document).ready(function() {
-
 				jQuery.validator.addMethod("phoneUS", function(phone_number, element) {
 				    phone_number = phone_number.replace(/\s+/g, "");
 					return this.optional(element) || phone_number.length > 9 &&
@@ -323,6 +336,7 @@ class FormWriterMaster {
 				}, "Please specify a valid phone number");
 
 					$("#'.$this->formid.'").validate({
+							'.$custom_js.'
 							rules: {';
 							$output .= "\r\n";
 							foreach($validation_rules as $name=>$rules){
@@ -355,7 +369,7 @@ class FormWriterMaster {
 							}
 							$output .=  '},';	
 							$output .= "\r\n";							
-							$output .=  $this->validate_style_info .'
+							$output .=  $this->validate_style_info . $debugtext .'
 							});';
 
 			$output .= '});

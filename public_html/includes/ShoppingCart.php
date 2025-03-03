@@ -87,6 +87,7 @@ class ShoppingCart {
 			$num_subscriptions = 0;
 			
 			if($user->key){
+				//IF USER IS LOGGED IN
 				$active_subscriptions = new MultiOrderItem(
 				array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
 				array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
@@ -94,6 +95,17 @@ class ShoppingCart {
 				NULL //OFFSET
 				);
 				$num_subscriptions = $active_subscriptions->count_all();	
+			}
+			else if($form_data['email'] && $user = User::GetByEmail($form_data['email'])){
+				//IF USER IS NOT LOGGED IN
+				$active_subscriptions = new MultiOrderItem(
+				array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
+				array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+				15, //NUMBER PER PAGE
+				NULL //OFFSET
+				);
+				$num_subscriptions = $active_subscriptions->count_all();				
+				
 			}
 			
 		
@@ -180,6 +192,58 @@ class ShoppingCart {
 		}
 	}
 	
+	public function billing_user_prefill_from_items(){
+		
+		//RETURN THE FIRST ONE
+		foreach($this->items as $key => $cart_item) {  
+			list($quantity, $product, $data, $price, $discount) = $cart_item;
+			if($data['email']){
+				$this->billing_user['first_name'] = $data['full_name_first'];
+				$this->billing_user['last_name'] = $data['full_name_last'];
+				$this->billing_user['email'] = strtolower(trim($data['email']));
+				return true;
+			}
+			return false;
+		}
+		
+	}
+	
+	public function is_billing_user_complete(){
+		if($this->billing_user['first_name'] && $this->billing_user['last_name'] && $this->billing_user['email'] && $this->billing_user['password'] && $this->billing_user['privacy']){
+			return 1;
+		}
+		return 0;
+	}
+	
+	public function determine_billing_user($data, $clear_first){
+		if($clear_first){
+			$this->billing_user = NULL;
+		}
+		
+		if($data['billing_email']){
+				$this->billing_user['first_name'] = $data['billing_first_name'];
+				$this->billing_user['last_name'] = $data['billing_last_name'];
+				$this->billing_user['email'] = strtolower(trim($data['billing_email']));
+				$this->billing_user['password'] = trim($data['password']);
+				$this->billing_user['privacy'] = $data['privacy'];
+		}
+		else if($data['existing_billing_email']){
+			//IF THE USER TYPED IN A NEW BILLING USER
+			if($data['existing_billing_email'] == 'A different person'){
+				$this->billing_user['first_name'] = $data['billing_first_name'];
+				$this->billing_user['last_name'] = $data['billing_last_name'];
+				$this->billing_user['email'] = strtolower(trim($data['billing_email']));
+				$this->billing_user['password'] = trim($data['password']);
+				$this->billing_user['privacy'] = $data['privacy'];
+			}	
+		}	
+
+		if(!$this->is_billing_user_complete()){
+			$this->billing_user_prefill_from_items();
+		}			
+		
+	}
+	
 	public function update_items_for_coupon(){
 
 		foreach($this->items as $key => $cart_item) {
@@ -236,32 +300,6 @@ class ShoppingCart {
 		return $detailed_items;
 	}
 	
-	public function get_or_create_billing_user(){
-		$charge_total = $this->get_total();
-
-
-		//HANDLE THE BILLING USER
-		$billing_user = User::GetByEmail(trim($this->billing_user['billing_email'])); 
-		if(!$billing_user){
-			$cart_billing_user = $this->billing_user;
-			//CREATE THE USER
-			$data = array(
-				'usr_first_name' => $cart_billing_user['billing_first_name'],
-				'usr_last_name' => $cart_billing_user['billing_last_name'],
-				'usr_email' => $cart_billing_user['billing_email'],
-				'password' => NULL,
-				'send_emails' => true
-			);
-			$billing_user = User::CreateNew($data);			
-		}	
-
-		if($charge_total > 0){ 
-			$stripe_helper = new StripeHelper();
-			$stripe_customer_id = $stripe_helper->get_or_create_stripe_customer($billing_user);
-		}	
-
-		return $billing_user;
-	}
 
 	public function get_total() {
 		$total_price = 0;
