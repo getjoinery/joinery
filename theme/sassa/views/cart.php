@@ -9,6 +9,8 @@
 	$currency_code = $page_vars['currency_code'];
 	$session = $page_vars['session'];
 	$require_login = $page_vars['require_login'];
+	$prefill_billing_user = $page_vars['prefill_billing_user'];
+
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
@@ -28,121 +30,159 @@ Contact Area
                 <div class="col-lg-6 col-xl-7 order-2">
                     <div class="contact-item-wrap">
 
-						
-						
-						
-		<?php
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('coupons_active')){
-			echo '<h4>Coupons</h4>';
-
-			//DEBUG LIST ALL COUPONS
-			if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
-				echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
-				foreach($page_vars['all_coupons'] as $coupon){
-					$formwriter = LibraryFunctions::get_formwriter_object('form_test_coupon');
-					echo $formwriter->begin_form("mt-6", "get", '/cart');
-					echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
-					echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary');
-					echo $formwriter->end_form();
-				}
-				echo '</div>';
-			}
-
-			
-			$formwriter = LibraryFunctions::get_formwriter_object('form_coupon');
-			echo $formwriter->begin_form("mt-6", "get", '/cart');
-			echo $formwriter->textinput('Add Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
-			if($page_vars['coupon_error']){
-				echo '<p>'.$page_vars['coupon_error'].'</p>';
-			}
-			//echo $formwriter->start_buttons();
-			echo $formwriter->new_form_button('Add Coupon', 'secondary');
-			//echo $formwriter->end_buttons();
-			echo $formwriter->end_form();
-
-			foreach($cart->coupon_codes as $coupon_code){
-				$coupon_code_obj = CouponCode::GetByColumn('ccd_code', $coupon_code);
-					?>
-			
-				<div class="media-body">
-					<span class="contact-item_text">Coupon applied: <?php echo $coupon_code . ' ('.$coupon_code_obj->get_readable_discount(). ' discount ) <a href="/cart?rc='.$coupon_code.'">remove</a>'; ?></span>
-				</div>
-					
-					
+	
 					<?php
-				}			
-		}
-		
-		if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
-			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
-		}
-		 ?>
-		 </div>
-		 <br>
-		 <div class=" contact-item-wrap">
-		<?php
-		if($require_login){
-				echo '<div class="alert alert-warning" role="alert">
-				  The email ('.strip_tags($cart->billing_user['billing_email']).') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
-				</div>';
-		}
-		else{
-			if($cart->get_total() > 0){			
+					$settings = Globalvars::get_instance();
+					if($settings->get_setting('coupons_active')){
+						echo '<h4>Coupons</h4>';
 
+						//DEBUG LIST ALL COUPONS
+						if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+							echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
+							foreach($page_vars['all_coupons'] as $coupon){
+								$formwriter = LibraryFunctions::get_formwriter_object('form_test_coupon');
+								echo $formwriter->begin_form("mt-6", "get", '/cart');
+								echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
+								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary');
+								echo $formwriter->end_form();
+							}
+							echo '</div>';
+						}
 
-					echo '<h4>Pay with Stripe</h4>';
-					$formwriter = LibraryFunctions::get_formwriter_object('form_stripe');
-					echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, 'th-btn');	
-				
-				
-				
-			}		
-		}			
-				
-		?>								
 						
-						
-						
-						
-						
-						
-						
-						
-						
-						<!--
-                            <div class="form-group col-md-6">
-                                <input type="text" class="form-control" name="name" id="name" placeholder="Your Name">
-                                <i class="fal fa-user"></i>
-                            </div>
-                            <div class="form-group col-md-6">
-                                <input type="email" class="form-control" name="email" id="email" placeholder="Email Address">
-                                <i class="fal fa-envelope"></i>
-                            </div>
-                            <div class="form-group col-md-6">
-                                <input type="tel" class="form-control" name="number" id="number" placeholder="Phone Number">
-                                <i class="fal fa-phone"></i>
-                            </div>
-                            <div class="form-group col-md-6">
-                                <select name="subject" id="subject" class="form-select nice-select">
-                                    <option value="" disabled selected hidden>Select Service</option>
-                                    <option value="Web Development">Web Development</option>
-                                    <option value="Cyber Security">Cyber Security</option>
-                                    <option value="App Development">App Development</option>
-                                    <option value="Cloud Service">Cloud Service</option>
-                                    <option value="Cloud Service">Cloud Service</option>
-                                </select>
-                            </div>
-                            <div class="form-group col-12">
-                                <textarea name="message" id="message" cols="30" rows="3" class="form-control" placeholder="Your Message"></textarea>
-                                <i class="fal fa-pencil"></i>
-                            </div>
-                            <div class="form-btn col-12">
-                                <button class="th-btn">Send Message</button>
-                            </div>-->
-                        </div>
-                        <p class="form-messages mb-0 mt-3"></p>
+						$formwriter = LibraryFunctions::get_formwriter_object('form_coupon');
+						echo $formwriter->begin_form("mt-6", "get", '/cart');
+						echo $formwriter->textinput('Add Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
+						if($page_vars['coupon_error']){
+							echo '<p>'.$page_vars['coupon_error'].'</p>';
+						}
+						//echo $formwriter->start_buttons();
+						echo $formwriter->new_form_button('Add Coupon', 'secondary');
+						//echo $formwriter->end_buttons();
+						echo $formwriter->end_form();
 
+						foreach($cart->coupon_codes as $coupon_code){
+							$coupon_code_obj = CouponCode::GetByColumn('ccd_code', $coupon_code);
+								?>
+						
+							<div class="media-body">
+								<span class="contact-item_text">Coupon applied: <?php echo $coupon_code . ' ('.$coupon_code_obj->get_readable_discount(). ' discount ) <a href="/cart?rc='.$coupon_code.'">remove</a>'; ?></span>
+							</div>
+								
+								
+								<?php
+							}			
+					}
+					
+					if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+						echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
+					}
+					?>
+					</div>
+					<br>
+					 
+					<div class="contact-item-wrap">
+						<h4>Billing User</h4>
+					
+					
+						<?php
+					if($require_login){
+							echo '<div class="alert alert-warning" role="alert">
+							  The email ('.strip_tags($cart->billing_user['billing_email']).') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
+							</div>';
+					}
+					else{							
+						if($cart->is_billing_user_complete()){	
+							echo '<p>'.$cart->billing_user['first_name'] . ' ' . $cart->billing_user['last_name'] . ' ('. $cart->billing_user['email'].')</p>';
+							$formwriter = LibraryFunctions::get_formwriter_object('form_billing_user', $settings->get_setting('form_style'));
+							
+							//echo $formwriter->start_buttons();
+							echo $formwriter->new_button('Change billing user', '/cart?newbilling=1', 'secondary');
+							//echo $formwriter->end_buttons();
+							echo '<br><br>';
+						}
+						else{
+							/*
+							?>
+							<script>
+							$(document).ready(function() {
+								$("#usr_first_name").focus();
+								$('#new_billing').hide();
+								$('#existing_billing_email').change(function () {
+									if ($('#existing_billing_email option:selected').text() == 'A different person') {
+										$('#new_billing').show();
+									}
+									else $('#new_billing').hide(); // hide div if value is not "custom"
+								});
+							});
+							</script>
+							<?php	
+							*/
+							$formwriter = LibraryFunctions::get_formwriter_object('form2', $settings->get_setting('form_style'));
+							$validation_rules = array();
+							$validation_rules['billing_email']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
+							$validation_rules['billing_email']['required']['value'] = 'true';
+							$validation_rules['billing_first_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
+							$validation_rules['billing_last_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";		
+							$validation_rules['password']['required']['value'] = 'true';
+							$validation_rules['privacy']['required']['value'] = 'true';
+							$custom_js = 'ignore: ":hidden:not(input[type=\'checkbox\'], input[type=\'radio\'])",';
+							echo $formwriter->set_validate($validation_rules, $custom_js);									
+
+							/*
+							$optionvals = array();
+							$selected = '';
+							foreach($cart->items as $key => $cart_item) {
+								list($quantity, $product, $data, $price, $discount) = $cart_item;
+								$name = $data['full_name_first'] . ' ' . $data['full_name_last'];
+								$optionvals[$name] = $data['email'];
+								if(!$selected){
+									$selected = $name;
+								}				
+							}
+							$optionvals['A different person'] = 'A different person';
+							echo $formwriter->dropinput("Billing User", "existing_billing_email", NULL, $optionvals, $selected, '', FALSE);
+							*/
+							echo $formwriter->begin_form("", "post", "/cart");
+							
+							echo '<div id="new_billing">';
+
+							echo $formwriter->textinput("First Name", "billing_first_name", NULL, 30, $cart->billing_user['first_name'], "", 255, "");
+							echo $formwriter->textinput("Last Name", "billing_last_name", NULL, 30, $cart->billing_user['last_name'], "", 255, "");
+							echo $formwriter->textinput("Email", "billing_email", NULL, 30, $cart->billing_user['email'], "", 255, ""); 
+							echo $formwriter->passwordinput("Create Password", "password", '', 20, "" , "", 255,"");
+							
+							echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "", "left", NULL, 1, "");
+
+							echo '</div>';
+							echo $formwriter->start_buttons();
+							//echo $formwriter->new_button('Cancel', 'secondary');
+							echo $formwriter->new_form_button('Submit Billing User');
+							echo $formwriter->end_buttons();
+							echo $formwriter->end_form();
+							echo '<br><br>';
+								
+						}	
+					}
+					?>
+					</div>
+					<br>
+					<?php 
+					if($cart->is_billing_user_complete()){
+					?>
+						<div class=" contact-item-wrap">
+						<?php
+						if($cart->get_total() > 0){			
+							echo '<h4>Pay with Stripe</h4>';
+							$formwriter = LibraryFunctions::get_formwriter_object('form_stripe');
+							echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, 'th-btn');					
+						}		
+						?> </div> <?php
+					}								
+
+					?>
+                    <p class="form-messages mb-0 mt-3"></p>			
+					
                 </div>
                 <div class="col-lg-6 col-xl-5 order-1">
                     <div class="contact-item-wrap">

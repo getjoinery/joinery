@@ -71,7 +71,7 @@
 	  ?>
       </div>
       <div class="mt-6 text-center">
-        <a href="/pricing ?>" class="underline">Sign up for an account</a>
+        <a href="/pricing" class="underline">Sign up for an account</a>
       </div>
     <?php echo $formwriter->end_form();	 ?>
   </div>
