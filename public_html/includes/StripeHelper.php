@@ -631,6 +631,49 @@ class StripeHelper {
 		}	
 
 	}
+
+	public function change_subscription($subscription_id, $item_id_to_update, $new_stripe_price){
+		$subscription = $this->stripe->subscriptions->update(
+			$subscription_id,
+			[
+				'items' => [
+					[
+						'id' => $item_id_to_update, // Specify the subscription item ID
+						'price' => $new_stripe_price, // Specify the new stripe price id
+					],
+				],
+			]
+		);
+		return $subscription;
+	}
+	
+	public function cancel_subscription($subscription_id, $choice){
+		if($choice == 'period_end'){
+			$subscription = $this->stripe->subscriptions->update(
+				$subscription_id,
+				[
+					'cancel_at_period_end' => true,
+				]
+			);		
+			if($subscription->cancel_at_period_end){
+				return $subscription;
+			}
+			else{
+				return false;
+			}
+		}
+		else if($choice = 'immediate'){
+			$stripe_subscription = $this->get_subscription($subscription_id);			
+			$subscription = $stripe_subscription->cancel();
+			if($subscription->canceled_at){
+				return $subscription;
+			}
+			else{
+				return false;
+			}
+		}
+		return false;
+	}
 	
 	
 	public function create_card_from_token($stripe_token, $stripe_customer_id, $set_as_default=true){
@@ -796,20 +839,7 @@ class StripeHelper {
 	}
 	
 
-	public function change_subscription($subscription_id, $item_id_to_update, $new_stripe_price){
-		$subscription = $this->stripe->subscriptions->update(
-			$subscription_id,
-			[
-				'items' => [
-					[
-						'id' => $item_id_to_update, // Specify the subscription item ID
-						'price' => $new_stripe_price, // Specify the new stripe price id
-					],
-				],
-			]
-		);
-		return $subscription;
-	}
+
 	
 
 	public function create_charge($params){

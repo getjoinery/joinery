@@ -212,8 +212,16 @@ class ShoppingCart {
 	}
 	
 	public function is_billing_user_complete(){
-		if($this->billing_user['first_name'] && $this->billing_user['last_name'] && $this->billing_user['email'] && $this->billing_user['password'] && $this->billing_user['privacy']){
-			return 1;
+		$session = SessionControl::get_instance();
+		if($session->get_user_id()){
+			if($this->billing_user['first_name'] && $this->billing_user['last_name'] && $this->billing_user['email']){
+				return 1;
+			}			
+		}
+		else{
+			if($this->billing_user['first_name'] && $this->billing_user['last_name'] && $this->billing_user['email'] && $this->billing_user['password'] && $this->billing_user['privacy']){
+				return 1;
+			}
 		}
 		return 0;
 	}
