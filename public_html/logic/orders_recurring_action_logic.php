@@ -32,17 +32,11 @@
 
 	if(!$order_item->get('odi_subscription_cancelled_time')){
 				
-		if(!$stripe_subscription->canceled_at){
-		
-			try {
-				$response = $stripe_subscription->cancel();
-			}					
-			catch (Exception $e) {
-				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (".$order_item->get('odi_stripe_subscription_id').").  Please contact the webmaster.");
-				exit;
-			}	
-		}
-		
+		$stripe_subscription = $stripe_helper->cancel_subscription($order_item->get('odi_stripe_subscription_id'), 'immediate');
+		if(!$stripe_subscription){
+			throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (".$order_item->get('odi_stripe_subscription_id').") Please contact the webmaster.");
+			exit;		
+		}			
 		$result = $stripe_helper->update_subscription_in_order_item($order_item);
 		
 		//SEND NOTIFICATION
