@@ -66,7 +66,10 @@ class ShoppingCart {
 		}
 	}
 
-	public function add_item($product, $form_data, $user) {
+	public function add_item($product, $form_data) {
+		$settings = Globalvars::get_instance();
+		$session = SessionControl::get_instance();
+		
 		$product_version = $product->get_product_versions(TRUE, $form_data['product_version']);
 
 		// First lets validate we can add this item to the cart!
@@ -76,7 +79,7 @@ class ShoppingCart {
 					'Sorry, the cart may contain only one subscription, and it cannot be mixed with other items.  Remove the other items or the subscription or check out with those first. <a href="/cart">Return to the cart</a>');
 		}
 		
-		$settings = Globalvars::get_instance();
+		
 		$max_subscriptions = $settings->get_setting('max_subscriptions_per_user');
 
 		
@@ -86,10 +89,10 @@ class ShoppingCart {
 		if($product_version->is_subscription() && $max_subscriptions){
 			$num_subscriptions = 0;
 			
-			if($user->key){
+			if($session->get_user_id()){
 				//IF USER IS LOGGED IN
 				$active_subscriptions = new MultiOrderItem(
-				array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
+				array('user_id' => $session->get_user_id(), 'is_active_subscription' => true), //SEARCH CRITERIA
 				array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
 				15, //NUMBER PER PAGE
 				NULL //OFFSET
