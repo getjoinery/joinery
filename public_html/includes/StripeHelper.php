@@ -647,8 +647,8 @@ class StripeHelper {
 		return $subscription;
 	}
 	
-	public function cancel_subscription($subscription_id, $choice){
-		if($choice == 'period_end'){
+	public function cancel_subscription($subscription_id, $cancel_type){
+		if($cancel_type == 'period_end'){
 			$subscription = $this->stripe->subscriptions->update(
 				$subscription_id,
 				[
@@ -662,7 +662,7 @@ class StripeHelper {
 				return false;
 			}
 		}
-		else if($choice = 'immediate'){
+		else if($cancel_type = 'immediate'){
 			$stripe_subscription = $this->get_subscription($subscription_id);			
 			$subscription = $stripe_subscription->cancel();
 			if($subscription->canceled_at){

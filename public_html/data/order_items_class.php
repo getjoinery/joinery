@@ -8,6 +8,8 @@ require_once($siteDir . '/includes/SessionControl.php');
 require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
+require_once($siteDir . '/includes/EmailTemplate.php');
+require_once($siteDir . '/includes/StripeHelper.php');
 
 require_once($siteDir . '/data/address_class.php');
 require_once($siteDir . '/data/order_item_requirements_class.php');
@@ -202,6 +204,51 @@ class OrderItem extends SystemBase {
 		else{
 			return FALSE;
 		}
+		
+	}
+	
+	function cancel_subscription_order_item($send_email, $cancel_type){
+		$session = SessionControl::get_instance();
+		$settings = Globalvars::get_instance();
+		$stripe_helper = new StripeHelper();
+		
+		$order = new Order($order_item->get('odi_ord_order_id'), TRUE);
+		$order_user = new User($order_item->get('odi_usr_user_id'), TRUE);
+		
+		$this->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+
+		$stripe_subscription = $stripe_helper->cancel_subscription($this->get('odi_stripe_subscription_id'), $cancel_type);
+		if(!$stripe_subscription){
+			throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (".$this->get('odi_stripe_subscription_id').") Please contact the webmaster.");
+			exit;		
+		}		
+		$result = $stripe_helper->update_subscription_in_order_item($this);
+		
+		
+		//SEND NOTIFICATION
+		if($send_email){
+			if($settings->get_setting('subscription_notification_emails')){
+				$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
+				foreach($notify_emails as $notify_email){
+					try {
+						$notify_user = User::GetByEmail($notify_email);
+						$body = 'Subscription '.$this->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
+						$email_inner_template = $settings->get_setting('individual_email_inner_template');
+						$email = new EmailTemplate($email_inner_template, $notify_user);
+						$email->fill_template(array(
+							'subject' => 'Cancelled Subscription',
+							'body' => $body,
+						));	
+						$result = $email->send();
+					}					
+					catch (Exception $e) {
+						//DO NOTHING
+						$error2 = "";
+					}
+				}
+			}	
+		}
+		return true;
 		
 	}
 	
