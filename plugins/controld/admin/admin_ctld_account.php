@@ -21,11 +21,11 @@
 	$session->set_return();
 	
 	$account = new CtldAccount($_REQUEST['account_id'], TRUE);
-	
+	$user = new User($account->get('cda_usr_user_id'), TRUE);
 
 	$devices = new MultiCtldDevice(
 		array(
-		'user_id' => $account->get('cda_usr_user_id'), 
+		'user_id' => $user_id, 
 		), 
 		
 	);
@@ -33,6 +33,20 @@
 	$devices->load();
 	$num_devices = $num_devices;
 	$page_vars['devices'] = $devices;
+	
+	//SUBSCRIPTIONS
+	$subscriptions = new MultiOrderItem(
+	array('user_id' => $user->key), //SEARCH CRITERIA
+	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+	5, //NUMBER PER PAGE
+	NULL //OFFSET
+	);
+	$subscriptions->load();	
+	$numsubscriptions = $subscriptions->count_all();
+	$subscription_list = array();
+	foreach($subscriptions as $subscription){
+		$subscription_list[] = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">'.$subscription->readable_subscription_status().'</a>';
+	}
 	
 	
 	//DELETED DEVICES
@@ -140,6 +154,9 @@
 			}
 		}		
 		echo $status;
+		echo '<br>';
+		echo '('.$numsubscriptions.') <br>'.implode('<br>', $subscription_list);
+		echo '<br>';
 
 		if($account->get('cda_renewal_time')){
 			echo LibraryFunctions::convert_time($account->get(cda_renewal_time), 'UTC', $session->get_timezone());

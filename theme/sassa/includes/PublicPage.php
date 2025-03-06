@@ -92,14 +92,7 @@ static function tab_menu($tab_menus, $current=NULL){
 	
 	public function global_includes_top($options=array()){
 		$settings = Globalvars::get_instance();
-		?>
-		<script src="<?php echo LibraryFunctions::get_theme_file_path('jquery-3.4.1.min.js', '/includes', 'web'); ?>"></script>
-		<!--<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js', '/includes', 'web'); ?>"></script>	-->
-		<script src="
-https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js
-"></script>
-		<?php
-		
+
 		
 		//CHECK TO SEE IF WE PASSED IN A PREVIEW IMAGE
 		if(isset($options['preview_image_url']) && $options['preview_image_url']){
@@ -264,7 +257,7 @@ Career Area
 	
 		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 		<meta name="description" content="<?php echo $options['description']; ?>">
-        <meta name="keywords" content="">
+        <meta name="keywords" content="adblocker, social media blocker, adult content filter, malware blocker">
 
 		<title><?php echo $options['title']; ?></title>
 				<?php $this->global_includes_top($options); ?>
@@ -301,17 +294,21 @@ Career Area
 	============================== -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
 
     <!--==============================
 	    All CSS File
 	============================== -->
     <!-- Bootstrap -->
-    <link rel="stylesheet" href="/theme/sassa/assets/css/bootstrap.min.css">
+    <!--<link rel="stylesheet" href="/theme/sassa/assets/css/bootstrap.min.css">-->
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Fontawesome Icon -->
     <link rel="stylesheet" href="/theme/sassa/assets/css/fontawesome.min.css">
+	<!--<link href="https://cdn.jsdelivr.net/npm/@r3dz0n3/fontawesome-pro@6.3.0/css/fontawesome.min.css" rel="stylesheet">-->
     <!-- Magnific Popup -->
     <!--<link rel="stylesheet" href="/theme/sassa/assets/css/magnific-popup.min.css">-->
+	<link href="https://cdn.jsdelivr.net/npm/magnific-popup@1.2.0/dist/magnific-popup.min.css" rel="stylesheet">
     <!-- Swiper Slider -->
     <link rel="stylesheet" href="/theme/sassa/assets/css/swiper-bundle.min.css">
     <!-- Theme Custom CSS -->
@@ -744,19 +741,26 @@ Career Area
     All Js File
 ============================== -->
     <!-- Jquery -->
+	<!--<script src="<?php echo LibraryFunctions::get_theme_file_path('jquery-3.4.1.min.js', '/includes', 'web'); ?>"></script>-->
+	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
     <!--<script src="/theme/sassa/assets/js/vendor/jquery-3.7.1.min.js"></script> //LOADED IN THE HEADER-->  
+	<!--<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js', '/includes', 'web'); ?>"></script>	-->
+	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
     <!-- Swiper Slider -->
     <script src="/theme/sassa/assets/js/swiper-bundle.min.js"></script>
     <!-- Bootstrap -->
-    <script src="/theme/sassa/assets/js/bootstrap.min.js"></script>
+    <!--<script src="/theme/sassa/assets/js/bootstrap.min.js"></script>-->
+	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.min.js"></script>
     <!-- Magnific Popup -->
     <!--<script src="/theme/sassa/assets/js/jquery.magnific-popup.min.js"></script>-->
+	<script src="https://cdn.jsdelivr.net/npm/magnific-popup@1.2.0/dist/jquery.magnific-popup.min.js"></script>
     <!-- Counter Up -->
     <!--<script src="/theme/sassa/assets/js/jquery.counterup.min.js"></script>-->
     <!-- Circle Progress -->
     <!--<script src="/theme/sassa/assets/js/circle-progress.js"></script>-->
     <!-- Range Slider -->
-    <script src="/theme/sassa/assets/js/jquery-ui.min.js"></script>
+    <!--<script src="/theme/sassa/assets/js/jquery-ui.min.js"></script>-->
+	<script src="https://cdn.jsdelivr.net/npm/jquery-ui@1.14.1/dist/jquery-ui.min.js"></script>
     <!-- Imagesloadedr -->
     <!--<script src="/theme/sassa/assets/js/imagesloaded.pkgd.min.js"></script>-->
     <!-- isotope -->

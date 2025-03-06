@@ -123,9 +123,12 @@ Contact Area
 							$validation_rules['billing_email']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
 							$validation_rules['billing_email']['required']['value'] = 'true';
 							$validation_rules['billing_first_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
-							$validation_rules['billing_last_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";		
-							$validation_rules['password']['required']['value'] = 'true';
-							$validation_rules['privacy']['required']['value'] = 'true';
+							$validation_rules['billing_last_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";	
+							if(!$session->get_user_id()){
+								$validation_rules['password']['required']['value'] = 'true';
+								$validation_rules['privacy']['required']['value'] = 'true';
+							}
+							
 							$custom_js = 'ignore: ":hidden:not(input[type=\'checkbox\'], input[type=\'radio\'])",';
 							echo $formwriter->set_validate($validation_rules, $custom_js);									
 
@@ -150,10 +153,11 @@ Contact Area
 							echo $formwriter->textinput("First Name", "billing_first_name", NULL, 30, $cart->billing_user['first_name'], "", 255, "");
 							echo $formwriter->textinput("Last Name", "billing_last_name", NULL, 30, $cart->billing_user['last_name'], "", 255, "");
 							echo $formwriter->textinput("Email", "billing_email", NULL, 30, $cart->billing_user['email'], "", 255, ""); 
-							echo $formwriter->passwordinput("Create Password", "password", '', 20, "" , "", 255,"");
+							if(!$session->get_user_id()){
+								echo $formwriter->passwordinput("Create Password", "password", '', 20, "" , "", 255,"");
 							
-							echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "", "left", NULL, 1, "");
-
+								echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "", "left", NULL, 1, "");
+							}
 							echo '</div>';
 							echo $formwriter->start_buttons();
 							//echo $formwriter->new_button('Cancel', 'secondary');
