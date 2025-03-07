@@ -5,7 +5,7 @@ function devices_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($siteDir . '/plugins/controld/includes/ControlDHelper.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/includes/ControlDHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldaccounts_class.php');
@@ -92,8 +92,31 @@ function devices_logic($get_vars, $post_vars){
 		$scheduled_string[$device->key] = 'No schedule set';
 		if($profile->get('cdp_schedule_start')){
 			
-			$scheduled_string['primary'][$device->key] = '<span class="duration">'.$device->get_schedule_string('primary').'</span>';
-			$scheduled_string['secondary'][$device->key] = '<span class="duration">'.$device->get_schedule_string('secondary').'</span>';
+			$primary_arr = $device->get_time_to_active_profile('primary');
+			if(!$primary_arr){
+				$primary_time = '';
+			}
+			else if($primary_arr['hours'] == 0 && $primary_arr['minutes'] == 0){
+				$primary_time = 'Active';
+			}
+			else{
+				$primary_time = 'Active in '.$primary_arr['hours'].' hours, '.$primary_arr['minutes'].' minutes';
+			}
+			$secondary_arr = $device->get_time_to_active_profile('secondary');
+			if(!$secondary_arr){
+				$primary_time = '';
+			}
+			else if($secondary_arr['hours'] == 0 && $secondary_arr['minutes'] == 0){
+				$secondary_time = 'Active';
+			}
+			else{
+				$secondary_time = 'Active in '.$secondary_arr['hours'].' hours, '.$secondary_arr['minutes'].' minutes';
+			}
+			
+			
+			
+			$scheduled_string['primary'][$device->key] = '<span class="duration">'.$primary_time.'</span>';
+			$scheduled_string['secondary'][$device->key] = '<span class="duration">'.$secondary_time.'</span>';
 		}
 	}
 	$page_vars['scheduled_string'] = $scheduled_string;

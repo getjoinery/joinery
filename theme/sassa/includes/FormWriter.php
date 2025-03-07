@@ -53,6 +53,11 @@ class FormWriter extends FormWriterMaster {
 	protected $dropinput_container_class = ' form-group';
 	protected $dropinput_select_class = 'form-select';
 	//protected $dropinput_select_class = 'form-select nice-select';
+	
+	protected $button_primary_class = 'th-btn';
+	protected $button_secondary_class = 'th-btn style2';
+	
+	
 
 	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
 		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'">';
@@ -109,7 +114,7 @@ class FormWriter extends FormWriterMaster {
 	}
 	
 	
-	function new_form_button($label='Submit', $style='primary', $width='standard', $class='th-btn', $id=NULL) {
+	function new_form_button($label='Submit', $style='primary', $width='standard', $class='', $id=NULL) {
 		
 		if($style == 'primary'){
 			$class = $this->button_primary_class . ' ' . $class;

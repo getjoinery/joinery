@@ -51,15 +51,19 @@ Contact Area
 
 						
 						$formwriter = LibraryFunctions::get_formwriter_object('form_coupon');
+						
 						echo $formwriter->begin_form("mt-6", "get", '/cart');
-						echo $formwriter->textinput('Add Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
+						echo '<div style="display: flex; align-items: center;">';
+						echo $formwriter->textinput('Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
+						
 						if($page_vars['coupon_error']){
 							echo '<p>'.$page_vars['coupon_error'].'</p>';
 						}
 						//echo $formwriter->start_buttons();
-						echo $formwriter->new_form_button('Add Coupon', 'secondary');
+						echo $formwriter->new_form_button('Add', 'secondary', 'standard',' ms-3');
 						//echo $formwriter->end_buttons();
 						echo $formwriter->end_form();
+						echo '</div>';
 
 						foreach($cart->coupon_codes as $coupon_code){
 							$coupon_code_obj = CouponCode::GetByColumn('ccd_code', $coupon_code);
@@ -120,10 +124,15 @@ Contact Area
 							*/
 							$formwriter = LibraryFunctions::get_formwriter_object('form2', $settings->get_setting('form_style'));
 							$validation_rules = array();
-							$validation_rules['billing_email']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
+							$validation_rules['billing_first_name']['required']['value'] = 'true';
+							$validation_rules['billing_last_name']['required']['value'] = 'true';
 							$validation_rules['billing_email']['required']['value'] = 'true';
+							/*
+							$validation_rules['billing_email']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
+							
 							$validation_rules['billing_first_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
 							$validation_rules['billing_last_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";	
+							*/
 							if(!$session->get_user_id()){
 								$validation_rules['password']['required']['value'] = 'true';
 								$validation_rules['privacy']['required']['value'] = 'true';

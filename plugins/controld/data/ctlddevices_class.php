@@ -183,6 +183,101 @@ class CtldDevice extends SystemBase {
 		return true;
 	}
 	
+	
+	function get_time_to_active_profile($profile_choice){
+			$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+			
+			if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
+				return '';
+			}
+
+			if($profile_choice == 'primary'){
+				$tz = new DateTimeZone($profile->get('cdp_schedule_timezone'));
+				$now = new DateTime('now', $tz);
+				$currentDay = strtolower($now->format('D')); // e.g., "mon", "tue", etc.
+
+				// Create DateTime objects for today's start and end times in the given timezone.
+				$todayStart = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
+				$todayEnd   = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_end'), $tz);
+
+				// If today is a scheduled day...
+				if (in_array($currentDay, unserialize($profile->get('cdp_schedule_days')))) {
+					// If the current time is before today's end, then today's scheduled period will end at $todayEnd.
+					if ($now < $todayEnd) {
+						$diff = $now->diff($todayEnd);
+						return [
+							'hours'   => $diff->h + ($diff->days * 24),
+							'minutes' => $diff->i
+						];
+					}
+				}
+
+				// Otherwise, find the next scheduled day (up to 7 days ahead) and return the time until that day's end time.
+				for ($i = 1; $i <= 7; $i++) {
+					$nextDay = clone $now;
+					$nextDay->modify("+{$i} days");
+					$nextDayAbbrev = strtolower($nextDay->format('D'));
+
+					if (in_array($nextDayAbbrev, unserialize($profile->get('cdp_schedule_days')))) {
+						$nextEnd = DateTime::createFromFormat('Y-m-d H:i', $nextDay->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_end'), $tz);
+						$diff = $now->diff($nextEnd);
+						return [
+							'hours'   => $diff->h + ($diff->days * 24),
+							'minutes' => $diff->i
+						];
+					}
+				}		
+				
+				
+			}
+			else if ($profile_choice == 'secondary'){
+				$tz = new DateTimeZone($profile->get('cdp_schedule_timezone'));
+				$now = new DateTime('now', $tz);
+				$currentDay = strtolower($now->format('D')); // e.g., "mon", "tue", etc.
+
+				// Create DateTime objects for today's start and end times in the given timezone.
+				$todayStart = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
+				$todayEnd   = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_end'), $tz);
+
+				// If today is a scheduled day...
+				if (in_array($currentDay, unserialize($profile->get('cdp_schedule_days')))) {
+					if ($now < $todayStart) {
+						// Before the scheduled start today.
+						$diff = $now->diff($todayStart);
+						return [
+							'hours'   => $diff->h + ($diff->days * 24),
+							'minutes' => $diff->i
+						];
+					} elseif ($now >= $todayStart && $now < $todayEnd) {
+						// Currently within the scheduled period.
+						return [
+							'hours'   => 0,
+							'minutes' => 0
+						];
+					}
+				}
+
+				// Otherwise, find the next scheduled day (up to 7 days ahead).
+				for ($i = 1; $i <= 7; $i++) {
+					$nextDay = clone $now;
+					$nextDay->modify("+{$i} days");
+					$nextDayAbbrev = strtolower($nextDay->format('D'));
+
+					if (in_array($nextDayAbbrev, unserialize($profile->get('cdp_schedule_days')))) {
+						// Set the start time for that day.
+						$nextStart = DateTime::createFromFormat('Y-m-d H:i', $nextDay->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
+						$diff = $now->diff($nextStart);
+						return [
+							'hours'   => $diff->h + ($diff->days * 24),
+							'minutes' => $diff->i
+						];
+					}
+				}						
+			}
+
+	}
+	
+	
 	function get_schedule_string($profile_choice){
 			$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
 			
