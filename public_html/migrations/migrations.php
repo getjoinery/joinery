@@ -626,3 +626,9 @@
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'alternate_loggedin_homepage\', \'\', 1, \'now()\', \'now()\', \'general\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;			
+
+ 		$migration['database_version'] = '0.50';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage = 'admin_analytics_funnels.php'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Funnels\', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = \'statistics\'), \'admin_locations\', 5, 5, 0, \'\', \'funnels\', \'\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;	
