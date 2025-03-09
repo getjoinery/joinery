@@ -110,10 +110,6 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 			$profile_name = 'user'.$user->key . '-'.$empty_device->key.'-profile1';
 			$profile1 = CtldProfile::createProfile($profile_name, $user);
 			
-			//CREATE THE SECOND PROFILE (SCHEDULED STUFF)
-			$profile_name = 'user'.$user->key . '-'.$empty_device->key.'-profile2';
-			$profile2 = CtldProfile::createProfile($profile_name, $user);
-			
 			
 			$device = CtldDevice::createDevice($empty_device, $profile1, $profile2, $_POST);
 			

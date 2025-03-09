@@ -138,8 +138,8 @@ Contact Area
 								$validation_rules['privacy']['required']['value'] = 'true';
 							}
 							
-							$custom_js = 'ignore: ":hidden:not(input[type=\'checkbox\'], input[type=\'radio\'])",';
-							echo $formwriter->set_validate($validation_rules, $custom_js);									
+
+							echo $formwriter->set_validate($validation_rules);									
 
 							/*
 							$optionvals = array();

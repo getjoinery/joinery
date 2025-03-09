@@ -10,6 +10,7 @@ require_once($siteDir . '/includes/SystemClass.php');
 require_once($siteDir . '/includes/Validator.php');
 require_once($siteDir . '/plugins/controld/includes/ControlDHelper.php');
 require_once($siteDir . '/plugins/controld/data/ctldfilters_class.php');
+require_once($siteDir . '/plugins/controld/data/ctlddevices_class.php');
 require_once($siteDir . '/plugins/controld/data/ctldservices_class.php');
 require_once($siteDir . '/plugins/controld/data/ctldrules_class.php');
 
@@ -87,6 +88,53 @@ class CtldProfile extends SystemBase {
 					'Current user does not have permission to edit this entry in '. static::$tablename.'-'.$data['current_user_permission'] );
 			}
 		}
+	}
+	
+	function get_device_for_profile(){
+		$device = CtldDevice::GetByColumn('cdd_cdp_ctldprofile_id_primary', $this->key);
+		if(!$device){
+			$device = CtldDevice::GetByColumn('cdd_cdp_ctldprofile_id_secondary', $this->key);
+		}
+		if($device){
+			return $device;
+		}
+		else{
+			return false;
+		}
+	}
+	
+	function is_primary_or_secondary(){
+		$device = CtldDevice::GetByColumn('cdd_cdp_ctldprofile_id_primary', $this->key);
+		if($device){
+			return 'primary';
+		}
+		
+		$device = CtldDevice::GetByColumn('cdd_cdp_ctldprofile_id_secondary', $this->key);
+		if($device){
+			return 'secondary';
+		}
+		return false;
+	}
+	
+	function delete_profile_from_device(){
+		$device = CtldDevice::GetByColumn('cdd_cdp_ctldprofile_id_primary', $this->key);
+		if($device){
+			$device->set('cdd_profile_id_primary', NULL);	
+			$device->set('cdd_cdp_ctldprofile_id_primary', NULL);	
+			$device->save();
+			return true;
+		}
+		
+		$device = CtldDevice::GetByColumn('cdd_cdp_ctldprofile_id_secondary', $this->key);
+		if($device){
+			$device->set('cdd_profile_id_secondary', NULL);	
+			$device->set('cdd_cdp_ctldprofile_id_secondary', NULL);	
+			$device->save();
+			return true;
+		}		
+		
+		return false;
+		
 	}
 	
 	static function createProfile($name, $user){
@@ -213,6 +261,50 @@ class CtldProfile extends SystemBase {
 		}
 	}
 	
+	function permanent_delete_all_rules(){
+		$rules = new MultiCtldRule(
+				array(
+					'profile_id' => $this->key,
+				),
+			);
+		$rules->load();		
+		foreach($rules as $rule){
+			$result = $this->delete_rule($rule->key);
+			if(!$result){
+				throw new SystemDisplayablePermanentError('Unable to delete custom rule.');
+				exit;
+			}
+		}			
+	}
+	
+	function permanent_delete_all_filters(){
+		$filters = new MultiCtldFilter(
+				array(
+					'profile_id' => $this->key,
+				),
+			);
+			$filters->load();
+
+		foreach($filters as $filter){
+			$filter->permanent_delete();
+		}		
+		return true;
+	}
+	
+	function permanent_delete_all_services(){
+		$services = new MultiCtldService(
+				array(
+					'profile_id' => $this->key,
+				),
+			);
+			$services->load();
+		foreach($services as $service){
+			$service->permanent_delete();
+		}	
+		return true;
+	}
+	
+	
 	function add_or_edit_schedule($device, $post_vars){
 		$user = new User($this->get('cdp_usr_user_id'), TRUE);
 		$cd = new ControlDHelper();
@@ -276,8 +368,52 @@ class CtldProfile extends SystemBase {
 		
 	}
 	
-	function remove_schedule(){
+	
+	function permanent_delete_schedule(){
+		$cd = new ControlDHelper();
+		//DELETE THE SCHEDULE IF PRESENT
+		if($this->get('cdp_schedule_id')){
+
+			$result = $cd->deleteSchedule($this->get('cdp_schedule_id'));
+			if(!$result['success']){
+				throw new SystemDisplayablePermanentError('Unable to delete schedule.');
+				exit;
+			}
+			$this->set('cdp_schedule_id', NULL);
+			$this->set('cdp_schedule_start', NULL);
+			$this->set('cdp_schedule_end', NULL);
+			$this->set('cdp_schedule_days', NULL);
+			$this->set('cdp_schedule_timezone', NULL);
+			$this->save();
+		}	
+
+		return true;		
+	}
+	
+	function permanent_delete($debug = false){
+		$cd = new ControlDHelper();
+		//DELETE THE SCHEDULE IF PRESENT
+		$this->permanent_delete_schedule();
 		
+		//DELETE THE CUSTOM RULES
+		$this->permanent_delete_all_rules();	
+		
+		
+		$result = $cd->deleteProfile($this->get('cdp_profile_id'));
+		if(!$result['success']){
+			throw new SystemDisplayablePermanentError('Unable to delete profile.');
+			exit;
+		}		
+
+
+		$this->permanent_delete_all_filters();
+		
+		$this->permanent_delete_all_services();
+		
+		$this->delete_profile_from_device();
+
+		parent::permanent_delete();	
+		return true;
 	}
 	
 	function update_remote_filters($newvalues){

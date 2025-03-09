@@ -86,6 +86,17 @@ Version: 1.0.0
 /*=================================
     CSS Index End
 ==================================*/
+
+/*=================================
+   01. Changes in theme
+==================================*/
+.form-select.is-invalid {
+  background-image: none !important;
+}
+select.is-invalid {
+  background-image: none !important;
+}
+
 /*=================================
    01. Theme Base
 ==================================*/

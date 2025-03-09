@@ -7,17 +7,19 @@ require_once( __DIR__ . '/../../../includes/FormWriterMaster.php');
 
 class FormWriter extends FormWriterMaster { 
 
-	public $validate_style_info = 'errorElement: "p",
+	public $validate_style_info = '
+							ignore: ":hidden:not(input[type=\'checkbox\'], input[type=\'radio\'])",
+							errorElement: "p",
 							errorClass: "text-danger",
 							highlight: function(element, errorClass) {
 								//REMOVE BRACKETS FOR CHECKBOX LISTS
 								var name = element.name.replace(/[\[\]]/gi, "");
-								$("#"+name+"").addClass("is-invalid").removeClass("is-valid");
+								$("#"+name+"").addClass("is-invalid");
 							  },
 							  unhighlight: function(element, errorClass) {
 								//REMOVE BRACKETS FOR CHECKBOX LISTS
 								var name = element.name.replace(/[\[\]]/gi, "");
-								  $("#"+name+"").addClass("is-valid").removeClass("is-invalid");
+								  $("#"+name+"").removeClass("is-invalid");
 							  },
 							errorPlacement: function(error, element) {
 								error.appendTo(element.parents(".errorplacement").eq(0));

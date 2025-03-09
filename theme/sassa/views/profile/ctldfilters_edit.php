@@ -41,12 +41,15 @@
 
 
 
-	$validation_rules = array();
-	$validation_rules['start_time']['required']['value'] = 'true';
-	$validation_rules['end_time']['required']['value'] = 'true';	
-	$validation_rules['days_blocked']['required']['value'] = 'true';	
+	if($profile_choice == 'secondary'){
+		$validation_rules = array();
+		$validation_rules['start_time']['required']['value'] = 'true';
+		$validation_rules['end_time']['required']['value'] = 'true';	
+		$validation_rules['end_time']['timeGreaterThan']['value'] = '"#start_time"';
+		$validation_rules['"days_blocked[]"']['required']['value'] = 'true';	
 
-	echo $formwriter->set_validate($validation_rules);	
+		echo $formwriter->set_validate($validation_rules);	
+	}	
 
 
 	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctldfilters_edit', true);
@@ -58,9 +61,10 @@
                                 <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
                                 <div class="icon"><a href="/profile/rules?device_id=<?php echo $device->key; ?>&profile_choice=<?php echo $profile_choice; ?>"><i class="fa-regular fa-list"></i> Custom Rules</a>
 								
-								<?php if($account->get('cda_plan') == CtldAccount::PRO_PLAN){ ?>
-								&nbsp;&nbsp;&nbsp;<a href="/profile/ctlddevice_delete?device_id=<?php echo $device->key; ?>"><i class="fa-regular fa-trash"></i> Delete</a>
+								<?php if($profile_choice == 'secondary'){ ?>
+								&nbsp;&nbsp;&nbsp;<a href="/profile/ctldprofile_delete?profile_id=<?php echo $profile->key; ?>"><i class="fa-regular fa-trash"></i> Delete profile</a>
 								<?php } ?>
+								
 								</div>
                             </div>
                         </div>
@@ -196,7 +200,7 @@
 	
 	
 	echo $formwriter->start_buttons('form-btn col-6');
-	echo $formwriter->new_form_button('Submit', 'th-btn');
+	echo $formwriter->new_form_button('Submit', 'primary');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);	
 	

@@ -86,8 +86,10 @@ function devices_logic($get_vars, $post_vars){
 		//CHECK FOR ACTIVATION
 		$device->check_activate();
 		
-		$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
-		$num_blocks_scheduled[$device->key] += $profile->count_blocks();
+		if($device->get('cdd_cdp_ctldprofile_id_secondary')){
+			$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+			$num_blocks_scheduled[$device->key] += $profile->count_blocks();
+		}
 
 		$scheduled_string[$device->key] = 'No schedule set';
 		if($profile->get('cdp_schedule_start')){
@@ -102,26 +104,28 @@ function devices_logic($get_vars, $post_vars){
 			else{
 				$primary_time = 'Active in '.$primary_arr['hours'].' hours, '.$primary_arr['minutes'].' minutes';
 			}
-			$secondary_arr = $device->get_time_to_active_profile('secondary');
-			if(!$secondary_arr){
-				$primary_time = '';
-			}
-			else if($secondary_arr['hours'] == 0 && $secondary_arr['minutes'] == 0){
-				$secondary_time = 'Active';
-			}
-			else{
-				$secondary_time = 'Active in '.$secondary_arr['hours'].' hours, '.$secondary_arr['minutes'].' minutes';
-			}
-			
-			
-			
 			$scheduled_string['primary'][$device->key] = '<span class="duration">'.$primary_time.'</span>';
-			$scheduled_string['secondary'][$device->key] = '<span class="duration">'.$secondary_time.'</span>';
+			
+			if($device->get('cdd_cdp_ctldprofile_id_secondary')){
+				$secondary_arr = $device->get_time_to_active_profile('secondary');
+				if(!$secondary_arr){
+					$primary_time = '';
+				}
+				else if($secondary_arr['hours'] == 0 && $secondary_arr['minutes'] == 0){
+					$secondary_time = 'Active';
+				}
+				else{
+					$secondary_time = 'Active in '.$secondary_arr['hours'].' hours, '.$secondary_arr['minutes'].' minutes';
+				}
+				$scheduled_string['secondary'][$device->key] = '<span class="duration">'.$secondary_time.'</span>';
+			}
+			
 		}
 	}
 	$page_vars['scheduled_string'] = $scheduled_string;
-	$page_vars['num_blocks_scheduled'] = $num_blocks_scheduled;
-	
+	if($device->get('cdd_cdp_ctldprofile_id_secondary')){
+		$page_vars['num_blocks_scheduled'] = $num_blocks_scheduled;
+	}
 
 
 	

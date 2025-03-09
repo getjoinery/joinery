@@ -170,23 +170,47 @@ else{
 									</div>
 								</div>
 								<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'&profile_choice=primary">Edit</a>
-							</div>
-							<br>
-							<div class="job-post_author">
-								<div class="job-wrapp">
-									<div class="job-author">
-										<i class="fa-regular '.$secondary_icon.'"></i>
-									</div>
-									<div class="author-info">
-										<h3 class="company-name">Scheduled blocklist</h3>
-										
-										<h5 class="price">'.$num_blocks_scheduled[$device->key].' services blocked</h5>
-										<h5 class="price">'.$scheduled_string['secondary'][$device->key].'</h5>
+							</div>';
+							if($device->get('cdd_cdp_ctldprofile_id_secondary')){
+									echo '
+								<br>
+								<div class="job-post_author">
+									<div class="job-wrapp">
+										<div class="job-author">
+											<i class="fa-regular '.$secondary_icon.'"></i>
+										</div>
+										<div class="author-info">
+											<h3 class="company-name">Scheduled blocklist</h3>
+											
+											<h5 class="price">'.$num_blocks_scheduled[$device->key].' services blocked</h5>
+											<h5 class="price">'.$scheduled_string['secondary'][$device->key].'</h5>
 
+										</div>
 									</div>
-								</div>
-								<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'&profile_choice=secondary">Edit</a>
-							</div>
+									<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'&profile_choice=secondary">Edit</a>
+								</div>';
+							}
+							else{
+									echo '
+								<br>
+								<div class="job-post_author">
+									<div class="job-wrapp">
+										<div class="job-author">
+											<i class="fa-regular fa-shield-slash"></i>
+										</div>
+										<div class="author-info">
+											<h3 class="company-name">Scheduled blocklist</h3>
+											
+											<h5 class="price">None.</h5>
+											
+
+										</div>
+									</div>
+									<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'&profile_choice=secondary">Create</a>
+								</div>';								
+								
+							}
+							echo '
 						</div>
 					</div>';
 
