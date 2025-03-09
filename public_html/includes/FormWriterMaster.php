@@ -334,6 +334,22 @@ class FormWriterMaster {
 					return this.optional(element) || phone_number.length > 9 &&
 						phone_number.match(/^(1-?)?(\([2-9]\d{2}\)|[2-9]\d{2})-?[2-9]\d{2}-?\d{4}$/);
 				}, "Please specify a valid phone number");
+				
+				function parseTime(timeStr) {
+					var parts = timeStr.split(":");
+					return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+				}
+
+				// Custom validator to check that end_time is greater than start_time.
+				$.validator.addMethod("timeGreaterThan", function(value, element, param) {
+					// Get the start time field value
+					var startVal = $(param).val();
+					// Only validate if both values are present.
+					if (!startVal || !value) {
+						return true; // Let the required rule handle empty fields.
+					}
+					return parseTime(value) > parseTime(startVal);
+				}, "End time must be after start time.");
 
 					$("#'.$this->formid.'").validate({
 							'.$custom_js.'

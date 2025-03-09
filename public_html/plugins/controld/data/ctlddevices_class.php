@@ -151,8 +151,10 @@ class CtldDevice extends SystemBase {
 				$device->set('cdd_deactivation_pin', $deactivation_pin);
 				$device->set('cdd_cdp_ctldprofile_id_primary', $profile1->key);
 				$device->set('cdd_profile_id_primary', $profile1->get('cdp_profile_id'));
-				$device->set('cdd_cdp_ctldprofile_id_secondary', $profile2->key);
-				$device->set('cdd_profile_id_secondary', $profile2->get('cdp_profile_id'));
+				if(isset($profile2->key)){
+					$device->set('cdd_cdp_ctldprofile_id_secondary', $profile2->key);
+					$device->set('cdd_profile_id_secondary', $profile2->get('cdp_profile_id'));
+				}
 				$device->set('cdd_device_id', $result['body']['PK']);
 				$device->set('cdd_device_type', $post_vars['device_type']);
 				$device->set('cdd_device_name', $device_name);
@@ -185,122 +187,134 @@ class CtldDevice extends SystemBase {
 	
 	
 	function get_time_to_active_profile($profile_choice){
-			$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+		if(!$this->get('cdd_cdp_ctldprofile_id_secondary')){
+			return [
+				'hours'   => 0,
+				'minutes' => 0
+			];		
+		}	
+
+
+		$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+		
+		if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
+			return '';
+		}
+
+		if($profile_choice == 'primary'){
+			$tz = new DateTimeZone($profile->get('cdp_schedule_timezone'));
+			$now = new DateTime('now', $tz);
+			$currentDay = strtolower($now->format('D')); // e.g., "mon", "tue", etc.
+
+			// Create DateTime objects for today's start and end times in the given timezone.
+			$todayStart = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
+			$todayEnd   = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_end'), $tz);
+
+			// If today is a scheduled day...
+			if (in_array($currentDay, unserialize($profile->get('cdp_schedule_days')))) {
+				// If the current time is before today's end, then today's scheduled period will end at $todayEnd.
+				if ($now < $todayEnd) {
+					$diff = $now->diff($todayEnd);
+					return [
+						'hours'   => $diff->h + ($diff->days * 24),
+						'minutes' => $diff->i
+					];
+				}
+			}
+			else{
+				return [
+						'hours'   => 0,
+						'minutes' => 0
+					];
+			}
 			
-			if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
-				return '';
-			}
+			
+		}
+		else if ($profile_choice == 'secondary'){
+			$tz = new DateTimeZone($profile->get('cdp_schedule_timezone'));
+			$now = new DateTime('now', $tz);
+			$currentDay = strtolower($now->format('D')); // e.g., "mon", "tue", etc.
 
-			if($profile_choice == 'primary'){
-				$tz = new DateTimeZone($profile->get('cdp_schedule_timezone'));
-				$now = new DateTime('now', $tz);
-				$currentDay = strtolower($now->format('D')); // e.g., "mon", "tue", etc.
+			// Create DateTime objects for today's start and end times in the given timezone.
+			$todayStart = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
+			$todayEnd   = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_end'), $tz);
 
-				// Create DateTime objects for today's start and end times in the given timezone.
-				$todayStart = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
-				$todayEnd   = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_end'), $tz);
-
-				// If today is a scheduled day...
-				if (in_array($currentDay, unserialize($profile->get('cdp_schedule_days')))) {
-					// If the current time is before today's end, then today's scheduled period will end at $todayEnd.
-					if ($now < $todayEnd) {
-						$diff = $now->diff($todayEnd);
-						return [
-							'hours'   => $diff->h + ($diff->days * 24),
-							'minutes' => $diff->i
-						];
-					}
+			// If today is a scheduled day...
+			if (in_array($currentDay, unserialize($profile->get('cdp_schedule_days')))) {
+				if ($now < $todayStart) {
+					// Before the scheduled start today.
+					$diff = $now->diff($todayStart);
+					return [
+						'hours'   => $diff->h + ($diff->days * 24),
+						'minutes' => $diff->i
+					];
+				} elseif ($now >= $todayStart && $now < $todayEnd) {
+					// Currently within the scheduled period.
+					return [
+						'hours'   => 0,
+						'minutes' => 0
+					];
 				}
-
-				// Otherwise, find the next scheduled day (up to 7 days ahead) and return the time until that day's end time.
-				for ($i = 1; $i <= 7; $i++) {
-					$nextDay = clone $now;
-					$nextDay->modify("+{$i} days");
-					$nextDayAbbrev = strtolower($nextDay->format('D'));
-
-					if (in_array($nextDayAbbrev, unserialize($profile->get('cdp_schedule_days')))) {
-						$nextEnd = DateTime::createFromFormat('Y-m-d H:i', $nextDay->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_end'), $tz);
-						$diff = $now->diff($nextEnd);
-						return [
-							'hours'   => $diff->h + ($diff->days * 24),
-							'minutes' => $diff->i
-						];
-					}
-				}		
-				
-				
 			}
-			else if ($profile_choice == 'secondary'){
-				$tz = new DateTimeZone($profile->get('cdp_schedule_timezone'));
-				$now = new DateTime('now', $tz);
-				$currentDay = strtolower($now->format('D')); // e.g., "mon", "tue", etc.
 
-				// Create DateTime objects for today's start and end times in the given timezone.
-				$todayStart = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
-				$todayEnd   = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_end'), $tz);
+			// Otherwise, find the next scheduled day (up to 7 days ahead).
+			for ($i = 1; $i <= 7; $i++) {
+				$nextDay = clone $now;
+				$nextDay->modify("+{$i} days");
+				$nextDayAbbrev = strtolower($nextDay->format('D'));
 
-				// If today is a scheduled day...
-				if (in_array($currentDay, unserialize($profile->get('cdp_schedule_days')))) {
-					if ($now < $todayStart) {
-						// Before the scheduled start today.
-						$diff = $now->diff($todayStart);
-						return [
-							'hours'   => $diff->h + ($diff->days * 24),
-							'minutes' => $diff->i
-						];
-					} elseif ($now >= $todayStart && $now < $todayEnd) {
-						// Currently within the scheduled period.
-						return [
-							'hours'   => 0,
-							'minutes' => 0
-						];
-					}
+				if (in_array($nextDayAbbrev, unserialize($profile->get('cdp_schedule_days')))) {
+					// Set the start time for that day.
+					$nextStart = DateTime::createFromFormat('Y-m-d H:i', $nextDay->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
+					$diff = $now->diff($nextStart);
+					return [
+						'hours'   => $diff->h + ($diff->days * 24),
+						'minutes' => $diff->i
+					];
 				}
-
-				// Otherwise, find the next scheduled day (up to 7 days ahead).
-				for ($i = 1; $i <= 7; $i++) {
-					$nextDay = clone $now;
-					$nextDay->modify("+{$i} days");
-					$nextDayAbbrev = strtolower($nextDay->format('D'));
-
-					if (in_array($nextDayAbbrev, unserialize($profile->get('cdp_schedule_days')))) {
-						// Set the start time for that day.
-						$nextStart = DateTime::createFromFormat('Y-m-d H:i', $nextDay->format('Y-m-d') . ' ' . $profile->get('cdp_schedule_start'), $tz);
-						$diff = $now->diff($nextStart);
-						return [
-							'hours'   => $diff->h + ($diff->days * 24),
-							'minutes' => $diff->i
-						];
-					}
-				}						
-			}
+			}						
+		}
 
 	}
 	
 	
 	function get_schedule_string($profile_choice){
-			$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
-			
-			if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
-				return '';
-			}
-			
-			$all_days = array('mon', 'tue','wed','thu','fri','sat','sun');
+		if(!$this->get('cdd_cdp_ctldprofile_id_secondary')){
+			return '';		
+		}		
 
-			if($profile_choice == 'primary'){
-				$string = LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_end')) . ' - ' . LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_start')) . ' ' . implode(', ', unserialize($profile->get('cdp_schedule_days')));
-				$string .= ', All day '.implode(', ', array_diff($all_days,  unserialize($profile->get('cdp_schedule_days'))));
-				return $string;
-				
-			}
-			else if ($profile_choice == 'secondary'){
-						
-				return LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_start')) . ' - ' . LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_end')) . ' ' . implode(', ', unserialize($profile->get('cdp_schedule_days')));					
-			}
+		$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+		
+		if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
+			return '';
+		}
+		
+		$all_days = array('mon', 'tue','wed','thu','fri','sat','sun');
+
+		if($profile_choice == 'primary'){
+			$string = LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_end')) . ' - ' . LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_start')) . ' ' . implode(', ', unserialize($profile->get('cdp_schedule_days')));
+			$string .= ', All day '.implode(', ', array_diff($all_days,  unserialize($profile->get('cdp_schedule_days'))));
+			return $string;
+			
+		}
+		else if ($profile_choice == 'secondary'){
+					
+			return LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_start')) . ' - ' . LibraryFunctions::convertToAmPmManual($profile->get('cdp_schedule_end')) . ' ' . implode(', ', unserialize($profile->get('cdp_schedule_days')));					
+		}
 
 	}
 	
 	function get_active_profile($readable=false){
+		if(!$this->get('cdd_cdp_ctldprofile_id_secondary')){
+			if($readable){
+				return 'Default blocklist';
+			}
+			else{
+				return 'primary';
+			}			
+		}
+		
+		
 		$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
 		
 		if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
@@ -405,92 +419,21 @@ class CtldDevice extends SystemBase {
 
 	}
 	
+	
+
+	
 	//PROFILE CHOICE IS PRIMARY OR SECONDARY
 	function permanent_delete_profile($profile_choice){
-		$cd = new ControlDHelper();
 		if($profile_choice == 'primary'){
-			$cd_profile_id = $this->get('cdd_profile_id_primary');
 			$profile_id = $this->get('cdd_cdp_ctldprofile_id_primary');
 		}
 		else if ($profile_choice == 'secondary'){
-			$cd_profile_id = $this->get('cdd_profile_id_secondary');
-			$profile_id = $this->get('cdd_cdp_ctldprofile_id_secondary');			
+			$profile_id = $this->get('cdd_cdp_ctldprofile_id_secondary');				
 		}
 		
 		$profile = new CtldProfile($profile_id, TRUE);
 
-		//DELETE THE SCHEDULE IF PRESENT
-		if($profile->get('cdp_schedule_id')){
-
-			$result = $cd->deleteSchedule($profile->get('cdp_schedule_id'));
-			if(!$result['success']){
-				throw new SystemDisplayablePermanentError('Unable to delete schedule.');
-				exit;
-			}
-			$profile->set('cdp_schedule_id', NULL);
-			$profile->set('cdp_schedule_start', NULL);
-			$profile->set('cdp_schedule_end', NULL);
-			$profile->set('cdp_schedule_days', NULL);
-			$profile->set('cdp_schedule_timezone', NULL);
-			$profile->save();
-		}
-		
-		//DELETE THE CUSTOM RULES
-		$rules = new MultiCtldRule(
-				array(
-					'profile_id' => $profile_id,
-				),
-			);
-		$rules->load();		
-		foreach($rules as $rule){
-			$result = $profile->delete_rule($rule->key);
-			if(!$result){
-				throw new SystemDisplayablePermanentError('Unable to delete custom rule.');
-				exit;
-			}
-		}		
-		
-		
-		$result = $cd->deleteProfile($cd_profile_id);
-		if(!$result['success']){
-			throw new SystemDisplayablePermanentError('Unable to delete profile.');
-			exit;
-		}		
-
-
-		$filters = new MultiCtldFilter(
-				array(
-					'profile_id' => $profile_id,
-				),
-			);
-			$filters->load();
-
-		foreach($filters as $filter){
-			$filter->permanent_delete();
-		}
-		
-		$services = new MultiCtldService(
-				array(
-					'profile_id' => $profile_id,
-				),
-			);
-			$services->load();
-		foreach($services as $service){
-			$service->permanent_delete();
-		}
-
 		$profile->permanent_delete();
-
-		if($profile_choice == 'primary'){
-			$this->set('cdd_profile_id_primary', NULL);	
-			$this->set('cdd_cdp_ctldprofile_id_primary', NULL);	
-		}
-		else if ($profile_choice == 'secondary'){
-			$this->set('cdd_profile_id_secondary', NULL);
-			$this->set('cdd_cdp_ctldprofile_id_secondary', NULL);				
-		}
-				
-		$this->save();
 		
 		return true;
 	}
@@ -504,7 +447,7 @@ class CtldDevice extends SystemBase {
 			$result = $this->permanent_delete_profile('secondary');
 		}	
 		
-
+		$result = $this->permanent_delete_profile('primary');
 
 
 
