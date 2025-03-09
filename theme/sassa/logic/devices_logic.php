@@ -70,28 +70,30 @@ function devices_logic($get_vars, $post_vars){
 	$page_vars['num_deleted_devices'] = $num_deleted_devices;
 	$page_vars['deleted_devices'] = $deleted_devices;	
 	
-	
-	//COUNT THE ALWAYS ON BLOCKS
-	$num_blocks_always = array();
-	foreach($devices as $device){
-		$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_primary'), TRUE);
-		$num_blocks_always[$device->key] += $profile->count_blocks();
-	}
-	$page_vars['num_blocks_always'] = $num_blocks_always;
-
-	//COUNT THE SCHEDULED BLOCKS
-	$num_blocks_scheduled = array();
-	
+	//CHECK FOR ACTIVATION 
 	foreach($devices as $device){
 		//CHECK FOR ACTIVATION
 		$device->check_activate();
-		
+	}
+	
+	//COUNT THE ALWAYS ON BLOCKS
+	$num_blocks_always = array();
+	$num_blocks_scheduled = array();
+	foreach($devices as $device){
+		$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_primary'), TRUE);
+		$num_blocks_always[$device->key] += $profile->count_blocks();
+
 		if($device->get('cdd_cdp_ctldprofile_id_secondary')){
 			$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
 			$num_blocks_scheduled[$device->key] += $profile->count_blocks();
 		}
+	}
+	$page_vars['num_blocks_always'] = $num_blocks_always;
+	$page_vars['num_blocks_scheduled'] = $num_blocks_scheduled;
 
-		$scheduled_string[$device->key] = 'No schedule set';
+	//SCHEDULE STRING
+	foreach($devices as $device){
+
 		if($profile->get('cdp_schedule_start')){
 			
 			$primary_arr = $device->get_time_to_active_profile('primary');
@@ -123,11 +125,6 @@ function devices_logic($get_vars, $post_vars){
 		}
 	}
 	$page_vars['scheduled_string'] = $scheduled_string;
-	if($device->get('cdd_cdp_ctldprofile_id_secondary')){
-		$page_vars['num_blocks_scheduled'] = $num_blocks_scheduled;
-	}
-
-
 	
 	return $page_vars;	
 	
