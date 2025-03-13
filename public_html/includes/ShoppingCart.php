@@ -171,9 +171,9 @@ class ShoppingCart {
 
 			if($coupon_code_test){
 				if($coupon_code_test->is_valid()){
-					$cart->coupon_codes[] = $coupon_code_test->get('ccd_code');
-					$cart->coupon_codes = array_unique($cart->coupon_codes);
-					$cart->update_items_for_coupon();
+					$this->coupon_codes[] = $coupon_code_test->get('ccd_code');
+					$this->coupon_codes = array_unique($this->coupon_codes);
+					$this->update_items_for_coupon();
 					return 1;
 				}
 				else{
@@ -187,7 +187,7 @@ class ShoppingCart {
 	
 	public function remove_coupon($coupon_code){
 		unset($this->coupon_codes[array_search(trim($coupon_code), $this->coupon_codes)]);
-		$cart->update_items_for_coupon();
+		$this->update_items_for_coupon();
 		
 		//IF THERE ARE NONE LEFT, CLEAR THE BILLING USER
 		if(count($this->coupon_codes) == 0){
