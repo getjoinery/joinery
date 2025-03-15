@@ -212,8 +212,8 @@ class OrderItem extends SystemBase {
 		$settings = Globalvars::get_instance();
 		$stripe_helper = new StripeHelper();
 		
-		$order = new Order($order_item->get('odi_ord_order_id'), TRUE);
-		$order_user = new User($order_item->get('odi_usr_user_id'), TRUE);
+		$order = new Order($this->get('odi_ord_order_id'), TRUE);
+		$order_user = new User($this->get('odi_usr_user_id'), TRUE);
 		
 		$this->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 
