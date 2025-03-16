@@ -188,7 +188,18 @@ class PublicPageTailwind extends PublicPageMaster {
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
-				<?php $this->global_includes_top($options); ?>
+				<?php $this->global_includes_top($options); 
+				
+				//IF WE ARE IN DEBUG MODE LOAD TAILWIND DIRECTLY
+		if ($this->debug_css == 1) {
+			echo '<script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio"></script>';
+		}		
+				?>
+				
+		
+		<script src="<?php echo LibraryFunctions::get_theme_file_path('jquery-3.4.1.min.js', '/includes', 'web'); ?>"></script>
+		<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js', '/includes', 'web'); ?>"></script>	
+			
 				
 		<!-- Favicon -->
 		<!--

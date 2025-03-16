@@ -348,7 +348,7 @@ class LibraryFunctions {
 	
 	//LOOK IN THE THEME DIRECTORY FIRST, THEN THE DEFAULT THEME, THEN THE MAIN FILES
 	//subdirectory starts with a slash
-	static function get_theme_file_path($filename, $subdirectory='', $path_format='system'){
+	static function get_theme_file_path($filename, $subdirectory='', $path_format='system', $debug = false){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
 		
@@ -359,13 +359,23 @@ class LibraryFunctions {
 		
 		$theme_template = $settings->get_setting('theme_template', true, true);
 		$theme_file = $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename;
-		
 		$default_theme_file = $siteDir.'/theme/default'.$subdirectory.'/'.$filename;
 		$default_file = $siteDir.$subdirectory.'/'.$filename;
+		
+		if($debug){
+			echo 'Theme template: '.$theme_template.'<br>';
+			echo 'Theme file: '.$theme_file.'<br>';
+			echo 'Default theme file: '.$default_theme_file.'<br>';
+			echo 'Default file: '.$default_file.'<br>';
+			
+		}
 
 
 
 		if($theme_template && file_exists($theme_file)){
+			if($debug){
+				echo 'Found theme file.<br>';
+			}
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
 				return $theme_file;
@@ -376,6 +386,9 @@ class LibraryFunctions {
 			}
 		}
 		else if(file_exists($default_theme_file)){
+			if($debug){
+				echo 'Found default theme file.<br>';
+			}
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
 				return $default_theme_file;
@@ -386,6 +399,9 @@ class LibraryFunctions {
 			}
 		}
 		else if(file_exists($default_file)){
+			if($debug){
+				echo 'Found default file.<br>';
+			}
 			if($path_format == 'system'){
 				//WE WANT A FILE PATH
 				return $default_file;
