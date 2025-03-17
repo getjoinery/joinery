@@ -13,9 +13,7 @@
 	echo PublicPage::BeginPage($page->get('pag_title'));
 	echo PublicPage::BeginPanel();
 	
-	echo '<div class="text-lg prose max-w-prose mx-auto">';
 	echo '<div>'. $page->get_filled_content() . '</div>';
-	echo '</div>';
 	echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();
 	$paget->public_footer($foptions=array('track'=>TRUE));
