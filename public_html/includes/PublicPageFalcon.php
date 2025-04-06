@@ -141,20 +141,20 @@ class PublicPageFalcon extends PublicPageMaster {
     <!--    Stylesheets-->
     <!-- ===============================================-->
     <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,500,600,700%7cPoppins:300,400,500,600,700,800,900&amp;display=swap" rel="stylesheet">
-	
+
+
+
+    <!-- Jquery -->
+	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>	
 	
 	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo LibraryFunctions::get_theme_file_path('simplebar.min.css', '/includes/vendors/simplebar', 'web'); ?>">
 	<link rel="stylesheet" type="text/css" id="style-rtl" href="<?php echo LibraryFunctions::get_theme_file_path('theme-rtl.css', '/includes/css', 'web'); ?>">
 	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo LibraryFunctions::get_theme_file_path('theme.css', '/includes/css', 'web'); ?>">
 	<link rel="stylesheet" type="text/css" id="user-style-rtl" href="<?php echo LibraryFunctions::get_theme_file_path('user-rtl.css', '/includes/css', 'web'); ?>">
 	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo LibraryFunctions::get_theme_file_path('user.css', '/includes/css', 'web'); ?>">
-	
-	<style>
-	.navbar-nav .nav-link {
-    font-size: 1rem !important; /* Adjust as needed (e.g., 1.1rem, 1.2rem) */
-	}
-	</style>
 	
 	
 	    <script>
@@ -837,6 +837,8 @@ class PublicPageFalcon extends PublicPageMaster {
     <!-- ===============================================-->
     <!--    JavaScripts-->
     <!-- ===============================================-->
+	<!--<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js', '/includes', 'web'); ?>"></script>	-->
+	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
 	<script src="<?php echo LibraryFunctions::get_theme_file_path('popper.min.js', '/includes/vendors/popper', 'web'); ?>"></script>
 	<script src="<?php echo LibraryFunctions::get_theme_file_path('bootstrap.min.js', '/includes/vendors/bootstrap', 'web'); ?>"></script>
 	<script src="<?php echo LibraryFunctions::get_theme_file_path('anchor.min.js', '/includes/vendors/anchorjs', 'web'); ?>"></script>
