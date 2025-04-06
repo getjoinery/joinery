@@ -34,11 +34,11 @@ class FormWriterMaster {
 	protected $text_container_class = 'uk-margin';
 	protected $text_label_class = '';
 	
-	protected $textintput_container_class_horizontal = 'row';
-	protected $textintput_label_class_horizontal = 'uk-margin col-sm-2 col-form-label';
-	protected $textintput_container_class = 'uk-margin';
-	protected $textintput_label_class = '';
-	protected $textintput_input_class = 'uk-input';
+	protected $textinput_container_class_horizontal = 'row';
+	protected $textinput_label_class_horizontal = 'uk-margin col-sm-2 col-form-label';
+	protected $textinput_container_class = 'uk-margin';
+	protected $textinput_label_class = '';
+	protected $textinput_input_class = 'uk-input';
 	
 	protected $textbox_container_class = 'uk-margin';
 	protected $textbox_textarea_class = 'uk-textarea';
