@@ -63,31 +63,10 @@ class PublicPageFalcon extends PublicPageMaster {
 		</div>'; 
 		return $output;
 	}
-
-
-	public function public_header($options=array()) {
-		$_GLOBALS['page_header_loaded'] = true;
-		$settings = Globalvars::get_instance();
+	
+	public function top_right_menu(){
 		$session = SessionControl::get_instance();
-		$options = parent::public_header_common($options);
-	
-	
-		$profile_menu = array();
-		$logged_out_menu = array();
-		if ($session->get_user_id()){ 
-			$profile_menu['My Profile'] = '/profile/profile';
-			if($_SESSION['permission'] >= 5){ 
-				$profile_menu['Admin'] = '/admin/admin_users';
-			}
-			$profile_menu['Settings'] = '/profile/account_edit';
-			$profile_menu['Sign out'] = '/logout';
-		}
-		else{ 		
-			$logged_out_menu['Sign in'] = '/login';			
-			if($settings->get_setting('register_active')){
-				$logged_out_menu['Sign up'] = '/register';	
-			}
-		}	
+		$settings = Globalvars::get_instance();
 
 		$cart = $session->get_shopping_cart();
 		if($numitems = $cart->count_items()){
@@ -97,6 +76,183 @@ class PublicPageFalcon extends PublicPageMaster {
 		else{
 			$cart_menu = NULL;
 		}
+			
+			
+			//SHOPPING CART MENU ITEM
+			if($cart_menu){
+				echo '<li class="nav-item d-none d-sm-block">
+				  <a class="nav-link px-0 notification-indicator notification-indicator-warning notification-indicator-fill fa-icon-wait" href="#"><span class="fas fa-shopping-cart" data-fa-transform="shrink-7" style="font-size: 33px;"></span><span class="notification-indicator-number">$numitems</span></a>
+
+				</li>';
+			}
+			
+			//NOTIFICATION MENU ITEM
+			?>
+			<!--
+            <li class="nav-item dropdown">
+              <a class="nav-link notification-indicator notification-indicator-primary px-0 fa-icon-wait" id="navbarDropdownNotification" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" data-hide-on-body-scroll="data-hide-on-body-scroll"><span class="fas fa-bell" data-fa-transform="shrink-6" style="font-size: 33px;"></span></a>
+              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end dropdown-menu-card dropdown-menu-notification dropdown-caret-bg" aria-labelledby="navbarDropdownNotification">
+                <div class="card card-notification shadow-none">
+                  <div class="card-header">
+                    <div class="row justify-content-between align-items-center">
+                      <div class="col-auto">
+                        <h6 class="card-header-title mb-0">Notifications</h6>
+                      </div>
+                      <div class="col-auto ps-0 ps-sm-3"><a class="card-link fw-normal" href="#">Mark all as read</a></div>
+                    </div>
+                  </div>
+                  <div class="scrollbar-overlay" style="max-height:19rem">
+                    <div class="list-group list-group-flush fw-normal fs-10">
+                      <div class="list-group-title border-bottom">NEW</div>
+                      <div class="list-group-item">
+                        <a class="notification notification-flush notification-unread" href="#!">
+                          <div class="notification-avatar">
+                            <div class="avatar avatar-2xl me-3">
+                              <img class="rounded-circle" src="../assets/img/team/1-thumb.png" alt="" />
+
+                            </div>
+                          </div>
+                          <div class="notification-body">
+                            <p class="mb-1"><strong>Emma Watson</strong> replied to your comment : "Hello world 😍"</p>
+                            <span class="notification-time"><span class="me-2" role="img" aria-label="Emoji">💬</span>Just now</span>
+
+                          </div>
+                        </a>
+
+                      </div>
+
+
+                    </div>
+                  </div>
+                  <div class="card-footer text-center border-top"><a class="card-link d-block" href="../app/social/notifications.html">View all</a></div>
+                </div>
+              </div>
+
+            </li>
+			-->
+			
+			
+			<?php 
+			//ADMIN MENU NAVIGATION ITEM
+			 if($_SESSION['permission'] >= 5){ ?>
+            <li class="nav-item dropdown px-1">
+              <a class="nav-link fa-icon-wait nine-dots p-1" id="navbarDropdownMenu" role="button" data-hide-on-body-scroll="data-hide-on-body-scroll" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="43" viewBox="0 0 16 16" fill="none">
+                  <circle cx="2" cy="2" r="2" fill="#6C6E71"></circle>
+                  <circle cx="2" cy="8" r="2" fill="#6C6E71"></circle>
+                  <circle cx="2" cy="14" r="2" fill="#6C6E71"></circle>
+                  <circle cx="8" cy="8" r="2" fill="#6C6E71"></circle>
+                  <circle cx="8" cy="14" r="2" fill="#6C6E71"></circle>
+                  <circle cx="14" cy="8" r="2" fill="#6C6E71"></circle>
+                  <circle cx="14" cy="14" r="2" fill="#6C6E71"></circle>
+                  <circle cx="8" cy="2" r="2" fill="#6C6E71"></circle>
+                  <circle cx="14" cy="2" r="2" fill="#6C6E71"></circle>
+                </svg></a>
+              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end dropdown-menu-card dropdown-caret-bg" aria-labelledby="navbarDropdownMenu">
+                <div class="card shadow-none">
+                  <div class="scrollbar-overlay nine-dots-dropdown">
+                    <div class="card-body px-3">
+                      <div class="row text-center gx-0 gy-0">
+						<div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/">
+                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+  <path d="M3 9.5L12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z"/>
+</svg>
+
+							</div>
+                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Home</p> 
+                          </a></div>
+                         <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/profile">
+                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+  <circle cx="12" cy="8" r="4"/>
+  <path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>
+</svg>
+</div>
+                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Profile</p>
+                          </a></div>
+						<?php if($session->get_permission() > 5) { ?>
+						 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_users">
+                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+  <path d="M3 4h18v4H3zM3 10h18v10H3z"/>
+</svg>
+</div>
+                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Admin</p>
+                          </a></div>
+						 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_settings">
+                            <div class="avatar avatar-2xl"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+  <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+  <path d="M19.4 15a1.7 1.7 0 0 0 .33 1.82l.05.05a2 2 0 1 1-2.82 2.83l-.06-.06a1.7 1.7 0 0 0-1.83-.33 1.7 1.7 0 0 0-1 1.51v.09a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.51 1.7 1.7 0 0 0-1.83.33l-.06.06a2 2 0 1 1-2.82-2.83l.05-.05a1.7 1.7 0 0 0 .33-1.82 1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.51-1 1.7 1.7 0 0 0-.33-1.82l-.05-.05a2 2 0 1 1 2.82-2.83l.06.06a1.7 1.7 0 0 0 1.83.33h.09A1.7 1.7 0 0 0 9 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51h.09a1.7 1.7 0 0 0 1.83-.33l.06-.06a2 2 0 1 1 2.82 2.83l-.05.05a1.7 1.7 0 0 0-.33 1.82 1.7 1.7 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/>
+</svg>
+
+
+</div>
+                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Settings</p>
+                          </a></div>
+						 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_utilities" >
+                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+  <path d="M3 3h6v6H3zM15 3h6v6h-6zM15 15h6v6h-6zM3 15h6v6H3z"/>
+</svg>
+</div>
+                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Utilities</p>
+                          </a></div>
+						 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_help" >
+                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+  <circle cx="12" cy="12" r="10"/>
+  <path d="M9.09 9a3 3 0 1 1 5.83 1c-.26 1.2-1.5 2-2.92 2v1"/>
+  <circle cx="12" cy="17" r="1"/>
+</svg>
+</div>
+                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Help</p>
+                          </a></div>
+                        <?php } ?>
+                        <!--<div class="col-12"><a class="btn btn-outline-primary btn-sm mt-4" href="#!">Show more</a></div>-->
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </li>
+			<?php } ?>
+			
+			
+			<?php if(!$session->is_logged_in()){ ?>
+			<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="/login">Login</a></li></ul>
+			
+			<?php if($settings->get_setting('register_active')){ ?>
+			<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="/register">Register</a></li></ul>
+			<?php } ?>
+			<?php } ?>
+
+			<?php if($session->is_logged_in()){ ?>
+			<li class="nav-item dropdown"><a class="nav-link pe-0 ps-2" id="navbarDropdownUser" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <div class="avatar avatar-xl">
+                  <img class="rounded-circle" src="<?php echo LibraryFunctions::get_theme_file_path('avatar.png', '/includes/img', 'web'); ?>" alt="" />
+
+                </div>
+              </a>
+              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end py-0" aria-labelledby="navbarDropdownUser">
+                <div class="bg-white dark__bg-1000 rounded-2 py-2">
+                  
+
+                  <!--<div class="dropdown-divider"></div>-->
+                  <a class="dropdown-item" href="/profile">Profile</a>
+                  <a class="dropdown-item" href="/logout">Logout</a>
+                </div>
+              </div>
+            </li>
+			<?php } 		
+		
+	}
+
+
+	public function public_header($options=array()) {
+		$_GLOBALS['page_header_loaded'] = true;
+		$settings = Globalvars::get_instance();
+		$session = SessionControl::get_instance();
+		$options = parent::public_header_common($options);
+	
+		$profile_menu = array();
+
 		
 		$notification_menu = NULL;
 
@@ -188,258 +344,66 @@ class PublicPageFalcon extends PublicPageMaster {
     <!--    Main Content-->
     <!-- ===============================================-->
     <main class="main" id="top">
-      <div class="container" data-layout="container">
-        <script>
-          var isFluid = JSON.parse(localStorage.getItem('isFluid'));
-          if (isFluid) {
-            var container = document.querySelector('[data-layout]');
-            container.classList.remove('container');
-            container.classList.add('container-fluid');
-          }
-        </script>
+      <div class="container" data-layout="container-fluid">
+
         <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg">
 
           <button class="btn navbar-toggler-humburger-icon navbar-toggler me-1 me-sm-3" type="button" data-bs-toggle="collapse" data-bs-target="#navbarStandard" aria-controls="navbarStandard" aria-expanded="false" aria-label="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
-          <a class="navbar-brand me-1 me-sm-3" href="../index.html">
-            <div class="d-flex align-items-center"><img class="me-2" src="#" alt="" width="40" /><span class="font-sans-serif text-primary">falcon</span>
-            </div>
-          </a>
+            <a class="navbar-brand me-1 me-sm-3" href="/">
+              <div class="d-flex align-items-center">
+					  <?php 
+							if($settings->get_setting('logo_link')){
+								echo '<img class="me-2" src="'.$settings->get_setting('logo_link').'" alt="" width="40" />';
+							}
+					  ?>
+					  <span class="font-sans-serif text-primary">
+					  <?php 
+							 echo $settings->get_setting('site_name'); 
+					?>
+					</span>
+              </div>
+            </a>
           <div class="collapse navbar-collapse scrollbar" id="navbarStandard">
             <ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
-              <li class="nav-item dropdown"><a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="dashboards">Dashboard</a>
-                <div class="dropdown-menu dropdown-caret dropdown-menu-card border-0 mt-0" aria-labelledby="dashboards">
-                  <div class="bg-white dark__bg-1000 rounded-3 py-2"><a class="dropdown-item link-600 fw-medium" href="../index.html">Default</a><a class="dropdown-item link-600 fw-medium" href="../dashboard/analytics.html">Analytics</a><a class="dropdown-item link-600 fw-medium" href="../dashboard/crm.html">CRM</a><a class="dropdown-item link-600 fw-medium" href="../dashboard/e-commerce.html">E commerce</a><a class="dropdown-item link-600 fw-medium" href="../dashboard/lms.html">LMS<span class="badge rounded-pill ms-2 badge-subtle-success">New</span></a><a class="dropdown-item link-600 fw-medium" href="../dashboard/project-management.html">Management</a><a class="dropdown-item link-600 fw-medium" href="../dashboard/saas.html">SaaS</a><a class="dropdown-item link-600 fw-medium" href="../dashboard/support-desk.html">Support desk<span class="badge rounded-pill ms-2 badge-subtle-success">New</span></a>
-                  </div>
-                </div>
-              </li>
-              <li class="nav-item dropdown"><a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="apps">App</a>
-                <div class="dropdown-menu dropdown-caret dropdown-menu-card border-0 mt-0" aria-labelledby="apps">
-                  <div class="card navbar-card-app shadow-none dark__bg-1000">
-                    <div class="card-body scrollbar max-h-dropdown"><img class="img-dropdown" src="../assets/img/icons/spot-illustrations/authentication-corner.png" width="130" alt="" />
-                      <div class="row">
-                        <div class="col-6 col-md-4">
-                          <div class="nav flex-column"><a class="nav-link py-1 link-600 fw-medium" href="../app/calendar.html">Calendar</a><a class="nav-link py-1 link-600 fw-medium" href="../app/chat.html">Chat</a><a class="nav-link py-1 link-600 fw-medium" href="../app/kanban.html">Kanban</a>
-                            <p class="nav-link text-700 mb-0 fw-bold">Social</p><a class="nav-link py-1 link-600 fw-medium" href="../app/social/feed.html">Feed</a><a class="nav-link py-1 link-600 fw-medium" href="../app/social/activity-log.html">Activity log</a><a class="nav-link py-1 link-600 fw-medium" href="../app/social/notifications.html">Notifications</a><a class="nav-link py-1 link-600 fw-medium" href="../app/social/followers.html">Followers</a>
-                            <p class="nav-link text-700 mb-0 fw-bold">Support Desk</p><a class="nav-link py-1 link-600 fw-medium" href="../app/support-desk/table-view.html">Table view</a><a class="nav-link py-1 link-600 fw-medium" href="../app/support-desk/card-view.html">Card view</a><a class="nav-link py-1 link-600 fw-medium" href="../app/support-desk/contacts.html">Contacts</a><a class="nav-link py-1 link-600 fw-medium" href="../app/support-desk/contact-details.html">Contact details</a><a class="nav-link py-1 link-600 fw-medium" href="../app/support-desk/tickets-preview.html">Tickets preview</a><a class="nav-link py-1 link-600 fw-medium" href="../app/support-desk/quick-links.html">Quick links</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-md-4">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">E-Learning</p><a class="nav-link py-1 link-600 fw-medium" href="../app/e-learning/course/course-list.html">Course list</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-learning/course/course-grid.html">Course grid</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-learning/course/course-details.html">Course details</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-learning/course/create-a-course.html">Create a course</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-learning/student-overview.html">Student overview</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-learning/trainer-profile.html">Trainer profile</a>
-                            <p class="nav-link text-700 mb-0 fw-bold">Events</p><a class="nav-link py-1 link-600 fw-medium" href="../app/events/create-an-event.html">Create an event</a><a class="nav-link py-1 link-600 fw-medium" href="../app/events/event-detail.html">Event detail</a><a class="nav-link py-1 link-600 fw-medium" href="../app/events/event-list.html">Event list</a>
-                            <p class="nav-link text-700 mb-0 fw-bold">Email</p><a class="nav-link py-1 link-600 fw-medium" href="../app/email/inbox.html">Inbox</a><a class="nav-link py-1 link-600 fw-medium" href="../app/email/email-detail.html">Email detail</a><a class="nav-link py-1 link-600 fw-medium" href="../app/email/compose.html">Compose</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-md-4">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">E-Commerce</p><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/product/product-list.html">Product list</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/product/product-grid.html">Product grid</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/product/product-details.html">Product details</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/product/add-product.html">Add product</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/orders/order-list.html">Order list</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/orders/order-details.html">Order details</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/customers.html">Customers</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/customer-details.html">Customer details</a><a class="nav-link py-1 link-600 fw-medium" href="#">Shopping cart</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/checkout.html">Checkout</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/billing.html">Billing</a><a class="nav-link py-1 link-600 fw-medium" href="../app/e-commerce/invoice.html">Invoice</a>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </li>
-              <li class="nav-item dropdown"><a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="pagess">Pages</a>
-                <div class="dropdown-menu dropdown-caret dropdown-menu-card border-0 mt-0" aria-labelledby="pagess">
-                  <div class="card navbar-card-pages shadow-none dark__bg-1000">
-                    <div class="card-body scrollbar max-h-dropdown"><img class="img-dropdown" src="../assets/img/icons/spot-illustrations/authentication-corner.png" width="130" alt="" />
-                      <div class="row">
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">Simple Auth</p><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/simple/login.html">Login</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/simple/logout.html">Logout</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/simple/register.html">Register</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/simple/forgot-password.html">Forgot password</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/simple/confirm-mail.html">Confirm mail</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/simple/reset-password.html">Reset password</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/simple/lock-screen.html">Lock screen</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">Card Auth</p><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/card/login.html">Login</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/card/logout.html">Logout</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/card/register.html">Register</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/card/forgot-password.html">Forgot password</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/card/confirm-mail.html">Confirm mail</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/card/reset-password.html">Reset password</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/card/lock-screen.html">Lock screen</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">Split Auth</p><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/split/login.html">Login</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/split/logout.html">Logout</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/split/register.html">Register</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/split/forgot-password.html">Forgot password</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/split/confirm-mail.html">Confirm mail</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/split/reset-password.html">Reset password</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/authentication/split/lock-screen.html">Lock screen</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">Layouts</p><a class="nav-link py-1 link-600 fw-medium" href="../demo/navbar-vertical.html">Navbar vertical</a><a class="nav-link py-1 link-600 fw-medium" href="../demo/navbar-top.html">Top nav</a><a class="nav-link py-1 link-600 fw-medium" href="../demo/navbar-double-top.html">Double top<span class="badge rounded-pill ms-2 badge-subtle-success">New</span></a><a class="nav-link py-1 link-600 fw-medium" href="../demo/combo-nav.html">Combo nav</a>
-                            <p class="nav-link text-700 mb-0 fw-bold">Others</p><a class="nav-link py-1 link-600 fw-medium" href="../pages/starter.html">Starter</a><a class="nav-link py-1 link-600 fw-medium" href="../pages/landing.html">Landing</a>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      
-                    </div>
-                  </div>
-                </div>
-              </li>
-              <li class="nav-item dropdown"><a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="moduless">Modules</a>
-                <div class="dropdown-menu dropdown-caret dropdown-menu-card border-0 mt-0" aria-labelledby="moduless">
-                  <div class="card navbar-card-components shadow-none dark__bg-1000">
-                    <div class="card-body scrollbar max-h-dropdown"><img class="img-dropdown" src="../assets/img/icons/spot-illustrations/authentication-corner.png" width="130" alt="" />
-                      <div class="row">
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">Components</p><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/accordion.html">Accordion</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/alerts.html">Alerts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/anchor.html">Anchor</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/animated-icons.html">Animated icons</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/background.html">Background</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/badges.html">Badges</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/bottom-bar.html">Bottom bar<span class="badge rounded-pill ms-2 badge-subtle-success">New</span></a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/breadcrumbs.html">Breadcrumbs</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/buttons.html">Buttons</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/calendar.html">Calendar</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/cards.html">Cards</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/carousel/bootstrap.html">Bootstrap carousel</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column mt-md-4 pt-md-1"><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/carousel/swiper.html">Swiper</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/collapse.html">Collapse</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/cookie-notice.html">Cookie notice</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/countup.html">Countup</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/dropdowns.html">Dropdowns</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/jquery-components.html">Jquery<span class="badge rounded-pill ms-2 badge-subtle-success">New</span></a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/list-group.html">List group</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/modals.html">Modals</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/navs-and-tabs/navs.html">Navs</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/navs-and-tabs/navbar.html">Navbar</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/navs-and-tabs/vertical-navbar.html">Navbar vertical</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/navs-and-tabs/top-navbar.html">Top nav</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column mt-xxl-4 pt-xxl-1"><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/navs-and-tabs/double-top-navbar.html">Double top<span class="badge rounded-pill ms-2 badge-subtle-success">New</span></a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/navs-and-tabs/combo-navbar.html">Combo nav</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/navs-and-tabs/tabs.html">Tabs</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/offcanvas.html">Offcanvas</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/pictures/avatar.html">Avatar</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/pictures/images.html">Images</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/pictures/figures.html">Figures</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/pictures/hoverbox.html">Hoverbox</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/pictures/lightbox.html">Lightbox</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/progress-bar.html">Progress bar</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/placeholder.html">Placeholder</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/pagination.html">Pagination</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column mt-xxl-4 pt-xxl-1"><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/popovers.html">Popovers</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/scrollspy.html">Scrollspy</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/search.html">Search</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/sortable.html">Sortable</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/spinners.html">Spinners</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/timeline.html">Timeline</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/toasts.html">Toasts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/tooltips.html">Tooltips</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/treeview.html">Treeview</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/typed-text.html">Typed text</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/videos/embed.html">Embed</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/components/videos/plyr.html">Plyr</a>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="row">
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">Utilities</p><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/background.html">Background</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/borders.html">Borders</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/clearfix.html">Clearfix</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/colors.html">Colors</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/colored-links.html">Colored links</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/display.html">Display</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/flex.html">Flex</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/float.html">Float</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/focus-ring.html">Focus ring</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/grid.html">Grid</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/icon-link.html">Icon link</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/overlayscrollbar.html">Overlay scrollbar</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/position.html">Position</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/ratio.html">Ratio</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/spacing.html">Spacing</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/sizing.html">Sizing</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/stretched-link.html">Stretched link</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/text-truncation.html">Text truncation</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/typography.html">Typography</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/vertical-align.html">Vertical align</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/vertical-rule.html">Vertical rule</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/utilities/visibility.html">Visibility</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">Tables</p><a class="nav-link py-1 link-600 fw-medium" href="../modules/tables/basic-tables.html">Basic tables</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/tables/advance-tables.html">Advance tables</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/tables/bulk-select.html">Bulk select</a>
-                            <p class="nav-link text-700 mb-0 fw-bold">Charts</p><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/chartjs.html">Chartjs</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/d3js.html">D3js<span class="badge rounded-pill ms-2 badge-subtle-success">New</span></a>
-                            <p class="nav-link text-700 mb-0 fw-bold">ECharts</p><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/line-charts.html">Line charts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/bar-charts.html">Bar charts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/candlestick-charts.html">Candlestick charts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/geo-map.html">Geo map</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/scatter-charts.html">Scatter charts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/pie-charts.html">Pie charts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/gauge-charts.html">Gauge charts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/radar-charts.html">Radar charts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/heatmap-charts.html">Heatmap charts</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/charts/echarts/how-to-use.html">How to use</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column">
-                            <p class="nav-link text-700 mb-0 fw-bold">Forms</p><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/basic/form-control.html">Form control</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/basic/input-group.html">Input group</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/basic/select.html">Select</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/basic/checks.html">Checks</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/basic/range.html">Range</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/basic/layout.html">Layout</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/advance/advance-select.html">Advance select</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/advance/date-picker.html">Date picker</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/advance/editor.html">Editor</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/advance/emoji-button.html">Emoji button</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/advance/file-uploader.html">File uploader</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/advance/input-mask.html">Input mask</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/advance/range-slider.html">Range slider</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/advance/rating.html">Rating</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/floating-labels.html">Floating labels</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/wizard.html">Wizard</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/forms/validation.html">Validation</a>
-                          </div>
-                        </div>
-                        <div class="col-6 col-xxl-3">
-                          <div class="nav flex-column pt-xxl-1">
-                            <p class="nav-link text-700 mb-0 fw-bold">Icons</p><a class="nav-link py-1 link-600 fw-medium" href="../modules/icons/font-awesome.html">Font awesome</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/icons/bootstrap-icons.html">Bootstrap icons</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/icons/feather.html">Feather</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/icons/material-icons.html">Material icons</a>
-                            <p class="nav-link text-700 mb-0 fw-bold">Maps</p><a class="nav-link py-1 link-600 fw-medium" href="../modules/maps/google-map.html">Google map</a><a class="nav-link py-1 link-600 fw-medium" href="../modules/maps/leaflet-map.html">Leaflet map</a>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </li>
-              <li class="nav-item dropdown"><a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="documentations">Documentation</a>
-                <div class="dropdown-menu dropdown-caret dropdown-menu-card border-0 mt-0" aria-labelledby="documentations">
-                  <div class="bg-white dark__bg-1000 rounded-3 py-2"><a class="dropdown-item link-600 fw-medium" href="../documentation/getting-started.html">Getting started</a><a class="dropdown-item link-600 fw-medium" href="../documentation/customization/configuration.html">Configuration</a><a class="dropdown-item link-600 fw-medium" href="../documentation/customization/styling.html">Styling<span class="badge rounded-pill ms-2 badge-subtle-success">Updated</span></a><a class="dropdown-item link-600 fw-medium" href="../documentation/customization/dark-mode.html">Dark mode</a><a class="dropdown-item link-600 fw-medium" href="../documentation/customization/plugin.html">Plugin</a><a class="dropdown-item link-600 fw-medium" href="../documentation/faq.html">Faq</a><a class="dropdown-item link-600 fw-medium" href="../documentation/gulp.html">Gulp</a><a class="dropdown-item link-600 fw-medium" href="../documentation/design-file.html">Design file</a><a class="dropdown-item link-600 fw-medium" href="../changelog.html">Changelog</a>
-                  </div>
-                </div>
-              </li>
+ 
+
+			<?php
+			foreach ($menus as $menu) {
+				if ($menu['parent'] === true) {
+					$submenus = $menu['submenu'];
+					// If there are no submenu items, output a simple nav item.
+					if (empty($submenus)) {
+						echo '<li class="nav-item"><a class="nav-link" href="' . $menu['link'] . '">' . $menu['name'] . '</a></li>';
+					} else {
+						// Generate a safe ID based on the menu name (replace spaces with dashes and lowercase)
+						$menuId = strtolower(preg_replace('/\s+/', '-', $menu['name']));
+						echo '<li class="nav-item dropdown">';
+						echo '  <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="' . $menuId . '">' . $menu['name'] . '</a>';
+						echo '  <div class="dropdown-menu dropdown-caret dropdown-menu-card border-0 mt-0" aria-labelledby="' . $menuId . '">';
+						foreach ($submenus as $submenu) {
+							echo '    <a class="dropdown-item link-600 fw-medium" href="' . $submenu['link'] . '">' . $submenu['name'] . '</a>';
+						}
+						echo '  </div>';
+						echo '</li>';
+					}
+				}
+			}
+			?> 
+              
+              
+
             </ul>
           </div>
           <ul class="navbar-nav navbar-nav-icons ms-auto flex-row">
 		  
 		  
-
+			<?php $this->top_right_menu(); ?>
 			
-			
-            <li class="nav-item d-none d-sm-block">
-              <a class="nav-link px-0 notification-indicator notification-indicator-warning notification-indicator-fill fa-icon-wait" href="#"><span class="fas fa-shopping-cart" data-fa-transform="shrink-7" style="font-size: 33px;"></span><span class="notification-indicator-number">1</span></a>
 
-            </li>
-            <li class="nav-item dropdown">
-              <a class="nav-link notification-indicator notification-indicator-primary px-0 fa-icon-wait" id="navbarDropdownNotification" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" data-hide-on-body-scroll="data-hide-on-body-scroll"><span class="fas fa-bell" data-fa-transform="shrink-6" style="font-size: 33px;"></span></a>
-              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end dropdown-menu-card dropdown-menu-notification dropdown-caret-bg" aria-labelledby="navbarDropdownNotification">
-                <div class="card card-notification shadow-none">
-                  <div class="card-header">
-                    <div class="row justify-content-between align-items-center">
-                      <div class="col-auto">
-                        <h6 class="card-header-title mb-0">Notifications</h6>
-                      </div>
-                      <div class="col-auto ps-0 ps-sm-3"><a class="card-link fw-normal" href="#">Mark all as read</a></div>
-                    </div>
-                  </div>
-                  <div class="scrollbar-overlay" style="max-height:19rem">
-                    <div class="list-group list-group-flush fw-normal fs-10">
-                      <div class="list-group-title border-bottom">NEW</div>
-                      <div class="list-group-item">
-                        <a class="notification notification-flush notification-unread" href="#!">
-                          <div class="notification-avatar">
-                            <div class="avatar avatar-2xl me-3">
-                              <img class="rounded-circle" src="../assets/img/team/1-thumb.png" alt="" />
-
-                            </div>
-                          </div>
-                          <div class="notification-body">
-                            <p class="mb-1"><strong>Emma Watson</strong> replied to your comment : "Hello world 😍"</p>
-                            <span class="notification-time"><span class="me-2" role="img" aria-label="Emoji">💬</span>Just now</span>
-
-                          </div>
-                        </a>
-
-                      </div>
-
-
-                    </div>
-                  </div>
-                  <div class="card-footer text-center border-top"><a class="card-link d-block" href="../app/social/notifications.html">View all</a></div>
-                </div>
-              </div>
-
-            </li>
-            <li class="nav-item dropdown px-1">
-              <a class="nav-link fa-icon-wait nine-dots p-1" id="navbarDropdownMenu" role="button" data-hide-on-body-scroll="data-hide-on-body-scroll" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="43" viewBox="0 0 16 16" fill="none">
-                  <circle cx="2" cy="2" r="2" fill="#6C6E71"></circle>
-                  <circle cx="2" cy="8" r="2" fill="#6C6E71"></circle>
-                  <circle cx="2" cy="14" r="2" fill="#6C6E71"></circle>
-                  <circle cx="8" cy="8" r="2" fill="#6C6E71"></circle>
-                  <circle cx="8" cy="14" r="2" fill="#6C6E71"></circle>
-                  <circle cx="14" cy="8" r="2" fill="#6C6E71"></circle>
-                  <circle cx="14" cy="14" r="2" fill="#6C6E71"></circle>
-                  <circle cx="8" cy="2" r="2" fill="#6C6E71"></circle>
-                  <circle cx="14" cy="2" r="2" fill="#6C6E71"></circle>
-                </svg></a>
-              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end dropdown-menu-card dropdown-caret-bg" aria-labelledby="navbarDropdownMenu">
-                <div class="card shadow-none">
-                  <div class="scrollbar-overlay nine-dots-dropdown">
-                    <div class="card-body px-3">
-                      <div class="row text-center gx-0 gy-0">
-                        <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="../pages/user/profile.html" target="_blank">
-                            <div class="avatar avatar-2xl"> <img class="rounded-circle" src="../assets/img/team/3.jpg" alt="" /></div>
-                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Account</p>
-                          </a></div>
-                        <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="https://themewagon.com/" target="_blank"><img class="rounded" src="../assets/img/nav-icons/themewagon.png" alt="" width="40" height="40" />
-                            <p class="mb-0 fw-medium text-800 text-truncate fs-11 pt-1">Themewagon</p>
-                          </a></div>
-                        
-                        <div class="col-12"><a class="btn btn-outline-primary btn-sm mt-4" href="#!">Show more</a></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </li>
-            <li class="nav-item dropdown"><a class="nav-link pe-0 ps-2" id="navbarDropdownUser" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                <div class="avatar avatar-xl">
-                  <img class="rounded-circle" src="<?php echo LibraryFunctions::get_theme_file_path('avatar.png', '/includes/img', 'web'); ?>" alt="" />
-
-                </div>
-              </a>
-              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end py-0" aria-labelledby="navbarDropdownUser">
-                <div class="bg-white dark__bg-1000 rounded-2 py-2">
-                  <a class="dropdown-item fw-bold text-warning" href="#!"><span class="fas fa-crown me-1"></span><span>Go Pro</span></a>
-
-                  <div class="dropdown-divider"></div>
-                  <a class="dropdown-item" href="#!">Set status</a>
-                  <a class="dropdown-item" href="../pages/user/profile.html">Profile &amp; account</a>
-                  <a class="dropdown-item" href="#!">Feedback</a>
-
-                  <div class="dropdown-divider"></div>
-                  <a class="dropdown-item" href="../pages/user/settings.html">Settings</a>
-                  <a class="dropdown-item" href="../pages/authentication/card/logout.html">Logout</a>
-                </div>
-              </div>
-            </li>
           </ul>
-        </nav>
+        </nav>		
+		
+		
 		<div class="content">
           
           
@@ -857,6 +821,255 @@ class PublicPageFalcon extends PublicPageMaster {
 
 		<?php
 	}
+	
+	
+	function dropdown_or_buttons($options){
+
+		if(!$options['options_label']){
+			$options['options_label'] = 'Options';
+		}		
+	
+
+	
+		if(is_array($options['altlinks'])){
+			echo '<div class="row justify-content-end justify-content-end gx-3 gy-0 px-3"><div class="col-sm-auto">';
+			if(count($options['altlinks']) > 2){
+				echo '<div class="dropdown font-sans-serif d-inline-block mb-2"><button class="btn btn-falcon-default dropdown-toggle" id="dropdownMenuButton" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">'.$options['options_label'].'</button><div class="dropdown-menu dropdown-menu-end py-0" aria-labelledby="dropdownMenuButton">';
+				foreach($options['altlinks'] as $label=>$link){
+					echo '<a href="'.$link.'" class="dropdown-item">'.$label.'</a></li>';
+				}	
+				echo '</div></div>';	    
+									
+			}
+			else if(count($options['altlinks']) > 0){
+				
+				foreach($options['altlinks'] as $label=>$link){
+					echo '<a href="'.$link.'"><button class="btn btn-outline-secondary me-1 mb-1" type="button">'.$label.'</button></a>';
+				}
+				
+			}
+			echo '</div></div>';
+		}			
+	}
+	
+	
+	
+	function begin_box($options=NULL){
+	
+	echo '<div id="tableExample4">';
+	
+				$this->dropdown_or_buttons($options);
+	
+	
+	}
+	
+	function end_box(){
+
+	echo '</div>';
+	}
+	
+
+	function tableheader($headers, $options=NULL, $pager=NULL){
+		
+		$this->begin_box($options);
+		
+		if(!$pager){
+			$pager = new Pager();
+		}
+
+		$sortoptions= $options['sortoptions'];
+		$filteroptions= $options['filteroptions'];
+		$search_on = $options['search_on'];
+
+		echo '<div class="row justify-content-end justify-content-end gx-3 gy-0 px-3">';
+
+		if($sortoptions){
+			echo '<div class="col-sm-auto">';
+			printf('<form method="get" ACTION="%s">', $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('sort', 'sdirection'));
+			echo '<label for="'.$pager->prefix().'sort'.'">Sort: </label><select name="'.$pager->prefix().'sort'.'">';
+			foreach ($sortoptions as $key => $value) {
+				if($pager->get_sort() == $value){
+					echo "<option value='$value' selected=selected>$key";
+				}
+				else{
+					echo "<option value='$value'>$key";
+				}
+			}
+			echo '</select>';
+			
+
+			echo '<label for="'.$pager->prefix().'sdirection'.'"> </label><select name="'.$pager->prefix().'sdirection'.'">';
+			$diroptions = array('Descending'=>'DESC', 'Ascending'=>'ASC');
+			foreach ($diroptions as $key => $value) {
+				if($pager->sort_direction() == $value){
+					echo "<option value='$value' selected=selected>$key";
+				}
+				else{
+					echo "<option value='$value'>$key";
+				}
+			}
+			echo '</select>';
+
+						
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
+			}
+
+
+			echo '<input type="submit" value="sort" /></form>'; 
+			echo '</div>';
+
+		}
+
+
+		if($filteroptions){
+			echo '<div class="col-sm-auto">';
+			printf('<form method="get" ACTION="%s">', $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('filter'));
+			echo '<label for="'.$pager->prefix().'filter'.'">Show: </label><select name="'.$pager->prefix().'filter'.'">';
+			foreach ($filteroptions as $key => $value) {
+				if($pager->get_filter() == $value){
+					echo "<option value='$value' selected=selected>$key";
+				}
+				else{
+					echo "<option value='$value'>$key";
+				}
+			}
+			echo '</select>';
+
+						
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
+			}
+
+
+			echo '<input type="submit" value="submit" /></form>'; 
+			echo '</div>';
+		}
+
+		if($search_on){
+			
+
+			echo '<div class="col-sm-auto">';
+			$formwriter = LibraryFunctions::get_formwriter_object('search_form', 'admin');
+
+			echo $formwriter->begin_form("search_form", "get", $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('searchterm'));
+			echo '<label for="searchterm">Search: </label>
+						  <input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.$pager->search_term().'" size="20" type="text" class="textInput" maxlength="">';	
+			
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
+			}	
+
+	
+			//echo $formwriter->textinput("Search (personal name, user ID, phone number, dharma name, or email)", "searchterm", '', 20, $searchterm, NULL, NULL);
+			echo '<input type="submit" value="Search" />';
+			echo $formwriter->end_form();
+			echo '</div>';
+		}
+
+		echo '</div>';
+
+
+		echo '<div class="table-responsive scrollbar">
+  <table class="table">
+
+			<tr>';
+
+			foreach ($headers as $value) {
+				echo '<th>'.$value.'</th>';
+			}
+
+		echo '</tr>';
+
+    }
+
+
+	function disprow($dataarray){
+		echo '<tr>';
+
+		foreach ($dataarray as $value) {
+			if($value == ""){
+				$value = "&nbsp";
+			}
+
+			printf('<td>%s</td>', $value);
+		}
+		echo "</tr>\n";
+	}
+
+
+	function endtable($pager=NULL){
+		
+		if(!$pager){
+			$pager = new Pager();
+		}
+		echo '</table></div>';
+
+		
+		//PAGE
+		if($pager->num_records()){	
+			echo '<div class="row  gx-3 gy-0 px-3" id="example1_info" role="status" aria-live="polite"> '.$pager->num_records().' records, Page '.$pager->current_page() .' of '.$pager->total_pages().'</div>';
+		}
+	
+		
+		if($pager->num_records() > $pager->num_per_page()){
+			echo '<div class="row justify-content-end justify-content-end gx-3 gy-0 px-3">';
+			if($page_number = $pager->is_valid_page('-10')){
+				echo '<a class="previous" href="'.$pager->get_url($page_number).'"><< Back 10&nbsp; </a>';
+			}
+			else{
+				echo '<span><< Back 10&nbsp; </span>';
+			}
+							
+
+			for($x=4; $x>=1;$x--){
+				if($page_number = $pager->is_valid_page('-'.$x)){
+					echo '<a href="'.$pager->get_url($page_number).'">'.$page_number.'</a> ';
+				}
+			}
+			
+			echo '<strong>'.$pager->current_page().'</strong> ';
+			
+			for($x=1; $x<=4;$x++){
+				if($page_number = $pager->is_valid_page('+'.$x)){
+					echo '<a href="'.$pager->get_url($page_number).'">'.$page_number.'</a> ';
+				}
+			}	
+
+		
+			if($page_number = $pager->is_valid_page('+10')){
+				echo '<a class="previous" href="'.$pager->get_url($page_number).'"> &nbsp;Ahead 10 >></a>';
+			}
+			else{
+				echo '<span> &nbsp;Ahead 10 >></span>';
+			}
+			echo '</div>';
+		}
+		
+
+		
+		$this->end_box();
+
+	}	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	/*
 	static function alert($title, $content, $type){
 		if($type == 'error'){
@@ -1113,46 +1326,6 @@ class PublicPageFalcon extends PublicPageMaster {
 	}
 
 
-	function tableheader($headers, $class='', $id='table1'){
-		echo '<div class="my-6"><div class="flex flex-col">
-		  <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-			<div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
-			  <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
-				<table class="min-w-full divide-y divide-gray-200">
-				  <thead class="bg-gray-50">
-					<tr>';
-		
-
-		foreach ($headers as $value) {
-			printf('<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" abbr="%s">%s</th>', $value, $value);
-		}
-		echo '</tr>
-          </thead><tbody class="bg-white divide-y divide-gray-200">';
-	}
-
-	function disprow($dataarray){
-
-		echo '<tr>';
-
-		foreach ($dataarray as $value) {
-			if ($value == "") {
-				$value = "&nbsp";
-			}
-
-
-			printf('<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">%s</td>', $value);
-
-		}
-		echo "</tr>\n";
-		$this->rowcount++;
-	}
-
-	function endtable(){
-		echo '</tbody></table>      </div>
-    </div>
-  </div>
-</div></div>';
-	}
 	*/
 }
 
