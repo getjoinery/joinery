@@ -1,5 +1,5 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
@@ -96,13 +96,14 @@
 	$paget->begin_box($pageoptions);
 
 
-	echo '<div uk-grid>
-    <div class="uk-width-2-3@m"><div style="padding: 20px">';
+	echo '<div class="row">
+    <div class="col-md-8"><div class="p-3">';
 	
 	// Editing an existing email
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
+	$validation_rules['pag_title']['required']['value'] = 'true';
 	$validation_rules['pag_link']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 
@@ -118,7 +119,7 @@
 	echo $formwriter->textinput('Page title', 'pag_title', NULL, 100, $title, '', 255, '');		
 
 	if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
-		echo $formwriter->textinput('Link (no spaces): '.$settings->get_setting('webDir').'/page/', 'pag_link', NULL, 100, $page->get('pag_link'), '', 255, '');	
+		echo $formwriter->textinput('Link (no spaces): ', 'pag_link', NULL, 100, $page->get('pag_link'), '', 255, '', TRUE, $settings->get_setting('webDir').'/page/', 'default');	
 	}
 
 	$optionvals = array("No"=>0, "Yes"=>1);
@@ -133,9 +134,9 @@
 
 
 
-	echo '	</div>
-	</div>
-	<div class="uk-width-1-3@m"><div style="padding: 20px">';
+	echo '  </div>
+    </div>
+    <div class="col-md-4"><div class="p-3">';
 
 	$content_versions = new MultiContentVersion(
 		array('type'=>ContentVersion::TYPE_PAGE, 'foreign_key_id' => $page->key),

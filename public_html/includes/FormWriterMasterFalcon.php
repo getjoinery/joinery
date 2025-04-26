@@ -53,6 +53,9 @@ class FormWriterMaster {
 	protected $dropinput_container_class = 'mb-3';
 	protected $dropinput_label_class = 'form-label';
 	protected $dropinput_select_class = 'form-select';
+	
+	protected $button_primary_class = 'btn-primary';
+	protected $button_secondary_class = 'btn-secondary';
 
 	function __construct($formid='form1', $secure=FALSE, $use_tabindex=FALSE){
 		$this->formid = $formid;
@@ -288,23 +291,68 @@ class FormWriterMaster {
 	
 	//DEPRECATED
 	function start_buttons($class = '') {
-		return '<div class="row '.$class.'">';
+		return '';
 	}
 
-	function new_form_button($label='Submit', $class='btn btn-primary', $id=NULL) {
+
+	//STYLE IS 'primary' or 'secondary'
+	//WIDTH IS 'standard' or 'full'
+	function new_button($label='Submit', $link, $style='primary', $width='standard', $class='', $id=NULL) {
+		$output = '';
+		if($style == 'primary'){
+			$class = $this->button_primary_class . ' ' . $class;
+		}
+		else{
+			$class = $this->button_secondary_class . ' ' . $class;
+		}
 		
-		$output = '<button type="submit" class="'.$class.'"';
+		if($width == 'full'){
+			$output .= '<div class="d-grid gap-2">';
+		}
+		
+		
+		$output .= '<a href="'.$link.'"><button type="button" class="btn me-1 mb-1 '.$class.'"';
 		if($id != '' && !is_null($id)){
 			$output .= ' id="'.$id.'"';
 		}
-		$output .= ' primaryAction">';
-		$output .= '<span>'. $label.'</span></button>';
+		$output .= '>';
+		$output .= $label.'</button></a>';
+		if($width == 'full'){
+			$output .= '</div>';
+		}
+		return $output;
+	}
+
+	//STYLE IS 'primary' or 'secondary'
+	//WIDTH IS 'standard' or 'full'
+	function new_form_button($label='Submit', $style='primary', $width='standard', $class='', $id=NULL) {
+		$output = '';
+		if($style == 'primary'){
+			$class = $this->button_primary_class . ' ' . $class;
+		}
+		else{
+			$class = $this->button_secondary_class . ' ' . $class;
+		}
+
+		if($width == 'full'){
+			$output .= '<div class="d-grid gap-2">';
+		}	
+		
+		$output = '<button type="submit" class="btn me-1 mb-1 '.$class.'"';
+		if($id != '' && !is_null($id)){
+			$output .= ' id="'.$id.'"';
+		}
+		$output .= '>';
+		$output .= $label.'</button>';
+		if($width == 'full'){
+			$output .= '</div>';
+		}
 		return $output;
 	}
 
 	
 	function end_buttons() {
-		return '</div>';
+		return '';
 	}
 	
 	function set_validate($validation_rules, $custom_js = NULL, $debug=false){
@@ -788,12 +836,21 @@ class FormWriterMaster {
 			if(in_array($value, $readonlyvals)){
 				if($checked){
 					$output .= $this->hiddeninput($id.'[]', $value);	
-					$output .= '<label for="'.$uniqid.'">'.$key.' (checked, read only)</label><br>';
+					//$output .= '<label for="'.$uniqid.'">'.$key.' (checked, read only)</label><br>';
 				}
 				else{
 					$output .= $this->hiddeninput($id.'[]', '');	
-					$output .= '<label for="'.$uniqid.'">'.$key.' (unchecked, read only)</label><br>';
+					//$output .= '<label for="'.$uniqid.'">'.$key.' (unchecked, read only)</label><br>';
 				}
+				
+				$output .= '
+						<div class="'.$this->checkboxList_container_class.'">
+							<input class="'.$class.'" type="'.$type.'" id="'.$uniqid.'" name="'.$id.'[]" value="'.$value.'" '.$checked.' disabled="disabled" />
+							<label class="'.$this->checkboxList_label_class.'" for="'.$uniqid.'">'.$key.'</label>                  
+						</div>
+					   ';				
+				
+				
 			}
 			else{
 
