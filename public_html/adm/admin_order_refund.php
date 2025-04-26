@@ -1,5 +1,5 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');

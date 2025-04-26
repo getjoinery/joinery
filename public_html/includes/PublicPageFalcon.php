@@ -132,9 +132,9 @@ class PublicPageFalcon extends PublicPageMaster {
 			-->
 			
 			
-			<?php 
+			<?php  
 			//ADMIN MENU NAVIGATION ITEM
-			 if($_SESSION['permission'] >= 5){ ?>
+			 if($session->get_permission() >= 5){ ?>
             <li class="nav-item dropdown px-1">
               <a class="nav-link fa-icon-wait nine-dots p-1" id="navbarDropdownMenu" role="button" data-hide-on-body-scroll="data-hide-on-body-scroll" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="43" viewBox="0 0 16 16" fill="none">
@@ -155,52 +155,52 @@ class PublicPageFalcon extends PublicPageMaster {
                       <div class="row text-center gx-0 gy-0">
 						<div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/">
                             <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-  <path d="M3 9.5L12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z"/>
-</svg>
+							  <path d="M3 9.5L12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z"/>
+							</svg>
+
+														</div>
+														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Home</p> 
+													  </a></div>
+													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/profile">
+														<div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+							  <circle cx="12" cy="8" r="4"/>
+							  <path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>
+							</svg>
+							</div>
+														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Profile</p>
+													  </a></div>
+													<?php if($session->get_permission() > 5) { ?>
+													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_users">
+														<div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+							  <path d="M3 4h18v4H3zM3 10h18v10H3z"/>
+							</svg>
+							</div>
+														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Admin</p>
+													  </a></div>
+													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_settings">
+														<div class="avatar avatar-2xl"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+							  <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+							  <path d="M19.4 15a1.7 1.7 0 0 0 .33 1.82l.05.05a2 2 0 1 1-2.82 2.83l-.06-.06a1.7 1.7 0 0 0-1.83-.33 1.7 1.7 0 0 0-1 1.51v.09a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.51 1.7 1.7 0 0 0-1.83.33l-.06.06a2 2 0 1 1-2.82-2.83l.05-.05a1.7 1.7 0 0 0 .33-1.82 1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.51-1 1.7 1.7 0 0 0-.33-1.82l-.05-.05a2 2 0 1 1 2.82-2.83l.06.06a1.7 1.7 0 0 0 1.83.33h.09A1.7 1.7 0 0 0 9 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51h.09a1.7 1.7 0 0 0 1.83-.33l.06-.06a2 2 0 1 1 2.82 2.83l-.05.05a1.7 1.7 0 0 0-.33 1.82 1.7 1.7 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/>
+							</svg>
+
 
 							</div>
-                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Home</p> 
-                          </a></div>
-                         <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/profile">
-                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-  <circle cx="12" cy="8" r="4"/>
-  <path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>
-</svg>
-</div>
-                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Profile</p>
-                          </a></div>
-						<?php if($session->get_permission() > 5) { ?>
-						 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_users">
-                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-  <path d="M3 4h18v4H3zM3 10h18v10H3z"/>
-</svg>
-</div>
-                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Admin</p>
-                          </a></div>
-						 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_settings">
-                            <div class="avatar avatar-2xl"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
-  <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
-  <path d="M19.4 15a1.7 1.7 0 0 0 .33 1.82l.05.05a2 2 0 1 1-2.82 2.83l-.06-.06a1.7 1.7 0 0 0-1.83-.33 1.7 1.7 0 0 0-1 1.51v.09a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.51 1.7 1.7 0 0 0-1.83.33l-.06.06a2 2 0 1 1-2.82-2.83l.05-.05a1.7 1.7 0 0 0 .33-1.82 1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.51-1 1.7 1.7 0 0 0-.33-1.82l-.05-.05a2 2 0 1 1 2.82-2.83l.06.06a1.7 1.7 0 0 0 1.83.33h.09A1.7 1.7 0 0 0 9 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51h.09a1.7 1.7 0 0 0 1.83-.33l.06-.06a2 2 0 1 1 2.82 2.83l-.05.05a1.7 1.7 0 0 0-.33 1.82 1.7 1.7 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/>
-</svg>
-
-
-</div>
-                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Settings</p>
-                          </a></div>
-						 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_utilities" >
-                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-  <path d="M3 3h6v6H3zM15 3h6v6h-6zM15 15h6v6h-6zM3 15h6v6H3z"/>
-</svg>
-</div>
-                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Utilities</p>
-                          </a></div>
-						 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_help" >
-                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-  <circle cx="12" cy="12" r="10"/>
-  <path d="M9.09 9a3 3 0 1 1 5.83 1c-.26 1.2-1.5 2-2.92 2v1"/>
-  <circle cx="12" cy="17" r="1"/>
-</svg>
-</div>
+														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Settings</p>
+													  </a></div>
+													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_utilities" >
+														<div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+							  <path d="M3 3h6v6H3zM15 3h6v6h-6zM15 15h6v6h-6zM3 15h6v6H3z"/>
+							</svg>
+							</div>
+														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Utilities</p>
+													  </a></div>
+													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_help" >
+														<div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+							  <circle cx="12" cy="12" r="10"/>
+							  <path d="M9.09 9a3 3 0 1 1 5.83 1c-.26 1.2-1.5 2-2.92 2v1"/>
+							  <circle cx="12" cy="17" r="1"/>
+							</svg>
+							</div>
                             <p class="mb-0 fw-medium text-800 text-truncate fs-11">Help</p>
                           </a></div>
                         <?php } ?>
@@ -218,9 +218,9 @@ class PublicPageFalcon extends PublicPageMaster {
 			<?php if(!$session->is_logged_in()){ ?>
 			<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="/login">Login</a></li></ul>
 			
-			<?php if($settings->get_setting('register_active')){ ?>
-			<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="/register">Register</a></li></ul>
-			<?php } ?>
+				<?php if($settings->get_setting('register_active')){ ?>
+				<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="/register">Register</a></li></ul>
+				<?php } ?>
 			<?php } ?>
 
 			<?php if($session->is_logged_in()){ ?>
@@ -243,6 +243,22 @@ class PublicPageFalcon extends PublicPageMaster {
 			<?php } 		
 		
 	}
+	
+	public function get_logo(){
+			$settings = Globalvars::get_instance();
+					
+			if($settings->get_setting('logo_link')){
+				echo '<img class="me-2" src="'.$settings->get_setting('logo_link').'" alt="" width="40" />';
+			}
+			 
+			echo '<span class="font-sans-serif text-primary">';
+			
+					 echo $settings->get_setting('site_name'); 
+			
+			echo '</span>';	
+		
+		
+	}
 
 
 	public function public_header($options=array()) {
@@ -252,7 +268,6 @@ class PublicPageFalcon extends PublicPageMaster {
 		$options = parent::public_header_common($options);
 	
 		$profile_menu = array();
-
 		
 		$notification_menu = NULL;
 
@@ -314,19 +329,13 @@ class PublicPageFalcon extends PublicPageMaster {
 	
 	
 	    <script>
-      var isRTL = JSON.parse(localStorage.getItem('isRTL'));
-      if (isRTL) {
-        var linkDefault = document.getElementById('style-default');
-        var userLinkDefault = document.getElementById('user-style-default');
-        linkDefault.setAttribute('disabled', true);
-        userLinkDefault.setAttribute('disabled', true);
-        document.querySelector('html').setAttribute('dir', 'rtl');
-      } else {
+      var isRTL = false;
+
         var linkRTL = document.getElementById('style-rtl');
         var userLinkRTL = document.getElementById('user-style-rtl');
         linkRTL.setAttribute('disabled', true);
         userLinkRTL.setAttribute('disabled', true);
-      }
+      
     </script>
 	<?php
 	if($settings->get_setting('custom_css')){
@@ -340,432 +349,85 @@ class PublicPageFalcon extends PublicPageMaster {
 
   <body>
 
-    <!-- ===============================================-->
+
+<!-- ===============================================-->
     <!--    Main Content-->
     <!-- ===============================================-->
     <main class="main" id="top">
-      <div class="container" data-layout="container-fluid">
+      <div class="container" data-layout="container">
+        <script>
+          var isFluid = JSON.parse(localStorage.getItem('isFluid'));
+          if (isFluid) {
+            var container = document.querySelector('[data-layout]');
+            container.classList.remove('container');
+            container.classList.add('container-fluid');
+          }
+        </script>
 
-        <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg">
+		  
+		  <?php 
+		  if($options['show_admin_menus']){
+				echo $this->get_admin_menu($options);
+		  }
+		  ?>
+		
+		
+		
+        <div class="content">
+          <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg" data-move-target="#navbarVerticalNav" data-navbar-top="combo">
 
-          <button class="btn navbar-toggler-humburger-icon navbar-toggler me-1 me-sm-3" type="button" data-bs-toggle="collapse" data-bs-target="#navbarStandard" aria-controls="navbarStandard" aria-expanded="false" aria-label="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
+            <button class="btn navbar-toggler-humburger-icon navbar-toggler me-1 me-sm-3" type="button" data-bs-toggle="collapse" data-bs-target="#navbarVerticalCollapse" aria-controls="navbarVerticalCollapse" aria-expanded="false" aria-label="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
             <a class="navbar-brand me-1 me-sm-3" href="/">
               <div class="d-flex align-items-center">
-					  <?php 
-							if($settings->get_setting('logo_link')){
-								echo '<img class="me-2" src="'.$settings->get_setting('logo_link').'" alt="" width="40" />';
-							}
-					  ?>
-					  <span class="font-sans-serif text-primary">
-					  <?php 
-							 echo $settings->get_setting('site_name'); 
-					?>
-					</span>
+
+					<?php echo $this->get_logo(); ?>
               </div>
             </a>
-          <div class="collapse navbar-collapse scrollbar" id="navbarStandard">
-            <ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
- 
-
-			<?php
-			foreach ($menus as $menu) {
-				if ($menu['parent'] === true) {
-					$submenus = $menu['submenu'];
-					// If there are no submenu items, output a simple nav item.
-					if (empty($submenus)) {
-						echo '<li class="nav-item"><a class="nav-link" href="' . $menu['link'] . '">' . $menu['name'] . '</a></li>';
-					} else {
-						// Generate a safe ID based on the menu name (replace spaces with dashes and lowercase)
-						$menuId = strtolower(preg_replace('/\s+/', '-', $menu['name']));
-						echo '<li class="nav-item dropdown">';
-						echo '  <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="' . $menuId . '">' . $menu['name'] . '</a>';
-						echo '  <div class="dropdown-menu dropdown-caret dropdown-menu-card border-0 mt-0" aria-labelledby="' . $menuId . '">';
-						foreach ($submenus as $submenu) {
-							echo '    <a class="dropdown-item link-600 fw-medium" href="' . $submenu['link'] . '">' . $submenu['name'] . '</a>';
+			
+			<?php 
+		  if(!$options['show_admin_menus']){
+			  ?>
+            <div class="collapse navbar-collapse scrollbar" id="navbarStandard">
+              <ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
+				<?php
+				foreach ($menus as $menu) {
+					if ($menu['parent'] === true) {
+						$submenus = $menu['submenu'];
+						// If there are no submenu items, output a simple nav item.
+						if (empty($submenus)) {
+							echo '<li class="nav-item"><a class="nav-link" href="' . $menu['link'] . '">' . $menu['name'] . '</a></li>';
+						} else {
+							// Generate a safe ID based on the menu name (replace spaces with dashes and lowercase)
+							$menuId = strtolower(preg_replace('/\s+/', '-', $menu['name']));
+							echo '<li class="nav-item dropdown">';
+							echo '  <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" id="' . $menuId . '">' . $menu['name'] . '</a>';
+							echo '  <div class="dropdown-menu dropdown-caret dropdown-menu-card border-0 mt-0" aria-labelledby="' . $menuId . '">';
+							foreach ($submenus as $submenu) {
+								echo '    <a class="dropdown-item link-600 fw-medium" href="' . $submenu['link'] . '">' . $submenu['name'] . '</a>';
+							}
+							echo '  </div>';
+							echo '</li>';
 						}
-						echo '  </div>';
-						echo '</li>';
 					}
 				}
-			}
-			?> 
-              
-              
-
+				?> 
+    
+              </ul>
+            </div>
+		  <?php } ?>
+            <ul class="navbar-nav navbar-nav-icons ms-auto flex-row align-items-center">
+              <?php $this->top_right_menu(); ?>
             </ul>
-          </div>
-          <ul class="navbar-nav navbar-nav-icons ms-auto flex-row">
-		  
-		  
-			<?php $this->top_right_menu(); ?>
-			
+          </nav>
 
-          </ul>
-        </nav>		
-		
-		
-		<div class="content">
           
-          
-          
-   
-
-
-<?php /* ?>
-
-
-		
-		
-	
-	<?php	
-	
-	if(empty($options['noheader'])){
-		?>	
-	<body class="h-full">
-<div class="min-h-full">
-
-<!-- This example requires Tailwind CSS v2.0+ -->
-<div class="bg-gray-50">
-  <div class="relative bg-white z-10">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6">
-      <div class="flex justify-between items-center py-6 md:justify-start md:space-x-10">
-        <div class="flex justify-start lg:w-0 lg:flex-1">
-          <a href="#">
-            <!--<span class="sr-only">Workflow</span>-->
-			<?php 
-			echo '<span class="sr-only">'.$settings->get_setting('site_name').'</span>';
-			if($settings->get_setting('logo_link')){
-				echo '<a href="/"><img style="max-height: 100px;" src="'.$settings->get_setting('logo_link').'" alt=""></a>';
-			}
-			else{
-				echo '<h3><a href="/">'.$settings->get_setting('site_name').'</a></h3>';
-			}
-			?>
-            <!--<img class="h-8 w-auto sm:h-10" src="https://tailwindui.com/img/logos/workflow-mark-blue-600.svg" alt="">-->
-          </a>
-        </div>
-        <div class="-mr-2 -my-2 md:hidden">
-          <button id="mobile-toggle-button" type="button" class="bg-white rounded-md p-2 inline-flex items-center justify-center text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500" aria-expanded="false">
-            <span class="sr-only">Open menu</span>
-            <!-- Heroicon name: outline/menu -->
-            <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-        </div>
-        <nav class="hidden md:flex space-x-10">
-		<?php
-			foreach ($menus as $menu){
-				if($menu['parent'] == true){
-					$submenus = $menu['submenu'];
-					
-					if(empty($submenus)){	
-						echo '          <a href="'.$menu['link'].'" class="text-base font-medium text-gray-500 hover:text-gray-900">'.$menu['name'].'</a>';
-					}
-					else{	
-						?>
-					  <div class="relative">
-						<!-- Item active: "text-gray-900", Item inactive: "text-gray-500" -->
-						<button type="button" class="js-clickable-menu text-gray-500 group bg-white rounded-md inline-flex items-center text-base font-medium hover:text-gray-900 " aria-expanded="false">
-						  <span><?php echo $menu['name']; ?></span>
-						  <!--
-							Heroicon name: solid/chevron-down
-
-							Item active: "text-gray-600", Item inactive: "text-gray-400"
-						  -->
-						  <svg class="text-gray-400 ml-2 h-5 w-5 group-hover:text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-							<path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-						  </svg>
-						</button>
-						<!--
-						  'Solutions' flyout menu, show/hide based on flyout menu state.
-
-						  Entering: "transition ease-out duration-200"
-							From: "opacity-0 translate-y-1"
-							To: "opacity-100 translate-y-0"
-						  Leaving: "transition ease-in duration-150"
-							From: "opacity-100 translate-y-0"
-							To: "opacity-0 translate-y-1"
-						-->
-						<div class="js-clicked-menu invisible absolute -ml-4 mt-3 transform z-10 px-2 w-screen max-w-md sm:px-0 lg:ml-0 lg:left-1/2 lg:-translate-x-1/2">
-						  <div class="rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 overflow-hidden">
-							<div class="relative grid gap-6 bg-white px-5 py-6 sm:gap-8 sm:p-8">
-							<?php foreach ($submenus as $submenu){ ?>
-							
-								<a href="<?php echo $submenu['link']; ?>" class="-m-3 p-3 flex items-start rounded-lg hover:bg-gray-50">
-									<!-- Heroicon name: outline/chart-bar -->
-									<!--<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-									  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-									</svg>-->
-									<div class="ml-4">
-									  <p class="text-base font-medium text-gray-900">
-										<?php echo $submenu['name']; ?>
-									  </p>
-									  <!--<p class="mt-1 text-sm text-gray-500">
-										Get a better understanding of where your traffic is coming from.
-									  </p>-->
-									</div>
-								  </a>			
-							<?php }
-						echo '</div></div></div></div>';
-						
-					}
-				}
-			}		
-		?>
-        </nav>
+        
 
 
 
 
 
-        <div class="hidden md:flex items-center justify-end space-x-8 md:flex-1 lg:w-0">
-		
-			<!--
-			<a href="#" class="text-sm font-medium text-gray-900 hover:underline">
-				Go Premium
-			</a>
-			-->
-			
-			<?php if(!empty($notification_menu)){ ?>
-			<a href="#" class="ml-5 flex-shrink-0 bg-white rounded-full p-1 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500">
-            <span class="sr-only">View notifications</span>
-            <!-- Heroicon name: outline/bell -->
-            <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-            </svg>
-			</a>
-			<?php } ?>
-
-			<?php if(!empty($cart_menu)){ ?>
-			<a href="<?php echo $cart_menu['Cart']; ?>" class="ml-5 flex-shrink-0 bg-white rounded-full p-1 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500">
-            <span class="sr-only">Cart</span>
-            <!-- Heroicon name: outline/bell -->
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-			  <path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3zM16 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM6.5 18a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
-			</svg>
-			</a>
-			<?php } ?>
-
-			<?php if(!empty($profile_menu)){ ?>
-			  <!-- Profile dropdown -->
-			<div class="flex-shrink-0 relative ml-5">
-				<div>
-				  <button type="button" class="bg-white rounded-full flex focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500" id="user-menu-button" aria-expanded="false" aria-haspopup="true">
-					<span class="sr-only">Open user menu</span>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 rounded-full" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-					</svg>
-					<!--<img class="h-8 w-8 rounded-full" src="https://images.unsplash.com/photo-1550525811-e5869dd03032?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">-->
-				  </button>
-				</div>
-
-				<!--
-				  Dropdown menu, show/hide based on menu state.
-
-				  Entering: "transition ease-out duration-100"
-					From: "transform opacity-0 scale-95"
-					To: "transform opacity-100 scale-100"
-				  Leaving: "transition ease-in duration-75"
-					From: "transform opacity-100 scale-100"
-					To: "transform opacity-0 scale-95"
-				-->
-				<div id="user-menu" class="js-clicked-menu invisible origin-top-right absolute z-10 right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 py-1 focus:outline-none" role="menu" aria-orientation="vertical" aria-labelledby="user-menu-button" tabindex="-1">
-				  <!-- Active: "bg-gray-100", Not Active: "" -->
-				  <?php
-				  foreach($profile_menu as $name=>$link){
-					  echo '<a href="'.$link.'" class="block py-2 px-4 text-sm text-gray-700" role="menuitem" tabindex="-1" id="user-menu-item-0">'.$name.'</a>';
-				  }
-				  ?>
-				  <!--
-				  <a href="#" class="block py-2 px-4 text-sm text-gray-700" role="menuitem" tabindex="-1" id="user-menu-item-0">Your Profile</a>
-
-				  <a href="#" class="block py-2 px-4 text-sm text-gray-700" role="menuitem" tabindex="-1" id="user-menu-item-1">Settings</a>
-
-				  <a href="#" class="block py-2 px-4 text-sm text-gray-700" role="menuitem" tabindex="-1" id="user-menu-item-2">Sign out</a>
-				  -->
-				</div>
-			</div>
-			<?php } ?>
-      
-			<!--
-			<a href="#" class="whitespace-nowrap bg-blue-100 border border-transparent rounded-md py-2 px-4 inline-flex items-center justify-center text-base font-medium text-blue-700 hover:bg-blue-200">
-				New Post
-			</a>-->
-		
-		<?php if(!empty($logged_out_menu)){ ?>
-          <a href="/login" class="whitespace-nowrap text-base font-medium text-gray-500 hover:text-gray-900">
-            Sign in
-          </a>
-		  <?php
-		  if($settings->get_setting('register_active')){
-			?>
-          <a href="/register" class="whitespace-nowrap bg-blue-100 border border-transparent rounded-md py-2 px-4 inline-flex items-center justify-center text-base font-medium text-blue-700 hover:bg-blue-200">
-            Sign up
-          </a>
-		  <?php } ?>
-		<?php } ?>
-        </div>
-      </div>
-    </div>
-
-    <!--
-      Mobile menu, show/hide based on mobile menu state.
-
-      Entering: "duration-200 ease-out"
-        From: "opacity-0 scale-95"
-        To: "opacity-100 scale-100"
-      Leaving: "duration-100 ease-in"
-        From: "opacity-100 scale-100"
-        To: "opacity-0 scale-95"
-    -->
-    <div  id="mobile-menu" class="invisible absolute top-0 inset-x-0 p-2 transition transform origin-top-right md:hidden">
-      <div class="rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 bg-white divide-y-2 divide-gray-50">
-        <div class="pt-5 pb-6 px-5">
-          <div class="flex items-center justify-between">
-            <div>
-				<?php 
-				echo '<span class="sr-only">'.$settings->get_setting('site_name').'</span>';
-				if($settings->get_setting('logo_link')){
-					echo '<a href="/"><img class="h-8 w-auto" src="'.$settings->get_setting('logo_link').'" alt=""></a>';
-				}
-				else{
-					echo '<h3><a href="/">'.$settings->get_setting('site_name').'</a></h3>';
-				}
-				?>
-              <!--<img class="h-8 w-auto" src="https://tailwindui.com/img/logos/workflow-mark-blue-600.svg" alt="Workflow">-->
-            </div>
-            <div class="-mr-2">
-              <button id="mobile-close-button" type="button" class="bg-white rounded-md p-2 inline-flex items-center justify-center text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500">
-                <span class="sr-only">Close menu</span>
-                <!-- Heroicon name: outline/x -->
-                <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="mt-6">
-            <nav class="grid gap-y-8">
-			
-		<?php
-			foreach ($menus as $menu){
-				if($menu['parent'] == true){
-					$submenus = $menu['submenu'];
-					
-					if(empty($submenus)){
-						?>
-					  <a href="<?php echo $menu['link']; ?>" class="-m-3 p-3 flex items-center rounded-md hover:bg-gray-50">
-						<!-- Heroicon name: outline/chart-bar -->
-						<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-						  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-						</svg>
-						<span class="ml-3 text-base font-medium text-gray-900">
-						  <?php echo $menu['name']; ?>
-						</span>
-					  </a>
-					  <?php
-					}
-					else{	
-						?>
-					  <a href="<?php echo $menu['link']; ?>" class="-m-3 p-3 flex items-center rounded-md hover:bg-gray-50">
-						<!-- Heroicon name: outline/chart-bar -->
-						<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-						  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-						</svg>
-						<span class="ml-3 text-base font-medium text-gray-900">
-						  <?php echo $menu['name']; ?>
-						</span>
-					  </a>
-					  
-						<div class="py-6 px-5 space-y-6">
-							<div class="grid grid-cols-2 gap-y-4 gap-x-8">
-								<?php 
-								foreach ($submenus as $submenu){ 
-									echo '<a href="'.$submenu['link'].'" class="text-base font-medium text-gray-900 hover:text-gray-700">'.$submenu['name'].'</a>'; 
-								}
-							echo '</div>
-						</div>';
-					}
-				}
-			}		
-			?>			
-			
-			
-            </nav>
-          </div>
-        </div>
-        <div class="py-6 px-5 space-y-6">
-          <div class="grid grid-cols-2 gap-y-4 gap-x-8">
-			<?php 
-			if(!empty($profile_menu)){
-				foreach($profile_menu as $name=>$link){
-					echo ' <a href="'.$link.'" class="text-base font-medium text-gray-900 hover:text-gray-700">'.$name.'</a>';
-				}
-			}
-			?>
-
-			<?php 
-			if(!empty($cart_menu)){
-				echo ' <a href="/cart" class="text-base font-medium text-gray-900 hover:text-gray-700">Cart</a>';
-			}
-			?>
-
-			<?php 
-			if(!empty($notification_menu)){
-				echo ' <a href="#" class="text-base font-medium text-gray-900 hover:text-gray-700">Notifications</a>';
-			}
-			?>
-
-
-
-
-
-			
-          </div>
-		  <?php if(!empty($logged_out_menu)){ ?>
-
-          <div>
-			<?php if($settings->get_setting('register_active')){ ?>
-            <a href="/register" class="w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-blue-600 hover:bg-blue-700">
-              Sign up
-            </a>
-			<?php } ?>
-            <p class="mt-6 text-center text-base font-medium text-gray-500">
-              Existing user?
-              <a href="/login" class="text-blue-600 hover:text-blue-500">
-                Sign in
-              </a>
-            </p>
-          </div>
-		  <?php } ?>
-        </div>
-      </div>
-    </div>
-  </div>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-		
-	<?php } //end if noheader ?>
-
-		
-	
-		<?php
-		*/
+	<?php 
 	}
 
 	public function public_footer($options=array()) {
@@ -779,10 +441,10 @@ class PublicPageFalcon extends PublicPageMaster {
           <footer class="footer">
             <div class="row g-0 justify-content-between fs-10 mt-4 mb-3">
               <div class="col-12 col-sm-auto text-center">
-                <p class="mb-0 text-600">Thank you for creating with Falcon <span class="d-none d-sm-inline-block">| </span><br class="d-sm-none" /> 2024 &copy; <a href="https://themewagon.com">Themewagon</a></p>
+                <!--<p class="mb-0 text-600">Thank you for creating with Falcon <span class="d-none d-sm-inline-block">| </span><br class="d-sm-none" /> 2024 &copy; <a href="https://themewagon.com">Themewagon</a></p>-->
               </div>
               <div class="col-12 col-sm-auto text-center">
-                <p class="mb-0 text-600">v3.23.0</p>
+                <p class="mb-0 text-600">v0.5.0</p>
               </div>
             </div>
           </footer>
@@ -856,7 +518,7 @@ class PublicPageFalcon extends PublicPageMaster {
 	
 	function begin_box($options=NULL){
 	
-	echo '<div id="tableExample4">';
+	echo '<div>';
 	
 				$this->dropdown_or_buttons($options);
 	
@@ -1011,45 +673,49 @@ class PublicPageFalcon extends PublicPageMaster {
 		
 		//PAGE
 		if($pager->num_records()){	
-			echo '<div class="row  gx-3 gy-0 px-3" id="example1_info" role="status" aria-live="polite"> '.$pager->num_records().' records, Page '.$pager->current_page() .' of '.$pager->total_pages().'</div>';
-		}
-	
+			echo '<div class="d-flex align-items-center justify-content-center position-relative mt-3">';
+						echo '<div class="position-absolute start-0 mb-0 fs-10"> '.$pager->num_records().' records, Page '.$pager->current_page() .' of '.$pager->total_pages().'</div>';
+
+						echo '<div><div class="d-flex justify-content-center mt-3">';
 		
-		if($pager->num_records() > $pager->num_per_page()){
-			echo '<div class="row justify-content-end justify-content-end gx-3 gy-0 px-3">';
-			if($page_number = $pager->is_valid_page('-10')){
-				echo '<a class="previous" href="'.$pager->get_url($page_number).'"><< Back 10&nbsp; </a>';
-			}
-			else{
-				echo '<span><< Back 10&nbsp; </span>';
-			}
+						if($pager->num_records() > $pager->num_per_page()){
+							if($page_number = $pager->is_valid_page('-10')){
+								echo '<a href="'.$pager->get_url($page_number).'"><button class="btn btn-sm btn-falcon-default me-1" type="button" title="Previous 10" data-list-pagination="prev"><svg class="svg-inline--fa fa-chevron-left fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-left" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" data-fa-i2svg=""><path fill="currentColor" d="M34.52 239.03L228.87 44.69c9.37-9.37 24.57-9.37 33.94 0l22.67 22.67c9.36 9.36 9.37 24.52.04 33.9L131.49 256l154.02 154.75c9.34 9.38 9.32 24.54-.04 33.9l-22.67 22.67c-9.37 9.37-24.57 9.37-33.94 0L34.52 272.97c-9.37-9.37-9.37-24.57 0-33.94z"></path></svg><!-- <span class="fas fa-chevron-left"></span> Font Awesome fontawesome.com --></button></a>';
+							}
+							else{
+								echo '<button class="btn btn-sm btn-falcon-default me-1 disabled" type="button" title="Previous 10" data-list-pagination="prev" disabled=""><svg class="svg-inline--fa fa-chevron-left fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-left" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" data-fa-i2svg=""><path fill="currentColor" d="M34.52 239.03L228.87 44.69c9.37-9.37 24.57-9.37 33.94 0l22.67 22.67c9.36 9.36 9.37 24.52.04 33.9L131.49 256l154.02 154.75c9.34 9.38 9.32 24.54-.04 33.9l-22.67 22.67c-9.37 9.37-24.57 9.37-33.94 0L34.52 272.97c-9.37-9.37-9.37-24.57 0-33.94z"></path></svg><!-- <span class="fas fa-chevron-left"></span> Font Awesome fontawesome.com --></button>';
+							}
+											
+							echo '<ul class="pagination mb-0">';
+							for($x=4; $x>=1;$x--){
+								if($page_number = $pager->is_valid_page('-'.$x)){
+									echo '<a href="'.$pager->get_url($page_number).'"><button class="page btn btn-sm btn-falcon-default" type="button" data-i="2" data-page="5">'.$page_number.'</button></a> ';
+								}
+							}
 							
-
-			for($x=4; $x>=1;$x--){
-				if($page_number = $pager->is_valid_page('-'.$x)){
-					echo '<a href="'.$pager->get_url($page_number).'">'.$page_number.'</a> ';
-				}
-			}
+							echo '<li class="active"><button class="page btn btn-sm btn-falcon-default disabled" type="button" disabled="">'.$pager->current_page().'</button></li> ';
+							
+							for($x=1; $x<=4;$x++){
+								if($page_number = $pager->is_valid_page('+'.$x)){
+									echo '<a href="'.$pager->get_url($page_number).'"><button class="page btn btn-sm btn-falcon-default" type="button" data-i="2" data-page="5">'.$page_number.'</button></a> ';
+								}
+							}	
+							echo '</ul>';
+						
+							if($page_number = $pager->is_valid_page('+10')){
+								echo '<a href="'.$pager->get_url($page_number).'"><button class="btn btn-sm btn-falcon-default ms-1" type="button" title="Next 10" data-list-pagination="next"><svg class="svg-inline--fa fa-chevron-right fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-right" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" data-fa-i2svg=""><path fill="currentColor" d="M285.476 272.971L91.132 467.314c-9.373 9.373-24.569 9.373-33.941 0l-22.667-22.667c-9.357-9.357-9.375-24.522-.04-33.901L188.505 256 34.484 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L285.475 239.03c9.373 9.372 9.373 24.568.001 33.941z"></path></svg><!-- <span class="fas fa-chevron-right"></span> Font Awesome fontawesome.com --></button></a>';
+							}
+							else{
+								echo '<button class="btn btn-sm btn-falcon-default ms-1 disabled" type="button" title="Next 10" data-list-pagination="next" disabled=""><svg class="svg-inline--fa fa-chevron-right fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-right" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" data-fa-i2svg=""><path fill="currentColor" d="M285.476 272.971L91.132 467.314c-9.373 9.373-24.569 9.373-33.941 0l-22.667-22.667c-9.357-9.357-9.375-24.522-.04-33.901L188.505 256 34.484 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L285.475 239.03c9.373 9.372 9.373 24.568.001 33.941z"></path></svg><!-- <span class="fas fa-chevron-right"></span> Font Awesome fontawesome.com --></button>';
+							}
+						}
 			
-			echo '<strong>'.$pager->current_page().'</strong> ';
 			
-			for($x=1; $x<=4;$x++){
-				if($page_number = $pager->is_valid_page('+'.$x)){
-					echo '<a href="'.$pager->get_url($page_number).'">'.$page_number.'</a> ';
-				}
-			}	
-
-		
-			if($page_number = $pager->is_valid_page('+10')){
-				echo '<a class="previous" href="'.$pager->get_url($page_number).'"> &nbsp;Ahead 10 >></a>';
-			}
-			else{
-				echo '<span> &nbsp;Ahead 10 >></span>';
-			}
+			echo '</div></div>';
 			echo '</div>';
+		
 		}
 		
-
 		
 		$this->end_box();
 

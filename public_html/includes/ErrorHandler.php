@@ -72,7 +72,7 @@ class ErrorHandler{
 	}
 
 	function handle_admin_error($errortext){
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
 		$session = SessionControl::get_instance();
 
 		$page = new AdminPage();

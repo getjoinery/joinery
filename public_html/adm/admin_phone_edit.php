@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 

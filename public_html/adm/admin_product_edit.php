@@ -1,5 +1,5 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
@@ -29,6 +29,7 @@
 
 
 	if ($_POST || $_REQUEST['action']) {
+		
 		
 		if ($_POST['action'] == 'add' || $_POST['action'] == 'edit') {
 			
@@ -189,6 +190,7 @@
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
+	
 	$validation_rules['pro_name']['required']['value'] = 'true';
 	$validation_rules['pro_name']['maxlength']['value'] = 255;
 	$validation_rules['pro_link']['required']['value'] = 'true';

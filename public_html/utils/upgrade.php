@@ -2,7 +2,7 @@
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
 	require_once( __DIR__ . '/../includes/ErrorHandler.php');
-	require_once( __DIR__ . '/../includes/AdminPage-uikit3.php');
+	require_once( __DIR__ . '/../includes/AdminPage.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
 	
 	
