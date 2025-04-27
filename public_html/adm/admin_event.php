@@ -193,15 +193,10 @@
 <?php $page->end_box();
 
 	?>
-	<nav class="uk-navbar-container" uk-navbar>
-		<div class="uk-navbar-left">
-			<ul class="uk-navbar-nav">
-				<li class="uk-active"><a href="">Registrants</a></li>
-				<li class="uk-parent"><a href="/admin/admin_event_sessions?evt_event_id=<?php echo $event->key; ?>">Sessions</a></li>
-			</ul>
-		</div>
-	</nav>
-	
+	<ul class="nav nav-tabs">
+	  <li class="nav-item"><a class="nav-link active" id="home-tab" href="#"  aria-selected="true">Registrants</a></li>
+	  <li class="nav-item"><a class="nav-link" id="profile-tab" href="/admin/admin_event_sessions?evt_event_id=<?php echo $event->key; ?>" role="tab" aria-selected="false">Sessions</a></li>
+	</ul>
 	<?php
 
 

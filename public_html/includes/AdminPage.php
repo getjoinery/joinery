@@ -58,134 +58,14 @@ class AdminPage extends PublicPageFalcon {
 		$siteDir = $settings->get_setting('siteDir');							
 		require_once($siteDir . '/data/admin_menus_class.php');
 		
-		if($session && $session->get_user_id()){
-			$user = new User($session->get_user_id(), TRUE);
-			$user_name = $user->display_name();
-		}
-		else{
-			$user = new User(NULL);
-		}	
+
 	
+
 		
-		$admin_menu = MultiAdminMenu::getadminmenu($user->get('usr_permission'), $options['menu-id']); 
+		$admin_menu = MultiAdminMenu::getadminmenu($session->get_permission(), $options['menu-id']); 
 		
-		?>
-        <nav class="navbar navbar-light navbar-vertical navbar-expand-xl">
-          <!--<script>
-            var navbarStyle = localStorage.getItem("navbarStyle");
-            if (navbarStyle && navbarStyle !== 'transparent') {
-              document.querySelector('.navbar-vertical').classList.add(`navbar-${navbarStyle}`);
-            }
-          </script>-->
-          <div class="d-flex align-items-center">
-            <div class="toggle-icon-wrapper">
-
-              <button class="btn navbar-toggler-humburger-icon navbar-vertical-toggle" data-bs-toggle="tooltip" data-bs-placement="left" title="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
-
-            </div><a class="navbar-brand" href="/">
-              <div class="d-flex align-items-center py-3">
-			  
-					<?php 
-							echo $this->get_logo(); 
-					?>
-					</span>
-              </div>
-            </a>
-          </div>
-          <div class="collapse navbar-collapse" id="navbarVerticalCollapse">
-            <div class="navbar-vertical-content scrollbar">
-              <ul class="navbar-nav flex-column mb-3" id="navbarVerticalNav">
-                
-
-                <li class="nav-item">
-                  <!-- label-->
-				  <!--
-                  <div class="row navbar-vertical-label-wrapper mt-3 mb-2">
-                    <div class="col-auto navbar-vertical-label">Documentation
-                    </div>
-                    <div class="col ps-0">
-                      <hr class="mb-0 navbar-vertical-divider" />
-                    </div>
-                  </div>-->
-                  			<?php
-
-							
-							$iterate_menu = $admin_menu;
-							foreach ($admin_menu as $menu_id=>$menu_info){	
-								if(!$menu_info['parent']){
-									if($menu_info['currentmain']){
-										if($menu_info['has_subs']){
-											echo '<!-- parent pages--><a class="nav-link dropdown-indicator" href="#'.str_replace(' ', '_', $menu_info['display']).'" role="button" data-bs-toggle="collapse" aria-expanded="false" aria-controls="'.str_replace(' ', '_', $menu_info['display']).'">
-												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
-												</div>
-											  </a>';
-											echo '<ul class="nav collapse show" id="'.str_replace(' ', '_', $menu_info['display']).'">';
-											foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
-												if($iterate_menu_info['parent'] == $menu_id){
-													if($iterate_menu_info['currentsub']){
-														echo '<li class="nav-item"><a class="nav-link active" title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'"><div class="d-flex align-items-center"><span class="nav-link-text ps-1">'.$iterate_menu_info['display'].'</span>
-														</div></a></li>';
-													}
-													else{
-														echo '<li class="nav-item"><a class="nav-link" title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'"><div class="d-flex align-items-center"><span class="nav-link-text ps-1">'.$iterate_menu_info['display'].'</span>
-														</div></a></li>';								
-													}
-												}
-											}
-											echo '</ul>';
-										}
-										else{
-												echo '<!-- parent pages--><a class="nav-link " href="'.$menu_info['defaultpage'].'" role="button" data-bs-toggle="collapse" aria-expanded="false" aria-controls="'.$menu_info['display'].'">
-												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
-												</div>
-											  </a>';	
-										}
-									}
-									else{
-										if($menu_info['has_subs']){
-											echo '<!-- parent pages--><a class="nav-link dropdown-indicator" href="#'.str_replace(' ', '_', $menu_info['display']).'" role="button" data-bs-toggle="collapse" aria-expanded="false" aria-controls="'.str_replace(' ', '_', $menu_info['display']).'">
-												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
-												</div>
-											  </a>';
-											echo '<ul class="nav collapse" id="'.str_replace(' ', '_', $menu_info['display']).'">';
-											foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
-												if($iterate_menu_info['parent'] == $menu_id){
-													if($iterate_menu_info['currentsub']){
-														echo '<li class="nav-item"><a class="nav-link active" title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'"><div class="d-flex align-items-center"><span class="nav-link-text ps-1">'.$iterate_menu_info['display'].'</span>
-														</div></a></li>';
-													}
-													else{
-														echo '<li class="nav-item"><a class="nav-link" title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'"><div class="d-flex align-items-center"><span class="nav-link-text ps-1">'.$iterate_menu_info['display'].'</span>
-														</div></a></li>';								
-													}
-												}
-											}
-											echo '</ul>';
-																		}
-										else{
-												echo '<!-- parent pages--><a class="nav-link" href="'.$menu_info['defaultpage'].'" role="button" >
-												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
-												</div>
-											  </a>';
-												
-										}
-									}
-								}		
-							}
-							
-							
-							?>
-
-                  
-                  
-                </li>
-              </ul>
-              
-            </div>
-          </div>
-        </nav>		
-		<?php
 		
+		$this->vertical_menu($admin_menu);
 	}
 
 

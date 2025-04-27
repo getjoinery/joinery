@@ -18,13 +18,13 @@
 		),
 	);
 	$page->public_header($hoptions);
-	echo PublicPage::BeginPage('Contact Preferences', $hoptions);
+	echo PublicPage::BeginPage('Change Contact Preferences', $hoptions);
 
 	
-	echo PublicPage::tab_menu($page_vars['tab_menus']);
+	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Change Contact Preferences');
 	
              
-	echo '<p>You can opt-out of mailing lists, but course or event emails cannot be disabled.  If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p><br>';
+	echo '<p>If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p><br>';
 
 	/*
 	foreach($page_vars['display_messages'] AS $display_message) {

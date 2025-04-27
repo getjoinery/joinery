@@ -99,17 +99,14 @@
 	<?php
 
 		$page->end_box();
+		
 	?>
-	<nav class="uk-navbar-container" uk-navbar>
-		<div class="uk-navbar-left">
-			<ul class="uk-navbar-nav">
-				<li class="uk-parent"><a href="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>">Registrants</a></li>
-				<li class="uk-active"><a href="#">Sessions</a></li>
-				<li><a href=""></a></li>
-			</ul>
-		</div>
-	</nav>
+	<ul class="nav nav-tabs">
+	  <li class="nav-item"><a class="nav-link " id="home-tab" href="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>"  aria-selected="false">Registrants</a></li>
+	  <li class="nav-item"><a class="nav-link active" id="profile-tab" href="#" role="tab" aria-selected="true">Sessions</a></li>
+	</ul>
 	<?php
+
 
 
 	//WAITING LIST

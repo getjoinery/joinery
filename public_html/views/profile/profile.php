@@ -16,7 +16,7 @@
 	);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPage::BeginPage('My Profile', $hoptions);
+	//echo PublicPage::BeginPage('My Profile', $hoptions);
 	
 
 	foreach($page_vars['display_messages'] AS $display_message) {
@@ -39,96 +39,410 @@
 		}			
 	} 
 	?>
-
-
-
-
-
-    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
-      <h1 class="sr-only">Profile</h1>
-      <!-- Main 3 column grid -->
-      <div class="grid grid-cols-1 gap-4 items-start lg:grid-cols-3 lg:gap-8">
-        <!-- Left column -->
-        <div class="grid grid-cols-1 gap-4 lg:col-span-2">
-          <!-- Welcome panel -->
-          <section aria-labelledby="profile-overview-title">
-            
-			
-			
-			
-			
-			<div class="rounded-lg bg-white overflow-hidden shadow">
-              <h2 class="sr-only" id="profile-overview-title">Profile Overview</h2>
-              <div class="bg-white p-6">
-                <div class="sm:flex sm:items-center sm:justify-between">
-                  <div class="sm:flex sm:space-x-5">
-					<!--
-                    <div class="flex-shrink-0">
-                      <img class="mx-auto h-20 w-20 rounded-full" src="https://images.unsplash.com/photo-1550525811-e5869dd03032?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
-                    </div>
-					-->
 	
 
+      
 	
-					
-                    <div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
-                      <p class="text-xl font-bold text-gray-900 sm:text-2xl"><?php echo htmlspecialchars($page_vars['user']->display_name()); ?></p>
-                      <!--<p class="text-sm font-medium text-gray-600"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>-->
+	
+	<div class="row g-3">
+		<div class="card mb-3"><img class="card-img-top" src="../../assets/img/generic/13.jpg" alt="" />
+            <div class="card-body">
+              <div class="row justify-content-between align-items-center">
+                <div class="col">
+                  <div class="d-flex">
+                    <!--<div class="calendar me-2"><span class="calendar-month">Dec</span><span class="calendar-day">31 </span></div>-->
+                    <div class="flex-1 fs-10">
+                      <!--<h5 class="fs-9">Your Feed</h5>-->
 					  
-
+					  <h4 class="mb-1">Your Feed
+					  </h4>
+					  <!--<h5 class="fs-9 fw-normal">Senior Software Engineer at Technext Limited</h5>
+					  <p class="text-500">New York, USA</p>-->
+                      <!--<p class="mb-0">by <a href="#!">Boston Harbor Now</a></p><span class="fs-9 text-warning fw-semi-bold">$49.99 – $89.99</span>-->
                     </div>
-                  </div>
-                  <div class="mt-5 flex justify-center sm:mt-0">
-                    <a href="/profile/account_edit" class="flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                      Edit profile
-                    </a>
                   </div>
                 </div>
+                <div class="col-md-auto mt-4 mt-md-0">
+                  <!--<button class="btn btn-falcon-default btn-sm me-2" type="button"><span class="fas fa-heart text-danger me-1"></span>235</button>
+                  <button class="btn btn-falcon-default btn-sm me-2" type="button"><span class="fas fa-share-alt me-1"></span>Share</button>-->
+                  <a href="/profile/account_edit"><button class="btn btn-falcon-primary btn-sm px-4 px-sm-5" type="button">Edit Account</button></a>
+                </div>
               </div>
+            </div>
+          </div>
+	 </div>
+	
+	
+	
+	
+		<div class="row g-3">
+            <div class="col-lg-8">
+              
+			  <div class="card mb-3">
+                <div class="card-header bg-body-tertiary overflow-hidden">
+                  <div class="d-flex align-items-center">
+                    <div class="avatar avatar-m">
+                      <img class="rounded-circle" src="../../assets/img/team/1.jpg" alt="" />
 
+                    </div>
+                    <div class="flex-1 ms-2">
+                      <h5 class="mb-0 fs-9">Create post</h5>
+                    </div>
+                  </div>
+                </div>
+				
+                <div class="card-body p-0">
+                  <form>
+                    <textarea class="shadow-none form-control rounded-0 resize-none px-x1 border-y-0 border-200" placeholder="What do you want to talk about?" rows="4"></textarea>
+                    <div class="d-flex align-items-center ps-x1 border border-200">
+                      <label class="text-nowrap mb-0 me-2" for="hash-tags"><span class="fas fa-plus me-1 fs-11"></span><span class="fw-medium fs-10">Add hashtag</span></label>
+                      <input class="form-control border-0 fs-10 shadow-none" id="hash-tags" type="text" placeholder="Help the right person to see" />
+                    </div>
+                    <div class="row g-0 justify-content-between mt-3 px-x1 pb-3">
+                      <div class="col">
+                        <button class="btn btn-tertiary btn-sm rounded-pill shadow-none d-inline-flex align-items-center fs-10 mb-0 me-1" type="button"><img class="cursor-pointer" src="../../assets/img/icons/spot-illustrations/image.svg" width="17" alt="" /><span class="ms-2 d-none d-md-inline-block">Image</span></button>
+                        <button class="btn btn-tertiary btn-sm rounded-pill shadow-none d-inline-flex align-items-center fs-10 me-1" type="button"><img class="cursor-pointer" src="../../assets/img/icons/spot-illustrations/calendar.svg" width="17" alt="" /><span class="ms-2 d-none d-md-inline-block">Event</span></button>
+                        <button class="btn btn-tertiary btn-sm rounded-pill shadow-none d-inline-flex align-items-center fs-10 me-1" type="button"><img class="cursor-pointer" src="../../assets/img/icons/spot-illustrations/location.svg" width="17" alt="" /><span class="ms-2 d-none d-md-inline-block text-nowrap">Check in</span></button>
+                      </div>
+                      <div class="col-auto">
+                        <div class="dropdown d-inline-block me-1">
+                          <button class="btn btn-sm dropdown-toggle px-1" id="dropdownMenuButton" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span class="fas fa-globe-americas"></span></button>
+                          <div class="dropdown-menu dropdown-menu-end" aria-labelledby="dropdownMenuButton"><a class="dropdown-item" href="#">Public</a><a class="dropdown-item" href="#">Private</a><a class="dropdown-item" href="#">Draft</a></div>
+                        </div>
+                        <button class="btn btn-primary btn-sm px-4 px-sm-5" type="submit">Share</button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+			  
+              <div class="card mb-3">
+                <div class="card-header bg-body-tertiary">
+                  <div class="row justify-content-between">
+                    <div class="col">
+                      <div class="d-flex">
+                        <div class="avatar avatar-2xl status-online">
+                          <img class="rounded-circle" src="../../assets/img/team/4.jpg" alt="" />
 
+                        </div>
+                        <div class="flex-1 align-self-center ms-2">
+                          <p class="mb-1 lh-1"><a class="fw-semi-bold" href="../../pages/user/profile.html">Rowan Atkinson</a> shared an <a href="#!">album</a></p>
+                          <p class="mb-0 fs-10">11 hrs &bull; Consett, UK &bull; <span class="fas fa-globe-americas"></span></p>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-auto">
+                      <div class="dropdown font-sans-serif btn-reveal-trigger">
+                        <button class="btn btn-link text-600 btn-sm dropdown-toggle dropdown-caret-none btn-reveal" type="button" id="post-album-action" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span class="fas fa-ellipsis-h fs-10"></span></button>
+                        <div class="dropdown-menu dropdown-menu-end py-3" aria-labelledby="post-album-action"><a class="dropdown-item" href="#!">View</a><a class="dropdown-item" href="#!">Edit</a><a class="dropdown-item" href="#!">Report</a>
+                          <div class="dropdown-divider"></div><a class="dropdown-item text-warning" href="#!">Archive</a><a class="dropdown-item text-danger" href="#!">Delete </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-body overflow-hidden">
+                  <p>Rowan Sebastian Atkinson CBE is an English actor, comedian and screenwriter best known for his work on the sitcoms Blackadder and Mr. Bean.</p>
+                  <div class="row mx-n1">
+                    <div class="col-6 p-1"><a href="../../assets/img/generic/4.jpg" data-gallery="gallery-1"><img class="img-fluid rounded" src="../../assets/img/generic/4.jpg" alt="" /></a></div>
+                    <div class="col-6 p-1"><a href="../../assets/img/generic/5.jpg" data-gallery="gallery-1"><img class="img-fluid rounded" src="../../assets/img/generic/5.jpg" alt="" /></a></div>
+                    <div class="col-4 p-1"><a href="../../assets/img/gallery/4.jpg" data-gallery="gallery-1"><img class="img-fluid rounded" src="../../assets/img/gallery/4.jpg" alt="" /></a></div>
+                    <div class="col-4 p-1"><a href="../../assets/img/gallery/5.jpg" data-gallery="gallery-1"><img class="img-fluid rounded" src="../../assets/img/gallery/5.jpg" alt="" /></a></div>
+                    <div class="col-4 p-1"><a href="../../assets/img/gallery/3.jpg" data-gallery="gallery-1"><img class="img-fluid rounded" src="../../assets/img/gallery/3.jpg" alt="" /></a></div>
+                  </div>
+                </div>
+                <div class="card-footer bg-body-tertiary pt-0">
+                  <div class="border-bottom border-200 fs-10 py-3"><a class="text-700" href="#!">345 Likes</a> &bull; <a class="text-700" href="#!">34 Comments</a>
+                  </div>
+                  <div class="row g-0 fw-semi-bold text-center py-2 fs-10">
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3" href="#!"><img src="../../assets/img/icons/spot-illustrations/like-active.png" width="20" alt="" /><span class="ms-1">Like</span></a></div>
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3" href="#!"><img src="../../assets/img/icons/spot-illustrations/comment-active.png" width="20" alt="" /><span class="ms-1">Comment</span></a></div>
+                    <div class="col-auto d-flex align-items-center"><a class="rounded-2 text-700 d-flex align-items-center" href="#!"><img src="../../assets/img/icons/spot-illustrations/share-inactive.png" width="20" alt="" /><span class="ms-1">Share</span></a></div>
+                  </div>
+                  <form class="d-flex align-items-center border-top border-200 pt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/3.jpg" alt="" />
 
-  <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
-    <dl class="grid grid-cols-1 gap-4 gap-y-8 sm:grid-cols-2">
-      <div class="sm:col-span-1">
-        <dt class="text-sm font-medium text-gray-500">
-          Email
-        </dt>
-        <dd class="mt-1 text-sm text-gray-900">
-          <?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?>
-        </dd>
-      </div>
-      <div class="sm:col-span-1">
-        <dt class="text-sm font-medium text-gray-500">
-          Phone
-        </dt>
-        <dd class="mt-1 text-sm text-gray-900">
-          <?php echo $page_vars['phone_number']->get_phone_string(); ?>
-        </dd>
-      </div>
-      <div class="sm:col-span-1">
-        <dt class="text-sm font-medium text-gray-500">
-          Address
-        </dt>
-        <dd class="mt-1 text-sm text-gray-900">
-          <?php echo $page_vars['address']->get_address_string(', '); ?>
-        </dd>
-      </div>
-      <div class="sm:col-span-1">
-        <dt class="text-sm font-medium text-gray-500">
-          Timezone
-        </dt>
-        <dd class="mt-1 text-sm text-gray-900">
-          <?php echo $page_vars['user']->get('usr_timezone'); ?>
-        </dd>
-      </div>
-	  
-      <div class="sm:col-span-2">
-        <dt class="text-sm font-medium text-gray-500">
-          Mailing List Subscriptions
-        </dt>
-        <dd class="mt-1 text-sm text-gray-900">
-          <?php 
+                    </div>
+                    <input class="form-control rounded-pill ms-2 fs-10" type="text" placeholder="Write a comment..." />
+                  </form>
+                  <div class="d-flex mt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/4.jpg" alt="" />
+
+                    </div>
+                    <div class="flex-1 ms-2 fs-10">
+                      <p class="mb-1 bg-200 rounded-3 p-2"><a class="fw-semi-bold" href="../../pages/user/profile.html">Rowan Atkinson</a> She starred as Jane Porter in The <a href="#!">@Legend of Tarzan (2016)</a>, Tanya Vanderpoel in Whiskey Tango Foxtrot (2016) and as DC comics villain Harley Quinn in Suicide Squad (2016), for which she was nominated for a Teen Choice Award, and many other awards.</p>
+                      <div class="px-2"><a href="#!">Like</a> &bull; <a href="#!">Reply</a> &bull; 23min </div>
+                    </div>
+                  </div>
+                  <div class="d-flex mt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/3.jpg" alt="" />
+
+                    </div>
+                    <div class="flex-1 ms-2 fs-10">
+                      <p class="mb-1 bg-200 rounded-3 p-2"><a class="fw-semi-bold" href="../../pages/user/profile.html">Jessalyn Gilsig</a> Jessalyn Sarah Gilsig is a Canadian-American actress known for her roles in television series, e.g., as Lauren Davis in Boston Public, Gina Russo in Nip/Tuck, Terri Schuester in Glee, and as Siggy Haraldson on the History Channel series Vikings. 🏆</p>
+                      <div class="px-2"><a href="#!">Like</a> &bull; <a href="#!">Reply</a> &bull; 3hrs </div>
+                    </div>
+                  </div><a class="fs-10 text-700 d-inline-block mt-2" href="#!">Load more comments (2 of 34)</a>
+                </div>
+              </div>
+			  
+              <div class="card mb-3">
+                <div class="card-header bg-body-tertiary">
+                  <div class="row justify-content-between">
+                    <div class="col">
+                      <div class="d-flex">
+                        <div class="avatar avatar-2xl">
+                          <img class="rounded-circle" src="../../assets/img/team/15.jpg" alt="" />
+
+                        </div>
+                        <div class="flex-1 align-self-center ms-2">
+                          <p class="mb-1 lh-1"><a class="fw-semi-bold" href="../../pages/user/profile.html">Margot Robbie</a></p>
+                          <p class="mb-0 fs-10">Yesterday &bull; Dalby &bull; <span class="fas fa-users"></span></p>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-auto">
+                      <div class="dropdown font-sans-serif btn-reveal-trigger">
+                        <button class="btn btn-link text-600 btn-sm dropdown-toggle dropdown-caret-none btn-reveal" type="button" id="post-article-action" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span class="fas fa-ellipsis-h fs-10"></span></button>
+                        <div class="dropdown-menu dropdown-menu-end py-3" aria-labelledby="post-article-action"><a class="dropdown-item" href="#!">View</a><a class="dropdown-item" href="#!">Edit</a><a class="dropdown-item" href="#!">Report</a>
+                          <div class="dropdown-divider"></div><a class="dropdown-item text-warning" href="#!">Archive</a><a class="dropdown-item text-danger" href="#!">Delete </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <p>Margot Elise Robbie was born on July 2, 1990 in Dalby, Queensland, Australia to Scottish parents. Her mother, Sarie Kessler, is a physiotherapist, and her father, is Doug Robbie. She comes from a family of four children, having two brothers and one sister. She graduated from Somerset College in Mudgeeraba, Queensland, Australia, a suburb in the Gold Coast hinterland of South East Queensland, where she and her siblings were raised by their mother and spent much of her time at the farm belonging to her grandparents. In her late teens, she moved to Melbourne, Victoria, Australia to pursue an acting career.</p>
+                  <p>From 2008-2010, Robbie played the character of Donna Freedman in the long-running Australian soap opera, Neighbours (1985), for which she was nominated for two Logie Awards. She set off to pursue Hollywood opportunities, quickly landing the role of Laura Cameron on the short-lived ABC series, Pan Am (2011). She made her big screen debut in the film, About Time (2013).</p>
+                  <p>Robbie rose to fame co-starring alongside Leonardo DiCaprio, portraying the role of Naomi Lapaglia in Martin Scorsese's Oscar-nominated film, The Wolf of Wall Street (2013). She was nominated for a Breakthrough Performance MTV Movie Award, and numerous other awards.</p>
+                  <p>In 2014, Robbie founded her own production company, LuckyChap Entertainment. She also appeared in the World War II romantic-drama film, Suite Française (2014). She starred in Focus (2015) and Z for Zachariah (2015), and made a cameo in The Big Short (2015).</p>
+                  <p>In 2016, she married Tom Ackerley in Byron Bay, New South Wales, Australia.</p>
+                  <p>She starred as Jane Porter in The Legend of Tarzan (2016), Tanya Vanderpoel in Whiskey Tango Foxtrot (2016) and as DC comics villain Harley Quinn in Suicide Squad (2016), for which she was nominated for a Teen Choice Award, and many other awards.</p>
+                  <p>She portrayed figure skater Tonya Harding in the biographical film I, Tonya (2017), receiving critical acclaim and a Golden Globe Award nomination for Best Actress - Motion Picture Comedy or Musical.</p>
+                </div>
+                <div class="card-footer bg-body-tertiary pt-0">
+                  <div class="border-bottom border-200 fs-10 py-3"><a class="text-700" href="#!">34 Comments</a>
+                  </div>
+                  <div class="row g-0 fw-semi-bold text-center py-2 fs-10">
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3 text-700" href="#!"><img src="../../assets/img/icons/spot-illustrations/like-inactive.png" width="20" alt="" /><span class="ms-1">Like</span></a></div>
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3" href="#!"><img src="../../assets/img/icons/spot-illustrations/comment-active.png" width="20" alt="" /><span class="ms-1">Comment</span></a></div>
+                    <div class="col-auto d-flex align-items-center"><a class="rounded-2 text-700 d-flex align-items-center" href="#!"><img src="../../assets/img/icons/spot-illustrations/share-inactive.png" width="20" alt="" /><span class="ms-1">Share</span></a></div>
+                  </div>
+                  <form class="d-flex align-items-center border-top border-200 pt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/3.jpg" alt="" />
+
+                    </div>
+                    <input class="form-control rounded-pill ms-2 fs-10" type="text" placeholder="Write a comment..." />
+                  </form>
+                  <div class="d-flex mt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/4.jpg" alt="" />
+
+                    </div>
+                    <div class="flex-1 ms-2 fs-10">
+                      <p class="mb-1 bg-200 rounded-3 p-2"><a class="fw-semi-bold" href="../../pages/user/profile.html">Rowan Atkinson</a> She starred as Jane Porter in The <a href="#!">@Legend of Tarzan (2016)</a>, Tanya Vanderpoel in Whiskey Tango Foxtrot (2016) and as DC comics villain Harley Quinn in Suicide Squad (2016), for which she was nominated for a Teen Choice Award, and many other awards.</p>
+                      <div class="px-2"><a href="#!">Like</a> &bull; <a href="#!">Reply</a> &bull; 23min </div>
+                    </div>
+                  </div>
+                  <div class="d-flex mt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/3.jpg" alt="" />
+
+                    </div>
+                    <div class="flex-1 ms-2 fs-10">
+                      <p class="mb-1 bg-200 rounded-3 p-2"><a class="fw-semi-bold" href="../../pages/user/profile.html">Jessalyn Gilsig</a> Jessalyn Sarah Gilsig is a Canadian-American actress known for her roles in television series, e.g., as Lauren Davis in Boston Public, Gina Russo in Nip/Tuck, Terri Schuester in Glee, and as Siggy Haraldson on the History Channel series Vikings. 🏆</p>
+                      <div class="px-2"><a href="#!">Like</a> &bull; <a href="#!">Reply</a> &bull; 3hrs </div>
+                    </div>
+                  </div><a class="fs-10 text-700 d-inline-block mt-2" href="#!">Load more comments (2 of 34)</a>
+                </div>
+              </div>
+			  
+              <div class="card mb-3"><img class="card-img-top" src="../../assets/img/generic/13.jpg" alt="" />
+                <div class="card-body overflow-hidden">
+                  <div class="row justify-content-between align-items-center">
+                    <div class="col">
+                      <div class="d-flex">
+                        <div class="calendar me-2"><span class="calendar-month">Dec</span><span class="calendar-day">31 </span></div>
+                        <div class="flex-1 fs-10">
+                          <h5 class="fs-9"><a href="../../app/events/event-detail.html">FREE New Year's Eve Midnight Harbor Fireworks</a></h5>
+                          <p class="mb-0">by <a href="#!">Boston Harbor Now</a></p><span class="fs-9 text-warning fw-semi-bold">$49.99 – $89.99</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-md-auto d-none d-md-block">
+                      <button class="btn btn-falcon-default btn-sm px-4" type="button">Register</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-footer bg-body-tertiary pt-0">
+                  <div class="row g-0 fw-semi-bold text-center py-2 fs-10">
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3 text-700" href="#!"><img src="../../assets/img/icons/spot-illustrations/like-inactive.png" width="20" alt="" /><span class="ms-1">Like</span></a></div>
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3 text-700" href="#!"><img src="../../assets/img/icons/spot-illustrations/comment-inactive.png" width="20" alt="" /><span class="ms-1">Comment</span></a></div>
+                    <div class="col-auto d-flex align-items-center"><a class="rounded-2 text-700 d-flex align-items-center" href="#!"><img src="../../assets/img/icons/spot-illustrations/share-inactive.png" width="20" alt="" /><span class="ms-1">Share</span></a></div>
+                  </div>
+                  <form class="d-flex align-items-center border-top border-200 pt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/3.jpg" alt="" />
+
+                    </div>
+                    <input class="form-control rounded-pill ms-2 fs-10" type="text" placeholder="Write a comment..." />
+                  </form>
+                </div>
+              </div>
+			  
+              <div class="card mb-3">
+                <div class="card-header bg-body-tertiary">
+                  <div class="row justify-content-between">
+                    <div class="col">
+                      <div class="d-flex">
+                        <div class="avatar avatar-2xl">
+                          <img class="rounded-circle" src="../../assets/img/team/10.jpg" alt="" />
+
+                        </div>
+                        <div class="flex-1 align-self-center ms-2">
+                          <p class="mb-1 lh-1"><a class="fw-semi-bold" href="../../pages/user/profile.html">Leonardo DiCaprio</a> shared a <a href="#!">photo</a></p>
+                          <p class="mb-0 fs-10">13 Jan &bull; LA, US &bull; <span class="fas fa-globe-americas"></span></p>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-auto">
+                      <div class="dropdown font-sans-serif btn-reveal-trigger">
+                        <button class="btn btn-link text-600 btn-sm dropdown-toggle dropdown-caret-none btn-reveal" type="button" id="post-image-action" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span class="fas fa-ellipsis-h fs-10"></span></button>
+                        <div class="dropdown-menu dropdown-menu-end py-3" aria-labelledby="post-image-action"><a class="dropdown-item" href="#!">View</a><a class="dropdown-item" href="#!">Edit</a><a class="dropdown-item" href="#!">Report</a>
+                          <div class="dropdown-divider"></div><a class="dropdown-item text-warning" href="#!">Archive</a><a class="dropdown-item text-danger" href="#!">Delete </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-body overflow-hidden"><a href="../../assets/img/generic/11.jpg" data-gallery="gallery-2"><img class="img-fluid rounded" src="../../assets/img/generic/11.jpg" alt="" /></a></div>
+                <div class="card-footer bg-body-tertiary pt-0">
+                  <div class="row g-0 fw-semi-bold text-center py-2 fs-10">
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3 text-700" href="#!"><img src="../../assets/img/icons/spot-illustrations/like-inactive.png" width="20" alt="" /><span class="ms-1">Like</span></a></div>
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3 text-700" href="#!"><img src="../../assets/img/icons/spot-illustrations/comment-inactive.png" width="20" alt="" /><span class="ms-1">Comment</span></a></div>
+                    <div class="col-auto d-flex align-items-center"><a class="rounded-2 text-700 d-flex align-items-center" href="#!"><img src="../../assets/img/icons/spot-illustrations/share-inactive.png" width="20" alt="" /><span class="ms-1">Share</span></a></div>
+                  </div>
+                  <form class="d-flex align-items-center border-top border-200 pt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/3.jpg" alt="" />
+
+                    </div>
+                    <input class="form-control rounded-pill ms-2 fs-10" type="text" placeholder="Write a comment..." />
+                  </form>
+                </div>
+              </div>
+              <div class="card mb-3">
+                <div class="card-header bg-body-tertiary">
+                  <div class="row justify-content-between">
+                    <div class="col">
+                      <div class="d-flex">
+                        <div class="avatar avatar-2xl">
+                          <img class="rounded-circle" src="../../assets/img/team/8.jpg" alt="" />
+
+                        </div>
+                        <div class="flex-1 align-self-center ms-2">
+                          <p class="mb-1 lh-1"><a class="fw-semi-bold" href="../../pages/user/profile.html">Johnny Depp</a> shared a <a href="#!">video</a></p>
+                          <p class="mb-0 fs-10">Just Now &bull; Paris &bull; <span class="fas fa-users"></span></p>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-auto">
+                      <div class="dropdown font-sans-serif btn-reveal-trigger">
+                        <button class="btn btn-link text-600 btn-sm dropdown-toggle dropdown-caret-none btn-reveal" type="button" id="post-video-action" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span class="fas fa-ellipsis-h fs-10"></span></button>
+                        <div class="dropdown-menu dropdown-menu-end py-3" aria-labelledby="post-video-action"><a class="dropdown-item" href="#!">View</a><a class="dropdown-item" href="#!">Edit</a><a class="dropdown-item" href="#!">Report</a>
+                          <div class="dropdown-divider"></div><a class="dropdown-item text-warning" href="#!">Archive</a><a class="dropdown-item text-danger" href="#!">Delete </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <p>See the sport of surfing as it’s never been captured before in John Florence and Blake Vincent Kueny’s second signature release, in association with the award-winning film studio, Brain Farm. The first surf film shot entirely in 4K, View From a Blue Moon. 🤩 🌎 🎬</p>
+                  <div>
+                    <div class="player" data-plyr-provider="youtube" data-plyr-embed-id="bTqVqk7FSmY"></div>
+                  </div>
+                </div>
+                <div class="card-footer bg-body-tertiary pt-0">
+                  <div class="row g-0 fw-semi-bold text-center py-2 fs-10">
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3 text-700" href="#!"><img src="../../assets/img/icons/spot-illustrations/like-inactive.png" width="20" alt="" /><span class="ms-1">Like</span></a></div>
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3 text-700" href="#!"><img src="../../assets/img/icons/spot-illustrations/comment-inactive.png" width="20" alt="" /><span class="ms-1">Comment</span></a></div>
+                    <div class="col-auto d-flex align-items-center"><a class="rounded-2 text-700 d-flex align-items-center" href="#!"><img src="../../assets/img/icons/spot-illustrations/share-inactive.png" width="20" alt="" /><span class="ms-1">Share</span></a></div>
+                  </div>
+                  <form class="d-flex align-items-center border-top border-200 pt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/3.jpg" alt="" />
+
+                    </div>
+                    <input class="form-control rounded-pill ms-2 fs-10" type="text" placeholder="Write a comment..." />
+                  </form>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header bg-body-tertiary">
+                  <div class="row justify-content-between">
+                    <div class="col">
+                      <div class="d-flex">
+                        <div class="avatar avatar-2xl status-online">
+                          <img class="rounded-circle" src="../../assets/img/team/17.jpg" alt="" />
+
+                        </div>
+                        <div class="flex-1 align-self-center ms-2">
+                          <p class="mb-1 lh-1"><a class="fw-semi-bold" href="../../pages/user/profile.html">Emilia Clarke</a> shared a <a href="#!">url</a></p>
+                          <p class="mb-0 fs-10">14 Feb &bull; London &bull; <span class="fas fa-globe-americas"></span></p>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-auto">
+                      <div class="dropdown font-sans-serif btn-reveal-trigger">
+                        <button class="btn btn-link text-600 btn-sm dropdown-toggle dropdown-caret-none btn-reveal" type="button" id="post-url-action" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span class="fas fa-ellipsis-h fs-10"></span></button>
+                        <div class="dropdown-menu dropdown-menu-end py-3" aria-labelledby="post-url-action"><a class="dropdown-item" href="#!">View</a><a class="dropdown-item" href="#!">Edit</a><a class="dropdown-item" href="#!">Report</a>
+                          <div class="dropdown-divider"></div><a class="dropdown-item text-warning" href="#!">Archive</a><a class="dropdown-item text-danger" href="#!">Delete </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-body overflow-hidden">
+                  <p>Mount Everest, known in Nepali as Sagarmatha and in Tibetan as Chomolungma, is Earth's highest mountain above sea level, located in the Mahalangur Himal sub-range of the Himalayas. The international border between Nepal and China runs across its summit point.</p><a class="text-decoration-none" href="#!"><img class="img-fluid rounded" src="../../assets/img/generic/12.jpg" alt="" /><small class="text-uppercase text-700">en.wikipedia.org</small>
+                    <h6 class="fs-9 mb-0">Mount Everest: Facts & Location of World's Highest Mountain</h6>
+                    <p class="fs-10 mb-0 text-700">The Himalayan range has many of the Earth's highest peaks, including the highest, Mount Everest...</p>
+                  </a>
+                </div>
+                <div class="card-footer bg-body-tertiary pt-0">
+                  <div class="border-bottom border-200 fs-10 py-3"><a class="text-700" href="#!">345 Likes</a>
+                  </div>
+                  <div class="row g-0 fw-semi-bold text-center py-2 fs-10">
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3" href="#!"><img src="../../assets/img/icons/spot-illustrations/like-active.png" width="20" alt="" /><span class="ms-1">Like</span></a></div>
+                    <div class="col-auto"><a class="rounded-2 d-flex align-items-center me-3 text-700" href="#!"><img src="../../assets/img/icons/spot-illustrations/comment-inactive.png" width="20" alt="" /><span class="ms-1">Comment</span></a></div>
+                    <div class="col-auto d-flex align-items-center"><a class="rounded-2 text-700 d-flex align-items-center" href="#!"><img src="../../assets/img/icons/spot-illustrations/share-inactive.png" width="20" alt="" /><span class="ms-1">Share</span></a></div>
+                  </div>
+                  <form class="d-flex align-items-center border-top border-200 pt-3">
+                    <div class="avatar avatar-xl">
+                      <img class="rounded-circle" src="../../assets/img/team/3.jpg" alt="" />
+
+                    </div>
+                    <input class="form-control rounded-pill ms-2 fs-10" type="text" placeholder="Write a comment..." />
+                  </form>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4">
+			
+			
+			  <div class="card mb-3">
+				<div class="card-body">
+				  <div class="row">
+					<div class="col-lg-8">
+					  <h4 class="mb-1"> <?php echo htmlspecialchars($page_vars['user']->display_name()); ?><!--<span data-bs-toggle="tooltip" data-bs-placement="right" title="Verified"><small class="fa fa-check-circle text-primary" data-fa-transform="shrink-4 down-2"></small></span>-->
+					  </h4>
+					  <!--<h5 class="fs-9 fw-normal">Senior Software Engineer at Technext Limited</h5>-->
+					  <p class="text-500"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>
+					  <p class="text-500"><?php echo $page_vars['address']->get_address_string(', '); ?></p>
+					             <?php 
 			echo '<br>';
 			if(empty($page_vars['user_subscribed_list'])){
 				echo 'You are not subscribed to any mailing lists.<br>';
@@ -137,82 +451,28 @@
 				echo 'You are subscribed to the following lists: '.implode(', ', $page_vars['user_subscribed_list']).'<br>';
 			}
 			?>
-        </dd>
-      </div>
-      
-    </dl>
-  </div>
-
- 
-			  <!--
-              <div class="border-t border-gray-200 bg-gray-50 grid grid-cols-1 divide-y divide-gray-200 sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
-                <div class="px-6 py-5 text-sm font-medium text-center">
-                  <span class="text-gray-900">12</span>
-                  <span class="text-gray-600">Vacation days left</span>
+					  <button class="btn btn-falcon-primary btn-sm px-3" type="button">Edit Account</button>
+					  <!--<button class="btn btn-falcon-default btn-sm px-3 ms-2" type="button">Message</button>-->
+					  <div class="border-bottom border-dashed my-4 d-lg-none"></div>
+					</div>
+				  </div>
+				</div>
+			  </div>			
+			
+			
+			<?php
+			?>
+			
+              
+              <div class="card mb-3">
+                <div class="card-header bg-body-tertiary">
+                  <h5 class="mb-0">Events and Courses</h5>
                 </div>
-
-                <div class="px-6 py-5 text-sm font-medium text-center">
-                  <span class="text-gray-900">4</span>
-                  <span class="text-gray-600">Sick days left</span>
-                </div>
-
-                <div class="px-6 py-5 text-sm font-medium text-center">
-                  <span class="text-gray-900">2</span>
-                  <span class="text-gray-600">Personal days left</span>
-                </div>
-              </div>
-			  -->
-            </div>
-          </section>
-
-<?php /*
-<div>
-  <div class="sm:hidden">
-    <label for="tabs" class="sr-only">Select a tab</label>
-    <!-- Use an "onChange" listener to redirect the user to the selected tab URL. -->
-    <select id="tabs" name="tabs" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
-      <option <?php if(!$_REQUEST['tab']){ echo 'selected'; } ?>>Active Events</option>
-
-      <option <?php if($_REQUEST['tab'] == 'past'){ echo 'selected'; } ?>>Past Events</option>
-
-    </select>
-  </div>
-  <div class="hidden sm:block">
-    <div class="border-b border-gray-200">
-      <nav class="-mb-px flex space-x-8" aria-label="Tabs">
-        <!-- Current: "border-indigo-500 text-indigo-600", Default: "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" -->
-		<?php
-		$current_style = 'class="border-indigo-500 text-indigo-600 group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm" aria-current="page"';
-		$standard_style = 'class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm"';
-		?>
-        <a href="/profile/profile"  <?php if(!$_REQUEST['tab']){ echo $current_style; } else{ echo $standard_style; } ?>>
-          Active Events
-        </a>
-
-        <a href="/profile/profile?tab=past" <?php if($_REQUEST['tab'] == 'past'){ echo $current_style; } else{ echo $standard_style; } ?>>
-          Past Events
-        </a>
-      </nav>
-    </div>
-  </div>
-</div>
-*/
-?>
-
-          <!-- Actions panel -->
-          <section aria-labelledby="quick-links-title">
-            <div class="rounded-lg bg-gray-200 overflow-hidden shadow divide-y divide-gray-200 sm:divide-y-0 sm:grid  sm:gap-px">
-              <h2 class="sr-only" id="quick-links-title">Events</h2>
-
-
-                
-
-<div class="bg-white shadow overflow-hidden sm:rounded-md">
-  <ul role="list" class="divide-y divide-gray-200">
-    
-
-
-	<?php
+                <div class="card-body fs-10">
+				
+				
+				
+						<?php
 
 							if(!$page_vars['num_events']){
 									echo '<p class="mt-6 px-4 py-5 ">You have no event registrations.</p>';						
@@ -274,17 +534,17 @@
 									}
 
 									
-									?>			
-									<li>
-									  <a href="<?php echo $course_link; ?>" class="block hover:bg-gray-50">
-										<div class="px-4 py-4 sm:px-6">
-										  <div class="flex items-center justify-between">
-											<p class="text-sm font-medium text-indigo-600 truncate">
-											  <?php echo $event->get('evt_name'); ?>
-											</p>
-											<div class="ml-2 flex-shrink-0 flex">
-											  
-												<?php
+									?>
+									  <div class="d-flex btn-reveal-trigger">
+										<div class="calendar"><span class="calendar-month">Feb</span><span class="calendar-day">21</span></div>
+										<div class="flex-1 position-relative ps-3">
+										  <h6 class="fs-9 mb-0"><a href="<?php echo $course_link; ?>"><?php echo $event->get('evt_name'); ?></a></h6>
+										  <p class="mb-1">Organized by <a href="#!" class="text-700">University of Oxford</a></p>
+										  <?php if($time){ ?>
+										  <p class="text-1000 mb-0"><?php echo $time; ?></p>
+										  <?php } ?>
+										  
+										  												<?php
 												if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
 													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Expired</p>';
 												} 
@@ -305,135 +565,62 @@
 													}
 												}
 												?>
-											  
-											</div>
-										  </div>
-										  <div class="mt-2 sm:flex sm:justify-between">
-											<div class="sm:flex">
-												<?php if($time){ ?>
-											  <p class="flex items-center text-sm text-gray-500">
-											  <!-- Heroicon name: solid/calendar -->
-											  <svg class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-												<path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
-											  </svg>
-												<?php echo $time; ?>
-											  </p>
-												<?php } ?>
-											  </div>
-
-
-											<div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
-											
-											  <!-- Heroicon name: solid/calendar -->
-											  <!--
-											  <svg class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-												<path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
-											  </svg>
-											  -->
-											  <p>
-												<?php echo $actions; ?>
-												<!--<time datetime="2020-01-07">January 7, 2020</time>-->
-											  </p>
-											</div>
-										  </div>
+										  <p class="text-1000 mb-0">Duration: 6:00AM - 5:00PM</p>Place: Cambridge Boat Club, Cambridge
+										  <div class="border-bottom border-dashed my-3"></div>
 										</div>
-									  </a>
-									</li>			
+									  </div>
+
+										
 									<?php
 									
 								}
 							}
-	?>
+						?>				
+				
+				
+				
+				
+				
+				
+				
+				
 
-  </ul>
-</div>
-
-
-             
-           
-          </section>
-        </div>
-
-        <!-- Right column -->
-        <div class="grid grid-cols-1 gap-4">
-		
-		<?php /* ?>
-          <!-- Announcements -->
-          <section aria-labelledby="announcements-title">
-            <div class="rounded-lg bg-white overflow-hidden shadow">
-              <div class="p-6">
-                <h2 class="text-base font-medium text-gray-900" id="announcements-title">Announcements</h2>
-                <div class="flow-root mt-6">
-                  <ul role="list" class="-my-5 divide-y divide-gray-200">
-                    <li class="py-5">
-                      <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
-                        <h3 class="text-sm font-semibold text-gray-800">
-                          <a href="#" class="hover:underline focus:outline-none">
-                            <!-- Extend touch target to entire panel -->
-                            <span class="absolute inset-0" aria-hidden="true"></span>
-                            Office closed on July 2nd
-                          </a>
-                        </h3>
-                        <p class="mt-1 text-sm text-gray-600 line-clamp-2">
-                          Cum qui rem deleniti. Suscipit in dolor veritatis sequi aut. Vero ut earum quis deleniti. Ut a sunt eum cum ut repudiandae possimus. Nihil ex tempora neque cum consectetur dolores.
-                        </p>
-                      </div>
-                    </li>
-
-                    <li class="py-5">
-                      <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
-                        <h3 class="text-sm font-semibold text-gray-800">
-                          <a href="#" class="hover:underline focus:outline-none">
-                            <!-- Extend touch target to entire panel -->
-                            <span class="absolute inset-0" aria-hidden="true"></span>
-                            New password policy
-                          </a>
-                        </h3>
-                        <p class="mt-1 text-sm text-gray-600 line-clamp-2">
-                          Alias inventore ut autem optio voluptas et repellendus. Facere totam quaerat quam quo laudantium cumque eaque excepturi vel. Accusamus maxime ipsam reprehenderit rerum id repellendus rerum. Culpa cum vel natus. Est sit autem mollitia.
-                        </p>
-                      </div>
-                    </li>
-
-                    <li class="py-5">
-                      <div class="relative focus-within:ring-2 focus-within:ring-cyan-500">
-                        <h3 class="text-sm font-semibold text-gray-800">
-                          <a href="#" class="hover:underline focus:outline-none">
-                            <!-- Extend touch target to entire panel -->
-                            <span class="absolute inset-0" aria-hidden="true"></span>
-                            Office closed on July 2nd
-                          </a>
-                        </h3>
-                        <p class="mt-1 text-sm text-gray-600 line-clamp-2">
-                          Tenetur libero voluptatem rerum occaecati qui est molestiae exercitationem. Voluptate quisquam iure assumenda consequatur ex et recusandae. Alias consectetur voluptatibus. Accusamus a ab dicta et. Consequatur quis dignissimos voluptatem nisi.
-                        </p>
-                      </div>
-                    </li>
-                  </ul>
+                  <div class="d-flex btn-reveal-trigger">
+                    <div class="calendar"><span class="calendar-month">Dec</span><span class="calendar-day">16</span></div>
+                    <div class="flex-1 position-relative ps-3">
+                      <h6 class="fs-9 mb-0"><a href="../../app/events/event-detail.html">Folk Festival</a></h6>
+                      <p class="mb-1">Organized by <a href="#!" class="text-700">Harvard University</a></p>
+                      <p class="text-1000 mb-0">Time: 9:00AM</p>
+                      <p class="text-1000 mb-0">Location: Cambridge Masonic Hall Association</p>Place: Porter Square, North Cambridge
+                    </div>
+                  </div>
+				  
                 </div>
-                <div class="mt-6">
-                  <a href="#" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                    View all
-                  </a>
-                </div>
+                <div class="card-footer bg-body-tertiary p-0 border-top"><a class="btn btn-link d-block w-100" href="../../app/events/event-list.html">All Events<span class="fas fa-chevron-right ms-1 fs-11"></span></a></div>
               </div>
-            </div>
-          </section>
-		  
-		  <?php */ ?>
+
+
+
+
+
+
+
+
+
 
           <!-- Subscriptions -->
 		  <?php
 			if($page_vars['settings']->get_setting('products_active') && $page_vars['settings']->get_setting('subscriptions_active')){
 			?>
-          <section aria-labelledby="recent-hires-title">
-            <div class="rounded-lg bg-white overflow-hidden shadow">
-              <div class="p-6">
-                <h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Your Subscriptions</h2>
-                <div class="flow-root mt-6">
-                  <ul role="list" class="-my-5 divide-y divide-gray-200">
-				  
-					<?php
+              <div class="card mb-3">
+                <div class="card-header bg-body-tertiary">
+                  <h5 class="mb-0">Subscriptions</h5>
+                </div>
+                <div class="card-body fs-10">
+				
+				
+				
+						<?php
 						foreach($page_vars['subscriptions'] as $subscription){	
 								
 							if($subscription->get('odi_subscription_cancelled_time')){
@@ -449,179 +636,128 @@
 								
 							}
 							?>
-							<li class="py-4">
-							  <div class="flex items-center space-x-4">
-							  <!--
-								<div class="flex-shrink-0">
-								  <img class="h-8 w-8 rounded-full" src="https://images.unsplash.com/photo-1519345182560-3f2917c472ef?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
-								</div>
-								-->
-								<div class="flex-1 min-w-0">
-								  <p class="text-sm font-medium text-gray-900 truncate">
-									<?php echo '$'.$subscription->get('odi_price') .'/month'; ?>
-								  </p>
-								  
-								  <p class="text-sm text-gray-500 truncate">
-									<?php echo $status; ?>
-								  </p>
-								  
-								</div>
-								<?php
-								if($action){
-								?>
-								<div>
-								  <?php echo $action; ?>
-								</div>
-								<?php
-								}
-								?>
-							  </div>
-							</li>
+									  <div class="d-flex btn-reveal-trigger">
+										<div class="flex-1 position-relative ps-3">
+										  <h6 class="fs-9 mb-0"><a href="#"><?php echo '$'.$subscription->get('odi_price') .'/month'; ?></a></h6>
+										  <p class="mb-1">Organized by <a href="#!" class="text-700"><?php echo $status; ?></a></p>
+
+										  <p class="text-1000 mb-0"></p>
+	
+										  	<?php
+											if($action){
+												echo $action; 
+											}
+											?>
+										  <p class="text-1000 mb-0">Duration: 6:00AM - 5:00PM</p>Place: Cambridge Boat Club, Cambridge
+										  <div class="border-bottom border-dashed my-3"></div>
+										</div>
+									  </div>
 
 							<?php
 								
 						}
 
-						?>				  
-
+						?>				
+				
+				
+				
+				
+				
+				
+				
 				  
-                  </ul>
                 </div>
-                <div class="mt-6">
-					<?php
-						if(!$active){
-							echo '<a href="/product/recurring-donation" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-							Start a new subscription
-						  </a>';
-							
-						}
-					?>
-                  
-                </div>
+                <div class="card-footer bg-body-tertiary p-0 border-top"><a class="btn btn-link d-block w-100" href="/product/recurring-donation">New Subscription<span class="fas fa-chevron-right ms-1 fs-11"></span></a></div>
               </div>
-            </div>
-          </section>
-		  <?php
+			 <?php
 			}
 			?>
-			
-			
-			
-          <!-- Order History -->
-		  <?php
-			if($page_vars['settings']->get_setting('products_active')){
-				?>
-				<section aria-labelledby="recent-hires-title">
-					<div class="rounded-lg bg-white overflow-hidden shadow">
-					  <div class="p-6">
-						<h2 class="text-base font-medium text-gray-900" id="recent-hires-title">Your Orders</h2>
-						<div class="flow-root mt-6">
-						  <ul role="list" class="-my-5 divide-y divide-gray-200">
-						  <?php
+			  
+			  
+			  <!-- Orders -->
+			  <?php if($page_vars['settings']->get_setting('products_active')){ ?>
+              <div class="card mb-3 ">
+                <div class="card-header bg-body-tertiary">
+                  <h5 class="mb-0">Orders</h5>
+                </div>
+                <div class="card-body fs-10">
 				
-				
+				<?php
 				foreach($page_vars['orders'] as $order) {
 					?>
-					<li class="py-4">
-					  <div class="flex items-center space-x-4">
-					  <!--
-						<div class="flex-shrink-0">
-						  <img class="h-8 w-8 rounded-full" src="https://images.unsplash.com/photo-1519345182560-3f2917c472ef?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
-						</div>
-						-->
-						<div class="flex-1 min-w-0">
-						  <p class="text-sm font-medium text-gray-900 truncate">
-							Order <?php echo $order->key. ' ($'.$order->get('ord_total_cost').')'; ?>
-						  </p>
-						  
-						  <p class="text-sm text-gray-500 truncate">
-							<?php echo  LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?>
-						  </p>
-						  
-						</div>
-						<?php
-						/*
-						if($action){
-						?>
-						<div>
-						  <?php echo $action; ?>
-						</div>
-						<?php
-						}
-						*/
-						?>
-					  </div>
-					</li>
+
+									  <div class="d-flex btn-reveal-trigger">
+										<div class="flex-1 position-relative ps-3">
+										  <h6 class="fs-9 mb-0"><a href="#"><?php echo $order->key. ' ($'.$order->get('ord_total_cost').')'; ?></a></h6>
+										  <p class="mb-1">Organized by <a href="#!" class="text-700"><?php echo  LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?></a></p>
+
+										  <p class="text-1000 mb-0"></p>
+	
+										  	
+										  <p class="text-1000 mb-0">Duration: 6:00AM - 5:00PM</p>Place: Cambridge Boat Club, Cambridge
+										  <div class="border-bottom border-dashed my-3"></div>
+										</div>
+									  </div>
+
+	
 				<?php
 				}
-				?>
-				  
-                  </ul>
-                </div>
-                <div class="mt-6">
-				<!--
-					<a href="/product/recurring-donation" class="w-full flex justify-center items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-						See All Orders
-					  </a>
-					  -->
-                </div>
-              </div>
-            </div>
-          </section>
-		  <?php
-			}
-			?>			
-			
-        </div>
-      </div>
-    </div>
-
-
-
-
-
-		<?php
-
-		/*
-			?>
-				<h6 class="font-small font-weight-normal uppercase">Your Appointments</h6>
-
-				<?php							
-			$logic_path = LibraryFunctions::get_logic_file_path('get_appointments_logic.php', 'url');
-			echo '
-			<script>
-			$(document).ready(function() {
-				$("#appointments").load("'.$logic_path.'");
-			});
-			</script>
-			<div style="margin-bottom: 20px;" id="appointments"></div>';
-			*/
-
-		/*
-		if($page_vars['settings']->get_setting('messages_active')){
-		?>
-		<div class="sidebar-box">
-			<h6 class="font-small font-weight-normal uppercase">Your Messages</h6>
-										
-			<?php
-			$num_messages = 0;
-			foreach($messages as $message){
-				$num_messages++; 
-				if($num_messages == 5){
-					break;
-				}
-				?>
-				<li><a href="/profile/messages"><strong><?php echo trim(str_replace('<br />', ' ', substr(strip_tags($message->get('msg_body')), 0, 50). '...')); ?></strong> <?php echo LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $page_vars['session']->get_timezone()); ?></a></li>								
-				<?php
-			}
-			?>	
+				?>				
 						
-		</div>
-		<?php
-		}
-		*/
-		
 
-	echo PublicPage::EndPage();
+				
+				
+				
+				
+				
+
+				  
+                </div>
+                <div class="card-footer bg-body-tertiary p-0 border-top"><a class="btn btn-link d-block w-100" href="../../app/events/event-list.html">All Events<span class="fas fa-chevron-right ms-1 fs-11"></span></a></div>
+              </div>			  
+			  			 <?php
+			}
+			?>
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+			   
+			  
+            </div> <!-- end column -->
+			
+			
+          </div>
+
+
+
+
+
+
+		<?php
+
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

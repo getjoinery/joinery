@@ -1,5 +1,6 @@
 <?php
 require_once('PublicPageMaster.php');
+require_once('Pager.php');
 
 class PublicPageFalcon extends PublicPageMaster {
 
@@ -244,6 +245,133 @@ class PublicPageFalcon extends PublicPageMaster {
 		
 	}
 	
+	public function vertical_menu($menu){
+		$session = SessionControl::get_instance();
+		$settings = Globalvars::get_instance();						
+
+		
+		?>
+        <nav class="navbar navbar-light navbar-vertical navbar-expand-xl">
+          <!--<script>
+            var navbarStyle = localStorage.getItem("navbarStyle");
+            if (navbarStyle && navbarStyle !== 'transparent') {
+              document.querySelector('.navbar-vertical').classList.add(`navbar-${navbarStyle}`);
+            }
+          </script>-->
+          <div class="d-flex align-items-center">
+            <div class="toggle-icon-wrapper">
+
+              <button class="btn navbar-toggler-humburger-icon navbar-vertical-toggle" data-bs-toggle="tooltip" data-bs-placement="left" title="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
+
+            </div><a class="navbar-brand" href="/">
+              <div class="d-flex align-items-center py-3">
+			  
+					<?php 
+							echo $this->get_logo(); 
+					?>
+					</span>
+              </div>
+            </a>
+          </div>
+          <div class="collapse navbar-collapse" id="navbarVerticalCollapse">
+            <div class="navbar-vertical-content scrollbar">
+              <ul class="navbar-nav flex-column mb-3" id="navbarVerticalNav">
+                
+
+                <li class="nav-item">
+                  <!-- label-->
+				  <!--
+                  <div class="row navbar-vertical-label-wrapper mt-3 mb-2">
+                    <div class="col-auto navbar-vertical-label">Documentation
+                    </div>
+                    <div class="col ps-0">
+                      <hr class="mb-0 navbar-vertical-divider" />
+                    </div>
+                  </div>-->
+                  			<?php
+
+							
+							$iterate_menu = $menu;
+							foreach ($menu as $menu_id=>$menu_info){	
+								if(!$menu_info['parent']){
+									if($menu_info['currentmain']){
+										if($menu_info['has_subs']){
+											echo '<!-- parent pages--><a class="nav-link dropdown-indicator" href="#'.str_replace(' ', '_', $menu_info['display']).'" role="button" data-bs-toggle="collapse" aria-expanded="false" aria-controls="'.str_replace(' ', '_', $menu_info['display']).'">
+												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
+												</div>
+											  </a>';
+											echo '<ul class="nav collapse show" id="'.str_replace(' ', '_', $menu_info['display']).'">';
+											foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
+												if($iterate_menu_info['parent'] == $menu_id){
+													if($iterate_menu_info['currentsub']){
+														echo '<li class="nav-item"><a class="nav-link active" title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'"><div class="d-flex align-items-center"><span class="nav-link-text ps-1">'.$iterate_menu_info['display'].'</span>
+														</div></a></li>';
+													}
+													else{
+														echo '<li class="nav-item"><a class="nav-link" title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'"><div class="d-flex align-items-center"><span class="nav-link-text ps-1">'.$iterate_menu_info['display'].'</span>
+														</div></a></li>';								
+													}
+												}
+											}
+											echo '</ul>';
+										}
+										else{
+												echo '<!-- parent pages--><a class="nav-link " href="'.$menu_info['defaultpage'].'" role="button" data-bs-toggle="collapse" aria-expanded="false" aria-controls="'.$menu_info['display'].'">
+												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
+												</div>
+											  </a>';	
+										}
+									}
+									else{
+										if($menu_info['has_subs']){
+											echo '<!-- parent pages--><a class="nav-link dropdown-indicator" href="#'.str_replace(' ', '_', $menu_info['display']).'" role="button" data-bs-toggle="collapse" aria-expanded="false" aria-controls="'.str_replace(' ', '_', $menu_info['display']).'">
+												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
+												</div>
+											  </a>';
+											echo '<ul class="nav collapse" id="'.str_replace(' ', '_', $menu_info['display']).'">';
+											foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
+												if($iterate_menu_info['parent'] == $menu_id){
+													if($iterate_menu_info['currentsub']){
+														echo '<li class="nav-item"><a class="nav-link active" title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'"><div class="d-flex align-items-center"><span class="nav-link-text ps-1">'.$iterate_menu_info['display'].'</span>
+														</div></a></li>';
+													}
+													else{
+														echo '<li class="nav-item"><a class="nav-link" title="'.$iterate_menu_info['display'].'" href="'.$iterate_menu_info['defaultpage'].'"><div class="d-flex align-items-center"><span class="nav-link-text ps-1">'.$iterate_menu_info['display'].'</span>
+														</div></a></li>';								
+													}
+												}
+											}
+											echo '</ul>';
+																		}
+										else{
+												echo '<!-- parent pages--><a class="nav-link" href="'.$menu_info['defaultpage'].'" role="button" >
+												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
+												</div>
+											  </a>';
+												
+										}
+									}
+								}		
+							}
+							
+							
+							?>
+
+                  
+                  
+                </li>
+              </ul>
+              
+            </div>
+          </div>
+        </nav>		
+		<?php
+				
+		
+		
+		
+	}
+	
 	public function get_logo(){
 			$settings = Globalvars::get_instance();
 					
@@ -342,8 +470,24 @@ class PublicPageFalcon extends PublicPageMaster {
 		echo '<style>'.$settings->get_setting('custom_css').'</style>';
 	}
 	?>		
+	<style>
+	  /* Force the nine-dots trigger always visible */
+	  .navbar-nav .nav-link.nine-dots {
+		display: inline-block !important;
+		visibility: visible      !important;
+		opacity: 1               !important;
+		pointer-events: auto     !important;
+	  }
 
-
+	  /* Force its dropdown menu openable and visible */
+	  .navbar-nav .nine-dots-dropdown,
+	  .navbar-nav .dropdown-menu.nine-dots-dropdown {
+		display: block           !important;
+		visibility: visible      !important;
+		opacity: 1               !important;
+		transform: none          !important;
+	  }
+	</style>
   </head>
 
 
@@ -370,11 +514,30 @@ class PublicPageFalcon extends PublicPageMaster {
 				echo $this->get_admin_menu($options);
 		  }
 		  ?>
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
 		
-		
-		
+		 
         <div class="content">
-          <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg" data-move-target="#navbarVerticalNav" data-navbar-top="combo">
+          <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg"  data-navbar-top="combo">
 
             <button class="btn navbar-toggler-humburger-icon navbar-toggler me-1 me-sm-3" type="button" data-bs-toggle="collapse" data-bs-target="#navbarVerticalCollapse" aria-controls="navbarVerticalCollapse" aria-expanded="false" aria-label="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
             <a class="navbar-brand me-1 me-sm-3" href="/">
@@ -383,9 +546,22 @@ class PublicPageFalcon extends PublicPageMaster {
 					<?php echo $this->get_logo(); ?>
               </div>
             </a>
+
+
+
+
+
+
+
+
+
+
+
+
+
 			
 			<?php 
-		  if(!$options['show_admin_menus']){
+			if(!$options['show_admin_menus']){
 			  ?>
             <div class="collapse navbar-collapse scrollbar" id="navbarStandard">
               <ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
@@ -428,6 +604,7 @@ class PublicPageFalcon extends PublicPageMaster {
 
 
 	<?php 
+	
 	}
 
 	public function public_footer($options=array()) {
@@ -725,274 +902,77 @@ class PublicPageFalcon extends PublicPageMaster {
 	
 	
 	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	/*
-	static function alert($title, $content, $type){
-		if($type == 'error'){
-			$output = '<div class="rounded-md bg-red-50 p-4">
-			  <div class="flex">
-				<div class="flex-shrink-0">
-				  <!-- Heroicon name: solid/x-circle -->
-				  <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-					<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-				  </svg>
-				</div>
-				<div class="ml-3">
-				  <h3 class="text-sm font-medium text-red-800">'.$title.'</h3>
-				  <div class="mt-2 text-sm text-red-700">
-					'.$content.'
-				  </div>
-				</div>
-			  </div>
-			</div>';
+	static function alert($title, $content, $type)
+	{
+		// map types to Bootstrap classes and SVG icons
+		switch ($type) {
+			case 'error':
+				$bsClass = 'alert-danger';
+				$svg = '<svg class="bi flex-shrink-0 me-2" width="24" height="24" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+						  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+						</svg>';
+				break;
+
+			case 'warn':
+				$bsClass = 'alert-warning';
+				$svg = '<svg class="bi flex-shrink-0 me-2" width="24" height="24" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+						  <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+						</svg>';
+				break;
+
+			case 'success':
+				$bsClass = 'alert-success';
+				$svg = '<svg class="bi flex-shrink-0 me-2" width="24" height="24" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+						  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+						</svg>';
+				break;
+
+			default:
+				$bsClass = 'alert-info';
+				$svg = '';
 		}
-		else if($type == 'warn'){
-			$output = '<div class="rounded-md bg-yellow-50 p-4">
-			  <div class="flex">
-				<div class="flex-shrink-0">
-				  <!-- Heroicon name: solid/exclamation -->
-				  <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-					<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-				  </svg>
-				</div>
-				<div class="ml-3">
-				  <h3 class="text-sm font-medium text-yellow-800">'.$title.'</h3>
-				  <div class="mt-2 text-sm text-yellow-700">
-					<p>'.$content.'</p>
-				  </div>
-				</div>
-			  </div>
-			</div>';	
+
+		// build Bootstrap alert with icon
+		$output  = '<div class="alert ' . $bsClass . ' d-flex align-items-start alert-dismissible fade show" role="alert">';
+		if ($svg) {
+			$output .= $svg;
 		}
-		else if($type == 'success'){
-			$output = '<div class="rounded-md bg-green-50 p-4">
-			  <div class="flex">
-				<div class="flex-shrink-0">
-				  <!-- Heroicon name: solid/check-circle -->
-				  <svg class="h-5 w-5 text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-					<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-				  </svg>
-				</div>
-				<div class="ml-3">
-				  <h3 class="text-sm font-medium text-green-800">'.$title.'</h3>
-				  <div class="mt-2 text-sm text-green-700">
-					<p>'.$content.'</p>
-				  </div>
-				  <!--
-				  <div class="mt-4">
-					<div class="-mx-2 -my-1.5 flex">
-					  <button type="button" class="bg-green-50 px-2 py-1.5 rounded-md text-sm font-medium text-green-800 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-green-50 focus:ring-green-600">View status</button>
-					  <button type="button" class="ml-3 bg-green-50 px-2 py-1.5 rounded-md text-sm font-medium text-green-800 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-green-50 focus:ring-green-600">Dismiss</button>
-					</div>
-				  </div>-->
-				</div>
-			  </div>
-			</div>';
-		}
-		
-		return $output;
-	}
-
-
-	static function dropdown_button($id, $options){ 
-
-		if (!count($options)){
-			return(false);
-		}
-		
-		$output = '
-		<!--
-		<div class="flex items-center">
-		  <div class="flex items-center rounded-md shadow-sm md:items-stretch">
-			<button type="button" class="flex items-center justify-center rounded-l-md border border-r-0 border-gray-300 bg-white py-2 pl-3 pr-4 text-gray-400 hover:text-gray-500 focus:relative md:w-9 md:px-2 md:hover:bg-gray-50">
-			  <span class="sr-only">Previous month</span>
-			 
-			  <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-				<path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
-			  </svg>
-			</button>
-			<button type="button" class="hidden border-t border-b border-gray-300 bg-white px-3.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 focus:relative md:block">Today</button>
-			<span class="relative -mx-px h-5 w-px bg-gray-300 md:hidden"></span>
-			<button type="button" class="flex items-center justify-center rounded-r-md border border-l-0 border-gray-300 bg-white py-2 pl-4 pr-3 text-gray-400 hover:text-gray-500 focus:relative md:w-9 md:px-2 md:hover:bg-gray-50">
-			  <span class="sr-only">Next month</span>
-			  
-			  <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-				<path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-			  </svg>
-			</button>
-		  </div>
-		  -->
-		  <div class="hidden md:ml-4 md:flex md:items-center">
-			<div class="relative">
-			  <button type="button" id="'.$id.'_button" class="flex items-center rounded-md border border-gray-300 bg-white py-2 pl-3 pr-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50" aria-expanded="false" aria-haspopup="true">
-				Actions
-				<!-- Heroicon name: solid/chevron-down -->
-				<svg class="ml-2 h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-				  <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-				</svg>
-			  </button>
-
-			  <!--
-				Dropdown menu, show/hide based on menu state.
-
-				Entering: "transition ease-out duration-100"
-				  From: "transform opacity-0 scale-95"
-				  To: "transform opacity-100 scale-100"
-				Leaving: "transition ease-in duration-75"
-				  From: "transform opacity-100 scale-100"
-				  To: "transform opacity-0 scale-95"
-			  -->
-			  <div id="'.$id.'" class="focus:outline-none absolute right-0 mt-3 w-36 origin-top-right overflow-hidden rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 invisible" role="menu" aria-orientation="vertical" aria-labelledby="menu-button" tabindex="-1">
-				<div class="py-1" role="none">
-				  <!-- Active: "bg-gray-100 text-gray-900", Not Active: "text-gray-700" -->';
-					foreach ($options as $label=>$link){
-						$output .= '<a href="'.$link.'" class="text-gray-700 block px-4 py-2 text-sm" role="menuitem" tabindex="-1" id="menu-item-0">'.$label.'</a>';
-					}			  
-				  $output .='
-				</div>
-			  </div>
-			</div>
-			<!--
-			<div class="ml-6 h-6 w-px bg-gray-300"></div>
-			<button type="button" class="focus:outline-none ml-6 rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">Add event</button>-->
-		  </div>
-		  <div class="relative ml-6 md:hidden">
-			<button type="button" class="-mx-2 flex items-center rounded-full border border-transparent p-2 text-gray-400 hover:text-gray-500" id="'.$id.'_button_mobile" aria-expanded="false" aria-haspopup="true">
-			  <span class="sr-only">Open menu</span>
-			  <!-- Heroicon name: solid/dots-horizontal -->
-			  <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-				<path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM16 12a2 2 0 100-4 2 2 0 000 4z" />
-			  </svg>
-			</button>
-
-			<!--
-			  Dropdown menu, show/hide based on menu state.
-
-			  Entering: "transition ease-out duration-100"
-				From: "transform opacity-0 scale-95"
-				To: "transform opacity-100 scale-100"
-			  Leaving: "transition ease-in duration-75"
-				From: "transform opacity-100 scale-100"
-				To: "transform opacity-0 scale-95"
-			-->
-			<div id="'.$id.'_mobile" class="focus:outline-none absolute right-0 mt-3 w-36 origin-top-right divide-y divide-gray-100 overflow-hidden rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 invisible" role="menu" aria-orientation="vertical" aria-labelledby="menu-0-button" tabindex="-1">
-			<!-- Active: "bg-gray-100 text-gray-900", Not Active: "text-gray-700" -->
-			  <!--
-			  <div class="py-1" role="none">
-				<a href="#" class="text-gray-700 block px-4 py-2 text-sm" role="menuitem" tabindex="-1" id="menu-0-item-0">Create event</a>
-			  </div>
-			  <div class="py-1" role="none">
-				<a href="#" class="text-gray-700 block px-4 py-2 text-sm" role="menuitem" tabindex="-1" id="menu-0-item-1">Go to today</a>
-			  </div>
-			  -->
-			  <div class="py-1" role="none">';
-					foreach ($options as $label=>$link){
-						$output .= '<a href="'.$link.'" class="text-gray-700 block px-4 py-2 text-sm" role="menuitem" tabindex="-1" id="menu-item-0">'.$label.'</a>';
-					}			  
-				  $output .='
-			  </div>
-			</div>
-		  </div>
-		</div>
-
-	 
-	 <script language="javascript">
-		 $(document).ready(function() {	
-			
-			$("#'.$id.'_button").click(function() { 
-			 $("#'.$id.'").toggleClass("invisible");
-			 event.stopPropagation();
-			});	
-		
-			
-			$("#'.$id.'_button_mobile").click(function() { 
-			 $("#'.$id.'_mobile").toggleClass("invisible");
-			 event.stopPropagation();
-			});	
-		
-			$("html").click(function() {
-				$("#'.$id.'").addClass("invisible");
-				$("#'.$id.'_mobile").addClass("invisible");
-			});	
-
-		});
-		</script>';		
+		$output .= '<div class="flex-grow-1">';
+		$output .= '<h4 class="alert-heading mb-1">' . htmlspecialchars($title) . '</h4>';
+		$output .= '<p class="mb-0">' . $content . '</p>';
+		$output .= '</div>';
+		$output .= '<button type="button" class="btn-close ms-3" data-bs-dismiss="alert" aria-label="Close"></button>';
+		$output .= '</div>';
 
 		return $output;
 	}
+	
 
 
-	static function tab_menu($tab_menus, $type=NULL){
+	static function tab_menu($tab_menus, $current=NULL){
+		
 		$output = '';
 		$output .= '
-		<script language="javascript">
-			 $(document).ready(function() {	
-				$(\'#tab_select\').change(function() {';
+		<ul class="nav nav-tabs mb-3">';
 
 					foreach($tab_menus as $name => $link){
-						$output .= '
-						if($(\'#tab_select\').val() == "'.$name.'"){
-							$(location).attr("href","'.$link.'");
-						}
-						';
-					}
-			$output .= '
-				});	
-			});
-			</script>	
-		<div class="mb-6">
-		  <div class="sm:hidden">
-			<label for="tabs" class="sr-only">Categories</label>
-			<!-- Use an "onChange" listener to redirect the user to the selected tab URL. -->
-			<select id="tab_select" name="tab_select" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">';
-
-					foreach($tab_menus as $name => $link){
-						if($name == $_REQUEST['menu_item']){
-						  $output .= '<option selected>'.$name.'</option>';					
+						if($name == $current){
+						  $output .= '<li class="nav-item"><a class="nav-link active" href="#"  aria-selected="true">'.$name.'</a></li>';						
 						}
 						else{
-						  $output .= '<option>'.$name.'</option>';						
-						}
-					}
-
-			$output .= '
-			</select>
-		  </div>
-		  <div class="hidden sm:block">
-			<div class="border-b border-gray-200">
-			  <nav class="-mb-px flex space-x-8" aria-label="Tabs">
-				<!-- Current: "border-indigo-500 text-indigo-600", Default: "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" -->';
-
-					foreach($tab_menus as $name => $link){
-						if($name == $_REQUEST['menu_item']){
-						  $output .= '<a class="border-indigo-500 text-indigo-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" aria-current="page" href="'.$link.'">'.$name.'</a>';					
-						}
-						else{
-						  $output .= '<a class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" href="'.$link.'">'.$name.'</a>';						
+						   $output .= '<li class="nav-item"><a class="nav-link" href="'.$link.'"  aria-selected="false">'.$name.'</a></li>';							
 						}
 					}
 				$output .= '
-			  </nav>
-			</div>
-		  </div>
-		</div>';
+
+		</ul>';
 		
 		return $output;
 		
 	}
 
 
-	*/
+	
 }
 
 ?>
