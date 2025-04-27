@@ -432,7 +432,6 @@ class PublicPageFalcon extends PublicPageMaster {
     <meta name="msapplication-TileImage" content="../assets/img/favicons/mstile-150x150.png">-->
     <meta name="theme-color" content="#ffffff">
     <!--<script src="../assets/js/config.js"></script>-->
-    <!--<script src="../vendors/simplebar/simplebar.min.js"></script>-->
 	<script src="<?php echo LibraryFunctions::get_theme_file_path('simplebar.min.js', '/includes/vendors/simplebar', 'web'); ?>"></script>
 
 
@@ -450,44 +449,16 @@ class PublicPageFalcon extends PublicPageMaster {
 	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>	
 	
 	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo LibraryFunctions::get_theme_file_path('simplebar.min.css', '/includes/vendors/simplebar', 'web'); ?>">
-	<link rel="stylesheet" type="text/css" id="style-rtl" href="<?php echo LibraryFunctions::get_theme_file_path('theme-rtl.css', '/includes/css', 'web'); ?>">
 	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo LibraryFunctions::get_theme_file_path('theme.css', '/includes/css', 'web'); ?>">
-	<link rel="stylesheet" type="text/css" id="user-style-rtl" href="<?php echo LibraryFunctions::get_theme_file_path('user-rtl.css', '/includes/css', 'web'); ?>">
-	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo LibraryFunctions::get_theme_file_path('user.css', '/includes/css', 'web'); ?>">
+	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo LibraryFunctions::get_theme_file_path('user_exceptions.css', '/includes/css', 'web'); ?>">
 	
 	
-	    <script>
-      var isRTL = false;
 
-        var linkRTL = document.getElementById('style-rtl');
-        var userLinkRTL = document.getElementById('user-style-rtl');
-        linkRTL.setAttribute('disabled', true);
-        userLinkRTL.setAttribute('disabled', true);
-      
-    </script>
 	<?php
 	if($settings->get_setting('custom_css')){
 		echo '<style>'.$settings->get_setting('custom_css').'</style>';
 	}
 	?>		
-	<style>
-	  /* Force the nine-dots trigger always visible */
-	  .navbar-nav .nav-link.nine-dots {
-		display: inline-block !important;
-		visibility: visible      !important;
-		opacity: 1               !important;
-		pointer-events: auto     !important;
-	  }
-
-	  /* Force its dropdown menu openable and visible */
-	  .navbar-nav .nine-dots-dropdown,
-	  .navbar-nav .dropdown-menu.nine-dots-dropdown {
-		display: block           !important;
-		visibility: visible      !important;
-		opacity: 1               !important;
-		transform: none          !important;
-	  }
-	</style>
   </head>
 
 
@@ -498,43 +469,23 @@ class PublicPageFalcon extends PublicPageMaster {
     <!--    Main Content-->
     <!-- ===============================================-->
     <main class="main" id="top">
-      <div class="container" data-layout="container">
-        <script>
-          var isFluid = JSON.parse(localStorage.getItem('isFluid'));
-          if (isFluid) {
-            var container = document.querySelector('[data-layout]');
-            container.classList.remove('container');
-            container.classList.add('container-fluid');
-          }
-        </script>
+	<?php 
+	if(isset($options['full_width']) && $options['full_width']){
+		echo '<div class="container-fluid">';
+	}
+	else{
+		echo '<div class="container">';
+	}
+	?>
 
-		  
+			<!-- Vertical Menu -->
 		  <?php 
-		  if($options['show_admin_menus']){
-				echo $this->get_admin_menu($options);
+		  if($options['vertical_menu']){
+				echo $this->vertical_menu($options['vertical_menu']);
 		  }
 		  ?>
 	
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	
-		
 		 
         <div class="content">
           <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg"  data-navbar-top="combo">
@@ -548,20 +499,8 @@ class PublicPageFalcon extends PublicPageMaster {
             </a>
 
 
-
-
-
-
-
-
-
-
-
-
-
-			
 			<?php 
-			if(!$options['show_admin_menus']){
+			if(!isset($options['hide_horizontal_menu']) || !$options['hide_horizontal_menu']){
 			  ?>
             <div class="collapse navbar-collapse scrollbar" id="navbarStandard">
               <ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
@@ -596,21 +535,10 @@ class PublicPageFalcon extends PublicPageMaster {
             </ul>
           </nav>
 
-          
-        
-
-
-
-
-
 	<?php 
-	
 	}
 
 	public function public_footer($options=array()) {
-		$session = SessionControl::get_instance();
-		$session->clear_clearable_messages();
-		$settings = Globalvars::get_instance();
 	
       ?>
          
