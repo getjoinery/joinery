@@ -15,9 +15,10 @@
 		),
 	);
 	$page->public_header($hoptions);
+	
 	echo PublicPage::BeginPage($page_vars['page_title'], $hoptions);
 
-	echo PublicPage::tab_menu($page_vars['tab_menus']);
+	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Change Password');
 	
 	
 	$settings = Globalvars::get_instance();
@@ -55,6 +56,7 @@
 	
 
 	echo PublicPage::EndPage();
+	
 	$page->public_footer($foptions=array('track'=>TRUE));
 
 ?>

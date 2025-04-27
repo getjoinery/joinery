@@ -74,12 +74,14 @@
 	
 	<?php 
 	if(!$page_vars['event']->get('evt_end_time') || $page_vars['event']->get('evt_end_time') > date('Y-m-d H:i:s')){
-		$options = array('Withdraw from Course'=> '/profile/event_withdraw?evr_event_registrant_id='.$page_vars['event_registrant']->key);
+		echo ' <div class="btn-group" role="group">
+			<button class="btn btn-secondary dropdown-toggle" id="btnGroupVerticalDrop1" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>
+			<div class="dropdown-menu" aria-labelledby="btnGroupVerticalDrop1">
+			  <a class="dropdown-item" href="/profile/event_withdraw?evr_event_registrant_id='.$page_vars['event_registrant']->key.'">Withdraw from Course</a>
+			</div>
+		  </div>';
 	}
-	else{
-		$options = array();
-	}
-	echo PublicPage::dropdown_button('actions_button', $options);
+
 	?>
 	</header>
  

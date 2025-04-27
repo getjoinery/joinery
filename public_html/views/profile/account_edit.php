@@ -16,7 +16,7 @@
 	);
 	$page->public_header($hoptions); 
 
-	echo PublicPage::BeginPage('Account Edit', $hoptions);
+	echo PublicPage::BeginPage('Edit Account', $hoptions);
 	
 
 	foreach($page_vars['display_messages'] AS $display_message) {
@@ -25,7 +25,7 @@
 		}
 	}		
 
-	echo PublicPage::tab_menu($page_vars['tab_menus']);
+	echo PublicPage::tab_menu($page_vars['tab_menus'],'Edit Account');
 	
 	
 	$settings = Globalvars::get_instance();

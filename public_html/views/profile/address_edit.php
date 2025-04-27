@@ -19,7 +19,7 @@
 	echo PublicPage::BeginPage('Edit Address', $hoptions);
 
 
-	echo PublicPage::tab_menu($page_vars['tab_menus']);
+	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Edit Address');
 	
 	$settings = Globalvars::get_instance();
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
