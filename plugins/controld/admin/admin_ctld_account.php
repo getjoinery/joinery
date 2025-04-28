@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage-uikit3.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
 
@@ -186,19 +186,7 @@
 
 
 <?php $page->end_box();
-/*
-	?>
-	<nav class="uk-navbar-container" uk-navbar>
-		<div class="uk-navbar-left">
-			<ul class="uk-navbar-nav">
-				<li class="uk-active"><a href="">Registrants</a></li>
-				<li class="uk-parent"><a href="/admin/admin_event_sessions?evt_event_id=<?php echo $event->key; ?>">Sessions</a></li>
-			</ul>
-		</div>
-	</nav>
-	
-	<?php
-*/
+
 
 
 	$headers = array("Device Name", "Status", "Default blocklist", "Scheduled blocklist",  "Schedule", "Active profile", "Editable");
@@ -408,147 +396,12 @@
 
 
 
-		/*
-		array_push($rowvalues, LibraryFunctions::convert_time($event_registrant->get('evr_create_time'), 'UTC', $session->get_timezone()));
-		//array_push($rowvalues, LibraryFunctions::bool_to_english($registrant->get('evr_is_default'), "Default", " dsasd"));
-		//array_push($rowvalues, LibraryFunctions::bool_to_english($registrant->get('evr_is_verified'), "Verified", 'Not Verified [<a class="sortlink" href="/admin/admin_phone_verify?evr_registrant_id='. $registrant->key. '">Verify</a>]'));
 
-		if($event_registrant->get('evr_ord_order_id')){
-			$order = new Order($event_registrant->get('evr_ord_order_id'), TRUE);
-		}
-
-		$order_items = new MultiOrderItem(array('registrant_id' => $event_registrant->key));
-		$order_items->load();
-		
-		$row = '';
-		$total_paid = 0;
-		foreach ($order_items as $order_item){	
-			$row .= '<a href="/admin/admin_order?ord_order_id=' . $order_item->get('odi_ord_order_id') . '">Order# '.$order_item->get('odi_ord_order_id').'</a> ($'. $order_item->get('odi_price'). ')';
-			//ADD AN ASTERISK IF THE ORDER HAS A REFUND
-			$order = $order_item->get_order();
-			if($order->get('ord_refund_amount')){
-				$row .= '*'; 
-			}
-			$row .= '<br>';
-		}
-		array_push($rowvalues, $row);
-		
-		
-		$evr_verified = LibraryFunctions::bool_to_english($registrant->get('usr_email_is_verified'),"Verified", "Unverified");
-		array_push($rowvalues, $evr_verified);	
-		
-		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
-			array_push($rowvalues, 'Expired: '.LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
-		}
-		else{
-			array_push($rowvalues, LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
-		}
-
-		
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
-		<input type="hidden" class="hidden" name="evr_event_registrant_id" id="evr_event_registrant_id" value="'.$event_registrant->key.'" />
-		<button class="uk-button" type="submit">Remove</button>
-		</form>';
-		array_push($rowvalues, $delform);			
-		*/
         $page->disprow($rowvalues);
 	}
 
 	$page->endtable($rpager);
 	
-	/*
-	if($numwaitinglist){
-		
-		$headers = array("User", "Registered on", "Action");
-		$altlinks = array();
-		if(!$event->get('evt_delete_time')) {
-			if($_SESSION['permission'] >= 8){
-				$altlinks +=  array('Email waiting list' => '/admin/admin_users_message?waiting_list=1&evt_event_id='.$event->key);
-				//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';
-			}
-		}
-		$box_vars =	array(
-			'altlinks' => $altlinks,
-			'title' => "Waiting List (".$numwaitinglist.')'
-		);
-		$page->tableheader($headers, $box_vars, $wpager);
-		
-		foreach($waiting_lists as $waiting_list){
-
-			$registrant = new User($waiting_list->get('ewl_usr_user_id'), TRUE);
-
-			$rowvalues=array();
-			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
-			array_push($rowvalues, LibraryFunctions::convert_time($waiting_list->get('ewl_create_time'), 'UTC', $session->get_timezone()));
-
-			
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="remove_from_waiting_list" />
-			<input type="hidden" class="hidden" name="ewl_waiting_list_id" id="ewl_waiting_list_id" value="'.$waiting_list->key.'" />
-			<button class="uk-button" type="submit">Remove</button>
-			</form>';
-			array_push($rowvalues, $delform);			
-
-			$page->disprow($rowvalues);
-		}
-
-		$page->endtable($wpager);	
-	}
-	
-	
-	//MESSAGES
-	$mnumperpage = 20;
-	$moffset = LibraryFunctions::fetch_variable('moffset', 0, 0, '');
-	$msort = LibraryFunctions::fetch_variable('msort', 'message_id', 0, '');
-	$msdirection = LibraryFunctions::fetch_variable('msdirection', 'DESC', 0, '');
-	$msearchterm = LibraryFunctions::fetch_variable('msearchterm', '', 0, '');
-	$msearch_criteria = array();
-	$msearch_criteria['event_id_only'] = $event->key;
-	$messages = new MultiMessage(		
-		$msearch_criteria,
-		array($msort=>$msdirection),
-		$mnumperpage,
-		$moffset);
-	$nummessages = $messages->count_all();
-	$messages->load();
-	$mpager = new Pager(array('numrecords'=>$nummessages, 'numperpage'=> $mnumperpage), 'w');
-	
-	
-	$headers = array("Sender", "Message", "Time");
-	$altlinks = array();
-	if(!$event->get('evt_delete_time')) {
-		if($_SESSION['permission'] >= 8){
-			$altlinks +=  array('Email registrants' => '/admin/admin_users_message?evt_event_id='.$event->key);
-			//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';
-		}
-	}
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => "Messages to registrants"
-	);
-	
-	$page->tableheader($headers, $box_vars, $mpager);
-
-	foreach($messages as $message){
-		$user = new User($message->get('msg_usr_user_id_sender'), TRUE);
-
-		$rowvalues=array();
-		array_push($rowvalues, $user->display_name());
-		array_push($rowvalues, '<a href="/admin/admin_message?msg_message_id='.$message->key.'">'.$message->display_title(). '...</a>');
-		array_push($rowvalues, LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $session->get_timezone()));
-        $page->disprow($rowvalues);
-	}
-
-	$page->endtable($mpager);	
-	
-	/*
-	$pageoptions['title'] = "Emails of all registrants";
-	$page->begin_box($pageoptions);
-	echo '<p>'.$registrant_emails. '';	
-	$page->end_box();
-	*/
-/*
 	?>
 
 
