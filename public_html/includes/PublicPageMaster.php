@@ -111,6 +111,55 @@ class PublicPageMaster {
 		$output = ''; 
 		return $output;
 	}	
+
+	public static function BeginPanel($options=array()) {
+		$output = ''; 
+		return $output;
+	}
+
+
+
+	public static function EndPanel($options=array()) {
+		$output = '
+		'; 
+		return $output;
+	}
+	
+	static function tab_menu($tab_menus, $current=NULL){
+	
+		
+		$output = '';
+		
+
+		$output .= '<div class="container"><div class="filter-menu filter-menu-active">
+
+								';
+									foreach($tab_menus as $name => $link){
+										if($name == 'Edit Address' || $name == 'Edit Phone Number'){
+											continue;
+										}
+										if($name == $current){
+											$output .= '
+											<button data-filter="*" class="tab-btn active" type="button">'.$name.'</button>
+											
+											';
+										}
+										else{
+											$output .= '
+											<a href="'.$link.'"><button data-filter=".cat5" class="tab-btn" type="button">'.$name.'</button></a>
+											
+											';
+										}
+									}
+                             $output .= '       
+                                
+                        </div></div>';
+		
+
+		
+		return $output;
+		
+	}
 	
 	public function global_includes_top($options=array()){
 		$settings = Globalvars::get_instance();
@@ -189,6 +238,29 @@ class PublicPageMaster {
 		
 		return $options;
 	}
+	
+	static function alert($title, $content, $type){
+		if($type == 'error'){
+			$output = '<div class="alert alert-danger" role="alert">
+			  <h4 class="alert-heading">'.$title.'</h4>
+			  <p>'.$content.'</p>
+			</div>';
+		}
+		else if($type == 'warn'){
+			$output = '<div class="alert alert-warning" role="alert">
+			  <h4 class="alert-heading">'.$title.'</h4>
+			  <p>'.$content.'</p>
+			</div>';	
+		}
+		else if($type == 'success'){
+			$output = '<div class="alert alert-success" role="alert">
+			  <h4 class="alert-heading">'.$title.'</h4>
+			  <p>'.$content.'</p>
+			</div>';
+		}
+		
+		return $output;
+	}	
 
 	public function public_footer($options=array()) {
 		$session = SessionControl::get_instance();
