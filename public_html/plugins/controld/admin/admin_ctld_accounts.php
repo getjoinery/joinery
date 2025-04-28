@@ -115,39 +115,7 @@
 			array_push($rowvalues, 'n/a');
 		}
 
-/*
-		if($account->get('cda_delete_time')){
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_account?cda_account_id='. $account->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="undelete" />
-			<input type="hidden" class="hidden" name="cda_account_id" id="cda_account_id" value="'.$account->key.'" />
-			<button class="uk-button" type="submit">Undelete</button>
-			</form>';
-		}
-		else{
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_account?cda_account_id='. $account->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="delete" />
-			<input type="hidden" class="hidden" name="cda_account_id" id="cda_account_id" value="'.$account->key.'" />
-			<button class="uk-button" type="submit">Delete</button>
-			</form>';			
-		}
-		array_push($rowvalues, $delform);	
 
-		if($account->get('cda_is_approved')){
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_account?cda_account_id='. $account->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="unapprove" />
-			<input type="hidden" class="hidden" name="cda_account_id" id="cda_account_id" value="'.$account->key.'" />
-			<button class="uk-button" type="submit">Unapprove</button>
-			</form>';
-		}
-		else{
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_account?cda_account_id='. $account->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="approve" />
-			<input type="hidden" class="hidden" name="cda_account_id" id="cda_account_id" value="'.$account->key.'" />
-			<button class="uk-button" type="submit">Approve</button>
-			</form>';			
-		}
-		array_push($rowvalues, $delform);	
-		*/
 
 		$page->disprow($rowvalues);
 	}

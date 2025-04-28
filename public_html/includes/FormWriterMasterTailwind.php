@@ -202,14 +202,14 @@ class FormWriterMaster {
 			
 		if($settings->get_setting('hcaptcha_public')){
 			//HCAPTCHA
-			$output .= '<div id="captcha_container" class="uk-margin errorplacement ">';
+			$output .= '<div id="captcha_container" class=" errorplacement ">';
 			$output .= "<script src='https://www.hCaptcha.com/1/api.js' async defer></script>";
 			$output .= '<div id="captcha_field" class="h-captcha" data-callback="enableBtn" data-sitekey="'.$settings->get_setting('hcaptcha_public').'"></div>';
 			$output .= '</div>';
 		}
 		else if($settings->get_setting('captcha_public')){
 			//GOOGLE
-			$output .= '<div id="captcha_container" class="uk-margin errorplacement ">';
+			$output .= '<div id="captcha_container" class=" errorplacement ">';
 			$output .= '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
 			$output .= '<div id="captcha_field" class="g-recaptcha" data-sitekey="'.$settings->get_setting('captcha_public').'" data-callback="enableBtn"></div>';
 			$output .= '</div>';
@@ -965,7 +965,7 @@ class FormWriterMaster {
 			</style>
 			';
 			
-			$output .= '<h5>'.$label.'</h5><div id="'.$id.'_container" class="uk-margin errorplacement image-dropdown">';
+			$output .= '<h5>'.$label.'</h5><div id="'.$id.'_container" class=" errorplacement image-dropdown">';
 								
 
 			if($showdefault){

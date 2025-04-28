@@ -73,23 +73,6 @@
 		} 		
 		array_push($rowvalues, $status);
 
-/*
-		if($location->get('loc_delete_time')){
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_location?loc_location_id='. $location->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="undelete" />
-			<input type="hidden" class="hidden" name="loc_location_id" id="loc_location_id" value="'.$location->key.'" />
-			<button class="uk-button" type="submit">Undelete</button>
-			</form>';
-		}
-		else{
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_location?loc_location_id='. $location->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="delete" />
-			<input type="hidden" class="hidden" name="loc_location_id" id="loc_location_id" value="'.$location->key.'" />
-			<button class="uk-button" type="submit">Delete</button>
-			</form>';			
-		}
-		array_push($rowvalues, $delform);	
-*/
 
 		$page->disprow($rowvalues);
 	}

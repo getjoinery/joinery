@@ -73,23 +73,7 @@
 		} 		
 		array_push($rowvalues, $status);
 
-/*
-		if($contact_type->get('ctt_delete_time')){
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_contact_type?ctt_contact_type_id='. $contact_type->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="undelete" />
-			<input type="hidden" class="hidden" name="ctt_contact_type_id" id="ctt_contact_type_id" value="'.$contact_type->key.'" />
-			<button class="uk-button" type="submit">Undelete</button>
-			</form>';
-		}
-		else{
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_contact_type?ctt_contact_type_id='. $contact_type->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="delete" />
-			<input type="hidden" class="hidden" name="ctt_contact_type_id" id="ctt_contact_type_id" value="'.$contact_type->key.'" />
-			<button class="uk-button" type="submit">Delete</button>
-			</form>';			
-		}
-		array_push($rowvalues, $delform);	
-*/
+
 
 		$page->disprow($rowvalues);
 	}

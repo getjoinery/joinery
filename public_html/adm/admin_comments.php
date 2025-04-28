@@ -88,34 +88,38 @@
 		array_push($rowvalues, $status);
 
 		if($comment->get('cmt_delete_time')){
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_comment?cmt_comment_id='. $comment->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="undelete" />
-			<input type="hidden" class="hidden" name="cmt_comment_id" id="cmt_comment_id" value="'.$comment->key.'" />
-			<button class="uk-button" type="submit">Undelete</button>
-			</form>';
+			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
+			$delform .= $formwriter->hiddeninput('action', 'undelete');
+			$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
+			$delform .= $formwriter->new_form_button('Undelete', 'secondary');
+			$delform .= $formwriter->end_form();
 		}
 		else{
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_comment?cmt_comment_id='. $comment->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="delete" />
-			<input type="hidden" class="hidden" name="cmt_comment_id" id="cmt_comment_id" value="'.$comment->key.'" />
-			<button class="uk-button" type="submit">Delete</button>
-			</form>';			
+			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
+			$delform .= $formwriter->hiddeninput('action', 'delete');
+			$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
+			$delform .= $formwriter->new_form_button('Delete', 'secondary');
+			$delform .= $formwriter->end_form();
 		}
 		array_push($rowvalues, $delform);	
 
 		if($comment->get('cmt_is_approved')){
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_comment?cmt_comment_id='. $comment->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="unapprove" />
-			<input type="hidden" class="hidden" name="cmt_comment_id" id="cmt_comment_id" value="'.$comment->key.'" />
-			<button class="uk-button" type="submit">Unapprove</button>
-			</form>';
+			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
+			$delform .= $formwriter->hiddeninput('action', 'unapprove');
+			$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
+			$delform .= $formwriter->new_form_button('Unapprove', 'secondary');
+			$delform .= $formwriter->end_form();
 		}
 		else{
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_comment?cmt_comment_id='. $comment->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="approve" />
-			<input type="hidden" class="hidden" name="cmt_comment_id" id="cmt_comment_id" value="'.$comment->key.'" />
-			<button class="uk-button" type="submit">Approve</button>
-			</form>';			
+			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
+			$delform .= $formwriter->hiddeninput('action', 'approve');
+			$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
+			$delform .= $formwriter->new_form_button('Approve', 'secondary');
+			$delform .= $formwriter->end_form();					
 		}
 		array_push($rowvalues, $delform);	
 
