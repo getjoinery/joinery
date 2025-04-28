@@ -112,7 +112,6 @@
 
 	
 	$pageoptions['title'] = "Edit Question";
-	$pageoptions['width'] = 'uk-width-1-2';
 	$page->begin_box($pageoptions);
 	
 	
@@ -281,7 +280,6 @@
 		<?php		
 		
 		$pageoptions['title'] = "Edit Answers";
-		$pageoptions['width'] = 'uk-width-1-2';
 		$page->begin_box($pageoptions);
 		echo '<span id="answersbox">';
 		$question_options = $question->get_question_options();

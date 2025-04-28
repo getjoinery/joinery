@@ -50,10 +50,11 @@
 	} 
 	
 	echo '<br /><br /><div>';
-	$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_file?fil_file_id='. $file->key.'">
-	<input type="hidden" class="hidden" name="action" id="action" value="remove" />
-	<button class="uk-button" type="submit">Delete this file permanently</button>
-	</form>';
+	$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+	$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_file?fil_file_id='. $file->key);
+	$delform .= $formwriter->hiddeninput('action', 'remove');
+	$delform .= $formwriter->new_form_button('Delete this file permanently', 'secondary');
+	$delform .= $formwriter->end_form();
 	echo $delform;
 	echo '</div>';
 	

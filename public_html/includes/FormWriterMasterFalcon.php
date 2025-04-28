@@ -281,7 +281,7 @@ class FormWriterMaster {
 	}	
 
 	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
-		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"><fieldset class="uk-fieldset">';
+		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"><fieldset>';
 		return $output;
 	}
 
@@ -1194,7 +1194,7 @@ class FormWriterMaster {
 			</style>
 			';
 			
-			$output .= '<h5>'.$label.'</h5><div id="'.$id.'_container" class="uk-margin errorplacement image-dropdown">';
+			$output .= '<h5>'.$label.'</h5><div id="'.$id.'_container" class="errorplacement image-dropdown">';
 								
 
 			if($showdefault){

@@ -142,8 +142,9 @@
 	$pageoptions['title'] = "Edit Event";
 	$page->begin_box($pageoptions);
 	
-	echo '<div uk-grid>
-    <div class="uk-width-2-3@m"><div style="padding: 20px">';
+	echo '<div class="row">
+    <div class="col-md-8">
+      <div class="p-3">';
 
 
 	// Editing an existing event
@@ -337,9 +338,10 @@
 	echo $formwriter->end_form();
 
 
-	echo '	</div>
-	</div>
-	<div class="uk-width-1-3@m"><div style="padding: 20px">';
+	echo '    </div>
+    </div>
+    <div class="col-md-4">
+      <div class="p-3">';
 
 	$content_versions = new MultiContentVersion(
 		array('type'=>ContentVersion::TYPE_EVENT, 'foreign_key_id' => $event->key),

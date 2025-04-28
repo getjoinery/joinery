@@ -77,24 +77,6 @@
 
 
 
-/*
-		if($mailing_list->get('mlt_delete_time')){
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_mailing_list?mlt_mailing_list_id='. $mailing_list->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="undelete" />
-			<input type="hidden" class="hidden" name="mlt_mailing_list_id" id="mlt_mailing_list_id" value="'.$mailing_list->key.'" />
-			<button class="uk-button" type="submit">Undelete</button>
-			</form>';
-		}
-		else{
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_mailing_list?mlt_mailing_list_id='. $mailing_list->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="delete" />
-			<input type="hidden" class="hidden" name="mlt_mailing_list_id" id="mlt_mailing_list_id" value="'.$mailing_list->key.'" />
-			<button class="uk-button" type="submit">Delete</button>
-			</form>';			
-		}
-		array_push($rowvalues, $delform);	
-*/
-
 		$page->disprow($rowvalues);
 	}
 

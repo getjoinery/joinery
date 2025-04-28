@@ -293,7 +293,7 @@
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
 		<input type="hidden" class="hidden" name="evr_event_registrant_id" id="evr_event_registrant_id" value="'.$event_registrant->key.'" />
-		<button class="uk-button" type="submit">Remove</button>
+		'.$formwriter->new_form_button('Remove', 'secondary').'
 		</form>';
 		array_push($rowvalues, $delform);			
 
@@ -330,7 +330,7 @@
 			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
 			<input type="hidden" class="hidden" name="action" id="action" value="remove_from_waiting_list" />
 			<input type="hidden" class="hidden" name="ewl_waiting_list_id" id="ewl_waiting_list_id" value="'.$waiting_list->key.'" />
-			<button class="uk-button" type="submit">Remove</button>
+			'.$formwriter->new_form_button('Remove', 'secondary').'
 			</form>';
 			array_push($rowvalues, $delform);			
 

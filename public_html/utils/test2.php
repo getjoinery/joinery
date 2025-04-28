@@ -594,20 +594,7 @@ exit();
 	
 	$pageoptions['title'] = "Edit Event";
 	//$page->begin_box($pageoptions);
-	?>
-	<button class="uk-button uk-button-default" type="button">Hover</button>
-<div uk-dropdown>
-    <ul class="uk-nav uk-dropdown-nav">
-        <li class="uk-active"><a href="#">Active</a></li>
-        <li><a href="#">Item</a></li>
-        <li class="uk-nav-header">Header</li>
-        <li><a href="#">Item</a></li>
-        <li><a href="#">Item</a></li>
-        <li class="uk-nav-divider"></li>
-        <li><a href="#">Item</a></li>
-    </ul>
-</div>
-	<?php
+
 	echo '<div>test</div>';
 
 	//$page->end_box();
