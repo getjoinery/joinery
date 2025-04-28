@@ -116,6 +116,18 @@ sudo chmod 775 /var/www
 sudo chmod g+s /var/www
 
 
+
+#OLD Web root permissions (deprecated)
+#Make sure the group is www-data on '/var/www'.
+#sudo chgrp -R www-data /var/www
+#Make it writable
+#sudo chmod 775 /var/www
+#set group id for subfolders
+#sudo chmod g+s /var/www
+#give yourself ownership
+#sudo chown -R user1 /var/www/
+
+
 #Further Postgres config
 #https://stackoverflow.com/questions/1471571/how-to-configure-postgresql-for-the-first-time
 sudo -u postgres psql template1
