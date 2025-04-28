@@ -27,34 +27,9 @@ class PublicPage extends PublicPageMaster {
 	}
 	
 	
-	static function alert($title, $content, $type){
-		if($type == 'error'){
-			$output = '<div class="alert alert-danger" role="alert">
-			  <h4 class="alert-heading">'.$title.'</h4>
-			  <p>'.$content.'</p>
-			</div>';
-		}
-		else if($type == 'warn'){
-			$output = '<div class="alert alert-warning" role="alert">
-			  <h4 class="alert-heading">'.$title.'</h4>
-			  <p>'.$content.'</p>
-			</div>';	
-		}
-		else if($type == 'success'){
-			$output = '<div class="alert alert-success" role="alert">
-			  <h4 class="alert-heading">'.$title.'</h4>
-			  <p>'.$content.'</p>
-			</div>';
-		}
-		
-		return $output;
-	}	
+
 	
-	
-	
-	
-	
-static function tab_menu($tab_menus, $current=NULL){
+	static function tab_menu($tab_menus, $current=NULL){
 	
 		
 		$output = '';
@@ -192,18 +167,7 @@ Career Area
 		return $output;
 	}	
 
-	public static function BeginPanel($options=array()) {
-		$output = ''; 
-		return $output;
-	}
 
-
-
-	public static function EndPanel($options=array()) {
-		$output = '
-		'; 
-		return $output;
-	}
 
 
 	public function public_header($options=array()) {
