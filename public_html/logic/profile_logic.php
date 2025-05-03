@@ -53,20 +53,93 @@ function profile_logic($get_vars, $post_vars){
 	$event_registrants->load();
 	$page_vars['num_events'] = $num_events;
 	$page_vars['event_registrants'] = $event_registrants;
-	
-	//COMPATIBILITY WITH OLD TEMPLATE
-	/*
-	$event_registrants_future = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => false, 'deleted' => false), array('event_id'=> 'DESC'));
-	$num_future_events = $event_registrants_future->count_all();
-	$event_registrants_future->load();
-	$page_vars['event_registrants_future'] = $event_registrants_future;
 
-	$event_registrants_past = new MultiEventRegistrant(array('user_id' => $user->key, 'past' => true, 'deleted' => false), array('event_id'=> 'DESC'));
-	$num_past_events = $event_registrants_future->count_all();
-	$event_registrants_past->load();
-	$page_vars['event_registrants_past'] = $event_registrants_past;
-	*/
-	//END COMPATIBILITY WITH OLD TEMPLATE
+
+	$page_vars['event_registrations'] =	array();
+	foreach($event_registrants as $event_registrant){
+		$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
+		if(!$event || $event->get('evt_delete_time')){
+			continue;
+		}
+		$next_session = $event->get_next_session();
+
+		
+		$time = '';
+		$tz = $event->get('evt_timezone');
+		if($next_session){
+			$time = '<b>Next session: ';
+			
+			if($event->get('evt_timezone') != $page_vars['session']->get_timezone()){
+				$time .= $next_session->get_time_string($page_vars['session']->get_timezone());
+			}
+			else{
+				$time .= $next_session->get_time_string($tz);
+			}
+			$time .= '</b>';
+		}
+		else if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+
+			if($event->get('evt_timezone') != $page_vars['session']->get_timezone()){
+				$time .= $event->get_time_string($page_vars['session']->get_timezone());			
+			}
+			else{
+				$time .= $event->get_time_string($tz);
+			}
+		}
+		$page_vars['event_registrations']['event_time'] = $time;
+		
+		$page_vars['event_registrations']['calendar_links'] = array();
+		if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
+			$page_vars['event_registrations']['calendar_links'] = $event->get_add_to_calendar_links();
+		}
+		
+
+		
+		/*
+		if(!$event_registrant->get('evr_extra_info_completed') && $event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
+			$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
+			$actions .= '<a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">Additional information needed</a> ';
+		}
+		*/
+
+		$page_vars['event_registrations']['event_name'] = $event->get('evt_name');
+		$page_vars['event_registrations']['event_expires'] = '';
+		 '';
+
+		if($event->get('evt_session_display_type')==2){
+			$page_vars['event_registrations']['event_link'] = '/profile/event_sessions_course?evt_event_id='.$event->key;
+		}
+		else{
+			$page_vars['event_registrations']['event_link'] = '/profile/event_sessions?evt_event_id='.$event->key;
+		}
+
+
+		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+			$page_vars['event_registrations']['event_status'] = 'Expired';
+		} 
+		else{
+			if($event->get('evt_status') == Event::STATUS_ACTIVE){
+				if($event_registrant->get('evr_expires_time')){
+					$page_vars['event_registrations']['event_status'] = 'Active';
+					$page_vars['event_registrations']['event_expires'] = LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $page_vars['session']->get_timezone());
+				}
+				else{
+					$page_vars['event_registrations']['event_status'] = 'Active';
+				}
+			} 
+			else if($event->get('evt_status') == Event::STATUS_CANCELED){
+				$page_vars['event_registrations']['event_status'] = 'Canceled';
+			}
+			else if($event->get('evt_status') == Event::STATUS_COMPLETED){
+				$page_vars['event_registrations']['event_status'] = 'Completed';
+			}
+		}
+		
+
+		
+	}
+
+
 
 		
 	$phone_numbers = new MultiPhoneNumber(
@@ -132,14 +205,19 @@ function profile_logic($get_vars, $post_vars){
 	$page_vars['messages'] = $messages;
 	
 	//SUBSCRIPTIONS
-	$subscriptions = new MultiOrderItem(
-	array('user_id' => $user->key, 'is_subscription' => true), //SEARCH CRITERIA
-	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	5, //NUMBER PER PAGE
-	NULL //OFFSET
-	);
-	$subscriptions->load();	
-	$page_vars['subscriptions'] = $subscriptions;
+	if($page_vars['settings']->get_setting('products_active') && $page_vars['settings']->get_setting('subscriptions_active')){
+		$subscriptions = new MultiOrderItem(
+		array('user_id' => $user->key, 'is_subscription' => true), //SEARCH CRITERIA
+		array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
+		5, //NUMBER PER PAGE
+		NULL //OFFSET
+		);
+		$subscriptions->load();	
+		$page_vars['subscriptions'] = $subscriptions;
+	}
+	else{
+		$page_vars['subscriptions'] = NULL;
+	}
 	
 	
 	$user_subscribed_list = array();

@@ -443,14 +443,14 @@
 					  <p class="text-500"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>
 					  <p class="text-500"><?php echo $page_vars['address']->get_address_string(', '); ?></p>
 					             <?php 
-			echo '<br>';
-			if(empty($page_vars['user_subscribed_list'])){
-				echo 'You are not subscribed to any mailing lists.<br>';
-			}
-			else{
-				echo 'You are subscribed to the following lists: '.implode(', ', $page_vars['user_subscribed_list']).'<br>';
-			}
-			?>
+								echo '<br>';
+								if(empty($page_vars['user_subscribed_list'])){
+									echo 'You are not subscribed to any mailing lists.<br>';
+								}
+								else{
+									echo 'You are subscribed to the following lists: '.implode(', ', $page_vars['user_subscribed_list']).'<br>';
+								}
+								?>
 					  <button class="btn btn-falcon-primary btn-sm px-3" type="button">Edit Account</button>
 					  <!--<button class="btn btn-falcon-default btn-sm px-3 ms-2" type="button">Message</button>-->
 					  <div class="border-bottom border-dashed my-4 d-lg-none"></div>
@@ -478,91 +478,36 @@
 									echo '<p class="mt-6 px-4 py-5 ">You have no event registrations.</p>';						
 							}
 							else{
-								foreach($page_vars['event_registrants'] as $event_registrant){
-									$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-									if(!$event || $event->get('evt_delete_time')){
-										continue;
-									}
-									$next_session = $event->get_next_session();
-
-									
-									$time = '';
-									$tz = $event->get('evt_timezone');
-									if($next_session){
-										$time = '<b>Next session: ';
-										
-										if($event->get('evt_timezone') != $page_vars['session']->get_timezone()){
-											$time .= $next_session->get_time_string($page_vars['session']->get_timezone());
-										}
-										else{
-											$time .= $next_session->get_time_string($tz);
-										}
-										$time .= '</b>';
-									}
-									else if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-		
-										if($event->get('evt_timezone') != $page_vars['session']->get_timezone()){
-											$time .= $event->get_time_string($page_vars['session']->get_timezone());			
-										}
-										else{
-											$time .= $event->get_time_string($tz);
-										}
-									}
-									
-									$calendar_text = '';
-									if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-										$calendar_links = $event->get_add_to_calendar_links();
-										if($calendar_links){
-											$calendar_text .= 'Add to calendar: <a href="'.$calendar_links['google'].'">google</a> | ';
-											$calendar_text .= '<a href="'.$calendar_links['yahoo'].'">yahoo</a> | ';
-											$calendar_text .= '<a href="'.$calendar_links['outlook'].'">outlook</a> | ';
-											$calendar_text .= '<a href="'.$calendar_links['ics'].'">ical</a> ';
-										}
-									}
-									
-									if($event->get('evt_session_display_type')==2){
-										$course_link = '/profile/event_sessions_course?evt_event_id='.$event->key;
-									}
-									else{
-										$course_link = '/profile/event_sessions?evt_event_id='.$event->key;
-									}
-									
-									$actions = '';
-									if(!$event_registrant->get('evr_extra_info_completed') && $event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
-										$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-										$actions .= '<a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">Additional information needed</a> ';
-									}
-
+								foreach($page_vars['event_registrations'] as $event){
 									
 									?>
 									  <div class="d-flex btn-reveal-trigger">
 										<div class="calendar"><span class="calendar-month">Feb</span><span class="calendar-day">21</span></div>
 										<div class="flex-1 position-relative ps-3">
-										  <h6 class="fs-9 mb-0"><a href="<?php echo $course_link; ?>"><?php echo $event->get('evt_name'); ?></a></h6>
+										  <h6 class="fs-9 mb-0"><a href="<?php echo $event['event_link']; ?>"><?php echo $event['event_name']; ?></a></h6>
 										  <p class="mb-1">Organized by <a href="#!" class="text-700">University of Oxford</a></p>
 										  <?php if($time){ ?>
-										  <p class="text-1000 mb-0"><?php echo $time; ?></p>
+										  <p class="text-1000 mb-0"><?php $event['event_time']; ?></p>
 										  <?php } ?>
 										  
-										  												<?php
-												if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+										  		<?php
+												if($event['event_status'] == 'Active'){
+													if($event['event_expires']){
+														echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Expires '.$event['event_expires'].'</p>';
+													}
+													else{
+														echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</p>';
+													}													
+												}
+												else if($event['event_status'] == 'Expired'){
 													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Expired</p>';
 												} 
-												else{
-													if($event->get('evt_status') == Event::STATUS_ACTIVE){
-														if($event_registrant->get('evr_expires_time')){
-															echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Expires '.LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $page_vars['session']->get_timezone()).'</p>';
-														}
-														else{
-															echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</p>';
-														}
-													} 
-													else if($event->get('evt_status') == Event::STATUS_CANCELED){
-														echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Canceled</p>';
-													}
-													else if($event->get('evt_status') == Event::STATUS_COMPLETED){
+												else if($event['event_status'] == 'Canceled'){
+
+													echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Canceled</p>'; 
+												}
+												else if($event['event_status'] == 'Completed'){
 														echo '<p class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Completed</p>';
-													}
 												}
 												?>
 										  <p class="text-1000 mb-0">Duration: 6:00AM - 5:00PM</p>Place: Cambridge Boat Club, Cambridge
@@ -610,7 +555,7 @@
 
           <!-- Subscriptions -->
 		  <?php
-			if($page_vars['settings']->get_setting('products_active') && $page_vars['settings']->get_setting('subscriptions_active')){
+			if($page_vars['subscriptions']){
 			?>
               <div class="card mb-3">
                 <div class="card-header bg-body-tertiary">
@@ -721,31 +666,7 @@
 			  
 			  
 			  
-			  
-			  
-			  
-			  
-			  
-			  
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-			   
 			  
             </div> <!-- end column -->
 			
