@@ -24,7 +24,8 @@
 			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}	
-		
+	
+	/*
 	if($page_vars['settings']->get_setting('events_active')){
 		//DISPLAY REGISTER FINISH LINKS
 		foreach($event_registrants as $event_registrant){
@@ -38,6 +39,7 @@
 			}
 		}			
 	} 
+	*/
 	?>
 	
 
