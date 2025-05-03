@@ -149,8 +149,6 @@ class LibraryFunctions {
 
 		$theme_template = $settings->get_setting('theme_template');
 		$theme_file = $siteDir . '/theme/'.$theme_template.'/404.php';	
-			
-		$site_file = $siteDir . '/theme/default/views/404.php';		
 
 		$base_file = $siteDir . '/views/404.php';
 
@@ -158,11 +156,6 @@ class LibraryFunctions {
 		if(file_exists($theme_file)){
 			//WE WANT A FILE PATH
 			require_once($theme_file);
-			exit();
-		}
-		if(file_exists($site_file)){
-			//WE WANT A FILE PATH
-			require_once($site_file);
 			exit();
 		}
 		else if(file_exists($base_file)){
@@ -359,13 +352,11 @@ class LibraryFunctions {
 		
 		$theme_template = $settings->get_setting('theme_template', true, true);
 		$theme_file = $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename;
-		$default_theme_file = $siteDir.'/theme/default'.$subdirectory.'/'.$filename;
 		$default_file = $siteDir.$subdirectory.'/'.$filename;
 		
 		if($debug){
 			echo 'Theme template: '.$theme_template.'<br>';
 			echo 'Theme file: '.$theme_file.'<br>';
-			echo 'Default theme file: '.$default_theme_file.'<br>';
 			echo 'Default file: '.$default_file.'<br>';
 			
 		}
@@ -383,19 +374,6 @@ class LibraryFunctions {
 			else{
 				//WE WANT A URL
 				return '/theme/'.$theme_template.$subdirectory.'/'.basename($filename, '.php');
-			}
-		}
-		else if(file_exists($default_theme_file)){
-			if($debug){
-				echo 'Found default theme file.<br>';
-			}
-			if($path_format == 'system'){
-				//WE WANT A FILE PATH
-				return $default_theme_file;
-			}
-			else{
-				//WE WANT A URL
-				return '/theme/default'.$subdirectory.'/'.basename($filename, '.php');
 			}
 		}
 		else if(file_exists($default_file)){
@@ -423,12 +401,10 @@ class LibraryFunctions {
 		$theme_template = $settings->get_setting('theme_template');
 
 		$theme_file = $siteDir.'/theme/'.$theme_template.'/logic/'.$filename;
-		$default_theme_file = $siteDir.'/theme/default/logic/'.$filename;
 		$main_file = $siteDir.'/logic/'.$filename;
 
 		if($debug){
 			echo 'Looking for theme logic file: '. $theme_file.'<br>';
-			echo 'Looking for default theme logic file: '. $default_theme_file.'<br>';
 			echo 'Looking for main logic file: '. $main_file.'<br>';
 		}
 		if($theme_template && file_exists($theme_file)){
@@ -443,20 +419,6 @@ class LibraryFunctions {
 			else{
 				//WE WANT A URL
 				return '/theme/'.$theme_template.'/logic/'.basename($filename, '.php');
-			}
-		}
-		else if(file_exists($default_theme_file)){
-			if($debug){
-				echo 'Found: '. $default_theme_file.'<br>';
-				exit;
-			}
-			if($path_format == 'system'){
-				//WE WANT A FILE PATH
-				return $main_file;
-			}
-			else{
-				//WE WANT A URL
-				return '/logic/'.basename($filename, '.php');
 			}
 		}
 		else if(file_exists($main_file)){
