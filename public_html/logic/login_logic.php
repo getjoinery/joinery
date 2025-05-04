@@ -190,6 +190,7 @@ function login_logic($get_vars, $post_vars){
 	}
 	
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
+	$session->clear_clearable_messages();
 	return $page_vars;
 }
 ?>
