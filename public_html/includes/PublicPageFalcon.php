@@ -27,7 +27,6 @@ class PublicPageFalcon extends PublicPageMaster {
 	
 	public static function BeginPage($title='', $options=array()) {
 
-
 		$output = '
 		
 			<div class="card">';
@@ -39,8 +38,8 @@ class PublicPageFalcon extends PublicPageMaster {
 			}
 			$output .= '
 				<div class="card-body">
-            ';
-		
+			';
+
 				
 						
 		return $output;
@@ -260,8 +259,8 @@ class PublicPageFalcon extends PublicPageMaster {
           </script>-->
           <div class="d-flex align-items-center">
             <div class="toggle-icon-wrapper">
+				<button class="btn navbar-toggler-humburger-icon navbar-vertical-toggle" data-bs-toggle="tooltip" data-bs-placement="left" title="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
 
-              <button class="btn navbar-toggler-humburger-icon navbar-vertical-toggle" data-bs-toggle="tooltip" data-bs-placement="left" title="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
 
             </div><a class="navbar-brand" href="/">
               <div class="d-flex align-items-center py-3">
@@ -372,9 +371,9 @@ class PublicPageFalcon extends PublicPageMaster {
 		
 	}
 	
-	public function get_logo(){
+	public function get_logo($choice='all'){
 			$settings = Globalvars::get_instance();
-					
+			
 			if($settings->get_setting('logo_link')){
 				echo '<img class="me-2" src="'.$settings->get_setting('logo_link').'" alt="" width="40" />';
 			}
@@ -398,8 +397,6 @@ class PublicPageFalcon extends PublicPageMaster {
 		$profile_menu = array();
 		
 		$notification_menu = NULL;
-
-		$menus = PublicPage::get_public_menu();
 			
 
 		?>
@@ -463,8 +460,11 @@ class PublicPageFalcon extends PublicPageMaster {
 
 
   <body>
-
-
+	<?php
+	if(isset($options['header_only']) && $options['header_only']){
+		return;
+	}
+	?>
 <!-- ===============================================-->
     <!--    Main Content-->
     <!-- ===============================================-->
@@ -486,11 +486,52 @@ class PublicPageFalcon extends PublicPageMaster {
 		  ?>
 	
 
-		 
-        <div class="content">
-          <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg"  data-navbar-top="combo">
+		 <?php 
+		  if($options['vertical_menu']){
+			?>
+			<div class="content">
+			 
+				<!-- Combo Top and Vertical Nav OR Just Vertical Nav -->
+			  <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg" data-move-target="#navbarVerticalNav" data-navbar-top="combo">
+				<button
+				  class="btn navbar-toggler-humburger-icon navbar-toggler me-1 me-sm-3"
+				  type="button"
+				  data-bs-toggle="collapse"
+				  data-bs-target=".navbar-collapse"
+				  aria-controls="navbarStandard"
+				  aria-expanded="false"
+				  aria-label="Toggle navigation"
+				>
+				  <span class="navbar-toggle-icon"><span class="toggle-line"></span></span>
+				</button>
+				<?php 
+			}
+			else{
+				?>
+				
+				
+				<!-- Top Nav Only-->
+				
+				<nav class="navbar navbar-light navbar-glass navbar-top navbar-expand-lg">
+				<button class="btn navbar-toggler-humburger-icon navbar-toggler me-1 me-sm-3" 
+				type="button" 
+				data-bs-toggle="collapse" 
+				data-bs-target="#navbarStandard" 
+				aria-controls="navbarStandard" 
+				aria-expanded="false" 
+				aria-label="Toggle Navigation"
+				>
+				<span class="navbar-toggle-icon"><span class="toggle-line"></span></span>
+				</button>
+				
+				<?php 
+			}
+			?>
+			
+		
 
-            <button class="btn navbar-toggler-humburger-icon navbar-toggler me-1 me-sm-3" type="button" data-bs-toggle="collapse" data-bs-target="#navbarVerticalCollapse" aria-controls="navbarVerticalCollapse" aria-expanded="false" aria-label="Toggle Navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
+			
+			
             <a class="navbar-brand me-1 me-sm-3" href="/">
               <div class="d-flex align-items-center">
 
@@ -505,6 +546,7 @@ class PublicPageFalcon extends PublicPageMaster {
             <div class="collapse navbar-collapse scrollbar" id="navbarStandard">
               <ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
 				<?php
+				$menus = PublicPage::get_public_menu();
 				foreach ($menus as $menu) {
 					if ($menu['parent'] === true) {
 						$submenus = $menu['submenu'];
@@ -529,7 +571,8 @@ class PublicPageFalcon extends PublicPageMaster {
     
               </ul>
             </div>
-		  <?php } ?>
+		  <?php } 
+		  ?>
             <ul class="navbar-nav navbar-nav-icons ms-auto flex-row align-items-center">
               <?php $this->top_right_menu(); ?>
             </ul>
@@ -540,7 +583,11 @@ class PublicPageFalcon extends PublicPageMaster {
 
 	public function public_footer($options=array()) {
 	
-      ?>
+	
+	
+	if(!$options['header_only']){
+	?>	
+
          
 
           <footer class="footer">
@@ -560,7 +607,7 @@ class PublicPageFalcon extends PublicPageMaster {
     <!-- ===============================================-->
     <!--    End of Main Content-->
     <!-- ===============================================-->
-
+	<?php } ?>
 
     
 
@@ -568,7 +615,7 @@ class PublicPageFalcon extends PublicPageMaster {
     <!-- ===============================================-->
     <!--    JavaScripts-->
     <!-- ===============================================-->
-	<!--<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js', '/includes', 'web'); ?>"></script>	-->
+	
 	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
 	<script src="<?php echo LibraryFunctions::get_theme_file_path('popper.min.js', '/includes/vendors/popper', 'web'); ?>"></script>
 	<script src="<?php echo LibraryFunctions::get_theme_file_path('bootstrap.min.js', '/includes/vendors/bootstrap', 'web'); ?>"></script>
