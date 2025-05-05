@@ -307,8 +307,13 @@ class Event extends SystemBase {
 			}
 		}
 		
-		//NOW GET THE AVAILABLE ONES
-		$max_value = max($existing_numbers)+1;
+		//NOW GET THE AVAILABLE ONESl
+		if(empty($existing_numbers)){
+			$max_value = 1;
+		}
+		else{
+			$max_value = max($existing_numbers)+1;
+		}
 
 		for($x=1; $x<=$max_value; $x++){
 			if(!in_array($x, $existing_numbers)){
