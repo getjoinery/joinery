@@ -240,6 +240,7 @@
 	
 	
 	//FILL IN A SESSION NUMBER IF IT'S BLANK
+	/*
 	$event_session_fill = $event_session->get('evs_session_number');
 	if(!$event_session_fill){
 
@@ -265,13 +266,15 @@
 	
 	
 	//echo $formwriter->textinput('Session number (number, for ordering)', 'evs_session_number', NULL, 100, @$event_session_fill, '', 255, '');
-	
+	*/
 
 	$optionvals = $event->get_all_valid_session_numbers();
 	//ADD IN THE CURRENT SESSION NUMBER 
 	if($event_session->get('evs_session_number')){
 		$optionvals[$event_session->get('evs_session_number')] = $event_session->get('evs_session_number');
 	}
+	
+	
 	echo $formwriter->dropinput("Session number (number, for ordering)", "evs_session_number", "ctrlHolder", $optionvals, $event_session->get('evs_session_number'), '', false);	
 	echo $formwriter->datetimeinput('Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_start_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
