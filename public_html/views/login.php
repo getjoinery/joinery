@@ -76,7 +76,7 @@
                   <div class="row flex-between-center">
                     <div class="col-auto">
                       <div class="form-check mb-0">
-                        <input class="form-check-input" type="checkbox" id="setcookie" name="setcookie" checked="checked" />
+                        <input class="form-check-input" type="checkbox" id="setcookie" name="setcookie" checked="checked" value="yes" />
                         <label class="form-check-label mb-0" for="setcookie">Remember me</label>
                       </div>
                     </div>
