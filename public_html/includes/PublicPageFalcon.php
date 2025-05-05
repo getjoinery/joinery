@@ -508,7 +508,7 @@ class PublicPageFalcon extends PublicPageMaster {
 			}
 			else{
 				?>
-				
+				<div class="content">
 				
 				<!-- Top Nav Only-->
 				
