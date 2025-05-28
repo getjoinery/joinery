@@ -694,9 +694,21 @@ class PublicPageFalcon extends PublicPageMaster {
 			$pager = new Pager();
 		}
 
-		$sortoptions= $options['sortoptions'];
-		$filteroptions= $options['filteroptions'];
-		$search_on = $options['search_on'];
+		$sortoptions = null;
+		if(isset($options['sortoptions'])){
+			$sortoptions = $options['sortoptions'];
+		}
+		
+		$filteroptions = null;
+		if(isset($options['filteroptions'])){
+			$filteroptions = $options['filteroptions'];
+		}
+		
+		$search_on = null;
+		if(isset($options['search_on'])){
+			$search_on = $options['search_on'];
+		}
+
 
 		echo '<div class="row justify-content-end justify-content-end gx-3 gy-0 px-3">';
 
