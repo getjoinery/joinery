@@ -263,7 +263,7 @@ Career Area
 
 
     <!-- Jquery -->
-	<!--<script src="<?php echo LibraryFunctions::get_theme_file_path('jquery-3.4.1.min.js', '/includes', 'web'); ?>"></script>-->
+	 <?php /*<!--<script src="<?php echo LibraryFunctions::get_theme_file_path('jquery-3.4.1.min.js', '/includes', 'web'); ?>"></script>-->*/ ?>
 	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 
     <!--==============================
@@ -326,9 +326,14 @@ Career Area
             </div>
         </div>
     </div>
-	--><!--==============================
+	-->
+	
+	
+	
+	<!--==============================
     Sidemenu
 ============================== -->
+<!--
     <div class="sidemenu-wrapper d-none d-lg-block ">
         <div class="sidemenu-content">
             <button class="closeButton sideMenuCls"><i class="far fa-times"></i></button>
@@ -412,7 +417,10 @@ Career Area
                 </div>
             </div>
         </div>
-    </div> <!--==============================
+    </div> 
+	-->
+	
+	<!--==============================
     Mobile Menu
   ============================== -->
     <div class="th-menu-wrapper">
