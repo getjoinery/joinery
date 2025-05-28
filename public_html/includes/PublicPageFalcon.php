@@ -638,7 +638,7 @@ class PublicPageFalcon extends PublicPageMaster {
 	
 	
 	function dropdown_or_buttons($options){
-		if(!is_array($options){
+		if(!is_array($options)){
 			$options = array();
 		}
 
