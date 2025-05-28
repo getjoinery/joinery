@@ -339,9 +339,11 @@ class LibraryFunctions {
 	}
 
 	
-	//LOOK IN THE THEME DIRECTORY FIRST, THEN THE DEFAULT THEME, THEN THE MAIN FILES
+	//LOOK IN THE THEME DIRECTORY FIRST, THEN THE DEFAULT THEME
+	//PATH FORMAT RETURNS A URL OR A SYSTEM PATH
+	//THEME NAME FORCES IT TO LOOK IN THE SPECIFIED THEME LOCATION
 	//subdirectory starts with a slash
-	static function get_theme_file_path($filename, $subdirectory='', $path_format='system', $debug = false){
+	static function get_theme_file_path($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $debug = false){
 		$settings = Globalvars::get_instance();
 		$siteDir = $settings->get_setting('siteDir');
 		
@@ -350,7 +352,15 @@ class LibraryFunctions {
 			$subdirectory = '/' . $subdirectory; // Add a forward slash if it doesn't exist
 		}
 		
-		$theme_template = $settings->get_setting('theme_template', true, true);
+		if($theme_name){
+			$theme_template = $theme_name;
+			if(!is_dir($siteDir.'/theme/'.$theme_template)){
+				throw new SystemDisplayablePermanentError('Could not find the specified theme: '. $theme_name);
+			}
+		}
+		else{
+			$theme_template = $settings->get_setting('theme_template', true, true);
+		}
 		$theme_file = $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename;
 		$default_file = $siteDir.$subdirectory.'/'.$filename;
 		
