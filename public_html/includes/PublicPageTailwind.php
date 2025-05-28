@@ -197,8 +197,9 @@ class PublicPageTailwind extends PublicPageMaster {
 				?>
 				
 		
-		<script src="<?php echo LibraryFunctions::get_theme_file_path('jquery-3.4.1.min.js', '/includes', 'web'); ?>"></script>
-		<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js', '/includes', 'web'); ?>"></script>	
+
+		<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>	
 			
 				
 		<!-- Favicon -->
