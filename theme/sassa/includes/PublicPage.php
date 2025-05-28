@@ -263,7 +263,6 @@ Career Area
 
 
     <!-- Jquery -->
-	 <?php /*<!--<script src="<?php echo LibraryFunctions::get_theme_file_path('jquery-3.4.1.min.js', '/includes', 'web'); ?>"></script>-->*/ ?>
 	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 
     <!--==============================
@@ -719,7 +718,6 @@ Career Area
 ============================== -->
 
     <!--<script src="/theme/sassa/assets/js/vendor/jquery-3.7.1.min.js"></script> //LOADED IN THE HEADER-->  
-	<!--<script type="text/javascript" src="<?php echo LibraryFunctions::get_theme_file_path('jquery.validate-1.9.1.js', '/includes', 'web'); ?>"></script>	-->
 	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
     <!-- Swiper Slider -->
     <script src="/theme/sassa/assets/js/swiper-bundle.min.js"></script>
