@@ -226,7 +226,7 @@ class PublicPageFalcon extends PublicPageMaster {
 			<?php if($session->is_logged_in()){ ?>
 			<li class="nav-item dropdown"><a class="nav-link pe-0 ps-2" id="navbarDropdownUser" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                 <div class="avatar avatar-xl">
-                  <img class="rounded-circle" src="<?php echo LibraryFunctions::get_theme_file_path('avatar.png', '/includes/img', 'web'); ?>" alt="" />
+                  <img class="rounded-circle" src="<?php echo LibraryFunctions::get_theme_file_path('avatar.png', '/includes/img', 'web', 'falcon'); ?>" alt="" />
 
                 </div>
               </a>
@@ -429,7 +429,7 @@ class PublicPageFalcon extends PublicPageMaster {
     <meta name="msapplication-TileImage" content="../assets/img/favicons/mstile-150x150.png">-->
     <meta name="theme-color" content="#ffffff">
     <!--<script src="../assets/js/config.js"></script>-->
-	<script src="<?php echo LibraryFunctions::get_theme_file_path('simplebar.min.js', '/includes/vendors/simplebar', 'web'); ?>"></script>
+	<script src="/theme/sassa/includes/vendors/simplebar/simplebar.min.js<?php echo LibraryFunctions::get_theme_file_path('simplebar.min.js', '/includes/vendors/simplebar', 'web', 'falcon'); ?>"></script>
 
 
     <!-- ===============================================-->
@@ -445,9 +445,9 @@ class PublicPageFalcon extends PublicPageMaster {
     <!-- Jquery -->
 	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>	
 	
-	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo LibraryFunctions::get_theme_file_path('simplebar.min.css', '/includes/vendors/simplebar', 'web'); ?>">
-	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo LibraryFunctions::get_theme_file_path('theme.css', '/includes/css', 'web'); ?>">
-	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo LibraryFunctions::get_theme_file_path('user_exceptions.css', '/includes/css', 'web'); ?>">
+	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo LibraryFunctions::get_theme_file_path('simplebar.min.css', '/includes/vendors/simplebar', 'web', 'falcon'); ?>">
+	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo LibraryFunctions::get_theme_file_path('theme.css', '/includes/css', 'web', 'falcon'); ?>">
+	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo LibraryFunctions::get_theme_file_path('user_exceptions.css', '/includes/css', 'web', 'falcon'); ?>">
 	
 	
 
@@ -617,14 +617,14 @@ class PublicPageFalcon extends PublicPageMaster {
     <!-- ===============================================-->
 	
 	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
-	<script src="<?php echo LibraryFunctions::get_theme_file_path('popper.min.js', '/includes/vendors/popper', 'web'); ?>"></script>
-	<script src="<?php echo LibraryFunctions::get_theme_file_path('bootstrap.min.js', '/includes/vendors/bootstrap', 'web'); ?>"></script>
-	<script src="<?php echo LibraryFunctions::get_theme_file_path('anchor.min.js', '/includes/vendors/anchorjs', 'web'); ?>"></script>
-	<script src="<?php echo LibraryFunctions::get_theme_file_path('is.min.js', '/includes/vendors/is', 'web'); ?>"></script>
-    <script src="<?php echo LibraryFunctions::get_theme_file_path('all.min.js', '/includes/vendors/fontawesome', 'web'); ?>"></script>
-	<script src="<?php echo LibraryFunctions::get_theme_file_path('lodash.min.js', '/includes/vendors/lodash', 'web'); ?>"></script>
-	<script src="<?php echo LibraryFunctions::get_theme_file_path('list.min.js', '/includes/vendors/list.js', 'web'); ?>"></script>
-	<script src="<?php echo LibraryFunctions::get_theme_file_path('theme.js', '/includes/js', 'web'); ?>"></script>
+	<script src="<?php echo LibraryFunctions::get_theme_file_path('popper.min.js', '/includes/vendors/popper', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo LibraryFunctions::get_theme_file_path('bootstrap.min.js', '/includes/vendors/bootstrap', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo LibraryFunctions::get_theme_file_path('anchor.min.js', '/includes/vendors/anchorjs', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo LibraryFunctions::get_theme_file_path('is.min.js', '/includes/vendors/is', 'web', 'falcon'); ?>"></script>
+    <script src="<?php echo LibraryFunctions::get_theme_file_path('all.min.js', '/includes/vendors/fontawesome', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo LibraryFunctions::get_theme_file_path('lodash.min.js', '/includes/vendors/lodash', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo LibraryFunctions::get_theme_file_path('list.min.js', '/includes/vendors/list.js', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo LibraryFunctions::get_theme_file_path('theme.js', '/includes/js', 'web', 'falcon'); ?>"></script>
 	
 
 
