@@ -637,7 +637,7 @@ class PublicPageFalcon extends PublicPageMaster {
 	}
 	
 	
-	function dropdown_or_buttons($options){
+	function dropdown_or_buttons($options=array()){
 		if(!is_array($options)){
 			$options = array();
 		}
@@ -686,7 +686,7 @@ class PublicPageFalcon extends PublicPageMaster {
 	}
 	
 
-	function tableheader($headers, $options=NULL, $pager=NULL){
+	function tableheader($headers, $options=array(), $pager=NULL){
 		
 		$this->begin_box($options);
 		
