@@ -178,84 +178,35 @@ class EmailRecipient extends SystemBase {
 
 class MultiEmailRecipient extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'erc_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
+        if (isset($this->options['user_id'])) {
+            $filters['erc_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('email_id', $this->options)) {
-			$where_clauses[] = 'erc_eml_email_id = ?';
-			$bind_params[] = array($this->options['email_id'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('user_email', $this->options)) {
-			$where_clauses[] = 'erc_email = ?';
-			$bind_params[] = array($this->options['user_email'], PDO::PARAM_STR);
-		}		
+        if (isset($this->options['email_id'])) {
+            $filters['erc_eml_email_id'] = [$this->options['email_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['user_email'])) {
+            $filters['erc_email'] = [$this->options['user_email'], PDO::PARAM_STR];
+        }
 
-		if (array_key_exists('sent', $this->options)) {
-			if ($this->options['sent']) { 
-				$where_clauses[] = 'erc_sent_time IS NOT NULL';
-			} else { 
-				$where_clauses[] = 'erc_sent_time IS NULL';
-			}
-		}
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
+        if (isset($this->options['sent'])) {
+            if ($this->options['sent']) {
+                $filters['erc_sent_time'] = "IS NOT NULL";
+            } else {
+                $filters['erc_sent_time'] = "IS NULL";
+            }
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM erc_email_recipients ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM erc_email_recipients
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " erc_email_recipient_id ASC ";
-			}
-			else {
-				if (array_key_exists('email_recipient_id', $this->order_by)) {
-					$sql .= ' erc_email_recipient_id ' . $this->order_by['email_recipient_id'];
-				}	
-				else if (array_key_exists('email_id', $this->order_by)) {
-					$sql .= ' erc_eml_email_id ' . $this->order_by['email_id'];
-				}					
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('erc_email_recipients', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new EmailRecipient($row->erc_email_recipient_id);
 			$child->load_from_data($row, array_keys(EmailRecipient::$fields));
@@ -263,11 +214,9 @@ class MultiEmailRecipient extends SystemMultiBase {
 		}
 	}
 
-
-	public static function GetUnsentRecipientsForEmail($eml_email_id) { 
-		$recipients = new MultiEmailRecipient(array('email_id' => $eml_email_id, 'sent' => FALSE));
-		$recipients->load();
-		return $recipients;
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 }
 

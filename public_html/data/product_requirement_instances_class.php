@@ -90,89 +90,37 @@ class MultiProductRequirementInstance extends SystemMultiBase {
 	}
 
 
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-
-	function _get_results($only_count=FALSE, $debug = false) {
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('product_id', $this->options)) {
-			$where_clauses[] = 'pri_pro_product_id = ?';
-			$bind_params[] = array($this->options['product_id'], PDO::PARAM_INT);
-		}
-		
-
-		if (array_key_exists('product_requirement_id', $this->options)) {
-			$where_clauses[] = 'pri_prq_product_requirement_id = ?';
-			$bind_params[] = array($this->options['product_requirement_id'], PDO::PARAM_INT);
+		if (isset($this->options['product_id'])) {
+			$filters['pri_pro_product_id'] = [$this->options['product_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'pri_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}		
-			
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['product_requirement_id'])) {
+			$filters['pri_prq_product_requirement_id'] = [$this->options['product_requirement_id'], PDO::PARAM_INT];
 		}
 
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM pri_product_requirement_instances
-				' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM pri_product_requirement_instances
-				' . $where_clause . ' ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= 'pri_product_requirement_instance_id DESC';
-			} else {
-				$sort_clauses = array();
-
-				if (array_key_exists('product_requirement_instance_id', $this->order_by)) {
-					$sort_clauses[] = 'pri_product_requirement_instance_id ' . $this->order_by['product_requirement_instance_id'];
-				}	
-							
-				
-				$sql .= implode(',', $sort_clauses);
-			}
-			$sql .= $this->generate_limit_and_offset();
+		if (isset($this->options['deleted'])) {
+			$filters['pri_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
 		}
 
-		try {
-			$q = $dblink->prepare($sql);
-			
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		return $q;
+		return $this->_get_resultsv2('pri_product_requirement_instances', $filters, $this->order_by, $only_count, $debug);
 	}
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new ProductRequirementInstance($row->pri_product_requirement_instance_id);
 			$child->load_from_data($row, array_keys(ProductRequirementInstance::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

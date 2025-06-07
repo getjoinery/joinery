@@ -61,90 +61,38 @@ class Upgrade extends SystemBase {
 
 class MultiUpgrade extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('user_id_recipient', $this->options)) {
-			$where_clauses[] = 'upg_usr_user_id_recipient = ?';
-			$bind_params[] = array($this->options['user_id_recipient'], PDO::PARAM_INT);
-		}
-	
-		if (array_key_exists('major_version', $this->options)) {
-			$where_clauses[] = 'upg_major_version = ?';
-			$bind_params[] = array($this->options['major_version'], PDO::PARAM_INT);
-		}	
-		
-		if (array_key_exists('minor_version', $this->options)) {
-			$where_clauses[] = 'upg_minor_version = ?';
-			$bind_params[] = array($this->options['minor_version'], PDO::PARAM_INT);
-		}	
-
-		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM upg_upgrades ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM upg_upgrades
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " upg_upgrade_id ASC ";
-			}
-			else {
-				if (array_key_exists('upgrade_id', $this->order_by)) {
-					$sql .= ' upg_upgrade_id ' . $this->order_by['upgrade_id'];
-				}
-				
-				if (array_key_exists('major_version', $this->order_by)) {
-					$sql .= ' upg_major_version ' . $this->order_by['major_version'];
-				}	
-
-				if (array_key_exists('minor_version', $this->order_by)) {
-					$sql .= ' upg_minor_version ' . $this->order_by['minor_version'];
-				}					
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Upgrade($row->upg_upgrade_id);
-			$child->load_from_data($row, array_keys(Upgrade::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['user_id_recipient'])) {
+            $filters['upg_usr_user_id_recipient'] = [$this->options['user_id_recipient'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['major_version'])) {
+            $filters['upg_major_version'] = [$this->options['major_version'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['minor_version'])) {
+            $filters['upg_minor_version'] = [$this->options['minor_version'], PDO::PARAM_INT];
+        }
+        
+        return $this->_get_resultsv2('upg_upgrades', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new Upgrade($row->upg_upgrade_id);
+            $child->load_from_data($row, array_keys(Upgrade::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 
 }
 

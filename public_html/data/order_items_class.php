@@ -296,117 +296,65 @@ class MultiOrderItem extends SystemMultiBase {
 		return $price_array;
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) {
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('order_id', $this->options)) {
-			$where_clauses[] = 'odi_ord_order_id = ?';
-			$bind_params[] = array($this->options['order_id'], PDO::PARAM_INT);
+		if (isset($this->options['order_id'])) {
+			$filters['odi_ord_order_id'] = [$this->options['order_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'odi_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('registrant_id', $this->options)) {
-			$where_clauses[] = 'odi_evr_event_registrant_id = ?';
-			$bind_params[] = array($this->options['registrant_id'], PDO::PARAM_INT);
-		}		
-
-		if (array_key_exists('product_id', $this->options)) {
-			$where_clauses[] = 'odi_pro_product_id = ?';
-			$bind_params[] = array($this->options['product_id'], PDO::PARAM_INT);
+		if (isset($this->options['user_id'])) {
+			$filters['odi_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('stripe_subscription_id', $this->options)) {
-			$where_clauses[] = 'odi_stripe_subscription_id = ?';
-			$bind_params[] = array($this->options['stripe_subscription_id'], PDO::PARAM_INT);
+		if (isset($this->options['registrant_id'])) {
+			$filters['odi_evr_event_registrant_id'] = [$this->options['registrant_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('status', $this->options)) {
-			$where_clauses[] = 'odi_status = ?';
-			$bind_params[] = array($this->options['status'], PDO::PARAM_INT);
+		if (isset($this->options['product_id'])) {
+			$filters['odi_pro_product_id'] = [$this->options['product_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('order_date_after', $this->options)) {
-			$where_clauses[] = 'odi_status_change_time > ?';
-			$bind_params[] = array($this->options['order_date_after'], PDO::PARAM_STR);
+		if (isset($this->options['stripe_subscription_id'])) {
+			$filters['odi_stripe_subscription_id'] = [$this->options['stripe_subscription_id'], PDO::PARAM_STR];
 		}
 
-		if (array_key_exists('is_subscription', $this->options)) {
-			$where_clauses[] = 'odi_is_subscription = TRUE';
+		if (isset($this->options['status'])) {
+			$filters['odi_status'] = [$this->options['status'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('is_active_subscription', $this->options)) {
-			$where_clauses[] = '(odi_is_subscription = TRUE AND odi_subscription_cancelled_time IS NULL)';
+		if (isset($this->options['order_date_after'])) {
+			$filters['odi_status_change_time'] = '> \''.$this->options['order_date_after'].'\'';
 		}
 
-		if (array_key_exists('is_cancelled_subscription', $this->options)) {
-			$where_clauses[] = '(odi_is_subscription = TRUE AND odi_subscription_cancelled_time IS NOT NULL)';
+		if (isset($this->options['is_subscription'])) {
+			$filters['odi_is_subscription'] = "= TRUE";
 		}
 
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['is_active_subscription'])) {
+			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NULL";
 		}
 
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		if ($this->order_by) {
-			if (array_key_exists('order_item_id', $this->order_by)) {
-				$order_by_string = ' odi_order_item_id '. $this->order_by['order_item_id'];
-			}	
-				
-		}
-		else {
-			$order_by_string = ' odi_order_item_id '. $this->order_by['order_item_id'];
-		}
-		
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM odi_order_items
-				' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM odi_order_items
-				' . $where_clause . '
-				ORDER BY ' . $order_by_string . ' ' .$this->generate_limit_and_offset();
+		if (isset($this->options['is_cancelled_subscription'])) {
+			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NOT NULL";
 		}
 
-		
-		try {
-			$q = $dblink->prepare($sql);
-
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		return $q;
+		return $this->_get_resultsv2('odi_order_items', $filters, $this->order_by, $only_count, $debug);
 	}
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new OrderItem($row->odi_order_item_id);
 			$child->load_from_data($row, array_keys(OrderItem::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

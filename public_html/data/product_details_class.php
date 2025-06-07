@@ -51,78 +51,35 @@ class ProductDetail extends SystemBase {
 
 class MultiProductDetail extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('product_id', $this->options)) {
-			$where_clauses[] = 'prd_pro_product_id = ?';
-			$bind_params[] = array($this->options['product_id'], PDO::PARAM_INT);
-		}
-	
-		if (array_key_exists('product_version_id', $this->options)) {
-			$where_clauses[] = 'prd_prv_product_version_id = ?';
-			$bind_params[] = array($this->options['product_version_id'], PDO::PARAM_INT);
-		}	
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['product_id'])) {
+			$filters['prd_pro_product_id'] = [$this->options['product_id'], PDO::PARAM_INT];
 		}
 
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM prd_product_details
-				' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM prd_product_details
-				' . $where_clause . ' ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= 'prd_product_detail_id DESC';
-			} else {
-				$sort_clauses = array();
-				if (array_key_exists('product_detail_id', $this->order_by)) {
-					$sort_clauses[] = 'prd_product_detail_id ' . $this->order_by['product_detail_id'];
-				}
-				
-				$sql .= implode(',', $sort_clauses);
-			}
-			$sql .= $this->generate_limit_and_offset();
-		}
-			
-	
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
+		if (isset($this->options['product_version_id'])) {
+			$filters['prd_prv_product_version_id'] = [$this->options['product_version_id'], PDO::PARAM_INT];
 		}
 
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
+		return $this->_get_resultsv2('prd_product_details', $filters, $this->order_by, $only_count, $debug);
 	}
 
+	// CHANGED: Updated load method
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new ProductDetail($row->prd_product_detail_id);
 			$child->load_from_data($row, array_keys(ProductDetail::$fields));
 			$this->add($child);
 		}
+	}
+
+	// NEW: Added count_all method
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

@@ -67,85 +67,37 @@ class Migration extends SystemBase {
 
 class MultiMigration extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-	
-		
-		if (array_key_exists('version', $this->options)) {
-			$where_clauses[] = 'mig_version = ?';
-			$bind_params[] = array($this->options['version'], PDO::PARAM_INT);
-		}	
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('hash', $this->options)) {
-			$where_clauses[] = 'mig_hash = ?';
-			$bind_params[] = array($this->options['hash'], PDO::PARAM_STR);
-		}	
-
-		if (array_key_exists('successful', $this->options)) {
-			$where_clauses[] = 'mig_success = ?';
-			$bind_params[] = array($this->options['successful'], PDO::PARAM_BOOL);
-		}		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['version'])) {
+			$filters['mig_version'] = [$this->options['version'], PDO::PARAM_INT];
 		}
 
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM mig_migrations ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM mig_migrations
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " mig_migration_id ASC ";
-			}
-			else {
-				if (array_key_exists('migration_id', $this->order_by)) {
-					$sql .= ' mig_migration_id ' . $this->order_by['migration_id'];
-				}
-				
-
-				if (array_key_exists('version', $this->order_by)) {
-					$sql .= ' mig_version ' . $this->order_by['version'];
-				}					
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
+		if (isset($this->options['hash'])) {
+			$filters['mig_hash'] = [$this->options['hash'], PDO::PARAM_STR];
 		}
 
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
+		if (isset($this->options['successful'])) {
+			$filters['mig_success'] = [$this->options['successful'], PDO::PARAM_BOOL];
 		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
 
-		return $q;
+		return $this->_get_resultsv2('mig_migrations', $filters, $this->order_by, $only_count, $debug);
 	}
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Migration($row->mig_migration_id);
 			$child->load_from_data($row, array_keys(Migration::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

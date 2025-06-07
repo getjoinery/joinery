@@ -86,80 +86,38 @@ class BookingType extends SystemBase {
 
 class MultiBookingType extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'bkt_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
-	
-
-		if (array_key_exists('calendly_uri', $this->options)) {
-			$where_clauses[] = 'bkt_calendly_event_type_uri = ?';
-			$bind_params[] = array($this->options['calendly_uri'], PDO::PARAM_STR);
-		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'bkt_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	 		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM bkt_booking_types ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM bkt_booking_types
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " bkt_booking_type_id ASC ";
-			}
-			else {
-				if (array_key_exists('booking_type_id', $this->order_by)) {
-					$sql .= ' bkt_booking_type_id ' . $this->order_by['booking_type_id'];
-				}			
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-			
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new BookingType($row->bkt_booking_type_id);
-			$child->load_from_data($row, array_keys(BookingType::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['user_id'])) {
+            $filters['bkt_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['calendly_uri'])) {
+            $filters['bkt_calendly_event_type_uri'] = [$this->options['calendly_uri'], PDO::PARAM_STR];
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['bkt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        return $this->_get_resultsv2('bkt_booking_types', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new BookingType($row->bkt_booking_type_id);
+            $child->load_from_data($row, array_keys(BookingType::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 
 }
 

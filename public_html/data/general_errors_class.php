@@ -107,71 +107,29 @@ class GeneralError extends SystemBase {
 
 class MultiGeneralError extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
 		if (isset($this->options['user_id'])) {
-		 	$where_clauses[] = 'err_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+			$filters['err_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM err_general_errors ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM err_general_errors
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " err_general_error_id ASC ";
-			}
-			else {
-				if (array_key_exists('general_error_id', $this->order_by)) {
-					$sql .= ' err_general_error_id ' . $this->order_by['general_error_id'];
-				}	
-				if (array_key_exists('create_time', $this->order_by)) {
-					$sql .= ' err_create_time ' . $this->order_by['create_time'];
-				}					
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
+		return $this->_get_resultsv2('err_general_errors', $filters, $this->order_by, $only_count, $debug);
 	}
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new GeneralError($row->err_general_error_id);
 			$child->load_from_data($row, array_keys(GeneralError::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

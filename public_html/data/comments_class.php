@@ -158,94 +158,54 @@ class Comment extends SystemBase {
 
 class MultiComment extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('author_id', $this->options)) {
-			$where_clauses[] = 'cmt_usr_user_id = ?';
-			$bind_params[] = array($this->options['author_id'], PDO::PARAM_INT);
-		}
-	
-		if (array_key_exists('approved', $this->options)) {
-			$where_clauses[] = 'cmt_is_approved = ' . ($this->options['approved'] ? 'TRUE' : 'FALSE');
-		}	
+        if (isset($this->options['author_id'])) {
+            $filters['cmt_usr_user_id'] = [$this->options['author_id'], PDO::PARAM_INT];
+        }
+    
+        if (isset($this->options['approved'])) {
+            $filters['cmt_is_approved'] = $this->options['approved'] ? "= TRUE" : "= FALSE";
+        }
 
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'cmt_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-		
-		if (array_key_exists('post_id', $this->options)) {
-			$where_clauses[] = 'cmt_pst_post_id = ?';
-			$bind_params[] = array($this->options['post_id'], PDO::PARAM_INT);
-		}		
-				
-		if (array_key_exists('parent_id', $this->options)) {
-			$where_clauses[] = 'cmt_comment_id_parent = ?';
-			$bind_params[] = array($this->options['parent_id'], PDO::PARAM_INT);		
-		}	
-	
-		if (array_key_exists('has_parent_id', $this->options)) {
-			if($this->options['has_parent_id']){
-				$where_clauses[] = 'cmt_comment_id_parent IS NOT NULL';
-			}
-			else{
-				$where_clauses[] = 'cmt_comment_id_parent IS NULL';
-			}
-		}		
-	
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
+        if (isset($this->options['deleted'])) {
+            $filters['cmt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        if (isset($this->options['post_id'])) {
+            $filters['cmt_pst_post_id'] = [$this->options['post_id'], PDO::PARAM_INT];
+        }
+                
+        if (isset($this->options['parent_id'])) {
+            $filters['cmt_comment_id_parent'] = [$this->options['parent_id'], PDO::PARAM_INT];
+        }
+    
+        if (isset($this->options['has_parent_id'])) {
+            if($this->options['has_parent_id']){
+                $filters['cmt_comment_id_parent'] = "IS NOT NULL";
+            }
+            else{
+                $filters['cmt_comment_id_parent'] = "IS NULL";
+            }
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM cmt_comments ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM cmt_comments
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " cmt_comment_id ASC ";
-			}
-			else {
-				if (array_key_exists('comment_id', $this->order_by)) {
-					$sql .= ' cmt_comment_id ' . $this->order_by['comment_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('cmt_comments', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Comment($row->cmt_comment_id);
 			$child->load_from_data($row, array_keys(Comment::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

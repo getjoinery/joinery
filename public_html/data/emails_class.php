@@ -255,74 +255,43 @@ class MultiEmail extends SystemMultiBase {
 	const SCHEDULED_PAST = 1;
 	const SCHEDULED_FUTURE = 2;
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'eml_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
+        if (isset($this->options['user_id'])) {
+            $filters['eml_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
 
-		if (isset($this->options['status'])) {
-			$where_clauses[] = 'eml_status = ?';
-			$bind_params[] = array($this->options['status'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'eml_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-		
-		if (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_PAST) {
-			$where_clauses[] = 'eml_scheduled_time < NOW()';
-		} elseif (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_FUTURE) {
-			$where_clauses[] = 'eml_scheduled_time > NOW()';
-		}		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-		
-		if (array_key_exists('email_id', $this->order_by)) {
-			$sql .= ' eml_email_id ' . $this->order_by['email_id'];
-		}			
+        if (isset($this->options['status'])) {
+            $filters['eml_status'] = [$this->options['status'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['eml_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        if (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_PAST) {
+            $filters['eml_scheduled_time'] = "< NOW()";
+        } elseif (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_FUTURE) {
+            $filters['eml_scheduled_time'] = "> NOW()";
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM eml_emails ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM eml_emails
-				' . $where_clause . '
-				ORDER BY eml_email_id DESC ' . $this->generate_limit_and_offset();
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('eml_emails', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Email($row->eml_email_id);
 			$child->load_from_data($row, array_keys(Email::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

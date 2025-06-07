@@ -81,74 +81,34 @@ class MultiCtldDeviceBackup extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'cdb_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
-
-		
-		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'cdb_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		} 
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM cdb_ctlddevice_backups ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM cdb_ctlddevice_backups
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " cdb_ctlddevice_backup_id ASC ";
-			}
-			else {
-				if (array_key_exists('ctlddevice_backup_id', $this->order_by)) {
-					$sql .= ' cdb_ctlddevice_backup_id ' . $this->order_by['ctlddevice_backup_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new CtldDeviceBackup($row->cdb_ctlddevice_backup_id);
-			$child->load_from_data($row, array_keys(CtldDeviceBackup::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['user_id'])) {
+            $filters['cdb_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['cdb_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        return $this->_get_resultsv2('cdb_ctlddevice_backups', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new CtldDeviceBackup($row->cdb_ctlddevice_backup_id);
+            $child->load_from_data($row, array_keys(CtldDeviceBackup::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 
 }
 

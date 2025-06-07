@@ -1334,121 +1334,61 @@ class MultiProduct extends SystemMultiBase {
 	}
 
 
-	function _get_results($only_count=FALSE, $debug = false) {
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('product_group', $this->options)) {
-			$where_clauses[] = 'pro_prg_product_group_id = ?';
-			$bind_params[] = array($this->options['product_group'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('event_id', $this->options)) {
-			$where_clauses[] = 'pro_evt_event_id = ?';
-			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}	
-
-		if (array_key_exists('name_like', $this->options)) {
-			$where_clauses[] = 'pro_name ILIKE ?';
-			$bind_params[] = array('%'.$this->options['name_like'].'%', PDO::PARAM_STR);
-		}		
-		
-		
-		if (array_key_exists('is_active', $this->options)) {
-			$where_clauses[] = 'pro_is_active = TRUE';
-		}			
-		
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'pro_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
-		}		
-	
-		if (array_key_exists('product_type', $this->options)) {
-			$where_clauses[] = 'pro_type = ?';
-			$bind_params[] = array($this->options['product_type'], PDO::PARAM_INT);
-		}	
-		
-		if (array_key_exists('in_stock', $this->options)) {
-			$where_clauses[] = '(pro_max_purchase_count IS NULL OR pro_max_purchase_count = 0 OR (pro_max_purchase_count > 0 AND (pro_num_remaining_calc IS NULL OR pro_num_remaining_calc > 0)))';
-		}	
-
-		if (array_key_exists('product_id_is_not', $this->options)) {
-			$where_clauses[] = 'pro_product_id != ?';
-			$bind_params[] = array($this->options['product_id_is_not'], PDO::PARAM_INT);
-		}	
-
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'pro_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
+		if (isset($this->options['product_group'])) {
+			$filters['pro_prg_product_group_id'] = [$this->options['product_group'], PDO::PARAM_INT];
 		}
 
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['event_id'])) {
+			$filters['pro_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
 		}
 
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-			
-		if ($this->order_by) {
-			if (array_key_exists('product_id', $this->order_by)) {
-				$order_by_string = ' pro_product_id '. $this->order_by['product_id'];
-			}	
-
-			if (array_key_exists('Name', $this->order_by)) {
-				$order_by_string = ' pro_name ASC';
-			}			
-			
-		}
-		else {
-			$order_by_string = ' pro_product_id '. $this->order_by['product_id'];
+		if (isset($this->options['name_like'])) {
+			$filters['pro_name'] = 'ILIKE \'%'.$this->options['name_like'].'%\'';
 		}
 
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM pro_products
-				' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM pro_products
-				' . $where_clause . '
-				ORDER BY ' . $order_by_string . ' ' .$this->generate_limit_and_offset();
+		if (isset($this->options['is_active'])) {
+			$filters['pro_is_active'] = "= TRUE";
 		}
 
-		try {
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-			$q = $dblink->prepare($sql);
-
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
+		if (isset($this->options['link'])) {
+			$filters['pro_link'] = [$this->options['link'], PDO::PARAM_STR];
 		}
 
-		return $q;
+		if (isset($this->options['product_type'])) {
+			$filters['pro_type'] = [$this->options['product_type'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['in_stock'])) {
+			$filters['pro_max_purchase_count'] = "IS NULL OR pro_max_purchase_count = 0 OR (pro_max_purchase_count > 0 AND (pro_num_remaining_calc IS NULL OR pro_num_remaining_calc > 0))";
+		}
+
+		if (isset($this->options['product_id_is_not'])) {
+			$filters['pro_product_id'] = '!= '.$this->options['product_id_is_not'];
+		}
+
+		if (isset($this->options['deleted'])) {
+			$filters['pro_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		return $this->_get_resultsv2('pro_products', $filters, $this->order_by, $only_count, $debug);
 	}
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Product($row->pro_product_id);
 			$child->load_from_data($row, array_keys(Product::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 }
 

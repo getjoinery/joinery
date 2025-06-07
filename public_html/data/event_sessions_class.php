@@ -421,143 +421,62 @@ class MultiEventSessions extends SystemMultiBase {
 
 
 
-	function _get_results($only_count=FALSE, $debug = false) {
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('event_id', $this->options)) {
-			$where_clauses[] = 'evs_evt_event_id = ?';
-			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}
-
-		if (array_key_exists('session_number', $this->options)) {
-			$where_clauses[] = 'evs_session_number = ?';
-			$bind_params[] = array($this->options['session_number'], PDO::PARAM_INT);
-		}
-	
-		if (array_key_exists('title_like', $this->options)) {
-			$where_clauses[] = 'evs_title ILIKE ?';
-			$bind_params[] = array('%'.$this->options['title_like'].'%', PDO::PARAM_STR);
-		}		
-
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'evs_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-		
-		if (array_key_exists('future', $this->options)) {
-			$where_clauses[] = 'evs_end_time > ?';
-			$bind_params[] = array($this->options['future'], PDO::PARAM_STR);
-		}
-
-		if (array_key_exists('future_or_none', $this->options)) {
-			$where_clauses[] = '(evs_end_time > now() OR evs_start_time IS NULL)';
-		}
-
-		if (array_key_exists('past', $this->options)) {
-			$where_clauses[] = 'evs_end_time < ?';
-			$bind_params[] = array($this->options['past'], PDO::PARAM_STR);
-		}		
-	
-		if (array_key_exists('past_or_none', $this->options)) {
-			$where_clauses[] = '(evs_end_time < now() OR evs_start_time IS NULL)';
-		}	
-		/*
-		if (array_key_exists('expired', $this->options)) {
-			$where_clauses[] = 'evs_expires_time ' . ($this->options['expired'] ? '<' : '>') . ' now()';
-		}	
-		*/		
-		
-
-		if (array_key_exists('public', $this->options)) {
-			$where_clauses[] = 'evs_is_public = ' . ($this->options['public'] ? 'TRUE' : 'FALSE');
-		}
-		
-			
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM evs_event_sessions
-				' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM evs_event_sessions
-				' . $where_clause . ' ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= 'evs_event_session_id DESC';
-			} else {
-				$sort_clauses = array();
-				if (array_key_exists('evs_evt_event_id', $this->order_by)) {
-					$sort_clauses[] = 'evs_evt_event_id ' . $this->order_by['evs_evt_event_id'];
-				}
-				
-				if (array_key_exists('title', $this->order_by)) {
-					$sort_clauses[] = 'evs_title ' . $this->order_by['title'];
-				}
-				
-				if (array_key_exists('session_number', $this->order_by)) {
-					$sort_clauses[] = 'evs_session_number ' . $this->order_by['session_number'];
-				}						
-				
-				if (array_key_exists('start_time', $this->order_by)) {
-					$sort_clauses[] = 'evs_start_time ' . $this->order_by['start_time'];
-				}
-				
-				if (array_key_exists('end_time', $this->order_by)) {
-					$sort_clauses[] = 'evs_end_time ' . $this->order_by['end_time'];
-				}
-
-				if (array_key_exists('session_number_then_title', $this->order_by)) {
-					$sort_clauses[] = 'evs_session_number '. $this->order_by['session_number_then_title'].', evs_title '. $this->order_by['session_number_then_title'];
-				}
-				
-				if (array_key_exists('time_then_session_number', $this->order_by)) {
-					$sort_clauses[] = 'evs_start_time '. $this->order_by['time_then_session_number'].' , evs_session_number '. $this->order_by['time_then_session_number'];
-				}							
-				
-				$sql .= implode(',', $sort_clauses);
-			}
-			$sql .= $this->generate_limit_and_offset();
-		}
-
-		try {
-			$q = $dblink->prepare($sql);
-			
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new EventSession($row->evs_event_session_id);
-			$child->load_from_data($row, array_keys(EventSession::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['event_id'])) {
+            $filters['evs_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['session_number'])) {
+            $filters['evs_session_number'] = [$this->options['session_number'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['title_like'])) {
+            $filters['evs_title'] = 'ILIKE \'%'.$this->options['title_like'].'%\'';
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['evs_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        if (isset($this->options['future'])) {
+            $filters['evs_end_time'] = '> \''.$this->options['future'].'\'';
+        }
+        
+        if (isset($this->options['future_or_none'])) {
+            $filters['evs_end_time'] = '> now() OR evs_start_time IS NULL';
+        }
+        
+        if (isset($this->options['past'])) {
+            $filters['evs_end_time'] = '< \''.$this->options['past'].'\'';
+        }
+        
+        if (isset($this->options['past_or_none'])) {
+            $filters['evs_end_time'] = '< now() OR evs_start_time IS NULL';
+        }
+        
+        if (isset($this->options['public'])) {
+            $filters['evs_is_public'] = $this->options['public'] ? "= TRUE" : "= FALSE";
+        }
+        
+        return $this->_get_resultsv2('evs_event_sessions', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new EventSession($row->evs_event_session_id);
+            $child->load_from_data($row, array_keys(EventSession::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 
 }
 

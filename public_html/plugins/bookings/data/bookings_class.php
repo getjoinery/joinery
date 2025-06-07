@@ -94,89 +94,46 @@ class Booking extends SystemBase {
 
 class MultiBooking extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('user_id_client', $this->options)) {
-			$where_clauses[] = 'bkn_usr_user_id_client = ?';
-			$bind_params[] = array($this->options['user_id_client'], PDO::PARAM_INT);
-		}
-	
-		if (array_key_exists('user_id_booked', $this->options)) {
-			$where_clauses[] = 'bkn_usr_user_id_booked = ?';
-			$bind_params[] = array($this->options['user_id_booked'], PDO::PARAM_INT);
-		}	
-		
-		if (array_key_exists('product_id', $this->options)) {
-			$where_clauses[] = 'bkn_pro_product_id = ?';
-			$bind_params[] = array($this->options['product_id'], PDO::PARAM_INT);
-		}	
-
-		if (array_key_exists('calendly_uri', $this->options)) {
-			$where_clauses[] = 'bkn_calendly_event_uri = ?';
-			$bind_params[] = array($this->options['calendly_uri'], PDO::PARAM_STR);
-		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'bkn_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	 		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM bkn_bookings ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM bkn_bookings
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " bkn_booking_id ASC ";
-			}
-			else {
-				if (array_key_exists('booking_id', $this->order_by)) {
-					$sql .= ' bkn_booking_id ' . $this->order_by['booking_id'];
-				}			
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-			
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Booking($row->bkn_booking_id);
-			$child->load_from_data($row, array_keys(Booking::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['user_id_client'])) {
+            $filters['bkn_usr_user_id_client'] = [$this->options['user_id_client'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['user_id_booked'])) {
+            $filters['bkn_usr_user_id_booked'] = [$this->options['user_id_booked'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['product_id'])) {
+            $filters['bkn_pro_product_id'] = [$this->options['product_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['calendly_uri'])) {
+            $filters['bkn_calendly_event_uri'] = [$this->options['calendly_uri'], PDO::PARAM_STR];
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['bkn_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        return $this->_get_resultsv2('bkn_bookings', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new Booking($row->bkn_booking_id);
+            $child->load_from_data($row, array_keys(Booking::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 
 }
 

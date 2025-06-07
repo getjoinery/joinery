@@ -126,90 +126,51 @@ class MultiPageContent extends SystemMultiBase {
 
 
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'pac_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('page_id', $this->options)) {
-		 	$where_clauses[] = 'pac_pag_page_id = ?';
-		 	$bind_params[] = array($this->options['page_id'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'pac_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
+		if (isset($this->options['user_id'])) {
+			$filters['pac_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('has_link', $this->options)) {
-			$where_clauses[] = 'LENGTH(pac_link) > 0';
-		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'pac_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-		
-		if (array_key_exists('published', $this->options)) {
-		 	$where_clauses[] = 'pac_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');
-		} 		
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['page_id'])) {
+			$filters['pac_pag_page_id'] = [$this->options['page_id'], PDO::PARAM_INT];
 		}
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM pac_page_contents ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM pac_page_contents
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " pac_page_content_id ASC ";
-			}
-			else {
-				if (array_key_exists('page_content_id', $this->order_by)) {
-					$sql .= ' pac_page_content_id ' . $this->order_by['page_content_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
+		if (isset($this->options['link'])) {
+			$filters['pac_link'] = [$this->options['link'], PDO::PARAM_STR];
 		}
 
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
+		if (isset($this->options['has_link'])) {
+			$filters['pac_link'] = "LENGTH(pac_link) > 0";
 		}
 
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
+		if (isset($this->options['deleted'])) {
+			$filters['pac_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
 		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
 
-		return $q;
+		if (isset($this->options['published'])) {
+			$filters['pac_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
+		}
+
+		return $this->_get_resultsv2('pac_page_contents', $filters, $this->order_by, $only_count, $debug);
 	}
 
+	// CHANGED: Updated load method
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new PageContent($row->pac_page_content_id);
 			$child->load_from_data($row, array_keys(PageContent::$fields));
 			$this->add($child);
 		}
+	}
+
+	// NEW: Added count_all method
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

@@ -803,106 +803,51 @@ class MultiAddress extends SystemMultiBase {
 		return $address_dropdown_builder;
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) {
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'usa_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
+        if (isset($this->options['user_id'])) {
+            $filters['usa_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('address1', $this->options)) {
-			$where_clauses[] = 'usa_address1 = ?';
-			$bind_params[] = array($this->options['address1'], PDO::PARAM_STR);
-		}
+        if (isset($this->options['address1'])) {
+            $filters['usa_address1'] = [$this->options['address1'], PDO::PARAM_STR];
+        }
 
-		if (array_key_exists('address2', $this->options)) {
-			$where_clauses[] = 'usa_address2 = ?';
-			$bind_params[] = array($this->options['address2'], PDO::PARAM_STR);
-		}
+        if (isset($this->options['address2'])) {
+            $filters['usa_address2'] = [$this->options['address2'], PDO::PARAM_STR];
+        }
 
-		if (array_key_exists('address1_lower', $this->options)) {
-			$where_clauses[] = 'LOWER(usa_address1) = ?';
-			$bind_params[] = array(strtolower($this->options['address1_lower']), PDO::PARAM_STR);
-		}
+        if (isset($this->options['address1_lower'])) {
+            $filters['LOWER(usa_address1)'] = '= \''.strtolower($this->options['address1_lower']).'\'';
+        }
 
-		if (array_key_exists('address2_lower', $this->options)) {
-			$where_clauses[] = 'LOWER(usa_address2) = ?';
-			$bind_params[] = array(strtolower($this->options['address2_lower']), PDO::PARAM_STR);
-		}
+        if (isset($this->options['address2_lower'])) {
+            $filters['LOWER(usa_address2)'] = '= \''.strtolower($this->options['address2_lower']).'\'';
+        }
 
-		if (array_key_exists('city_lower', $this->options)) {
-			$where_clauses[] = 'LOWER(usa_city) = ?';
-			$bind_params[] = array(strtolower($this->options['city_lower']), PDO::PARAM_STR);
-		}
+        if (isset($this->options['city_lower'])) {
+            $filters['LOWER(usa_city)'] = '= \''.strtolower($this->options['city_lower']).'\'';
+        }
 
-		if (array_key_exists('state_lower', $this->options)) {
-			$where_clauses[] = 'LOWER(usa_state) = ?';
-			$bind_params[] = array(strtolower($this->options['state_lower']), PDO::PARAM_STR);
-		}
+        if (isset($this->options['state_lower'])) {
+            $filters['LOWER(usa_state)'] = '= \''.strtolower($this->options['state_lower']).'\'';
+        }
 
-		if (array_key_exists('zip_code_lower', $this->options)) {
-			$where_clauses[] = 'LOWER(usa_zip_code_id) = ?';
-			$bind_params[] = array(strtolower($this->options['zip_code_lower']), PDO::PARAM_STR);
-		}
+        if (isset($this->options['zip_code_lower'])) {
+            $filters['LOWER(usa_zip_code_id)'] = '= \''.strtolower($this->options['zip_code_lower']).'\'';
+        }
 
-		if (array_key_exists('zip_code', $this->options)) {
-			$where_clauses[] = 'usa_zip_code_id = ?';
-			$bind_params[] = array($this->options['zip_code'], PDO::PARAM_STR);
-		}
+        if (isset($this->options['zip_code'])) {
+            $filters['usa_zip_code_id'] = [$this->options['zip_code'], PDO::PARAM_STR];
+        }
 
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM usa_users_addrs ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM usa_users_addrs
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " usa_users_addr_id ASC ";
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();			
-		}
-
-
-		try {
-			$q = $dblink->prepare($sql);
-
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		return $q;
-	}
+        return $this->_get_resultsv2('usa_users_addrs', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 
 		// So now we have all of the messages from this thread.
 		foreach($q->fetchAll() as $row) {
@@ -910,6 +855,11 @@ class MultiAddress extends SystemMultiBase {
 			$child->load_from_data($row, array_keys(Address::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 

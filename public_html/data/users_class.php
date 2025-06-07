@@ -924,156 +924,94 @@ class MultiUser extends SystemMultiBase {
 		return $items; 
 
 	}
-	
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
+        if (isset($this->options['user_id'])) {
+            $filters['usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('user_id_list', $this->options)) {
-				if(count($this->options['user_id_list'])) {
-					$where_clauses[] = 'usr_user_id IN ('.implode(',', $this->options['user_id_list']).')';
-				}
-		}
+        if (isset($this->options['user_id_list'])) {
+            if(count($this->options['user_id_list'])) {
+                $filters['usr_user_id'] = 'IN ('.implode(',', $this->options['user_id_list']).')';
+            }
+        }
 
-		if (array_key_exists('first_name_like', $this->options)) {
-			$where_clauses[] = 'usr_first_name ILIKE ?';
-			$bind_params[] = array('%'.$this->options['first_name_like'].'%', PDO::PARAM_STR);
-		}
+        if (isset($this->options['first_name_like'])) {
+            $filters['usr_first_name'] = 'ILIKE \'%'.$this->options['first_name_like'].'%\'';
+        }
 
-		if (array_key_exists('last_name_like', $this->options)) {
-			$where_clauses[] = 'usr_last_name ILIKE ?';
-			$bind_params[] = array('%'.$this->options['last_name_like'].'%', PDO::PARAM_STR);
-		}
-		
-		if (array_key_exists('nickname_like', $this->options)) {
-			$where_clauses[] = 'usr_nickname ILIKE ?';
-			$bind_params[] = array('%'.$this->options['nickname_like'].'%', PDO::PARAM_STR);
-		}		
+        if (isset($this->options['last_name_like'])) {
+            $filters['usr_last_name'] = 'ILIKE \'%'.$this->options['last_name_like'].'%\'';
+        }
+        
+        if (isset($this->options['nickname_like'])) {
+            $filters['usr_nickname'] = 'ILIKE \'%'.$this->options['nickname_like'].'%\'';
+        }
 
-		if (array_key_exists('name_like', $this->options)) {
-			$fsearch = preg_replace('/[^A-Za-z0-9\s]/', ' ', $this->options['name_like']);
-			$fsearch = trim(preg_replace('/\s+/', ' ', $fsearch));
-			$searchwords = explode(' ', $fsearch);
-			$where_clauses[] = 'usr_first_name ILIKE ? AND usr_last_name ILIKE ?';
-			$bind_params[] = array('%'.$searchwords[0].'%', PDO::PARAM_STR);
-			$bind_params[] = array('%'.$searchwords[1].'%', PDO::PARAM_STR);
-		}
+        if (isset($this->options['name_like'])) {
+            $fsearch = preg_replace('/[^A-Za-z0-9\s]/', ' ', $this->options['name_like']);
+            $fsearch = trim(preg_replace('/\s+/', ' ', $fsearch));
+            $searchwords = explode(' ', $fsearch);
+            if (count($searchwords) >= 2) {
+                $filters['usr_first_name'] = 'ILIKE \'%'.$searchwords[0].'%\' AND usr_last_name ILIKE \'%'.$searchwords[1].'%\'';
+                unset($filters['usr_last_name']); // Prevent duplicate condition
+            }
+        }
 
-		if (array_key_exists('email_like', $this->options)) {
-			$where_clauses[] = 'usr_email ILIKE ?';
-			$bind_params[] = array('%'.$this->options['email_like'].'%', PDO::PARAM_STR);
-		}
+        if (isset($this->options['email_like'])) {
+            $filters['usr_email'] = 'ILIKE \'%'.$this->options['email_like'].'%\'';
+        }
 
-		if (array_key_exists('email_verified', $this->options)) {
-			$where_clauses[] = 'usr_email_is_verified = ' . ($this->options['email_verified'] ? 'TRUE' : 'FALSE');
-		}
+        if (isset($this->options['email_verified'])) {
+            $filters['usr_email_is_verified'] = $this->options['email_verified'] ? "= TRUE" : "= FALSE";
+        }
 
-		if (array_key_exists('admin_disabled', $this->options)) {
-			$where_clauses[] = 'usr_is_admin_disabled = ' . ($this->options['admin_disabled'] ? 'TRUE' : 'FALSE');
-		}
+        if (isset($this->options['admin_disabled'])) {
+            $filters['usr_is_admin_disabled'] = $this->options['admin_disabled'] ? "= TRUE" : "= FALSE";
+        }
 
-		if (array_key_exists('disabled', $this->options)) {
-			$where_clauses[] = 'usr_is_disabled = ' . ($this->options['disabled'] ? 'TRUE' : 'FALSE');
-		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'usr_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-		
-		if (array_key_exists('not_system_users', $this->options)) {
-			$where_clauses[] = '(usr_user_id != '.User::USER_SYSTEM.' AND usr_user_id != '.User::USER_DELETED.')';
-		}
+        if (isset($this->options['disabled'])) {
+            $filters['usr_is_disabled'] = $this->options['disabled'] ? "= TRUE" : "= FALSE";
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['usr_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        if (isset($this->options['not_system_users'])) {
+            $filters['usr_user_id'] = '!= '.User::USER_SYSTEM.' AND usr_user_id != '.User::USER_DELETED;
+        }
 
-		if (array_key_exists('permission_range', $this->options)) {
-			$where_clauses[] = 'usr_permission >= ? AND usr_permission <= ?';
-			$bind_params[] = array($this->options['permission_range'][0], PDO::PARAM_INT);
-			$bind_params[] = array($this->options['permission_range'][1], PDO::PARAM_INT);
-		}
-		
+        if (isset($this->options['permission_range'])) {
+            $filters['usr_permission'] = '>= '.$this->options['permission_range'][0].' AND usr_permission <= '.$this->options['permission_range'][1];
+        }
 
-		//NOT INDEXED!
-		if (array_key_exists('user_name_fulltext', $this->options)) {
-			$fsearch = preg_replace('/[^A-Za-z0-9\s]/', ' ', $this->options['user_name_fulltext']);
-			$fsearch = trim(preg_replace('/\s+/', ' ', $fsearch));
-			$fsearch = str_replace(' ', ' | ', $fsearch);
+        if (isset($this->options['user_name_fulltext'])) {
+            $fsearch = preg_replace('/[^A-Za-z0-9\s]/', ' ', $this->options['user_name_fulltext']);
+            $fsearch = trim(preg_replace('/\s+/', ' ', $fsearch));
+            $fsearch = str_replace(' ', ' | ', $fsearch);
+            $filters['to_tsvector(\'english\', usr_first_name || \' \' || usr_last_name)'] = '@@ to_tsquery(\'english\', \''.$fsearch.'\')';
+        }
 
-			$where_clauses[] = 'to_tsvector(\'english\', usr_first_name || \' \' || usr_last_name) @@ to_tsquery(\'english\', ?)';
-			$bind_params[] = array($fsearch, PDO::PARAM_STR);
-		}
-
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM usr_users ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM usr_users
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " usr_user_id ASC ";
-			}
-			else {
-				if (array_key_exists('user_id', $this->order_by)) {
-					$sql .= ' usr_user_id ' . $this->order_by['user_id'];
-				}
-
-				if (array_key_exists('signup_date', $this->order_by)) {
-					$sql .= ' usr_signup_date ' . $this->order_by['signup_date'];
-				}
-
-				if (array_key_exists('last_name', $this->order_by)) {
-					$sql .= ' usr_last_name ' . $this->order_by['last_name'];
-				}
-
-				if (array_key_exists('first_name', $this->order_by)) {
-					$sql .= ' usr_first_name ' . $this->order_by['first_name'];
-				}				
-						
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for($i=0;$i<$total_params;$i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('usr_users', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new User($row->usr_user_id);
 			$child->load_from_data($row, array_keys(User::$fields));
 			$this->add($child);
 		}
 	}
+	
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
+	}
+
 }
 
 ?>

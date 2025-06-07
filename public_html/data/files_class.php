@@ -455,104 +455,63 @@ class MultiFile extends SystemMultiBase {
 		return $items;
 	}
 	
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'fil_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
-
-		if (array_key_exists('group_id', $this->options)) {
-		 	$where_clauses[] = 'fil_grp_group_id = ?';
-		 	$bind_params[] = array($this->options['group_id'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('event_id', $this->options)) {
-		 	$where_clauses[] = 'fil_evt_event_id = ?';
-		 	$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'fil_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-
-		if (array_key_exists('source', $this->options)) {
-		 	$where_clauses[] = 'fil_source = ?';
-		 	$bind_params[] = array($this->options['source'], PDO::PARAM_INT);
-		} 	
-		
-		if (array_key_exists('picture', $this->options)) {
-			if($this->options['picture']){
-				$where_clauses[] = '(fil_type LIKE \'image/%\')';
-			}
-			else{
-				$where_clauses[] = '(fil_type NOT LIKE \'image%\')';
-			}
-		} 	
-
-		if (array_key_exists('filename_like', $this->options)) {
-			$where_clauses[] = 'fil_name ILIKE ?';
-			$bind_params[] = array('%'.$this->options['filename_like'].'%', PDO::PARAM_STR);
-		}		 
-
-		if (array_key_exists('in_gallery', $this->options)) {
-			$where_clauses[] = 'fil_gal_gallery_id IS ' . ($this->options['deleted'] ? 'NULL' : 'NOT NULL');
-		}				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['user_id'])) {
+			$filters['fil_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM fil_files ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM fil_files
-				' . $where_clause . '
-				ORDER BY ';
+		if (isset($this->options['group_id'])) {
+			$filters['fil_grp_group_id'] = [$this->options['group_id'], PDO::PARAM_INT];
+		}
 
-			if (empty($this->order_by)) {
-				$sql .= " fil_file_id ASC ";
+		if (isset($this->options['event_id'])) {
+			$filters['fil_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['deleted'])) {
+			$filters['fil_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		if (isset($this->options['source'])) {
+			$filters['fil_source'] = [$this->options['source'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['picture'])) {
+			if ($this->options['picture']) {
+				$filters['fil_type'] = "LIKE 'image/%'";
+			} else {
+				$filters['fil_type'] = "NOT LIKE 'image%'";
 			}
-			else {
-				if (array_key_exists('file_id', $this->order_by)) {
-					$sql .= ' fil_file_id ' . $this->order_by['file_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
 		}
 
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
+		if (isset($this->options['filename_like'])) {
+			$filters['fil_name'] = 'ILIKE \'%'.$this->options['filename_like'].'%\'';
 		}
 
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
+		if (isset($this->options['in_gallery'])) {
+			$filters['fil_gal_gallery_id'] = $this->options['in_gallery'] ? "IS NOT NULL" : "IS NULL";
 		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
 
-		return $q;
+		return $this->_get_resultsv2('fil_files', $filters, $this->order_by, $only_count, $debug);
 	}
+
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new File($row->fil_file_id);
 			$child->load_from_data($row, array_keys(File::$fields));
 			$this->add($child);
 		}
+	}
+
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

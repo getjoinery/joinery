@@ -75,71 +75,30 @@ class Url extends SystemBase {
 
 class MultiUrl extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('incoming', $this->options)) {
-			$where_clauses[] = 'url_incoming = ?';
-			$bind_params[] = array($this->options['incoming'], PDO::PARAM_INT);
-		}
-	
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM url_urls ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM url_urls
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " url_url_id ASC ";
-			}
-			else {
-				if (array_key_exists('url_id', $this->order_by)) {
-					$sql .= ' url_url_id ' . $this->order_by['url_id'];
-				}			
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Url($row->url_url_id);
-			$child->load_from_data($row, array_keys(Url::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['incoming'])) {
+            $filters['url_incoming'] = [$this->options['incoming'], PDO::PARAM_STR];
+        }
+        
+        return $this->_get_resultsv2('url_urls', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new Url($row->url_url_id);
+            $child->load_from_data($row, array_keys(Url::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 }
 
 
