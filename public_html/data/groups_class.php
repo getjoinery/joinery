@@ -428,92 +428,47 @@ class MultiGroup extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-		
-		if (array_key_exists('group_id', $this->options)) {
-			$where_clauses[] = 'grp_group_id = ?';
-			$bind_params[] = array($this->options['group_id'], PDO::PARAM_INT);
-		}		
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('group_name', $this->options)) {
-			$where_clauses[] = 'grp_name = ?';
-			$bind_params[] = array($this->options['group_name'], PDO::PARAM_STR);
-		}
-	
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'grp_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}		
-
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'grp_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	 
-
-		if (array_key_exists('category', $this->options)) {
-			$where_clauses[] = 'grp_category = ?';
-			$bind_params[] = array($this->options['category'], PDO::PARAM_STR);
-		}	
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['group_id'])) {
+			$filters['grp_group_id'] = [$this->options['group_id'], PDO::PARAM_INT];
 		}
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM grp_groups ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM grp_groups
-				' . $where_clause . '
-				ORDER BY ';
-				
-			if (empty($this->order_by)) {
-				$sql .= " grp_group_id ASC ";
-			}
-			else {
-				if (array_key_exists('group_id', $this->order_by)) {
-					$sql .= ' grp_group_id ' . $this->order_by['group_id'];
-				}	
-				if (array_key_exists('group_name', $this->order_by)) {
-					$sql .= ' grp_name ' . $this->order_by['group_name'];
-				}						
-				if (array_key_exists('grp_update_time', $this->order_by)) {
-					$sql .= ' grp_update_time ' . $this->order_by['grp_update_time'];
-				}
-			}				
-
-			$sql .= ' '.$this->generate_limit_and_offset();				
-		}
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
+		if (isset($this->options['group_name'])) {
+			$filters['grp_name'] = [$this->options['group_name'], PDO::PARAM_STR];
 		}
 
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
+		if (isset($this->options['user_id'])) {
+			$filters['grp_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
 
-		return $q;
+		if (isset($this->options['deleted'])) {
+			$filters['grp_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		if (isset($this->options['category'])) {
+			$filters['grp_category'] = [$this->options['category'], PDO::PARAM_STR];
+		}
+
+		return $this->_get_resultsv2('grp_groups', $filters, $this->order_by, $only_count, $debug);
 	}
+
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Group($row->grp_group_id);
 			$child->load_from_data($row, array_keys(Group::$fields));
 			$this->add($child);
 		}
+	}
+
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 }
 

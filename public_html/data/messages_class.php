@@ -72,89 +72,45 @@ class Message extends SystemBase {
 
 class MultiMessage extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('user_id_recipient', $this->options)) {
-			$where_clauses[] = 'msg_usr_user_id_recipient = ?';
-			$bind_params[] = array($this->options['user_id_recipient'], PDO::PARAM_INT);
-		}
-	
-		if (array_key_exists('user_id_sender', $this->options)) {
-			$where_clauses[] = 'msg_usr_user_id_sender = ?';
-			$bind_params[] = array($this->options['user_id_sender'], PDO::PARAM_INT);
-		}	
-		
-		if (array_key_exists('event_id', $this->options)) {
-			$where_clauses[] = 'msg_evt_event_id = ?';
-			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}	
-
-		
-		if (array_key_exists('event_id_only', $this->options)) {
-			$where_clauses[] = 'msg_evt_event_id = ? and msg_usr_user_id_recipient is NULL';
-			$bind_params[] = array($this->options['event_id_only'], PDO::PARAM_INT);
-		}	
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'msg_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	 		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['user_id_recipient'])) {
+			$filters['msg_usr_user_id_recipient'] = [$this->options['user_id_recipient'], PDO::PARAM_INT];
 		}
 
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM msg_messages ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM msg_messages
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " msg_message_id ASC ";
-			}
-			else {
-				if (array_key_exists('message_id', $this->order_by)) {
-					$sql .= ' msg_message_id ' . $this->order_by['message_id'];
-				}			
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
+		if (isset($this->options['user_id_sender'])) {
+			$filters['msg_usr_user_id_sender'] = [$this->options['user_id_sender'], PDO::PARAM_INT];
 		}
 
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
+		if (isset($this->options['event_id'])) {
+			$filters['msg_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
 		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
 
-		return $q;
+		if (isset($this->options['event_id_only'])) {
+			$filters['msg_evt_event_id'] = '= '.$this->options['event_id_only'].' AND msg_usr_user_id_recipient IS NULL';
+		}
+
+		if (isset($this->options['deleted'])) {
+			$filters['msg_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		return $this->_get_resultsv2('msg_messages', $filters, $this->order_by, $only_count, $debug);
 	}
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Message($row->msg_message_id);
 			$child->load_from_data($row, array_keys(Message::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

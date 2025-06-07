@@ -58,95 +58,51 @@ class EmailRecipientGroup extends SystemBase {
 
 class MultiEmailRecipientGroup extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('group_id', $this->options)) {
-			$where_clauses[] = 'erg_grp_group_id = ?';
-			$bind_params[] = array($this->options['group_id'], PDO::PARAM_INT);
-		}
+        if (isset($this->options['group_id'])) {
+            $filters['erg_grp_group_id'] = [$this->options['group_id'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('email_id', $this->options)) {
-			$where_clauses[] = 'erg_eml_email_id = ?';
-			$bind_params[] = array($this->options['email_id'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('event_id', $this->options)) {
-			$where_clauses[] = 'erg_evt_event_id = ?';
-			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('operation', $this->options)) {
-			$where_clauses[] = 'erg_operation = ?';
-			$bind_params[] = array($this->options['operation'], PDO::PARAM_STR);
-		}		
+        if (isset($this->options['email_id'])) {
+            $filters['erg_eml_email_id'] = [$this->options['email_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['event_id'])) {
+            $filters['erg_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['operation'])) {
+            $filters['erg_operation'] = [$this->options['operation'], PDO::PARAM_STR];
+        }
 
-		if (array_key_exists('sent', $this->options)) {
-			if ($this->options['sent']) { 
-				$where_clauses[] = 'erg_sent_time IS NOT NULL';
-			} else { 
-				$where_clauses[] = 'erg_sent_time IS NULL';
-			}
-		}
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
+        if (isset($this->options['sent'])) {
+            if ($this->options['sent']) {
+                $filters['erg_sent_time'] = "IS NOT NULL";
+            } else {
+                $filters['erg_sent_time'] = "IS NULL";
+            }
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM erg_email_recipient_groups ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM erg_email_recipient_groups
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " erg_email_recipient_group_id ASC ";
-			}
-			else {
-				if (array_key_exists('email_recipient_group_id', $this->order_by)) {
-					$sql .= ' erg_email_recipient_group_id ' . $this->order_by['email_recipient_group_id'];
-				}	
-				else if (array_key_exists('email_id', $this->order_by)) {
-					$sql .= ' erg_eml_email_id ' . $this->order_by['email_id'];
-				}					
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('erg_email_recipient_groups', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new EmailRecipientGroup($row->erg_email_recipient_group_id);
 			$child->load_from_data($row, array_keys(EmailRecipientGroup::$fields));
 			$this->add($child);
 		}
 	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
+	}
+
 
 }
 

@@ -614,7 +614,7 @@ class Event extends SystemBase {
 
 }
 
-class Multievent extends SystemMultiBase {
+class MultiEvent extends SystemMultiBase {
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -629,143 +629,69 @@ class Multievent extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('event_id', $this->options)) {
-			$where_clauses[] = 'evt_event_id = ?';
-			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('name_like', $this->options)) {
-			$where_clauses[] = 'evt_name ILIKE ?';
-			$bind_params[] = array('%'.$this->options['name_like'].'%', PDO::PARAM_STR);
-		}			
-		
-		if (array_key_exists('user_id_leader', $this->options)) {
-			$where_clauses[] = 'evt_usr_user_id_leader = ?';
-			$bind_params[] = array($this->options['user_id_leader'], PDO::PARAM_INT);
-		}
+        if (isset($this->options['event_id'])) {
+            $filters['evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['name_like'])) {
+            $filters['evt_name'] = 'ILIKE \'%'.$this->options['name_like'].'%\'';
+        }
+        
+        if (isset($this->options['user_id_leader'])) {
+            $filters['evt_usr_user_id_leader'] = [$this->options['user_id_leader'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'evt_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
-		}
+        if (isset($this->options['link'])) {
+            $filters['evt_link'] = [$this->options['link'], PDO::PARAM_STR];
+        }
 
-		if (array_key_exists('status', $this->options)) {
-			$where_clauses[] = 'evt_status = ?';
-			$bind_params[] = array($this->options['status'], PDO::PARAM_INT);
-		}
+        if (isset($this->options['status'])) {
+            $filters['evt_status'] = [$this->options['status'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('type', $this->options)) {
-			$where_clauses[] = 'evt_ety_event_type_id = ?';
-			$bind_params[] = array($this->options['type'], PDO::PARAM_INT);
-		}
+        if (isset($this->options['type'])) {
+            $filters['evt_ety_event_type_id'] = [$this->options['type'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('status_not_cancelled', $this->options)) {
-			$where_clauses[] = '(evt_status = 1 OR evt_status = 2)';
-		}
+        if (isset($this->options['status_not_cancelled'])) {
+            $filters['evt_status'] = '= 1 OR evt_status = 2';
+        }
 
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'evt_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-		/*
-		if (array_key_exists('expired', $this->options)) {
-			$where_clauses[] = 'evt_expires_time ' . ($this->options['expired'] ? '<' : '>') . ' now()';
-		}	
-		*/		
-		
-		
-		if (array_key_exists('past', $this->options)) {
-			$where_clauses[] = '((evt_end_time ' . ($this->options['past'] ? '<' : '>') . ' now()) OR evt_end_time is null)';
-		}	
-				
-		
-		if (array_key_exists('name', $this->options)) {
-			$where_clauses[] = 'evt_name ILIKE ?';
-			$bind_params[] = array('%'.$this->options['name'].'%', PDO::PARAM_STR);
-		}		
-	
-		if (array_key_exists('visibility', $this->options)) {
-			$where_clauses[] = 'evt_visibility = ?';
-			$bind_params[] = array($this->options['visibility'], PDO::PARAM_INT);
-		}
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
+        if (isset($this->options['deleted'])) {
+            $filters['evt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        if (isset($this->options['past'])) {
+            $filters['evt_end_time'] = ($this->options['past'] ? '< now() OR evt_end_time IS NULL' : '> now() OR evt_end_time IS NULL');
+        }
+        
+        if (isset($this->options['name'])) {
+            $filters['evt_name'] = 'ILIKE \'%'.$this->options['name'].'%\'';
+        }
+    
+        if (isset($this->options['visibility'])) {
+            $filters['evt_visibility'] = [$this->options['visibility'], PDO::PARAM_INT];
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM evt_events ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM evt_events
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " evt_event_id ASC ";
-			}
-			else {
-				if (array_key_exists('event_id', $this->order_by)) {
-					$sql .= ' evt_event_id ' . $this->order_by['event_id'];
-				}		
-
-				if (array_key_exists('name', $this->order_by)) {
-					$sql .= ' evt_name ' . $this->order_by['name'];
-				}	
-				
-				if (array_key_exists('created_time', $this->order_by)) {
-					$sql .= ' evt_created_time ' . $this->order_by['created_time'];
-				}			
-
-				if (array_key_exists('start_time', $this->order_by)) {
-					$sql .= ' evt_start_time ' . $this->order_by['start_time'];
-				}	
-
-				if (array_key_exists('end_time', $this->order_by)) {
-					$sql .= ' evt_end_time ' . $this->order_by['end_time'];
-				}				
-
-				if (array_key_exists('status', $this->order_by)) {
-					$sql .= ' evt_status ' . $this->order_by['status'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for($i=0;$i<$total_params;$i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('evt_events', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Event($row->evt_event_id);
 			$child->load_from_data($row, array_keys(Event::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

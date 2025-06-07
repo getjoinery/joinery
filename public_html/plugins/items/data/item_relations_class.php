@@ -74,75 +74,34 @@ class ItemRelation extends SystemBase {
 class MultiItemRelation extends SystemMultiBase {
 
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'itr_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
-		}
-
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'itr_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM itr_item_relations ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM itr_item_relations
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " itr_item_relation_id ASC ";
-			}
-			else {
-				if (array_key_exists('item_relation_id', $this->order_by)) {
-					$sql .= ' itr_item_relation_id ' . $this->order_by['item_relation_id'];
-				}			
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Item($row->itr_item_relation_id);
-			$child->load_from_data($row, array_keys(Item::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['link'])) {
+            $filters['itr_link'] = [$this->options['link'], PDO::PARAM_STR];
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['itr_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        return $this->_get_resultsv2('itr_item_relations', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new ItemRelation($row->itr_item_relation_id);
+            $child->load_from_data($row, array_keys(ItemRelation::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 }
 
 

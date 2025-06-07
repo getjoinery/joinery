@@ -252,76 +252,37 @@ class AdminGraph extends SystemBase {
 
 class MultiAdminGraph extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) {
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('hidden', $this->options)) {
-			$where_clauses[] = 'agp_hidden = ' . ($this->options['hidden'] ? 'TRUE' : 'FALSE');
-		}
-
-		if (array_key_exists('tag', $this->options)) {
-			$where_clauses[] = 'LOWER(agt_tag) = ?';
-			$bind_params[] = array(strtolower($this->options['tag']), PDO::PARAM_STR);
-		}
-
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM agp_admin_graphs
-				INNER JOIN agt_graph_tags ON agt_agp_admin_graph_id = agp_admin_graph_id
-				' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM agp_admin_graphs
-				INNER JOIN agt_graph_tags ON agt_agp_admin_graph_id = agp_admin_graph_id
-				' . $where_clause . '
-				ORDER BY agp_graph_title ASC' . $this->generate_limit_and_offset();
-		}
-
-		try {
-			$q = $dblink->prepare($sql);
-
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-			
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		$q = $this->_get_results();
-		foreach($q->fetchAll() as $row) {
-			$child = new AdminGraph($row->agp_admin_graph_id);
-			$child->load_from_data($row, array_keys(AdminGraph::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
-		$counter = $q->fetch();
-		return $counter->count_all;
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['hidden'])) {
+            $filters['agp_hidden'] = $this->options['hidden'] ? "= TRUE" : "= FALSE";
+        }
+        
+        if (isset($this->options['tag'])) {
+            $filters['LOWER(agt_tag)'] = [strtolower($this->options['tag']), PDO::PARAM_STR];
+        }
+        
+        // Note: This class uses JOINs, so we need to specify the full query
+        $table_sql = 'agp_admin_graphs INNER JOIN agt_graph_tags ON agt_agp_admin_graph_id = agp_admin_graph_id';
+        
+        return $this->_get_resultsv2($table_sql, $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new AdminGraph($row->agp_admin_graph_id);
+            $child->load_from_data($row, array_keys(AdminGraph::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 }
 
 

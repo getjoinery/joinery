@@ -404,91 +404,43 @@ class MultiMailingList extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('mailing_list_id', $this->options)) {
-			$where_clauses[] = 'mlt_mailing_list_id = ?';
-			$bind_params[] = array($this->options['mailing_list_id'], PDO::PARAM_INT);
+		if (isset($this->options['mailing_list_id'])) {
+			$filters['mlt_mailing_list_id'] = [$this->options['mailing_list_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'mlt_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-	
-		if (array_key_exists('visibility', $this->options)) {
-			$where_clauses[] = 'mlt_visibility = ?';
-			$bind_params[] = array($this->options['visibility'], PDO::PARAM_INT);
+		if (isset($this->options['deleted'])) {
+			$filters['mlt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
 		}
 
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'mlt_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
-		}				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['visibility'])) {
+			$filters['mlt_visibility'] = [$this->options['visibility'], PDO::PARAM_INT];
 		}
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM mlt_mailing_lists ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM mlt_mailing_lists
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " mlt_mailing_list_id ASC ";
-			}
-			else {
-				if (array_key_exists('mailing_list_id', $this->order_by)) {
-					$sql .= ' mlt_mailing_list_id ' . $this->order_by['mailing_list_id'];
-				}		
-
-				if (array_key_exists('name', $this->order_by)) {
-					$sql .= ' mlt_name ' . $this->order_by['name'];
-				}	
-				
-				if (array_key_exists('create_time', $this->order_by)) {
-					$sql .= ' mlt_create_time ' . $this->order_by['create_time'];
-				}			
-	
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
+		if (isset($this->options['link'])) {
+			$filters['mlt_link'] = [$this->options['link'], PDO::PARAM_STR];
 		}
 
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for($i=0;$i<$total_params;$i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
+		return $this->_get_resultsv2('mlt_mailing_lists', $filters, $this->order_by, $only_count, $debug);
 	}
 
+	// CHANGED: Updated load method
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new MailingList($row->mlt_mailing_list_id);
 			$child->load_from_data($row, array_keys(MailingList::$fields));
 			$this->add($child);
 		}
+	}
+
+	// NEW: Added count_all method
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

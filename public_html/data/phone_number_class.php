@@ -376,95 +376,49 @@ class MultiPhoneNumber extends SystemMultiBase {
 
 
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'phn_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
-		
-		if (array_key_exists('country_code', $this->options)) {
-			$where_clauses[] = 'phn_cco_country_code_id = ?';
-			$bind_params[] = array($this->options['country_code'], PDO::PARAM_INT);
-		}		
-
-		if (array_key_exists('verified', $this->options)) {
-			$where_clauses[] = 'phn_is_verified = ' . ($this->options['verified'] ? 'TRUE' : 'FALSE');
-		}
-		
-		if (array_key_exists('private', $this->options)) {
-			$where_clauses[] = 'phn_is_private = ' . ($this->options['private'] ? 'TRUE' : 'FALSE');
-		}		
-
-		if (array_key_exists('phone_number', $this->options)) {
-			$where_clauses[] = 'phn_phone_number = ?';
-			$bind_params[] = array($this->options['phone_number'], PDO::PARAM_STR);
+		if (isset($this->options['user_id'])) {
+			$filters['phn_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('phone_number_like', $this->options)) {
-			$where_clauses[] = 'phn_phone_number LIKE ?';
-			$bind_params[] = array('%'.$this->options['phone_number_like'].'%', PDO::PARAM_STR);
-		}	
-	
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['country_code'])) {
+			$filters['phn_cco_country_code_id'] = [$this->options['country_code'], PDO::PARAM_INT];
 		}
 
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM phn_phone_numbers ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM phn_phone_numbers
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " phn_phone_number_id ASC ";
-			}
-			else {
-				/*
-				if (array_key_exists('phone_number_id', $this->order_by)) {
-					$sql .= ' phn_phone_number_id ' . $this->order_by['phone_number_id'];
-				}	
-				*/				
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
+		if (isset($this->options['verified'])) {
+			$filters['phn_is_verified'] = $this->options['verified'] ? "= TRUE" : "= FALSE";
 		}
 
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
+		if (isset($this->options['private'])) {
+			$filters['phn_is_private'] = $this->options['private'] ? "= TRUE" : "= FALSE";
 		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
 
-		return $q;
+		if (isset($this->options['phone_number'])) {
+			$filters['phn_phone_number'] = [$this->options['phone_number'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['phone_number_like'])) {
+			$filters['phn_phone_number'] = 'LIKE \'%'.$this->options['phone_number_like'].'%\'';
+		}
+
+		return $this->_get_resultsv2('phn_phone_numbers', $filters, $this->order_by, $only_count, $debug);
 	}
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new PhoneNumber($row->phn_phone_number_id);
 			$child->load_from_data($row, array_keys(PhoneNumber::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 

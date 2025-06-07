@@ -199,116 +199,63 @@ class Order extends SystemBase {
 
 class MultiOrder extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) {
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('order_id', $this->options)) {
-			$where_clauses[] = 'ord_order_id = ?';
-			$bind_params[] = array($this->options['order_id'], PDO::PARAM_INT);
+		if (isset($this->options['order_id'])) {
+			$filters['ord_order_id'] = [$this->options['order_id'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'ord_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
+		if (isset($this->options['user_id'])) {
+			$filters['ord_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
-		
-		if (array_key_exists('event_id', $this->options)) {
-			$where_clauses[] = 'ord_evt_event_id = ?';
-			$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		}	
 
-		if (array_key_exists('created_before', $this->options)) {
-			$where_clauses[] = 'ord_timestamp <= ?';
-			$bind_params[] = array($this->options['created_before'], PDO::PARAM_STR);
-		}	
+		if (isset($this->options['event_id'])) {
+			$filters['ord_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
+		}
 
-		if (array_key_exists('created_after', $this->options)) {
-			$where_clauses[] = 'ord_timestamp >= ?';
-			$bind_params[] = array($this->options['created_after'], PDO::PARAM_STR);
-		}	
+		if (isset($this->options['created_before'])) {
+			$filters['ord_timestamp'] = '<= \''.$this->options['created_before'].'\'';
+		}
 
-		if (array_key_exists('test_mode', $this->options)) {
-			if($this->options['test_mode'] == true){
-				$where_clauses[] = 'ord_test_mode IS true';
-			}
-			else{
-				$where_clauses[] = '(ord_test_mode IS false OR ord_test_mode IS NULL)';
-			}
-			
-		}			
+		if (isset($this->options['created_after'])) {
+			$filters['ord_timestamp'] = '>= \''.$this->options['created_after'].'\'';
+		}
 
-		if (array_key_exists('order_finished', $this->options)) {
-			if($this->options['order_finished']) {
-				$where_clauses[] = 'ord_order_id IN (SELECT odi_ord_order_id FROM odi_order_items WHERE odi_status = '.OrderItem::STATUS_DONE.')';
+		if (isset($this->options['test_mode'])) {
+			if ($this->options['test_mode'] == true) {
+				$filters['ord_test_mode'] = "IS TRUE";
 			} else {
-				$where_clauses[] = 'ord_order_id IN (SELECT odi_ord_order_id FROM odi_order_items WHERE odi_status = '.OrderItem::STATUS_NEW.' OR odi_status = '.OrderItem::STATUS_PENDING.')';
+				$filters['ord_test_mode'] = "IS FALSE OR ord_test_mode IS NULL";
 			}
 		}
 
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM ord_orders
-				' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM ord_orders
-				' . $where_clause . ' ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= 'ord_order_id DESC';
+		if (isset($this->options['order_finished'])) {
+			if ($this->options['order_finished']) {
+				$filters['ord_order_id'] = 'IN (SELECT odi_ord_order_id FROM odi_order_items WHERE odi_status = '.OrderItem::STATUS_PAID.')';
 			} else {
-				$sort_clauses = array();
-				if (array_key_exists('ord_order_id', $this->order_by)) {
-					$sort_clauses[] = 'ord_order_id ' . $this->order_by['ord_order_id'];
-				}
-				
-				if (array_key_exists('timestamp', $this->order_by)) {
-					$sort_clauses[] = 'ord_timestamp ' . $this->order_by['timestamp'];
-				}
-				$sql .= implode(',', $sort_clauses);
+				$filters['ord_order_id'] = 'IN (SELECT odi_ord_order_id FROM odi_order_items WHERE odi_status = '.OrderItem::STATUS_UNPAID.' OR odi_status = '.OrderItem::STATUS_ERROR.')';
 			}
-			$sql .= $this->generate_limit_and_offset();
 		}
 
-		try {
-			$q = $dblink->prepare($sql);
-
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		return $q;
+		return $this->_get_resultsv2('ord_orders', $filters, $this->order_by, $only_count, $debug);
 	}
 
+	// CHANGED: Updated load method
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Order($row->ord_order_id);
 			$child->load_from_data($row, array_keys(Order::$fields));
 			$this->add($child);
 		}
+	}
+
+	// NEW: Added count_all method
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

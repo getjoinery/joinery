@@ -315,90 +315,40 @@ class MultiVideo extends SystemMultiBase {
 		return $items;
 
 	}
-
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'vid_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
-
-		if (array_key_exists('group_id', $this->options)) {
-		 	$where_clauses[] = 'vid_grp_group_id = ?';
-		 	$bind_params[] = array($this->options['group_id'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('event_id', $this->options)) {
-		 	$where_clauses[] = 'vid_evt_event_id = ?';
-		 	$bind_params[] = array($this->options['event_id'], PDO::PARAM_INT);
-		} 
-
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'vid_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
-		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'vid_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}	
-
-		if (array_key_exists('source', $this->options)) {
-		 	$where_clauses[] = 'vid_source = ?';
-		 	$bind_params[] = array($this->options['source'], PDO::PARAM_INT);
-		} 	
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM vid_videos ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM vid_videos
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " vid_video_id ASC ";
-			}
-			else {
-				if (array_key_exists('video_id', $this->order_by)) {
-					$sql .= ' vid_video_id ' . $this->order_by['video_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
 	
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
+        if (isset($this->options['user_id'])) {
+            $filters['vid_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
+
+        if (isset($this->options['group_id'])) {
+            $filters['vid_grp_group_id'] = [$this->options['group_id'], PDO::PARAM_INT];
+        }
+
+        if (isset($this->options['event_id'])) {
+            $filters['vid_evt_event_id'] = [$this->options['event_id'], PDO::PARAM_INT];
+        }
+
+        if (isset($this->options['link'])) {
+            $filters['vid_link'] = [$this->options['link'], PDO::PARAM_STR];
+        }
+
+        if (isset($this->options['deleted'])) {
+            $filters['vid_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+
+        if (isset($this->options['source'])) {
+            $filters['vid_source'] = [$this->options['source'], PDO::PARAM_INT];
+        }
+
+        return $this->_get_resultsv2('vid_videos', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Video($row->vid_video_id);
 			$child->load_from_data($row, array_keys(Video::$fields));
@@ -406,6 +356,11 @@ class MultiVideo extends SystemMultiBase {
 		}
 	}
 	
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
+	}
+
 }
 
 

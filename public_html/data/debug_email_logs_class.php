@@ -48,73 +48,33 @@ class DebugEmailLog extends SystemBase {
 
 class MultiDebugEmailLog extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'del_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
+        if (isset($this->options['user_id'])) {
+            $filters['del_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('event', $this->options)) {
-		 	$where_clauses[] = 'del_event = ?';
-		 	$bind_params[] = array($this->options['event'], PDO::PARAM_INT);
-		}
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
+        if (isset($this->options['event'])) {
+            $filters['del_event'] = [$this->options['event'], PDO::PARAM_INT];
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM del_debug_email_logs ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM del_debug_email_logs
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " del_debug_email_log_id ASC ";
-			}
-			else {
-				if (array_key_exists('debug_email_log_id', $this->order_by)) {
-					$sql .= ' del_debug_email_log_id ' . $this->order_by['debug_email_log_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('del_debug_email_logs', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new DebugEmailLog($row->del_debug_email_log_id);
 			$child->load_from_data($row, array_keys(DebugEmailLog::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

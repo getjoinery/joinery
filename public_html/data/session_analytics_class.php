@@ -51,68 +51,31 @@ class SessionAnalytic extends SystemBase {
 
 class MultiSessionAnalytic extends SystemMultiBase {
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('session_id', $this->options)) {
-		 	$where_clauses[] = 'sev_evs_event_session_id = ?';
-		 	$bind_params[] = array($this->options['session_id'], PDO::PARAM_INT);
-		} 
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['session_id'])) {
+			$filters['sev_evs_event_session_id'] = [$this->options['session_id'], PDO::PARAM_INT];
 		}
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM sev_session_analytics ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM sev_session_analytics
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " sev_session_analytic_id ASC ";
-			}
-			else {
-				if (array_key_exists('session_analytic_id', $this->order_by)) {
-					$sql .= ' sev_session_analytic_id ' . $this->order_by['session_analytic_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
+		return $this->_get_resultsv2('sev_session_analytics', $filters, $this->order_by, $only_count, $debug);
 	}
 
+	// CHANGED: Updated load method
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new SessionAnalytic($row->sev_session_analytic_id);
 			$child->load_from_data($row, array_keys(SessionAnalytic::$fields));
 			$this->add($child);
 		}
+	}
+
+	// NEW: Added count_all method
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

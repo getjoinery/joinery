@@ -165,73 +165,37 @@ class MultiQueuedEmail extends SystemMultiBase {
 		}
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) {
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		if (array_key_exists('status', $this->options)) {
-			$where_clauses[] = 'equ_status = ?';
-			$bind_params[] = array($this->options['status'], PDO::PARAM_INT);
+		if (isset($this->options['status'])) {
+			$filters['equ_status'] = [$this->options['status'], PDO::PARAM_INT];
 		}
 
-		if (array_key_exists('multi_status', $this->options)) {
-			$sub_where_clauses = array();
+		if (isset($this->options['multi_status'])) {
+			$status_conditions = [];
 			foreach($this->options['multi_status'] as $status) {
-				$sub_where_clauses[] = 'equ_status = ?';
-				$bind_params[] = array($status, PDO::PARAM_INT);
+				$status_conditions[] = 'equ_status = '.$status;
 			}
-			$where_clauses[] = '(' . implode(' OR ' , $sub_where_clauses) . ')';
+			$filters['equ_status'] = '('.implode(' OR ', $status_conditions).')';
 		}
 
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM equ_queued_emails
-				' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM equ_queued_emails
-				' . $where_clause . '
-				ORDER BY equ_queued_email_id' . $this->generate_limit_and_offset();
-		}
-
-		try {
-			$q = $dblink->prepare($sql);
-
-			if($debug){
-				echo $sql. "<br>\n";
-				print_r($this->options);
-			}
-
-			$total_params = count($bind_params);
-			for($i=0;$i<$total_params;$i++) {
-				list($param, $type) = $bind_params[$i];
-				$q->bindValue($i+1, $param, $type);
-			}
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
-
-		return $q;
+		return $this->_get_resultsv2('equ_queued_emails', $filters, $this->order_by, $only_count, $debug);
 	}
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new QueuedEmail($row->equ_queued_email_id);
 			$child->load_from_data($row, array_keys(QueuedEmail::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

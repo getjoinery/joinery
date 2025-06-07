@@ -121,82 +121,38 @@ class MultiSurveyAnswer extends SystemMultiBase {
 		return $items;
 	}
 	
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('survey_id', $this->options)) {
-			$where_clauses[] = 'sva_svy_survey_id = ?';
-			$bind_params[] = array($this->options['survey_id'], PDO::PARAM_INT);
-		}
-
-		if (array_key_exists('question_id', $this->options)) {
-			$where_clauses[] = 'sva_qst_question_id = ?';
-			$bind_params[] = array($this->options['question_id'], PDO::PARAM_INT);
-		}	
-
-		if (array_key_exists('user_id', $this->options)) {
-			$where_clauses[] = 'sva_usr_user_id = ?';
-			$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		}
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM sva_survey_answers ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM sva_survey_answers
-				' . $where_clause . '
-				ORDER BY ';
-				
-			if (empty($this->order_by)) {
-				$sql .= " sva_survey_answer_id ASC ";
-			}
-			else {
-				if (array_key_exists('survey_answer_id', $this->order_by)) {
-					$sql .= ' sva_survey_answer_id ' . $this->order_by['survey_answer_id'];
-				}
-				
-				if (array_key_exists('question_id', $this->order_by)) {
-					$sql .= ' sva_qst_question_id ' . $this->order_by['question_id'];
-				}				
-			}				
-
-			$sql .= ' '.$this->generate_limit_and_offset();				
-		}
-
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new SurveyAnswer($row->sva_survey_answer_id);
-			$child->load_from_data($row, array_keys(SurveyAnswer::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['survey_id'])) {
+            $filters['sva_svy_survey_id'] = [$this->options['survey_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['question_id'])) {
+            $filters['sva_qst_question_id'] = [$this->options['question_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['user_id'])) {
+            $filters['sva_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
+        
+        return $this->_get_resultsv2('sva_survey_answers', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new SurveyAnswer($row->sva_survey_answer_id);
+            $child->load_from_data($row, array_keys(SurveyAnswer::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 
 }
 

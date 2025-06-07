@@ -111,81 +111,41 @@ class MultiApiKey extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
 
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'apk_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('public_key', $this->options)) {
-			$where_clauses[] = 'apk_public_key = ?';
-			$bind_params[] = array($this->options['public_key'], PDO::PARAM_STR);
-		}			
+        if (isset($this->options['user_id'])) {
+            $filters['apk_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['public_key'])) {
+            $filters['apk_public_key'] = [$this->options['public_key'], PDO::PARAM_STR];
+        }
 
-		if (array_key_exists('published', $this->options)) {
-		 	$where_clauses[] = 'apk_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');
-		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'apk_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		} 
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
+        if (isset($this->options['published'])) {
+            $filters['apk_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['apk_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM apk_api_keys ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM apk_api_keys
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " apk_api_key_id ASC ";
-			}
-			else {
-				if (array_key_exists('api_key_id', $this->order_by)) {
-					$sql .= ' apk_api_key_id ' . $this->order_by['api_key_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('apk_api_keys', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new ApiKey($row->apk_api_key_id);
 			$child->load_from_data($row, array_keys(ApiKey::$fields));
 			$this->add($child);
 		}
+	}
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }

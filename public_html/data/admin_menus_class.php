@@ -159,81 +159,35 @@ class MultiAdminMenu extends SystemMultiBase {
 		return $finalmenu;
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-		
-		if (array_key_exists('admin_menu_id', $this->options)) {
-			$where_clauses[] = 'amu_admin_menu_id = ?';
-			$bind_params[] = array($this->options['admin_menu_id'], PDO::PARAM_INT);
-		}		
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['admin_menu_id'])) {
+            $filters['amu_admin_menu_id'] = [$this->options['admin_menu_id'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('parent_menu_id', $this->options)) {
-			$where_clauses[] = 'amu_parent_menu_id = ?';
-			$bind_params[] = array($this->options['parent_menu_id'], PDO::PARAM_INT);
-		}	
+        if (isset($this->options['parent_menu_id'])) {
+            $filters['amu_parent_menu_id'] = [$this->options['parent_menu_id'], PDO::PARAM_INT];
+        }
 
-		if (array_key_exists('has_parent_menu_id', $this->options)) {
-			$where_clauses[] = '(amu_parent_menu_id IS NOT NULL OR amu_parent_menu_id != 0)';
-		}
-	
-		if (array_key_exists('is_not_disabled', $this->options)) {
-			$where_clauses[] = '(amu_disabled IS NOT NULL OR amu_disabled != false)';
-		}
-		
-		if (array_key_exists('has_no_parent_menu_id', $this->options)) {
-			$where_clauses[] = '(amu_parent_menu_id IS NULL OR amu_parent_menu_id = 0)';
-		}
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
+        if (isset($this->options['has_parent_menu_id'])) {
+            $filters['amu_parent_menu_id'] = "IS NOT NULL AND amu_parent_menu_id != 0";
+        }
+    
+        if (isset($this->options['is_not_disabled'])) {
+            $filters['amu_disabled'] = "IS NOT NULL AND amu_disabled != false";
+        }
+        
+        if (isset($this->options['has_no_parent_menu_id'])) {
+            $filters['amu_parent_menu_id'] = "IS NULL OR amu_parent_menu_id = 0";
+        }
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM amu_admin_menus ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM amu_admin_menus
-				' . $where_clause . '
-				ORDER BY ';
-				
-			if (empty($this->order_by)) {
-				$sql .= " amu_admin_menu_id ASC ";
-			}
-			else {
-				if (array_key_exists('admin_menu_id', $this->order_by)) {
-					$sql .= ' amu_admin_menu_id ' . $this->order_by['admin_menu_id'];
-				}		
-				if (array_key_exists('order', $this->order_by)) {
-					$sql .= ' amu_order ' . $this->order_by['order'];
-				}	
-			}				
-
-			$sql .= ' '.$this->generate_limit_and_offset();				
-		}
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-			
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
+        return $this->_get_resultsv2('amu_admin_menus', $filters, $this->order_by, $only_count, $debug);
+    }
 
 	function load($debug = false) {
-		$q = $this->_get_results();
+		parent::load();
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new AdminMenu($row->amu_admin_menu_id);
 			$child->load_from_data($row, array_keys(AdminMenu::$fields));
@@ -242,9 +196,8 @@ class MultiAdminMenu extends SystemMultiBase {
 	}
 
 	function count_all($debug = false) {
-		$q = $this->_get_results(TRUE);
-		$counter = $q->fetch();
-		return $counter->count;
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 }
 

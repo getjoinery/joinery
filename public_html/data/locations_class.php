@@ -94,77 +94,39 @@ class MultiLocation extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = [];
 
-		
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'loc_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
-		}			
-
-		if (array_key_exists('published', $this->options)) {
-		 	$where_clauses[] = 'loc_is_published = ' . ($this->options['published'] ? 'TRUE' : 'FALSE');
-		}
-		
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'loc_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
+		if (isset($this->options['link'])) {
+			$filters['loc_link'] = [$this->options['link'], PDO::PARAM_STR];
 		}
 
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM loc_locations ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM loc_locations
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " loc_location_id ASC ";
-			}
-			else {
-				if (array_key_exists('location_id', $this->order_by)) {
-					$sql .= ' loc_location_id ' . $this->order_by['location_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
+		if (isset($this->options['published'])) {
+			$filters['loc_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
 		}
 
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
+		if (isset($this->options['deleted'])) {
+			$filters['loc_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
 		}
 
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
+		return $this->_get_resultsv2('loc_locations', $filters, $this->order_by, $only_count, $debug);
 	}
+
 
 	function load($debug = false) {
 		parent::load();
-		$q = $this->_get_results(false, $debug);
+		$q = $this->getMultiResults(false, $debug);
 		foreach($q->fetchAll() as $row) {
 			$child = new Location($row->loc_location_id);
 			$child->load_from_data($row, array_keys(Location::$fields));
 			$this->add($child);
 		}
+	}
+
+
+	function count_all($debug = false) {
+		$q = $this->getMultiResults(TRUE, $debug);
+		return $q;
 	}
 
 }
