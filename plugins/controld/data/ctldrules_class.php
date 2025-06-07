@@ -71,83 +71,42 @@ class MultiCtldRule extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('rule', $this->options)) {
-		 	$where_clauses[] = 'cdr_rule_pk = ?';
-		 	$bind_params[] = array($this->options['rule'], PDO::PARAM_STR);
-		} 
-		
-		if (array_key_exists('profile_id', $this->options)) {
-		 	$where_clauses[] = 'cdr_cdp_ctldprofile_id = ?';
-		 	$bind_params[] = array($this->options['profile_id'], PDO::PARAM_INT);
-		} 
-
-		if (array_key_exists('active', $this->options)) {
-		 	$where_clauses[] = 'cdr_is_active = ' . ($this->options['active'] ? 1 : 0);
-		}
-		
-		if (array_key_exists('rule_action', $this->options)) {
-		 	$where_clauses[] = 'cdr_rule_action = ?';
-		 	$bind_params[] = array($this->options['rule_action'], PDO::PARAM_INT);
-		} 
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM cdr_ctldrules ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM cdr_ctldrules
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " cdr_ctldrule_id ASC ";
-			}
-			else {
-				if (array_key_exists('ctldrule_id', $this->order_by)) {
-					$sql .= ' cdr_ctldrule_id ' . $this->order_by['ctldrule_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new CtldRule($row->cdr_ctldrule_id);
-			$child->load_from_data($row, array_keys(CtldRule::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['rule'])) {
+            $filters['cdr_rule_pk'] = [$this->options['rule'], PDO::PARAM_STR];
+        }
+        
+        if (isset($this->options['profile_id'])) {
+            $filters['cdr_cdp_ctldprofile_id'] = [$this->options['profile_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['active'])) {
+            $filters['cdr_is_active'] = $this->options['active'] ? "= 1" : "= 0";
+        }
+        
+        if (isset($this->options['rule_action'])) {
+            $filters['cdr_rule_action'] = [$this->options['rule_action'], PDO::PARAM_INT];
+        }
+        
+        return $this->_get_resultsv2('cdr_ctldrules', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new CtldRule($row->cdr_ctldrule_id);
+            $child->load_from_data($row, array_keys(CtldRule::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 
 }
 

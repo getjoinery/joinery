@@ -434,14 +434,27 @@ class CtldProfile extends SystemBase {
 			$cached_filters[$filter->get('cdf_filter_pk')] = $filter->get('cdf_is_active');
 		}
 
+$result = $cd->modifyProfileFilter('689209jfkncn', 'ai_malware', 1);
+require_once($_SERVER['DOCUMENT_ROOT'].'/plugins/controld/includes/ControlDHelper.php');
+	$cd = new ControlDHelper();
+	print_r($cached_filters);
+	print_r( $cd->listNativeFilters('689209jfkncn'));
+	
+	exit;
+
+//$result = $cd->modifyProfileFilter('689209jfkncn', 'malware', 1);
+exit;
 
 		foreach($all_filters as $all_filter_key=>$all_filter_desc){
 			if(isset($newvalues['block_'.$all_filter_key])){
+				echo 'Found block_'.$all_filter_key."<br>\n";
 				//FORM VALUE WAS SUBMITTED
 				if(isset($cached_filters[$all_filter_key])){
 					//CACHED FILTER EXISTS
+					echo 'Cached filter '.$all_filter_key."<br>\n";
 					if($cached_filters[$all_filter_key] != $newvalues['block_'.$all_filter_key]){
 						//CHANGED, UPDATE REMOTE AND LOCAL
+						echo 'Changed, update remote and local'."<br>\n";
 						$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, $newvalues['block_'.$all_filter_key]);
 						if($result['success']){
 							foreach($filters as $filter){
@@ -456,10 +469,12 @@ class CtldProfile extends SystemBase {
 					}
 					else{
 						//NO NEED TO DO ANYTHING
+						echo 'Skipping'."<br>\n";
 					}
 				}
 				else{
 					//CACHED FILTER DOES NOT EXIST, UPDATE REMOTE FIRST AND THEN ADD LOCALLY
+					echo 'Cache does not exist '.$all_filter_key.', update remote then local'."<br>\n";
 					$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, $newvalues['block_'.$all_filter_key]);
 					if($result['success']){
 						$new_cached_filter = new CtldFilter(NULL);
@@ -477,7 +492,9 @@ class CtldProfile extends SystemBase {
 				if(isset($cached_filters[$all_filter_key])){
 					//CACHED FILTER EXISTS
 					if($cached_filters[$all_filter_key]){
+						echo 'Cached filter exists '.$all_filter_key."<br>\n";
 						//CACHED IS NOT ZERO, SO UPDATE CACHE AND UPDATE REMOTE
+						echo 'Update local and remote'."<br>\n";
 						$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, 0);
 						if($result['success']){
 							foreach($filters as $filter){
@@ -493,6 +510,7 @@ class CtldProfile extends SystemBase {
 					}
 					else{
 						//NO NEED TO DO ANYTHING
+						echo 'Skipping'."<br>\n";
 					}
 				}
 			}
@@ -525,6 +543,11 @@ class CtldProfile extends SystemBase {
 		foreach($services as $service){
 			$cached_services[$service->get('cds_service_pk')] = $service->get('cds_is_active');
 		}
+
+
+
+
+
 
 
 		foreach($all_services as $all_service_key=>$all_service_desc){
@@ -611,88 +634,46 @@ class MultiCtldProfile extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('user_id', $this->options)) {
-		 	$where_clauses[] = 'cdp_usr_user_id = ?';
-		 	$bind_params[] = array($this->options['user_id'], PDO::PARAM_INT);
-		} 
-		
-		if (array_key_exists('profile_id_primary', $this->options)) {
-		 	$where_clauses[] = 'cdp_profile_id_primary = ?';
-		 	$bind_params[] = array($this->options['profile_id_primary'], PDO::PARAM_INT);
-		} 
-
-		if (array_key_exists('profile_id_secondary', $this->options)) {
-		 	$where_clauses[] = 'cdp_profile_id_secondary = ?';
-		 	$bind_params[] = array($this->options['profile_id_secondary'], PDO::PARAM_INT);
-		} 		
-
-		if (array_key_exists('active', $this->options)) {
-		 	$where_clauses[] = 'cdp_is_active = ' . ($this->options['active'] ? 'TRUE' : 'FALSE');
-		}
-
-		
-		if (array_key_exists('deleted', $this->options)) {
-		 	$where_clauses[] = 'cdp_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		} 
-				
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM cdp_ctldprofiles ' . $where_clause;
-		} 
-		else {
-			$sql = 'SELECT * FROM cdp_ctldprofiles
-				' . $where_clause . '
-				ORDER BY ';
-
-			if (empty($this->order_by)) {
-				$sql .= " cdp_ctldprofile_id ASC ";
-			}
-			else {
-				if (array_key_exists('ctldprofile_id', $this->order_by)) {
-					$sql .= ' cdp_ctldprofile_id ' . $this->order_by['ctldprofile_id'];
-				}			
-			}
-			
-			$sql .= ' '.$this->generate_limit_and_offset();	
-		}
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new CtldProfile($row->cdp_ctldprofile_id);
-			$child->load_from_data($row, array_keys(CtldProfile::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['user_id'])) {
+            $filters['cdp_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['profile_id_primary'])) {
+            $filters['cdp_profile_id_primary'] = [$this->options['profile_id_primary'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['profile_id_secondary'])) {
+            $filters['cdp_profile_id_secondary'] = [$this->options['profile_id_secondary'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['active'])) {
+            $filters['cdp_is_active'] = $this->options['active'] ? "= TRUE" : "= FALSE";
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['cdp_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        return $this->_get_resultsv2('cdp_ctldprofiles', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new CtldProfile($row->cdp_ctldprofile_id);
+            $child->load_from_data($row, array_keys(CtldProfile::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 
 }
 
