@@ -10,12 +10,8 @@ $static_routes_path = ltrim($static_routes_path, '/');
 $settings = Globalvars::get_instance();
 $session = SessionControl::get_instance();
 $theme_template = $settings->get_setting('theme_template');
-if($theme_template){
-	$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$theme_template;
-}
-else{
-	$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/default';
-}
+$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$theme_template;
+
 
 
 
