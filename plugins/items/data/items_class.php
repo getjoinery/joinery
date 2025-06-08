@@ -105,78 +105,38 @@ class MultiItem extends SystemMultiBase {
 
 	}
 
-	function _get_results($only_count=FALSE, $debug = false) { 
-		$where_clauses = array();
-		$bind_params = array();
-
-		if (array_key_exists('link', $this->options)) {
-			$where_clauses[] = 'itm_link = ?';
-			$bind_params[] = array($this->options['link'], PDO::PARAM_STR);
-		}
-
-		if (array_key_exists('has_link', $this->options)) {
-			$where_clauses[] = 'LENGTH(itm_link) > 0';
-		}
-		
-		if (array_key_exists('deleted', $this->options)) {
-			$where_clauses[] = 'itm_delete_time IS ' . ($this->options['deleted'] ? 'NOT NULL' : 'NULL');
-		}		
-		
-		if ($where_clauses) {
-			$where_clause = 'WHERE ' . implode(' '.$this->operation.' ', $where_clauses) . ' ';
-		} else {
-			$where_clause = '';
-		}
-
-
-		if ($only_count) {
-			$sql = 'SELECT COUNT(1) as count_all FROM itm_items ' . $where_clause;
-		} else {
-			$sql = 'SELECT * FROM itm_items
-				' . $where_clause . '
-				ORDER BY ';
-			
-			if (empty($this->order_by)) {
-				$sql .= " itm_item_id ASC ";
-			}
-			else {
-				if (array_key_exists('item_id', $this->order_by)) {
-					$sql .= ' itm_item_id ' . $this->order_by['item_id'];
-				}			
-			}
-				
-			$sql .= ' '.$this->generate_limit_and_offset();	
-
-		}			
-		
-
-		$q = DbConnector::GetPreparedStatement($sql);
-
-		if($debug){
-			echo $sql. "<br>\n";
-			print_r($this->options);
-		}
-
-		$total_params = count($bind_params);
-		for ($i=0; $i<$total_params; $i++) {
-			list($param, $type) = $bind_params[$i];
-			$q->bindValue($i+1, $param, $type);
-		}
-		$q->execute();
-		$q->setFetchMode(PDO::FETCH_OBJ);
-
-		return $q;
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->_get_results(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Item($row->itm_item_id);
-			$child->load_from_data($row, array_keys(Item::$fields));
-			$this->add($child);
-		}
-	}
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+        
+        if (isset($this->options['link'])) {
+            $filters['itm_link'] = [$this->options['link'], PDO::PARAM_STR];
+        }
+        
+        if (isset($this->options['has_link'])) {
+            $filters['LENGTH(itm_link)'] = '> 0';
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['itm_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        return $this->_get_resultsv2('itm_items', $filters, $this->order_by, $only_count, $debug);
+    }
+    
+    function load($debug = false) {
+        parent::load();
+        $q = $this->getMultiResults(false, $debug);
+        foreach($q->fetchAll() as $row) {
+            $child = new Item($row->itm_item_id);
+            $child->load_from_data($row, array_keys(Item::$fields));
+            $this->add($child);
+        }
+    }
+    
+    function count_all($debug = false) {
+        $q = $this->getMultiResults(TRUE, $debug);
+        return $q;
+    }
 }
 
 

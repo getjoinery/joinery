@@ -134,9 +134,16 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 
 		//$page_vars['num_filters'] = $num_devices;
 		$filter_out = array();
+
+	
+		
+		
+		
 		foreach($filters as $filter){
 			$filter_out[$filter->get('cdf_filter_pk')] = $filter->get('cdf_is_active');
 		}
+		
+
 
 		//DROPDOWN FORMATTING
 		if($filter_out['ads']){
