@@ -4,8 +4,8 @@
 
 //SETTINGS
 $this->settings['baseDir'] = '/var/www/html/';  //PATH FROM ROOT TO INSTALLATION DIRECTORY (/)
-$this->settings['site_template'] = 'placeholder'; //ACTIVE SITE TEMPLATE.  "default" OR THE DIRECTORY OF YOUR SITE TEMPLATE, NO LEADING OR FOLLOWING SLASH
-$this->settings['webDir'] = 'https://placeholdersite';	//WEB PATH TO THE WEBSITE ROOT DIRECTORY INCLUDING HTTP://, LEAVE OFF FINAL SLASH
+$this->settings['site_template'] = '{{SITE_NAME}}'; //ACTIVE SITE TEMPLATE.  "default" OR THE DIRECTORY OF YOUR SITE TEMPLATE, NO LEADING OR FOLLOWING SLASH
+$this->settings['webDir'] = '{{DOMAIN_NAME}}';	//WEB PATH TO THE WEBSITE ROOT DIRECTORY INCLUDING HTTP://, LEAVE OFF FINAL SLASH
 
 //DEFAULT DIRECTORIES, GENERALLY LEAVE THESE ALONE
 $this->settings['siteDir'] = $this->settings['baseDir'] . $this->settings['site_template']. '/public_html';  //PATH FROM COMPUTER ROOT DIRECTORY TO LOCATION OF WEB ROOT (/), LEAVE OFF THE FINAL SLASH
@@ -15,11 +15,11 @@ $this->settings['static_files_dir'] = $this->settings['baseDir'] . $this->settin
 	
 
 $this->settings['dbusername'] = 'postgres';  //DATABASE USERNAME
-$this->settings['dbname'] = 'placeholder';  //DATABASE NAME
+$this->settings['dbname'] = '{{SITE_NAME}}';  //DATABASE NAME
 $this->settings['dbpassword'] = 'NRxJBA44ZeXDmwywGo';  //DATABASE PASSWORD
 
 $this->settings['dbusername_test'] = 'postgres';  //DATABASE USERNAME
-$this->settings['dbname_test'] = 'test_placeholder';  //DATABASE NAME
+$this->settings['dbname_test'] = 'test_{{SITE_NAME}}';  //DATABASE NAME
 $this->settings['dbpassword_test'] = 'NRxJBA44ZeZmwywGo';  //DATABASE PASSWORD
 
 

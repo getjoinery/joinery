@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 1.24
+#VERSION 1.25
 #Usage:  ./new_account.sh site_name domain_name server_ip --virtualhostonly
 
 VIRTUALHOST_TEMPLATE=/home/user1/default_virtualhost.conf
@@ -82,8 +82,9 @@ if [ "$VHONLY" == 0 ]; then
 	chown -R www-data /var/www/html/$1/uploads
 	cp Globalvars_site_default.php /var/www/html/$1/config/Globalvars_site.php
 	cp serve.php /var/www/html/$1/public_html/serve.php
-	sed -i -e "s/placeholdersite/${2}/g" /var/www/html/$1/config/Globalvars_site.php
-	sed -i -e "s/placeholder/${1}/g" /var/www/html/$1/config/Globalvars_site.php
+	# Updated to use new {{}} placeholder format for Globalvars_site.php
+	sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1/config/Globalvars_site.php
+	sed -i -e "s/{{SITE_NAME}}/${1}/g" /var/www/html/$1/config/Globalvars_site.php
 	echo "$NEW_SITE_ROOT created."
 fi
 
@@ -92,9 +93,10 @@ if [ -f "$VIRTUALHOST_FILE" ]; then
     echo "$VIRTUALHOST_FILE exists."
 else
 	cp /home/user1/default_virtualhost.conf /etc/apache2/sites-available/$1.conf
-	sed -i -e "s/placeholderip/${3}/g" /etc/apache2/sites-available/$1.conf
-	sed -i -e "s/placeholdersite/${2}/g" /etc/apache2/sites-available/$1.conf
-	sed -i -e "s/placeholder/${1}/g" /etc/apache2/sites-available/$1.conf
+	# Updated to use new {{}} placeholder format
+	sed -i -e "s/{{SERVER_IP}}/${3}/g" /etc/apache2/sites-available/$1.conf
+	sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /etc/apache2/sites-available/$1.conf
+	sed -i -e "s/{{SITE_NAME}}/${1}/g" /etc/apache2/sites-available/$1.conf
 	echo "$VIRTUALHOST_FILE created."
 fi
 
@@ -103,4 +105,3 @@ echo "All done."
 #removed
 #echo 'Enter git credentials:'
 #/home/user1/deploy.sh $1
-
