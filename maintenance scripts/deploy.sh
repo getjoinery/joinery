@@ -1,21 +1,105 @@
 #!/usr/bin/env bash
-#version 2.0 - Unified deploy script for live and test sites
+#version 2.1 - Unified deploy script with theme/plugin deployment
 
 GITHUB_USER="jeremytunnell"
 GITHUB_TOKEN="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"
 REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/Tunnell-Software/membership.git"
 
+# Theme/Plugin repository settings
+THEME_PLUGIN_USER="getjoinery"
+THEME_PLUGIN_TOKEN="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"
+THEME_PLUGIN_REPO_URL="https://${THEME_PLUGIN_USER}:${THEME_PLUGIN_TOKEN}@github.com/getjoinery/joinery.git"
+
 # Function to show usage
 show_usage() {
     echo "Usage:"
-    echo "  $0 [site_name]                    # Deploy to live site"
-    echo "  $0 [site_name] --test             # Deploy to test site (site_name_test)"
+    echo "  $0 [site_name]                    # Full deploy to live site"
+    echo "  $0 [site_name] --test             # Full deploy to test site (site_name_test)"
+    echo "  $0 [site_name] --theme-only       # Deploy only themes/plugins to live site"
+    echo "  $0 [site_name] --theme-only --test # Deploy only themes/plugins to test site"
+    echo "  $0 [site_name] --fix-permissions  # Fix permissions only (no deployment)"
     echo ""
     echo "Examples:"
-    echo "  $0 getjoinery                     # Deploy to getjoinery (live)"
-    echo "  $0 getjoinery --test              # Deploy to getjoinery_test"
+    echo "  $0 getjoinery                     # Full deploy to getjoinery (live)"
+    echo "  $0 getjoinery --test              # Full deploy to getjoinery_test"
+    echo "  $0 getjoinery --theme-only        # Update only themes/plugins on getjoinery"
+    echo "  $0 getjoinery --fix-permissions   # Fix permissions on getjoinery"
     echo ""
+    echo "Note: Permission fixes work best when run with sudo"
     echo "Test site will be available at: https://test.[domain].com"
+}
+
+# Function to deploy themes and plugins
+deploy_theme_plugin() {
+    local target_site="$1"
+    local staging_dir="/var/www/html/$target_site"
+    
+    echo "Deploying themes and plugins for $target_site..."
+    
+    # DEPLOY THEMES
+    echo "Setting up theme deployment..."
+    rm -rf "$staging_dir/theme_stage"
+    mkdir -p "$staging_dir/theme_stage"
+    chown -R :www-data "$staging_dir/theme_stage" 2>/dev/null || true
+    chmod -R g+rw "$staging_dir/theme_stage" 2>/dev/null || true
+
+    # Clone repo for themes
+    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$staging_dir/theme_stage"
+    cd "$staging_dir/theme_stage" || exit 1
+    git config core.sparseCheckout true
+    git sparse-checkout init --cone
+    git sparse-checkout set theme/
+    git pull origin main
+    rm -rf .git
+    cd - > /dev/null
+
+    # DEPLOY PLUGINS
+    echo "Setting up plugin deployment..."
+    rm -rf "$staging_dir/plugins_stage"
+    mkdir -p "$staging_dir/plugins_stage"
+    chown -R :www-data "$staging_dir/plugins_stage" 2>/dev/null || true
+    chmod -R g+rw "$staging_dir/plugins_stage" 2>/dev/null || true
+
+    # Clone repo for plugins
+    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$staging_dir/plugins_stage"
+    cd "$staging_dir/plugins_stage" || exit 1
+    git config core.sparseCheckout true
+    git sparse-checkout init --cone
+    git sparse-checkout set plugins/
+    git pull origin main
+    rm -rf .git
+    cd - > /dev/null
+
+    # Deploy themes
+    if [[ -d "$staging_dir/theme_stage/theme" ]]; then
+        echo "Deploying themes..."
+        rm -rf "$staging_dir/theme_old"
+        if [[ -d "$staging_dir/theme" ]]; then
+            mv "$staging_dir/theme" "$staging_dir/theme_old"
+        fi
+        mv "$staging_dir/theme_stage/theme" "$staging_dir/theme"
+        chown -R :www-data "$staging_dir/theme" 2>/dev/null || true
+        chmod -R g+rw "$staging_dir/theme" 2>/dev/null || true
+    fi
+
+    # Deploy plugins
+    if [[ -d "$staging_dir/plugins_stage/plugins" ]]; then
+        echo "Deploying plugins..."
+        rm -rf "$staging_dir/plugins_old"
+        if [[ -d "$staging_dir/plugins" ]]; then
+            mv "$staging_dir/plugins" "$staging_dir/plugins_old"
+        fi
+        mv "$staging_dir/plugins_stage/plugins" "$staging_dir/plugins"
+        chown -R :www-data "$staging_dir/plugins" 2>/dev/null || true
+        chmod -R g+rw "$staging_dir/plugins" 2>/dev/null || true
+    fi
+
+    # Cleanup staging directories
+    echo "Cleaning up theme/plugin staging directories..."
+    rm -rf "$staging_dir/theme_stage"
+    rm -rf "$staging_dir/plugins_stage"
+    
+    echo "Theme and plugin deployment complete."
 }
 
 # Parse arguments
@@ -26,15 +110,43 @@ fi
 
 LIVE_SITE="$1"
 IS_TEST_DEPLOY=false
+IS_THEME_ONLY=false
+IS_FIX_PERMISSIONS_ONLY=false
 
-# Check for test flag
-if [ "$2" == "--test" ]; then
-    IS_TEST_DEPLOY=true
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        --test)
+            IS_TEST_DEPLOY=true
+            ;;
+        --theme-only)
+            IS_THEME_ONLY=true
+            ;;
+        --fix-permissions)
+            IS_FIX_PERMISSIONS_ONLY=true
+            ;;
+    esac
+done
+
+# Set target site and deploy type
+if [ "$IS_TEST_DEPLOY" = true ]; then
     TARGET_SITE="${LIVE_SITE}_test"
-    DEPLOY_TYPE="TEST"
+    if [ "$IS_FIX_PERMISSIONS_ONLY" = true ]; then
+        DEPLOY_TYPE="PERMISSIONS-ONLY (TEST)"
+    elif [ "$IS_THEME_ONLY" = true ]; then
+        DEPLOY_TYPE="THEME-ONLY (TEST)"
+    else
+        DEPLOY_TYPE="FULL (TEST)"
+    fi
 else
     TARGET_SITE="$LIVE_SITE"
-    DEPLOY_TYPE="LIVE"
+    if [ "$IS_FIX_PERMISSIONS_ONLY" = true ]; then
+        DEPLOY_TYPE="PERMISSIONS-ONLY (LIVE)"
+    elif [ "$IS_THEME_ONLY" = true ]; then
+        DEPLOY_TYPE="THEME-ONLY (LIVE)"
+    else
+        DEPLOY_TYPE="FULL (LIVE)"
+    fi
 fi
 
 # SAFETY CHECK: Ensure live site exists (needed for both live and test deploys)
@@ -50,6 +162,37 @@ if [ "$IS_TEST_DEPLOY" = true ] && [ "$LIVE_SITE" = "$TARGET_SITE" ]; then
     exit 1
 fi
 
+# SAFETY CHECK: Ensure target site exists for permissions-only or theme-only operations
+if ([ "$IS_FIX_PERMISSIONS_ONLY" = true ] || [ "$IS_THEME_ONLY" = true ]) && [[ ! -d "/var/www/html/$TARGET_SITE" ]]; then
+    echo "ERROR: Target site directory '/var/www/html/$TARGET_SITE' does not exist."
+    echo "Please verify the site name is correct."
+    exit 1
+fi
+
+# IF PERMISSIONS-ONLY, HANDLE AND EXIT
+if [ "$IS_FIX_PERMISSIONS_ONLY" = true ]; then
+    echo "========================================="
+    echo "PERMISSIONS FIX:"
+    echo "Target site: $TARGET_SITE"
+    echo "========================================="
+    echo "This will fix permissions for: /var/www/html/$TARGET_SITE"
+    echo "Owner: www-data, Group: user1, Permissions: 775 (777 for uploads)"
+    echo "========================================="
+    read -p "Continue with permission fix? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Permission fix cancelled."
+        exit 0
+    fi
+    
+    fix_permissions "$TARGET_SITE"
+    
+    echo "========================================="
+    echo "SUCCESS: Permissions fixed for '$TARGET_SITE'!"
+    echo "========================================="
+    exit 0
+fi
+
 deploy_directory="/var/www/html/$TARGET_SITE"
 
 # Show deployment configuration
@@ -62,21 +205,37 @@ echo "Target directory: $deploy_directory"
 echo "========================================="
 
 if [ "$IS_TEST_DEPLOY" = true ]; then
-    echo "This will:"
-    echo "1. Copy database: $LIVE_SITE -> $TARGET_SITE"
-    echo "2. Deploy code to: $deploy_directory"
-    echo "3. Copy theme/plugins from live site if needed"
-    echo "========================================="
-    read -p "Continue with TEST deployment? (y/N): " -n 1 -r
+    if [ "$IS_THEME_ONLY" = true ]; then
+        echo "This will:"
+        echo "1. Deploy fresh theme/plugins to TEST site: $TARGET_SITE"
+        echo "2. NO database copy or code deployment"
+        echo "========================================="
+        read -p "Continue with THEME-ONLY deployment to TEST site? (y/N): " -n 1 -r
+    else
+        echo "This will:"
+        echo "1. Copy database: $LIVE_SITE -> $TARGET_SITE"
+        echo "2. Deploy code to: $deploy_directory"
+        echo "3. Deploy fresh theme/plugins from repository"
+        echo "========================================="
+        read -p "Continue with FULL deployment to TEST site? (y/N): " -n 1 -r
+    fi
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Deployment cancelled."
         exit 0
     fi
 else
-    echo "This will deploy to the LIVE site: $TARGET_SITE"
-    echo "========================================="
-    read -p "Continue with LIVE deployment? (y/N): " -n 1 -r
+    if [ "$IS_THEME_ONLY" = true ]; then
+        echo "This will deploy fresh theme/plugins to LIVE site: $TARGET_SITE"
+        echo "NO code deployment or database changes will be made"
+        echo "========================================="
+        read -p "Continue with THEME-ONLY deployment to LIVE site? (y/N): " -n 1 -r
+    else
+        echo "This will deploy to the LIVE site: $TARGET_SITE"
+        echo "This includes fresh theme/plugins from repository"
+        echo "========================================="
+        read -p "Continue with FULL LIVE deployment? (y/N): " -n 1 -r
+    fi
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Deployment cancelled."
@@ -97,61 +256,31 @@ if [ "$IS_TEST_DEPLOY" = true ] && [[ ! -d $deploy_directory ]]; then
     echo "Created directory structure for $TARGET_SITE"
 fi
 
-# For live deploys, directory must exist
+# For live deploys or theme-only deploys, directory must exist
 if [ "$IS_TEST_DEPLOY" = false ] && [[ ! -d $deploy_directory ]]; then
     echo "ERROR: Deploy directory $deploy_directory does not exist."
     exit 1
 fi
 
-# CHECK TO MAKE SURE EVERYTHING IS THERE
+# CREATE THEME AND PLUGIN DIRECTORIES IF THEY DON'T EXIST
 if [[ ! -d "/var/www/html/$TARGET_SITE/theme" ]]; then
-    if [ "$IS_TEST_DEPLOY" = true ]; then
-        echo "Creating theme directory..."
-        mkdir -p "/var/www/html/$TARGET_SITE/theme"
-    else
-        echo "ERROR: Theme directory does not exist"
-        exit 1
-    fi
-fi
-
-if [[ ! "$(ls -A /var/www/html/$TARGET_SITE/theme)" ]]; then
-    if [ "$IS_TEST_DEPLOY" = true ]; then
-        echo "Theme directory is empty - will copy from live site"
-    else
-        echo "ERROR: Theme directory is empty"
-        exit 1
-    fi
+    echo "Creating theme directory..."
+    mkdir -p "/var/www/html/$TARGET_SITE/theme"
 fi
 
 if [[ ! -d "/var/www/html/$TARGET_SITE/plugins" ]]; then
-    if [ "$IS_TEST_DEPLOY" = true ]; then
-        echo "Creating plugins directory..."
-        mkdir -p "/var/www/html/$TARGET_SITE/plugins"
-    else
-        echo "ERROR: Plugin directory does not exist"
-        exit 1
-    fi
+    echo "Creating plugins directory..."
+    mkdir -p "/var/www/html/$TARGET_SITE/plugins"
 fi
 
-# CREATE ADDITIONAL SUBDIRECTORIES IF NEEDED (test deploys only)
-if [ "$IS_TEST_DEPLOY" = true ]; then
+# CREATE ADDITIONAL SUBDIRECTORIES IF NEEDED (test deploys only, not theme-only)
+if [ "$IS_TEST_DEPLOY" = true ] && [ "$IS_THEME_ONLY" = false ]; then
     for dir in public_html logs static_files uploads; do
         if [[ ! -d "/var/www/html/$TARGET_SITE/$dir" ]]; then
             echo "Creating $dir directory..."
             mkdir -p "/var/www/html/$TARGET_SITE/$dir"
         fi
     done
-    
-    # COPY THEME AND PLUGINS FROM LIVE SITE IF TEST DIRECTORIES ARE EMPTY
-    if [[ ! "$(ls -A /var/www/html/$TARGET_SITE/theme)" ]] && [[ -d "/var/www/html/$LIVE_SITE/theme" ]]; then
-        echo "Copying theme from live site $LIVE_SITE..."
-        cp -r /var/www/html/$LIVE_SITE/theme/* /var/www/html/$TARGET_SITE/theme/
-    fi
-
-    if [[ ! "$(ls -A /var/www/html/$TARGET_SITE/plugins)" ]] && [[ -d "/var/www/html/$LIVE_SITE/plugins" ]]; then
-        echo "Copying plugins from live site $LIVE_SITE..."
-        cp -r /var/www/html/$LIVE_SITE/plugins/* /var/www/html/$TARGET_SITE/plugins/
-    fi
     
     # COPY DATABASE FROM LIVE SITE TO TEST SITE
     echo "Copying database from $LIVE_SITE to $TARGET_SITE..."
@@ -166,6 +295,24 @@ if [ "$IS_TEST_DEPLOY" = true ]; then
         echo "ERROR: copy_database.sh not found in current directory. Aborting deploy."
         exit 1
     fi
+fi
+
+# DEPLOY THEMES AND PLUGINS FROM REPOSITORY
+deploy_theme_plugin "$TARGET_SITE"
+
+# IF THEME-ONLY DEPLOYMENT, SKIP THE REST
+if [ "$IS_THEME_ONLY" = true ]; then
+    echo "========================================="
+    if [ "$IS_TEST_DEPLOY" = true ]; then
+        echo "SUCCESS: Theme-only deployment to test site '$TARGET_SITE' complete!"
+        echo "Test site should be available at:"
+        echo "  https://test.${LIVE_SITE}.com (if subdomain configured)"
+    else
+        echo "SUCCESS: Theme-only deployment to live site '$TARGET_SITE' complete!"
+    fi
+    echo "Permissions have been fixed automatically."
+    echo "========================================="
+    exit 0
 fi
 
 # CLEAR THE STAGING FOLDER AND RECREATE
@@ -201,6 +348,10 @@ fi
 # DO THE DEPLOY
 cp -r /var/www/html/$TARGET_SITE/public_html_stage/* /var/www/html/$TARGET_SITE/public_html
 
+# FIX PERMISSIONS AFTER DEPLOYMENT
+echo "Fixing permissions after deployment..."
+fix_permissions "$TARGET_SITE"
+
 # Check if update_database.php exists
 if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; then
     echo "ERROR: /var/www/html/$TARGET_SITE/public_html/utils/update_database.php does not exist. Aborting deploy."
@@ -229,10 +380,11 @@ rm -rf /var/www/html/$TARGET_SITE/public_html_stage
 
 echo "========================================="
 if [ "$IS_TEST_DEPLOY" = true ]; then
-    echo "SUCCESS: Deploy to test site '$TARGET_SITE' complete!"
+    echo "SUCCESS: Full deployment to test site '$TARGET_SITE' complete!"
     echo "Test site should be available at:"
     echo "  https://test.${LIVE_SITE}.com (if subdomain configured)"
 else
-    echo "SUCCESS: Deploy to live site '$TARGET_SITE' complete!"
+    echo "SUCCESS: Full deployment to live site '$TARGET_SITE' complete!"
 fi
+echo "Permissions have been fixed automatically."
 echo "========================================="
