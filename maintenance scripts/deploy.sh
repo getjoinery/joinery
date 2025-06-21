@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 2.1 - Unified deploy script with theme/plugin deployment
+#version 2.2 - Unified deploy script with theme/plugin deployment
 
 GITHUB_USER="jeremytunnell"
 GITHUB_TOKEN="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"
@@ -9,6 +9,64 @@ REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/Tunnell-Software/mem
 THEME_PLUGIN_USER="getjoinery"
 THEME_PLUGIN_TOKEN="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"
 THEME_PLUGIN_REPO_URL="https://${THEME_PLUGIN_USER}:${THEME_PLUGIN_TOKEN}@github.com/getjoinery/joinery.git"
+
+# Function to fix permissions
+fix_permissions() {
+    local target_site="$1"
+    echo "Fixing permissions for $target_site..."
+    
+    # Check if running with sufficient privileges
+    if [ "$EUID" -ne 0 ]; then
+        echo "WARNING: Not running as root/sudo. Permission changes may fail."
+        echo "For best results, run this script with: sudo $0 $*"
+        echo "Attempting permission changes anyway..."
+    fi
+    
+    # Test for site existence
+    local site_root="/var/www/html/$target_site"
+    if [[ ! -d "$site_root" ]]; then
+        echo "ERROR: Site directory $site_root does not exist."
+        return 1
+    fi
+    
+    # Create plugin directory if it doesn't exist
+    local plugin_dir="/var/www/html/$target_site/plugins"
+    if [[ ! -d "$plugin_dir" ]]; then
+        echo "Directory $plugin_dir does not exist. Creating it now..."
+        mkdir -p "$plugin_dir"
+        echo "Directory $plugin_dir created successfully."
+    else
+        echo "Directory $plugin_dir already exists."
+    fi
+    
+    # Create theme directory if it doesn't exist
+    local theme_dir="/var/www/html/$target_site/theme"
+    if [[ ! -d "$theme_dir" ]]; then
+        echo "Directory $theme_dir does not exist. Creating it now..."
+        mkdir -p "$theme_dir"
+        echo "Directory $theme_dir created successfully."
+    else
+        echo "Directory $theme_dir already exists."
+    fi
+    
+    # Set the correct ownership and permissions (suppress errors for non-root execution)
+    echo "Setting ownership to www-data..."
+    chown -R www-data "/var/www/html/$target_site" 2>/dev/null || echo "  Warning: Could not change ownership (may need sudo)"
+    
+    echo "Setting group to user1..."
+    chgrp -R user1 "/var/www/html/$target_site" 2>/dev/null || echo "  Warning: Could not change group (may need sudo)"
+    
+    echo "Setting permissions to 775..."
+    chmod -R 775 "/var/www/html/$target_site" 2>/dev/null || echo "  Warning: Could not change permissions (may need sudo)"
+    
+    # Special permissions for uploads directory if it exists
+    if [[ -d "/var/www/html/$target_site/uploads" ]]; then
+        echo "Setting uploads directory permissions to 777..."
+        chmod -R 777 "/var/www/html/$target_site/uploads" 2>/dev/null || echo "  Warning: Could not change uploads permissions (may need sudo)"
+    fi
+    
+    echo "Permissions update complete for $target_site."
+}
 
 # Function to show usage
 show_usage() {
@@ -357,7 +415,13 @@ if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; 
     echo "ERROR: /var/www/html/$TARGET_SITE/public_html/utils/update_database.php does not exist. Aborting deploy."
     # Clean up staging directory before reverting
     rm -rf /var/www/html/$TARGET_SITE/public_html_stage
-    mv /var/www/html/$TARGET_SITE/public_html_last/* /var/www/html/$TARGET_SITE/public_html
+    
+    # Remove current broken deployment
+    rm -rf /var/www/html/$TARGET_SITE/public_html
+    
+    # Restore from backup
+    mv /var/www/html/$TARGET_SITE/public_html_last /var/www/html/$TARGET_SITE/public_html
+    
     exit 1
 fi
 
@@ -368,7 +432,13 @@ if [[ "$returnvalue" != 1 ]]; then
     echo "ERROR: Database update failed. Reverting deploy"
     # Clean up staging directory before reverting
     rm -rf /var/www/html/$TARGET_SITE/public_html_stage
-    mv /var/www/html/$TARGET_SITE/public_html_last/* /var/www/html/$TARGET_SITE/public_html
+    
+    # Remove current broken deployment
+    rm -rf /var/www/html/$TARGET_SITE/public_html
+    
+    # Restore from backup
+    mv /var/www/html/$TARGET_SITE/public_html_last /var/www/html/$TARGET_SITE/public_html
+    
     exit 1
 else
     echo "Database update successful."
@@ -387,4 +457,4 @@ else
     echo "SUCCESS: Full deployment to live site '$TARGET_SITE' complete!"
 fi
 echo "Permissions have been fixed automatically."
-echo "========================================="
+echo "========================================"
