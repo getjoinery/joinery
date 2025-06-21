@@ -1,6 +1,6 @@
 <?php
-//Version 1.04
-//SITE: placeholder
+//Version 1.05
+//SITE: {{SITE_NAME}}
 
 //SETTINGS
 $this->settings['baseDir'] = '/var/www/html/';  //PATH FROM ROOT TO INSTALLATION DIRECTORY (/)
@@ -16,11 +16,11 @@ $this->settings['static_files_dir'] = $this->settings['baseDir'] . $this->settin
 
 $this->settings['dbusername'] = 'postgres';  //DATABASE USERNAME
 $this->settings['dbname'] = '{{SITE_NAME}}';  //DATABASE NAME
-$this->settings['dbpassword'] = 'NRxJBA44ZeXDmwywGo';  //DATABASE PASSWORD
+$this->settings['dbpassword'] = '';  //DATABASE PASSWORD
 
 $this->settings['dbusername_test'] = 'postgres';  //DATABASE USERNAME
 $this->settings['dbname_test'] = 'test_{{SITE_NAME}}';  //DATABASE NAME
-$this->settings['dbpassword_test'] = 'NRxJBA44ZeZmwywGo';  //DATABASE PASSWORD
+$this->settings['dbpassword_test'] = '';  //DATABASE PASSWORD
 
 
 ?>
