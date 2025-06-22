@@ -1,0 +1,42 @@
+#set domain info
+#set A record for root and A record for www
+
+#create the database
+sudo ./new_database.sh newsite default-05_01_2022.sql 
+
+#edit the database settings in the new database to the right site and url
+
+#create a new account
+sudo ./new_account.sh newsite newdomain.com IP
+
+#move the theme files into /theme
+
+#edit the new Globalvars for the new site
+
+#deploy the site files
+./deploy.sh newsite
+
+#set the dns
+sudo a2ensite newsite.conf
+sudo apachectl configtest
+systemctl reload apache2
+
+#no longer necessary?
+#/usr/bin/php /var/www/html/newsite/public_html/utils/update_database.php
+
+#set ssl at cloudflare to be "flexible"
+
+sudo certbot certonly --apache -d integralzen.org -d www.integralzen.org --dry-run
+sudo certbot --apache -d integralzen.org -d www.integralzen.org
+
+
+
+######################
+If old site needs to be uninstalled:
+
+sudo a2dissite joinerytest.conf
+make sure you edit the path (/var/www/html/x)
+make sure you edit the Globalvars_site
+
+
+
