@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-#version 2.2 - Unified deploy script with theme/plugin deployment
+#version 2.3 - Fixed deployment order and theme/plugin deployment
+# MODIFIED: Preserve staging directory on deployment failures for debugging
 
 GITHUB_USER="jeremytunnell"
 GITHUB_TOKEN="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"
@@ -27,26 +28,6 @@ fix_permissions() {
     if [[ ! -d "$site_root" ]]; then
         echo "ERROR: Site directory $site_root does not exist."
         return 1
-    fi
-    
-    # Create plugin directory if it doesn't exist
-    local plugin_dir="/var/www/html/$target_site/plugins"
-    if [[ ! -d "$plugin_dir" ]]; then
-        echo "Directory $plugin_dir does not exist. Creating it now..."
-        mkdir -p "$plugin_dir"
-        echo "Directory $plugin_dir created successfully."
-    else
-        echo "Directory $plugin_dir already exists."
-    fi
-    
-    # Create theme directory if it doesn't exist
-    local theme_dir="/var/www/html/$target_site/theme"
-    if [[ ! -d "$theme_dir" ]]; then
-        echo "Directory $theme_dir does not exist. Creating it now..."
-        mkdir -p "$theme_dir"
-        echo "Directory $theme_dir created successfully."
-    else
-        echo "Directory $theme_dir already exists."
     fi
     
     # Set the correct ownership and permissions (suppress errors for non-root execution)
@@ -87,75 +68,97 @@ show_usage() {
     echo "Test site will be available at: https://test.[domain].com"
 }
 
-# Function to deploy themes and plugins
+# Function to deploy themes and plugins directly to public_html
 deploy_theme_plugin() {
     local target_site="$1"
-    local staging_dir="/var/www/html/$target_site"
+    local site_root="/var/www/html/$target_site"
+    local public_html_dir="$site_root/public_html"
     
-    echo "Deploying themes and plugins for $target_site..."
+    echo "Deploying themes and plugins for $target_site directly to public_html..."
     
-    # DEPLOY THEMES
-    echo "Setting up theme deployment..."
-    rm -rf "$staging_dir/theme_stage"
-    mkdir -p "$staging_dir/theme_stage"
-    chown -R :www-data "$staging_dir/theme_stage" 2>/dev/null || true
-    chmod -R g+rw "$staging_dir/theme_stage" 2>/dev/null || true
-
+    # Ensure public_html directory exists
+    if [[ ! -d "$public_html_dir" ]]; then
+        echo "Creating public_html directory..."
+        mkdir -p "$public_html_dir"
+    fi
+    
+    # DEPLOY THEMES directly to public_html/theme
+    echo "Setting up theme deployment to public_html/theme..."
+    local theme_stage_dir="$site_root/theme_stage"
+    rm -rf "$theme_stage_dir"
+    mkdir -p "$theme_stage_dir"
+    
     # Clone repo for themes
-    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$staging_dir/theme_stage"
-    cd "$staging_dir/theme_stage" || exit 1
+    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$theme_stage_dir"
+    cd "$theme_stage_dir" || exit 1
     git config core.sparseCheckout true
     git sparse-checkout init --cone
-    git sparse-checkout set theme/
-    git pull origin main
+    git sparse-checkout set theme
+    git checkout main
     rm -rf .git
     cd - > /dev/null
 
-    # DEPLOY PLUGINS
-    echo "Setting up plugin deployment..."
-    rm -rf "$staging_dir/plugins_stage"
-    mkdir -p "$staging_dir/plugins_stage"
-    chown -R :www-data "$staging_dir/plugins_stage" 2>/dev/null || true
-    chmod -R g+rw "$staging_dir/plugins_stage" 2>/dev/null || true
-
+    # DEPLOY PLUGINS directly to public_html/plugins
+    echo "Setting up plugin deployment to public_html/plugins..."
+    local plugins_stage_dir="$site_root/plugins_stage"
+    rm -rf "$plugins_stage_dir"
+    mkdir -p "$plugins_stage_dir"
+    
     # Clone repo for plugins
-    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$staging_dir/plugins_stage"
-    cd "$staging_dir/plugins_stage" || exit 1
+    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$plugins_stage_dir"
+    cd "$plugins_stage_dir" || exit 1
     git config core.sparseCheckout true
     git sparse-checkout init --cone
-    git sparse-checkout set plugins/
-    git pull origin main
+    git sparse-checkout set plugins
+    git checkout main
     rm -rf .git
     cd - > /dev/null
 
-    # Deploy themes
-    if [[ -d "$staging_dir/theme_stage/theme" ]]; then
-        echo "Deploying themes..."
-        rm -rf "$staging_dir/theme_old"
-        if [[ -d "$staging_dir/theme" ]]; then
-            mv "$staging_dir/theme" "$staging_dir/theme_old"
+    # Deploy themes directly to public_html/theme
+    if [[ -d "$theme_stage_dir/theme" ]]; then
+        echo "Deploying themes to public_html/theme..."
+        rm -rf "$public_html_dir/theme_old"
+        if [[ -d "$public_html_dir/theme" ]]; then
+            mv "$public_html_dir/theme" "$public_html_dir/theme_old"
         fi
-        mv "$staging_dir/theme_stage/theme" "$staging_dir/theme"
-        chown -R :www-data "$staging_dir/theme" 2>/dev/null || true
-        chmod -R g+rw "$staging_dir/theme" 2>/dev/null || true
+        mv "$theme_stage_dir/theme" "$public_html_dir/theme"
+        chown -R www-data:user1 "$public_html_dir/theme" 2>/dev/null || true
+        chmod -R 775 "$public_html_dir/theme" 2>/dev/null || true
+        echo "Themes deployed successfully to public_html/theme"
+    else
+        echo "WARNING: No theme directory found in repository"
     fi
 
-    # Deploy plugins
-    if [[ -d "$staging_dir/plugins_stage/plugins" ]]; then
-        echo "Deploying plugins..."
-        rm -rf "$staging_dir/plugins_old"
-        if [[ -d "$staging_dir/plugins" ]]; then
-            mv "$staging_dir/plugins" "$staging_dir/plugins_old"
+    # Deploy plugins directly to public_html/plugins
+    if [[ -d "$plugins_stage_dir/plugins" ]]; then
+        echo "Deploying plugins to public_html/plugins..."
+        rm -rf "$public_html_dir/plugins_old"
+        if [[ -d "$public_html_dir/plugins" ]]; then
+            mv "$public_html_dir/plugins" "$public_html_dir/plugins_old"
         fi
-        mv "$staging_dir/plugins_stage/plugins" "$staging_dir/plugins"
-        chown -R :www-data "$staging_dir/plugins" 2>/dev/null || true
-        chmod -R g+rw "$staging_dir/plugins" 2>/dev/null || true
+        mv "$plugins_stage_dir/plugins" "$public_html_dir/plugins"
+        chown -R www-data:user1 "$public_html_dir/plugins" 2>/dev/null || true
+        chmod -R 775 "$public_html_dir/plugins" 2>/dev/null || true
+        echo "Plugins deployed successfully to public_html/plugins"
+    else
+        echo "WARNING: No plugins directory found in repository"
     fi
 
     # Cleanup staging directories
     echo "Cleaning up theme/plugin staging directories..."
-    rm -rf "$staging_dir/theme_stage"
-    rm -rf "$staging_dir/plugins_stage"
+    rm -rf "$theme_stage_dir"
+    rm -rf "$plugins_stage_dir"
+    
+    # Also create backup theme/plugins directories outside public_html for compatibility
+    echo "Creating backup theme/plugins directories outside public_html..."
+    if [[ -d "$public_html_dir/theme" ]]; then
+        rm -rf "$site_root/theme"
+        cp -r "$public_html_dir/theme" "$site_root/theme"
+    fi
+    if [[ -d "$public_html_dir/plugins" ]]; then
+        rm -rf "$site_root/plugins"
+        cp -r "$public_html_dir/plugins" "$site_root/plugins"
+    fi
     
     echo "Theme and plugin deployment complete."
 }
@@ -320,20 +323,15 @@ if [ "$IS_TEST_DEPLOY" = false ] && [[ ! -d $deploy_directory ]]; then
     exit 1
 fi
 
-# CREATE THEME AND PLUGIN DIRECTORIES IF THEY DON'T EXIST
-if [[ ! -d "/var/www/html/$TARGET_SITE/theme" ]]; then
-    echo "Creating theme directory..."
-    mkdir -p "/var/www/html/$TARGET_SITE/theme"
-fi
-
-if [[ ! -d "/var/www/html/$TARGET_SITE/plugins" ]]; then
-    echo "Creating plugins directory..."
-    mkdir -p "/var/www/html/$TARGET_SITE/plugins"
+# Ensure public_html directory exists
+if [[ ! -d "/var/www/html/$TARGET_SITE/public_html" ]]; then
+    echo "Creating public_html directory..."
+    mkdir -p "/var/www/html/$TARGET_SITE/public_html"
 fi
 
 # CREATE ADDITIONAL SUBDIRECTORIES IF NEEDED (test deploys only, not theme-only)
 if [ "$IS_TEST_DEPLOY" = true ] && [ "$IS_THEME_ONLY" = false ]; then
-    for dir in public_html logs static_files uploads; do
+    for dir in logs static_files uploads config; do
         if [[ ! -d "/var/www/html/$TARGET_SITE/$dir" ]]; then
             echo "Creating $dir directory..."
             mkdir -p "/var/www/html/$TARGET_SITE/$dir"
@@ -355,11 +353,14 @@ if [ "$IS_TEST_DEPLOY" = true ] && [ "$IS_THEME_ONLY" = false ]; then
     fi
 fi
 
-# DEPLOY THEMES AND PLUGINS FROM REPOSITORY
+# DEPLOY THEMES AND PLUGINS FROM REPOSITORY FIRST
 deploy_theme_plugin "$TARGET_SITE"
 
 # IF THEME-ONLY DEPLOYMENT, SKIP THE REST
 if [ "$IS_THEME_ONLY" = true ]; then
+    # Fix permissions after theme deployment
+    fix_permissions "$TARGET_SITE"
+    
     echo "========================================="
     if [ "$IS_TEST_DEPLOY" = true ]; then
         echo "SUCCESS: Theme-only deployment to test site '$TARGET_SITE' complete!"
@@ -391,20 +392,69 @@ rm -rf .git
 # CLEAR THE LAST FOLDER AND SAVE CURRENT TO LAST
 rm -rf /var/www/html/$TARGET_SITE/public_html_last
 mkdir /var/www/html/$TARGET_SITE/public_html_last
-mv /var/www/html/$TARGET_SITE/public_html/* /var/www/html/$TARGET_SITE/public_html_last
-
-# COPY THE THEME FILES
-if [[ -d /var/www/html/$TARGET_SITE/theme ]]; then
-    cp -r /var/www/html/$TARGET_SITE/theme /var/www/html/$TARGET_SITE/public_html_stage
+if [[ -d /var/www/html/$TARGET_SITE/public_html ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html)" ]]; then
+    mv /var/www/html/$TARGET_SITE/public_html/* /var/www/html/$TARGET_SITE/public_html_last/ 2>/dev/null || true
 fi
 
-# COPY THE PLUGIN FILES
-if [[ -d /var/www/html/$TARGET_SITE/plugins ]]; then
-    cp -r /var/www/html/$TARGET_SITE/plugins /var/www/html/$TARGET_SITE/public_html_stage
-fi
+# DO THE MAIN CODE DEPLOY (with smart theme/plugin merging)
+echo "Deploying main application code..."
+cd /var/www/html/$TARGET_SITE/public_html_stage || {
+    echo "ERROR: Could not change to staging directory"
+    exit 1
+}
 
-# DO THE DEPLOY
-cp -r /var/www/html/$TARGET_SITE/public_html_stage/* /var/www/html/$TARGET_SITE/public_html
+for item in *; do
+    if [ "$item" = "theme" ]; then
+        echo "Smart merging themes (adding new themes, preserving existing)..."
+        if [ -d "theme" ]; then
+            # Ensure theme directory exists in target
+            mkdir -p "/var/www/html/$TARGET_SITE/public_html/theme"
+            for theme_path in theme/*/; do
+                if [ -d "$theme_path" ]; then
+                    theme_name=$(basename "$theme_path")
+                    if [ -d "/var/www/html/$TARGET_SITE/public_html/theme/$theme_name" ]; then
+                        echo "  Preserving existing theme: $theme_name"
+                    else
+                        echo "  Adding new theme: $theme_name"
+                        cp -r "$theme_path" "/var/www/html/$TARGET_SITE/public_html/theme/" || {
+                            echo "ERROR: Failed to copy theme $theme_name"
+                            exit 1
+                        }
+                    fi
+                fi
+            done
+        fi
+    elif [ "$item" = "plugins" ]; then
+        echo "Smart merging plugins (adding new plugins, preserving existing)..."
+        if [ -d "plugins" ]; then
+            # Ensure plugins directory exists in target
+            mkdir -p "/var/www/html/$TARGET_SITE/public_html/plugins"
+            for plugin_path in plugins/*/; do
+                if [ -d "$plugin_path" ]; then
+                    plugin_name=$(basename "$plugin_path")
+                    if [ -d "/var/www/html/$TARGET_SITE/public_html/plugins/$plugin_name" ]; then
+                        echo "  Preserving existing plugin: $plugin_name"
+                    else
+                        echo "  Adding new plugin: $plugin_name"
+                        cp -r "$plugin_path" "/var/www/html/$TARGET_SITE/public_html/plugins/" || {
+                            echo "ERROR: Failed to copy plugin $plugin_name"
+                            exit 1
+                        }
+                    fi
+                fi
+            done
+        fi
+    else
+        echo "Copying $item..."
+        cp -r "$item" "/var/www/html/$TARGET_SITE/public_html/" || {
+            echo "ERROR: Failed to copy $item"
+            exit 1
+        }
+    fi
+done
+cd - > /dev/null
+
+# Note: Themes and plugins use smart merging - existing ones are preserved, new ones are added
 
 # FIX PERMISSIONS AFTER DEPLOYMENT
 echo "Fixing permissions after deployment..."
@@ -412,15 +462,28 @@ fix_permissions "$TARGET_SITE"
 
 # Check if update_database.php exists
 if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; then
-    echo "ERROR: /var/www/html/$TARGET_SITE/public_html/utils/update_database.php does not exist. Aborting deploy."
-    # Clean up staging directory before reverting
-    rm -rf /var/www/html/$TARGET_SITE/public_html_stage
+    echo "ERROR: /var/www/html/$TARGET_SITE/public_html/utils/update_database.php does not exist."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    echo "DEBUGGING: You can examine the staged files to understand what was deployed."
     
-    # Remove current broken deployment
-    rm -rf /var/www/html/$TARGET_SITE/public_html
-    
-    # Restore from backup
-    mv /var/www/html/$TARGET_SITE/public_html_last /var/www/html/$TARGET_SITE/public_html
+    # Check if this is an initial deployment (no backup to restore)
+    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
+        echo "Rolling back to previous deployment..."
+        # MODIFIED: Don't clean up staging directory on rollback
+        # rm -rf /var/www/html/$TARGET_SITE/public_html_stage
+        
+        # Remove current broken deployment
+        rm -rf /var/www/html/$TARGET_SITE/public_html/*
+        
+        # Restore from backup
+        mv /var/www/html/$TARGET_SITE/public_html_last/* /var/www/html/$TARGET_SITE/public_html/ 2>/dev/null || true
+        echo "Rollback completed."
+    else
+        echo "This appears to be an initial deployment - no previous version to rollback to."
+        echo "Keeping current deployment in place for debugging."
+        # MODIFIED: Don't clean up staging directory on initial deployment failure
+        # rm -rf /var/www/html/$TARGET_SITE/public_html_stage
+    fi
     
     exit 1
 fi
@@ -429,22 +492,36 @@ fi
 returnvalue=$?
 
 if [[ "$returnvalue" != 1 ]]; then
-    echo "ERROR: Database update failed. Reverting deploy"
-    # Clean up staging directory before reverting
-    rm -rf /var/www/html/$TARGET_SITE/public_html_stage
+    echo "ERROR: Database update failed."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    echo "DEBUGGING: You can examine the staged files to understand what was deployed."
     
-    # Remove current broken deployment
-    rm -rf /var/www/html/$TARGET_SITE/public_html
-    
-    # Restore from backup
-    mv /var/www/html/$TARGET_SITE/public_html_last /var/www/html/$TARGET_SITE/public_html
+    # Check if this is an initial deployment (no backup to restore)
+    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
+        echo "Rolling back to previous deployment..."
+        # MODIFIED: Don't clean up staging directory on rollback
+        # rm -rf /var/www/html/$TARGET_SITE/public_html_stage
+        
+        # Remove current broken deployment
+        rm -rf /var/www/html/$TARGET_SITE/public_html/*
+        
+        # Restore from backup
+        mv /var/www/html/$TARGET_SITE/public_html_last/* /var/www/html/$TARGET_SITE/public_html/ 2>/dev/null || true
+        echo "Rollback completed."
+    else
+        echo "This appears to be an initial deployment - no previous version to rollback to."
+        echo "Keeping current deployment in place for debugging."
+        echo "You may need to manually fix the database update issue."
+        # MODIFIED: Don't clean up staging directory on initial deployment failure
+        # rm -rf /var/www/html/$TARGET_SITE/public_html_stage
+    fi
     
     exit 1
 else
     echo "Database update successful."
 fi
 
-# CLEANUP: Remove staging directory after successful deployment
+# CLEANUP: Remove staging directory after successful deployment ONLY
 echo "Cleaning up staging directory..."
 rm -rf /var/www/html/$TARGET_SITE/public_html_stage
 
