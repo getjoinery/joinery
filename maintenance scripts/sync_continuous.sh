@@ -21,7 +21,6 @@ SHOULD_EXIT=false
 LAST_SYNC_TIME=0
 SYNC_IN_PROGRESS=false
 SSH_KEY_AUTH=false
-DEBUG_MODE=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -177,6 +176,7 @@ perform_sync() {
     local RSYNC_OPTS=(
         -avzh
         --stats
+        --omit-dir-times
         -e "ssh -p $SSH_PORT"
         --exclude='.git/'
         --exclude='.gitignore'
@@ -215,6 +215,9 @@ perform_sync() {
             echo "  $line"
         elif [[ "$line" =~ "building file list" ]] || [[ "$line" =~ "sending incremental" ]]; then
             # Skip these lines
+            :
+        elif [[ "$line" =~ "failed to set times on" ]] && [[ "$line" =~ "/\." ]]; then
+            # Skip harmless directory time warnings
             :
         elif [[ -n "$line" ]] && [[ ! "$line" =~ ^[[:space:]]*$ ]]; then
             # Show file transfers
@@ -665,6 +668,7 @@ if [ "$INITIAL_SYNC" = true ]; then
         RSYNC_OPTS=(
             -avzh
             --stats
+            --omit-dir-times
             -e "ssh -p $SSH_PORT"
             --exclude='.git/'
             --exclude='.gitignore'
