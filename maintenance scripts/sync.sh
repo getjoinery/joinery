@@ -13,6 +13,10 @@ DEFAULT_LOCAL_DIR=""
 DEFAULT_REMOTE_HOST=""
 DEFAULT_REMOTE_DIR=""
 
+# Runtime variables
+SSH_KEY_AUTH=false
+SSH_KEY_PATH=""
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -35,6 +39,26 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Function to find SSH key
+find_ssh_key() {
+    # Common SSH key locations in order of preference
+    local key_locations=(
+        "$HOME/.ssh/id_rsa"
+        "$HOME/.ssh/id_ed25519"
+        "$HOME/.ssh/id_ecdsa"
+        "$HOME/.ssh/id_rsa_sync"
+    )
+    
+    for key in "${key_locations[@]}"; do
+        if [ -f "$key" ]; then
+            SSH_KEY_PATH="$key"
+            return 0
+        fi
+    done
+    
+    return 1
 }
 
 # Function to read configuration file
@@ -185,6 +209,8 @@ show_usage() {
     echo "Options:"
     echo "  --autodelete           - Skip confirmation prompt for deleting remote files"
     echo "  --ignore-file <file>   - Use custom ignore file (default: .syncignore)"
+    echo "  --no-key               - Skip SSH key authentication, use password only"
+    echo "  --setup-ssh-key        - Interactive SSH key setup helper"
     echo ""
     echo "Arguments (all optional if defaults configured):"
     echo "  local_dir   - Local directory to sync FROM"
@@ -208,6 +234,11 @@ show_usage() {
     echo "  $0 --autodelete   # Uses defaults from .syncconfig"
     echo "  $0 ./different-dir   # Uses config defaults for host/remote dir"
     echo ""
+    echo "SSH Authentication:"
+    echo "  The script will try SSH key authentication first, then fall back to password."
+    echo "  To set up SSH keys for passwordless sync, run:"
+    echo "    $0 --setup-ssh-key"
+    echo ""
     echo "Ignore Files:"
     echo "  Create a .syncignore file in your local directory to specify additional"
     echo "  files and directories to exclude. One pattern per line, supports:"
@@ -224,6 +255,62 @@ show_usage() {
     echo "  - Excludes common unwanted files (.git, node_modules, etc.)"
     echo "  - Supports custom ignore patterns via .syncignore file"
     echo "  - Supports default configuration via .syncconfig file"
+    echo "  - SSH key authentication with password fallback"
+}
+
+# Function to set up SSH key authentication
+setup_ssh_key() {
+    print_status "SSH Key Setup Helper"
+    echo "===================="
+    echo ""
+    
+    # Check if key exists
+    local key_file="$HOME/.ssh/id_rsa"
+    if [ -f "$key_file" ]; then
+        print_status "SSH key already exists at $key_file"
+        read -p "Use existing key? (Y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            read -p "Enter path for new key [$HOME/.ssh/id_rsa_sync]: " new_key_path
+            key_file="${new_key_path:-$HOME/.ssh/id_rsa_sync}"
+        fi
+    else
+        print_status "No SSH key found. Creating new key..."
+        key_file="$HOME/.ssh/id_rsa"
+    fi
+    
+    # Generate key if it doesn't exist
+    if [ ! -f "$key_file" ]; then
+        print_status "Generating SSH key..."
+        mkdir -p "$HOME/.ssh"
+        ssh-keygen -t rsa -b 4096 -f "$key_file" -N "" || {
+            print_error "Failed to generate SSH key"
+            return 1
+        }
+        print_success "SSH key generated at $key_file"
+    fi
+    
+    # Copy key to remote server
+    print_status "Copying SSH key to remote server..."
+    echo "You'll need to enter your password for the remote server:"
+    
+    if ssh-copy-id -p "$SSH_PORT" -i "$key_file" "$SSH_USER@$REMOTE_HOST"; then
+        print_success "SSH key successfully copied to remote server!"
+        echo ""
+        print_status "Testing passwordless connection..."
+        if ssh -p "$SSH_PORT" -i "$key_file" -o BatchMode=yes "$SSH_USER@$REMOTE_HOST" exit 2>/dev/null; then
+            print_success "Passwordless SSH connection successful!"
+            echo ""
+            echo "You can now run sync without password prompts."
+        else
+            print_error "Passwordless connection test failed"
+        fi
+    else
+        print_error "Failed to copy SSH key to remote server"
+        return 1
+    fi
+    
+    return 0
 }
 
 # Read configuration file if it exists
@@ -232,6 +319,7 @@ read_config
 # Parse arguments
 AUTO_DELETE=false
 IGNORE_FILE=".syncignore"
+USE_SSH_KEY=true
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -248,6 +336,28 @@ while [[ $# -gt 0 ]]; do
             fi
             IGNORE_FILE="$2"
             shift 2
+            ;;
+        --no-key)
+            USE_SSH_KEY=false
+            shift
+            ;;
+        --setup-ssh-key)
+            # Need to get the connection details first
+            shift
+            LOCAL_DIR="${1:-$DEFAULT_LOCAL_DIR}"
+            REMOTE_HOST="${2:-$DEFAULT_REMOTE_HOST}"
+            REMOTE_DIR="${3:-$DEFAULT_REMOTE_DIR}"
+            SSH_USER="${4:-$DEFAULT_SSH_USER}"
+            SSH_PORT="${5:-$DEFAULT_SSH_PORT}"
+            
+            if [ -z "$REMOTE_HOST" ]; then
+                print_error "Remote host required for SSH setup"
+                show_usage
+                exit 1
+            fi
+            
+            setup_ssh_key
+            exit $?
             ;;
         -*)
             print_error "Unknown option: $1"
@@ -343,8 +453,43 @@ echo ""
 
 # Test SSH connection
 print_status "Testing SSH connection..."
-if ! ssh -p "$SSH_PORT" -o ConnectTimeout=10 -o BatchMode=yes "$SSH_USER@$REMOTE_HOST" exit 2>/dev/null; then
-    print_warning "SSH connection test failed. You may need to enter a password or check your SSH keys."
+
+# Try to find SSH key if enabled
+if [ "$USE_SSH_KEY" = true ] && find_ssh_key; then
+    print_status "Found SSH key at: $SSH_KEY_PATH"
+    
+    # Test key authentication
+    if ssh -p "$SSH_PORT" -i "$SSH_KEY_PATH" -o BatchMode=yes -o PasswordAuthentication=no "$SSH_USER@$REMOTE_HOST" exit 2>/dev/null; then
+        print_success "SSH key authentication successful"
+        SSH_KEY_AUTH=true
+    else
+        print_warning "SSH key authentication failed, will fall back to password"
+        SSH_KEY_AUTH=false
+    fi
+else
+    if [ "$USE_SSH_KEY" = true ]; then
+        print_warning "No SSH key found. Consider setting up SSH keys for passwordless sync:"
+        echo "  Run: $0 --setup-ssh-key $LOCAL_DIR $REMOTE_HOST $REMOTE_DIR $SSH_USER $SSH_PORT"
+        echo ""
+    fi
+    SSH_KEY_AUTH=false
+fi
+
+# If key auth failed, test password auth
+if [ "$SSH_KEY_AUTH" = false ]; then
+    print_status "Testing password authentication..."
+    if ! ssh -p "$SSH_PORT" -o ConnectTimeout=10 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$SSH_USER@$REMOTE_HOST" exit 2>&1; then
+        print_warning "SSH connection test failed. You'll be prompted for password during sync."
+    else
+        print_success "Password authentication available"
+    fi
+fi
+
+# Build SSH command based on authentication method
+if [ "$SSH_KEY_AUTH" = true ]; then
+    SSH_CMD="ssh -p $SSH_PORT -i $SSH_KEY_PATH"
+else
+    SSH_CMD="ssh -p $SSH_PORT"
 fi
 
 # First, do a dry run to see what would change
@@ -357,7 +502,8 @@ DRY_RUN_OPTS=(
     --itemize-changes
     --delete
     --stats
-    -e "ssh -p $SSH_PORT"
+    --omit-dir-times
+    -e "$SSH_CMD"
     --exclude='.git/'
     --exclude='.gitignore'
     --exclude='.DS_Store'
@@ -385,11 +531,6 @@ elif [ "$IGNORE_FILE" != ".syncignore" ]; then
     exit 1
 fi
 
-print_status "Debug: Dry run will use ${#DRY_RUN_OPTS[@]} rsync options"
-print_status "Debug: Local path is: '$LOCAL_DIR'"
-print_status "Debug: Remote path is: '$REMOTE_PATH'"
-
-# Perform dry run
 print_status "Running analysis..."
 
 # Temporarily disable exit on error so we can handle rsync failure gracefully
@@ -397,8 +538,6 @@ set +e
 DRY_RUN_OUTPUT=$(rsync "${DRY_RUN_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1)
 DRY_RUN_EXIT_CODE=$?
 set -e  # Re-enable exit on error
-
-print_status "Debug: rsync completed with exit code $DRY_RUN_EXIT_CODE"
 
 # Handle rsync exit codes
 if [ $DRY_RUN_EXIT_CODE -eq 0 ]; then
@@ -421,15 +560,15 @@ else
     echo "$DRY_RUN_OUTPUT"
     echo "=================="
     echo ""
-    echo "Local directory contents:"
-    ls -la "$LOCAL_DIR" | head -10
+    echo "Common causes:"
+    echo "  - SSH authentication failed (check your password or SSH keys)"
+    echo "  - Network connectivity issues"
+    echo "  - Remote directory doesn't exist or isn't accessible"
     echo ""
-    echo "Local directory exists: $(test -d "$LOCAL_DIR" && echo "YES" || echo "NO")"
-    echo "Local directory readable: $(test -r "$LOCAL_DIR" && echo "YES" || echo "NO")"
-    echo ""
-    echo "Command that was attempted:"
-    printf '%q ' rsync "${DRY_RUN_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH"
-    echo ""
+    if [ "$SSH_KEY_AUTH" = false ]; then
+        echo "Consider setting up SSH keys for easier authentication:"
+        echo "  $0 --setup-ssh-key $LOCAL_DIR $REMOTE_HOST $REMOTE_DIR $SSH_USER $SSH_PORT"
+    fi
     exit 1
 fi
 
@@ -524,6 +663,9 @@ fi
 # Always ask about proceeding with the sync
 echo ""
 print_warning "Ready to sync $TOTAL_CHANGES changes"
+if [ "$SSH_KEY_AUTH" = false ]; then
+    print_warning "You will be prompted for your SSH password"
+fi
 read -p "Proceed with synchronization? (y/N): " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -552,7 +694,8 @@ RSYNC_OPTS=(
     --delete
     --progress
     --stats
-    -e "ssh -p $SSH_PORT"
+    --omit-dir-times
+    -e "$SSH_CMD"
     --exclude='.git/'
     --exclude='.gitignore'
     --exclude='.DS_Store'
@@ -578,6 +721,11 @@ if [ -n "$FULL_IGNORE_PATH" ]; then
 fi
 
 print_status "Starting rsync transfer..."
+if [ "$SSH_KEY_AUTH" = true ]; then
+    print_status "Using SSH key authentication"
+else
+    print_status "Using password authentication"
+fi
 echo ""
 
 # Perform the sync with better error handling
