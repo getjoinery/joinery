@@ -64,7 +64,7 @@ setup_ssh_multiplexing() {
     local ssh_key_path="$4"
     
     # Create unique control path
-    SSH_CONTROL_PATH="/tmp/sync_ssh_${ssh_host}_${ssh_port}_${ssh_user}_$"
+    SSH_CONTROL_PATH="/tmp/sync_ssh_${ssh_host}_${ssh_port}_${ssh_user}_$$"
     
     # SSH multiplexing options
     local ssh_multiplex_opts="-o ControlMaster=auto -o ControlPath=$SSH_CONTROL_PATH -o ControlPersist=300"
@@ -91,6 +91,8 @@ setup_ssh_multiplexing() {
         return 1
     fi
 }
+
+# Function to find SSH key
 find_ssh_key() {
     # Common SSH key locations in order of preference
     local key_locations=(
@@ -210,8 +212,8 @@ analyze_content_changes() {
     # Try to get remote content and compare (ignoring whitespace differences)
     if remote_content=$(ssh -o ConnectTimeout=5 -o BatchMode=yes $ssh_cmd "cat '$remote_path'" 2>/dev/null); then
         # Normalize both files (remove CR, normalize whitespace) and compare
-        local_normalized=$(tr -d '\r' < "$local_file" | sed 's/[[:space:]]*$//')
-        remote_normalized=$(echo "$remote_content" | tr -d '\r' | sed 's/[[:space:]]*$//')
+        local_normalized=$(tr -d '\r' < "$local_file" 2>/dev/null | sed 's/[[:space:]]*$//' 2>/dev/null || echo "")
+        remote_normalized=$(echo "$remote_content" | tr -d '\r' 2>/dev/null | sed 's/[[:space:]]*$//' 2>/dev/null || echo "")
         
         if [[ "$local_normalized" == "$remote_normalized" ]]; then
             echo "format-only"
@@ -221,6 +223,48 @@ analyze_content_changes() {
     else
         # Can't compare content, assume it's a real change
         echo "content-changed"
+    fi
+}
+
+# Fast content analysis with timeout and size heuristics
+analyze_content_changes_fast() {
+    local local_file="$1"
+    local remote_path="$2"
+    local ssh_cmd="$3"
+    
+    # Skip if local file doesn't exist or isn't readable
+    if [[ ! -f "$local_file" ]] || [[ ! -r "$local_file" ]]; then
+        echo "unknown"
+        return
+    fi
+    
+    # Check if file is likely binary by extension (simple approach)
+    local filename=$(basename "$local_file")
+    local extension="${filename##*.}"
+    extension="${extension,,}"  # Convert to lowercase
+    
+    case "$extension" in
+        jpg|jpeg|png|gif|bmp|ico|pdf|zip|tar|gz|exe|dll|so|dylib|class|jar|war|ear|mp3|mp4|avi|mov|doc|docx|xls|xlsx|ppt|pptx|woff|woff2|ttf|eot)
+            echo "content-changed"
+            return
+            ;;
+    esac
+    
+    # Quick content comparison with 3 second timeout for text files
+    if remote_content=$(timeout 3s ssh -o ConnectTimeout=2 -o BatchMode=yes $ssh_cmd "cat '$remote_path'" 2>/dev/null); then
+        # Skip binary detection for now to avoid syntax issues - just do text comparison
+        # Normalize both files (remove CR, normalize whitespace) and compare
+        local_normalized=$(tr -d '\r' < "$local_file" 2>/dev/null | sed 's/[[:space:]]*$//' 2>/dev/null || echo "")
+        remote_normalized=$(echo "$remote_content" | tr -d '\r' 2>/dev/null | sed 's/[[:space:]]*$//' 2>/dev/null || echo "")
+        
+        if [[ "$local_normalized" == "$remote_normalized" ]]; then
+            echo "format-only"
+        else
+            echo "content-changed"
+        fi
+    else
+        # Can't compare content quickly, assume it's a real change
+        echo "unknown"
     fi
 }
 
@@ -358,35 +402,6 @@ analyze_changes() {
     fi
     if [ ${#deleted_files[@]} -gt 0 ]; then
         echo "deleted_files:$(IFS='|'; echo "${deleted_files[*]}")"
-    fi
-}
-
-# Fast content analysis with timeout and size heuristics
-analyze_content_changes_fast() {
-    local local_file="$1"
-    local remote_path="$2"
-    local ssh_cmd="$3"
-    
-    # Skip if local file doesn't exist or isn't readable
-    if [[ ! -f "$local_file" ]] || [[ ! -r "$local_file" ]]; then
-        echo "unknown"
-        return
-    fi
-    
-    # Quick content comparison with 3 second timeout
-    if remote_content=$(timeout 3s ssh -o ConnectTimeout=2 -o BatchMode=yes $ssh_cmd "cat '$remote_path'" 2>/dev/null); then
-        # Normalize both files (remove CR, normalize whitespace) and compare
-        local_normalized=$(tr -d '\r' < "$local_file" | sed 's/[[:space:]]*$//')
-        remote_normalized=$(echo "$remote_content" | tr -d '\r' | sed 's/[[:space:]]*$//')
-        
-        if [[ "$local_normalized" == "$remote_normalized" ]]; then
-            echo "format-only"
-        else
-            echo "content-changed"
-        fi
-    else
-        # Can't compare content quickly, assume it's a real change
-        echo "unknown"
     fi
 }
 
