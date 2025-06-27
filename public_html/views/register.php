@@ -61,27 +61,27 @@
 	echo $formwriter->begin_form("form1", "post", "/register", TRUE);
 	echo $formwriter->hiddeninput("prevformname", "register");
 
-	echo $formwriter->textinput("First Name", "usr_first_name", 'sm:col-span-2', 20, @$form_fields->usr_first_name , "",32, "");	
-	echo $formwriter->textinput("Last Name", "usr_last_name", 'sm:col-span-2', 20, @$form_fields->usr_last_name, "" , 32, "");
+	echo $formwriter->textinput("First Name", "usr_first_name", '', 20, @$form_fields->usr_first_name , "",32, "");	
+	echo $formwriter->textinput("Last Name", "usr_last_name", '', 20, @$form_fields->usr_last_name, "" , 32, "");
 	
 	if($nickname_display){
-		echo $formwriter->textinput($nickname_display, "usr_nickname", 'sm:col-span-2', 20, @$form_fields->usr_nickname, "" , 32, "");
+		echo $formwriter->textinput($nickname_display, "usr_nickname", '', 20, @$form_fields->usr_nickname, "" , 32, "");
 	}
-	echo $formwriter->textinput("Email", "usr_email", 'sm:col-span-2', 20, '', "" , 64, "");
+	echo $formwriter->textinput("Email", "usr_email", '', 20, '', "" , 64, "");
 
-	echo $formwriter->passwordinput("Create Password", "password", 'sm:col-span-2', 20, "" , "", 255,"");
+	echo $formwriter->passwordinput("Create Password", "password", '', 20, "" , "", 255,"");
 
 	$optionvals = Address::get_timezone_drop_array();
 	$default_timezone = $settings->get_setting('default_timezone');
-	echo $formwriter->dropinput("Timezone", "usr_timezone", 'sm:col-span-2', $optionvals, $default_timezone, '', FALSE);	
+	echo $formwriter->dropinput("Timezone", "usr_timezone", '', $optionvals, $default_timezone, '', FALSE);	
 	
 	echo $formwriter->antispam_question_input();
 	//echo $formwriter->textinput("Zip Code", "usa_zip_code_id", NULL, 20, @$form_fields->usa_zip_code_id, "", 255,"");
 
 
-	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy'>privacy policy</a>", "privacy", "sm:col-span-6", "normal", NULL, "yes", '');
-	echo $formwriter->checkboxinput("Please add me to the mailing list", "newsletter", "sm:col-span-6", "normal", NULL, "yes", '');	
-	echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "sm:col-span-6", "normal", 'yes', "yes", '');
+	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy'>privacy policy</a>", "privacy", "", "normal", NULL, "yes", '');
+	echo $formwriter->checkboxinput("Please add me to the mailing list", "newsletter", "", "normal", NULL, "yes", '');	
+	echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "", "normal", 'yes', "yes", '');
 	echo $formwriter->honeypot_hidden_input();	
 
 	echo $formwriter->captcha_hidden_input();
