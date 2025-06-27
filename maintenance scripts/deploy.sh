@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #version 2.3 - Fixed deployment order and theme/plugin deployment
 # MODIFIED: Preserve staging directory on deployment failures for debugging
+# MODIFIED: Added --norollback flag to disable rollback functionality
 
 GITHUB_USER="jeremytunnell"
 GITHUB_TOKEN="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"
@@ -57,12 +58,14 @@ show_usage() {
     echo "  $0 [site_name] --theme-only       # Deploy only themes/plugins to live site"
     echo "  $0 [site_name] --theme-only --test # Deploy only themes/plugins to test site"
     echo "  $0 [site_name] --fix-permissions  # Fix permissions only (no deployment)"
+    echo "  $0 [site_name] --norollback       # Disable rollback on deployment failure"
     echo ""
     echo "Examples:"
     echo "  $0 getjoinery                     # Full deploy to getjoinery (live)"
     echo "  $0 getjoinery --test              # Full deploy to getjoinery_test"
     echo "  $0 getjoinery --theme-only        # Update only themes/plugins on getjoinery"
     echo "  $0 getjoinery --fix-permissions   # Fix permissions on getjoinery"
+    echo "  $0 getjoinery --test --norollback # Full deploy to test site without rollback"
     echo ""
     echo "Note: Permission fixes work best when run with sudo"
     echo "Test site will be available at: https://test.[domain].com"
@@ -173,6 +176,7 @@ LIVE_SITE="$1"
 IS_TEST_DEPLOY=false
 IS_THEME_ONLY=false
 IS_FIX_PERMISSIONS_ONLY=false
+DISABLE_ROLLBACK=false
 
 # Parse arguments
 for arg in "$@"; do
@@ -185,6 +189,9 @@ for arg in "$@"; do
             ;;
         --fix-permissions)
             IS_FIX_PERMISSIONS_ONLY=true
+            ;;
+        --norollback)
+            DISABLE_ROLLBACK=true
             ;;
     esac
 done
@@ -208,6 +215,11 @@ else
     else
         DEPLOY_TYPE="FULL (LIVE)"
     fi
+fi
+
+# Add rollback status to deploy type if disabled
+if [ "$DISABLE_ROLLBACK" = true ]; then
+    DEPLOY_TYPE="$DEPLOY_TYPE - ROLLBACK DISABLED"
 fi
 
 # SAFETY CHECK: Ensure live site exists (needed for both live and test deploys)
@@ -263,6 +275,11 @@ echo "Deploy type: $DEPLOY_TYPE"
 echo "Live site: $LIVE_SITE"
 echo "Target site: $TARGET_SITE"
 echo "Target directory: $deploy_directory"
+if [ "$DISABLE_ROLLBACK" = true ]; then
+    echo "Rollback: DISABLED"
+else
+    echo "Rollback: ENABLED"
+fi
 echo "========================================="
 
 if [ "$IS_TEST_DEPLOY" = true ]; then
@@ -405,41 +422,69 @@ cd /var/www/html/$TARGET_SITE/public_html_stage || {
 
 for item in *; do
     if [ "$item" = "theme" ]; then
-        echo "Smart merging themes (adding new themes, preserving existing)..."
+        echo "Smart merging themes (preserving ALL existing themes, adding only new ones)..."
+        
+        # Ensure theme directory exists in target
+        mkdir -p "/var/www/html/$TARGET_SITE/public_html/theme"
+        
+        # FIRST: Restore all themes from backup (these include theme repository themes + any custom themes)
+        if [[ -d "/var/www/html/$TARGET_SITE/public_html_last/theme" ]]; then
+            echo "  Restoring all existing themes from backup..."
+            cp -r /var/www/html/$TARGET_SITE/public_html_last/theme/* "/var/www/html/$TARGET_SITE/public_html/theme/" 2>/dev/null || true
+        fi
+        
+        # SECOND: Add any new themes from main code repo (if they don't already exist)
         if [ -d "theme" ]; then
-            # Ensure theme directory exists in target
-            mkdir -p "/var/www/html/$TARGET_SITE/public_html/theme"
             for theme_path in theme/*/; do
                 if [ -d "$theme_path" ]; then
                     theme_name=$(basename "$theme_path")
-                    if [ -d "/var/www/html/$TARGET_SITE/public_html/theme/$theme_name" ]; then
-                        echo "  Preserving existing theme: $theme_name"
+                    target_theme_path="/var/www/html/$TARGET_SITE/public_html/theme/$theme_name"
+                    
+                    if [ -d "$target_theme_path" ]; then
+                        echo "  PRESERVING existing theme: $theme_name (not overwriting)"
                     else
-                        echo "  Adding new theme: $theme_name"
+                        echo "  Adding new theme from main repo: $theme_name"
                         cp -r "$theme_path" "/var/www/html/$TARGET_SITE/public_html/theme/" || {
                             echo "ERROR: Failed to copy theme $theme_name"
                             exit 1
                         }
+                        # Fix permissions for newly added theme
+                        chown -R www-data:user1 "$target_theme_path" 2>/dev/null || true
+                        chmod -R 775 "$target_theme_path" 2>/dev/null || true
                     fi
                 fi
             done
         fi
     elif [ "$item" = "plugins" ]; then
-        echo "Smart merging plugins (adding new plugins, preserving existing)..."
+        echo "Smart merging plugins (preserving ALL existing plugins, adding only new ones)..."
+        
+        # Ensure plugins directory exists in target
+        mkdir -p "/var/www/html/$TARGET_SITE/public_html/plugins"
+        
+        # FIRST: Restore all plugins from backup (these include theme repository plugins + any custom plugins)
+        if [[ -d "/var/www/html/$TARGET_SITE/public_html_last/plugins" ]]; then
+            echo "  Restoring all existing plugins from backup..."
+            cp -r /var/www/html/$TARGET_SITE/public_html_last/plugins/* "/var/www/html/$TARGET_SITE/public_html/plugins/" 2>/dev/null || true
+        fi
+        
+        # SECOND: Add any new plugins from main code repo (if they don't already exist)
         if [ -d "plugins" ]; then
-            # Ensure plugins directory exists in target
-            mkdir -p "/var/www/html/$TARGET_SITE/public_html/plugins"
             for plugin_path in plugins/*/; do
                 if [ -d "$plugin_path" ]; then
                     plugin_name=$(basename "$plugin_path")
-                    if [ -d "/var/www/html/$TARGET_SITE/public_html/plugins/$plugin_name" ]; then
-                        echo "  Preserving existing plugin: $plugin_name"
+                    target_plugin_path="/var/www/html/$TARGET_SITE/public_html/plugins/$plugin_name"
+                    
+                    if [ -d "$target_plugin_path" ]; then
+                        echo "  PRESERVING existing plugin: $plugin_name (not overwriting)"
                     else
-                        echo "  Adding new plugin: $plugin_name"
+                        echo "  Adding new plugin from main repo: $plugin_name"
                         cp -r "$plugin_path" "/var/www/html/$TARGET_SITE/public_html/plugins/" || {
                             echo "ERROR: Failed to copy plugin $plugin_name"
                             exit 1
                         }
+                        # Fix permissions for newly added plugin
+                        chown -R www-data:user1 "$target_plugin_path" 2>/dev/null || true
+                        chmod -R 775 "$target_plugin_path" 2>/dev/null || true
                     fi
                 fi
             done
@@ -454,7 +499,7 @@ for item in *; do
 done
 cd - > /dev/null
 
-# Note: Themes and plugins use smart merging - existing ones are preserved, new ones are added
+# Note: Themes and plugins use SAFE smart merging - existing themes/plugins are NEVER overwritten, only new ones are added
 
 # FIX PERMISSIONS AFTER DEPLOYMENT
 echo "Fixing permissions after deployment..."
@@ -465,6 +510,13 @@ if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; 
     echo "ERROR: /var/www/html/$TARGET_SITE/public_html/utils/update_database.php does not exist."
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "DEBUGGING: You can examine the staged files to understand what was deployed."
+    
+    # Check if rollback is disabled
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
+        echo "Manual intervention required to fix the missing update_database.php file."
+        exit 1
+    fi
     
     # Check if this is an initial deployment (no backup to restore)
     if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
@@ -495,6 +547,13 @@ if [[ "$returnvalue" != 1 ]]; then
     echo "ERROR: Database update failed."
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "DEBUGGING: You can examine the staged files to understand what was deployed."
+    
+    # Check if rollback is disabled
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
+        echo "Manual intervention required to fix the database update issue."
+        exit 1
+    fi
     
     # Check if this is an initial deployment (no backup to restore)
     if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
