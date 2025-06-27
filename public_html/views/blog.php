@@ -118,9 +118,9 @@
 		<?php
 		if($page_vars['pager']->is_valid_page('-1') || $page_vars['pager']->is_valid_page('+1')){
 		?>
-			<nav class="bg-white px-4 py-3 flex items-center justify-between border border-gray-200 sm:px-6 lg:col-span-2 rounded-lg" aria-label="Pagination">
+			<nav class="bg-white px-4 py-3 flex items-center justify-between border border sm:px-6 lg:col-span-2 rounded-lg" aria-label="Pagination">
 			  <div class="hidden sm:block">
-				<p class="text-sm text-gray-700">
+				<p class="text-sm text-muted">
 				  Showing
 				  <span class="font-medium"><?php echo $page_vars['pager']->current_record_start(); ?></span>
 				  to
@@ -134,12 +134,12 @@
 
 				<?php	
 				if($page_vars['pager']->is_valid_page('-1')){
-					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars['pager']->get_url('-1', '').'">Previous</a>';
+					echo '<a class="relative inline-flex items-center px-4 py-2 border border text-sm font-medium rounded-md text-muted bg-white hover:bg-light" href="'.$page_vars['pager']->get_url('-1', '').'">Previous</a>';
 				}
 				?>
 				<?php	
 				if($page_vars['pager']->is_valid_page('+1')){
-					echo '<a class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50" href="'.$page_vars['pager']->get_url('+1', '').'">Next</a>';
+					echo '<a class="relative inline-flex items-center px-4 py-2 border border text-sm font-medium rounded-md text-muted bg-white hover:bg-light" href="'.$page_vars['pager']->get_url('+1', '').'">Next</a>';
 				}
 				?>
 				
