@@ -67,7 +67,7 @@
 			$default_timezone = $settings->get_setting('default_timezone');
 			echo $formwriter->dropinput("Your timezone", "usr_timezone", NULL, $optionvals, $default_timezone, '', FALSE);	
 			
-			echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "sm:col-span-6", "left", 1, NULL, "");
+			echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "", "left", 1, NULL, "");
 		}
 
 		$optionvals = $mailing_lists->get_dropdown_array();	

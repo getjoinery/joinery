@@ -59,16 +59,16 @@
 		$optionvals = Address::get_timezone_drop_array();
 		$default_timezone = $settings->get_setting('default_timezone');
 		echo $formwriter->dropinput("Your timezone", "usr_timezone", NULL, $optionvals, $default_timezone, '', FALSE);	
-		echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "sm:col-span-6", "left", 1, NULL, "");
+		echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "", "left", 1, NULL, "");
 	}	
 
 	if(!$member_of_list){
 		echo $formwriter->hiddeninput('mlt_mailing_list_id', $mailing_list->key);
-		echo $formwriter->checkboxinput("Subscribe to this list.", "mlt_mailing_list_id_subscribe", "sm:col-span-6", "left", 1, NULL, "");
+		echo $formwriter->checkboxinput("Subscribe to this list.", "mlt_mailing_list_id_subscribe", "", "left", 1, NULL, "");
 		
 	}	
 	else{
-		echo $formwriter->checkboxinput("Unsubscribe from this list.", "mlt_mailing_list_id_unsubscribe", "sm:col-span-6", "left", 1, NULL, "");
+		echo $formwriter->checkboxinput("Unsubscribe from this list.", "mlt_mailing_list_id_unsubscribe", "", "left", 1, NULL, "");
 	}
 	
 	if(!$session->get_user_id()){
