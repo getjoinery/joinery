@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-#Version 1.02
+#Version 2.00 - Added compression + encryption support
+
+# Global flag for encryption (default: encrypted)
+ENCRYPT_BACKUPS=true
 
 # Check for .pgpass file or PGPASSWORD environment variable
 if [[ ! -f ~/.pgpass ]] && [[ -z "$PGPASSWORD" ]]; then
@@ -23,25 +26,67 @@ now=$(date +"%m_%d_%Y")
 # Function to backup a single database
 backup_database() {
     local db_name="$1"
-    local backup_file="${db_name}-${now}.sql"
+    local backup_file
     
-    echo "Backing up database: $db_name"
-    pg_dump -U postgres -W "$db_name" > "$backup_file"
-    
-    if [ $? -eq 0 ]; then
-        echo "✓ Backup of '$db_name' complete: $backup_file"
+    if [ "$ENCRYPT_BACKUPS" = true ]; then
+        backup_file="${db_name}-${now}.sql.gz.enc"
+        echo "Backing up database (encrypted): $db_name"
+        echo "Note: You will be prompted for PostgreSQL password first, then encryption password."
+        
+        # Create compressed + encrypted backup using temporary file
+        local temp_file=$(mktemp)
+        if pg_dump -U postgres -W "$db_name" > "$temp_file"; then
+            if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file"; then
+                rm -f "$temp_file"
+                # Set restrictive permissions on encrypted file
+                chmod 600 "$backup_file"
+                echo "✓ Encrypted backup of '$db_name' complete: $backup_file"
+                echo "  To decrypt: openssl enc -aes-256-cbc -d -pbkdf2 -in $backup_file | gunzip > ${db_name}-restored.sql"
+            else
+                rm -f "$temp_file"
+                echo "✗ Error during compression/encryption of '$db_name'"
+                return 1
+            fi
+        else
+            rm -f "$temp_file"
+            echo "✗ Error during pg_dump of '$db_name'"
+            return 1
+        fi
     else
-        echo "✗ Error backing up '$db_name'"
-        return 1
+        backup_file="${db_name}-${now}.sql"
+        echo "Backing up database (plaintext): $db_name"
+        echo "⚠️  WARNING: Creating unencrypted backup file!"
+        
+        # Create plaintext backup
+        if pg_dump -U postgres -W "$db_name" > "$backup_file"; then
+            # Set restrictive permissions on plaintext file
+            chmod 600 "$backup_file"
+            echo "✓ Plaintext backup of '$db_name' complete: $backup_file"
+        else
+            echo "✗ Error backing up '$db_name'"
+            return 1
+        fi
     fi
 }
 
 # Function to backup all databases
 backup_all_databases() {
+    local backup_type
+    if [ "$ENCRYPT_BACKUPS" = true ]; then
+        backup_type="ENCRYPTED"
+    else
+        backup_type="PLAINTEXT"
+    fi
+    
     echo "========================================="
-    echo "BACKING UP ALL DATABASES"
+    echo "BACKING UP ALL DATABASES ($backup_type)"
     echo "Date: $(date)"
     echo "========================================="
+    
+    if [ "$ENCRYPT_BACKUPS" = false ]; then
+        echo "⚠️  WARNING: Creating unencrypted backup files!"
+        echo ""
+    fi
     
     # Get list of all databases (excluding system databases)
     echo "Getting list of databases..."
@@ -64,6 +109,12 @@ backup_all_databases() {
     echo "Found databases to backup:"
     echo "$databases" | sed 's/^/  - /'
     echo ""
+    
+    if [ "$ENCRYPT_BACKUPS" = true ]; then
+        echo "Each database will prompt for an encryption password."
+        echo "For convenience, you may want to use the same password for all databases."
+        echo ""
+    fi
     
     read -p "Continue with backup of all databases? (y/N): " -n 1 -r
     echo
@@ -92,9 +143,17 @@ backup_all_databases() {
     
     echo "========================================="
     echo "BACKUP SUMMARY"
+    echo "Backup type: $backup_type"
     echo "Successful backups: $backup_count"
     echo "Failed backups: $error_count"
     echo "Backup files created with date: $now"
+    if [ "$ENCRYPT_BACKUPS" = true ]; then
+        echo "File extension: .sql.gz.enc"
+        echo "To decrypt: openssl enc -aes-256-cbc -d -pbkdf2 -in [file] | gunzip > restored.sql"
+    else
+        echo "File extension: .sql"
+        echo "⚠️  Remember: These files contain unencrypted database data!"
+    fi
     echo "========================================="
     
     if [ $error_count -gt 0 ]; then
@@ -102,27 +161,89 @@ backup_all_databases() {
     fi
 }
 
+# Function to show help
+show_help() {
+    echo "PostgreSQL Database Backup Script v2.00"
+    echo ""
+    echo "Usage:"
+    echo "  $0                        # Backup all databases (encrypted)"
+    echo "  $0 [database_name]        # Backup specific database (encrypted)"
+    echo "  $0 --plaintext            # Backup all databases (unencrypted)"
+    echo "  $0 --plaintext [db_name]  # Backup specific database (unencrypted)"
+    echo ""
+    echo "Options:"
+    echo "  --plaintext, -p           Create unencrypted backups"
+    echo "  --help, -h                Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0                        # Backup all user databases (encrypted)"
+    echo "  $0 myapp                  # Backup only 'myapp' database (encrypted)"
+    echo "  $0 --plaintext            # Backup all databases (unencrypted)"
+    echo "  $0 --plaintext myapp      # Backup 'myapp' database (unencrypted)"
+    echo ""
+    echo "Security Notes:"
+    echo "  • Encrypted backups use AES-256-CBC + gzip compression"
+    echo "  • System databases (postgres, template0, template1) are excluded from 'all' backup"
+    echo "  • All backup files are created with 600 permissions (owner read/write only)"
+    echo "  • Use strong passwords for encrypted backups"
+    echo ""
+    echo "Decryption:"
+    echo "  openssl enc -aes-256-cbc -d -pbkdf2 -in backup.sql.gz.enc | gunzip > restored.sql"
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --plaintext|-p)
+            ENCRYPT_BACKUPS=false
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        -*)
+            echo "Error: Unknown option $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+        *)
+            # This is a database name, store it and break
+            DATABASE_NAME="$1"
+            shift
+            break
+            ;;
+    esac
+done
+
+# Check if OpenSSL is available when encryption is enabled
+if [ "$ENCRYPT_BACKUPS" = true ]; then
+    if ! command -v openssl &> /dev/null; then
+        echo "Error: OpenSSL is required for encrypted backups but is not installed."
+        echo "Please install OpenSSL or use --plaintext for unencrypted backups."
+        echo ""
+        echo "To install OpenSSL:"
+        echo "  Ubuntu/Debian: sudo apt-get install openssl"
+        echo "  CentOS/RHEL:   sudo yum install openssl"
+        echo "  macOS:         OpenSSL is pre-installed"
+        exit 1
+    fi
+fi
+
 # Main script logic
-if [ "$1" == "" ]; then
-    # No arguments - backup all databases
+if [ -z "$DATABASE_NAME" ]; then
+    # No database name specified - backup all databases
     backup_all_databases
 else
-    # Single database backup (original functionality)
-    if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
-        echo "Usage:"
-        echo "  $0                    # Backup all databases"
-        echo "  $0 [database_name]    # Backup specific database"
-        echo ""
-        echo "Examples:"
-        echo "  $0                    # Backup all user databases"
-        echo "  $0 myapp              # Backup only 'myapp' database"
-        echo ""
-        echo "Note: System databases (postgres, template0, template1) are excluded from 'all' backup"
-        exit 0
+    # Single database backup
+    if [ "$ENCRYPT_BACKUPS" = true ]; then
+        echo "Backing up single database (encrypted): $DATABASE_NAME"
+    else
+        echo "Backing up single database (plaintext): $DATABASE_NAME"
+        echo "⚠️  WARNING: Creating unencrypted backup file!"
     fi
     
-    echo "Backing up single database: $1"
-    backup_database "$1"
+    backup_database "$DATABASE_NAME"
     
     if [ $? -eq 0 ]; then
         echo "Backup complete."
