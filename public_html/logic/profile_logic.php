@@ -47,7 +47,7 @@ function profile_logic($get_vars, $post_vars){
 		'user_id' => $user->key, 
 		'deleted' => false
 		), 
-		array('event_id'=> 'DESC')
+		array('evt_event_id'=> 'DESC')
 	);
 	$num_events = $event_registrants->count_all();
 	$event_registrants->load();
