@@ -86,11 +86,15 @@ function profile_logic($get_vars, $post_vars){
 				$time .= $event->get_time_string($tz);
 			}
 		}
-		$page_vars['event_registrations']['event_time'] = $time;
 		
-		$page_vars['event_registrations']['calendar_links'] = array();
+		$tevent = array();
+		
+		
+		$tevent['event_time'] = $time;
+		
+		$tevent['calendar_links'] = array();
 		if($event->get('evt_status') != 2 && $event->get('evt_status') != 3){
-			$page_vars['event_registrations']['calendar_links'] = $event->get_add_to_calendar_links();
+			$tevent['calendar_links'] = $event->get_add_to_calendar_links();
 		}
 		
 
@@ -102,39 +106,40 @@ function profile_logic($get_vars, $post_vars){
 		}
 		*/
 
-		$page_vars['event_registrations']['event_name'] = $event->get('evt_name');
-		$page_vars['event_registrations']['event_expires'] = '';
+		$tevent['event_name'] = $event->get('evt_name');
+		$tevent['event_expires'] = '';
 		 '';
 
 		if($event->get('evt_session_display_type')==2){
-			$page_vars['event_registrations']['event_link'] = '/profile/event_sessions_course?evt_event_id='.$event->key;
+			$tevent['event_link'] = '/profile/event_sessions_course?evt_event_id='.$event->key;
 		}
 		else{
-			$page_vars['event_registrations']['event_link'] = '/profile/event_sessions?evt_event_id='.$event->key;
+			$tevent['event_link'] = '/profile/event_sessions?evt_event_id='.$event->key;
 		}
 
 
 		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
-			$page_vars['event_registrations']['event_status'] = 'Expired';
+			$tevent['event_status'] = 'Expired';
 		} 
 		else{
 			if($event->get('evt_status') == Event::STATUS_ACTIVE){
 				if($event_registrant->get('evr_expires_time')){
-					$page_vars['event_registrations']['event_status'] = 'Active';
-					$page_vars['event_registrations']['event_expires'] = LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $page_vars['session']->get_timezone());
+					$tevent['event_status'] = 'Active';
+					$tevent['event_expires'] = LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $page_vars['session']->get_timezone());
 				}
 				else{
-					$page_vars['event_registrations']['event_status'] = 'Active';
+					$tevent['event_status'] = 'Active';
 				}
 			} 
 			else if($event->get('evt_status') == Event::STATUS_CANCELED){
-				$page_vars['event_registrations']['event_status'] = 'Canceled';
+				$tevent['event_status'] = 'Canceled';
 			}
 			else if($event->get('evt_status') == Event::STATUS_COMPLETED){
-				$page_vars['event_registrations']['event_status'] = 'Completed';
+				$tevent['event_status'] = 'Completed';
 			}
 		}
-		
+		$page_vars['event_registrations'][] = $tevent;
+		   
 
 		
 	}

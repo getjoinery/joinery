@@ -486,7 +486,7 @@
 									  <div class="d-flex btn-reveal-trigger">
 										<div class="calendar"><span class="calendar-month">Feb</span><span class="calendar-day">21</span></div>
 										<div class="flex-1 position-relative ps-3">
-										  <h6 class="fs-9 mb-0"><a href="<?php echo $event['event_link']; ?>"><?php echo $event['event_name']; ?></a></h6>
+										  <h6 class="fs-9 mb-0"><a href="<?php echo $event['event_link']; ?>"><?php echo $event['event_name']; ?></a></h6> 
 										  <p class="mb-1">Organized by <a href="#!" class="text-700">University of Oxford</a></p>
 										  <?php if($time){ ?>
 										  <p class="text-1000 mb-0"><?php $event['event_time']; ?></p>
