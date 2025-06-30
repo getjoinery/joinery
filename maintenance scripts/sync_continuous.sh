@@ -2,7 +2,8 @@
 
 # Continuous Directory Synchronization Script
 # Monitors and syncs local directory with remote directory using rsync over SSH
-# Usage: ./sync-continuous.sh [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]
+# Usage: ./sync-continuous.sh [config_file] [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]
+#    or: ./sync-continuous.sh [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]
 
 set -e  # Exit on any error
 
@@ -12,7 +13,7 @@ DEFAULT_SSH_USER="$USER"
 DEFAULT_LOCAL_DIR=""
 DEFAULT_REMOTE_HOST=""
 DEFAULT_REMOTE_DIR=""
-DEFAULT_SYNC_INTERVAL=1  # seconds between sync checks
+DEFAULT_SYNC_INTERVAL=2  # seconds between sync checks
 DEFAULT_WATCH_METHOD="auto"  # auto, inotify, or polling
 
 # Runtime variables
@@ -53,18 +54,33 @@ print_change() {
 
 # Function to read configuration file
 read_config() {
-    local config_file=""
+    local config_file="$1"  # Optional specific config file path
     
-    # Look for .syncconfig in current directory first, then home directory
-    if [ -f ".syncconfig" ]; then
-        config_file=".syncconfig"
-    elif [ -f "$HOME/.syncconfig" ]; then
-        config_file="$HOME/.syncconfig"
+    if [ -n "$config_file" ]; then
+        # Use the specified config file
+        if [ ! -f "$config_file" ]; then
+            print_error "Specified config file '$config_file' does not exist"
+            exit 1
+        fi
+        if [ ! -r "$config_file" ]; then
+            print_error "Specified config file '$config_file' is not readable"
+            exit 1
+        fi
+        print_status "Reading configuration from: $config_file"
+    else
+        # Look for .syncconfig in current directory first, then home directory
+        if [ -f ".syncconfig" ]; then
+            config_file=".syncconfig"
+        elif [ -f "$HOME/.syncconfig" ]; then
+            config_file="$HOME/.syncconfig"
+        fi
+        
+        if [ -n "$config_file" ]; then
+            print_status "Reading configuration from: $config_file"
+        fi
     fi
     
     if [ -n "$config_file" ]; then
-        print_status "Reading configuration from: $config_file"
-        
         # Source the config file safely
         while IFS= read -r line || [ -n "$line" ]; do
             # Skip empty lines and comments
@@ -419,7 +435,12 @@ setup_ssh_key() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo "Usage: $0 [config_file] [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo "   or: $0 [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo ""
+    echo "Config File:"
+    echo "  config_file            - Path to custom configuration file (e.g., .testserver)"
+    echo "                          If not provided, looks for .syncconfig in current/home directory"
     echo ""
     echo "Options:"
     echo "  --interval <seconds>   - Sync check interval for polling mode (default: 2)"
@@ -448,6 +469,11 @@ show_usage() {
     echo ""
     echo "Configuration File (.syncconfig):"
     echo "  Create a .syncconfig file with additional settings:"
+    echo "    DEFAULT_LOCAL_DIR=/path/to/project"
+    echo "    DEFAULT_REMOTE_HOST=server.example.com"
+    echo "    DEFAULT_REMOTE_DIR=/var/www/html"
+    echo "    DEFAULT_SSH_USER=deploy"
+    echo "    DEFAULT_SSH_PORT=22"
     echo "    DEFAULT_SYNC_INTERVAL=2"
     echo "    DEFAULT_WATCH_METHOD=auto"
     echo ""
@@ -458,6 +484,8 @@ show_usage() {
     echo "  $0 --setup-ssh-key ./project server.com /var/www/project deploy"
     echo "  $0 --skip-ssh-test ./src server.com /var/www (if connection test fails)"
     echo "  $0 --verbose --method inotify ./project server.com /var/www/project"
+    echo "  $0 /path/to/.testserverconfig --verbose"
+    echo "  $0 ~/.configs/production.sync --initial-sync"
     echo ""
     echo "Features:"
     echo "  - Follows symbolic links and copies actual files"
@@ -469,7 +497,17 @@ show_usage() {
 }
 
 # Read configuration
-read_config
+CUSTOM_CONFIG_FILE=""
+
+# Check if first argument is a config file
+if [[ $# -gt 0 ]] && [[ "$1" != --* ]] && [[ -f "$1" ]] && [[ ! -d "$1" ]]; then
+    # First argument is a readable file (not directory) and not a flag
+    CUSTOM_CONFIG_FILE="$1"
+    shift  # Remove config file from arguments
+    print_status "Using custom config file: $CUSTOM_CONFIG_FILE"
+fi
+
+read_config "$CUSTOM_CONFIG_FILE"
 
 # Parse arguments
 SYNC_INTERVAL="$DEFAULT_SYNC_INTERVAL"

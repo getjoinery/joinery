@@ -3,7 +3,8 @@
 # Directory Synchronization Script with Content Analysis
 # Syncs local directory with remote directory using rsync over SSH
 # Enhanced to differentiate between substantive content changes and format-only changes
-# Usage: ./sync.sh [local_dir] [remote_host] [remote_dir] [ssh_user]
+# Usage: ./sync.sh [config_file] [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
+#    or: ./sync.sh [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
 
 set -e  # Exit on any error
 
@@ -114,18 +115,33 @@ find_ssh_key() {
 
 # Function to read configuration file
 read_config() {
-    local config_file=""
+    local config_file="$1"  # Optional specific config file path
     
-    # Look for .syncconfig in current directory first, then home directory
-    if [ -f ".syncconfig" ]; then
-        config_file=".syncconfig"
-    elif [ -f "$HOME/.syncconfig" ]; then
-        config_file="$HOME/.syncconfig"
+    if [ -n "$config_file" ]; then
+        # Use the specified config file
+        if [ ! -f "$config_file" ]; then
+            print_error "Specified config file '$config_file' does not exist"
+            exit 1
+        fi
+        if [ ! -r "$config_file" ]; then
+            print_error "Specified config file '$config_file' is not readable"
+            exit 1
+        fi
+        print_status "Reading configuration from: $config_file"
+    else
+        # Look for .syncconfig in current directory first, then home directory
+        if [ -f ".syncconfig" ]; then
+            config_file=".syncconfig"
+        elif [ -f "$HOME/.syncconfig" ]; then
+            config_file="$HOME/.syncconfig"
+        fi
+        
+        if [ -n "$config_file" ]; then
+            print_status "Reading configuration from: $config_file"
+        fi
     fi
     
     if [ -n "$config_file" ]; then
-        print_status "Reading configuration from: $config_file"
-        
         # Source the config file safely
         while IFS= read -r line || [ -n "$line" ]; do
             # Skip empty lines and comments
@@ -443,7 +459,12 @@ read_ignore_patterns() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo "Usage: $0 [config_file] [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo "   or: $0 [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo ""
+    echo "Config File:"
+    echo "  config_file            - Path to custom configuration file (e.g., .testserver)"
+    echo "                          If not provided, looks for .syncconfig in current/home directory"
     echo ""
     echo "Options:"
     echo "  --autodelete           - Skip confirmation prompt for deleting remote files"
@@ -473,6 +494,8 @@ show_usage() {
     echo "  $0 --ignore-file custom.ignore ./docs server.com /var/www/docs deploy"
     echo "  $0 --autodelete   # Uses defaults from .syncconfig"
     echo "  $0 ./different-dir   # Uses config defaults for host/remote dir"
+    echo "  $0 /path/to/.testserver --fast   # Uses custom config file"
+    echo "  $0 ~/.configs/production.sync --autodelete   # Uses config in home dir"
     echo ""
     echo "SSH Authentication:"
     echo "  The script will try SSH key authentication first, then fall back to password."
@@ -556,8 +579,18 @@ setup_ssh_key() {
     return 0
 }
 
-# Read configuration file if it exists
-read_config
+# Read configuration
+CUSTOM_CONFIG_FILE=""
+
+# Check if first argument is a config file
+if [[ $# -gt 0 ]] && [[ "$1" != --* ]] && [[ -f "$1" ]] && [[ ! -d "$1" ]]; then
+    # First argument is a readable file (not directory) and not a flag
+    CUSTOM_CONFIG_FILE="$1"
+    shift  # Remove config file from arguments
+    print_status "Using custom config file: $CUSTOM_CONFIG_FILE"
+fi
+
+read_config "$CUSTOM_CONFIG_FILE"
 
 # Parse arguments
 AUTO_DELETE=false
