@@ -12,7 +12,7 @@ DEFAULT_SSH_USER="$USER"
 DEFAULT_LOCAL_DIR=""
 DEFAULT_REMOTE_HOST=""
 DEFAULT_REMOTE_DIR=""
-DEFAULT_SYNC_INTERVAL=5  # seconds between sync checks
+DEFAULT_SYNC_INTERVAL=1  # seconds between sync checks
 DEFAULT_WATCH_METHOD="auto"  # auto, inotify, or polling
 
 # Runtime variables
@@ -174,7 +174,10 @@ perform_sync() {
     
     # Build rsync options
     local RSYNC_OPTS=(
-        -avzh
+        -avzhL
+        --no-perms
+        --no-owner
+        --no-group
         --stats
         --omit-dir-times
         -e "ssh -p $SSH_PORT"
@@ -210,18 +213,43 @@ perform_sync() {
     # Run rsync
     print_status "Starting sync..."
     rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1 | while IFS= read -r line; do
-        # Filter and format rsync output
-        if [[ "$line" =~ "Number of" ]] || [[ "$line" =~ "Total" ]] || [[ "$line" =~ "sent" ]]; then
-            echo "  $line"
-        elif [[ "$line" =~ "building file list" ]] || [[ "$line" =~ "sending incremental" ]]; then
-            # Skip these lines
-            :
-        elif [[ "$line" =~ "failed to set times on" ]] && [[ "$line" =~ "/\." ]]; then
-            # Skip harmless directory time warnings
-            :
-        elif [[ -n "$line" ]] && [[ ! "$line" =~ ^[[:space:]]*$ ]]; then
-            # Show file transfers
-            print_change "$line"
+        # Filter and format rsync output based on verbose setting
+        if [ "$VERBOSE" = true ]; then
+            # Verbose mode: show detailed statistics and most output
+            if [[ "$line" =~ "Number of" ]] || [[ "$line" =~ "Total" ]] || [[ "$line" =~ "sent" ]] || 
+               [[ "$line" =~ "Literal data:" ]] || [[ "$line" =~ "Matched data:" ]] || 
+               [[ "$line" =~ "File list" ]] || [[ "$line" =~ "total size is" ]] ||
+               [[ "$line" =~ "speedup is" ]] || [[ "$line" =~ "bytes/sec" ]]; then
+                print_change "$line"
+            elif [[ "$line" =~ "building file list" ]] || [[ "$line" =~ "sending incremental" ]]; then
+                # Skip these lines even in verbose mode
+                :
+            elif [[ "$line" =~ "failed to set times on" ]] && [[ "$line" =~ "/\." ]]; then
+                # Skip harmless directory time warnings
+                :
+            elif [[ -n "$line" ]] && [[ ! "$line" =~ ^[[:space:]]*$ ]]; then
+                # Show file transfers and other output
+                print_change "$line"
+            fi
+        else
+            # Non-verbose mode: show minimal output
+            if [[ "$line" =~ "Number of regular files transferred:" ]] || [[ "$line" =~ "Total file size:" ]]; then
+                echo "  $line"
+            elif [[ "$line" =~ "building file list" ]] || [[ "$line" =~ "sending incremental" ]]; then
+                # Skip these lines
+                :
+            elif [[ "$line" =~ "failed to set times on" ]] && [[ "$line" =~ "/\." ]]; then
+                # Skip harmless directory time warnings
+                :
+            elif [[ -n "$line" ]] && [[ ! "$line" =~ ^[[:space:]]*$ ]] && 
+                 [[ ! "$line" =~ "Number of files:" ]] && [[ ! "$line" =~ "Number of created" ]] && 
+                 [[ ! "$line" =~ "Number of deleted" ]] && [[ ! "$line" =~ "Total transferred" ]] &&
+                 [[ ! "$line" =~ "Total bytes" ]] && [[ ! "$line" =~ "bytes/sec" ]] &&
+                 [[ ! "$line" =~ "speedup is" ]] && [[ ! "$line" =~ "Literal data:" ]] &&
+                 [[ ! "$line" =~ "Matched data:" ]] && [[ ! "$line" =~ "File list" ]]; then
+                # Show only file transfers and important messages (not detailed stats)
+                print_change "$line"
+            fi
         fi
     done
     
@@ -394,13 +422,14 @@ show_usage() {
     echo "Usage: $0 [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
     echo ""
     echo "Options:"
-    echo "  --interval <seconds>   - Sync check interval for polling mode (default: 5)"
+    echo "  --interval <seconds>   - Sync check interval for polling mode (default: 2)"
     echo "  --method <method>      - Watch method: auto, inotify, or polling (default: auto)"
     echo "  --ignore-file <file>   - Use custom ignore file (default: .syncignore)"
     echo "  --initial-sync         - Perform initial sync before starting watch"
     echo "  --no-delete            - Don't delete files on remote that don't exist locally"
     echo "  --setup-ssh-key        - Interactive SSH key setup helper"
     echo "  --skip-ssh-test        - Skip SSH connection test (if you know it works)"
+    echo "  --verbose              - Show detailed rsync statistics after each sync"
     echo ""
     echo "Arguments (all optional if defaults configured):"
     echo "  local_dir   - Local directory to sync FROM"
@@ -419,7 +448,7 @@ show_usage() {
     echo ""
     echo "Configuration File (.syncconfig):"
     echo "  Create a .syncconfig file with additional settings:"
-    echo "    DEFAULT_SYNC_INTERVAL=5"
+    echo "    DEFAULT_SYNC_INTERVAL=2"
     echo "    DEFAULT_WATCH_METHOD=auto"
     echo ""
     echo "Examples:"
@@ -428,6 +457,13 @@ show_usage() {
     echo "  $0 --interval 10 --method polling ./docs server.com /var/www/docs"
     echo "  $0 --setup-ssh-key ./project server.com /var/www/project deploy"
     echo "  $0 --skip-ssh-test ./src server.com /var/www (if connection test fails)"
+    echo "  $0 --verbose --method inotify ./project server.com /var/www/project"
+    echo ""
+    echo "Features:"
+    echo "  - Follows symbolic links and copies actual files"
+    echo "  - Real-time file change monitoring"
+    echo "  - SSH key authentication setup"
+    echo "  - Custom ignore patterns"
     echo ""
     echo "To stop the continuous sync, press Ctrl+C"
 }
@@ -442,6 +478,7 @@ IGNORE_FILE=".syncignore"
 INITIAL_SYNC=false
 NO_DELETE=false
 SKIP_SSH_TEST=false
+VERBOSE=false
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -483,6 +520,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-ssh-test)
             SKIP_SSH_TEST=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
             shift
             ;;
         --setup-ssh-key)
@@ -584,6 +625,9 @@ fi
 if [ -n "$FULL_IGNORE_PATH" ]; then
     echo "  Ignores:  $FULL_IGNORE_PATH"
 fi
+if [ "$VERBOSE" = true ]; then
+    echo "  Verbose:  Enabled (detailed rsync statistics)"
+fi
 echo "====================================="
 echo ""
 
@@ -666,7 +710,10 @@ if [ "$INITIAL_SYNC" = true ]; then
         
         # Build rsync options
         RSYNC_OPTS=(
-            -avzh
+            -avzhL
+            --no-perms
+            --no-owner
+            --no-group
             --stats
             --omit-dir-times
             -e "ssh -p $SSH_PORT"
@@ -700,7 +747,11 @@ if [ "$INITIAL_SYNC" = true ]; then
         fi
         
         # Run rsync directly (will prompt for password)
-        rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH"
+        if [ "$VERBOSE" = true ]; then
+            rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH"
+        else
+            rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1 | grep -E "(Number of regular files transferred:|Total file size:|^[^[:space:]])" | grep -v "building file list\|sending incremental"
+        fi
     else
         perform_sync
     fi
