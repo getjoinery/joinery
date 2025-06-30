@@ -498,6 +498,7 @@ show_usage() {
     echo "  - SSH key authentication with password fallback"
     echo "  - SSH connection multiplexing for faster content analysis"
     echo "  - Differentiates between content changes and format-only changes"
+    echo "  - Follows symbolic links and copies actual files"
 }
 
 # Function to set up SSH key authentication
@@ -747,7 +748,7 @@ print_status "Analyzing changes (dry run)..."
 
 # Create dry-run specific options (same as main options but with dry-run and itemize)
 DRY_RUN_OPTS=(
-    -avzh
+    -avzhL
     --dry-run
     --itemize-changes
     --delete
@@ -989,7 +990,7 @@ fi
 
 # Rsync options for the actual sync (similar to dry run but without --dry-run and --itemize-changes)
 RSYNC_OPTS=(
-    -avzh
+    -avzhL
     --delete
     --progress
     --stats
