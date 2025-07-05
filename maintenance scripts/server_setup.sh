@@ -138,11 +138,14 @@ cd /home/user1
 tee composer.json > /dev/null << 'EOF'
 {
     "require": {
-        "stripe/stripe-php": "^10.0",
-        "phpmailer/phpmailer": "^6.0",
-        "monolog/monolog": "^3.0",
-        "mailchimp/marketing": "^3.0",
-        "guzzlehttp/guzzle": "^7.0"
+        "mailgun/mailgun-php": "^3.2",
+        "kriswallsmith/buzz": "^1.2",
+        "nyholm/psr7": "^1.3",
+        "jhut89/mailchimp3php": "^3.2",
+        "zenapply/php-calendly": "^1.0",
+        "verot/class.upload.php": "^2.1",
+        "tm/error-log-parser": "^1.2",
+        "stripe/stripe-php": "^10.16"
     }
 }
 EOF
