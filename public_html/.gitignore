@@ -6,6 +6,6 @@ composer.phar
 # composer.lock
 
 Globalvars_site.php
-/theme/test/
-/theme/sassa/
+/theme/
 /plugins/
+.claude/
