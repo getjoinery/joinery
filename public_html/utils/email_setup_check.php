@@ -1,18 +1,411 @@
 <?php
-header('Content-Type: text/html; charset=UTF-8');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
+$session = SessionControl::get_instance();
+$session->check_permission(5);
+
+$page = new AdminPage();
+$settings = Globalvars::get_instance();
+
+// Process form submission
+$domain = $_GET['domain'] ?? '';
+$is_comprehensive = isset($_GET['complete']) && $_GET['complete'] == '1';
+
+// Set time limit based on scan mode
+if (!empty($domain)) {
+    set_time_limit($is_comprehensive ? 120 : 30);
+}
+
+// Admin header
+$page->admin_header([
+    'title' => 'Email Authentication Checker',
+    'menu-id' => 'email-tools',
+    'readable_title' => 'Email Authentication Checker'
+]);
+
+?>
+
+<div class="row">
+    <div class="col-12">
+        
+        <!-- Search Form -->
+        <h5 class="mb-3">Check Domain Authentication</h5>
+        
+        <?php
+        $formwriter = LibraryFunctions::get_formwriter_object('domain_check_form', 'admin');
+        
+        $validation_rules = array();
+        $validation_rules['domain']['required']['value'] = 'true';
+        echo $formwriter->set_validate($validation_rules);
+        
+        echo $formwriter->begin_form('domain_check_form', 'GET', $_SERVER['PHP_SELF']);
+        
+        echo '<div class="row g-3 mb-4">';
+        echo '<div class="col-md-6">';
+        echo $formwriter->textinput('Domain to Check', 'domain', 'form-control', 100, $domain, 'example.com', 255, 'Enter domain name without http:// or www.');
+        echo '</div>';
+        
+        echo '<div class="col-md-6">';
+        echo $formwriter->checkboxinput('Comprehensive DKIM scan (slower, checks 400+ selectors)', 'complete', 'form-check-input', 'left', '1', $is_comprehensive ? '1' : '', 'Quick scan: checks the 10 most common DKIM selectors (~5 seconds)<br>Comprehensive scan: checks 400+ selectors using multiple discovery methods (~30-60 seconds)');
+        echo '</div>';
+        
+        echo '<div class="col-12">';
+        echo $formwriter->start_buttons();
+        echo $formwriter->new_form_button('<i class="fas fa-search"></i> Check Domain', 'btn btn-primary');
+        echo $formwriter->end_buttons();
+        echo '</div>';
+        echo '</div>';
+        
+        echo $formwriter->end_form();
+        ?>
+
+        <?php if (!empty($domain)): ?>
+            <?php
+            // Basic domain validation
+            if (!filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+                echo '<div class="alert alert-danger">Invalid domain format</div>';
+            } else {
+                // Perform the checks
+                $checker = new EmailAuthChecker($domain, $is_comprehensive);
+                $results = $checker->checkAll();
+                
+                // Display results
+                ?>
+                
+                <!-- Results Header -->
+                <div class="alert alert-info">
+                    <h5 class="alert-heading mb-2">Authentication Report for: <?php echo htmlspecialchars($domain); ?></h5>
+                    <p class="mb-0">Generated at: <?php echo date('Y-m-d H:i:s'); ?></p>
+                </div>
+                
+                <!-- SPF Results -->
+                <div class="mt-5 mb-4">
+                    <h4 class="mb-3"><i class="fas fa-shield-alt"></i> SPF (Sender Policy Framework)</h4>
+                        <?php if ($results['spf']['valid']): ?>
+                            <div class="alert alert-success">
+                                <strong>SPF Record Found:</strong>
+                                <pre class="mb-0 mt-2"><?php echo htmlspecialchars($results['spf']['record']); ?></pre>
+                            </div>
+                            
+                            <?php if (!empty($results['spf']['mechanisms'])): ?>
+                                <h6>Mechanisms:</h6>
+                                <div class="row g-2 mb-3">
+                                    <?php foreach ($results['spf']['mechanisms'] as $mechanism): ?>
+                                        <div class="col-auto">
+                                            <span class="badge bg-secondary"><?php echo htmlspecialchars($mechanism); ?></span>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                            
+                            <?php if (!empty($results['spf']['services'])): ?>
+                                <h6>Detected Email Services:</h6>
+                                <ul class="list-unstyled">
+                                    <?php foreach ($results['spf']['services'] as $service): ?>
+                                        <li><i class="fas fa-server text-primary"></i> <?php echo htmlspecialchars($service); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <div class="alert alert-danger">
+                                No SPF record found for this domain.
+                            </div>
+                        <?php endif; ?>
+                        
+                        <?php if (!empty($results['spf']['issues'])): ?>
+                            <div class="alert alert-warning">
+                                <h6 class="alert-heading">Issues Found:</h6>
+                                <ul class="mb-0">
+                                    <?php foreach ($results['spf']['issues'] as $issue): ?>
+                                        <li><?php echo htmlspecialchars($issue); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <?php if (!empty($results['spf']['recommendations'])): ?>
+                            <div class="alert alert-info">
+                                <h6 class="alert-heading">Recommendations:</h6>
+                                <ul class="mb-0">
+                                    <?php foreach ($results['spf']['recommendations'] as $rec): ?>
+                                        <li><?php echo htmlspecialchars($rec); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <!-- SPF Status -->
+                        <div class="text-end mt-3">
+                            <?php if ($results['spf']['valid']): ?>
+                                <span class="badge bg-success fs-6 px-3 py-2"><i class="fas fa-check-circle"></i> SPF VALID</span>
+                            <?php else: ?>
+                                <span class="badge bg-danger fs-6 px-3 py-2"><i class="fas fa-times-circle"></i> SPF NOT FOUND</span>
+                            <?php endif; ?>
+                        </div>
+                </div>
+                
+                <!-- DKIM Results -->
+                <div class="mt-5 mb-4">
+                    <h4 class="mb-3"><i class="fas fa-key"></i> DKIM (DomainKeys Identified Mail)</h4>
+                        <!-- Scan Info -->
+                        <div class="alert <?php echo $is_comprehensive ? 'alert-success' : 'alert-info'; ?>">
+                            <?php if ($is_comprehensive): ?>
+                                <i class="fas fa-search-plus"></i> <strong>Comprehensive Scan:</strong> 
+                                Checked <?php echo count($results['dkim']['selectors_checked']); ?> selectors using multiple discovery methods
+                            <?php else: ?>
+                                <i class="fas fa-bolt"></i> <strong>Quick Scan:</strong> 
+                                Checked top <?php echo count($results['dkim']['selectors_checked']); ?> common selectors. 
+                                <a href="?<?php echo http_build_query(array_merge($_GET, ['complete' => '1'])); ?>" class="alert-link">
+                                    Run comprehensive scan
+                                </a> to check 400+ selectors.
+                            <?php endif; ?>
+                        </div>
+                        
+                        <?php if (!empty($results['dkim']['discovery_methods'])): ?>
+                            <h6>Discovery Methods Used:</h6>
+                            <ul>
+                                <?php foreach ($results['dkim']['discovery_methods'] as $method): ?>
+                                    <li><?php echo htmlspecialchars($method); ?></li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+                        
+                        <?php if (!empty($results['dkim']['selectors_found'])): ?>
+                            <h6>DKIM Selectors Found:</h6>
+                            <?php foreach ($results['dkim']['selectors_found'] as $selector => $data): ?>
+                                <div class="card mb-3">
+                                    <div class="card-header <?php echo $data['valid'] ? 'bg-light' : 'bg-warning'; ?>">
+                                        <strong>Selector: <?php echo htmlspecialchars($selector); ?></strong>
+                                        <?php if ($data['valid']): ?>
+                                            <span class="badge bg-success float-end">Valid</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-warning float-end">Invalid</span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="card-body">
+                                        <?php if (isset($data['subdomain'])): ?>
+                                            <p><strong>Location:</strong> Subdomain <?php echo htmlspecialchars($data['subdomain']); ?></p>
+                                        <?php endif; ?>
+                                        
+                                        <?php if ($data['type'] === 'CNAME'): ?>
+                                            <p><strong>Type:</strong> CNAME → <?php echo htmlspecialchars($data['target']); ?></p>
+                                        <?php else: ?>
+                                            <p><strong>Type:</strong> Direct TXT record</p>
+                                        <?php endif; ?>
+                                        
+                                        <pre class="bg-light p-2"><?php echo htmlspecialchars($data['record']); ?></pre>
+                                        
+                                        <?php if (!empty($data['details'])): ?>
+                                            <table class="table table-sm">
+                                                <?php foreach ($data['details'] as $key => $value): ?>
+                                                    <tr>
+                                                        <th style="width: 150px;"><?php echo htmlspecialchars($key); ?>:</th>
+                                                        <td><?php echo htmlspecialchars($value); ?></td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            </table>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="alert alert-danger">
+                                No DKIM records found after scanning <?php echo count($results['dkim']['selectors_checked']); ?> potential selectors.
+                            </div>
+                        <?php endif; ?>
+                        
+                        <?php if (!empty($results['dkim']['issues'])): ?>
+                            <div class="alert alert-warning">
+                                <h6 class="alert-heading">Issues Found:</h6>
+                                <ul class="mb-0">
+                                    <?php foreach ($results['dkim']['issues'] as $issue): ?>
+                                        <li><?php echo htmlspecialchars($issue); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <?php if (!empty($results['dkim']['recommendations'])): ?>
+                            <div class="alert alert-info">
+                                <h6 class="alert-heading">Recommendations:</h6>
+                                <ul class="mb-0">
+                                    <?php foreach ($results['dkim']['recommendations'] as $rec): ?>
+                                        <li><?php echo htmlspecialchars($rec); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <!-- DKIM Status -->
+                        <div class="text-end mt-3">
+                            <?php 
+                            $validDkimCount = count(array_filter($results['dkim']['selectors_found'], function($s) { return $s['valid']; }));
+                            if ($validDkimCount > 0): ?>
+                                <span class="badge bg-success fs-6 px-3 py-2"><i class="fas fa-check-circle"></i> DKIM VALID (<?php echo $validDkimCount; ?> selectors)</span>
+                            <?php else: ?>
+                                <span class="badge bg-danger fs-6 px-3 py-2"><i class="fas fa-times-circle"></i> DKIM NOT FOUND</span>
+                            <?php endif; ?>
+                        </div>
+                </div>
+                
+                <!-- DMARC Results -->
+                <div class="mt-5 mb-4">
+                    <h4 class="mb-3"><i class="fas fa-envelope-open-text"></i> DMARC (Domain-based Message Authentication)</h4>
+                        <?php if ($results['dmarc']['valid']): ?>
+                            <div class="alert alert-success">
+                                <strong>DMARC Record Found:</strong>
+                                <pre class="mb-0 mt-2"><?php echo htmlspecialchars($results['dmarc']['record']); ?></pre>
+                            </div>
+                            
+                            <h6>Policy Details:</h6>
+                            <table class="table table-sm">
+                                <tr>
+                                    <th style="width: 200px;">Policy:</th>
+                                    <td>
+                                        <?php 
+                                        $policyBadge = 'secondary';
+                                        if ($results['dmarc']['policy'] === 'reject') $policyBadge = 'danger';
+                                        elseif ($results['dmarc']['policy'] === 'quarantine') $policyBadge = 'warning';
+                                        elseif ($results['dmarc']['policy'] === 'none') $policyBadge = 'info';
+                                        ?>
+                                        <span class="badge bg-<?php echo $policyBadge; ?>">
+                                            <?php echo htmlspecialchars($results['dmarc']['policy']); ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                                <?php if (!empty($results['dmarc']['subdomain_policy'])): ?>
+                                <tr>
+                                    <th>Subdomain Policy:</th>
+                                    <td><?php echo htmlspecialchars($results['dmarc']['subdomain_policy']); ?></td>
+                                </tr>
+                                <?php endif; ?>
+                                <tr>
+                                    <th>Percentage:</th>
+                                    <td><?php echo $results['dmarc']['percentage']; ?>%</td>
+                                </tr>
+                                <?php if (!empty($results['dmarc']['alignment'])): ?>
+                                    <?php foreach ($results['dmarc']['alignment'] as $type => $mode): ?>
+                                    <tr>
+                                        <th><?php echo ucfirst($type); ?> Alignment:</th>
+                                        <td><?php echo htmlspecialchars($mode); ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                                <?php if (!empty($results['dmarc']['reporting'])): ?>
+                                    <?php foreach ($results['dmarc']['reporting'] as $type => $email): ?>
+                                    <tr>
+                                        <th><?php echo ucfirst($type); ?> Reports:</th>
+                                        <td><?php echo htmlspecialchars($email); ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </table>
+                        <?php else: ?>
+                            <div class="alert alert-danger">
+                                No DMARC record found for this domain.
+                            </div>
+                        <?php endif; ?>
+                        
+                        <?php if (!empty($results['dmarc']['issues'])): ?>
+                            <div class="alert alert-warning">
+                                <h6 class="alert-heading">Issues Found:</h6>
+                                <ul class="mb-0">
+                                    <?php foreach ($results['dmarc']['issues'] as $issue): ?>
+                                        <li><?php echo htmlspecialchars($issue); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <?php if (!empty($results['dmarc']['recommendations'])): ?>
+                            <div class="alert alert-info">
+                                <h6 class="alert-heading">Recommendations:</h6>
+                                <ul class="mb-0">
+                                    <?php foreach ($results['dmarc']['recommendations'] as $rec): ?>
+                                        <li><?php echo htmlspecialchars($rec); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <!-- DMARC Status -->
+                        <div class="text-end mt-3">
+                            <?php if ($results['dmarc']['valid']): ?>
+                                <span class="badge bg-success fs-6 px-3 py-2"><i class="fas fa-check-circle"></i> DMARC VALID</span>
+                            <?php else: ?>
+                                <span class="badge bg-danger fs-6 px-3 py-2"><i class="fas fa-times-circle"></i> DMARC NOT FOUND</span>
+                            <?php endif; ?>
+                        </div>
+                </div>
+                
+                <!-- Summary -->
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="fas fa-chart-pie"></i> Summary</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-md-4">
+                                <div class="p-3">
+                                    <h2 class="<?php echo $results['spf']['valid'] ? 'text-success' : 'text-danger'; ?>">
+                                        <?php echo $results['spf']['valid'] ? '✓' : '✗'; ?>
+                                    </h2>
+                                    <h5>SPF</h5>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="p-3">
+                                    <h2 class="<?php echo $validDkimCount > 0 ? 'text-success' : 'text-danger'; ?>">
+                                        <?php echo $validDkimCount > 0 ? "✓ ($validDkimCount)" : '✗'; ?>
+                                    </h2>
+                                    <h5>DKIM</h5>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="p-3">
+                                    <h2 class="<?php echo $results['dmarc']['valid'] ? 'text-success' : 'text-danger'; ?>">
+                                        <?php echo $results['dmarc']['valid'] ? '✓' : '✗'; ?>
+                                    </h2>
+                                    <h5>DMARC</h5>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        
+                        <h6>Overall Recommendations:</h6>
+                        <ul>
+                            <li>Ensure all three protocols (SPF, DKIM, DMARC) are properly configured</li>
+                            <li>Start with DMARC policy "p=none" to monitor, then move to "p=quarantine" or "p=reject"</li>
+                            <li>Set up DMARC reporting to monitor email authentication results</li>
+                            <li>Regularly review and update your email authentication configuration</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <?php
+            }
+            ?>
+        <?php endif; ?>
+        
+    </div>
+</div>
+
+<?php
+// Admin footer
+$page->admin_footer();
+
+// EmailAuthChecker class definition
 class EmailAuthChecker {
     private $domain;
     private $results = [];
+    private $is_comprehensive;
     
-    public function __construct($domain) {
+    public function __construct($domain, $is_comprehensive = false) {
         $this->domain = strtolower(trim($domain));
-        
-        // Set time limit based on scan mode
-        if (!empty($domain)) {
-            $isComprehensive = isset($_GET['complete']) && $_GET['complete'] == '1';
-            set_time_limit($isComprehensive ? 120 : 30); // 2 minutes for comprehensive, 30 seconds for quick
-        }
+        $this->is_comprehensive = $is_comprehensive;
     }
     
     public function checkAll() {
@@ -205,12 +598,12 @@ class EmailAuthChecker {
             'selectors_found' => [],
             'selectors_checked' => [],
             'discovery_methods' => [],
-            'scan_mode' => isset($_GET['complete']) && $_GET['complete'] == '1' ? 'comprehensive' : 'quick',
+            'scan_mode' => $this->is_comprehensive ? 'comprehensive' : 'quick',
             'issues' => [],
             'recommendations' => []
         ];
         
-        // DKIM selector discovery - quick or comprehensive based on GET parameter
+        // DKIM selector discovery
         $this->discoverDKIMSelectors($dkim);
         
         if (empty($dkim['selectors_found'])) {
@@ -231,11 +624,10 @@ class EmailAuthChecker {
     
     private function discoverDKIMSelectors(&$dkim) {
         $foundSelectors = [];
-        $isComprehensive = $dkim['scan_mode'] === 'comprehensive';
         
-        // Method 1: Common selectors wordlist (always run)
-        $dkim['discovery_methods'][] = $isComprehensive ? 'Comprehensive selectors wordlist' : 'Top 10 common selectors';
-        $commonSelectors = $isComprehensive ? $this->getComprehensiveSelectorList() : $this->getTopCommonSelectors();
+        // Method 1: Common selectors wordlist
+        $dkim['discovery_methods'][] = $this->is_comprehensive ? 'Comprehensive selectors wordlist' : 'Top 10 common selectors';
+        $commonSelectors = $this->is_comprehensive ? $this->getComprehensiveSelectorList() : $this->getTopCommonSelectors();
         
         foreach ($commonSelectors as $selector) {
             if ($this->checkSingleDKIMSelector($selector, $dkim)) {
@@ -244,14 +636,14 @@ class EmailAuthChecker {
         }
         
         // Only run additional methods in comprehensive mode
-        if ($isComprehensive) {
+        if ($this->is_comprehensive) {
             // Method 2: Pattern-based discovery from found selectors
             if (!empty($foundSelectors)) {
                 $dkim['discovery_methods'][] = 'Pattern-based discovery';
                 $this->discoverSelectorPatterns($foundSelectors, $dkim);
             }
             
-            // Method 3: Date-based selectors (many orgs rotate keys)
+            // Method 3: Date-based selectors
             $dkim['discovery_methods'][] = 'Date-based selector discovery';
             $this->discoverDateBasedSelectors($dkim);
             
@@ -266,7 +658,6 @@ class EmailAuthChecker {
     }
     
     private function getTopCommonSelectors() {
-        // Top 10 most commonly used DKIM selectors - carefully chosen for maximum coverage
         return [
             'default',      // Most common generic selector
             'selector1',    // Microsoft Office 365, others
@@ -744,286 +1135,5 @@ class EmailAuthChecker {
         
         return $dmarc;
     }
-    
-    public function generateReport() {
-        $html = '<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Authentication Report for ' . htmlspecialchars($this->domain) . '</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .header { text-align: center; margin-bottom: 30px; }
-        .domain { color: #2c5aa0; font-size: 24px; font-weight: bold; }
-        .section { margin-bottom: 30px; border: 1px solid #ddd; border-radius: 5px; overflow: hidden; }
-        .section-header { background: #2c5aa0; color: white; padding: 15px; font-size: 18px; font-weight: bold; }
-        .section-content { padding: 20px; }
-        .status-good { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .status-warning { background: #fff3cd; color: #856404; padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .status-error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .record { background: #f8f9fa; padding: 10px; border-left: 4px solid #007bff; margin: 10px 0; font-family: monospace; word-break: break-all; }
-        .mechanisms { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 10px 0; }
-        .mechanism { background: #e9ecef; padding: 8px; border-radius: 4px; font-family: monospace; }
-        ul { margin: 10px 0; padding-left: 20px; }
-        li { margin: 5px 0; }
-        .form-section { background: #e3f2fd; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
-        .form-section input { padding: 10px; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; width: 300px; margin-right: 10px; }
-        .form-section input[type="checkbox"] { width: auto; margin: 0 5px 0 10px; transform: scale(1.2); }
-        .form-section label { font-size: 14px; color: #555; }
-        .form-section button { padding: 10px 20px; font-size: 16px; background: #2c5aa0; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        .form-section button:hover { background: #1e3f73; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Email Authentication Checker</h1>';
-        
-        if (!empty($this->domain)) {
-            $html .= '<div class="domain">Report for: ' . htmlspecialchars($this->domain) . '</div>';
-        }
-        
-        $html .= '</div>
-        
-        <div class="form-section">
-            <form method="GET">
-                <input type="text" name="domain" placeholder="Enter domain (e.g., example.com)" value="' . htmlspecialchars($_GET['domain'] ?? '') . '">
-                <label style="margin: 0 10px;">
-                    <input type="checkbox" name="complete" value="1" ' . (($_GET['complete'] ?? '') == '1' ? 'checked' : '') . '> 
-                    Comprehensive DKIM scan (slower, checks 400+ selectors)
-                </label>
-                <button type="submit">Check Domain</button>
-            </form>
-            <p style="margin-top: 10px; font-size: 14px; color: #666;">
-                <strong>Quick scan</strong> checks the 10 most common DKIM selectors (~5 seconds)<br>
-                <strong>Comprehensive scan</strong> checks 400+ selectors using multiple discovery methods (~30-60 seconds)
-            </p>
-        </div>';
-        
-        if (!empty($this->results)) {
-            // SPF Section
-            $html .= '<div class="section">
-                <div class="section-header">SPF (Sender Policy Framework)</div>
-                <div class="section-content">';
-            
-            if ($this->results['spf']['valid']) {
-                $html .= '<div class="status-good">✓ SPF record found</div>';
-                $html .= '<div class="record">' . htmlspecialchars($this->results['spf']['record']) . '</div>';
-                
-                if (!empty($this->results['spf']['mechanisms'])) {
-                    $html .= '<h4>Mechanisms:</h4><div class="mechanisms">';
-                    foreach ($this->results['spf']['mechanisms'] as $mechanism) {
-                        $html .= '<div class="mechanism">' . htmlspecialchars($mechanism) . '</div>';
-                    }
-                    $html .= '</div>';
-                }
-            } else {
-                $html .= '<div class="status-error">✗ No valid SPF record found</div>';
-            }
-            
-            if (!empty($this->results['spf']['issues'])) {
-                $html .= '<h4>Issues:</h4><ul>';
-                foreach ($this->results['spf']['issues'] as $issue) {
-                    $html .= '<li class="status-warning">' . htmlspecialchars($issue) . '</li>';
-                }
-                $html .= '</ul>';
-            }
-            
-            if (!empty($this->results['spf']['recommendations'])) {
-                $html .= '<h4>Recommendations:</h4><ul>';
-                foreach ($this->results['spf']['recommendations'] as $rec) {
-                    $html .= '<li>' . htmlspecialchars($rec) . '</li>';
-                }
-                $html .= '</ul>';
-            }
-            
-            $html .= '</div></div>';
-            
-            // DKIM Section
-            $scanMode = $this->results['dkim']['scan_mode'] === 'comprehensive' ? 'Comprehensive Discovery' : 'Quick Scan';
-            $html .= '<div class="section">
-                <div class="section-header">DKIM (DomainKeys Identified Mail) - ' . $scanMode . '</div>
-                <div class="section-content">';
-            
-            // Show scan mode info
-            if ($this->results['dkim']['scan_mode'] === 'comprehensive') {
-                $html .= '<div class="status-good">🔍 Comprehensive scan: Checked ' . count($this->results['dkim']['selectors_checked']) . ' selectors using multiple discovery methods</div>';
-            } else {
-                $html .= '<div style="background: #e3f2fd; padding: 10px; border-radius: 4px; margin: 10px 0;">
-                    ⚡ Quick scan: Checked top ' . count($this->results['dkim']['selectors_checked']) . ' common selectors. 
-                    <a href="?' . http_build_query(array_merge($_GET, ['complete' => '1'])) . '" style="color: #2c5aa0; text-decoration: underline;">Run comprehensive scan</a> to check 400+ selectors.
-                </div>';
-            }
-            
-            // Show discovery methods used
-            if (!empty($this->results['dkim']['discovery_methods'])) {
-                $html .= '<h4>Discovery Methods Used:</h4>';
-                $html .= '<ul>';
-                foreach ($this->results['dkim']['discovery_methods'] as $method) {
-                    $html .= '<li>' . htmlspecialchars($method) . '</li>';
-                }
-                $html .= '</ul>';
-            }
-            
-            if (!empty($this->results['dkim']['selectors_found'])) {
-                $validCount = count(array_filter($this->results['dkim']['selectors_found'], function($s) { return $s['valid']; }));
-                $html .= '<div class="status-good">✓ Found ' . count($this->results['dkim']['selectors_found']) . ' DKIM selector(s), ' . $validCount . ' valid</div>';
-                
-                foreach ($this->results['dkim']['selectors_found'] as $selector => $data) {
-                    $html .= '<h4>Selector: ' . htmlspecialchars($selector) . '</h4>';
-                    
-                    if (isset($data['subdomain'])) {
-                        $html .= '<p><strong>Location:</strong> Subdomain ' . htmlspecialchars($data['subdomain']) . '</p>';
-                    }
-                    
-                    if ($data['type'] === 'CNAME') {
-                        $html .= '<p><strong>Type:</strong> CNAME pointing to ' . htmlspecialchars($data['target']) . '</p>';
-                        if ($data['valid']) {
-                            $html .= '<div class="status-good">✓ Valid DKIM record found at target</div>';
-                        } else {
-                            $html .= '<div class="status-warning">⚠ CNAME found but no valid DKIM record at target</div>';
-                        }
-                    } else {
-                        $html .= '<p><strong>Type:</strong> Direct TXT record</p>';
-                    }
-                    
-                    $html .= '<div class="record">' . htmlspecialchars($data['record']) . '</div>';
-                    
-                    if (!empty($data['details'])) {
-                        $html .= '<ul>';
-                        foreach ($data['details'] as $key => $value) {
-                            $html .= '<li><strong>' . htmlspecialchars($key) . ':</strong> ' . htmlspecialchars($value) . '</li>';
-                        }
-                        $html .= '</ul>';
-                    }
-                }
-            } else {
-                $html .= '<div class="status-error">✗ No DKIM records found after comprehensive scan</div>';
-                $html .= '<p>The scanner checked ' . count($this->results['dkim']['selectors_checked']) . ' potential selectors using multiple discovery methods.</p>';
-            }
-            
-            if (!empty($this->results['dkim']['issues'])) {
-                $html .= '<h4>Issues:</h4><ul>';
-                foreach ($this->results['dkim']['issues'] as $issue) {
-                    $html .= '<li class="status-warning">' . htmlspecialchars($issue) . '</li>';
-                }
-                $html .= '</ul>';
-            }
-            
-            if (!empty($this->results['dkim']['recommendations'])) {
-                $html .= '<h4>Recommendations:</h4><ul>';
-                foreach ($this->results['dkim']['recommendations'] as $rec) {
-                    $html .= '<li>' . htmlspecialchars($rec) . '</li>';
-                }
-                $html .= '</ul>';
-            }
-            
-            $html .= '</div></div>';
-            
-            // DMARC Section
-            $html .= '<div class="section">
-                <div class="section-header">DMARC (Domain-based Message Authentication, Reporting & Conformance)</div>
-                <div class="section-content">';
-            
-            if ($this->results['dmarc']['valid']) {
-                $html .= '<div class="status-good">✓ DMARC record found</div>';
-                $html .= '<div class="record">' . htmlspecialchars($this->results['dmarc']['record']) . '</div>';
-                
-                $html .= '<h4>Policy Details:</h4><ul>';
-                $html .= '<li><strong>Policy:</strong> ' . htmlspecialchars($this->results['dmarc']['policy']) . '</li>';
-                if (!empty($this->results['dmarc']['subdomain_policy'])) {
-                    $html .= '<li><strong>Subdomain Policy:</strong> ' . htmlspecialchars($this->results['dmarc']['subdomain_policy']) . '</li>';
-                }
-                $html .= '<li><strong>Percentage:</strong> ' . $this->results['dmarc']['percentage'] . '%</li>';
-                
-                if (!empty($this->results['dmarc']['alignment'])) {
-                    foreach ($this->results['dmarc']['alignment'] as $type => $mode) {
-                        $html .= '<li><strong>' . ucfirst($type) . ' Alignment:</strong> ' . htmlspecialchars($mode) . '</li>';
-                    }
-                }
-                
-                if (!empty($this->results['dmarc']['reporting'])) {
-                    foreach ($this->results['dmarc']['reporting'] as $type => $email) {
-                        $html .= '<li><strong>' . ucfirst($type) . ' Reports:</strong> ' . htmlspecialchars($email) . '</li>';
-                    }
-                }
-                $html .= '</ul>';
-            } else {
-                $html .= '<div class="status-error">✗ No valid DMARC record found</div>';
-            }
-            
-            if (!empty($this->results['dmarc']['issues'])) {
-                $html .= '<h4>Issues:</h4><ul>';
-                foreach ($this->results['dmarc']['issues'] as $issue) {
-                    $html .= '<li class="status-warning">' . htmlspecialchars($issue) . '</li>';
-                }
-                $html .= '</ul>';
-            }
-            
-            if (!empty($this->results['dmarc']['recommendations'])) {
-                $html .= '<h4>Recommendations:</h4><ul>';
-                foreach ($this->results['dmarc']['recommendations'] as $rec) {
-                    $html .= '<li>' . htmlspecialchars($rec) . '</li>';
-                }
-                $html .= '</ul>';
-            }
-            
-            $html .= '</div></div>';
-            
-            // Summary Section
-            $html .= '<div class="section">
-                <div class="section-header">Summary</div>
-                <div class="section-content">';
-            
-            $spfStatus = $this->results['spf']['valid'] ? '✓' : '✗';
-            $validDkimCount = 0;
-            foreach ($this->results['dkim']['selectors_found'] as $data) {
-                if ($data['valid']) $validDkimCount++;
-            }
-            $dkimStatus = $validDkimCount > 0 ? "✓ ($validDkimCount selectors)" : '✗';
-            $dmarcStatus = $this->results['dmarc']['valid'] ? '✓' : '✗';
-            
-            $html .= '<ul>';
-            $html .= '<li><strong>SPF:</strong> ' . $spfStatus . '</li>';
-            $html .= '<li><strong>DKIM:</strong> ' . $dkimStatus . '</li>';
-            $html .= '<li><strong>DMARC:</strong> ' . $dmarcStatus . '</li>';
-            $html .= '</ul>';
-            
-            $html .= '<h4>Overall Recommendations:</h4>';
-            $html .= '<ul>';
-            $html .= '<li>Ensure all three protocols (SPF, DKIM, DMARC) are properly configured</li>';
-            $html .= '<li>Start with DMARC policy "p=none" to monitor, then move to "p=quarantine" or "p=reject"</li>';
-            $html .= '<li>Set up DMARC reporting to monitor email authentication results</li>';
-            $html .= '<li>Regularly review and update your email authentication configuration</li>';
-            $html .= '</ul>';
-            
-            $html .= '</div></div>';
-        }
-        
-        $html .= '</div></body></html>';
-        
-        return $html;
-    }
-}
-
-// Main execution
-$domain = $_GET['domain'] ?? '';
-
-if (!empty($domain)) {
-    // Basic domain validation
-    if (!filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-        echo '<div style="color: red; padding: 20px;">Invalid domain format</div>';
-        exit;
-    }
-    
-    $checker = new EmailAuthChecker($domain);
-    $checker->checkAll();
-    echo $checker->generateReport();
-} else {
-    // Show form only
-    $checker = new EmailAuthChecker('');
-    echo $checker->generateReport();
 }
 ?>

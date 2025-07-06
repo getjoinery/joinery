@@ -1,17 +1,13 @@
 <?php
-/**
- * Email Authentication Test Script
- * 
- * This script sends a test email using the EmailTemplate class and then
- * connects via IMAP to analyze the SPF, DKIM, and DMARC authentication results.
- * 
- * Usage: php email_send_test.php
- */
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+
+$session = SessionControl::get_instance();
+$session->check_permission(5);
 
 // Determine the base path based on how the script is being run
-if (defined('GLOBALVARS_INCLUDED')) {
-    // Running through serve.php - includes already loaded
-} else {
+if (!defined('GLOBALVARS_INCLUDED')) {
     // Running standalone - need to include files
     $base_path = dirname(__DIR__);
     require_once($base_path . '/includes/Globalvars.php');
@@ -25,143 +21,127 @@ if (defined('GLOBALVARS_INCLUDED')) {
     }
 }
 
+$page = new AdminPage();
+$settings = Globalvars::get_instance();
+
 // Check if running from CLI or web
 $is_cli = (php_sapi_name() === 'cli');
 
-// If running from web, check login requirement
-if (!$is_cli) {
-    require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-
-    $session = SessionControl::get_instance();
-    $session->check_permission(5);
-    $session->set_return();
+// Process form submission
+$run_test = false;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$is_cli) {
+    $run_test = true;
 }
 
 // Configuration
 $config = [
-    'test_email' => '',  // Gmail address to send test email to
-    'imap_username' => '', // Gmail username (usually same as email)
-    'imap_password' => '', // Gmail app password (not regular password)
+    'test_email' => $_POST['test_email'] ?? 'joineryemailtests@gmail.com',
+    'imap_username' => $_POST['imap_username'] ?? 'joineryemailtests@gmail.com',
+    'imap_password' => $_POST['imap_password'] ?? '',
     'imap_host' => '{imap.gmail.com:993/imap/ssl}INBOX',
     'email_subject' => 'Email Authentication Test - ' . date('Y-m-d H:i:s'),
     'wait_time' => 10, // Seconds to wait after sending before checking
 ];
 
-// Handle web interface
+// Admin header
 if (!$is_cli) {
-    // Start output buffering to capture all output
-    ob_start();
+    $page->admin_header([
+        'title' => 'Email Authentication Test',
+        'menu-id' => 'email-tools',
+        'readable_title' => 'Email Authentication Test'
+    ]);
+}
+
+// Handle web interface
+if (!$is_cli && !$run_test) {
+    ?>
     
-    // Check if form was submitted
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $config['test_email'] = $_POST['test_email'] ?? '';
-        $config['imap_username'] = $_POST['imap_username'] ?? '';
-        $config['imap_password'] = $_POST['imap_password'] ?? '';
-        
-        if (empty($config['test_email']) || empty($config['imap_username']) || empty($config['imap_password'])) {
-            die("Error: All fields are required.");
-        }
-    } else {
-        // Show HTML form
-        ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Authentication Test</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .header { text-align: center; margin-bottom: 30px; }
-        .domain { color: #2c5aa0; font-size: 24px; font-weight: bold; }
-        .section { margin-bottom: 30px; border: 1px solid #ddd; border-radius: 5px; overflow: hidden; }
-        .section-header { background: #2c5aa0; color: white; padding: 15px; font-size: 18px; font-weight: bold; }
-        .section-content { padding: 20px; }
-        .status-good { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .status-warning { background: #fff3cd; color: #856404; padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .status-error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .status-info { background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 4px; margin: 10px 0; }
-        .form-section { background: #e3f2fd; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
-        .form-section input[type="text"], .form-section input[type="password"] { padding: 10px; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; width: 100%; margin: 5px 0 15px 0; box-sizing: border-box; }
-        .form-section label { font-size: 14px; color: #333; font-weight: bold; display: block; margin-bottom: 5px; }
-        .form-section button { padding: 12px 24px; font-size: 16px; background: #2c5aa0; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px; }
-        .form-section button:hover { background: #1e3f73; }
-        .requirements { margin: 15px 0; }
-        .requirements ul { margin: 10px 0; padding-left: 20px; }
-        .requirements li { margin: 5px 0; color: #666; }
-        .help-link { color: #2c5aa0; text-decoration: none; }
-        .help-link:hover { text-decoration: underline; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Email Authentication Test Tool</h1>
-            <div class="domain">Send Test Email & Analyze Authentication Results</div>
-        </div>
-        
-        <div class="section">
-            <div class="section-header">📧 Test Email & Authentication Analysis</div>
-            <div class="section-content">
-                <div class="status-info">
-                    <strong>What this tool does:</strong><br>
-                    • Sends a test email using your EmailTemplate system<br>
-                    • Connects to Gmail via IMAP to retrieve the sent email<br>
-                    • Analyzes SPF, DKIM, and DMARC authentication headers<br>
-                    • Provides detailed interpretation of authentication results
+    <div class="row">
+        <div class="col-12">
+            
+            <!-- Information Section -->
+            <div class="alert alert-info">
+                <h6 class="alert-heading mb-2">📧 Email Authentication Test Tool</h6>
+                <p class="mb-2"><strong>What this tool does:</strong></p>
+                <ul class="mb-2">
+                    <li>Sends a test email using your EmailTemplate system</li>
+                    <li>Connects to Gmail via IMAP to retrieve the sent email</li>
+                    <li>Analyzes SPF, DKIM, and DMARC authentication headers</li>
+                    <li>Provides detailed interpretation of authentication results</li>
+                </ul>
+            </div>
+            
+            <!-- Requirements Alert -->
+            <div class="alert alert-warning">
+                <h6 class="alert-heading mb-2">⚠️ Important Requirements:</h6>
+                <ul class="mb-2">
+                    <li>You need a <strong>Gmail App Password</strong>, not your regular password</li>
+                    <li>IMAP must be enabled in your Gmail account settings</li>
+                    <li>Two-factor authentication must be enabled on your Google account</li>
+                </ul>
+                <p class="mb-0"><a href="https://support.google.com/accounts/answer/185833" target="_blank" class="text-decoration-none">📖 Learn how to create a Gmail App Password</a></p>
+            </div>
+            
+            <!-- Test Form -->
+            <h5 class="mb-3">Run Authentication Test</h5>
+            
+            <?php
+            $formwriter = LibraryFunctions::get_formwriter_object('email_test_form', 'admin');
+            
+            $validation_rules = array();
+            $validation_rules['test_email']['required']['value'] = 'true';
+            $validation_rules['imap_username']['required']['value'] = 'true';
+            $validation_rules['imap_password']['required']['value'] = 'true';
+            echo $formwriter->set_validate($validation_rules);
+            
+            echo $formwriter->begin_form('email_test_form', 'POST', $_SERVER['PHP_SELF']);
+            
+            echo '<div class="row g-3 mb-4">';
+            echo '<div class="col-md-6">';
+            echo $formwriter->textinput('Gmail address to send test email to', 'test_email', 'form-control', 100, 'joineryemailtests@gmail.com', 'email@gmail.com', 255, '');
+            echo '</div>';
+            
+            echo '<div class="col-md-6">';
+            echo $formwriter->textinput('Gmail username for IMAP access', 'imap_username', 'form-control', 100, 'joineryemailtests@gmail.com', 'email@gmail.com', 255, 'Usually the same as your email address');
+            echo '</div>';
+            
+            echo '<div class="col-12">';
+            echo $formwriter->passwordinput('Gmail App Password', 'imap_password', 'form-control', 100, '', '16-character app-specific password from Google Account settings');
+            echo '</div>';
+            
+            echo '<div class="col-12">';
+            echo $formwriter->start_buttons();
+            echo $formwriter->new_form_button('<i class="fas fa-paper-plane"></i> Run Authentication Test', 'btn btn-primary');
+            echo $formwriter->end_buttons();
+            echo '</div>';
+            echo '</div>';
+            
+            echo $formwriter->end_form();
+            ?>
+            
+            <!-- Setup Instructions -->
+            <div class="card">
+                <div class="card-header bg-body-tertiary">
+                    <h6 class="mb-0">ℹ️ How to Setup Gmail App Password</h6>
                 </div>
-                
-                <div class="status-warning">
-                    <strong>⚠️ Important Requirements:</strong>
-                    <div class="requirements">
-                        <ul>
-                            <li>You need a <strong>Gmail App Password</strong>, not your regular password</li>
-                            <li>IMAP must be enabled in your Gmail account settings</li>
-                            <li>Two-factor authentication must be enabled on your Google account</li>
-                        </ul>
-                        <p><a href="https://support.google.com/accounts/answer/185833" target="_blank" class="help-link">📖 Learn how to create a Gmail App Password</a></p>
-                    </div>
+                <div class="card-body">
+                    <ol>
+                        <li>Go to your <a href="https://myaccount.google.com/" target="_blank" class="text-decoration-none">Google Account settings</a></li>
+                        <li>Click "Security" in the left sidebar</li>
+                        <li>Under "Signing in to Google," click "2-Step Verification" (must be enabled)</li>
+                        <li>At the bottom, click "App passwords"</li>
+                        <li>Select "Mail" and "Other (custom name)" - enter "Email Auth Test"</li>
+                        <li>Copy the 16-character password and use it in the form above</li>
+                    </ol>
                 </div>
             </div>
-        </div>
-        
-        <div class="form-section">
-            <form method="POST">
-                <label for="test_email">Gmail address to send test email to:</label>
-                <input type="text" id="test_email" name="test_email" value="joineryemailtests@gmail.com" required>
-                
-                <label for="imap_username">Gmail username for IMAP access:</label>
-                <input type="text" id="imap_username" name="imap_username" value="joineryemailtests@gmail.com" required>
-                <small style="color: #666;">Usually the same as your email address</small>
-                
-                <label for="imap_password">Gmail App Password:</label>
-                <input type="password" id="imap_password" name="imap_password" required>
-                <small style="color: #666;">16-character app-specific password from Google Account settings</small>
-                
-                <button type="submit">🚀 Run Authentication Test</button>
-            </form>
-        </div>
-        
-        <div class="section">
-            <div class="section-header">ℹ️ How to Setup Gmail App Password</div>
-            <div class="section-content">
-                <ol style="color: #666; line-height: 1.6;">
-                    <li>Go to your <a href="https://myaccount.google.com/" target="_blank" class="help-link">Google Account settings</a></li>
-                    <li>Click "Security" in the left sidebar</li>
-                    <li>Under "Signing in to Google," click "2-Step Verification" (must be enabled)</li>
-                    <li>At the bottom, click "App passwords"</li>
-                    <li>Select "Mail" and "Other (custom name)" - enter "Email Auth Test"</li>
-                    <li>Copy the 16-character password and use it in the form above</li>
-                </ol>
-            </div>
+            
         </div>
     </div>
-</body>
-</html>
-        <?php
-        exit;
-    }
+    
+    <?php
+    $page->admin_footer();
+    exit;
 }
 
 // CLI prompts
@@ -599,7 +579,7 @@ if ($auth_results['spf']['status'] === 'pass' &&
 }
 
 // Format output for web display
-if (!$is_cli) {
+if (!$is_cli && $run_test) {
     $output = ob_get_clean();
     
     // Parse the output to create a more structured web display
@@ -630,43 +610,17 @@ if (!$is_cli) {
     }
     
     ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Authentication Test Results</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .header { text-align: center; margin-bottom: 30px; }
-        .domain { color: #2c5aa0; font-size: 24px; font-weight: bold; }
-        .section { margin-bottom: 20px; border: 1px solid #ddd; border-radius: 5px; overflow: hidden; }
-        .section-header { background: #2c5aa0; color: white; padding: 15px; font-size: 16px; font-weight: bold; }
-        .section-content { padding: 20px; }
-        .status-good { background: #d4edda; color: #155724; padding: 8px; border-radius: 4px; margin: 5px 0; display: inline-block; }
-        .status-warning { background: #fff3cd; color: #856404; padding: 8px; border-radius: 4px; margin: 5px 0; display: inline-block; }
-        .status-error { background: #f8d7da; color: #721c24; padding: 8px; border-radius: 4px; margin: 5px 0; display: inline-block; }
-        .status-info { background: #d1ecf1; color: #0c5460; padding: 8px; border-radius: 4px; margin: 5px 0; display: inline-block; }
-        .output-block { background: #f8f9fa; padding: 15px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; margin: 10px 0; border-left: 4px solid #007bff; }
-        .back-link { display: inline-block; margin: 20px 0; padding: 10px 20px; background: #2c5aa0; color: white; text-decoration: none; border-radius: 4px; }
-        .back-link:hover { background: #1e3f73; }
-        .success-icon { color: #28a745; }
-        .warning-icon { color: #ffc107; }
-        .error-icon { color: #dc3545; }
-        .info-icon { color: #17a2b8; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Email Authentication Test Results</h1>
-            <div class="domain">📧 Test Complete - Analysis Report</div>
-        </div>
-        
-        <?php foreach ($sections as $section): ?>
-        <div class="section">
-            <div class="section-header">
+    
+    <!-- Test Results -->
+    <div class="alert alert-success">
+        <h5 class="alert-heading mb-2">📧 Email Authentication Test Results</h5>
+        <p class="mb-0">Test completed at: <?php echo date('Y-m-d H:i:s'); ?></p>
+    </div>
+    
+    <?php foreach ($sections as $section): ?>
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h6 class="mb-0">
                 <?php 
                 $icon = '📝';
                 if (strpos($section['title'], 'Sending') !== false) $icon = '📤';
@@ -679,31 +633,56 @@ if (!$is_cli) {
                 elseif (strpos($section['title'], 'TEST COMPLETE') !== false) $icon = '✅';
                 echo $icon . ' ' . htmlspecialchars($section['title']);
                 ?>
-            </div>
-            <div class="section-content">
-                <?php 
-                $content = $section['content'];
-                
-                // Apply color coding to specific patterns
-                $content = preg_replace('/✓([^\n]+)/', '<span class="status-good">✓$1</span>', $content);
-                $content = preg_replace('/⚠([^\n]+)/', '<span class="status-warning">⚠$1</span>', $content);
-                $content = preg_replace('/✗([^\n]+)/', '<span class="status-error">✗$1</span>', $content);
-                $content = preg_replace('/◯([^\n]+)/', '<span class="status-info">◯$1</span>', $content);
-                
-                // Handle ERROR messages
-                if (strpos($content, 'ERROR') !== false || strpos($content, 'MAILGUN VERSION COMPATIBILITY') !== false) {
-                    echo '<div class="status-error">' . nl2br(htmlspecialchars($content)) . '</div>';
-                } else {
-                    echo '<div class="output-block">' . $content . '</div>';
-                }
-                ?>
-            </div>
+            </h6>
         </div>
-        <?php endforeach; ?>
-        
-        <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="back-link">← Run Another Test</a>
+        <div class="card-body">
+            <?php 
+            $content = $section['content'];
+            
+            // Apply color coding to specific patterns
+            $content = preg_replace('/✓([^\n]+)/', '<span class="badge bg-success">✓$1</span>', $content);
+            $content = preg_replace('/⚠([^\n]+)/', '<span class="badge bg-warning">⚠$1</span>', $content);
+            $content = preg_replace('/✗([^\n]+)/', '<span class="badge bg-danger">✗$1</span>', $content);
+            $content = preg_replace('/◯([^\n]+)/', '<span class="badge bg-info">◯$1</span>', $content);
+            
+            // Handle ERROR messages
+            if (strpos($content, 'ERROR') !== false || strpos($content, 'MAILGUN VERSION COMPATIBILITY') !== false) {
+                echo '<div class="alert alert-danger"><pre>' . htmlspecialchars($content) . '</pre></div>';
+            } else {
+                echo '<pre class="bg-light p-3 rounded">' . $content . '</pre>';
+            }
+            ?>
+        </div>
     </div>
-</body>
-</html>
+    <?php endforeach; ?>
+    
+    <div class="mb-4">
+        <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-primary">
+            <i class="fas fa-arrow-left"></i> Run Another Test
+        </a>
+    </div>
+    
     <?php
+    $page->admin_footer();
+    exit;
+}
+
+// Add validation for web interface
+if (!$is_cli && $run_test) {
+    if (empty($config['test_email']) || empty($config['imap_username']) || empty($config['imap_password'])) {
+        ?>
+        <div class="alert alert-danger">
+            <h6 class="alert-heading">Error: Missing Required Fields</h6>
+            <p class="mb-0">All fields are required to run the authentication test.</p>
+        </div>
+        <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-primary">
+            <i class="fas fa-arrow-left"></i> Back to Form
+        </a>
+        <?php
+        $page->admin_footer();
+        exit;
+    }
+    
+    // Start output buffering to capture all output
+    ob_start();
 }
