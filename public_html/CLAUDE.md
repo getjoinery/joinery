@@ -319,6 +319,17 @@ Create new plugin directory structure:
 - Table export functionality built-in
 - Analytics and reporting modules available
 
+## Development Restrictions
+
+**IMPORTANT: Do not make changes to files in the following directories without explicit instructions:**
+
+- `/includes/` - Core system classes and libraries
+- `/migrations/` - Database schema changes and version control
+- `/api/` - REST API endpoints and authentication
+- `/data/` - Existing data model classes (new classes are allowed)
+
+These directories contain critical system infrastructure. Changes should only be made with explicit user approval to prevent breaking core functionality.
+
 ## Best Practices
 
 1. **Security**: Always validate and sanitize user input
@@ -331,6 +342,7 @@ Create new plugin directory structure:
 8. **Error Handling**: Provide clear error messages to users
 9. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
 10. **Documentation**: Update this file when discovering new patterns or conventions
+11. **Respect Restrictions**: Only modify restricted directories with explicit user permission
 
 ## Example Admin Page Template
 
