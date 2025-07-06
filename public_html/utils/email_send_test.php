@@ -28,6 +28,15 @@ if (defined('GLOBALVARS_INCLUDED')) {
 // Check if running from CLI or web
 $is_cli = (php_sapi_name() === 'cli');
 
+// If running from web, check login requirement
+if (!$is_cli) {
+    require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+
+    $session = SessionControl::get_instance();
+    $session->check_permission(5);
+    $session->set_return();
+}
+
 // Configuration
 $config = [
     'test_email' => '',  // Gmail address to send test email to
