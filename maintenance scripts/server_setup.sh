@@ -145,7 +145,8 @@ tee composer.json > /dev/null << 'EOF'
         "zenapply/php-calendly": "^1.0",
         "verot/class.upload.php": "^2.1",
         "tm/error-log-parser": "^1.2",
-        "stripe/stripe-php": "^10.16"
+        "stripe/stripe-php": "^10.16",
+		"phpmailer/phpmailer": "^6.10.0"
     }
 }
 EOF
