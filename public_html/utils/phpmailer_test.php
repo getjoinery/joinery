@@ -7,7 +7,9 @@
 $INCLUDE_DIR = "../includes/";
 
 require("phpunit.php");
-require($INCLUDE_DIR . "PHPMailer.php");
+require("../vendor/autoload.php");
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
 error_reporting(E_ALL);
 
 /**
@@ -77,7 +79,7 @@ class phpmailerTest extends TestCase
         $this->Mail->Username = "";
         $this->Mail->Password = "";
         $this->Mail->PluginDir = $INCLUDE_DIR;
-		$this->Mail->AddReplyTo("no_reply@phpmailer.sf.net", "Reply Guy");
+		$this->Mail->addReplyTo("no_reply@phpmailer.sf.net", "Reply Guy");
         $this->Mail->Sender = "unit_test@phpmailer.sf.net";
 
         if(strlen($this->Mail->Host) > 0)
@@ -242,13 +244,13 @@ class phpmailerTest extends TestCase
         switch($sType)
         {
             case "to":
-                $this->Mail->AddAddress($sAddress, $sName);
+                $this->Mail->addAddress($sAddress, $sName);
                 break;
             case "cc":
-                $this->Mail->AddCC($sAddress, $sName);
+                $this->Mail->addCC($sAddress, $sName);
                 break;
             case "bcc":
-                $this->Mail->AddBCC($sAddress, $sName);
+                $this->Mail->addBCC($sAddress, $sName);
                 break;
         }
     }
@@ -273,7 +275,7 @@ class phpmailerTest extends TestCase
         $this->Mail->Subject .= ": Wordwrap";
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -285,10 +287,10 @@ class phpmailerTest extends TestCase
         $this->Mail->Body = "Here is the main body.  There should be " .
                             "a reply to address in this message.";
         $this->Mail->Subject .= ": Low Priority";
-        $this->Mail->AddReplyTo("nobody@nobody.com", "Nobody (Unit Test)");
+        $this->Mail->addReplyTo("nobody@nobody.com", "Nobody (Unit Test)");
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -299,20 +301,20 @@ class phpmailerTest extends TestCase
         $this->Mail->Body = "Here is the text body";
         $this->Mail->Subject .= ": Plain + Multiple FileAttachments";
 
-        if(!$this->Mail->AddAttachment("test.png"))
+        if(!$this->Mail->addAttachment("test.png"))
         {
             $this->assert(false, $this->Mail->ErrorInfo);
             return;
         }
 
-        if(!$this->Mail->AddAttachment("phpmailer_test.php", "test.txt"))
+        if(!$this->Mail->addAttachment("phpmailer_test.php", "test.txt"))
         {
             $this->assert(false, $this->Mail->ErrorInfo);
             return;
         }
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -327,10 +329,10 @@ class phpmailerTest extends TestCase
                        "string attachment.\nThis might be taken from a ".
                        "database or some other such thing. ";
 
-        $this->Mail->AddStringAttachment($sAttachment, "string_attach.txt");
+        $this->Mail->addStringAttachment($sAttachment, "string_attach.txt");
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -343,7 +345,7 @@ class phpmailerTest extends TestCase
         $this->Mail->Encoding = "quoted-printable";
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -351,7 +353,7 @@ class phpmailerTest extends TestCase
      */
     function test_Html() {
 
-        $this->Mail->IsHTML(true);
+        $this->Mail->isHTML(true);
         $this->Mail->Subject .= ": HTML only";
 
         $this->Mail->Body = "This is a <b>test message</b> written in HTML. </br>" .
@@ -360,7 +362,7 @@ class phpmailerTest extends TestCase
                             "phpmailer.  <p/> Thank you!";
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -370,16 +372,16 @@ class phpmailerTest extends TestCase
 
         $this->Mail->Body = "This is the <b>HTML</b> part of the email.";
         $this->Mail->Subject .= ": HTML + Attachment";
-        $this->Mail->IsHTML(true);
+        $this->Mail->isHTML(true);
 
-        if(!$this->Mail->AddAttachment("phpmailer_test.php", "test_attach.txt"))
+        if(!$this->Mail->addAttachment("phpmailer_test.php", "test_attach.txt"))
         {
             $this->assert(false, $this->Mail->ErrorInfo);
             return;
         }
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -390,9 +392,9 @@ class phpmailerTest extends TestCase
         $this->Mail->Body = "Embedded Image: <img alt=\"phpmailer\" src=\"cid:my-attach\">" .
                      "Here is an image!</a>";
         $this->Mail->Subject .= ": Embedded Image";
-        $this->Mail->IsHTML(true);
+        $this->Mail->isHTML(true);
 
-        if(!$this->Mail->AddEmbeddedImage("test.png", "my-attach", "test.png",
+        if(!$this->Mail->addEmbeddedImage("test.png", "my-attach", "test.png",
                                           "base64", "image/png"))
         {
             $this->assert(false, $this->Mail->ErrorInfo);
@@ -400,7 +402,7 @@ class phpmailerTest extends TestCase
         }
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -411,23 +413,23 @@ class phpmailerTest extends TestCase
         $this->Mail->Body = "Embedded Image: <img alt=\"phpmailer\" src=\"cid:my-attach\">" .
                      "Here is an image!</a>";
         $this->Mail->Subject .= ": Embedded Image + Attachment";
-        $this->Mail->IsHTML(true);
+        $this->Mail->isHTML(true);
 
-        if(!$this->Mail->AddEmbeddedImage("test.png", "my-attach", "test.png",
+        if(!$this->Mail->addEmbeddedImage("test.png", "my-attach", "test.png",
                                           "base64", "image/png"))
         {
             $this->assert(false, $this->Mail->ErrorInfo);
             return;
         }
 
-        if(!$this->Mail->AddAttachment("phpmailer_test.php", "test.txt"))
+        if(!$this->Mail->addAttachment("phpmailer_test.php", "test.txt"))
         {
             $this->assert(false, $this->Mail->ErrorInfo);
             return;
         }
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -444,7 +446,7 @@ class phpmailerTest extends TestCase
         $this->Mail->Subject .= ": AltBody + Word Wrap";
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     /**
@@ -455,19 +457,19 @@ class phpmailerTest extends TestCase
         $this->Mail->Body = "This is the <b>HTML</b> part of the email.";
         $this->Mail->AltBody = "This is the text part of the email.";
         $this->Mail->Subject .= ": AltBody + Attachment";
-        $this->Mail->IsHTML(true);
+        $this->Mail->isHTML(true);
 
-        if(!$this->Mail->AddAttachment("phpmailer_test.php", "test_attach.txt"))
+        if(!$this->Mail->addAttachment("phpmailer_test.php", "test_attach.txt"))
         {
             $this->assert(false, $this->Mail->ErrorInfo);
             return;
         }
 
         $this->BuildBody();
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
 
         $fp = fopen("message.txt", "w");
-        fwrite($fp, $this->Mail->CreateHeader() . $this->Mail->CreateBody());
+        fwrite($fp, $this->Mail->createHeader() . $this->Mail->createBody());
         fclose($fp);
     }
 
@@ -477,10 +479,10 @@ class phpmailerTest extends TestCase
         $subject = $this->Mail->Subject;
 
         $this->Mail->Subject = $subject . ": SMTP 1";
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
 
         $this->Mail->Subject = $subject . ": SMTP 2";
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     function test_SmtpKeepAlive() {
@@ -490,11 +492,11 @@ class phpmailerTest extends TestCase
 
         $this->Mail->SMTPKeepAlive = true;
         $this->Mail->Subject = $subject . ": SMTP keep-alive 1";
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
 
         $this->Mail->Subject = $subject . ": SMTP keep-alive 2";
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
-        $this->Mail->SmtpClose();
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
+        $this->Mail->smtpClose();
     }
 
     /**
@@ -506,20 +508,20 @@ class phpmailerTest extends TestCase
         $this->BuildBody();
 
         $this->Mail->Subject = str_repeat("A", 998);
-        $this->assert($this->Mail->Send(), $this->Mail->ErrorInfo);
+        $this->assert($this->Mail->send(), $this->Mail->ErrorInfo);
     }
 
     function test_Error() {
         $this->Mail->Subject .= ": This should be sent";
         $this->BuildBody();
-        $this->Mail->ClearAllRecipients(); // no addresses should cause an error
-        $this->assert($this->Mail->IsError() == false, "Error found");
-        $this->assert($this->Mail->Send() == false, "Send succeeded");
-        $this->assert($this->Mail->IsError(), "No error found");
+        $this->Mail->clearAllRecipients(); // no addresses should cause an error
+        $this->assert($this->Mail->isError() == false, "Error found");
+        $this->assert($this->Mail->send() == false, "Send succeeded");
+        $this->assert($this->Mail->isError(), "No error found");
         $this->assertEquals('You must provide at least one ' .
                             'recipient email address.', $this->Mail->ErrorInfo);
-        $this->Mail->AddAddress(get("mail_to"));
-        $this->assert($this->Mail->Send(), "Send failed");
+        $this->Mail->addAddress(get("mail_to"));
+        $this->assert($this->Mail->send(), "Send failed");
     }
 }
 

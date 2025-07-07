@@ -24,13 +24,12 @@ if (!defined('GLOBALVARS_INCLUDED')) {
 $page = new AdminPage();
 $settings = Globalvars::get_instance();
 
-// Check if running from CLI or web
-$is_cli = (php_sapi_name() === 'cli');
-
 // Process form submission
 $run_test = false;
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$is_cli) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $run_test = true;
+    // Debug: Log that form was submitted
+    error_log('Form submitted with POST data: ' . print_r($_POST, true));
 }
 
 // Configuration
@@ -44,16 +43,20 @@ $config = [
 ];
 
 // Admin header
-if (!$is_cli) {
-    $page->admin_header([
-        'title' => 'Email Authentication Test',
-        'menu-id' => 'email-tools',
-        'readable_title' => 'Email Authentication Test'
-    ]);
-}
+$page->admin_header([
+    'title' => 'Email Authentication Test',
+    'menu-id' => 'email-tools',
+    'readable_title' => 'Email Authentication Test'
+]);
+
+// Debug output
+echo '<!-- DEBUG: REQUEST_METHOD = ' . ($_SERVER['REQUEST_METHOD'] ?? 'NOT SET') . ' -->';
+echo '<!-- DEBUG: POST data: ' . htmlspecialchars(print_r($_POST, true)) . ' -->';
+echo '<!-- DEBUG: REQUEST data: ' . htmlspecialchars(print_r($_REQUEST, true)) . ' -->';
+echo '<!-- DEBUG: $run_test = ' . ($run_test ? 'true' : 'false') . ' -->';
 
 // Handle web interface
-if (!$is_cli && !$run_test) {
+if (!$run_test) {
     ?>
     
     <div class="row">
@@ -88,13 +91,10 @@ if (!$is_cli && !$run_test) {
             <?php
             $formwriter = LibraryFunctions::get_formwriter_object('email_test_form', 'admin');
             
-            $validation_rules = array();
-            $validation_rules['test_email']['required']['value'] = 'true';
-            $validation_rules['imap_username']['required']['value'] = 'true';
-            $validation_rules['imap_password']['required']['value'] = 'true';
-            echo $formwriter->set_validate($validation_rules);
-            
-            echo $formwriter->begin_form('email_test_form', 'POST', $_SERVER['PHP_SELF']);
+            // No validation rules - just plain form
+            $form_html = $formwriter->begin_form('email_test_form', 'POST', '/utils/email_send_test');
+            echo '<!-- DEBUG FORM HTML: ' . htmlspecialchars($form_html) . ' -->';
+            echo $form_html;
             
             echo '<div class="row g-3 mb-4">';
             echo '<div class="col-md-6">';
@@ -118,6 +118,43 @@ if (!$is_cli && !$run_test) {
             
             echo $formwriter->end_form();
             ?>
+            
+            <script>
+            // Form submission with loading state
+            document.addEventListener('DOMContentLoaded', function() {
+                const form = document.getElementById('email_test_form');
+                const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+                
+                if (form && submitBtn) {
+                    form.addEventListener('submit', function(e) {
+                        // Disable the submit button
+                        submitBtn.disabled = true;
+                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running Test...';
+                        
+                        // Show loading status
+                        const loadingHtml = `
+                            <div id="loading-status" class="alert alert-primary mt-3">
+                                <div class="d-flex align-items-center">
+                                    <div class="spinner-border spinner-border-sm me-3" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <div>
+                                        <strong>Running Email Authentication Test...</strong><br>
+                                        <small class="text-muted">This may take 10-15 seconds. Please wait while we send the email and analyze the results.</small>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        // Insert loading status after the form
+                        form.insertAdjacentHTML('afterend', loadingHtml);
+                        
+                        // Scroll to loading indicator
+                        document.getElementById('loading-status').scrollIntoView({ behavior: 'smooth' });
+                    });
+                }
+            });
+            </script>
             
             <!-- Setup Instructions -->
             <div class="card">
@@ -144,545 +181,570 @@ if (!$is_cli && !$run_test) {
     exit;
 }
 
-// CLI prompts
-if ($is_cli) {
-    if (empty($config['test_email'])) {
-        echo "Gmail address to send test email to: ";
-        $config['test_email'] = trim(fgets(STDIN));
-    }
-
-    if (empty($config['imap_username'])) {
-        echo "Gmail username for IMAP access (usually same as email): ";
-        $config['imap_username'] = trim(fgets(STDIN));
-    }
-
-    if (empty($config['imap_password'])) {
-        echo "Gmail app password (NOT regular password - see https://support.google.com/accounts/answer/185833): ";
-        $config['imap_password'] = trim(fgets(STDIN));
-    }
-}
-
-// Step 1: Send test email
-echo "\n=== STEP 1: Sending Test Email ===\n";
+// If we get here, $run_test is true - process the form submission
+echo '<div class="row"><div class="col-12">';
+echo '<h4>Running Email Authentication Test...</h4>';
 
 try {
-    // Create test content values
+    // Step 1: Send test email
+    echo '<div class="alert alert-info"><strong>Step 1:</strong> Sending test email...</div>';
+    
     $test_timestamp = date('Y-m-d H:i:s');
     $test_id = uniqid('test_', true);
-    $server_info = php_uname();
-    $php_version = phpversion();
     
-    // First, let's try to use the default_outer_template which should exist
+    // Create email content
+    $email_html = '
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background-color: #2c5aa0; color: white; padding: 20px; text-align: center;">
+            <h1>Email Authentication Test</h1>
+            <p>Test ID: ' . $test_id . '</p>
+        </div>
+        <div style="padding: 20px; background-color: #f8f9fa;">
+            <h2>Test Results</h2>
+            <p><strong>Timestamp:</strong> ' . $test_timestamp . '</p>
+            <p><strong>From:</strong> ' . $settings->get_setting('defaultemail') . '</p>
+            <p><strong>To:</strong> ' . htmlspecialchars($config['test_email']) . '</p>
+            <p><strong>Subject:</strong> ' . htmlspecialchars($config['email_subject']) . '</p>
+            
+            <div style="margin: 20px 0; padding: 15px; background-color: white; border-left: 4px solid #007bff;">
+                <h3>What to expect:</h3>
+                <ul>
+                    <li>This email tests your server\'s email authentication setup</li>
+                    <li>The system will analyze SPF, DKIM, and DMARC headers</li>
+                    <li>Results will be displayed in the admin panel</li>
+                </ul>
+            </div>
+        </div>
+        <div style="background-color: #6c757d; color: white; padding: 10px; text-align: center; font-size: 12px;">
+            Generated by Email Authentication Test Tool
+        </div>
+    </div>';
+
+    // Try to use EmailTemplate system
     $emailTemplate = new EmailTemplate('default_outer_template');
-    
-    // Clear any default recipients and add our test recipient
     $emailTemplate->clear_recipients();
     $emailTemplate->add_recipient($config['test_email'], 'Test Recipient');
     
-    // Create the email content directly using public properties
-    $email_html = '<div class="header" style="background-color: #2c5aa0; color: white; padding: 20px; text-align: center;">
-        <h1>Email Authentication Test</h1>
-    </div>
-    <div class="content" style="padding: 20px; background-color: #f5f5f5;">
-        <p>This is an automated test email to verify SPF, DKIM, and DMARC authentication settings.</p>
-        
-        <table class="info-table" style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold; width: 150px;">Test Timestamp:</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">' . $test_timestamp . '</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">Test ID:</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">' . $test_id . '</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">Server Info:</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">' . htmlspecialchars($server_info) . '</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">PHP Version:</td>
-                <td style="padding: 10px; border-bottom: 1px solid #ddd;">' . $php_version . '</td>
-            </tr>
-        </table>
-        
-        <p>This email will be analyzed via IMAP to check the authentication results headers added by the receiving mail server.</p>
-        
-        <p style="color: #666; font-size: 12px; margin-top: 30px;">
-            This is an automated test message. Please do not reply.
-        </p>
-    </div>';
-    
-    $email_text = "Email Authentication Test\n\n";
-    $email_text .= "This is an automated test email to verify SPF, DKIM, and DMARC authentication settings.\n\n";
-    $email_text .= "Test Timestamp: $test_timestamp\n";
-    $email_text .= "Test ID: $test_id\n";
-    $email_text .= "Server Info: $server_info\n";
-    $email_text .= "PHP Version: $php_version\n\n";
-    $email_text .= "This email will be analyzed via IMAP to check the authentication results headers added by the receiving mail server.\n\n";
-    $email_text .= "This is an automated test message. Please do not reply.";
-    
-    // Set the email content directly using public properties
+    // Set email properties directly
     $emailTemplate->email_subject = $config['email_subject'];
     $emailTemplate->email_html = $email_html;
-    $emailTemplate->email_text = $email_text;
     $emailTemplate->email_has_content = true;
     
     // Send the email
-    $send_result = $emailTemplate->send(false);
+    $send_result = $emailTemplate->send(false); // false = don\'t check session
     
     if ($send_result) {
-        echo "✓ Email sent successfully to: " . $config['test_email'] . "\n";
-        echo "  Subject: " . $config['email_subject'] . "\n";
-        echo "  From: " . $emailTemplate->email_from . " (" . $emailTemplate->email_from_name . ")\n";
-        echo "  Test ID: " . $test_id . "\n";
+        echo '<div class="alert alert-success"><strong>✓ Email sent successfully!</strong></div>';
     } else {
-        throw new Exception("Failed to send email");
+        echo '<div class="alert alert-warning"><strong>⚠ Email sending completed</strong> (check logs for details)</div>';
     }
+    
+    // Step 2: Wait before checking
+    echo '<div class="alert alert-info"><strong>Step 2:</strong> Waiting ' . $config['wait_time'] . ' seconds for email delivery...</div>';
+    echo '<script>
+        let countdown = ' . $config['wait_time'] . ';
+        const timer = setInterval(function() {
+            document.getElementById("countdown").textContent = countdown;
+            countdown--;
+            if (countdown < 0) {
+                clearInterval(timer);
+                document.getElementById("countdown-container").innerHTML = "<strong>✓ Wait complete!</strong>";
+            }
+        }, 1000);
+    </script>';
+    echo '<div id="countdown-container" class="alert alert-primary">Waiting <span id="countdown">' . $config['wait_time'] . '</span> seconds...</div>';
+    
+    // Force output to browser immediately
+    if (ob_get_level()) {
+        ob_flush();
+    }
+    flush();
+    
+    // Actually wait
+    sleep($config['wait_time']);
+    
+    // Step 3: Connect to IMAP and retrieve email
+    echo '<div class="alert alert-info"><strong>Step 3:</strong> Connecting to Gmail IMAP...</div>';
+    
+    if (!function_exists('imap_open')) {
+        throw new Exception('IMAP extension is not installed. Please install php-imap extension.');
+    }
+    
+    // Connect to Gmail IMAP
+    $imap = imap_open($config['imap_host'], $config['imap_username'], $config['imap_password']);
+    
+    if (!$imap) {
+        throw new Exception('Failed to connect to Gmail IMAP: ' . imap_last_error());
+    }
+    
+    echo '<div class="alert alert-success"><strong>✓ Connected to Gmail IMAP successfully!</strong></div>';
+    
+    // Search for our test email
+    $search_criteria = 'SUBJECT "' . $config['email_subject'] . '"';
+    $emails = imap_search($imap, $search_criteria);
+    
+    if (!$emails) {
+        echo '<div class="alert alert-warning"><strong>⚠ Test email not found</strong> in inbox. It may be in spam, or delivery may be delayed.</div>';
+        echo '<div class="alert alert-info">Try checking your spam folder, or run the test again in a few minutes.</div>';
+    } else {
+        echo '<div class="alert alert-success"><strong>✓ Found test email!</strong> Analyzing headers...</div>';
+        
+        // Get the most recent matching email
+        $latest_email = end($emails);
+        $header = imap_fetchheader($imap, $latest_email);
+        
+        // Parse authentication headers
+        $results = parseEmailAuthHeaders($header);
+        
+        // Display results
+        displayAuthResults($results, $header, $settings);
+    }
+    
+    imap_close($imap);
     
 } catch (Exception $e) {
-    $error_message = $e->getMessage();
+    echo '<div class="alert alert-danger"><strong>Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</div>';
+    echo '<div class="alert alert-info">
+        <strong>Troubleshooting tips:</strong>
+        <ul>
+            <li>Verify your Gmail App Password is correct (16 characters, no spaces)</li>
+            <li>Ensure IMAP is enabled in your Gmail settings</li>
+            <li>Check that 2-factor authentication is enabled on your Google account</li>
+            <li>Try generating a new App Password if the current one doesn\'t work</li>
+        </ul>
+    </div>';
+}
+
+echo '</div></div>';
+$page->admin_footer();
+
+// Helper functions
+function parseEmailAuthHeaders($header) {
+    $results = [
+        'spf' => ['status' => 'not found', 'result' => '', 'details' => '', 'domain' => ''],
+        'dkim' => ['status' => 'not found', 'result' => '', 'details' => '', 'domain' => '', 'selector' => ''],
+        'dmarc' => ['status' => 'not found', 'result' => '', 'details' => '', 'domain' => '']
+    ];
     
-    // Check for Mailgun version compatibility issues
-    if (strpos($error_message, 'Mailgun\HttpClient\HttpClientConfigurator') !== false || 
-        strpos($error_message, 'Argument #1 ($configurator) must be of type') !== false) {
+    // Parse Authentication-Results header for SPF
+    if (preg_match('/Authentication-Results:.*?spf=([^;\\s]+)([^\\r\\n]*)/i', $header, $matches)) {
+        $results['spf']['status'] = 'found';
+        $results['spf']['result'] = trim($matches[1]);
+        $results['spf']['details'] = trim($matches[2]);
         
-        echo "\n❌ MAILGUN VERSION COMPATIBILITY ERROR DETECTED\n";
-        echo "==============================================\n\n";
-        echo "The error indicates a mismatch between your Mailgun PHP library version\n";
-        echo "and the configuration in your EmailTemplate system.\n\n";
+        // Extract SPF domain
+        if (preg_match('/smtp\\.mailfrom=([^\\s;]+)/i', $matches[2], $domain_matches)) {
+            $results['spf']['domain'] = trim($domain_matches[1]);
+        }
+    }
+    
+    // Parse Authentication-Results header for DKIM with more detail
+    if (preg_match('/Authentication-Results:.*?dkim=([^;\\s]+)([^\\r\\n]*)/i', $header, $matches)) {
+        $results['dkim']['status'] = 'found';
+        $results['dkim']['result'] = trim($matches[1]);
+        $results['dkim']['details'] = trim($matches[2]);
         
-        // Get current settings
-        $settings = Globalvars::get_instance();
-        $current_version = $settings->get_setting('mailgun_version', true, true);
-        $api_key_set = $settings->get_setting('mailgun_api_key', true, true) ? 'SET' : 'NOT SET';
-        $domain = $settings->get_setting('mailgun_domain', true, true);
+        // Extract DKIM domain (header.d)
+        if (preg_match('/header\\.d=([^\\s;]+)/i', $matches[2], $domain_matches)) {
+            $results['dkim']['domain'] = trim($domain_matches[1]);
+        }
         
-        echo "Current Mailgun Configuration:\n";
-        echo "- mailgun_version setting: " . ($current_version ? $current_version : 'NOT SET (defaults to newer API)') . "\n";
-        echo "- mailgun_api_key: $api_key_set\n";
-        echo "- mailgun_domain: " . ($domain ? $domain : 'NOT SET') . "\n\n";
+        // Extract DKIM selector (header.s)
+        if (preg_match('/header\\.s=([^\\s;]+)/i', $matches[2], $selector_matches)) {
+            $results['dkim']['selector'] = trim($selector_matches[1]);
+        }
+    }
+    
+    // Parse Authentication-Results header for DMARC
+    if (preg_match('/Authentication-Results:.*?dmarc=([^;\\s]+)([^\\r\\n]*)/i', $header, $matches)) {
+        $results['dmarc']['status'] = 'found';
+        $results['dmarc']['result'] = trim($matches[1]);
+        $results['dmarc']['details'] = trim($matches[2]);
         
-        echo "To fix this issue, choose ONE of the following solutions:\n\n";
-        
-        echo "SOLUTION 1 (Recommended): Update Mailgun version setting\n";
-        echo "---------------------------------------------------------\n";
-        echo "Set mailgun_version to 3 in your system settings:\n";
-        echo "• In database: UPDATE stg_settings SET stg_value='3' WHERE stg_name='mailgun_version';\n";
-        echo "• Or in your admin panel: Set 'mailgun_version' setting to '3'\n\n";
-        
-        echo "SOLUTION 2: Check installed Mailgun library version\n";
-        echo "----------------------------------------------------\n";
-        echo "Run: composer show mailgun/mailgun-php\n";
-        echo "If version is 3.0+, use Solution 1 above.\n";
-        echo "If you need the old API, downgrade: composer require mailgun/mailgun-php:^2.0\n\n";
-        
-        echo "SOLUTION 3: Alternative - Use SMTP instead\n";
-        echo "-------------------------------------------\n";
-        echo "Temporarily disable Mailgun by removing/renaming mailgun_api_key setting\n";
-        echo "This will fall back to SMTP sending.\n\n";
-        
-        echo "For more details about Mailgun PHP library versions:\n";
-        echo "https://github.com/mailgun/mailgun-php\n\n";
-        
-        echo "Original error: " . $error_message . "\n";
-        
+        // Extract DMARC domain
+        if (preg_match('/header\\.from=([^\\s;]+)/i', $matches[2], $domain_matches)) {
+            $results['dmarc']['domain'] = trim($domain_matches[1]);
+        }
+    }
+    
+    return $results;
+}
+
+function displayAuthResults($results, $header, $settings) {
+    // Extract domain from default email settings
+    $defaultEmail = $settings->get_setting('defaultemail');
+    $domain = '';
+    if ($defaultEmail && strpos($defaultEmail, '@') !== false) {
+        $domain = substr($defaultEmail, strpos($defaultEmail, '@') + 1);
+    }
+    if (empty($domain)) {
+        $domain = 'yourdomain.com'; // fallback
+    }
+    echo '<div class="card mt-4">';
+    echo '<div class="card-header bg-primary text-white">';
+    echo '<h5 class="mb-0">📊 Authentication Results for <code>' . htmlspecialchars($domain) . '</code></h5>';
+    echo '<small class="text-light">Testing email authentication from ' . htmlspecialchars($defaultEmail) . '</small>';
+    echo '</div>';
+    echo '<div class="card-body">';
+    
+    // SPF Results
+    $spf = $results['spf'];
+    echo '<div class="row mb-4">';
+    echo '<div class="col-md-6">';
+    echo '<h6>SPF (Sender Policy Framework)</h6>';
+    
+    if ($spf['status'] === 'found') {
+        $badge_class = getSPFBadgeClass($spf['result']);
+        echo '<span class="badge ' . $badge_class . ' mb-2">' . strtoupper($spf['result']) . '</span><br>';
+        if ($spf['details']) {
+            echo '<small class="text-muted">' . htmlspecialchars($spf['details']) . '</small><br>';
+        }
+        echo '<div class="mt-2">' . getSPFExplanation($spf['result']) . '</div>';
     } else {
-        echo "ERROR sending email: " . $error_message . "\n";
-        
-        // Check for other common email sending issues
-        if (strpos($error_message, 'Could not find the template') !== false) {
-            echo "\nTIP: This error means the email template doesn't exist in the database.\n";
-            echo "The script is trying to use 'default_outer_template' which should exist in your system.\n";
-        } elseif (strpos($error_message, 'SMTP') !== false) {
-            echo "\nTIP: This appears to be an SMTP configuration issue.\n";
-            echo "Check your SMTP settings in the system configuration.\n";
-        } elseif (strpos($error_message, 'authentication') !== false) {
-            echo "\nTIP: This appears to be an authentication issue.\n";
-            echo "Check your email service credentials (SMTP, Mailgun, etc.).\n";
-        }
+        echo '<span class="badge bg-danger mb-2">NOT FOUND</span><br>';
+        echo '<div class="alert alert-warning mt-2 p-2">';
+        echo '<strong>⚠️ Missing SPF Record for ' . htmlspecialchars($domain) . '</strong><br>';
+        echo 'Gmail could not verify that your server is authorized to send email for <strong>' . htmlspecialchars($domain) . '</strong>.';
+        echo '</div>';
     }
     
-    exit(1);
-}
-
-// Step 2: Wait for email to be delivered
-echo "\n=== STEP 2: Waiting for Email Delivery ===\n";
-echo "Waiting " . $config['wait_time'] . " seconds for email to be delivered...\n";
-sleep($config['wait_time']);
-
-// Step 3: Connect to Gmail via IMAP
-echo "\n=== STEP 3: Connecting to Gmail via IMAP ===\n";
-
-$imap = @imap_open($config['imap_host'], $config['imap_username'], $config['imap_password']);
-
-if (!$imap) {
-    die("ERROR: Cannot connect to Gmail IMAP: " . imap_last_error() . "\n");
-}
-
-echo "✓ Connected to Gmail IMAP successfully\n";
-
-// Step 4: Search for our test email
-echo "\n=== STEP 4: Searching for Test Email ===\n";
-
-// Search for emails with our unique subject
-$search_criteria = 'SUBJECT "' . $config['email_subject'] . '"';
-$emails = imap_search($imap, $search_criteria);
-
-if (!$emails) {
-    imap_close($imap);
-    die("ERROR: Could not find test email. It may not have been delivered yet.\n");
-}
-
-// Get the most recent email (last in array)
-$email_number = end($emails);
-echo "✓ Found test email (Message #$email_number)\n";
-
-// Step 5: Analyze email headers
-echo "\n=== STEP 5: Analyzing Email Authentication Headers ===\n";
-
-// Get full headers
-$headers = imap_fetchheader($imap, $email_number);
-
-// Parse headers into array
-$header_lines = explode("\n", $headers);
-$parsed_headers = [];
-$current_header = '';
-
-foreach ($header_lines as $line) {
-    if (preg_match('/^([A-Za-z0-9-]+):\s*(.*)$/', $line, $matches)) {
-        if ($current_header) {
-            $parsed_headers[] = $current_header;
-        }
-        $current_header = ['name' => $matches[1], 'value' => $matches[2]];
-    } elseif (preg_match('/^\s+(.*)$/', $line, $matches) && $current_header) {
-        $current_header['value'] .= ' ' . $matches[1];
-    }
-}
-if ($current_header) {
-    $parsed_headers[] = $current_header;
-}
-
-// Authentication results
-$auth_results = [
-    'spf' => ['status' => 'not_found', 'details' => ''],
-    'dkim' => ['status' => 'not_found', 'details' => ''],
-    'dmarc' => ['status' => 'not_found', 'details' => ''],
-    'arc' => ['status' => 'not_found', 'details' => ''],
-];
-
-// Look for authentication results headers
-foreach ($parsed_headers as $header) {
-    $name = strtolower($header['name']);
-    $value = $header['value'];
+    echo '</div>';
+    echo '<div class="col-md-6">';
+    echo '<div class="bg-light p-3 rounded">';
+    echo '<h6 class="text-primary">What SPF Should Show:</h6>';
+    echo '<ul class="mb-2" style="font-size: 0.9em;">';
+    echo '<li><strong>PASS:</strong> Server is authorized to send</li>';
+    echo '<li><strong>FAIL:</strong> Server is NOT authorized</li>';
+    echo '<li><strong>SOFTFAIL:</strong> Server probably not authorized</li>';
+    echo '<li><strong>NEUTRAL:</strong> No policy or inconclusive</li>';
+    echo '</ul>';
+    echo '<strong>Expected:</strong> <code>spf=pass</code><br>';
+    echo '<strong>Fix:</strong> Add SPF record to <strong>' . htmlspecialchars($domain) . '</strong> DNS:<br>';
+    echo '<code style="font-size: 0.8em;">v=spf1 ip4:YOUR_SERVER_IP ~all</code>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
     
-    // Authentication-Results header (primary source)
-    if ($name === 'authentication-results') {
-        echo "\nAuthentication-Results header found:\n";
-        echo "  " . $value . "\n";
-        
-        // Parse SPF
-        if (preg_match('/spf=(\w+)(?:\s+\(([^)]+)\))?/i', $value, $matches)) {
-            $auth_results['spf']['status'] = $matches[1];
-            $auth_results['spf']['details'] = isset($matches[2]) ? $matches[2] : '';
-        }
-        
-        // Parse DKIM
-        if (preg_match('/dkim=(\w+)(?:\s+\(([^)]+)\))?/i', $value, $matches)) {
-            $auth_results['dkim']['status'] = $matches[1];
-            $auth_results['dkim']['details'] = isset($matches[2]) ? $matches[2] : '';
-        }
-        
-        // Parse DMARC
-        if (preg_match('/dmarc=(\w+)(?:\s+\(([^)]+)\))?/i', $value, $matches)) {
-            $auth_results['dmarc']['status'] = $matches[1];
-            $auth_results['dmarc']['details'] = isset($matches[2]) ? $matches[2] : '';
-        }
-    }
+    // DKIM Results
+    $dkim = $results['dkim'];
+    echo '<div class="row mb-4">';
+    echo '<div class="col-md-6">';
+    echo '<h6>DKIM (DomainKeys Identified Mail)</h6>';
     
-    // ARC-Authentication-Results
-    if ($name === 'arc-authentication-results') {
-        echo "\nARC-Authentication-Results header found:\n";
-        echo "  " . $value . "\n";
-        $auth_results['arc']['status'] = 'present';
-        $auth_results['arc']['details'] = $value;
-    }
-    
-    // Received-SPF header
-    if ($name === 'received-spf') {
-        if (preg_match('/^(\w+)/i', $value, $matches)) {
-            if ($auth_results['spf']['status'] === 'not_found') {
-                $auth_results['spf']['status'] = $matches[1];
-                $auth_results['spf']['details'] = $value;
+    if ($dkim['status'] === 'found') {
+        $badge_class = getDKIMBadgeClass($dkim['result']);
+        echo '<span class="badge ' . $badge_class . ' mb-2">' . strtoupper($dkim['result']) . '</span><br>';
+        
+        // Show DKIM domain and alignment
+        if ($dkim['domain']) {
+            $is_aligned = (strtolower($dkim['domain']) === strtolower($domain));
+            echo '<div class="mt-2 mb-2">';
+            echo '<strong>DKIM Signing Domain:</strong> <code>' . htmlspecialchars($dkim['domain']) . '</code> ';
+            if ($is_aligned) {
+                echo '<span class="badge bg-success">ALIGNED</span>';
+            } else {
+                echo '<span class="badge bg-warning">NOT ALIGNED</span>';
+                echo '<br><small class="text-warning">⚠️ DKIM signed by <strong>' . htmlspecialchars($dkim['domain']) . '</strong> but email claims to be from <strong>' . htmlspecialchars($domain) . '</strong></small>';
+            }
+            echo '</div>';
+            
+            if ($dkim['selector']) {
+                echo '<small class="text-muted">Selector: ' . htmlspecialchars($dkim['selector']) . '</small><br>';
             }
         }
+        
+        if ($dkim['details']) {
+            echo '<small class="text-muted">' . htmlspecialchars($dkim['details']) . '</small><br>';
+        }
+        
+        // Enhanced explanation based on alignment
+        if ($dkim['domain'] && strtolower($dkim['domain']) !== strtolower($domain)) {
+            echo '<div class="alert alert-warning mt-2 p-2">';
+            echo '<strong>🔍 Domain Alignment Issue Detected</strong><br>';
+            echo 'DKIM signature is valid, but it\'s from <strong>' . htmlspecialchars($dkim['domain']) . '</strong>, not your domain <strong>' . htmlspecialchars($domain) . '</strong>. ';
+            echo 'This means you\'re sending through a third-party service (like Gmail) without proper domain authentication setup.';
+            echo '</div>';
+        } else {
+            echo '<div class="mt-2">' . getDKIMExplanation($dkim['result']) . '</div>';
+        }
+    } else {
+        echo '<span class="badge bg-danger mb-2">NOT FOUND</span><br>';
+        echo '<div class="alert alert-warning mt-2 p-2">';
+        echo '<strong>⚠️ Missing DKIM Signature</strong><br>';
+        echo 'Your email from <strong>' . htmlspecialchars($domain) . '</strong> was not digitally signed, reducing trust and deliverability.';
+        echo '</div>';
     }
     
-    // DKIM-Signature header
-    if ($name === 'dkim-signature') {
-        if ($auth_results['dkim']['status'] === 'not_found') {
-            $auth_results['dkim']['status'] = 'signature_present';
-            $auth_results['dkim']['details'] = 'DKIM signature found in headers';
+    echo '</div>';
+    echo '<div class="col-md-6">';
+    echo '<div class="bg-light p-3 rounded">';
+    echo '<h6 class="text-primary">What DKIM Should Show:</h6>';
+    echo '<ul class="mb-2" style="font-size: 0.9em;">';
+    echo '<li><strong>PASS:</strong> Signature valid, email unmodified</li>';
+    echo '<li><strong>FAIL:</strong> Signature invalid or email modified</li>';
+    echo '<li><strong>NEUTRAL:</strong> No signature found</li>';
+    echo '<li><strong>TEMPERROR:</strong> Temporary DNS issue</li>';
+    echo '<li><strong>PERMERROR:</strong> Permanent DNS/config issue</li>';
+    echo '</ul>';
+    echo '<strong>Expected:</strong> <code>dkim=pass</code><br>';
+    echo '<strong>Fix:</strong> Configure DKIM signing on your mail server and publish public key in <strong>' . htmlspecialchars($domain) . '</strong> DNS';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+    
+    // DMARC Results
+    $dmarc = $results['dmarc'];
+    echo '<div class="row mb-4">';
+    echo '<div class="col-md-6">';
+    echo '<h6>DMARC (Domain-based Message Authentication)</h6>';
+    
+    if ($dmarc['status'] === 'found') {
+        $badge_class = getDMARCBadgeClass($dmarc['result']);
+        echo '<span class="badge ' . $badge_class . ' mb-2">' . strtoupper($dmarc['result']) . '</span><br>';
+        if ($dmarc['details']) {
+            echo '<small class="text-muted">' . htmlspecialchars($dmarc['details']) . '</small><br>';
+        }
+        echo '<div class="mt-2">' . getDMARCExplanation($dmarc['result']) . '</div>';
+    } else {
+        echo '<span class="badge bg-danger mb-2">NOT FOUND</span><br>';
+        echo '<div class="alert alert-warning mt-2 p-2">';
+        echo '<strong>⚠️ Missing DMARC Policy</strong><br>';
+        echo 'No DMARC policy found for <strong>' . htmlspecialchars($domain) . '</strong>. Email receivers cannot determine how to handle authentication failures.';
+        echo '</div>';
+    }
+    
+    echo '</div>';
+    echo '<div class="col-md-6">';
+    echo '<div class="bg-light p-3 rounded">';
+    echo '<h6 class="text-primary">What DMARC Should Show:</h6>';
+    echo '<ul class="mb-2" style="font-size: 0.9em;">';
+    echo '<li><strong>PASS:</strong> SPF or DKIM passed with alignment</li>';
+    echo '<li><strong>FAIL:</strong> Both SPF and DKIM failed alignment</li>';
+    echo '<li><strong>TEMPERROR:</strong> Temporary DNS issue</li>';
+    echo '<li><strong>PERMERROR:</strong> Invalid DMARC record</li>';
+    echo '</ul>';
+    echo '<strong>Expected:</strong> <code>dmarc=pass</code><br>';
+    echo '<strong>Fix:</strong> Add DMARC record to <code>_dmarc.' . htmlspecialchars($domain) . '</code>:<br>';
+    echo '<code style="font-size: 0.8em;">v=DMARC1; p=none; rua=mailto:dmarc@' . htmlspecialchars($domain) . '</code>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+    
+    // Domain Alignment Analysis
+    $alignment_issues = [];
+    if ($dkim['status'] === 'found' && $dkim['domain'] && strtolower($dkim['domain']) !== strtolower($domain)) {
+        $alignment_issues[] = 'DKIM signed by ' . $dkim['domain'] . ' instead of ' . $domain;
+    }
+    if ($spf['status'] === 'found' && $spf['domain'] && strtolower($spf['domain']) !== strtolower($domain)) {
+        $alignment_issues[] = 'SPF checked for ' . $spf['domain'] . ' instead of ' . $domain;
+    }
+    
+    if (!empty($alignment_issues)) {
+        echo '<div class="alert alert-danger">';
+        echo '<h6 class="alert-heading">🚨 Critical Domain Alignment Issues Detected</h6>';
+        echo '<p><strong>Your email authentication reveals a security problem:</strong></p>';
+        echo '<ul>';
+        foreach ($alignment_issues as $issue) {
+            echo '<li>' . htmlspecialchars($issue) . '</li>';
+        }
+        echo '</ul>';
+        echo '<p class="mb-0"><strong>What this means:</strong> You\'re sending emails claiming to be from <strong>' . htmlspecialchars($domain) . '</strong> but using a third-party service (like Gmail) for actual delivery. Recipients can detect this mismatch, which may cause your emails to be marked as suspicious or spam.</p>';
+        echo '</div>';
+    }
+    
+    // Overall Summary
+    echo '<div class="alert alert-info">';
+    echo '<h6 class="alert-heading">📋 Summary & Next Steps for ' . htmlspecialchars($domain) . '</h6>';
+    $passed = 0;
+    $aligned_passed = 0;
+    $total = 3;
+    
+    if ($spf['status'] === 'found' && strtolower($spf['result']) === 'pass') {
+        $passed++;
+        if (!$spf['domain'] || strtolower($spf['domain']) === strtolower($domain)) {
+            $aligned_passed++;
         }
     }
+    if ($dkim['status'] === 'found' && strtolower($dkim['result']) === 'pass') {
+        $passed++;
+        if (!$dkim['domain'] || strtolower($dkim['domain']) === strtolower($domain)) {
+            $aligned_passed++;
+        }
+    }
+    if ($dmarc['status'] === 'found' && strtolower($dmarc['result']) === 'pass') {
+        $passed++;
+        $aligned_passed++; // DMARC passing means alignment is OK
+    }
+    
+    echo '<p><strong>Authentication Score:</strong> ' . $passed . '/' . $total . ' protocols passing for <strong>' . htmlspecialchars($domain) . '</strong></p>';
+    echo '<p><strong>Domain Alignment Score:</strong> ' . $aligned_passed . '/' . $passed . ' passing protocols properly aligned</p>';
+    
+    if ($passed === 3) {
+        echo '<p class="text-success mb-0"><strong>✅ Excellent!</strong> All email authentication protocols for <strong>' . htmlspecialchars($domain) . '</strong> are working correctly.</p>';
+    } elseif ($passed >= 1) {
+        echo '<p class="text-warning mb-2"><strong>⚠️ Partially Protected:</strong> <strong>' . htmlspecialchars($domain) . '</strong> has some authentication working, but improvements needed.</p>';
+        echo '<p class="mb-0"><strong>Priority for ' . htmlspecialchars($domain) . ':</strong> ';
+        if ($spf['status'] !== 'found' || strtolower($spf['result']) !== 'pass') echo 'Fix SPF DNS record first (easiest), ';
+        if ($dmarc['status'] !== 'found' || strtolower($dmarc['result']) !== 'pass') echo 'then add DMARC DNS policy, ';
+        if ($dkim['status'] !== 'found' || strtolower($dkim['result']) !== 'pass') echo 'finally configure DKIM signing on mail server';
+        echo '</p>';
+    } else {
+        echo '<p class="text-danger mb-0"><strong>❌ Vulnerable:</strong> No email authentication found for <strong>' . htmlspecialchars($domain) . '</strong>. Emails from this domain may be rejected or marked as spam.</p>';
+    }
+    
+    // Add specific DNS guidance
+    echo '<hr>';
+    echo '<h6 class="text-primary">🔧 Specific DNS Records Needed for ' . htmlspecialchars($domain) . ':</h6>';
+    echo '<div class="row">';
+    
+    if ($spf['status'] !== 'found' || strtolower($spf['result']) !== 'pass') {
+        echo '<div class="col-md-4 mb-2">';
+        echo '<strong>SPF Record:</strong><br>';
+        echo '<code style="font-size: 0.8em;">v=spf1 ip4:YOUR_SERVER_IP ~all</code><br>';
+        echo '<small class="text-muted">Add as TXT record for ' . htmlspecialchars($domain) . '</small>';
+        echo '</div>';
+    }
+    
+    if ($dmarc['status'] !== 'found' || strtolower($dmarc['result']) !== 'pass') {
+        echo '<div class="col-md-4 mb-2">';
+        echo '<strong>DMARC Record:</strong><br>';
+        echo '<code style="font-size: 0.8em;">v=DMARC1; p=none; rua=mailto:dmarc@' . htmlspecialchars($domain) . '</code><br>';
+        echo '<small class="text-muted">Add as TXT record for _dmarc.' . htmlspecialchars($domain) . '</small>';
+        echo '</div>';
+    }
+    
+    if ($dkim['status'] !== 'found' || strtolower($dkim['result']) !== 'pass') {
+        echo '<div class="col-md-4 mb-2">';
+        echo '<strong>DKIM Setup:</strong><br>';
+        echo '<small>1. Configure mail server to sign emails<br>';
+        echo '2. Publish public key as TXT record:<br>';
+        echo '<code style="font-size: 0.75em;">selector._domainkey.' . htmlspecialchars($domain) . '</code></small>';
+        echo '</div>';
+    }
+    
+    echo '</div>';
+    echo '</div>';
+    
+    echo '</div></div>';
+    
+    // Show raw headers for debugging
+    echo '<div class="card mt-3">';
+    echo '<div class="card-header">';
+    echo '<h6 class="mb-0">🔍 Raw Authentication Headers</h6>';
+    echo '<small class="text-muted">Look for "Authentication-Results" lines in the headers below</small>';
+    echo '</div>';
+    echo '<div class="card-body">';
+    
+    // Extract and highlight authentication-related headers
+    $auth_headers = extractAuthHeaders($header);
+    if ($auth_headers) {
+        echo '<div class="alert alert-secondary p-2 mb-3">';
+        echo '<strong>Found Authentication Headers:</strong><br>';
+        echo '<pre style="font-size: 0.9em; margin: 0;">' . htmlspecialchars($auth_headers) . '</pre>';
+        echo '</div>';
+    }
+    
+    echo '<details>';
+    echo '<summary class="btn btn-sm btn-outline-secondary">Show All Headers</summary>';
+    echo '<pre style="font-size: 11px; max-height: 300px; overflow-y: auto; margin-top: 10px;">' . htmlspecialchars($header) . '</pre>';
+    echo '</details>';
+    echo '</div></div>';
 }
 
-// Step 6: Display Results
-echo "\n=== AUTHENTICATION ANALYSIS RESULTS ===\n\n";
-
-// SPF Results
-echo "SPF (Sender Policy Framework):\n";
-echo "  Status: " . $auth_results['spf']['status'] . "\n";
-if ($auth_results['spf']['details']) {
-    echo "  Details: " . $auth_results['spf']['details'] . "\n";
-}
-echo "  Interpretation: ";
-switch (strtolower($auth_results['spf']['status'])) {
-    case 'pass':
-        echo "✓ SPF check passed - sending IP is authorized\n";
-        break;
-    case 'fail':
-        echo "✗ SPF check failed - sending IP is NOT authorized\n";
-        break;
-    case 'softfail':
-        echo "⚠ SPF soft fail - sending IP is questionable\n";
-        break;
-    case 'neutral':
-        echo "◯ SPF neutral - no policy statement\n";
-        break;
-    case 'temperror':
-        echo "⚠ SPF temporary error - DNS issue\n";
-        break;
-    case 'permerror':
-        echo "✗ SPF permanent error - invalid SPF record\n";
-        break;
-    case 'not_found':
-        echo "? No SPF results found in headers\n";
-        break;
-    default:
-        echo "? Unknown SPF status\n";
-}
-
-echo "\nDKIM (DomainKeys Identified Mail):\n";
-echo "  Status: " . $auth_results['dkim']['status'] . "\n";
-if ($auth_results['dkim']['details']) {
-    echo "  Details: " . $auth_results['dkim']['details'] . "\n";
-}
-echo "  Interpretation: ";
-switch (strtolower($auth_results['dkim']['status'])) {
-    case 'pass':
-        echo "✓ DKIM signature verified successfully\n";
-        break;
-    case 'fail':
-        echo "✗ DKIM signature verification failed\n";
-        break;
-    case 'temperror':
-        echo "⚠ DKIM temporary error\n";
-        break;
-    case 'permerror':
-        echo "✗ DKIM permanent error\n";
-        break;
-    case 'signature_present':
-        echo "◯ DKIM signature present but verification result not found\n";
-        break;
-    case 'not_found':
-        echo "? No DKIM results found in headers\n";
-        break;
-    default:
-        echo "? Unknown DKIM status\n";
-}
-
-echo "\nDMARC (Domain-based Message Authentication):\n";
-echo "  Status: " . $auth_results['dmarc']['status'] . "\n";
-if ($auth_results['dmarc']['details']) {
-    echo "  Details: " . $auth_results['dmarc']['details'] . "\n";
-}
-echo "  Interpretation: ";
-switch (strtolower($auth_results['dmarc']['status'])) {
-    case 'pass':
-        echo "✓ DMARC check passed - aligned and authenticated\n";
-        break;
-    case 'fail':
-        echo "✗ DMARC check failed\n";
-        break;
-    case 'temperror':
-        echo "⚠ DMARC temporary error\n";
-        break;
-    case 'permerror':
-        echo "✗ DMARC permanent error\n";
-        break;
-    case 'not_found':
-        echo "? No DMARC results found in headers\n";
-        break;
-    default:
-        echo "? Unknown DMARC status\n";
-}
-
-echo "\nARC (Authenticated Received Chain):\n";
-echo "  Status: " . $auth_results['arc']['status'] . "\n";
-if ($auth_results['arc']['status'] === 'present') {
-    echo "  ✓ ARC headers present - email went through forwarding/mailing list\n";
-} else {
-    echo "  ◯ No ARC headers found\n";
-}
-
-// Step 7: Additional Header Analysis
-echo "\n=== ADDITIONAL HEADER INFORMATION ===\n";
-
-// Look for specific headers
-$headers_to_check = [
-    'return-path' => 'Return Path',
-    'from' => 'From',
-    'sender' => 'Sender',
-    'reply-to' => 'Reply-To',
-    'x-originating-ip' => 'Originating IP',
-    'x-mailer' => 'Mail Client',
-    'message-id' => 'Message ID',
-];
-
-foreach ($parsed_headers as $header) {
-    $name = strtolower($header['name']);
-    if (isset($headers_to_check[$name])) {
-        echo $headers_to_check[$name] . ": " . $header['value'] . "\n";
+function getSPFBadgeClass($result) {
+    switch (strtolower($result)) {
+        case 'pass': return 'bg-success';
+        case 'fail': return 'bg-danger';
+        case 'softfail': case 'neutral': return 'bg-warning';
+        default: return 'bg-secondary';
     }
 }
 
-// Close IMAP connection
-imap_close($imap);
-
-echo "\n=== TEST COMPLETE ===\n";
-echo "\nSummary:\n";
-echo "- Email sent from: " . $emailTemplate->email_from . "\n";
-echo "- Email sent to: " . $config['test_email'] . "\n";
-echo "- SPF: " . $auth_results['spf']['status'] . "\n";
-echo "- DKIM: " . $auth_results['dkim']['status'] . "\n";
-echo "- DMARC: " . $auth_results['dmarc']['status'] . "\n";
-
-// Provide recommendations
-echo "\nRecommendations:\n";
-
-if ($auth_results['spf']['status'] !== 'pass') {
-    echo "⚠ SPF is not passing. Check your SPF record includes the sending IP/server.\n";
+function getDKIMBadgeClass($result) {
+    switch (strtolower($result)) {
+        case 'pass': return 'bg-success';
+        case 'fail': return 'bg-danger';
+        case 'neutral': case 'temperror': return 'bg-warning';
+        case 'permerror': return 'bg-danger';
+        default: return 'bg-secondary';
+    }
 }
 
-if ($auth_results['dkim']['status'] !== 'pass') {
-    echo "⚠ DKIM is not passing. Ensure DKIM signing is enabled and keys are published.\n";
+function getDMARCBadgeClass($result) {
+    switch (strtolower($result)) {
+        case 'pass': return 'bg-success';
+        case 'fail': return 'bg-danger';
+        case 'temperror': return 'bg-warning';
+        case 'permerror': return 'bg-danger';
+        default: return 'bg-secondary';
+    }
 }
 
-if ($auth_results['dmarc']['status'] !== 'pass') {
-    echo "⚠ DMARC is not passing. This usually means SPF or DKIM failed, or alignment issues.\n";
+function getSPFExplanation($result) {
+    switch (strtolower($result)) {
+        case 'pass':
+            return '<div class="alert alert-success p-2">✅ Your server is authorized to send email for this domain.</div>';
+        case 'fail':
+            return '<div class="alert alert-danger p-2">❌ Your server is NOT authorized. Recipients may reject your emails.</div>';
+        case 'softfail':
+            return '<div class="alert alert-warning p-2">⚠️ Your server is probably not authorized. Emails may be marked suspicious.</div>';
+        case 'neutral':
+            return '<div class="alert alert-info p-2">ℹ️ SPF record exists but doesn\'t specify a policy for your server.</div>';
+        default:
+            return '<div class="alert alert-secondary p-2">Unknown SPF result: ' . htmlspecialchars($result) . '</div>';
+    }
 }
 
-if ($auth_results['spf']['status'] === 'pass' && 
-    $auth_results['dkim']['status'] === 'pass' && 
-    $auth_results['dmarc']['status'] === 'pass') {
-    echo "✓ All authentication checks are passing! Your email configuration is properly set up.\n";
+function getDKIMExplanation($result) {
+    switch (strtolower($result)) {
+        case 'pass':
+            return '<div class="alert alert-success p-2">✅ Email signature is valid and email content is unmodified.</div>';
+        case 'fail':
+            return '<div class="alert alert-danger p-2">❌ Email signature is invalid or email content was modified in transit.</div>';
+        case 'neutral':
+            return '<div class="alert alert-info p-2">ℹ️ No DKIM signature found on this email.</div>';
+        case 'temperror':
+            return '<div class="alert alert-warning p-2">⚠️ Temporary DNS error prevented DKIM verification.</div>';
+        case 'permerror':
+            return '<div class="alert alert-danger p-2">❌ Permanent DKIM configuration error detected.</div>';
+        default:
+            return '<div class="alert alert-secondary p-2">Unknown DKIM result: ' . htmlspecialchars($result) . '</div>';
+    }
 }
 
-// Format output for web display
-if (!$is_cli && $run_test) {
-    $output = ob_get_clean();
-    
-    // Parse the output to create a more structured web display
-    $lines = explode("\n", $output);
-    $sections = [];
-    $current_section = null;
-    $current_content = [];
+function getDMARCExplanation($result) {
+    switch (strtolower($result)) {
+        case 'pass':
+            return '<div class="alert alert-success p-2">✅ Email passed DMARC alignment checks (SPF or DKIM aligned with From domain).</div>';
+        case 'fail':
+            return '<div class="alert alert-danger p-2">❌ Email failed DMARC alignment. Action depends on domain policy (none/quarantine/reject).</div>';
+        case 'temperror':
+            return '<div class="alert alert-warning p-2">⚠️ Temporary DNS error prevented DMARC policy lookup.</div>';
+        case 'permerror':
+            return '<div class="alert alert-danger p-2">❌ DMARC record is malformed or invalid.</div>';
+        default:
+            return '<div class="alert alert-secondary p-2">Unknown DMARC result: ' . htmlspecialchars($result) . '</div>';
+    }
+}
+
+function extractAuthHeaders($header) {
+    $lines = explode("\n", $header);
+    $auth_lines = [];
     
     foreach ($lines as $line) {
-        if (strpos($line, '=== STEP') !== false) {
-            if ($current_section) {
-                $sections[] = ['title' => $current_section, 'content' => implode("\n", $current_content)];
+        if (stripos($line, 'Authentication-Results:') !== false) {
+            $auth_lines[] = trim($line);
+            // Get continuation lines
+            $i = array_search($line, $lines);
+            for ($j = $i + 1; $j < count($lines); $j++) {
+                if (preg_match('/^\s+/', $lines[$j]) && !empty(trim($lines[$j]))) {
+                    $auth_lines[] = trim($lines[$j]);
+                } else {
+                    break;
+                }
             }
-            $current_section = trim(str_replace(['===', 'STEP'], ['', ''], $line));
-            $current_content = [];
-        } elseif (strpos($line, '=== ') !== false) {
-            if ($current_section) {
-                $sections[] = ['title' => $current_section, 'content' => implode("\n", $current_content)];
-            }
-            $current_section = trim(str_replace('===', '', $line));
-            $current_content = [];
-        } else {
-            $current_content[] = $line;
         }
     }
-    if ($current_section) {
-        $sections[] = ['title' => $current_section, 'content' => implode("\n", $current_content)];
-    }
     
-    ?>
-    
-    <!-- Test Results -->
-    <div class="alert alert-success">
-        <h5 class="alert-heading mb-2">📧 Email Authentication Test Results</h5>
-        <p class="mb-0">Test completed at: <?php echo date('Y-m-d H:i:s'); ?></p>
-    </div>
-    
-    <?php foreach ($sections as $section): ?>
-    <div class="card mb-4">
-        <div class="card-header bg-primary text-white">
-            <h6 class="mb-0">
-                <?php 
-                $icon = '📝';
-                if (strpos($section['title'], 'Sending') !== false) $icon = '📤';
-                elseif (strpos($section['title'], 'Waiting') !== false) $icon = '⏱️';
-                elseif (strpos($section['title'], 'Connecting') !== false) $icon = '🔗';
-                elseif (strpos($section['title'], 'Searching') !== false) $icon = '🔍';
-                elseif (strpos($section['title'], 'Analyzing') !== false) $icon = '🔬';
-                elseif (strpos($section['title'], 'RESULTS') !== false) $icon = '📊';
-                elseif (strpos($section['title'], 'ADDITIONAL') !== false) $icon = 'ℹ️';
-                elseif (strpos($section['title'], 'TEST COMPLETE') !== false) $icon = '✅';
-                echo $icon . ' ' . htmlspecialchars($section['title']);
-                ?>
-            </h6>
-        </div>
-        <div class="card-body">
-            <?php 
-            $content = $section['content'];
-            
-            // Apply color coding to specific patterns
-            $content = preg_replace('/✓([^\n]+)/', '<span class="badge bg-success">✓$1</span>', $content);
-            $content = preg_replace('/⚠([^\n]+)/', '<span class="badge bg-warning">⚠$1</span>', $content);
-            $content = preg_replace('/✗([^\n]+)/', '<span class="badge bg-danger">✗$1</span>', $content);
-            $content = preg_replace('/◯([^\n]+)/', '<span class="badge bg-info">◯$1</span>', $content);
-            
-            // Handle ERROR messages
-            if (strpos($content, 'ERROR') !== false || strpos($content, 'MAILGUN VERSION COMPATIBILITY') !== false) {
-                echo '<div class="alert alert-danger"><pre>' . htmlspecialchars($content) . '</pre></div>';
-            } else {
-                echo '<pre class="bg-light p-3 rounded">' . $content . '</pre>';
-            }
-            ?>
-        </div>
-    </div>
-    <?php endforeach; ?>
-    
-    <div class="mb-4">
-        <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-primary">
-            <i class="fas fa-arrow-left"></i> Run Another Test
-        </a>
-    </div>
-    
-    <?php
-    $page->admin_footer();
-    exit;
-}
-
-// Add validation for web interface
-if (!$is_cli && $run_test) {
-    if (empty($config['test_email']) || empty($config['imap_username']) || empty($config['imap_password'])) {
-        ?>
-        <div class="alert alert-danger">
-            <h6 class="alert-heading">Error: Missing Required Fields</h6>
-            <p class="mb-0">All fields are required to run the authentication test.</p>
-        </div>
-        <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-primary">
-            <i class="fas fa-arrow-left"></i> Back to Form
-        </a>
-        <?php
-        $page->admin_footer();
-        exit;
-    }
-    
-    // Start output buffering to capture all output
-    ob_start();
+    return empty($auth_lines) ? null : implode("\n", $auth_lines);
 }

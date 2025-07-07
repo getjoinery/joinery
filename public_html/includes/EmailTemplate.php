@@ -2,12 +2,14 @@
 require_once('Globalvars.php');
 $settings = Globalvars::get_instance();
 $siteDir = $settings->get_setting('siteDir');
-require_once('smtpmailer.php');
+require_once('systemmailer.php');
 require_once('LibraryFunctions.php');
 	
 $composer_dir = $settings->get_setting('composerAutoLoad');	
 require $composer_dir.'autoload.php';
 use Mailgun\Mailgun;
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
 
 require_once($siteDir . '/data/users_class.php');
 require_once($siteDir . '/data/email_templates_class.php');
@@ -265,7 +267,7 @@ class EmailTemplate {
 		$this->email_recipients = array();
 
 		if($this->mailer){
-			$this->mailer->ClearAddresses();
+			$this->mailer->clearAllRecipients();
 		}
 	}
 
@@ -677,22 +679,22 @@ class EmailTemplate {
 
 		
 		if($this->mailer){
-			$this->mailer = new smtpmailer();
+			$this->mailer = new systemmailer();
 			if ($other_host) {
 				$this->mailer->Host = $other_host;
 			}
-			$this->mailer->From = $this->email_from;
-			$this->mailer->FromName =  $this->email_from_name;
+			$this->mailer->setFrom($this->email_from, $this->email_from_name);
 			
 			foreach($this->email_recipients as $recipient){
-				$this->mailer->AddAddress($recipient['email'], $recipient['name']);
+				$this->mailer->addAddress($recipient['email'], $recipient['name']);
 			}
 			
+			$this->mailer->isHTML(true);
 			$this->mailer->Body = $this->email_html;
 			$this->mailer->AltBody = $this->email_text;
 			
 
-			if (!$this->mailer->Send()) {
+			if (!$this->mailer->send()) {
 				// Oops, email didn't send.  Save it and move on.
 				$this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR);
 			}	

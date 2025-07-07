@@ -4,7 +4,7 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
 
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/smtpmailer.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/systemmailer.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 
@@ -272,8 +272,8 @@ class Activation {
 		));
 		// Clear the addresses because we don't want to automatically send this to the user's
 		// current email (as would happen since we pass in the recipient user to the email template)
-		$activation_email->mailer->ClearAddresses();
-		$activation_email->mailer->AddAddress($new_email);
+		$activation_email->mailer->clearAllRecipients();
+		$activation_email->mailer->addAddress($new_email);
 		$activation_email->send();
 	}	
 
@@ -285,15 +285,14 @@ class Activation {
 		$gen_code = self::getTempCode($phone->get('phn_usr_user_id'), '30 day', Activation::PHONE_VERIFY, $phn_phone_number_id, NULL, 6);
 
 		//SEND WELCOME MAIL
-		$mail = new smtpmailer();
+		$mail = new systemmailer();
 
 		$settings = Globalvars::get_instance();
-		$mail->From = $settings->get_setting('defaultemail');
-		$mail->FromName = $settings->get_setting('defaultemailname');
-		$mail->AddAddress($phone->get('phn_phone_number') . '@' . $phone->get('phn_phone_carrier'));
+		$mail->setFrom($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'));
+		$mail->addAddress($phone->get('phn_phone_number') . '@' . $phone->get('phn_phone_carrier'));
 		$mail->Subject = $settings->get_setting('site_name').' Verify Code';
 		$mail->Body = "Code: $gen_code";
-		$mail->Send();
+		$mail->send();
 	}
 }
 
