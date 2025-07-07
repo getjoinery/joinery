@@ -11,7 +11,7 @@ $settings = Globalvars::get_instance();
 
 // Process form submission
 $domain = $_GET['domain'] ?? '';
-$is_comprehensive = isset($_GET['complete']) && $_GET['complete'] == '1';
+$is_comprehensive = isset($_GET['complete']) && ($_GET['complete'] == '1' || $_GET['complete'] === '');
 
 // Set time limit based on scan mode
 if (!empty($domain)) {
@@ -40,7 +40,7 @@ $page->admin_header([
         $validation_rules['domain']['required']['value'] = 'true';
         echo $formwriter->set_validate($validation_rules);
         
-        echo $formwriter->begin_form('domain_check_form', 'GET', $_SERVER['PHP_SELF']);
+        echo $formwriter->begin_form('domain_check_form', 'GET', '/utils/email_setup_check');
         
         echo '<div class="row g-3 mb-4">';
         echo '<div class="col-md-6">';
@@ -61,6 +61,49 @@ $page->admin_header([
         echo $formwriter->end_form();
         ?>
 
+        <script>
+        // Form submission with loading state
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('domain_check_form');
+            const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+            const checkbox = form ? form.querySelector('input[name="complete"]') : null;
+            
+            if (form && submitBtn) {
+                form.addEventListener('submit', function(e) {
+                    // Determine scan type
+                    const isComprehensive = checkbox && checkbox.checked;
+                    const scanType = isComprehensive ? 'Comprehensive' : 'Quick';
+                    const estimatedTime = isComprehensive ? '30-60 seconds' : '5-10 seconds';
+                    
+                    // Disable the submit button
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+                    
+                    // Show loading status
+                    const loadingHtml = `
+                        <div id="loading-status" class="alert alert-primary mt-3">
+                            <div class="d-flex align-items-center">
+                                <div class="spinner-border spinner-border-sm me-3" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <div>
+                                    <strong>Running ${scanType} Domain Authentication Check...</strong><br>
+                                    <small class="text-muted">Estimated time: ${estimatedTime}. Please wait while we analyze DNS records.</small>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Insert loading status after the form
+                    form.insertAdjacentHTML('afterend', loadingHtml);
+                    
+                    // Scroll to loading indicator
+                    document.getElementById('loading-status').scrollIntoView({ behavior: 'smooth' });
+                });
+            }
+        });
+        </script>
+
         <?php if (!empty($domain)): ?>
             <?php
             // Basic domain validation
@@ -76,7 +119,11 @@ $page->admin_header([
                 
                 <!-- Results Header -->
                 <div class="alert alert-info">
-                    <h5 class="alert-heading mb-2">Authentication Report for: <?php echo htmlspecialchars($domain); ?></h5>
+                    <h5 class="alert-heading mb-2">Authentication Report for: <?php echo htmlspecialchars($domain); ?> 
+                        <span class="badge <?php echo $is_comprehensive ? 'bg-primary' : 'bg-secondary'; ?>">
+                            <?php echo $is_comprehensive ? 'Comprehensive Scan' : 'Quick Scan'; ?>
+                        </span>
+                    </h5>
                     <p class="mb-0">Generated at: <?php echo date('Y-m-d H:i:s'); ?></p>
                 </div>
                 

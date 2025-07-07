@@ -7,6 +7,9 @@ require_once($siteDir . '/includes/LibraryFunctions.php');
 require_once($siteDir . '/includes/SessionControl.php');
 require_once($siteDir . '/includes/SingleRowAccessor.php');
 require_once($siteDir . '/includes/SystemClass.php');
+require_once($siteDir . '/includes/systemmailer.php');
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
 
 class QueuedEmailException extends SystemClassException {}
 
@@ -121,12 +124,11 @@ class QueuedEmail extends SystemBase {
 
 		// Now send it!
 		$mailer = new systemmailer();
-		$mailer->IsHTML(true);
+		$mailer->isHTML(true);
 		$mailer->Subject = $this->get('equ_subject');
 		$mailer->Body = $this->get('equ_body');
-		$mailer->From = $this->get('equ_from');
-		$mailer->FromName = $this->get('equ_from_name');
-		$mailer->AddAddress($this->get('equ_to'), $this->get('equ_to_name'));
+		$mailer->setFrom($this->get('equ_from'), $this->get('equ_from_name'));
+		$mailer->addAddress($this->get('equ_to'), $this->get('equ_to_name'));
 		
 		$dblink->beginTransaction();
 

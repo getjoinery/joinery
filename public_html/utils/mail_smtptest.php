@@ -22,26 +22,26 @@ $mail = new systemmailer();
 
 
 
-				$mail->AddAddress('jeremy.tunnell@gmail.com', 'Jeremy');
+				$mail->addAddress('jeremy.tunnell@gmail.com', 'Jeremy');
 
 
 
 
-			if(!$mail->Send()){
+			if(!$mail->send()){
 				echo "There has been a mail error sending bulk mail to " . $reciprow->recipient_email . ":" . $mail->ErrorInfo . "<br>";
 			}
 
 
 
 		// Clear all addresses and attachments for next loop
-		$mail->ClearAddresses();
+		$mail->clearAddresses();
 
 
 
 echo 'done';
 
 //CLOSE THE SMTP CONNECTION
-$mail->SmtpClose();
+$mail->smtpClose();
 
 
 ?>

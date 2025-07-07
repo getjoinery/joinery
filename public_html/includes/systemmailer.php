@@ -1,10 +1,11 @@
 <?php
 
-require_once('PHPMailer.php');
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
 
 class systemmailer extends PHPMailer {
 	function __construct() {
-		$this->Mailer = 'smtp';
+		$this->isSMTP();
 		$this->Host = '64.77.41.226';
 		$this->Encoding = 'quoted-printable';
 		$this->Helo = 'integralzen.org';
