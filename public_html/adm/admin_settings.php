@@ -374,22 +374,49 @@
 			if (file_exists($autoload_path)) {
 				echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Valid Composer installation</strong></div>';
 				
-				// Get installed packages from composer.lock
-				$packages = [];
+				// Get direct dependencies from composer.json
+				$direct_dependencies = [];
+				if (file_exists($composer_json)) {
+					$json_content = @file_get_contents($composer_json);
+					if ($json_content) {
+						$json_data = json_decode($json_content, true);
+						if (isset($json_data['require'])) {
+							$direct_dependencies = array_keys($json_data['require']);
+						}
+					}
+				}
+				
+				// Get all installed packages from composer.lock
+				$all_packages = [];
+				$direct_packages = [];
+				$sub_packages = [];
+				
 				if (file_exists($composer_lock)) {
 					$lock_content = @file_get_contents($composer_lock);
 					if ($lock_content) {
 						$lock_data = json_decode($lock_content, true);
 						if (isset($lock_data['packages'])) {
 							foreach ($lock_data['packages'] as $package) {
-								$packages[] = [
+								$pkg_info = [
 									'name' => $package['name'],
 									'version' => $package['version'] ?? 'unknown'
 								];
+								
+								$all_packages[] = $pkg_info;
+								
+								// Separate direct vs sub-dependencies
+								if (in_array($package['name'], $direct_dependencies)) {
+									$direct_packages[] = $pkg_info;
+								} else {
+									$sub_packages[] = $pkg_info;
+								}
 							}
 						}
 					}
 				}
+				
+				// For backward compatibility, keep $packages as all packages
+				$packages = $all_packages;
 				
 				// Show key packages we use FIRST
 				$key_packages = ['mailgun/mailgun-php', 'stripe/stripe-php', 'phpmailer/phpmailer'];
@@ -415,17 +442,53 @@
 				
 				if (!empty($packages)) {
 					echo '<div style="font-size: 12px; color: #666; margin-bottom: 8px;"><strong>' . count($packages) . ' total packages installed:</strong></div>';
-					echo '<div>';
-					foreach ($packages as $package) { // Show all packages
-						$version = $package['version'];
-						// Don't add 'v' if version already starts with 'v'
-						$version_display = (strpos($version, 'v') === 0) ? $version : 'v' . $version;
-						echo '<div style="font-size: 11px; color: #333; margin-bottom: 2px; padding: 2px 5px; background: white; border-radius: 3px;">';
-						echo '<code style="color: #007bff;">' . htmlspecialchars($package['name']) . '</code> ';
-						echo '<span style="color: #666;">' . htmlspecialchars($version_display) . '</span>';
+					echo '<div style="font-size: 11px; color: #666; margin-bottom: 8px;">' . count($direct_packages) . ' direct dependencies, ' . count($sub_packages) . ' sub-dependencies</div>';
+					
+					// Show direct dependencies first
+					if (!empty($direct_packages)) {
+						echo '<div style="margin-bottom: 12px;">';
+						echo '<div style="font-size: 11px; color: #495057; font-weight: bold; margin-bottom: 4px; padding: 2px 5px; background: #e9ecef; border-radius: 3px;">📦 Direct Dependencies</div>';
+						foreach ($direct_packages as $package) {
+							$version = $package['version'];
+							$version_display = (strpos($version, 'v') === 0) ? $version : 'v' . $version;
+							echo '<div style="font-size: 11px; color: #333; margin-bottom: 2px; padding: 2px 5px; background: white; border-radius: 3px; border-left: 3px solid #007bff;">';
+							echo '<code style="color: #007bff;">' . htmlspecialchars($package['name']) . '</code> ';
+							echo '<span style="color: #666;">' . htmlspecialchars($version_display) . '</span>';
+							echo '</div>';
+						}
 						echo '</div>';
 					}
-					echo '</div>';
+					
+					// Show sub-dependencies (collapsed by default if many)
+					if (!empty($sub_packages)) {
+						$show_all_sub = count($sub_packages) <= 10;
+						echo '<div style="margin-bottom: 8px;">';
+						echo '<div style="font-size: 11px; color: #6c757d; font-weight: bold; margin-bottom: 4px; padding: 2px 5px; background: #f8f9fa; border-radius: 3px;">🔗 Sub-Dependencies</div>';
+						
+						if ($show_all_sub) {
+							// Show all if 10 or fewer
+							foreach ($sub_packages as $package) {
+								$version = $package['version'];
+								$version_display = (strpos($version, 'v') === 0) ? $version : 'v' . $version;
+								echo '<div style="font-size: 10px; color: #6c757d; margin-bottom: 1px; padding: 1px 5px; background: #f8f9fa; border-radius: 2px;">';
+								echo '<code style="color: #6c757d;">' . htmlspecialchars($package['name']) . '</code> ';
+								echo '<span style="color: #999;">' . htmlspecialchars($version_display) . '</span>';
+								echo '</div>';
+							}
+						} else {
+							// Show first 5 and collapse button
+							foreach (array_slice($sub_packages, 0, 5) as $package) {
+								$version = $package['version'];
+								$version_display = (strpos($version, 'v') === 0) ? $version : 'v' . $version;
+								echo '<div style="font-size: 10px; color: #6c757d; margin-bottom: 1px; padding: 1px 5px; background: #f8f9fa; border-radius: 2px;">';
+								echo '<code style="color: #6c757d;">' . htmlspecialchars($package['name']) . '</code> ';
+								echo '<span style="color: #999;">' . htmlspecialchars($version_display) . '</span>';
+								echo '</div>';
+							}
+							echo '<div style="font-size: 10px; color: #999; margin-top: 4px; font-style: italic;">... and ' . (count($sub_packages) - 5) . ' more sub-dependencies</div>';
+						}
+						echo '</div>';
+					}
 				} else {
 					echo '<div style="color: #ffc107; font-size: 12px;">No packages found in composer.lock</div>';
 				}
