@@ -793,7 +793,7 @@
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
-		echo '<div style="margin: 30px 0;"></div>';
+		echo '<div style="margin: 50px 0;"></div>';
 
 		// Stripe Test API section with two-column layout and API validation
 		echo '<div class="row">';
@@ -896,7 +896,7 @@
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
-		echo '<div style="margin: 30px 0;"></div>';
+		echo '<div style="margin: 50px 0;"></div>';
 
 		// Stripe Webhook section with validation
 		echo '<div class="row">';
@@ -948,7 +948,7 @@
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
-		echo '<div style="margin: 30px 0;"></div>';
+		echo '<div style="margin: 50px 0;"></div>';
 		
 		//TODO: FIX STRIPE CHECKOUT WEBHOOK FOR NEW API VERSION
 		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', 'None' => 'none'); 
@@ -956,10 +956,283 @@
 
 		$optionvals = array("Yes"=>1, 'No' => 0);
 		echo $formwriter->dropinput("Enable Paypal Checkout", "use_paypal_checkout", '', $optionvals, $settings->get_setting('use_paypal_checkout'), '', FALSE);
+		// PayPal Live API section with two-column layout and API validation
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>PayPal Live API Settings</h5>';
 		echo $formwriter->textinput("Paypal Client ID (Example: ATF46g-L-ler2xxxx)", 'paypal_api_key', '', 20, $settings->get_setting('paypal_api_key'), "" , 255, "");
 		echo $formwriter->textinput("Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)", 'paypal_api_secret', '', 20, $settings->get_setting('paypal_api_secret'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Live API Status</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
+		
+		$paypal_api_key = $settings->get_setting('paypal_api_key');
+		$paypal_api_secret = $settings->get_setting('paypal_api_secret');
+		
+		if (!empty($paypal_api_key) && !empty($paypal_api_secret)) {
+			try {
+				// Test PayPal Live API connection using a simple account info call
+				$original_test_mode = $_SESSION['test_mode'] ?? null;
+				$_SESSION['test_mode'] = false; // Force live mode
+				
+				require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PaypalHelper.php');
+				
+				// Step 1: Get OAuth2 access token
+				$basic_auth = base64_encode($paypal_api_key . ':' . $paypal_api_secret);
+				$endpoint = 'https://api-m.paypal.com';
+				
+				// Get access token first
+				$curl = curl_init();
+				curl_setopt_array($curl, array(
+					CURLOPT_URL => $endpoint . '/v1/oauth2/token',
+					CURLOPT_RETURNTRANSFER => true,
+					CURLOPT_ENCODING => '',
+					CURLOPT_MAXREDIRS => 10,
+					CURLOPT_TIMEOUT => 10,
+					CURLOPT_FOLLOWLOCATION => true,
+					CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+					CURLOPT_CUSTOMREQUEST => 'POST',
+					CURLOPT_POSTFIELDS => 'grant_type=client_credentials',
+					CURLOPT_HTTPHEADER => array(
+						'Accept: application/json',
+						'Accept-Language: en_US',
+						'Content-Type: application/x-www-form-urlencoded',
+						"Authorization: Basic $basic_auth"
+					),
+				));
+				
+				$token_response = curl_exec($curl);
+				$token_http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+				$curl_error = curl_error($curl);
+				curl_close($curl);
+				
+				// If we got an access token, that means credentials are valid
+				if ($token_http_code === 200) {
+					$token_data = json_decode($token_response, true);
+					$http_code = 200;
+					$response = json_encode(array(
+						'success' => true,
+						'access_token' => substr($token_data['access_token'], 0, 20) . '...',
+						'token_type' => $token_data['token_type'],
+						'expires_in' => $token_data['expires_in']
+					));
+				} else {
+					$http_code = $token_http_code;
+					$response = $token_response;
+				}
+				
+				// Restore original test mode
+				if ($original_test_mode !== null) {
+					$_SESSION['test_mode'] = $original_test_mode;
+				} else {
+					unset($_SESSION['test_mode']);
+				}
+				
+				if ($http_code === 200) {
+					$token_info = json_decode($response, true);
+					echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Live API Credentials Valid</strong></div>';
+					echo '<strong>Environment:</strong> Production<br>';
+					echo '<strong>Token Type:</strong> ' . htmlspecialchars($token_info['token_type']) . '<br>';
+					echo '<strong>Access Token:</strong> ' . htmlspecialchars($token_info['access_token']) . '<br>';
+					echo '<strong>Expires In:</strong> ' . htmlspecialchars($token_info['expires_in']) . ' seconds<br>';
+					
+					echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ OAuth2 authentication successful - Ready for live payments</div>';
+					
+				} else {
+					echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Authentication Failed</strong></div>';
+					echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">HTTP Code: ' . $http_code . '</div>';
+					if ($response) {
+						$error_data = json_decode($response, true);
+						if (isset($error_data['error_description'])) {
+							echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($error_data['error_description']) . '</div>';
+						} elseif (isset($error_data['error'])) {
+							echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($error_data['error']) . '</div>';
+						}
+					}
+					
+					// Show debug info only on failure
+					echo '<div style="background: #f8d7da; padding: 10px; border-radius: 3px; margin-top: 10px; font-size: 10px; color: #721c24;">';
+					echo '<strong>Debug Info:</strong><br>';
+					echo 'Client ID: ' . htmlspecialchars(substr($paypal_api_key, 0, 8)) . '...' . htmlspecialchars(substr($paypal_api_key, -4)) . '<br>';
+					echo 'Client Secret: ' . htmlspecialchars(substr($paypal_api_secret, 0, 8)) . '...' . htmlspecialchars(substr($paypal_api_secret, -4)) . '<br>';
+					echo 'Endpoint: ' . htmlspecialchars($endpoint) . '<br>';
+					
+					// Check if this might be a credential mismatch
+					if (strpos($paypal_api_key, 'sb-') === 0 || strpos($paypal_api_key, 'ATF') === 0) {
+						echo '<div style="color: #dc3545; font-weight: bold; margin-top: 5px;">⚠ WARNING: This Client ID appears to be for SANDBOX, but you\'re testing against LIVE endpoint!</div>';
+					}
+					if ($curl_error) {
+						echo 'cURL Error: ' . htmlspecialchars($curl_error) . '<br>';
+					}
+					echo '</div>';
+				}
+				
+			} catch (Exception $e) {
+				echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Connection Failed</strong></div>';
+				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+				
+				// Restore original test mode
+				if (isset($original_test_mode)) {
+					if ($original_test_mode !== null) {
+						$_SESSION['test_mode'] = $original_test_mode;
+					} else {
+						unset($_SESSION['test_mode']);
+					}
+				}
+			}
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both Client ID and Secret to validate connection</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<div style="margin: 50px 0;"></div>';
+
+		// PayPal Test API section with two-column layout and API validation
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>PayPal Test API Settings</h5>';
 		echo $formwriter->textinput("Test Paypal Client ID (Example: ATF46g-L-ler2xxxx)", 'paypal_api_key_test', '', 20, $settings->get_setting('paypal_api_key_test'), "" , 255, "");
 		echo $formwriter->textinput("Test Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)", 'paypal_api_secret_test', '', 20, $settings->get_setting('paypal_api_secret_test'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Test API Status</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
+		
+		$paypal_api_key_test = $settings->get_setting('paypal_api_key_test');
+		$paypal_api_secret_test = $settings->get_setting('paypal_api_secret_test');
+		
+		if (!empty($paypal_api_key_test) && !empty($paypal_api_secret_test)) {
+			try {
+				// Test PayPal Test API connection using a simple account info call
+				$original_test_mode = $_SESSION['test_mode'] ?? null;
+				$_SESSION['test_mode'] = true; // Force test mode
+				
+				require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PaypalHelper.php');
+				
+				// Step 1: Get OAuth2 access token
+				$basic_auth_test = base64_encode($paypal_api_key_test . ':' . $paypal_api_secret_test);
+				$endpoint_test = 'https://api-m.sandbox.paypal.com';
+				
+				
+				// Get access token first
+				$curl = curl_init();
+				curl_setopt_array($curl, array(
+					CURLOPT_URL => $endpoint_test . '/v1/oauth2/token',
+					CURLOPT_RETURNTRANSFER => true,
+					CURLOPT_ENCODING => '',
+					CURLOPT_MAXREDIRS => 10,
+					CURLOPT_TIMEOUT => 10,
+					CURLOPT_FOLLOWLOCATION => true,
+					CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+					CURLOPT_CUSTOMREQUEST => 'POST',
+					CURLOPT_POSTFIELDS => 'grant_type=client_credentials',
+					CURLOPT_HTTPHEADER => array(
+						'Accept: application/json',
+						'Accept-Language: en_US',
+						'Content-Type: application/x-www-form-urlencoded',
+						"Authorization: Basic $basic_auth_test"
+					),
+				));
+				
+				$token_response = curl_exec($curl);
+				$token_http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+				$curl_error = curl_error($curl);
+				curl_close($curl);
+				
+				
+				// If we got an access token, that means credentials are valid
+				if ($token_http_code === 200) {
+					$token_data = json_decode($token_response, true);
+					$http_code = 200;
+					$response = json_encode(array(
+						'success' => true,
+						'access_token' => substr($token_data['access_token'], 0, 20) . '...',
+						'token_type' => $token_data['token_type'],
+						'expires_in' => $token_data['expires_in']
+					));
+				} else {
+					$http_code = $token_http_code;
+					$response = $token_response;
+				}
+				
+				// Restore original test mode
+				if ($original_test_mode !== null) {
+					$_SESSION['test_mode'] = $original_test_mode;
+				} else {
+					unset($_SESSION['test_mode']);
+				}
+				
+				if ($http_code === 200) {
+					$token_info = json_decode($response, true);
+					echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Test API Credentials Valid</strong></div>';
+					echo '<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 11px; color: #856404;">🧪 Sandbox Environment</div>';
+					echo '<strong>Token Type:</strong> ' . htmlspecialchars($token_info['token_type']) . '<br>';
+					echo '<strong>Access Token:</strong> ' . htmlspecialchars($token_info['access_token']) . '<br>';
+					echo '<strong>Expires In:</strong> ' . htmlspecialchars($token_info['expires_in']) . ' seconds<br>';
+					
+					echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ OAuth2 authentication successful - Ready for testing</div>';
+					
+				} else {
+					echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Authentication Failed</strong></div>';
+					echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">HTTP Code: ' . $http_code . '</div>';
+					if ($response) {
+						$error_data = json_decode($response, true);
+						if (isset($error_data['error_description'])) {
+							echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($error_data['error_description']) . '</div>';
+						} elseif (isset($error_data['error'])) {
+							echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($error_data['error']) . '</div>';
+						}
+					}
+					
+					// Debug information (only shown on failure)
+					echo '<div style="background: #e9ecef; padding: 10px; border-radius: 3px; margin-top: 10px; font-size: 10px; color: #495057;">';
+					echo '<strong>Debug Info:</strong><br>';
+					echo 'Client ID: ' . htmlspecialchars(substr($paypal_api_key_test, 0, 8)) . '...' . htmlspecialchars(substr($paypal_api_key_test, -4)) . '<br>';
+					echo 'Client Secret: ' . htmlspecialchars(substr($paypal_api_secret_test, 0, 8)) . '...' . htmlspecialchars(substr($paypal_api_secret_test, -4)) . '<br>';
+					echo 'Endpoint: ' . htmlspecialchars($endpoint_test) . '<br>';
+					echo 'Basic Auth: ' . htmlspecialchars(substr($basic_auth_test, 0, 20)) . '...<br>';
+					
+					// Check if this might be a credential mismatch
+					if (strpos($paypal_api_key_test, 'sb-') !== 0 && strpos($paypal_api_key_test, 'ATF') !== 0) {
+						echo '<div style="color: #dc3545; font-weight: bold;">⚠ WARNING: This Client ID appears to be for LIVE, but you\'re testing against SANDBOX endpoint!</div>';
+					}
+					echo '</div>';
+					
+					// Response debug (only shown on failure)
+					echo '<div style="background: #f8f9fa; padding: 10px; border-radius: 3px; margin-top: 10px; font-size: 10px; color: #495057;">';
+					echo '<strong>Response Debug:</strong><br>';
+					echo 'HTTP Code: ' . $token_http_code . '<br>';
+					if ($curl_error) {
+						echo 'cURL Error: ' . htmlspecialchars($curl_error) . '<br>';
+					}
+					echo 'Response: ' . htmlspecialchars(substr($token_response, 0, 200)) . '...<br>';
+					echo '</div>';
+				}
+				
+			} catch (Exception $e) {
+				echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Connection Failed</strong></div>';
+				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+				
+				// Restore original test mode
+				if (isset($original_test_mode)) {
+					if ($original_test_mode !== null) {
+						$_SESSION['test_mode'] = $original_test_mode;
+					} else {
+						unset($_SESSION['test_mode']);
+					}
+				}
+			}
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both Client ID and Secret to validate connection</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<div style="margin: 50px 0;"></div>';
 
 
 
@@ -1074,7 +1347,7 @@
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
-		echo '<div style="margin: 30px 0;"></div>';
+		echo '<div style="margin: 50px 0;"></div>';
 
 	}
 	
