@@ -310,21 +310,54 @@
 		echo '<h3>System Settings</h3>';
 
 
-		echo '<div style="border: 3px solid black; padding: 10px; margin: 10px;">NOTE: The following values are loaded from Globalvars_site.php</b>';
+		// Path Configuration Section
+		echo '<h5>Path Configuration</h5>';
+		
+		// Read Globalvars_site.php to determine what's actually hardcoded
+		$globalvars_site_path = dirname(__DIR__, 2) . '/config/Globalvars_site.php';
+		$globalvars_hardcoded = array();
+		
+		if (file_exists($globalvars_site_path)) {
+			$globalvars_content = file_get_contents($globalvars_site_path);
+			
+			// Parse the file to find $this->settings assignments
+			if (preg_match_all('/\$this->settings\[\'([^\']+)\'\]\s*=\s*[\'"]([^\'"]*)[\'"];/', $globalvars_content, $matches, PREG_SET_ORDER)) {
+				foreach ($matches as $match) {
+					$globalvars_hardcoded[$match[1]] = $match[2];
+				}
+			}
+			
+			// Also check for $this->settings["key"] = "value" format
+			if (preg_match_all('/\$this->settings\["([^"]+)"\]\s*=\s*[\'"]([^\'"]*)[\'"];/', $globalvars_content, $matches, PREG_SET_ORDER)) {
+				foreach ($matches as $match) {
+					$globalvars_hardcoded[$match[1]] = $match[2];
+				}
+			}
+		}
 		
 		
-		echo '<p><b>Base path: </b> '.$settings->get_setting('baseDir').'</p>';
-		echo '<p><b>Site path: </b> '.$settings->get_setting('siteDir').'</p>';
-		echo '<p><b>Static files path: </b> '.$settings->get_setting('static_files_dir').'</p>';
-		echo '<p><b>Upload path: </b> '.$settings->get_setting('upload_dir').'</p>';
-		echo '<p><b>Upload web directory: </b> '.$settings->get_setting('upload_web_dir').'</p>';
+		// Base path - check if hardcoded in Globalvars_site.php
+		if (isset($globalvars_hardcoded['baseDir'])) {
+			echo $formwriter->textinput("Base path (Loaded from Globalvars_site.php)", 'baseDir_readonly', 'is-valid', 20, $settings->get_setting('baseDir'), '', 255, 'readonly');
+		} else {
+			echo $formwriter->textinput("Base path", 'baseDir', '', 20, $settings->get_setting('baseDir'), '', 255, '');
+		}
 		
-		/*echo $formwriter->textinput("Site Path (Default: ".$settings->get_setting('siteDir').")", 'siteDir', '', 20, $settings->get_setting('siteDir', false), "" , 255, "");
-		echo $formwriter->textinput("Static Files Path (Default: ".$settings->get_setting('static_files_dir').")", 'static_files_dir', '', 20, $settings->get_setting('static_files_dir', false), "" , 255, "");
-		echo $formwriter->textinput("Upload Path (Default: ".$settings->get_setting('upload_dir').")", 'upload_dir', '', 20, $settings->get_setting('upload_dir', false), "" , 255, "");
-		echo $formwriter->textinput("Upload Web URL (Default: ".$settings->get_setting('upload_web_dir').")", 'upload_web_dir', '', 20, $settings->get_setting('upload_web_dir', false), "" , 255, "");
-		*/
-		echo '</div>';
+		// Site path - always calculated, read-only
+		echo $formwriter->textinput("Site path (Auto-calculated)", 'siteDir_readonly', 'is-valid', 20, $settings->get_setting('siteDir'), '', 255, 'readonly');
+		
+		// Static files path - always calculated, read-only
+		echo $formwriter->textinput("Static files path (Auto-calculated)", 'static_files_dir_readonly', 'is-valid', 20, $settings->get_setting('static_files_dir'), '', 255, 'readonly');
+		
+		// Upload path - always calculated, read-only
+		echo $formwriter->textinput("Upload path (Auto-calculated)", 'upload_dir_readonly', 'is-valid', 20, $settings->get_setting('upload_dir'), '', 255, 'readonly');
+		
+		// Upload web directory - check if hardcoded in Globalvars_site.php
+		if (isset($globalvars_hardcoded['upload_web_dir'])) {
+			echo $formwriter->textinput("Upload web directory (Loaded from Globalvars_site.php)", 'upload_web_dir_readonly', 'is-valid', 20, $settings->get_setting('upload_web_dir'), '', 255, 'readonly');
+		} else {
+			echo $formwriter->textinput("Upload web directory", 'upload_web_dir', '', 20, $settings->get_setting('upload_web_dir'), '', 255, 'Usually just "uploads" - relative path visible on web');
+		}
 		
 		// Create dropdown for site folder based on directories under base path
 		// Note: baseDir is loaded from Globalvars_site.php and is not editable through admin
@@ -351,7 +384,14 @@
 			$site_optionvals[''] = 'Base path not configured or invalid';
 		}
 		
-		echo $formwriter->dropinput("Site location (The site we are running, basically the folder at " . htmlspecialchars($base_path) . ")", "site_template", $site_folder_error, $site_optionvals, $settings->get_setting('site_template'), '', FALSE);
+		// Site location - check if it's hardcoded in Globalvars_site.php
+		if (isset($globalvars_hardcoded['site_template'])) {
+			// It's hardcoded, make it read-only
+			echo $formwriter->textinput("Site location (Loaded from Globalvars_site.php)", 'site_template_readonly', 'is-valid', 20, $settings->get_setting('site_template'), '', 255, 'readonly');
+		} else {
+			// It's database-driven, make it editable
+			echo $formwriter->dropinput("Site location (The site we are running, basically the folder at " . htmlspecialchars($base_path) . ")", "site_template", $site_folder_error, $site_optionvals, $settings->get_setting('site_template'), '', FALSE);
+		}
 		
 		echo $formwriter->textinput("Web URL (Example: https://getjoinery.com)", 'webDir', '', 20, $settings->get_setting('webDir'), "" , 255, "");
 		
