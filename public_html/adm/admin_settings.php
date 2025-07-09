@@ -261,6 +261,7 @@
 			}		
 		}
 		
+		
 	
 		$(document).ready(function() {
 			set_choices();
@@ -308,6 +309,52 @@
 		
 		echo '<h3>System Settings</h3>';
 
+
+		echo '<div style="border: 3px solid black; padding: 10px; margin: 10px;">NOTE: The following values are loaded from Globalvars_site.php</b>';
+		
+		
+		echo '<p><b>Base path: </b> '.$settings->get_setting('baseDir').'</p>';
+		echo '<p><b>Site path: </b> '.$settings->get_setting('siteDir').'</p>';
+		echo '<p><b>Static files path: </b> '.$settings->get_setting('static_files_dir').'</p>';
+		echo '<p><b>Upload path: </b> '.$settings->get_setting('upload_dir').'</p>';
+		echo '<p><b>Upload web directory: </b> '.$settings->get_setting('upload_web_dir').'</p>';
+		
+		/*echo $formwriter->textinput("Site Path (Default: ".$settings->get_setting('siteDir').")", 'siteDir', '', 20, $settings->get_setting('siteDir', false), "" , 255, "");
+		echo $formwriter->textinput("Static Files Path (Default: ".$settings->get_setting('static_files_dir').")", 'static_files_dir', '', 20, $settings->get_setting('static_files_dir', false), "" , 255, "");
+		echo $formwriter->textinput("Upload Path (Default: ".$settings->get_setting('upload_dir').")", 'upload_dir', '', 20, $settings->get_setting('upload_dir', false), "" , 255, "");
+		echo $formwriter->textinput("Upload Web URL (Default: ".$settings->get_setting('upload_web_dir').")", 'upload_web_dir', '', 20, $settings->get_setting('upload_web_dir', false), "" , 255, "");
+		*/
+		echo '</div>';
+		
+		// Create dropdown for site folder based on directories under base path
+		// Note: baseDir is loaded from Globalvars_site.php and is not editable through admin
+		$base_path = $settings->get_setting('baseDir');
+		$site_optionvals = array();
+		$site_folder_error = '';
+		
+		if ($base_path && is_dir($base_path)) {
+			$site_directories = LibraryFunctions::list_directories_in_directory($base_path, 'filename');
+			foreach($site_directories as $site_directory){
+				// Skip hidden directories and common system directories
+				if (substr($site_directory, 0, 1) !== '.' && $site_directory !== 'lost+found') {
+					$site_optionvals[$site_directory] = $site_directory;
+				}
+			}
+			// Add current value if it's not in the list
+			$current_site_template = $settings->get_setting('site_template');
+			if ($current_site_template && !isset($site_optionvals[$current_site_template])) {
+				$site_optionvals[$current_site_template] = $current_site_template . ' (missing)';
+			}
+		} else {
+			// Base path is invalid, show error
+			$site_folder_error = 'is-invalid';
+			$site_optionvals[''] = 'Base path not configured or invalid';
+		}
+		
+		echo $formwriter->dropinput("Site location (The site we are running, basically the folder at " . htmlspecialchars($base_path) . ")", "site_template", $site_folder_error, $site_optionvals, $settings->get_setting('site_template'), '', FALSE);
+		
+		echo $formwriter->textinput("Web URL (Example: https://getjoinery.com)", 'webDir', '', 20, $settings->get_setting('webDir'), "" , 255, "");
+		
 		$optionvals = array("Yes"=>1, 'No' => 0);
 		echo $formwriter->dropinput("Force HTTPS", "force_https", '', $optionvals, $settings->get_setting('force_https'), '', FALSE);	
 
@@ -330,28 +377,6 @@
 		
 		//echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
 		echo $formwriter->dropinput("Active theme", "theme_template", '', $optionvals, $settings->get_setting('theme_template'), '', FALSE);
-		
-		echo $formwriter->textinput("Base Path", 'baseDir', '', 20, $settings->get_setting('baseDir'), "" , 255, "");
-		echo $formwriter->textinput("Site folder (The site we are running, basically the folder at /var/www/html/x)", 'site_template', '', 20, $settings->get_setting('site_template'), "" , 255, "");
-		
-		echo $formwriter->textinput("Web URL (Example: https://getjoinery.com)", 'webDir', '', 20, $settings->get_setting('webDir'), "" , 255, "");
-		
-		echo '<div style="border: 3px solid black; padding: 10px; margin: 10px;">NOTE: The following values are loaded from Globalvars_site.php</b>';
-		
-		echo '<p><b>Site path: </b> '.$settings->get_setting('siteDir').'</p>';
-		echo '<p><b>Static files path: </b> '.$settings->get_setting('static_files_dir').'</p>';
-		echo '<p><b>Upload path: </b> '.$settings->get_setting('upload_dir').'</p>';
-		echo '<p><b>Upload web directory: </b> '.$settings->get_setting('upload_web_dir').'</p>';
-		
-		/*echo $formwriter->textinput("Site Path (Default: ".$settings->get_setting('siteDir').")", 'siteDir', '', 20, $settings->get_setting('siteDir', false), "" , 255, "");
-		echo $formwriter->textinput("Static Files Path (Default: ".$settings->get_setting('static_files_dir').")", 'static_files_dir', '', 20, $settings->get_setting('static_files_dir', false), "" , 255, "");
-		echo $formwriter->textinput("Upload Path (Default: ".$settings->get_setting('upload_dir').")", 'upload_dir', '', 20, $settings->get_setting('upload_dir', false), "" , 255, "");
-		echo $formwriter->textinput("Upload Web URL (Default: ".$settings->get_setting('upload_web_dir').")", 'upload_web_dir', '', 20, $settings->get_setting('upload_web_dir', false), "" , 255, "");
-		*/
-		echo '</div>';
-		
-		
-		
 		
 		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', '', 20, $settings->get_setting('webmaster_email'), "" , 255, "");
 		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");
