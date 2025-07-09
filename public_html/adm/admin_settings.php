@@ -251,6 +251,16 @@
 			}		
 		}
 		
+		function set_tracking_choices(){
+			var value = $("#tracking").val();
+			if(value == 'custom'){  
+				$("#tracking_code_container").show();
+			}	
+			else{ 
+				$("#tracking_code_container").hide();
+			}		
+		}
+		
 	
 		$(document).ready(function() {
 			set_choices();
@@ -258,6 +268,7 @@
 			set_blog_choices();
 			check_social_content(); // Check content before setting visibility
 			set_social_choices();
+			set_tracking_choices();
 			$("#use_paypal_checkout").change(function() {	
 				set_choices();
 			});	
@@ -269,6 +280,9 @@
 			});	
 			$("#social_settings_active").change(function() {	
 				set_social_choices();
+			});	
+			$("#tracking").change(function() {	
+				set_tracking_choices();
 			});	
 		});
 	
@@ -690,6 +704,9 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
+		// Stripe Configuration Section
+		echo '<h4>Stripe Configuration</h4>';
+		
 		// Stripe Live API section with two-column layout and API validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
@@ -950,12 +967,18 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 		
+		// Checkout Configuration Section
+		echo '<h4>Checkout Configuration</h4>';
 		//TODO: FIX STRIPE CHECKOUT WEBHOOK FOR NEW API VERSION
 		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', 'None' => 'none'); 
 		echo $formwriter->dropinput("Checkout Type", "checkout_type", '', $optionvals, $settings->get_setting('checkout_type'), '', FALSE);
-
+		echo '<div style="margin: 50px 0;"></div>';
+		
+		// PayPal Configuration Section
+		echo '<h4>PayPal Configuration</h4>';
 		$optionvals = array("Yes"=>1, 'No' => 0);
 		echo $formwriter->dropinput("Enable Paypal Checkout", "use_paypal_checkout", '', $optionvals, $settings->get_setting('use_paypal_checkout'), '', FALSE);
+		
 		// PayPal Live API section with two-column layout and API validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
@@ -1375,7 +1398,8 @@
 	echo $formwriter->dropinput("Default timezone", "default_timezone", '', $optionvals, $settings->get_setting('default_timezone'), '', FALSE); 
 
 	echo $formwriter->textinput("Nickname display as (blank for no nicknames)", "nickname_display_as", '', 20, $settings->get_setting('nickname_display_as'), "" , 255, "");	
-	echo $formwriter->textinput("Form styling (blank for default)", "form_style", '', 20, $settings->get_setting('form_style'), "" , 255, "");	
+	$optionvals = array("Default (UIKit)"=>'', 'Bootstrap' => 'admin', 'Tailwind' => 'tailwind');
+	echo $formwriter->dropinput("Form styling", "form_style", '', $optionvals, $settings->get_setting('form_style'), '', FALSE);	
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Require email activation to log on", "activation_required_login", '', $optionvals, $settings->get_setting('activation_required_login'), '', FALSE);	
