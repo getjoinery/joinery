@@ -690,11 +690,265 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
+		// Stripe Live API section with two-column layout and API validation
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>Stripe Live API Settings</h5>';
 		echo $formwriter->textinput("Stripe API Key (Example: sk_live_xxxx)", 'stripe_api_key', '', 20, $settings->get_setting('stripe_api_key'), "" , 255, "");
 		echo $formwriter->textinput("Stripe API Private Key (Example: pk_live_xxxx)", 'stripe_api_pkey', '', 20, $settings->get_setting('stripe_api_pkey'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Live API Status</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
+		
+		$stripe_api_key = $settings->get_setting('stripe_api_key');
+		$stripe_api_pkey = $settings->get_setting('stripe_api_pkey');
+		
+		if (!empty($stripe_api_key)) {
+			// Test Stripe Live API connection
+			$composer_path = $settings->get_setting('composerAutoLoad');
+			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
+				try {
+					require_once(rtrim($composer_path, '/') . '/autoload.php');
+					
+					// Create a temporary StripeHelper instance for live API
+					$original_test_mode = $_SESSION['test_mode'] ?? null;
+					$_SESSION['test_mode'] = false; // Force live mode
+					
+					require_once($_SERVER['DOCUMENT_ROOT'].'/includes/StripeHelper.php');
+					$stripe_helper = new StripeHelper();
+					
+					if ($stripe_helper->is_initialized()) {
+						// Use account retrieve as minimal API call
+						$stripe_client = new \Stripe\StripeClient([
+							'api_key' => $stripe_api_key,
+							'stripe_version' => '2022-11-15'
+						]);
+						
+						$account = $stripe_client->accounts->retrieve();
+						
+						if ($account && isset($account->id)) {
+							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Live API Key Valid</strong></div>';
+							echo '<strong>Account ID:</strong> ' . htmlspecialchars($account->id) . '<br>';
+							
+							if (isset($account->business_profile->name)) {
+								echo '<strong>Business:</strong> ' . htmlspecialchars($account->business_profile->name) . '<br>';
+							}
+							if (isset($account->country)) {
+								echo '<strong>Country:</strong> ' . htmlspecialchars($account->country) . '<br>';
+							}
+							if (isset($account->default_currency)) {
+								echo '<strong>Currency:</strong> ' . htmlspecialchars(strtoupper($account->default_currency)) . '<br>';
+							}
+							if (isset($account->charges_enabled)) {
+								echo '<strong>Charges Enabled:</strong> ' . ($account->charges_enabled ? 'Yes' : 'No') . '<br>';
+							}
+							if (isset($account->payouts_enabled)) {
+								echo '<strong>Payouts Enabled:</strong> ' . ($account->payouts_enabled ? 'Yes' : 'No') . '<br>';
+							}
+							
+							if (!empty($stripe_api_pkey)) {
+								echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Public key also configured</div>';
+							} else {
+								echo '<div style="color: #ffc107; font-size: 11px; margin-top: 10px;">⚠ Public key not configured</div>';
+							}
+							
+						} else {
+							echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Invalid API Response</strong></div>';
+							echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">API key may be invalid or expired</div>';
+						}
+					} else {
+						echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Key Invalid</strong></div>';
+						echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">StripeHelper could not initialize with this key</div>';
+					}
+					
+					// Restore original test mode
+					if ($original_test_mode !== null) {
+						$_SESSION['test_mode'] = $original_test_mode;
+					} else {
+						unset($_SESSION['test_mode']);
+					}
+					
+				} catch (Exception $e) {
+					echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Connection Failed</strong></div>';
+					echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+					
+					// Restore original test mode
+					if (isset($original_test_mode)) {
+						if ($original_test_mode !== null) {
+							$_SESSION['test_mode'] = $original_test_mode;
+						} else {
+							unset($_SESSION['test_mode']);
+						}
+					}
+				}
+			} else {
+				echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ Composer Not Configured</strong></div>';
+				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
+			}
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter API key to validate connection</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<div style="margin: 30px 0;"></div>';
+
+		// Stripe Test API section with two-column layout and API validation
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>Stripe Test API Settings</h5>';
 		echo $formwriter->textinput("Test Stripe API Key (Example: sk_test_xxxx)", 'stripe_api_key_test', '', 20, $settings->get_setting('stripe_api_key_test'), "" , 255, "");
 		echo $formwriter->textinput("Test Stripe Private Key (Example: pk_test_xxxx)", 'stripe_api_pkey_test', '', 20, $settings->get_setting('stripe_api_pkey_test'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Test API Status</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
+		
+		$stripe_api_key_test = $settings->get_setting('stripe_api_key_test');
+		$stripe_api_pkey_test = $settings->get_setting('stripe_api_pkey_test');
+		
+		if (!empty($stripe_api_key_test)) {
+			// Test Stripe Test API connection
+			$composer_path = $settings->get_setting('composerAutoLoad');
+			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
+				try {
+					require_once(rtrim($composer_path, '/') . '/autoload.php');
+					
+					// Create a temporary StripeHelper instance for test API
+					$original_test_mode = $_SESSION['test_mode'] ?? null;
+					$_SESSION['test_mode'] = true; // Force test mode
+					
+					require_once($_SERVER['DOCUMENT_ROOT'].'/includes/StripeHelper.php');
+					$stripe_helper_test = new StripeHelper();
+					
+					if ($stripe_helper_test->is_initialized()) {
+						// Use account retrieve as minimal API call
+						$stripe_client_test = new \Stripe\StripeClient([
+							'api_key' => $stripe_api_key_test,
+							'stripe_version' => '2022-11-15'
+						]);
+						
+						$account_test = $stripe_client_test->accounts->retrieve();
+						
+						if ($account_test && isset($account_test->id)) {
+							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Test API Key Valid</strong></div>';
+							echo '<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 11px; color: #856404;">🧪 Test Mode Account</div>';
+							echo '<strong>Account ID:</strong> ' . htmlspecialchars($account_test->id) . '<br>';
+							
+							if (isset($account_test->business_profile->name)) {
+								echo '<strong>Business:</strong> ' . htmlspecialchars($account_test->business_profile->name) . '<br>';
+							}
+							if (isset($account_test->country)) {
+								echo '<strong>Country:</strong> ' . htmlspecialchars($account_test->country) . '<br>';
+							}
+							if (isset($account_test->default_currency)) {
+								echo '<strong>Currency:</strong> ' . htmlspecialchars(strtoupper($account_test->default_currency)) . '<br>';
+							}
+							if (isset($account_test->charges_enabled)) {
+								echo '<strong>Charges Enabled:</strong> ' . ($account_test->charges_enabled ? 'Yes' : 'No') . '<br>';
+							}
+							
+							if (!empty($stripe_api_pkey_test)) {
+								echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Public key also configured</div>';
+							} else {
+								echo '<div style="color: #ffc107; font-size: 11px; margin-top: 10px;">⚠ Public key not configured</div>';
+							}
+							
+						} else {
+							echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Invalid API Response</strong></div>';
+							echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">API key may be invalid or expired</div>';
+						}
+					} else {
+						echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Key Invalid</strong></div>';
+						echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">StripeHelper could not initialize with this key</div>';
+					}
+					
+					// Restore original test mode
+					if ($original_test_mode !== null) {
+						$_SESSION['test_mode'] = $original_test_mode;
+					} else {
+						unset($_SESSION['test_mode']);
+					}
+					
+				} catch (Exception $e) {
+					echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Connection Failed</strong></div>';
+					echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+					
+					// Restore original test mode
+					if (isset($original_test_mode)) {
+						if ($original_test_mode !== null) {
+							$_SESSION['test_mode'] = $original_test_mode;
+						} else {
+							unset($_SESSION['test_mode']);
+						}
+					}
+				}
+			} else {
+				echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ Composer Not Configured</strong></div>';
+				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
+			}
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter test API key to validate connection</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<div style="margin: 30px 0;"></div>';
+
+		// Stripe Webhook section with validation
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>Stripe Webhook Settings</h5>';
 		echo $formwriter->textinput("Stripe Endpoint Secret (Example: whsec_xxxx)", 'stripe_endpoint_secret', '', 20, $settings->get_setting('stripe_endpoint_secret'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Webhook Configuration</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
+		
+		$stripe_endpoint_secret = $settings->get_setting('stripe_endpoint_secret');
+		
+		if (!empty($stripe_endpoint_secret)) {
+			// Basic validation of webhook secret format
+			if (strpos($stripe_endpoint_secret, 'whsec_') === 0) {
+				echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Webhook Secret Configured</strong></div>';
+				echo '<strong>Format:</strong> Valid (whsec_*****)<br>';
+				echo '<strong>Length:</strong> ' . strlen($stripe_endpoint_secret) . ' characters<br>';
+				
+				echo '<div style="margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 3px; font-size: 11px;">';
+				echo '<strong>Purpose:</strong> This secret validates that webhook requests are actually from Stripe using HMAC-SHA256 signatures.<br><br>';
+				echo '<strong>Used for:</strong> Payment confirmations, subscription updates, failed payments, etc.<br><br>';
+				echo '<strong>Security:</strong> Prevents malicious webhook spoofing attacks.';
+				echo '</div>';
+				
+				echo '<div style="color: #17a2b8; font-size: 11px; margin-top: 10px;">ℹ️ This secret can only be tested by receiving actual webhooks from Stripe</div>';
+				
+			} else {
+				echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Invalid Format</strong></div>';
+				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Stripe webhook secrets should start with "whsec_"</div>';
+				echo '<strong>Current value:</strong> ' . htmlspecialchars(substr($stripe_endpoint_secret, 0, 10)) . '...<br>';
+			}
+		} else {
+			echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ No Webhook Secret</strong></div>';
+			echo '<div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 3px; font-size: 11px; color: #856404;">';
+			echo '<strong>Without a webhook secret:</strong><br>';
+			echo '• Webhook requests cannot be verified<br>';
+			echo '• Your application is vulnerable to webhook spoofing<br>';
+			echo '• Payment confirmations may not be secure<br><br>';
+			echo '<strong>To get this secret:</strong><br>';
+			echo '1. Go to your Stripe Dashboard<br>';
+			echo '2. Navigate to Developers → Webhooks<br>';
+			echo '3. Create or edit your webhook endpoint<br>';
+			echo '4. Copy the "Signing secret"';
+			echo '</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<div style="margin: 30px 0;"></div>';
 		
 		//TODO: FIX STRIPE CHECKOUT WEBHOOK FOR NEW API VERSION
 		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', 'None' => 'none'); 
