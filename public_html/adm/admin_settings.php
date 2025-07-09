@@ -168,12 +168,96 @@
 				$("#blog_footer_text_container").show();
 			}		
 		}
+
+		function check_social_content(){
+			// Check if any social field has content
+			var social_fields = [
+				"#social_facebook_link",
+				"#social_instagram_link",
+				"#social_soundcloud_link",
+				"#social_spotify_link",
+				"#social_youtube_link",
+				"#social_mixcloud_link",
+				"#social_discord_link",
+				"#social_google_link",
+				"#social_linkedin_link",
+				"#social_pinterest_link",
+				"#social_stack_link",
+				"#social_telegram_link",
+				"#social_tiktok_link",
+				"#social_snapchat_link",
+				"#social_slack_link",
+				"#social_github_link",
+				"#social_reddit_link",
+				"#social_whatsapp_link",
+				"#social_twitch_link"
+			];
+			
+			var has_content = false;
+			for(var i = 0; i < social_fields.length; i++){
+				if($(social_fields[i]).val() && $(social_fields[i]).val().trim() !== ''){
+					has_content = true;
+					break;
+				}
+			}
+			
+			// Set the dropdown value based on content
+			$("#social_settings_active").val(has_content ? '1' : '0');
+		}
+
+		function set_social_choices(){
+			var value = $("#social_settings_active").val();
+			if(value == 0 || value == ''){  
+				$("#social_facebook_link_container").hide();
+				$("#social_instagram_link_container").hide();
+				$("#social_soundcloud_link_container").hide();
+				$("#social_spotify_link_container").hide();
+				$("#social_youtube_link_container").hide();
+				$("#social_mixcloud_link_container").hide();
+				$("#social_discord_link_container").hide();
+				$("#social_google_link_container").hide();
+				$("#social_linkedin_link_container").hide();
+				$("#social_pinterest_link_container").hide();
+				$("#social_stack_link_container").hide();
+				$("#social_telegram_link_container").hide();
+				$("#social_tiktok_link_container").hide();
+				$("#social_snapchat_link_container").hide();
+				$("#social_slack_link_container").hide();
+				$("#social_github_link_container").hide();
+				$("#social_reddit_link_container").hide();
+				$("#social_whatsapp_link_container").hide();
+				$("#social_twitch_link_container").hide();
+			}	
+			else{ 
+				$("#social_facebook_link_container").show();
+				$("#social_instagram_link_container").show();
+				$("#social_soundcloud_link_container").show();
+				$("#social_spotify_link_container").show();
+				$("#social_youtube_link_container").show();
+				$("#social_mixcloud_link_container").show();
+				$("#social_discord_link_container").show();
+				$("#social_google_link_container").show();
+				$("#social_linkedin_link_container").show();
+				$("#social_pinterest_link_container").show();
+				$("#social_stack_link_container").show();
+				$("#social_telegram_link_container").show();
+				$("#social_tiktok_link_container").show();
+				$("#social_snapchat_link_container").show();
+				$("#social_slack_link_container").show();
+				$("#social_github_link_container").show();
+				$("#social_reddit_link_container").show();
+				$("#social_whatsapp_link_container").show();
+				$("#social_twitch_link_container").show();
+			}		
+		}
 		
 	
 		$(document).ready(function() {
 			set_choices();
 			set_booking_choices();
 			set_blog_choices();
+			check_social_content(); // Check content before setting visibility
+			set_social_choices();
 			$("#use_paypal_checkout").change(function() {	
 				set_choices();
 			});	
@@ -182,6 +266,9 @@
 			});	
 			$("#blog_active").change(function() {	
 				set_blog_choices();
+			});	
+			$("#social_settings_active").change(function() {	
+				set_social_choices();
 			});	
 		});
 	
@@ -400,6 +487,9 @@
 	echo '<hr>';
 
  	echo '<h3>Social Settings</h3>';
+
+	$optionvals = array("Yes"=>1, 'No' => 0);
+	echo $formwriter->dropinput("Social settings active", "social_settings_active", '', $optionvals, '0', '', FALSE);
 
 	echo $formwriter->textinput("Facebook link", "social_facebook_link", '', 20, $settings->get_setting('social_facebook_link'), "" , 255, "");	
 
