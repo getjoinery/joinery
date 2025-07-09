@@ -359,11 +359,63 @@
 		
 		echo $formwriter->textinput("Standard Error Message", 'standard_error', '', 20, $settings->get_setting('standard_error'), "" , 255, "");
 		
+		// hCaptcha section with two-column layout
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>hCaptcha Settings</h5>';
 		echo $formwriter->textinput("HCaptcha Public Key", 'hcaptcha_public', '', 20, $settings->get_setting('hcaptcha_public'), "" , 255, "");
 		echo $formwriter->textinput("HCaptcha Private Key", 'hcaptcha_private', '', 20, $settings->get_setting('hcaptcha_private'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Live Preview</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">';
 		
+		// Show live hCaptcha preview if both keys are configured
+		if($settings->get_setting('hcaptcha_public') && $settings->get_setting('hcaptcha_private')) {
+			echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ hCaptcha is configured</strong></div>';
+			// Use the same captcha rendering method from FormWriterMaster
+			echo "<script src='https://www.hCaptcha.com/1/api.js' async defer></script>";
+			echo '<div class="h-captcha" data-sitekey="'.$settings->get_setting('hcaptcha_public').'"></div>';
+		} else if($settings->get_setting('hcaptcha_public')) {
+			echo '<div style="color: #ffc107;"><strong>⚠ Only public key configured</strong></div>';
+			echo '<div style="color: #666; font-size: 14px; margin-top: 5px;">Enter private key to complete setup</div>';
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both keys to see preview</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<hr style="margin: 20px 0;">';
+		
+		// Google Captcha section with two-column layout
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>Google reCAPTCHA Settings</h5>';
 		echo $formwriter->textinput("Google Captcha Public Key", 'captcha_public', '', 20, $settings->get_setting('captcha_public'), "" , 255, "");
 		echo $formwriter->textinput("Google Captcha Private Key", 'captcha_private', '', 20, $settings->get_setting('captcha_private'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Live Preview</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">';
+		
+		// Show live Google Captcha preview if both keys are configured
+		if($settings->get_setting('captcha_public') && $settings->get_setting('captcha_private')) {
+			echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Google reCAPTCHA is configured</strong></div>';
+			// Use the same captcha rendering method from FormWriterMaster
+			echo '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
+			echo '<div class="g-recaptcha" data-sitekey="'.$settings->get_setting('captcha_public').'"></div>';
+		} else if($settings->get_setting('captcha_public')) {
+			echo '<div style="color: #ffc107;"><strong>⚠ Only public key configured</strong></div>';
+			echo '<div style="color: #666; font-size: 14px; margin-top: 5px;">Enter private key to complete setup</div>';
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both keys to see preview</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<hr style="margin: 20px 0;">';
 
 		echo $formwriter->textinput("Mailchimp API Key", 'mailchimp_api_key', '', 20, $settings->get_setting('mailchimp_api_key'), "" , 255, "");
 
