@@ -363,7 +363,7 @@
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Installed Packages</h5>';
-		echo '<div style="height: 280px; padding: 15px; background-color: #f5f5f5; border-radius: 5px; overflow-y: auto;">';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
 		$composer_path = $settings->get_setting('composerAutoLoad');
 		if ($composer_path && !empty(trim($composer_path))) {
@@ -505,11 +505,13 @@
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
-		echo '<hr style="margin: 20px 0;">';
+		echo '<div style="margin: 50px 0;"></div>';
 		
 		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/test/public_html/logs/error.log)", 'apache_error_log', '', 20, $settings->get_setting('apache_error_log'), "" , 255, "");
 		
 		echo $formwriter->textinput("Standard Error Message", 'standard_error', '', 20, $settings->get_setting('standard_error'), "" , 255, "");
+		
+		echo '<div style="margin: 50px 0;"></div>';
 		
 		// hCaptcha section with two-column layout
 		echo '<div class="row">';
@@ -538,7 +540,7 @@
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
-		echo '<hr style="margin: 20px 0;">';
+		echo '<div style="margin: 50px 0;"></div>';
 		
 		// Google Captcha section with two-column layout
 		echo '<div class="row">';
@@ -567,7 +569,7 @@
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
-		echo '<hr style="margin: 20px 0;">';
+		echo '<div style="margin: 50px 0;"></div>';
 
 		// Mailchimp section with two-column layout and API validation
 		echo '<div class="row">';
@@ -577,7 +579,7 @@
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>API Status</h5>';
-		echo '<div style="height: 120px; padding: 15px; background-color: #f5f5f5; border-radius: 5px; overflow-y: auto;">';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
 		$mailchimp_api_key = $settings->get_setting('mailchimp_api_key');
 		if ($mailchimp_api_key && !empty(trim($mailchimp_api_key))) {
@@ -632,10 +634,61 @@
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
-		echo '<hr style="margin: 20px 0;">';
+		echo '<div style="margin: 50px 0;"></div>';
 
+		// Acuity API Key and User ID with validation
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
 		echo $formwriter->textinput("Acuity API Key (Example: 7d97bfea536935sgd8b14d266b105ab1)", 'acuity_api_key', '', 20, $settings->get_setting('acuity_api_key'), "" , 255, "");
 		echo $formwriter->textinput("Acuity User ID (Example: 18623423)", 'acuity_user_id', '', 20, $settings->get_setting('acuity_user_id'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px;">';
+		
+		$acuity_api_key = $settings->get_setting('acuity_api_key');
+		$acuity_user_id = $settings->get_setting('acuity_user_id');
+		
+		if (!empty($acuity_api_key) && !empty($acuity_user_id)) {
+			echo '<h5>API Status</h5>';
+			try {
+				require_once($_SERVER['DOCUMENT_ROOT'].'/includes/AcuityScheduling.php');
+				
+				$acuity = new AcuityScheduling(array(
+					'userId' => $acuity_user_id,
+					'apiKey' => $acuity_api_key
+				));
+				
+				// Test the connection by getting account information
+				$account = $acuity->request('/me');
+				
+				if ($account && is_array($account) && isset($account['email'])) {
+					echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Connected successfully!</strong></div>';
+					echo '<strong>Account:</strong> ' . htmlspecialchars($account['email']) . '<br>';
+					if (isset($account['firstName']) && isset($account['lastName'])) {
+						echo '<strong>Name:</strong> ' . htmlspecialchars($account['firstName']) . ' ' . htmlspecialchars($account['lastName']) . '<br>';
+					}
+					if (isset($account['company'])) {
+						echo '<strong>Company:</strong> ' . htmlspecialchars($account['company']) . '<br>';
+					}
+					if (isset($account['timezone'])) {
+						echo '<strong>Timezone:</strong> ' . htmlspecialchars($account['timezone']) . '<br>';
+					}
+				} else {
+					echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ Connection failed or invalid response</strong></div>';
+					echo 'Unable to verify API credentials. Please check your API key and User ID.';
+				}
+			} catch (Exception $e) {
+				echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Connection failed</strong></div>';
+				echo 'Error: ' . htmlspecialchars($e->getMessage());
+			}
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both API Key and User ID to validate connection</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<div style="margin: 50px 0;"></div>';
 
 		echo $formwriter->textinput("Stripe API Key (Example: sk_live_xxxx)", 'stripe_api_key', '', 20, $settings->get_setting('stripe_api_key'), "" , 255, "");
 		echo $formwriter->textinput("Stripe API Private Key (Example: pk_live_xxxx)", 'stripe_api_pkey', '', 20, $settings->get_setting('stripe_api_pkey'), "" , 255, "");
