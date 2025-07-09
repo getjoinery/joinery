@@ -93,6 +93,14 @@ $page->admin_header([
 3. **Bootstrap Grid**: Use Bootstrap's responsive grid system (`row`, `col-md-6`, etc.)
 4. **Consistent Spacing**: Use Bootstrap spacing utilities (`mb-4`, `g-3`, etc.)
 
+### CSS Framework Usage
+
+**Admin Sections ALWAYS use Bootstrap CSS classes:**
+- Error states: Use `is-invalid` instead of UIKit classes like `uk-form-danger`
+- Form controls: Use `form-control` instead of UIKit equivalents
+- Buttons: Use `btn btn-primary`, `btn btn-secondary` etc.
+- UIKit is being phased out in favor of Bootstrap across the admin interface
+
 ### Form Implementation
 
 **ALWAYS use the FormWriter class for all forms:**
