@@ -128,12 +128,60 @@
 				$("#paypal_api_secret_test_container").show();	
 			}		
 		}
+
+		function set_booking_choices(){
+			var value = $("#bookings_active").val();
+			if(value == 0 || value == ''){  
+				$("#calendly_organization_uri_container").hide();
+				$("#calendly_organization_name_container").hide();
+				$("#calendly_api_key_container").hide();
+				$("#calendly_api_token_container").hide();
+			}	
+			else{ 
+				$("#calendly_organization_uri_container").show();
+				$("#calendly_organization_name_container").show();
+				$("#calendly_api_key_container").show();
+				$("#calendly_api_token_container").show();
+			}		
+		}
+
+		function set_blog_choices(){
+			var value = $("#blog_active").val();
+			if(value == 0 || value == ''){  
+				$("#show_comments_container").hide();
+				$("#comments_active_container").hide();
+				$("#comments_unregistered_users_container").hide();
+				$("#default_comment_status_container").hide();
+				$("#comment_notification_emails_container").hide();
+				$("#anti_spam_answer_comments_container").hide();
+				$("#use_captcha_comments_container").hide();
+				$("#blog_footer_text_container").hide();
+			}	
+			else{ 
+				$("#show_comments_container").show();
+				$("#comments_active_container").show();
+				$("#comments_unregistered_users_container").show();
+				$("#default_comment_status_container").show();
+				$("#comment_notification_emails_container").show();
+				$("#anti_spam_answer_comments_container").show();
+				$("#use_captcha_comments_container").show();
+				$("#blog_footer_text_container").show();
+			}		
+		}
 		
 	
 		$(document).ready(function() {
 			set_choices();
+			set_booking_choices();
+			set_blog_choices();
 			$("#use_paypal_checkout").change(function() {	
 				set_choices();
+			});	
+			$("#bookings_active").change(function() {	
+				set_booking_choices();
+			});	
+			$("#blog_active").change(function() {	
+				set_blog_choices();
 			});	
 		});
 	
