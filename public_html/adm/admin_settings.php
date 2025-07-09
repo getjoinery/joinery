@@ -354,7 +354,96 @@
 		
 		
 		echo $formwriter->textinput("Node Path (Example: /var/www/html/test/node)", 'node_dir', '', 20, $settings->get_setting('node_dir'), "" , 255, "");
+		
+		// Composer section with two-column layout and package validation
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>Composer Settings</h5>';
 		echo $formwriter->textinput("Composer Path (Example: /home/user1/vendor/)", 'composerAutoLoad', '', 20, $settings->get_setting('composerAutoLoad'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Installed Packages</h5>';
+		echo '<div style="height: 280px; padding: 15px; background-color: #f5f5f5; border-radius: 5px; overflow-y: auto;">';
+		
+		$composer_path = $settings->get_setting('composerAutoLoad');
+		if ($composer_path && !empty(trim($composer_path))) {
+			$autoload_path = rtrim($composer_path, '/') . '/autoload.php';
+			$composer_lock = rtrim($composer_path, '/') . '/../composer.lock';
+			$composer_json = rtrim($composer_path, '/') . '/../composer.json';
+			
+			if (file_exists($autoload_path)) {
+				echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Valid Composer installation</strong></div>';
+				
+				// Get installed packages from composer.lock
+				$packages = [];
+				if (file_exists($composer_lock)) {
+					$lock_content = @file_get_contents($composer_lock);
+					if ($lock_content) {
+						$lock_data = json_decode($lock_content, true);
+						if (isset($lock_data['packages'])) {
+							foreach ($lock_data['packages'] as $package) {
+								$packages[] = [
+									'name' => $package['name'],
+									'version' => $package['version'] ?? 'unknown'
+								];
+							}
+						}
+					}
+				}
+				
+				// Show key packages we use FIRST
+				$key_packages = ['mailgun/mailgun-php', 'stripe/stripe-php', 'phpmailer/phpmailer'];
+				$found_key_packages = array_filter($packages, function($pkg) use ($key_packages) {
+					return in_array($pkg['name'], $key_packages);
+				});
+				
+				if (!empty($found_key_packages)) {
+					echo '<div style="margin-bottom: 12px; padding: 8px; background: #d4edda; border-radius: 4px;">';
+					echo '<div style="font-size: 12px; color: #155724; font-weight: bold; margin-bottom: 4px;">Key packages detected:</div>';
+					foreach ($found_key_packages as $pkg) {
+						$version = $pkg['version'];
+						// Don't add 'v' if version already starts with 'v'
+						$version_display = (strpos($version, 'v') === 0) ? $version : 'v' . $version;
+						echo '<div style="font-size: 11px; color: #155724;">✓ ' . htmlspecialchars($pkg['name']) . ' <span style="color: #666;">' . htmlspecialchars($version_display) . '</span></div>';
+					}
+					echo '</div>';
+				} else if (!empty($packages)) {
+					echo '<div style="margin-bottom: 12px; padding: 8px; background: #fff3cd; border-radius: 4px;">';
+					echo '<div style="font-size: 11px; color: #856404;">⚠ No key packages detected (mailgun, stripe, phpmailer)</div>';
+					echo '</div>';
+				}
+				
+				if (!empty($packages)) {
+					echo '<div style="font-size: 12px; color: #666; margin-bottom: 8px;"><strong>' . count($packages) . ' total packages installed:</strong></div>';
+					echo '<div>';
+					foreach ($packages as $package) { // Show all packages
+						$version = $package['version'];
+						// Don't add 'v' if version already starts with 'v'
+						$version_display = (strpos($version, 'v') === 0) ? $version : 'v' . $version;
+						echo '<div style="font-size: 11px; color: #333; margin-bottom: 2px; padding: 2px 5px; background: white; border-radius: 3px;">';
+						echo '<code style="color: #007bff;">' . htmlspecialchars($package['name']) . '</code> ';
+						echo '<span style="color: #666;">' . htmlspecialchars($version_display) . '</span>';
+						echo '</div>';
+					}
+					echo '</div>';
+				} else {
+					echo '<div style="color: #ffc107; font-size: 12px;">No packages found in composer.lock</div>';
+				}
+				
+			} else {
+				echo '<div style="color: #dc3545;"><strong>✗ Invalid path</strong></div>';
+				echo '<div style="color: #666; font-size: 12px; margin-top: 5px;">Could not find: <code>' . htmlspecialchars($autoload_path) . '</code></div>';
+				echo '<div style="color: #666; font-size: 11px; margin-top: 8px;">Make sure the path points to the vendor directory containing autoload.php</div>';
+			}
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 30px 10px;">Enter Composer path to see installed packages</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<hr style="margin: 20px 0;">';
+		
 		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/test/public_html/logs/error.log)", 'apache_error_log', '', 20, $settings->get_setting('apache_error_log'), "" , 255, "");
 		
 		echo $formwriter->textinput("Standard Error Message", 'standard_error', '', 20, $settings->get_setting('standard_error'), "" , 255, "");
