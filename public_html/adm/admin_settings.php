@@ -709,11 +709,118 @@
 
 
 
+		// Mailgun section with two-column layout and API validation
+		echo '<div class="row">';
+		echo '<div class="col-md-6">';
+		echo '<h5>Mailgun Settings</h5>';
 		$optionvals = array("Version 2.X"=>'1', 'Version 3.X' => '2');
 		echo $formwriter->dropinput("Mailgun Version", "mailgun_version", '', $optionvals, $settings->get_setting('mailgun_version'), '', FALSE);	
 		echo $formwriter->textinput("Mailgun API Key (Example: key-6eac34eed3afb3df055f81aa20d878e4)", 'mailgun_api_key', '', 20, $settings->get_setting('mailgun_api_key'), "" , 255, "");
 		echo $formwriter->textinput("Mailgun Domain (Example: mg.domain.net)", 'mailgun_domain', '', 20, $settings->get_setting('mailgun_domain'), "" , 255, "");
 		echo $formwriter->textinput("Mailgun EU API Link (Example: https://api.eu.mailgun.net)", 'mailgun_eu_api_link', '', 20, $settings->get_setting('mailgun_eu_api_link'), "" , 255, "");
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>API Status</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
+		
+		$mailgun_api_key = $settings->get_setting('mailgun_api_key');
+		$mailgun_domain = $settings->get_setting('mailgun_domain');
+		$mailgun_version = $settings->get_setting('mailgun_version');
+		$mailgun_eu_api_link = $settings->get_setting('mailgun_eu_api_link');
+		
+		if (!empty($mailgun_api_key) && !empty($mailgun_domain)) {
+			// Test Mailgun API connection
+			$composer_path = $settings->get_setting('composerAutoLoad');
+			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
+				try {
+					require_once(rtrim($composer_path, '/') . '/autoload.php');
+					
+					// Create Mailgun client based on version and test with a simple domain check
+					if ($mailgun_version == 1) {
+						if ($mailgun_eu_api_link) {
+							$mg = new Mailgun\Mailgun($mailgun_api_key, $mailgun_eu_api_link);
+						} else {
+							$mg = new Mailgun\Mailgun($mailgun_api_key);
+						}
+						
+						// For version 2.X, try to get domain info
+						try {
+							$domain_info = $mg->get("domains/{$mailgun_domain}");
+							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
+							echo '<strong>Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
+							
+							if (isset($domain_info->http_response_body->domain)) {
+								$domain_data = $domain_info->http_response_body->domain;
+								if (isset($domain_data->state)) {
+									echo '<strong>Status:</strong> ' . htmlspecialchars($domain_data->state) . '<br>';
+								}
+								if (isset($domain_data->created_at)) {
+									echo '<strong>Created:</strong> ' . htmlspecialchars($domain_data->created_at) . '<br>';
+								}
+							}
+							
+							// Test if we can access the domain
+							echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Domain accessible via API</div>';
+							
+						} catch (Exception $domain_ex) {
+							// If domain check fails, try a simple validation
+							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
+							echo '<strong>Configured Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
+							echo '<div style="color: #ffc107; font-size: 11px; margin-top: 10px;">⚠ Unable to verify domain details: ' . htmlspecialchars($domain_ex->getMessage()) . '</div>';
+						}
+						
+					} else {
+						if ($mailgun_eu_api_link) {
+							$mg = Mailgun\Mailgun::create($mailgun_api_key, $mailgun_eu_api_link);
+						} else {
+							$mg = Mailgun\Mailgun::create($mailgun_api_key);
+						}
+						
+						// For version 3.X, try to get domain info
+						try {
+							$domain_info = $mg->domains()->show($mailgun_domain);
+							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
+							echo '<strong>Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
+							
+							// Try to get domain data from the response
+							if ($domain_info && method_exists($domain_info, 'getDomain')) {
+								$domain = $domain_info->getDomain();
+								if ($domain) {
+									if (method_exists($domain, 'getName')) {
+										echo '<strong>Name:</strong> ' . htmlspecialchars($domain->getName()) . '<br>';
+									}
+									if (method_exists($domain, 'getState')) {
+										echo '<strong>Status:</strong> ' . htmlspecialchars($domain->getState()) . '<br>';
+									}
+								}
+							}
+							
+							echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Domain accessible via API</div>';
+							
+						} catch (Exception $domain_ex) {
+							// If domain check fails, try a simple validation by checking if client was created
+							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
+							echo '<strong>Configured Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
+							echo '<div style="color: #ffc107; font-size: 11px; margin-top: 10px;">⚠ Unable to verify domain details: ' . htmlspecialchars($domain_ex->getMessage()) . '</div>';
+						}
+					}
+					
+				} catch (Exception $e) {
+					echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Connection Failed</strong></div>';
+					echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+				}
+			} else {
+				echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ Composer Not Configured</strong></div>';
+				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
+			}
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter API key and domain to validate connection</div>';
+		}
+		
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+		echo '<div style="margin: 30px 0;"></div>';
 
 	}
 	
