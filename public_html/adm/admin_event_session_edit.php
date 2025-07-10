@@ -249,7 +249,7 @@
 		$searches['event_id'] = $event->key;
 		$event_sessions_search = new MultiEventSessions(
 			$searches,
-			array('session_number_then_title'=>'DESC'),
+			array('evs_session_number'=>'DESC', 'evs_title'=>'DESC'),
 			NULL,
 			NULL,
 			'AND'

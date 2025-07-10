@@ -54,7 +54,7 @@
 			$ssearch_criteria['event_id'] = $result->key;
 			$sessions = new MultiEventSessions(
 				$ssearch_criteria,
-				array('session_number_then_title'=>'ASC'),
+				array('evs_session_number'=>'ASC', 'evs_title'=>'ASC'),
 				NULL,
 				NULL
 			);
