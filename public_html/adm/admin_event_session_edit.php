@@ -70,7 +70,7 @@
 		$searches['event_id'] = $event->key;
 		$event_sessions = new MultiEventSessions(
 			$searches,
-			array('time_then_session_number'=>'DESC')
+			array('evs_start_time'=>'DESC', 'evs_session_number'=>'DESC')
 		); 
 		$event_sessions->load();	
 		$latest_session = $event_sessions->get(0);

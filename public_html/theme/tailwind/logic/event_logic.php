@@ -111,7 +111,7 @@ function event_logic($get_vars, $post_vars, $event){
 		$searches = array();
 		$searches['event_id'] = $event->key;
 		$event_sessions = new MultiEventSessions($searches,
-			array('time_then_session_number'=>'ASC')); 
+			array('evs_start_time'=>'ASC', 'evs_session_number'=>'ASC')); 
 		$event_sessions->load();	
 		$page_vars['event_sessions'] = $event_sessions;
 		$numsessions = $event_sessions->count_all();
@@ -124,7 +124,7 @@ function event_logic($get_vars, $post_vars, $event){
 		$searches['event_id'] = $event->key;
 		$searches['future_or_none'] = true;
 		$future_event_sessions = new MultiEventSessions($searches,
-			array('time_then_session_number'=>'ASC')); 
+			array('evs_start_time'=>'ASC', 'evs_session_number'=>'ASC')); 
 		$future_event_sessions->load();	
 		$page_vars['future_event_sessions'] = $future_event_sessions;
 		$future_numsessions = $future_event_sessions->count_all();
@@ -134,7 +134,7 @@ function event_logic($get_vars, $post_vars, $event){
 		$searches['event_id'] = $event->key;
 		$searches['past'] = 'now()';
 		$past_event_sessions = new MultiEventSessions($searches,
-			array('time_then_session_number'=>'DESC'));
+			array('evs_start_time'=>'DESC', 'evs_session_number'=>'DESC'));
 		$past_numsessions = $past_event_sessions->count_all();
 		$page_vars['past_numsessions'] = $past_numsessions;
 		$past_event_sessions->load();
