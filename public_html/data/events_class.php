@@ -284,7 +284,7 @@ class Event extends SystemBase {
 		$searches['event_id'] = $this->key;
 		$searches['deleted'] = false;
 		$event_sessions = new MultiEventSessions($searches,
-			array('session_number_then_title'=>'ASC'));
+			array('evs_session_number'=>'ASC', 'evs_title'=>'ASC'));
 		$num_sessions = $event_sessions->count_all();
 		$event_sessions->load();	
 		if($num_sessions){

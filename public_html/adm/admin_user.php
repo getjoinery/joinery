@@ -557,7 +557,7 @@
 		$searches['event_id'] = $event_registration->get('evr_evt_event_id');
 		$event_sessions = new MultiEventSessions(
 			$searches,
-			array('session_number_then_title' => 'DESC'));
+			array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
 		$event_sessions->load();
 		
 		foreach ($event_sessions as $event_session){
