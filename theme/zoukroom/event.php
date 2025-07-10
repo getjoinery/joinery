@@ -120,7 +120,7 @@
 			$searches = array();
 			$searches['event_id'] = $event->key;
 			$event_sessions = new MultiEventSessions($searches,
-				array('time_then_session_number'=>'ASC')); 
+				array('evs_start_time'=>'ASC', 'evs_session_number'=>'ASC')); 
 			$event_sessions->load();	
 			$numsessions = $event_sessions->count_all();
 			
