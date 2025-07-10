@@ -112,7 +112,7 @@
 	//WAITING LIST
 	$wnumperpage = 10;
 	$woffset = LibraryFunctions::fetch_variable('woffset', 0, 0, '');
-	$wsort = LibraryFunctions::fetch_variable('wsort', 'time_then_session_number', 0, '');
+	$wsort = LibraryFunctions::fetch_variable('wsort', 'evs_start_time', 0, '');
 	$wsdirection = LibraryFunctions::fetch_variable('wsdirection', 'DESC', 0, '');
 	$wsearchterm = LibraryFunctions::fetch_variable('wsearchterm', '', 0, '');
 	$wsearch_criteria = array();
