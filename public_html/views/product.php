@@ -109,7 +109,10 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
         </div>-->
 					<?php
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT OR IF IT CANNOT BE ADDED TO THE CART
-				if(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)){
+				if(!$product_version){
+					echo '<p class="text-red-600">This product is not available for purchase. No product version found.</p>';
+				}
+				else if(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)){
 
 					$formwriter = LibraryFunctions::get_formwriter_object('product_form', $settings->get_setting('form_style'));
 					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
@@ -121,7 +124,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 					echo $formwriter->end_form(true);
 					$product->output_javascript(array(), $formwriter);
 				}
-				else if(!$cart->can_add_to_cart($product_version)){
+				else if($product_version && !$cart->can_add_to_cart($product_version)){
 					if($product_version->is_subscription()){
 						if($cart->get_num_recurring()){
 							echo 'You cannot add more than one subscription to the cart.  Please check out first or clear your cart.';
