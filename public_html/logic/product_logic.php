@@ -9,6 +9,7 @@ function product_logic($get_vars, $post_vars, $product){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/questions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_versions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirements_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirement_instances_class.php');
 
@@ -41,8 +42,17 @@ function product_logic($get_vars, $post_vars, $product){
 	
 	if($get_vars['product_version_id']){
 		$product_version_id = LibraryFunctions::fetch_variable_local($get_vars, 'product_version_id', NULL, FALSE, '', TRUE, 'int');
-		$product_version = new Product($product_version_id, TRUE);
+		$product_version = new ProductVersion($product_version_id, TRUE);
 		$page_vars['product_version'] = $product_version;
+	}
+	else {
+		// If no specific version requested, get the first active version
+		$product_versions = $product->get_product_versions(TRUE);
+		if ($product_versions && count($product_versions) > 0) {
+			$page_vars['product_version'] = $product_versions->get(0);
+		} else {
+			$page_vars['product_version'] = null;
+		}
 	}
 	
 	if ($product && $session->get_user_id() && $session->get_permission() > 4) {
