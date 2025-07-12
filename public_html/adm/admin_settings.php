@@ -13,6 +13,17 @@
 
 	$settings = Globalvars::get_instance();
 
+	// Handle AJAX validation requests
+	if (isset($_POST['validate_apache_log'])) {
+		$log_path = $_POST['validate_apache_log'];
+		if (file_exists($log_path) && is_readable($log_path)) {
+			echo 'exists';
+		} else {
+			echo 'not_exists';
+		}
+		exit;
+	}
+
 	if($_POST){
 		
 		
@@ -286,6 +297,58 @@
 				set_tracking_choices();
 			});	
 		});
+		
+		function validateWebDir() {
+			var webDir = document.getElementById('webDir').value;
+			var webDirField = document.getElementById('webDir');
+			
+			// Check if it starts with http:// or https://
+			var hasProtocol = /^https?:\/\//.test(webDir);
+			
+			// Check if it ends with a slash
+			var endsWithSlash = webDir.endsWith('/');
+			
+			if (webDir && (!hasProtocol || endsWithSlash)) {
+				// Invalid format
+				webDirField.classList.add('is-invalid');
+				webDirField.classList.remove('is-valid');
+			} else {
+				// Valid format
+				webDirField.classList.remove('is-invalid');
+				if (webDir) {
+					webDirField.classList.add('is-valid');
+				}
+			}
+		}
+		
+		function validateApacheLog() {
+			var logPath = document.getElementById('apache_error_log').value;
+			var logField = document.getElementById('apache_error_log');
+			
+			if (!logPath) {
+				// Empty is okay, remove all validation classes
+				logField.classList.remove('is-invalid', 'is-valid');
+				return;
+			}
+			
+			// Use AJAX to check if file exists on server
+			var xhr = new XMLHttpRequest();
+			xhr.open('POST', '/adm/admin_settings.php', true);
+			xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+			xhr.onreadystatechange = function() {
+				if (xhr.readyState === 4 && xhr.status === 200) {
+					var response = xhr.responseText;
+					if (response === 'exists') {
+						logField.classList.remove('is-invalid');
+						logField.classList.add('is-valid');
+					} else {
+						logField.classList.add('is-invalid');
+						logField.classList.remove('is-valid');
+					}
+				}
+			};
+			xhr.send('validate_apache_log=' + encodeURIComponent(logPath));
+		}
 	
 		
 		</script>
@@ -393,7 +456,27 @@
 			echo $formwriter->dropinput("Site location (The site we are running, basically the folder at " . htmlspecialchars($base_path) . ")", "site_template", $site_folder_error, $site_optionvals, $settings->get_setting('site_template'), '', FALSE);
 		}
 		
-		echo $formwriter->textinput("Web URL (Example: https://getjoinery.com)", 'webDir', '', 20, $settings->get_setting('webDir'), "" , 255, "");
+		// Web URL - check if hardcoded in Globalvars_site.php
+		$current_webDir = $settings->get_setting('webDir');
+		$webDir_error = '';
+		$webDir_valid = true;
+		
+		// Validate webDir format regardless of source
+		if ($current_webDir && (!preg_match('/^https?:\/\//', $current_webDir) || substr($current_webDir, -1) === '/')) {
+			$webDir_error = 'is-invalid';
+			$webDir_valid = false;
+		}
+		
+		if (isset($globalvars_hardcoded['webDir'])) {
+			$readonly_class = $webDir_valid ? 'is-valid' : 'is-invalid';
+			$readonly_label = $webDir_valid ? "Web URL (Loaded from Globalvars_site.php)" : "Web URL (Loaded from Globalvars_site.php - INVALID FORMAT)";
+			echo $formwriter->textinput($readonly_label, 'webDir_readonly', $readonly_class, 20, $current_webDir, '', 255, 'readonly');
+			if (!$webDir_valid) {
+				echo '<div class="text-danger small">webDir must start with http:// or https:// and not end with /</div>';
+			}
+		} else {
+			echo $formwriter->textinput("Web URL (Must start with http:// or https:// and not end with /)", 'webDir', $webDir_error, 20, $current_webDir, "onchange=\"validateWebDir()\"" , 255, "");
+		}
 		
 		$optionvals = array("Yes"=>1, 'No' => 0);
 		echo $formwriter->dropinput("Force HTTPS", "force_https", '', $optionvals, $settings->get_setting('force_https'), '', FALSE);	
@@ -586,7 +669,24 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 		
-		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/test/public_html/logs/error.log)", 'apache_error_log', '', 20, $settings->get_setting('apache_error_log'), "" , 255, "");
+		// Apache Error Log Path - validate if file exists
+		$apache_log_error = '';
+		$current_apache_log = $settings->get_setting('apache_error_log');
+		if ($current_apache_log && !file_exists($current_apache_log)) {
+			$apache_log_error = 'is-invalid';
+		} else if ($current_apache_log && file_exists($current_apache_log) && !is_readable($current_apache_log)) {
+			$apache_log_error = 'is-invalid';
+		} else if ($current_apache_log && file_exists($current_apache_log)) {
+			$apache_log_error = 'is-valid';
+		}
+		
+		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/test/public_html/logs/error.log)", 'apache_error_log', $apache_log_error, 20, $current_apache_log, "onchange=\"validateApacheLog()\"" , 255, "");
+		
+		if ($current_apache_log && !file_exists($current_apache_log)) {
+			echo '<div class="text-danger small">File does not exist: ' . htmlspecialchars($current_apache_log) . '</div>';
+		} else if ($current_apache_log && file_exists($current_apache_log) && !is_readable($current_apache_log)) {
+			echo '<div class="text-danger small">File exists but is not readable (check permissions)</div>';
+		}
 		
 		echo $formwriter->textinput("Standard Error Message", 'standard_error', '', 20, $settings->get_setting('standard_error'), "" , 255, "");
 		
