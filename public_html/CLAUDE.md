@@ -96,14 +96,14 @@ $page->admin_header([
 ### CSS Framework Usage
 
 **Admin Sections ALWAYS use Bootstrap CSS classes:**
-- Error states: Use `is-invalid` instead of UIKit classes like `uk-form-danger`
-- Form controls: Use `form-control` instead of UIKit equivalents
+- Error states: Use `is-invalid` instead of legacy framework classes
+- Form controls: Use `form-control` instead of legacy equivalents
 - Buttons: Use `btn btn-primary`, `btn btn-secondary` etc.
-- UIKit is being phased out in favor of Bootstrap across the admin interface
+- **IMPORTANT**: UIKit is being phased out and only left for compatibility with old themes. Do not reference UIKit classes unless explicitly instructed.
 
 ### Form Implementation
 
-**ALWAYS use the FormWriter class for all forms:**
+**ALWAYS use the FormWriter class for all forms and prefer built-in FormWriter validation:**
 
 ```php
 $formwriter = LibraryFunctions::get_formwriter_object('form_name', 'admin');
@@ -214,14 +214,19 @@ $session->check_permission(LEVEL);
 
 ### Validation
 
-Use FormWriter validation for all user inputs:
+**Always prefer built-in FormWriter validation over custom JavaScript validation.** Use FormWriter validation for all user inputs:
 
 ```php
 $validation_rules = array();
 $validation_rules['field_name']['required']['value'] = 'true';
 $validation_rules['email_field']['email']['value'] = 'true';
+$validation_rules['url_field']['url']['value'] = 'true';
+$validation_rules['file_field']['remote']['value'] = "'/ajax/validation_endpoint'";
 echo $formwriter->set_validate($validation_rules);
 ```
+
+**Built-in validation types:** required, email, url, minlength, maxlength, min, max, remote
+**Custom validators:** Can be added to FormWriterMaster.php when needed
 
 ## Development Workflow
 
