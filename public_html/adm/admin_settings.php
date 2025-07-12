@@ -13,16 +13,6 @@
 
 	$settings = Globalvars::get_instance();
 
-	// Handle AJAX validation requests
-	if (isset($_POST['validate_apache_log'])) {
-		$log_path = $_POST['validate_apache_log'];
-		if (file_exists($log_path) && is_readable($log_path)) {
-			echo 'exists';
-		} else {
-			echo 'not_exists';
-		}
-		exit;
-	}
 
 	if($_POST){
 		
@@ -298,57 +288,6 @@
 			});	
 		});
 		
-		function validateWebDir() {
-			var webDir = document.getElementById('webDir').value;
-			var webDirField = document.getElementById('webDir');
-			
-			// Check if it starts with http:// or https://
-			var hasProtocol = /^https?:\/\//.test(webDir);
-			
-			// Check if it ends with a slash
-			var endsWithSlash = webDir.endsWith('/');
-			
-			if (webDir && (!hasProtocol || endsWithSlash)) {
-				// Invalid format
-				webDirField.classList.add('is-invalid');
-				webDirField.classList.remove('is-valid');
-			} else {
-				// Valid format
-				webDirField.classList.remove('is-invalid');
-				if (webDir) {
-					webDirField.classList.add('is-valid');
-				}
-			}
-		}
-		
-		function validateApacheLog() {
-			var logPath = document.getElementById('apache_error_log').value;
-			var logField = document.getElementById('apache_error_log');
-			
-			if (!logPath) {
-				// Empty is okay, remove all validation classes
-				logField.classList.remove('is-invalid', 'is-valid');
-				return;
-			}
-			
-			// Use AJAX to check if file exists on server
-			var xhr = new XMLHttpRequest();
-			xhr.open('POST', '/adm/admin_settings.php', true);
-			xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-			xhr.onreadystatechange = function() {
-				if (xhr.readyState === 4 && xhr.status === 200) {
-					var response = xhr.responseText;
-					if (response === 'exists') {
-						logField.classList.remove('is-invalid');
-						logField.classList.add('is-valid');
-					} else {
-						logField.classList.add('is-invalid');
-						logField.classList.remove('is-valid');
-					}
-				}
-			};
-			xhr.send('validate_apache_log=' + encodeURIComponent(logPath));
-		}
 	
 		
 		</script>
@@ -356,7 +295,17 @@
 	
 	$validation_rules = array();
 	$validation_rules['stg_value']['required']['value'] = 'true';
-	$validation_rules['stg_name']['required']['value'] = 'true';	
+	$validation_rules['stg_name']['required']['value'] = 'true';
+	
+	// Add validation for webDir (only if not read-only from Globalvars_site.php)
+	if (!isset($globalvars_hardcoded['webDir'])) {
+		$validation_rules['webDir']['weburl']['value'] = 'true';
+	}
+	
+	// Add validation for Apache error log path using remote validation
+	$validation_rules['apache_error_log']['remote']['value'] = "'/ajax/validate_file_ajax'";
+	$validation_rules['apache_error_log']['remote']['message'] = "'File does not exist or is not readable'";
+	
 	echo $formwriter->set_validate($validation_rules);	
 
 
@@ -401,23 +350,23 @@
 		
 		// Base path - check if hardcoded in Globalvars_site.php
 		if (isset($globalvars_hardcoded['baseDir'])) {
-			echo $formwriter->textinput("Base path (Loaded from Globalvars_site.php)", 'baseDir_readonly', 'is-valid', 20, $settings->get_setting('baseDir'), '', 255, 'readonly');
+			echo $formwriter->textinput("Base path (Loaded from Globalvars_site.php)", 'baseDir_readonly', '', 20, $settings->get_setting('baseDir'), '', 255, 'readonly');
 		} else {
 			echo $formwriter->textinput("Base path", 'baseDir', '', 20, $settings->get_setting('baseDir'), '', 255, '');
 		}
 		
 		// Site path - always calculated, read-only
-		echo $formwriter->textinput("Site path (Auto-calculated)", 'siteDir_readonly', 'is-valid', 20, $settings->get_setting('siteDir'), '', 255, 'readonly');
+		echo $formwriter->textinput("Site path (Auto-calculated)", 'siteDir_readonly', '', 20, $settings->get_setting('siteDir'), '', 255, 'readonly');
 		
 		// Static files path - always calculated, read-only
-		echo $formwriter->textinput("Static files path (Auto-calculated)", 'static_files_dir_readonly', 'is-valid', 20, $settings->get_setting('static_files_dir'), '', 255, 'readonly');
+		echo $formwriter->textinput("Static files path (Auto-calculated)", 'static_files_dir_readonly', '', 20, $settings->get_setting('static_files_dir'), '', 255, 'readonly');
 		
 		// Upload path - always calculated, read-only
-		echo $formwriter->textinput("Upload path (Auto-calculated)", 'upload_dir_readonly', 'is-valid', 20, $settings->get_setting('upload_dir'), '', 255, 'readonly');
+		echo $formwriter->textinput("Upload path (Auto-calculated)", 'upload_dir_readonly', '', 20, $settings->get_setting('upload_dir'), '', 255, 'readonly');
 		
 		// Upload web directory - check if hardcoded in Globalvars_site.php
 		if (isset($globalvars_hardcoded['upload_web_dir'])) {
-			echo $formwriter->textinput("Upload web directory (Loaded from Globalvars_site.php)", 'upload_web_dir_readonly', 'is-valid', 20, $settings->get_setting('upload_web_dir'), '', 255, 'readonly');
+			echo $formwriter->textinput("Upload web directory (Loaded from Globalvars_site.php)", 'upload_web_dir_readonly', '', 20, $settings->get_setting('upload_web_dir'), '', 255, 'readonly');
 		} else {
 			echo $formwriter->textinput("Upload web directory", 'upload_web_dir', '', 20, $settings->get_setting('upload_web_dir'), '', 255, 'Usually just "uploads" - relative path visible on web');
 		}
@@ -443,14 +392,14 @@
 			}
 		} else {
 			// Base path is invalid, show error
-			$site_folder_error = 'is-invalid';
+			$site_folder_error = '';
 			$site_optionvals[''] = 'Base path not configured or invalid';
 		}
 		
 		// Site location - check if it's hardcoded in Globalvars_site.php
 		if (isset($globalvars_hardcoded['site_template'])) {
 			// It's hardcoded, make it read-only
-			echo $formwriter->textinput("Site location (Loaded from Globalvars_site.php)", 'site_template_readonly', 'is-valid', 20, $settings->get_setting('site_template'), '', 255, 'readonly');
+			echo $formwriter->textinput("Site location (Loaded from Globalvars_site.php)", 'site_template_readonly', '', 20, $settings->get_setting('site_template'), '', 255, 'readonly');
 		} else {
 			// It's database-driven, make it editable
 			echo $formwriter->dropinput("Site location (The site we are running, basically the folder at " . htmlspecialchars($base_path) . ")", "site_template", $site_folder_error, $site_optionvals, $settings->get_setting('site_template'), '', FALSE);
@@ -458,24 +407,22 @@
 		
 		// Web URL - check if hardcoded in Globalvars_site.php
 		$current_webDir = $settings->get_setting('webDir');
-		$webDir_error = '';
 		$webDir_valid = true;
 		
-		// Validate webDir format regardless of source
+		// Validate webDir format regardless of source (for display purposes)
 		if ($current_webDir && (!preg_match('/^https?:\/\//', $current_webDir) || substr($current_webDir, -1) === '/')) {
-			$webDir_error = 'is-invalid';
 			$webDir_valid = false;
 		}
 		
 		if (isset($globalvars_hardcoded['webDir'])) {
-			$readonly_class = $webDir_valid ? 'is-valid' : 'is-invalid';
+			$readonly_class = '';
 			$readonly_label = $webDir_valid ? "Web URL (Loaded from Globalvars_site.php)" : "Web URL (Loaded from Globalvars_site.php - INVALID FORMAT)";
 			echo $formwriter->textinput($readonly_label, 'webDir_readonly', $readonly_class, 20, $current_webDir, '', 255, 'readonly');
 			if (!$webDir_valid) {
 				echo '<div class="text-danger small">webDir must start with http:// or https:// and not end with /</div>';
 			}
 		} else {
-			echo $formwriter->textinput("Web URL (Must start with http:// or https:// and not end with /)", 'webDir', $webDir_error, 20, $current_webDir, "onchange=\"validateWebDir()\"" , 255, "");
+			echo $formwriter->textinput("Web URL", 'webDir', '', 20, $current_webDir, '' , 255, "");
 		}
 		
 		$optionvals = array("Yes"=>1, 'No' => 0);
@@ -669,24 +616,7 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 		
-		// Apache Error Log Path - validate if file exists
-		$apache_log_error = '';
-		$current_apache_log = $settings->get_setting('apache_error_log');
-		if ($current_apache_log && !file_exists($current_apache_log)) {
-			$apache_log_error = 'is-invalid';
-		} else if ($current_apache_log && file_exists($current_apache_log) && !is_readable($current_apache_log)) {
-			$apache_log_error = 'is-invalid';
-		} else if ($current_apache_log && file_exists($current_apache_log)) {
-			$apache_log_error = 'is-valid';
-		}
-		
-		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/test/public_html/logs/error.log)", 'apache_error_log', $apache_log_error, 20, $current_apache_log, "onchange=\"validateApacheLog()\"" , 255, "");
-		
-		if ($current_apache_log && !file_exists($current_apache_log)) {
-			echo '<div class="text-danger small">File does not exist: ' . htmlspecialchars($current_apache_log) . '</div>';
-		} else if ($current_apache_log && file_exists($current_apache_log) && !is_readable($current_apache_log)) {
-			echo '<div class="text-danger small">File exists but is not readable (check permissions)</div>';
-		}
+		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/test/public_html/logs/error.log)", 'apache_error_log', '', 20, $settings->get_setting('apache_error_log'), "" , 255, "");
 		
 		echo $formwriter->textinput("Standard Error Message", 'standard_error', '', 20, $settings->get_setting('standard_error'), "" , 255, "");
 		

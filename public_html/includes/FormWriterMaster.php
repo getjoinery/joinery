@@ -351,6 +351,16 @@ class FormWriterMaster {
 					return parseTime(value) > parseTime(startVal);
 				}, "End time must be after start time.");
 
+				// Custom validator for webDir URLs
+				jQuery.validator.addMethod("weburl", function(value, element) {
+					if (this.optional(element)) return true;
+					// Must start with http:// or https:// and not end with /
+					var hasProtocol = /^https?:\/\//.test(value);
+					var endsWithSlash = value.endsWith("/");
+					return hasProtocol && !endsWithSlash;
+				}, "Must start with http:// or https:// and not end with /");
+
+
 					$("#'.$this->formid.'").validate({
 							'.$custom_js.'
 							rules: {';
