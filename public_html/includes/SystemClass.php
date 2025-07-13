@@ -173,8 +173,7 @@ abstract class SystemBase {
 		}
 		
 		if($format == 'full'){
-			$settings = Globalvars::get_instance();
-			return $settings->get_setting('webDir').'/'. static::$url_namespace .'/' . $this->get(static::$prefix .'_link');
+			return LibraryFunctions::get_absolute_url('/'. static::$url_namespace .'/' . $this->get(static::$prefix .'_link'));
 		}
 		else{
 			return '/'. static::$url_namespace .'/' . $this->get(static::$prefix .'_link');

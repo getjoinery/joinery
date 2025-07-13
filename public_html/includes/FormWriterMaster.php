@@ -351,14 +351,15 @@ class FormWriterMaster {
 					return parseTime(value) > parseTime(startVal);
 				}, "End time must be after start time.");
 
-				// Custom validator for webDir URLs
+				// Custom validator for webDir URLs (no protocol allowed)
 				jQuery.validator.addMethod("weburl", function(value, element) {
 					if (this.optional(element)) return true;
-					// Must start with http:// or https:// and not end with /
+					// Must NOT contain protocol and not end with /
 					var hasProtocol = /^https?:\/\//.test(value);
 					var endsWithSlash = value.endsWith("/");
-					return hasProtocol && !endsWithSlash;
-				}, "Must start with http:// or https:// and not end with /");
+					var isValidDomain = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/.test(value.replace(/:\d+$/, ''));
+					return !hasProtocol && !endsWithSlash && isValidDomain;
+				}, "Enter domain only (e.g. 'example.com' or 'localhost:8080'). Protocol is set separately.");
 
 
 					$("#'.$this->formid.'").validate({

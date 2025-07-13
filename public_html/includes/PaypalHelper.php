@@ -35,8 +35,8 @@ class PaypalHelper{
 			exit();			
 		}
 		
-		$this->return_url = $settings->get_setting('webDir').'/cart_charge';
-		$this->cancel_url = $settings->get_setting('webDir').'/cart';
+		$this->return_url = LibraryFunctions::get_absolute_url('/cart_charge');
+		$this->cancel_url = LibraryFunctions::get_absolute_url('/cart');
 
 	}
 	
@@ -270,7 +270,7 @@ class PaypalHelper{
 			"type" => "DIGITAL",  //PHYSICAL, DIGITAL, OR SERVICE
 			//"category" => "SOFTWARE",  //Category, see:  https://developer.paypal.com/docs/api/catalog-products/v1/#products_create
 			//"image_url" => "https://example.com/streaming.jpg",
-			"home_url" => $webDir . $product->get_url(),
+			"home_url" => LibraryFunctions::get_absolute_url($product->get_url()),
 		);
 
 	 

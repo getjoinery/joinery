@@ -50,7 +50,7 @@ class UploadHandler
         $this->options = array(
             'script_url' => $this->get_full_url().'/'.$this->basename($this->get_server_var('SCRIPT_NAME')),
             'upload_dir' => $this->settings['upload_dir'].'/', /*dirname($this->get_server_var('SCRIPT_FILENAME')).'/files/',*/
-            'upload_url' => $this->settings['webDir']. '/' . $this->settings['upload_web_dir'].'/', /*$this->get_full_url().'/files/',*/
+            'upload_url' => LibraryFunctions::get_absolute_url('/' . $this->settings['upload_web_dir'].'/'), /*$this->get_full_url().'/files/',*/
             'input_stream' => 'php://input',
             'user_dirs' => false,
             'mkdir_mode' => 0755,

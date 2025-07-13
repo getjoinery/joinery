@@ -16,9 +16,9 @@
 	echo '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">';
 
 	echo '<channel>';
-	echo '<atom:link href="'.$page_vars['settings']->get_setting('webDir').'/rss20_feed" rel="self" type="application/rss+xml" />';
+	echo '<atom:link href="'.LibraryFunctions::get_absolute_url('/rss20_feed').'" rel="self" type="application/rss+xml" />';
 	echo '<title>'.$page_vars['settings']->get_setting('site_name').'</title>
-	<link>'.$page_vars['settings']->get_setting('webDir').'</link>
+	<link>'.LibraryFunctions::get_absolute_url('').'</link>
 	<description/>';
 
 	foreach ($posts as $post){  
@@ -29,8 +29,8 @@
 
 		echo '<item><title>'.$title.'</title>
 		<description><![CDATA['.$post->get('pst_short_description').']]></description>
-		<link>'.$page_vars['settings']->get_setting('webDir').$post->get_url().'</link>
-		<guid>'.$page_vars['settings']->get_setting('webDir').$post->get_url().'</guid>
+		<link>'.LibraryFunctions::get_absolute_url($post->get_url()).'</link>
+		<guid>'.LibraryFunctions::get_absolute_url($post->get_url()).'</guid>
 		<pubDate>'.LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York', DATE_RSS).'</pubDate>
 		</item>';
 

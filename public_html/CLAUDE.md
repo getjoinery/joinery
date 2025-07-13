@@ -239,9 +239,153 @@ echo $formwriter->set_validate($validation_rules);
 6. Add database migration in `/migrations/`
 
 ### Database Migrations
-- Use conditional migrations with test queries
-- Follow existing patterns in `/migrations/migrations.php`
-- Plugins have separate migration files
+
+**CRITICAL:** Database migrations require careful attention to structure and syntax to prevent system failures.
+
+#### Migration File Structure
+
+Migrations are defined in `/migrations/migrations.php` and use a specific array structure:
+
+```php
+// SQL-based migration
+$migration['database_version'] = '0.XX';
+$migration['test'] = "SELECT count(1) as count FROM table WHERE condition";
+$migration['migration_sql'] = 'SQL STATEMENT HERE';
+$migration['migration_file'] = NULL;
+$migrations[] = $migration;
+
+// File-based migration  
+$migration = array(); // CRITICAL: Clear previous migration data
+$migration['database_version'] = '0.XX';
+$migration['test'] = "SELECT count(1) as count FROM table WHERE condition";
+$migration['migration_file'] = 'migration_filename.php';
+$migration['migration_sql'] = NULL; // CRITICAL: Clear SQL from previous migration
+$migrations[] = $migration;
+```
+
+#### Critical Migration Rules
+
+1. **ALWAYS clear the `$migration` array between migrations:**
+   ```php
+   $migration = array(); // Prevents data contamination from previous migrations
+   ```
+
+2. **File-based migrations MUST define a function:**
+   ```php
+   // File: protocol_mode_migration.php
+   function protocol_mode_migration() {
+       // Migration logic here
+       return true; // MUST return true on success, false on failure
+   }
+   ```
+
+3. **Function name MUST match filename** (without .php extension):
+   - File: `protocol_mode_migration.php` → Function: `protocol_mode_migration()`
+
+4. **Set unused fields to NULL explicitly:**
+   ```php
+   $migration['migration_sql'] = NULL; // For file-based migrations
+   $migration['migration_file'] = NULL; // For SQL-based migrations
+   ```
+
+#### Migration Types
+
+**SQL Migrations:**
+- Hash generated from: `md5($migration['migration_sql'])`
+- Use for simple SQL statements
+- Executed directly by migration system
+
+**File Migrations:**
+- Hash generated from: `md5_file($migration['migration_file'])`  
+- Use for complex logic, multi-step operations
+- Must define function with same name as file
+
+#### Test Conditions
+
+Test conditions determine if migration should run:
+- Return `count = 0` → Migration runs
+- Return `count > 0` → Migration skipped
+
+```php
+// Good: Check if setting doesn't exist
+$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'new_setting'";
+
+// Complex: Check multiple conditions
+$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'new_setting' AND NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'old_setting')";
+```
+
+#### Common Migration Errors
+
+**❌ Array Contamination (causes hash collisions):**
+```php
+// Previous migration
+$migration['migration_sql'] = 'INSERT INTO...';
+$migration['migration_file'] = NULL;
+$migrations[] = $migration;
+
+// Next migration - WRONG (inherits previous SQL)
+$migration['migration_file'] = 'new_migration.php';
+$migrations[] = $migration;
+```
+
+**✅ Correct Pattern:**
+```php
+// Previous migration
+$migration['migration_sql'] = 'INSERT INTO...';
+$migration['migration_file'] = NULL;
+$migrations[] = $migration;
+
+// Next migration - CORRECT (clean slate)
+$migration = array();
+$migration['migration_file'] = 'new_migration.php'; 
+$migration['migration_sql'] = NULL;
+$migrations[] = $migration;
+```
+
+**❌ Missing Function in Migration File:**
+```php
+// File: my_migration.php - WRONG (no function defined)
+$dblink = DbConnector::get_instance();
+$dblink->exec("UPDATE table SET field = 'value'");
+```
+
+**✅ Correct Function Pattern:**
+```php
+// File: my_migration.php - CORRECT
+function my_migration() {
+    $dblink = DbConnector::get_instance();
+    try {
+        $dblink->exec("UPDATE table SET field = 'value'");
+        return true;
+    } catch (Exception $e) {
+        echo "ERROR: " . $e->getMessage();
+        return false;
+    }
+}
+```
+
+#### Migration Debugging
+
+Enhanced error handling now provides detailed messages:
+- Missing function errors show expected function name
+- Failed migrations log detailed error information
+- Migration tracking prevents duplicate execution
+
+To troubleshoot migration issues:
+1. Check `/utils/update_database.php` output for detailed errors
+2. Verify function name matches filename exactly
+3. Ensure migration array is properly cleared between definitions
+4. Check for hash collisions in `mig_migrations` table
+
+#### Migration Best Practices
+
+1. **Test migrations thoroughly** in development environment
+2. **Use transactions** for multi-step operations in migration functions
+3. **Include rollback logic** where possible
+4. **Log migration progress** with descriptive echo statements
+5. **Handle errors gracefully** and return appropriate boolean values
+6. **Follow existing patterns** in `/migrations/migrations.php`
+7. **Plugins have separate migration files** in `/plugins/[name]/migrations/`
 
 ### Form Generation
 Use `FormWriterMaster` classes for consistent form rendering:

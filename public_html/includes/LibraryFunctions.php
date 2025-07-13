@@ -469,6 +469,40 @@ class LibraryFunctions {
 
 	}	
 	
+	//GENERATES ABSOLUTE URLS USING PROTOCOL_MODE SETTING
+	static function get_absolute_url($path = '') {
+		$settings = Globalvars::get_instance();
+		$protocol_mode = $settings->get_setting('protocol_mode') ?: 'auto';
+		
+		// Determine protocol based on protocol_mode
+		switch ($protocol_mode) {
+			case 'http':
+				$protocol = 'http';
+				break;
+			case 'https':
+			case 'https_redirect':
+				$protocol = 'https';
+				break;
+			case 'auto':
+			default:
+				$protocol = self::isSecure() ? 'https' : 'http';
+				break;
+		}
+		
+		// Get host from webDir, stripping any protocol, otherwise use current host
+		$webDir = $settings->get_setting('webDir');
+		if ($webDir) {
+			// Strip protocol if present, otherwise use as-is
+			$host = preg_replace('#^https?://#', '', $webDir);
+			// Remove trailing slash if present
+			$host = rtrim($host, '/');
+		} else {
+			$host = $_SERVER['HTTP_HOST'];
+		}
+		
+		return $protocol . '://' . $host . $path;
+	}
+	
 	static function get_tables_and_columns(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();

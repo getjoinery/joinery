@@ -632,3 +632,11 @@
 		$migration['migration_sql'] = 'INSERT INTO "public"."amu_admin_menus"("amu_menudisplay", "amu_parent_menu_id", "amu_defaultpage", "amu_order", "amu_min_permission", "amu_disable", "amu_icon", "amu_slug", "amu_setting_activate") VALUES (\'Funnels\', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = \'statistics\'), \'admin_locations\', 5, 5, 0, \'\', \'funnels\', \'\');';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
+
+		// Migrate force_https to protocol_mode
+		$migration = array(); // Clear previous migration data
+		$migration['database_version'] = '0.51';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'protocol_mode'";
+		$migration['migration_file'] = 'protocol_mode_migration.php';
+		$migration['migration_sql'] = NULL;
+		$migrations[] = $migration; 
