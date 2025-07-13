@@ -80,7 +80,7 @@
 	}
 	
 
-	echo '<strong>Link:</strong> <a href="'.$page->get_url().'">'.$page->get_url('full').'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$page->get_url().'">'.$page->get_url('short').'</a><br />';	
 
 
 	$headers = array("Content",  "Published", "Creator", "Status");

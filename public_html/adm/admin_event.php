@@ -166,13 +166,13 @@
 					echo 'Status: Deleted at '.LibraryFunctions::convert_time($event->get('evt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
 				}
 				else if($event->get('evt_visibility') == 0) {
-					echo '<b>Private</b> <a href="' . $event->get_url() . '">'.$event->get_url('full').'</a><br />';
+					echo '<b>Private</b> <a href="' . $event->get_url() . '">'.$event->get_url('short').'</a><br />';
 				} 
 				else if($event->get('evt_visibility') == 1){
-					echo '<b>Public:</b> <a href="' . $event->get_url() . '">'.$event->get_url('full').'</a><br />';
+					echo '<b>Public:</b> <a href="' . $event->get_url() . '">'.$event->get_url('short').'</a><br />';
 				}
 				else{
-					echo '<b>Public but unlisted:</b> <a href="' . $event->get_url() . '">'.$event->get_url('full').'</a><br />';
+					echo '<b>Public but unlisted:</b> <a href="' . $event->get_url() . '">'.$event->get_url('short').'</a><br />';
 				}		
 				
 				//echo '<b>Sessions page:</b> <a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$settings->get_setting('webDir').'/profile/event_sessions_course?event_id='.$event->key.'</a><br />';

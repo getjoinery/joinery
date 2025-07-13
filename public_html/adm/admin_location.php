@@ -61,7 +61,7 @@
 	$page->begin_box($options);
 	
 	echo '<h3>'.$location->get('loc_name').'</h3>'; 
-	echo '<strong>Link:</strong> <a href="'.$location->get_url().'">'.$location->get_url('full').'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$location->get_url().'">'.$location->get_url('short').'</a><br />';	
 	?><p><?php echo 'Address: '.$location->get('loc_address'); ?></p><?php
 	?><p><?php echo 'Website: '.$location->get('loc_website'); ?></p><?php
 	if($location->get('loc_is_published')){

@@ -71,7 +71,7 @@
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
 	
-	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$post->get_url('full').'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$post->get_url('short').'</a><br />';	
 
 	if($post->get('pst_short_description')){
 		echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description').'</p><br />';
