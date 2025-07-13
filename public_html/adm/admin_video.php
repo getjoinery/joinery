@@ -110,7 +110,7 @@
 	
 	echo '<br />';		
 	echo '<strong>Description:</strong> '.$video->get('vid_description') .'<br />';
-	echo '<strong>Link:</strong> <a href="'.$video->get_url().'">'.$video->get_url('full').'</a><br />';	
+	echo '<strong>Link:</strong> <a href="'.$video->get_url().'">'.$video->get_url('short').'</a><br />';	
 	echo '<strong>Original:</strong> <a href="'.$video->get('vid_video_text').'">'.$video->get('vid_video_text').'</a><br />';	
 	
 	echo '<br /><br />';			

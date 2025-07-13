@@ -134,12 +134,12 @@
 	
 	echo '<br />';
 	if($file->is_image()){
-		echo '<div class="padding10px">Full size:  <pre><a href="'.$file->get_url('standard','full').'">'.$file->get_url('standard','full').'</a></pre></div>';
-		echo '<div class="padding10px">Large size:  <pre><a href="'.$file->get_url('large','full').'">'.$file->get_url('large','full').'</a></pre></div>'; 
-		echo '<div class="padding10px">Medium size:  <pre><a href="'.$file->get_url('medium','full').'">'.$file->get_url('medium','full').'</a></pre></div>';
-		echo '<div class="padding10px">Small size:  <pre><a href="'.$file->get_url('small','full').'">'.$file->get_url('small','full').'</a></pre></div>';
-		echo '<div class="padding10px">Large thumbnail size:  <pre><a href="'.$file->get_url('lthumbnail','full').'">'.$file->get_url('lthumbnail','full').'</a></pre></div>';
-		echo '<div class="padding10px">Thumbnail size:  <pre><a href="'.$file->get_url('thumbnail','full').'">'.$file->get_url('thumbnail','full').'</a></pre></div>';
+		echo '<div class="padding10px">Full size:  <pre><a href="'.$file->get_url('standard','short').'">'.$file->get_url('standard','short').'</a></pre></div>';
+		echo '<div class="padding10px">Large size:  <pre><a href="'.$file->get_url('large','short').'">'.$file->get_url('large','short').'</a></pre></div>'; 
+		echo '<div class="padding10px">Medium size:  <pre><a href="'.$file->get_url('medium','short').'">'.$file->get_url('medium','short').'</a></pre></div>';
+		echo '<div class="padding10px">Small size:  <pre><a href="'.$file->get_url('small','short').'">'.$file->get_url('small','short').'</a></pre></div>';
+		echo '<div class="padding10px">Large thumbnail size:  <pre><a href="'.$file->get_url('lthumbnail','short').'">'.$file->get_url('lthumbnail','short').'</a></pre></div>';
+		echo '<div class="padding10px">Thumbnail size:  <pre><a href="'.$file->get_url('thumbnail','short').'">'.$file->get_url('thumbnail','short').'</a></pre></div>';
 		//echo '<div class="padding10px"><img src="/uploads/medium/'.$file->get('fil_name').'"/></div>';
 	}
 	else{

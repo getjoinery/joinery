@@ -81,7 +81,7 @@
 		
 			
 		
-		echo '<p>Product Link - <a href="'.$product->get_url() . '">' . $settings->get_setting('webDir').$product->get_url() . '</a><br />';
+		echo '<p>Product Link - <a href="'.$product->get_url('short') . '">' . $product->get_url('short') . '</a><br />';
 
 		
 		echo 'Price: <b>'.$currency_symbol. $product->get_readable_price().'</b><br>';
