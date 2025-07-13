@@ -681,6 +681,19 @@
 					$numperpage,
 					$offset);
 				$numrecords = $past_migrations->count_all();				
+				
+				// DEBUG: Show what records were found
+				if($verbose && $numrecords > 0){
+					echo "DEBUG: Found $numrecords migration record(s) with hash '$migration_hash':<br>\n";
+					$past_migrations->load();
+					foreach($past_migrations as $found_migration) {
+						echo "  - ID: " . $found_migration->get('mig_migration_id') . 
+							 ", File: " . ($found_migration->get('mig_file') ?: 'NULL') .
+							 ", Hash: " . ($found_migration->get('mig_hash') ?: 'NULL') .
+							 ", Success: " . ($found_migration->get('mig_success') ? 'true' : 'false') . "<br>\n";
+					}
+				}
+				
 				//IF WE GET SOMETHING BACK, THE MIGRATION HAS ALREADY BEEN run
 				if($numrecords){
 					$num_migrations_skipped++;
@@ -691,18 +704,25 @@
 				else{
 						
 					$function_name = pathinfo($migration['migration_file']);
-					if(!function_exists($function_name['filename'])){
+					$expected_function = $function_name['filename'];
+					
+					if(!function_exists($expected_function)){
 						$migration_log->set('mig_success', 0);
+						$migration_log->set('mig_output', 'MIGRATION ERROR: Function "' . $expected_function . '()" not found in file "' . $migration['migration_file'] . '". Migration files must define a function with the same name as the filename (without .php extension).');
 						$migration_log->save();
-						echo 'ABORTING MIGRATIONS at Migration '. $key ." Function does not exist.<br>\n";
-						return 0;							
+						echo 'ABORTING MIGRATIONS at Migration '. $key .": Function \"" . $expected_function . "()\" does not exist in file \"" . $migration['migration_file'] . "\".<br>\n";
+						echo 'Migration files must define a function with the same name as the filename (without .php extension).<br>\n';
+						echo 'Expected function: function ' . $expected_function . '() { ... }<br>\n';
+						throw new Exception('Migration validation failed: Missing required function "' . $expected_function . '()" in migration file "' . $migration['migration_file'] . '"');
 					}
 					$result = call_user_func($function_name['filename']);
 					if(!$result){
 						$migration_log->set('mig_success', 0);
+						$migration_log->set('mig_output', 'MIGRATION ERROR: Function "' . $expected_function . '()" returned false, indicating migration failure.');
 						$migration_log->save();
-						echo 'ABORTING MIGRATIONS at Migration '. $key ."<br>\n";
-						return 0;					
+						echo 'ABORTING MIGRATIONS at Migration '. $key .": Function \"" . $expected_function . "()\" returned false (migration failed).<br>\n";
+						echo 'Check the migration function for errors and ensure it returns true on success.<br>\n';
+						throw new Exception('Migration execution failed: Function "' . $expected_function . '()" returned false');
 					}
 					$num_migrations_run++;
 					$migration_log->set('mig_success', 1);
