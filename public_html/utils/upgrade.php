@@ -154,7 +154,7 @@
 		$response['upgrade_name'] = $upgrade->get('upg_name');
 		$response['release_date'] = $upgrade->get('upg_create_time');
 		$response['release_notes'] = $upgrade->get('upg_release_notes');
-		$response['upgrade_location'] = $settings->get_setting('webDir').'/static_files/'.$upgrade->get('upg_name');
+		$response['upgrade_location'] = LibraryFunctions::get_absolute_url('/static_files/'.$upgrade->get('upg_name'));
 		header("Content-Type: application/json");
 		http_response_code(400);
 

@@ -81,7 +81,7 @@
 	if($location->get('loc_fil_file_id')){
 		$file = new File($location->get('loc_fil_file_id'), true);
 
-		echo '<img src="'.$settings->get_setting('webDir').'/uploads/small/'.$file->get('fil_name').'">';
+		echo '<img src="'.LibraryFunctions::get_absolute_url('/uploads/small/'.$file->get('fil_name')).'">';
 	}	
 
 	

@@ -18,7 +18,6 @@
 
 	
 	$settings = Globalvars::get_instance();
-	$webDir = $settings->get_setting('webDir');
 	
 	if($settings->get_setting('page_contents_active')){
 
@@ -29,7 +28,7 @@
 		
 		foreach ($pages as $page){
 			echo "    <url>\n";
-			echo "        <loc>" . $webDir.htmlspecialchars($page->get_url(), ENT_XML1, 'UTF-8') . "</loc>\n";
+			echo "        <loc>" . LibraryFunctions::get_absolute_url(htmlspecialchars($page->get_url(), ENT_XML1, 'UTF-8')) . "</loc>\n";
 			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
 			echo "        <changefreq>monthly</changefreq>\n";
 			echo "        <priority>0.8</priority>\n";
@@ -58,7 +57,7 @@
 
 		foreach ($events as $event){
 			echo "    <url>\n";
-			echo "        <loc>" . $webDir.htmlspecialchars($event->get_url(), ENT_XML1, 'UTF-8') . "</loc>\n";
+			echo "        <loc>" . LibraryFunctions::get_absolute_url(htmlspecialchars($event->get_url(), ENT_XML1, 'UTF-8')) . "</loc>\n";
 			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
 			echo "        <changefreq>monthly</changefreq>\n";
 			echo "        <priority>0.8</priority>\n";
@@ -82,7 +81,7 @@
 
 		foreach ($locations as $location){
 			echo "    <url>\n";
-			echo "        <loc>" . $webDir.htmlspecialchars($location->get_url(), ENT_XML1, 'UTF-8') . "</loc>\n";
+			echo "        <loc>" . LibraryFunctions::get_absolute_url(htmlspecialchars($location->get_url(), ENT_XML1, 'UTF-8')) . "</loc>\n";
 			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
 			echo "        <changefreq>monthly</changefreq>\n";
 			echo "        <priority>0.8</priority>\n";
@@ -104,7 +103,7 @@
 		
 		foreach ($posts as $post){
 			echo "    <url>\n";
-			echo "        <loc>" . $webDir.htmlspecialchars($post->get_url(), ENT_XML1, 'UTF-8') . "</loc>\n";
+			echo "        <loc>" . LibraryFunctions::get_absolute_url(htmlspecialchars($post->get_url(), ENT_XML1, 'UTF-8')) . "</loc>\n";
 			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
 			echo "        <changefreq>monthly</changefreq>\n";
 			echo "        <priority>0.8</priority>\n";

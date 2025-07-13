@@ -192,8 +192,7 @@ class EventSession extends SystemBase {
 			$start_time_obj = LibraryFunctions::get_time_obj($this->get_start_time($session->get_timezone()), $session->get_timezone());	
 			$end_time_obj = LibraryFunctions::get_time_obj($this->get_end_time($session->get_timezone()), $session->get_timezone());
 			$settings = Globalvars::get_instance();
-			$webDir = $settings->get_setting('webDir');	
-			$cal_link = $webDir.'/profile/event_sessions?evt_event_id='.$this->get('evs_evt_event_id');
+			$cal_link = LibraryFunctions::get_absolute_url('/profile/event_sessions?evt_event_id='.$this->get('evs_evt_event_id'));
 			$link = Link::create($this->get('evs_title'), $start_time_obj, $end_time_obj)
 				->description($this->get('evs_title'))
 				->address($cal_link);

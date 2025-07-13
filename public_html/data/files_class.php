@@ -116,10 +116,6 @@ class File extends SystemBase {
 		
 		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
-		$url_append = '';
-		if($format == 'full'){
-			$url_append =$settings->get_setting('webDir');
-		}
 		
 		if($size == 'thumbnail'){
 			$file_path = $upload_web_dir.'/thumbnail/'.$this->get('fil_name');
@@ -147,7 +143,11 @@ class File extends SystemBase {
 			$file_path = '/'.$file_path;
 		}
 		
-		return $url_append . $file_path;
+		if($format == 'full'){
+			return LibraryFunctions::get_absolute_url($file_path);
+		} else {
+			return $file_path;
+		}
 		
 	}	
 

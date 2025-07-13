@@ -418,23 +418,28 @@
 		$webDir_valid = true;
 		
 		// Validate webDir format regardless of source (for display purposes)
-		if ($current_webDir && (!preg_match('/^https?:\/\//', $current_webDir) || substr($current_webDir, -1) === '/')) {
+		if ($current_webDir && (preg_match('/^https?:\/\//', $current_webDir) || substr($current_webDir, -1) === '/')) {
 			$webDir_valid = false;
 		}
 		
 		if (isset($globalvars_hardcoded['webDir'])) {
 			$readonly_class = '';
-			$readonly_label = $webDir_valid ? "Web URL (Loaded from Globalvars_site.php)" : "Web URL (Loaded from Globalvars_site.php - INVALID FORMAT)";
+			$readonly_label = $webDir_valid ? "Web Domain (Loaded from Globalvars_site.php)" : "Web Domain (Loaded from Globalvars_site.php - INVALID FORMAT)";
 			echo $formwriter->textinput($readonly_label, 'webDir_readonly', $readonly_class, 20, $current_webDir, '', 255, 'readonly');
 			if (!$webDir_valid) {
-				echo '<div class="text-danger small">webDir must start with http:// or https:// and not end with /</div>';
+				echo '<div class="text-danger small">webDir should contain domain only (e.g. \'example.com\' or \'localhost:8080\'). Protocol is set by Protocol Mode.</div>';
 			}
 		} else {
-			echo $formwriter->textinput("Web URL", 'webDir', '', 20, $current_webDir, '' , 255, "");
+			echo $formwriter->textinput("Web Domain", 'webDir', '', 20, $current_webDir, 'Enter domain only (e.g. example.com or localhost:8080). Protocol is set by Protocol Mode below.' , 255, "");
 		}
 		
-		$optionvals = array("Yes"=>1, 'No' => 0);
-		echo $formwriter->dropinput("Force HTTPS", "force_https", '', $optionvals, $settings->get_setting('force_https'), '', FALSE);	
+		$optionvals = array(
+			'auto' => 'Auto-detect',
+			'http' => 'HTTP only', 
+			'https' => 'HTTPS only',
+			'https_redirect' => 'HTTPS with redirects'
+		);
+		echo $formwriter->dropinput("Protocol Mode", "protocol_mode", '', $optionvals, $settings->get_setting('protocol_mode'), 'Controls protocol for generated URLs and redirect behavior', FALSE);	
 
 		$optionvals = array("Yes"=>1, 'No' => 0);
 		echo $formwriter->dropinput("Payment Debug Mode ", "debug", '', $optionvals, $settings->get_setting('debug'), '', FALSE);

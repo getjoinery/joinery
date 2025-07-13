@@ -150,7 +150,7 @@ class EmailTemplate {
 
 		$this->template_values = array(
 			'template_name' => $this->template_name,
-			'web_dir' => $settings->get_setting('webDir'),
+			'web_dir' => LibraryFunctions::get_absolute_url(''),
 			'email_vars' => $this->_generate_email_vars(),
 		);
 

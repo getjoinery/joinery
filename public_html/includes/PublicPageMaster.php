@@ -47,8 +47,9 @@ class PublicPageMaster {
 		}
 		
 		//https://blog.vnaik.com/posts/web-attacks.html
-		if($settings->get_setting('force_https')){
-			// Use the more robust isSecure() method from LibraryFunctions
+		// Check protocol_mode for HTTPS redirect
+		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true
+		if($protocol_mode === 'https_redirect'){
 			require_once('LibraryFunctions.php');
 			if(!LibraryFunctions::isSecure()){
 				$location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
@@ -189,18 +190,12 @@ class PublicPageMaster {
 		}		
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
-		if($settings->get_setting('force_https')){
-
-			$isSecure = false;
-			if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') {
-				$isSecure = true;
-			}
-			elseif (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https' || !empty($_SERVER['HTTP_X_FORWARDED_SSL']) && $_SERVER['HTTP_X_FORWARDED_SSL'] == 'on') {
-				$isSecure = true;
-			}
-			$REQUEST_PROTOCOL = $isSecure ? 'https' : 'http';
-			if($REQUEST_PROTOCOL == 'http'){
-				 $location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+		// Check protocol_mode for HTTPS redirect (duplicate check for safety)
+		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true
+		if($protocol_mode === 'https_redirect'){
+			require_once('LibraryFunctions.php');
+			if(!LibraryFunctions::isSecure()){
+				$location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
 				header('HTTP/1.1 301 Moved Permanently');
 				header('Location: ' . $location);
 				exit;

@@ -96,8 +96,9 @@ class Email extends SystemBase {
 
 		// Store a few things here for easy passthrough into the 
 		// email templates
-		$settings = Globalvars::get_instance();
-		$this->webdir = $settings->get_setting('webDir');
+		// Note: webdir is now handled by LibraryFunctions::get_absolute_url() in EmailTemplate.php
+		//$settings = Globalvars::get_instance();
+		//$this->webdir = $settings->get_setting('webDir');
 	}
 	
 	
