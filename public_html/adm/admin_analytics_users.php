@@ -1,7 +1,8 @@
 <?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/admin_analytics_users_data.php');
+PathHelper::requireOnce('includes/AdminPage.php');
+PathHelper::requireOnce('data/admin_analytics_users_data.php');
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);

@@ -1,8 +1,10 @@
 <?php
-	require_once( __DIR__ . '/../includes/Globalvars.php');
-	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
-	require_once( __DIR__ . '/../data/migrations_class.php');
-	require_once( __DIR__ . '/../migrations/migrations.php');
+	require_once( __DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('data/migrations_class.php');
+	PathHelper::requireOnce('migrations/migrations.php');
 	//error_reporting(E_ERROR | E_PARSE);
 	error_reporting(E_ERROR | E_PARSE);
 	ini_set('display_errors', 1);

@@ -1,10 +1,12 @@
 <?php
-	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once( __DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require_once $composer_dir.'autoload.php';
-	require_once( __DIR__ . '/../data/events_class.php');
-	require_once( __DIR__ . '/../data/orders_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/orders_class.php');
 
 
 $settings = Globalvars::get_instance();

@@ -1,13 +1,15 @@
 <?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
 function register_logic($get_vars, $post_vars){
 	// Check if the page was requested with jQuery, if so, we should process this page differently
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
 	if ($ajax) { 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AjaxErrorHandler.php');
+		PathHelper::requireOnce('includes/AjaxErrorHandler.php');
 	}
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+	PathHelper::requireOnce('includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');

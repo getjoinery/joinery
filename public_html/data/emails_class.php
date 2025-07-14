@@ -1,13 +1,14 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SystemClass.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
-require_once($siteDir . '/data/email_recipients_class.php');	
-require_once($siteDir . '/data/email_recipient_groups_class.php');	
-require_once($siteDir . '/data/users_class.php');	
+PathHelper::requireOnce('includes/Globalvars.php');
+$settings = Globalvars::get_instance();
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('data/email_recipients_class.php');
+PathHelper::requireOnce('data/email_recipient_groups_class.php');
+PathHelper::requireOnce('data/users_class.php');	
 
 class EmailException extends SystemClassException {}
 class EmailNotSentException extends EmailException {};

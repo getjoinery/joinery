@@ -1,13 +1,13 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/event_registrants_class.php');
+	PathHelper::requireOnce('data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_waiting_lists_class.php');
 
 	$session = SessionControl::get_instance();

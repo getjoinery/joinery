@@ -1,11 +1,13 @@
 <?php
-require_once(dirname(__DIR__, 1) . '/includes/DbConnector.php');
-require_once(dirname(__DIR__, 1) . '/includes/FieldConstraints.php');
-require_once(dirname(__DIR__, 1) . '/includes/Globalvars.php');
-require_once(dirname(__DIR__, 1) . '/includes/LibraryFunctions.php');
-require_once(dirname(__DIR__, 1) . '/includes/SingleRowAccessor.php');
-require_once(dirname(__DIR__, 1) . '/includes/SystemClass.php');
-require_once(dirname(__DIR__, 1) . '/includes/Validator.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/FieldConstraints.php');
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SingleRowAccessor.php');
+PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/Validator.php');
 
 
 
