@@ -1,9 +1,11 @@
 <?php
-	require_once( __DIR__ . '/../includes/Globalvars.php');
-	require_once( __DIR__ . '/../includes/DbConnector.php');
-	require_once( __DIR__ . '/../includes/EmailTemplate.php');
-	require_once( __DIR__ . '/../data/emails_class.php');
-	require_once( __DIR__ . '/../data/mailing_lists_class.php');
+	require_once( __DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/DbConnector.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('data/emails_class.php');
+	PathHelper::requireOnce('data/mailing_lists_class.php');
 
 	header('Content-type: text/html');
 

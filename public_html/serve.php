@@ -1,6 +1,8 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+require_once(__DIR__ . '/includes/PathHelper.php');
+
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
 $params = explode("/", $_REQUEST['path']);
 
 $full_path = $_REQUEST['path'];
@@ -10,7 +12,7 @@ $static_routes_path = ltrim($static_routes_path, '/');
 $settings = Globalvars::get_instance();
 $session = SessionControl::get_instance();
 $theme_template = $settings->get_setting('theme_template');
-$template_directory = $_SERVER['DOCUMENT_ROOT'] . '/theme/'.$theme_template;
+$template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
 
 
 

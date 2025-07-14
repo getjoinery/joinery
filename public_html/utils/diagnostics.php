@@ -1,7 +1,9 @@
 <?php
-	require_once('../includes/Globalvars.php');
-	require_once('../includes/LibraryFunctions.php');
-	require_once('../includes/SessionControl.php');	
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/SessionControl.php');	
 	
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	

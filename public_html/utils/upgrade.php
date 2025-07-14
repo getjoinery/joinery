@@ -1,9 +1,10 @@
 <?php
-	require_once( __DIR__ . '/../includes/Globalvars.php');
-	require_once( __DIR__ . '/../includes/SessionControl.php');
-	require_once( __DIR__ . '/../includes/ErrorHandler.php');
-	require_once( __DIR__ . '/../includes/AdminPage.php');
-	require_once( __DIR__ . '/../includes/SessionControl.php');
+	require_once( __DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	
 	$settings = Globalvars::get_instance();

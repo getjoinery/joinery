@@ -1,10 +1,10 @@
 <?php
-	require_once( __DIR__ . '/../includes/Globalvars.php');
-	require_once( __DIR__ . '/../utils/class_list.php');
-
+	require_once( __DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('utils/class_list.php');
 	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');
-	require_once($siteDir . '/data/api_keys_class.php');
+	PathHelper::requireOnce('data/api_keys_class.php');
 
 
 	$source_ip = $_SERVER['REMOTE_ADDR'];

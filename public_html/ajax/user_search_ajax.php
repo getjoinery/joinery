@@ -1,9 +1,11 @@
 <?php
 	header('Content-Type: application/json');
 
-	require_once( __DIR__ . '/../includes/Globalvars.php');
-	require_once( __DIR__ . '/../includes/SessionControl.php');
-	require_once( __DIR__ . '/../data/users_class.php');
+	require_once( __DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('data/users_class.php');
 
 
 	$session = SessionControl::get_instance();
