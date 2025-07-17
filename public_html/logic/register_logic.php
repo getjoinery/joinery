@@ -10,13 +10,13 @@ function register_logic($get_vars, $post_vars){
 	}
 
 	PathHelper::requireOnce('includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/SingleRowAccessor.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/address_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

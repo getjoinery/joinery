@@ -10,9 +10,10 @@
  * REQUIRES: System admin permission level (10)
  */
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/SessionControl.php');
 
 // Require login and highest permission level
 $session = SessionControl::get_instance();

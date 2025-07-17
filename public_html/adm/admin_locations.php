@@ -6,7 +6,7 @@
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
+	PathHelper::requireOnce('data/locations_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

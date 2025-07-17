@@ -1,10 +1,10 @@
 <?php
+require_once('PathHelper.php');
 require_once('Globalvars.php');
 $settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir.'/data/users_class.php');
-require_once($siteDir.'/data/orders_class.php');
-require_once($siteDir.'/data/order_items_class.php');
+PathHelper::requireOnce('data/users_class.php');
+PathHelper::requireOnce('data/orders_class.php');
+PathHelper::requireOnce('data/order_items_class.php');
 
 $composer_dir = $settings->get_setting('composerAutoLoad');	
 require_once $composer_dir.'autoload.php';

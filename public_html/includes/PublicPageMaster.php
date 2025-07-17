@@ -1,12 +1,11 @@
 <?php
+require_once('PathHelper.php');
 require_once('Globalvars.php');
 require_once('SessionControl.php');
 require_once('ShoppingCart.php');
 
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/data/users_class.php');
-require_once($siteDir . '/data/public_menus_class.php');
+PathHelper::requireOnce('data/users_class.php');
+PathHelper::requireOnce('data/public_menus_class.php');
 
 class PublicPageMaster {
 

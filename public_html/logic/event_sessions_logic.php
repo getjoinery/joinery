@@ -1,19 +1,20 @@
 <?php
 
 function event_sessions_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Pager.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/Pager.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/videos_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/event_registrants_class.php');
+	PathHelper::requireOnce('data/event_sessions_class.php');
+	PathHelper::requireOnce('data/files_class.php');
+	PathHelper::requireOnce('data/locations_class.php');
 	
 
 	$settings = Globalvars::get_instance();

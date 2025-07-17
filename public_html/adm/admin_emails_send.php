@@ -1,16 +1,17 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipients_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/messages_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
+	PathHelper::requireOnce('data/emails_class.php');
+	PathHelper::requireOnce('data/email_recipients_class.php');
+	PathHelper::requireOnce('data/messages_class.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_members_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_list_registrants_class.php');
+	PathHelper::requireOnce('data/emails_class.php');
+	PathHelper::requireOnce('data/groups_class.php');
+	PathHelper::requireOnce('data/group_members_class.php');
+	PathHelper::requireOnce('data/mailing_lists_class.php');
+	PathHelper::requireOnce('data/mailing_list_registrants_class.php');
 	
 	$session = SessionControl::get_instance();
 	//$session->set_return();

@@ -1,13 +1,15 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+	PathHelper::requireOnce('/includes/ErrorHandler.php');
+	
+	PathHelper::requireOnce('/includes/AdminPage.php');
+	PathHelper::requireOnce('/includes/SessionControl.php');
+	PathHelper::requireOnce('/includes/Activation.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_list_registrants_class.php');
+	PathHelper::requireOnce('/data/users_class.php');
+	PathHelper::requireOnce('/data/mailing_lists_class.php');
+	PathHelper::requireOnce('/data/mailing_list_registrants_class.php');
 
 	$settings = Globalvars::get_instance();
 	$user = new User($_REQUEST['usr_user_id'], TRUE);

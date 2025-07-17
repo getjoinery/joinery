@@ -1,4 +1,5 @@
 <?php
+require_once('PathHelper.php');
 require_once('SystemClass.php');
 
 class LibraryFunctions {
@@ -145,12 +146,11 @@ class LibraryFunctions {
 	
 	static function display_404_page(){
 		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
 
 		$theme_template = $settings->get_setting('theme_template');
-		$theme_file = $siteDir . '/theme/'.$theme_template.'/404.php';	
+		$theme_file = PathHelper::getBasePath() . '/theme/'.$theme_template.'/404.php';	
 
-		$base_file = $siteDir . '/views/404.php';
+		$base_file = PathHelper::getBasePath() . '/views/404.php';
 
 		header("HTTP/1.0 404 Not Found");
 		if(file_exists($theme_file)){
@@ -217,7 +217,7 @@ class LibraryFunctions {
 	
 	static function list_plugins($plugin_dir = NULL){
 		if(!$plugin_dir){
-			$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
+			$plugin_dir = PathHelper::getBasePath()."/plugins";
 		}
 
 		return LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
@@ -235,12 +235,12 @@ class LibraryFunctions {
 		}	
 		
 		if($override_name == 'admin'){
-			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMasterFalcon.php');
+			PathHelper::requireOnce('includes/FormWriterMasterFalcon.php');
 			$formwriter = new FormWriterMaster($form_id);
 			return $formwriter;	
 		}
 		else if($override_name == 'tailwind'){
-			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMasterTailwind.php');
+			PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
 			$formwriter = new FormWriterMaster($form_id);
 			return $formwriter;	
 		}
@@ -260,7 +260,7 @@ class LibraryFunctions {
 		
 		
 		//FINALLY GRAB THE DEFAULT FORM
-		require_once($_SERVER['DOCUMENT_ROOT'].'/includes/FormWriterMaster.php');
+		PathHelper::requireOnce('includes/FormWriterMaster.php');
 		$formwriter = new FormWriterMaster($form_id);
 		return $formwriter;		
 							
@@ -269,8 +269,7 @@ class LibraryFunctions {
 	
 	//RETURNS THE PATH OF A FILE IN A PLUGIN, PLUGIN IS OPTIONAL, SUBDIRECTORY IS OPTIONAL
 	static function get_plugin_file_path($filename, $plugin='', $subdirectory='', $path_format='system'){
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
+		$siteDir = PathHelper::getBasePath();
 		
 		//MAKE SURE THEY START WITH A SLASH
 		if($plugin[0] != '/'){
@@ -295,7 +294,7 @@ class LibraryFunctions {
 			}
 		}
 		else if($plugin && !$subdirectory){
-			$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
+			$plugin_dir = PathHelper::getBasePath()."/plugins";
 			$directories = LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
 			
 			foreach($directories as $directory){
@@ -316,7 +315,7 @@ class LibraryFunctions {
 		else{
 			$plugins = LibraryFunctions::list_plugins();
 			foreach($plugins as $plugin){
-				$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
+				$plugin_dir = PathHelper::getBasePath()."/plugins";
 				$directories = LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
 				
 				foreach($directories as $directory){
@@ -345,7 +344,7 @@ class LibraryFunctions {
 	//subdirectory starts with a slash
 	static function get_theme_file_path($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $debug = false){
 		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
+		$siteDir = PathHelper::getBasePath();
 		
 		//SUBDIRECTORY WORKS WITH OR WITHOUT SLASH
 		if (substr($subdirectory, 0, 1) !== '/') {
@@ -407,7 +406,7 @@ class LibraryFunctions {
 	
 	static function get_logic_file_path($filename, $path_format='system', $debug=0){
 		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
+		$siteDir = PathHelper::getBasePath();
 		$theme_template = $settings->get_setting('theme_template');
 
 		$theme_file = $siteDir.'/theme/'.$theme_template.'/logic/'.$filename;
@@ -657,7 +656,7 @@ class LibraryFunctions {
 
 	static function write_to_log($type, $entry){
 
-		$dbhelper = DbConnector::$siteDir();
+		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
 
@@ -701,7 +700,7 @@ class LibraryFunctions {
 			return FALSE;
 		}
 
-		$dbhelper = DbConnector::$siteDir();
+		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
 		try {
@@ -755,7 +754,7 @@ class LibraryFunctions {
 	}
 
 	static function state_to_abbr($fullstate) {
-		require_once($siteDir . '/data/address_class.php');
+		PathHelper::requireOnce('data/address_class.php');
 		$abbrev = array_search($fullstate, Address::$states);
 		return $abbrev;
 	}
@@ -764,7 +763,7 @@ class LibraryFunctions {
 		/*
 		$ipnum = ip2long($ip);
 
-		$dbhelper = DbConnector::$siteDir();
+		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$sql = "
 			SELECT region,city FROM geoip.locations
@@ -953,7 +952,7 @@ class LibraryFunctions {
 		x(ST_Transform(ST_SetSRID(ST_MakePoint(?, ?),4269),2163)),
 		y(ST_Transform(ST_SetSRID(ST_MakePoint(?, ?),4269),2163))';
 
-		$dbhelper = DbConnector::$siteDir();
+		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		try{
 			$q = $dblink->prepare($sql);
@@ -977,7 +976,7 @@ class LibraryFunctions {
 	static function GetTimezoneFromZipCode($zip_code) {
 		$sql = "SELECT zip_timezone FROM zips.zip_codes WHERE zip_code_id = ? LIMIT 1";
 
-		$dbhelper = DbConnector::$siteDir();
+		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		try {
 			$q = $dblink->prepare($sql);
@@ -1136,7 +1135,7 @@ class LibraryFunctions {
 
 	//RETURN LAT/LONG FOR CURRENT USER
 	static function get_current_lat_lon(){
-		$session = SessionControl::$siteDir();
+		$session = SessionControl::get_instance();
 
 		$location_data = $session->get_location_data();
 		if ($location_data) {

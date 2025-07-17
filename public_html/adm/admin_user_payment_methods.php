@@ -1,10 +1,11 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/StripeHelper.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	PathHelper::requireOnce('data/users_class.php');
 
 	$settings = Globalvars::get_instance();
 

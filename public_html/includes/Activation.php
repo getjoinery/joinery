@@ -1,15 +1,16 @@
 <?php
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
+require_once('PathHelper.php');
+PathHelper::requireOnce('includes/SystemClass.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/systemmailer.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+PathHelper::requireOnce('includes/ErrorHandler.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/systemmailer.php');
+PathHelper::requireOnce('includes/EmailTemplate.php');
+PathHelper::requireOnce('includes/Activation.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
+PathHelper::requireOnce('data/users_class.php');
+PathHelper::requireOnce('data/phone_number_class.php');
 
 class ActivationError extends SystemClassException {}
 

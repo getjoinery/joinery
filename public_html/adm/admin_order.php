@@ -1,14 +1,15 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('/includes/AdminPage.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
+	PathHelper::requireOnce('/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('/includes/StripeHelper.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
+	PathHelper::requireOnce('/data/address_class.php');
+	PathHelper::requireOnce('/data/product_groups_class.php');
+	PathHelper::requireOnce('/data/order_items_class.php');
+	PathHelper::requireOnce('/data/orders_class.php');
+	PathHelper::requireOnce('/data/products_class.php');
 
 	$settings = Globalvars::get_instance();
 

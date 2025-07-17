@@ -1,16 +1,16 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
-
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirements_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirement_instances_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/StripeHelper.php');
+	PathHelper::requireOnce('data/email_templates_class.php');
+	PathHelper::requireOnce('data/products_class.php');
+	PathHelper::requireOnce('data/product_groups_class.php');
+	PathHelper::requireOnce('data/product_requirements_class.php');
+	PathHelper::requireOnce('data/product_requirement_instances_class.php');
+	PathHelper::requireOnce('data/order_items_class.php');
+	PathHelper::requireOnce('data/events_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

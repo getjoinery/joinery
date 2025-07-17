@@ -1,9 +1,11 @@
 <?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
 function password_set_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

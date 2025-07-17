@@ -10,13 +10,13 @@ PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 
-require_once($siteDir . '/data/groups_class.php');
-require_once($siteDir . '/data/address_class.php');
-require_once($siteDir . '/data/phone_number_class.php'); 
-require_once($siteDir . '/data/activation_codes_class.php'); 
-require_once($siteDir . '/data/visitor_events_class.php');
-require_once($siteDir . '/data/contact_types_class.php');
-require_once($siteDir . '/data/mailing_lists_class.php');
+PathHelper::requireOnce('data/groups_class.php');
+PathHelper::requireOnce('data/address_class.php');
+PathHelper::requireOnce('data/phone_number_class.php');
+PathHelper::requireOnce('data/activation_codes_class.php');
+PathHelper::requireOnce('data/visitor_events_class.php');
+PathHelper::requireOnce('data/contact_types_class.php');
+PathHelper::requireOnce('data/mailing_lists_class.php');
 
 class UserException extends SystemClassException {}
 class DisplayableUserException extends UserException implements DisplayableErrorMessage {}

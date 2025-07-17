@@ -47,7 +47,8 @@ if($_POST) {
 	//DEAL WITH THE UPLOADED FILE
 	$my_upload = new file_upload;
 
-	$my_upload->upload_dir = $_SERVER['DOCUMENT_ROOT'] . "/admin/upload/"; // "files" is the folder for the uploaded files (you have to create this folder)
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	$my_upload->upload_dir = PathHelper::getAbsolutePath("/admin/upload/"); // "files" is the folder for the uploaded files (you have to create this folder)
 	$my_upload->extensions = array(".csv"); // specify the allowed extensions here
 	$my_upload->max_length_filename = 100; // change this value to fit your field length in your database (standard 100)
 	$my_upload->rename_file = false;

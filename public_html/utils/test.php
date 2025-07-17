@@ -5,12 +5,11 @@
 	*/
 	
 	require_once( __DIR__ . '/class_list.php');
-	require_once( __DIR__ . '/../includes/Globalvars.php');
-	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');
-
-	require_once($siteDir.'/includes/SessionControl.php');
-	require_once($siteDir.'/includes/LibraryFunctions.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
  
 	echo 'All classes loaded<br>';

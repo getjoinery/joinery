@@ -1,6 +1,7 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+require_once('PathHelper.php');
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/SessionControl.php');
 
 $session = SessionControl::get_instance();
 

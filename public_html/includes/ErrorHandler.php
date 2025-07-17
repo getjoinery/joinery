@@ -1,4 +1,5 @@
 <?php
+require_once('PathHelper.php');
 require_once('Globalvars.php');
 require_once('SessionControl.php');
 require_once('DbConnector.php');
@@ -72,7 +73,7 @@ class ErrorHandler{
 	}
 
 	function handle_admin_error($errortext){
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+		PathHelper::requireOnce('includes/AdminPage.php');
 		$session = SessionControl::get_instance();
 
 		$page = new AdminPage();

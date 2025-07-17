@@ -11,7 +11,7 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-require_once($siteDir . '/data/order_items_class.php');
+PathHelper::requireOnce('data/order_items_class.php');
 
 class OrderException extends SystemClassException {}
 

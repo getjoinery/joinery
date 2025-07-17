@@ -11,13 +11,13 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-require_once($siteDir . '/data/order_items_class.php');
-require_once($siteDir . '/data/questions_class.php');
-require_once($siteDir . '/data/coupon_codes_class.php');
-require_once($siteDir . '/data/coupon_code_products_class.php');
-require_once($siteDir . '/data/product_versions_class.php');
-require_once($siteDir . '/data/product_requirements_class.php');
-require_once($siteDir . '/data/product_requirement_instances_class.php');
+PathHelper::requireOnce('data/order_items_class.php');
+PathHelper::requireOnce('data/questions_class.php');
+PathHelper::requireOnce('data/coupon_codes_class.php');
+PathHelper::requireOnce('data/coupon_code_products_class.php');
+PathHelper::requireOnce('data/product_versions_class.php');
+PathHelper::requireOnce('data/product_requirements_class.php');
+PathHelper::requireOnce('data/product_requirement_instances_class.php');
 
 class ProductException extends SystemClassException {}
 
@@ -715,11 +715,11 @@ class Product extends SystemBase {
 	
 	function run_product_scripts($user, $order_item){
 		//REQUIRE ALL OF THE PRODUCT SCRIPTS, THE MAIN ONE AND ALL OF THE PLUGINS
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/logic/product_scripts_logic.php');
+		PathHelper::requireOnce('logic/product_scripts_logic.php');
 
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
-			$product_script_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
+			$product_script_file = PathHelper::getRootDir().'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
 			if(file_exists($product_script_file)){
 				require_once($product_script_file);
 			}
@@ -1395,7 +1395,7 @@ class MultiProduct extends SystemMultiBase {
 }
 
 // Also require all the sub-products
-foreach (glob($siteDir . '/data/products/*.php') as $sub) {
+foreach (glob(PathHelper::getBasePath() . '/data/products/*.php') as $sub) {
 	require_once($sub);
 }
 

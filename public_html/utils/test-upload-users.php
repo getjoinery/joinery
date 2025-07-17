@@ -1,11 +1,12 @@
 <?php
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
+PathHelper::requireOnce('/includes/DbConnector.php');
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+PathHelper::requireOnce('/data/users_class.php');
+PathHelper::requireOnce('/data/address_class.php');
 
 echo 'feature turned off';
 exit();

@@ -8,7 +8,7 @@
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
 	PathHelper::requireOnce('data/event_sessions_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_waiting_lists_class.php');
+	PathHelper::requireOnce('data/event_waiting_lists_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
