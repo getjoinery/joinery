@@ -1,4 +1,5 @@
 <?php
+require_once('PathHelper.php');
 require_once('SqlBuilder.php');
 require_once('FieldConstraints.php');
 
@@ -1359,9 +1360,7 @@ require_once('ErrorHandler.php');
 require_once('Globalvars.php');
 require_once('SessionControl.php');
 require_once('Globalvars.php');
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir  . '/data/general_errors_class.php');
+PathHelper::requireOnce('data/general_errors_class.php');
 
 if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) { 
 	function default_exception_handler($e) {

@@ -1,13 +1,15 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	
+	PathHelper::requireOnce('includes/AdminPage.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/surveys_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/survey_answers_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/survey_questions_class.php');
+	PathHelper::requireOnce('data/surveys_class.php');
+	PathHelper::requireOnce('data/survey_answers_class.php');
+	PathHelper::requireOnce('data/survey_questions_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

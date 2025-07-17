@@ -1,12 +1,14 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	
+	PathHelper::requireOnce('includes/AdminPage.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/contact_types_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/contact_types_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

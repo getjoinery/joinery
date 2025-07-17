@@ -8,7 +8,7 @@ function login_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/Activation.php');
 	PathHelper::requireOnce('data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/login_class.php');
+	PathHelper::requireOnce('data/login_class.php');
 	
 	//HANDLE ACTIVATION FIRST IF PRESENT
 	if ($get_vars['act_code']) {
@@ -81,7 +81,7 @@ function login_logic($get_vars, $post_vars){
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
 	if ($ajax) {
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AjaxErrorHandler.php');
+		PathHelper::requireOnce('includes/AjaxErrorHandler.php');
 	}
 
 

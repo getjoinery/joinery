@@ -1,10 +1,11 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('/includes/AdminPage.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_templates_class.php');
+	PathHelper::requireOnce('/data/mailing_lists_class.php');
+	PathHelper::requireOnce('/data/email_templates_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

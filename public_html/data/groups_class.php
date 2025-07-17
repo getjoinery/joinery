@@ -10,7 +10,7 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-require_once($siteDir . '/data/group_members_class.php');
+PathHelper::requireOnce('data/group_members_class.php');
 
 class GroupException extends SystemClassException {}
 

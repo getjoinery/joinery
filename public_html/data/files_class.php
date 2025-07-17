@@ -1,15 +1,16 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/FieldConstraints.php');
-require_once($siteDir . '/includes/Globalvars.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SingleRowAccessor.php');
-require_once($siteDir . '/includes/SystemClass.php');
-require_once($siteDir . '/includes/Validator.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
-require_once($siteDir . '/data/event_sessions_class.php');
+PathHelper::requireOnce('includes/Globalvars.php');
+$settings = Globalvars::get_instance();
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/FieldConstraints.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SingleRowAccessor.php');
+PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/Validator.php');
+
+PathHelper::requireOnce('data/event_sessions_class.php');
 
 class FileException extends SystemClassException {}
 
@@ -400,7 +401,7 @@ class File extends SystemBase {
 		}	
 	
 		if ($group_id = $this->get('fil_grp_group_id')){
-			require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
+			PathHelper::requireOnce('data/groups_class.php');
 			//CHECK TO SEE IF USER IS IN AUTHORIZED GROUP
 			$group = new Group($group_id, TRUE);
 			if(!$group->is_member_in_group($session->get_user_id())){
@@ -409,7 +410,7 @@ class File extends SystemBase {
 		}
 		
 		if ($event_id = $this->get('fil_evt_event_id')){
-			require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
+			PathHelper::requireOnce('data/event_registrants_class.php');
 			//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
 			$searches['user_id'] = $session->get_user_id();
 			$searches['event_id'] = $event_id;

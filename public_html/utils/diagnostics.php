@@ -21,7 +21,7 @@
 
 error_reporting(E_ALL | E_STRICT);
 
-require "../includes/PasswordHash.php";
+PathHelper::requireOnce('includes/PasswordHash.php');
 
 header("Content-type: text/plain");
 

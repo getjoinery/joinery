@@ -1,14 +1,14 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_types_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/surveys_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/products_class.php');
+	PathHelper::requireOnce('data/files_class.php');
+	PathHelper::requireOnce('data/event_types_class.php');
+	PathHelper::requireOnce('data/surveys_class.php');
+	PathHelper::requireOnce('data/locations_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

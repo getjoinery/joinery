@@ -1,10 +1,11 @@
 <?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function account_edit_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/address_class.php');
+	PathHelper::requireOnce('data/phone_number_class.php');
 	
 	$page_vars = array();
 	

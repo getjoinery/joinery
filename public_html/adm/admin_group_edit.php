@@ -1,9 +1,11 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
+	
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
+	PathHelper::requireOnce('data/groups_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);

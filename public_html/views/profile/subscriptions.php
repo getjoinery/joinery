@@ -1,7 +1,8 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	require_once(__DIR__ . '/../../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(LibraryFunctions::get_logic_file_path('subscriptions_logic.php'));
 
 	$page_vars = subscriptions_logic($_GET, $_POST);

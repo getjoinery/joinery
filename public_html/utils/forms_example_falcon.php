@@ -1,7 +1,8 @@
 <?php
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('/includes/SessionControl.php');
+	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 
@@ -19,7 +20,7 @@
 	
 	
 	//$formwriter = LibraryFunctions::get_formwriter_object('form1');
-				require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMasterFalcon.php');
+				PathHelper::requireOnce('/includes/FormWriterMasterFalcon.php');
 			$formwriter = new FormWriterMaster('form1');
 	
 	$validation_rules = array();

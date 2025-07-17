@@ -1,5 +1,6 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	require_once (LibraryFunctions::get_logic_file_path('cart_logic.php'));
 

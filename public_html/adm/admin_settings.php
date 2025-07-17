@@ -93,7 +93,7 @@
 	//GET ALL OF THE PLUGIN SETTINGS PAGES
 	$plugins = LibraryFunctions::list_plugins();
 	foreach($plugins as $plugin){
-		$script_dir = $_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/admin/';
+		$script_dir = PathHelper::getAbsolutePath('/plugins/'.$plugin.'/admin/');
 		if(is_dir($script_dir)){
 			$settings_files = LibraryFunctions::getFilesWithSubstring($script_dir, 'admin_settings');
 			if(!empty($settings_files)){
@@ -450,7 +450,7 @@
 		$optionvals = array("Yes (show to screen)"=>1, 'No (logged)' => 0);
 		echo $formwriter->dropinput("Show errors", "show_errors", '', $optionvals, $settings->get_setting('show_errors'), '', FALSE);		
 		
-		$theme_dir = $_SERVER['DOCUMENT_ROOT'].'/theme/';
+		$theme_dir = PathHelper::getAbsolutePath('/theme/');
 		$directories = LibraryFunctions::list_directories_in_directory($theme_dir, 'filename');
 		$optionvals = array();
 		foreach($directories as $directory){
@@ -773,7 +773,7 @@
 		if (!empty($acuity_api_key) && !empty($acuity_user_id)) {
 			echo '<h5>API Status</h5>';
 			try {
-				require_once($_SERVER['DOCUMENT_ROOT'].'/includes/AcuityScheduling.php');
+				PathHelper::requireOnce('/includes/AcuityScheduling.php');
 				
 				$acuity = new AcuityScheduling(array(
 					'userId' => $acuity_user_id,
@@ -840,7 +840,7 @@
 					$original_test_mode = $_SESSION['test_mode'] ?? null;
 					$_SESSION['test_mode'] = false; // Force live mode
 					
-					require_once($_SERVER['DOCUMENT_ROOT'].'/includes/StripeHelper.php');
+					PathHelper::requireOnce('/includes/StripeHelper.php');
 					$stripe_helper = new StripeHelper();
 					
 					if ($stripe_helper->is_initialized()) {
@@ -945,7 +945,7 @@
 					$original_test_mode = $_SESSION['test_mode'] ?? null;
 					$_SESSION['test_mode'] = true; // Force test mode
 					
-					require_once($_SERVER['DOCUMENT_ROOT'].'/includes/StripeHelper.php');
+					PathHelper::requireOnce('/includes/StripeHelper.php');
 					$stripe_helper_test = new StripeHelper();
 					
 					if ($stripe_helper_test->is_initialized()) {
@@ -1107,7 +1107,7 @@
 				$original_test_mode = $_SESSION['test_mode'] ?? null;
 				$_SESSION['test_mode'] = false; // Force live mode
 				
-				require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PaypalHelper.php');
+				PathHelper::requireOnce('/includes/PaypalHelper.php');
 				
 				// Step 1: Get OAuth2 access token
 				$basic_auth = base64_encode($paypal_api_key . ':' . $paypal_api_secret);
@@ -1241,7 +1241,7 @@
 				$original_test_mode = $_SESSION['test_mode'] ?? null;
 				$_SESSION['test_mode'] = true; // Force test mode
 				
-				require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PaypalHelper.php');
+				PathHelper::requireOnce('/includes/PaypalHelper.php');
 				
 				// Step 1: Get OAuth2 access token
 				$basic_auth_test = base64_encode($paypal_api_key_test . ':' . $paypal_api_secret_test);

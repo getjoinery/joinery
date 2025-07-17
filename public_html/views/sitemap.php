@@ -1,14 +1,15 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('/includes/SessionControl.php');
+	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/pages_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/locations_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
+	PathHelper::requireOnce('/data/users_class.php');
+	PathHelper::requireOnce('/data/pages_class.php');
+	PathHelper::requireOnce('/data/posts_class.php');
+	PathHelper::requireOnce('/data/events_class.php');
+	PathHelper::requireOnce('/data/locations_class.php');
+	PathHelper::requireOnce('/data/videos_class.php');
 
 	header("Content-Type: application/xml; charset=UTF-8");
 

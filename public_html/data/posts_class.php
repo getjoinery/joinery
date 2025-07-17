@@ -10,8 +10,8 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-require_once($siteDir . '/data/content_versions_class.php');
-require_once($siteDir . '/data/groups_class.php');
+PathHelper::requireOnce('data/content_versions_class.php');
+PathHelper::requireOnce('data/groups_class.php');
 
 class PostException extends SystemClassException {}
 

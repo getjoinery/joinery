@@ -10,18 +10,18 @@ PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 
-require_once($siteDir . '/data/event_registrants_class.php');
-require_once($siteDir . '/data/files_class.php');
-require_once($siteDir . '/data/content_versions_class.php');
-require_once($siteDir . '/data/groups_class.php');
-require_once($siteDir . '/data/event_waiting_lists_class.php');
+PathHelper::requireOnce('data/event_registrants_class.php');
+PathHelper::requireOnce('data/files_class.php');
+PathHelper::requireOnce('data/content_versions_class.php');
+PathHelper::requireOnce('data/groups_class.php');
+PathHelper::requireOnce('data/event_waiting_lists_class.php');
 
-require_once($siteDir . '/includes/calendar-links/Link.php');
-require_once($siteDir . '/includes/calendar-links/Generator.php');
-require_once($siteDir . '/includes/calendar-links/Generators/Google.php');
-require_once($siteDir . '/includes/calendar-links/Generators/Ics.php');
-require_once($siteDir . '/includes/calendar-links/Generators/Yahoo.php');
-require_once($siteDir . '/includes/calendar-links/Generators/WebOutlook.php');
+PathHelper::requireOnce('includes/calendar-links/Link.php');
+PathHelper::requireOnce('includes/calendar-links/Generator.php');
+PathHelper::requireOnce('includes/calendar-links/Generators/Google.php');
+PathHelper::requireOnce('includes/calendar-links/Generators/Ics.php');
+PathHelper::requireOnce('includes/calendar-links/Generators/Yahoo.php');
+PathHelper::requireOnce('includes/calendar-links/Generators/WebOutlook.php');
 use Spatie\CalendarLinks\Link;
 
 class EventException extends SystemClassException {}
@@ -482,7 +482,7 @@ class Event extends SystemBase {
 
 	
 	function output_product_dropdown($formwriter, $currentvalue, $extra_data=array()) {
-		require_once($siteDir . '/data/products_class.php');
+		PathHelper::requireOnce('data/products_class.php');
 
 		$products = new MultiProduct(
 			array(

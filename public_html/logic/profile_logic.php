@@ -1,22 +1,23 @@
 <?php
 
 function profile_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/messages_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/address_class.php');
+	PathHelper::requireOnce('data/phone_number_class.php');
+	PathHelper::requireOnce('data/messages_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/event_registrants_class.php');
+	PathHelper::requireOnce('data/event_sessions_class.php');
 	
 	$page_vars = array();
 	
-	//require_once($_SERVER['DOCUMENT_ROOT'].'/includes/stripe-php/init.php');
+	//PathHelper::requireOnce('includes/stripe-php/init.php');
 	$settings = Globalvars::get_instance(); 
 	$page_vars['settings'] = $settings;
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -39,7 +40,7 @@ function profile_logic($get_vars, $post_vars){
 	
 	$user = new User($session->get_user_id(), TRUE);	
 	$page_vars['user'] = $user;
-	include($_SERVER['DOCUMENT_ROOT'] . '/utils/registrant_maintenance.php');
+	include(PathHelper::getAbsolutePath('utils/registrant_maintenance.php'));
 	
 
 	$event_registrants = new MultiEventRegistrant(

@@ -1,17 +1,17 @@
 <?php
-	require_once('../includes/Globalvars.php');
-	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');	
-	require_once($siteDir . '/includes/ErrorHandler.php');
-	require_once($siteDir . '/includes/LibraryFunctions.php');
-	require_once($siteDir . '/includes/SessionControl.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
-	require_once($siteDir . '/data/users_class.php');
-	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
-	
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';	
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/ErrorHandler.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SessionControl.php');
+
+PathHelper::requireOnce('data/users_class.php');
+require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
+
+$settings = Globalvars::get_instance();
+$composer_dir = $settings->get_setting('composerAutoLoad');	
+require_once $composer_dir.'autoload.php';	
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);

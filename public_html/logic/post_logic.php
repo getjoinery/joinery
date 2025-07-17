@@ -1,10 +1,11 @@
 <?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function post_logic($get_vars, $post_vars, $post){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/comments_class.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('data/posts_class.php');
+	PathHelper::requireOnce('data/comments_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

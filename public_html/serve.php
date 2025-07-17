@@ -28,7 +28,7 @@ if(file_exists($template_file)){
 
 /*
 if($_GET['act_code']){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
+	PathHelper::requireOnce('includes/Activation.php');
 	$activated = Activation::ActivateUser($act_code);
 }
 */
@@ -36,7 +36,7 @@ if($_GET['act_code']){
 //ROBOTS.TXT
 if($params[0] == 'robots.txt'){
 	$template_file = $template_directory.'/views/robots.php';
-	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/views/robots.php';
+	$base_file = PathHelper::getIncludePath('views/robots.php');
 	if(file_exists($template_file)){
 		require_once($template_file);
 		exit();
@@ -65,7 +65,7 @@ if($params[0] == 'favicon.ico'){
 
 //MAIN INCLUDE FILES.  LOAD ANYTHING UNDER /includes
 if($params[0] == 'includes'){
-	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
 	if(file_exists($base_file)){
 		$seconds_to_cache = 43200;
 		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
@@ -84,7 +84,7 @@ if($params[0] == 'includes'){
 
 //PLUGIN INCLUDE FILES.  LOAD ANYTHING UNDER /plugins/PLUGIN/includes
 if($params[0] == 'plugins' && $params[2] == 'includes'){
-	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
 
 	if(file_exists($base_file)){
 		$seconds_to_cache = 43200;
@@ -105,7 +105,7 @@ if($params[0] == 'plugins' && $params[2] == 'includes'){
 //THEME INCLUDE FILES.  LOAD ANYTHING UNDER /theme/
 if($params[0] == 'theme'){
 
-	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
 	if(file_exists($base_file)){
 		$seconds_to_cache = 43200;
 		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
@@ -127,7 +127,7 @@ if($params[0] == 'theme'){
 if($settings->get_setting('urls_active')){
 
 	//CHECK REDIRECTS
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/urls_class.php');
+	PathHelper::requireOnce('data/urls_class.php');
 	$urls = new MultiUrl(
 		array('deleted'=>false, 'incoming'=> mb_convert_encoding($static_routes_path, 'UTF-8', 'UTF-8')),
 		NULL,
@@ -164,7 +164,7 @@ if($settings->get_setting('urls_active')){
 //CHECK API
 if($params[0] == 'api' && $params[1] == 'v1'){
 	$theme_file = $template_directory.'/api/apiv1.php';
-	$base_file = $_SERVER['DOCUMENT_ROOT'] . '/api/apiv1.php';
+	$base_file = PathHelper::getIncludePath('api/apiv1.php');
 
 	if(file_exists($theme_file)){
 		require_once($theme_file);
@@ -183,7 +183,7 @@ if($params[0] == 'ajax'){
 		//LOAD THE AJAX FILES FROM THE PLUGINS
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
-			$plugin_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/ajax/'.$params[1], 'php');
+			$plugin_file = ensure_extension(PathHelper::getIncludePath('plugins/'.$plugin.'/ajax/'.$params[1]), 'php');
 			if(file_exists($plugin_file)){
 				$is_valid_page = true;
 				require_once($plugin_file);
@@ -191,7 +191,7 @@ if($params[0] == 'ajax'){
 			}
 		}	
 		
-		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/ajax/'.$params[1],'php');
+		$base_file = ensure_extension(PathHelper::getIncludePath('ajax/'.$params[1]),'php');
 		if(file_exists($base_file)){
 			$is_valid_page = true;
 			require_once($base_file); 
@@ -257,10 +257,10 @@ if($settings->get_setting('files_active')){
 		}
 		//ORIGINAL FILE
 		if(file_exists($file)){
-			require_once($_SERVER['DOCUMENT_ROOT'] . '/data/files_class.php');
+			PathHelper::requireOnce('data/files_class.php');
 			$file_obj = File::get_by_name(basename($file));
 
-			require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+			PathHelper::requireOnce('includes/SessionControl.php');
 					
 			if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){	
 				
@@ -285,14 +285,14 @@ if($settings->get_setting('files_active')){
 //VIDEOS
 if($settings->get_setting('videos_active')){
 	if($params[0] == 'video'){
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/videos_class.php');
+		PathHelper::requireOnce('data/videos_class.php');
 		$video = Video::get_by_link($params[1], true);
 		
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+		PathHelper::requireOnce('includes/SessionControl.php');
 		$session = SessionControl::get_instance();
 		if($video && $video->authenticate_read(array('session'=>$session))){		
 				$template_file = $template_directory.'/views/video.php';
-				$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/video.php';
+				$base_file = PathHelper::getIncludePath('views/video.php');
 				
 				$is_valid_page = true;
 				
@@ -322,24 +322,24 @@ if(!$params[0]){
 		//IF IT IS THE BLOG
 		if($page_pieces[1] == 'blog'){
 			$template_file = $template_directory.'/views/blog.php';
-			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+			$base_file = PathHelper::getIncludePath('views/blog.php');
 
 		}
 		else if($page_pieces[1] == 'page'){
 			//IF IT IS A PAGE
 			if($settings->get_setting('page_contents_active')){
-				require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
+				PathHelper::requireOnce('data/pages_class.php');
 
 				$page = Page::get_by_link($page_pieces[2], true);		
 
 				$template_file = $template_directory.'/views/page.php';
-				$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
+				$base_file = PathHelper::getIncludePath('views/page.php');
 						
 			}	
 		}
 		else{
 			$template_file = $template_directory.$alternate_page;
-			$base_file = $_SERVER['DOCUMENT_ROOT'].$alternate_page;			
+			$base_file = PathHelper::getRootDir().$alternate_page;			
 			
 		}
 		
@@ -350,30 +350,30 @@ if(!$params[0]){
 		//IF IT IS THE BLOG
 		if($page_pieces[1] == 'blog'){
 			$template_file = $template_directory.'/views/blog.php';
-			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+			$base_file = PathHelper::getIncludePath('views/blog.php');
 
 		}
 		else if($page_pieces[1] == 'page'){
 			//IF IT IS A PAGE
 			if($settings->get_setting('page_contents_active')){
-				require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
+				PathHelper::requireOnce('data/pages_class.php');
 
 				$page = Page::get_by_link($page_pieces[2], true);		
 
 				$template_file = $template_directory.'/views/page.php';
-				$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
+				$base_file = PathHelper::getIncludePath('views/page.php');
 						
 			}	
 		}
 		else{
 			$template_file = $template_directory.$alternate_page;
-			$base_file = $_SERVER['DOCUMENT_ROOT'].$alternate_page;			
+			$base_file = PathHelper::getRootDir().$alternate_page;			
 		}		
 		
 	}
 	else{
 		$template_file = $template_directory.'/views/index.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/index.php';		
+		$base_file = PathHelper::getIncludePath('views/index.php');		
 	}
 	$is_valid_page = true;
 
@@ -391,11 +391,11 @@ if(!$params[0]){
 if($params[0] == 'profile'){
 	if($params[1]){
 		$template_file = ensure_extension($template_directory.'/views/profile/'.$params[1],'php');
-		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/views/profile/'.$params[1],'php');
+		$base_file = ensure_extension(PathHelper::getIncludePath('views/profile/'.$params[1]),'php');
 	}
 	else{
 		$template_file = $template_directory.'/views/profile/profile.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/profile/profile.php';
+		$base_file = PathHelper::getIncludePath('views/profile/profile.php');
 	}
 	
 	if(file_exists($template_file)){
@@ -415,7 +415,7 @@ if($settings->get_setting('blog_active')){
 	if($params[0] == 'posts'){
 		if(!$params[1] || $params[1] == 'tag'){
 			$template_file = $template_directory.'/views/blog.php';
-			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/blog.php';
+			$base_file = PathHelper::getIncludePath('views/blog.php');
 			
 			if(file_exists($template_file)){
 				$is_valid_page = true;
@@ -431,12 +431,12 @@ if($settings->get_setting('blog_active')){
 	}
 	else if($params[0] == 'post'){
 	
-		require_once($_SERVER['DOCUMENT_ROOT'].'/data/posts_class.php');
+		PathHelper::requireOnce('data/posts_class.php');
 		
 		$post = Post::get_by_link($params[1], true);	
 
 		$template_file = $template_directory.'/views/post.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/post.php';
+		$base_file = PathHelper::getIncludePath('views/post.php');
 		
 		if(file_exists($template_file)){
 			$is_valid_page = true;
@@ -454,12 +454,12 @@ if($settings->get_setting('blog_active')){
 //PAGE CONTENTS.  DEFAULT IS TO USE THE /PAGE/ SUBDIRECTORY
 if($params[0] == 'page'){
 	if($settings->get_setting('page_contents_active')){
-		require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
+		PathHelper::requireOnce('data/pages_class.php');
 
 		$page = Page::get_by_link($params[1], true);		
 
 		$template_file = $template_directory.'/views/page.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/page.php';
+		$base_file = PathHelper::getIncludePath('views/page.php');
 		
 		if(file_exists($template_file)){
 			$is_valid_page = true;
@@ -477,12 +477,12 @@ if($params[0] == 'page'){
 //LOCATIONS.  DEFAULT IS TO USE THE /LOCATION/ SUBDIRECTORY
 if($params[0] == 'location'){
 	if($settings->get_setting('events_active')){
-		require_once($_SERVER['DOCUMENT_ROOT'].'/data/locations_class.php');
+		PathHelper::requireOnce('data/locations_class.php');
 
 		$location = Location::get_by_link($params[1], true);		
 
 		$template_file = $template_directory.'/views/location.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/location.php';
+		$base_file = PathHelper::getIncludePath('views/location.php');
 		
 		if(file_exists($template_file)){
 			$is_valid_page = true;
@@ -500,12 +500,12 @@ if($params[0] == 'location'){
 //EVENTS.  DEFAULT IS TO USE THE /EVENT/ SUBDIRECTORY
 if($params[0] == 'event'){
 	if($settings->get_setting('events_active')){
-		require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
+		PathHelper::requireOnce('data/events_class.php');
 
 		$event = Event::get_by_link($params[1], true);		
 
 		$template_file = $template_directory.'/views/event.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/event.php';
+		$base_file = PathHelper::getIncludePath('views/event.php');
 
 		if(file_exists($template_file)){
 			$is_valid_page = true;
@@ -523,12 +523,12 @@ if($params[0] == 'event'){
 //MAILING LISTS.  DEFAULT IS TO USE THE /LIST/ SUBDIRECTORY
 if($params[0] == 'list'){
 	//if($settings->get_setting('mailing_lists_active')){
-		require_once($_SERVER['DOCUMENT_ROOT'].'/data/mailing_lists_class.php');
+		PathHelper::requireOnce('data/mailing_lists_class.php');
 
 		$mailing_list = MailingList::get_by_link($params[1], true);		
 
 		$template_file = $template_directory.'/views/list.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/list.php';
+		$base_file = PathHelper::getIncludePath('views/list.php');
 		
 		if(file_exists($template_file)){
 			$is_valid_page = true;
@@ -546,13 +546,13 @@ if($params[0] == 'list'){
 //PRODUCTS.  DEFAULT IS TO USE THE /PRODUCT/ SUBDIRECTORY
 if($params[0] == 'product'){
 	if($settings->get_setting('products_active')){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
+	PathHelper::requireOnce('data/products_class.php');
 
 		$product = Product::get_by_link($params[1], true);	
 		$product_id = $product->key;
 		
 		$template_file = $template_directory.'/views/product.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/product.php';
+		$base_file = PathHelper::getIncludePath('views/product.php');
 		
 		
 		if(file_exists($template_file)){
@@ -572,7 +572,7 @@ if($params[0] == 'product'){
 
 //ADMIN STYLING FILES.  TEMPORARY UNTIL WE FIGURE OUT HOW TO HANDLE.  LOAD ANY URL UNDER /adm/includes/
 if($params[0] == 'adm' && $params[1] == 'includes'){
-	$base_file = $_SERVER['DOCUMENT_ROOT'].$_SERVER['REQUEST_URI'];
+	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
 	if(file_exists($base_file)){
 		$seconds_to_cache = 43200;
 		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
@@ -593,7 +593,7 @@ if($params[0] == 'admin'){
 
 	if($params[1]){	
 		
-		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1],'php');
+		$base_file = ensure_extension(PathHelper::getIncludePath('adm/'.$params[1]),'php');
 		if(file_exists($base_file)){
 			$is_valid_page = true;
 			require_once($base_file); 
@@ -601,7 +601,7 @@ if($params[0] == 'admin'){
 		}
 	}
 	else{
-		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/adm/'.$params[1],'php');
+		$base_file = ensure_extension(PathHelper::getIncludePath('adm/'.$params[1]),'php');
 		if(file_exists($base_file)){
 			$is_valid_page = true;
 			require_once($base_file); 
@@ -613,8 +613,8 @@ if($params[0] == 'admin'){
 //PLUGIN URLS
 $plugins = LibraryFunctions::list_plugins();
 foreach($plugins as $plugin){
-	$plugin_dir = $_SERVER['DOCUMENT_ROOT']."/plugins";
-	$site_file = $siteDir.'/plugins/'.$plugin.'/serve.php';
+	$plugin_dir = PathHelper::getIncludePath('plugins');
+	$site_file = PathHelper::getIncludePath('plugins/'.$plugin.'/serve.php');
 	
 	if(file_exists($site_file)){
 		include_once($site_file);
@@ -628,7 +628,7 @@ if($params[0] == 'utils'){
 		//LOAD THE UTILS FILES FROM THE PLUGINS
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
-			$plugin_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/plugins/'.$plugin.'/utils/'.$params[1], 'php');
+			$plugin_file = ensure_extension(PathHelper::getIncludePath('plugins/'.$plugin.'/utils/'.$params[1]), 'php');
 			if(file_exists($plugin_file)){
 				$is_valid_page = true;
 				require_once($plugin_file);
@@ -636,7 +636,7 @@ if($params[0] == 'utils'){
 			}
 		}	
 		
-		$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/utils/'.$params[1], 'php');
+		$base_file = ensure_extension(PathHelper::getIncludePath('utils/'.$params[1]), 'php');
 		if(file_exists($base_file)){
 			$is_valid_page = true;
 			require_once($base_file); 
@@ -651,7 +651,7 @@ if($params[0] == 'utils'){
 //ROOT PAGES
 if($params[0]){
 	$template_file = ensure_extension($template_directory.'/views/'.$params[0],'php');
-	$base_file = ensure_extension($_SERVER['DOCUMENT_ROOT'].'/views/'.$params[0],'php');
+	$base_file = ensure_extension(PathHelper::getIncludePath('views/'.$params[0]),'php');
 
 	if(file_exists($template_file)){
 		$is_valid_page = true;

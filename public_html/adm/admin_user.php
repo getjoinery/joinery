@@ -1,29 +1,31 @@
 <?php
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
+	PathHelper::requireOnce('/includes/Activation.php');
+	PathHelper::requireOnce('/includes/ErrorHandler.php');
+	
+	PathHelper::requireOnce('/includes/AdminPage.php');
+	PathHelper::requireOnce('/includes/SessionControl.php');
+	PathHelper::requireOnce('/includes/DbConnector.php');
 
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/log_form_errors_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/emails_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/email_recipients_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_logs_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_sessions_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
+	PathHelper::requireOnce('/data/users_class.php');
+	PathHelper::requireOnce('/data/phone_number_class.php');
+	PathHelper::requireOnce('/data/address_class.php');
+	PathHelper::requireOnce('/data/log_form_errors_class.php');
+	PathHelper::requireOnce('/data/emails_class.php');
+	PathHelper::requireOnce('/data/email_recipients_class.php');
+	PathHelper::requireOnce('/data/events_class.php');
+	PathHelper::requireOnce('/data/event_logs_class.php');
+	PathHelper::requireOnce('/data/event_sessions_class.php');
+	PathHelper::requireOnce('/data/orders_class.php');
+	PathHelper::requireOnce('/data/products_class.php');
+	PathHelper::requireOnce('/data/product_details_class.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/group_members_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/mailing_lists_class.php');
+	PathHelper::requireOnce('/data/groups_class.php');
+	PathHelper::requireOnce('/data/group_members_class.php');
+	PathHelper::requireOnce('/data/mailing_lists_class.php');
 	
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
@@ -36,8 +38,8 @@
 
 
 	$user = new User($_GET['usr_user_id'], TRUE);
-	include($_SERVER['DOCUMENT_ROOT'] . '/utils/registrant_maintenance.php'); 
-	include($_SERVER['DOCUMENT_ROOT'] . '/utils/order_maintenance.php');
+	include(PathHelper::getAbsolutePath('/utils/registrant_maintenance.php')); 
+	include(PathHelper::getAbsolutePath('/utils/order_maintenance.php'));
 
 	if($_REQUEST['action'] == 'delete'){
 		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));

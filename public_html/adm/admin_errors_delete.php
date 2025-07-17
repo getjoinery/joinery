@@ -1,6 +1,8 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(9);

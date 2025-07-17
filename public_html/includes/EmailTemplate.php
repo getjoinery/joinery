@@ -1,7 +1,7 @@
 <?php
+require_once('PathHelper.php');
 require_once('Globalvars.php');
 $settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
 require_once('systemmailer.php');
 require_once('LibraryFunctions.php');
 	
@@ -11,10 +11,10 @@ use Mailgun\Mailgun;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
 
-require_once($siteDir . '/data/users_class.php');
-require_once($siteDir . '/data/email_templates_class.php');
-require_once($siteDir . '/data/queued_email_class.php');
-require_once($siteDir . '/data/debug_email_logs_class.php');
+PathHelper::requireOnce('data/users_class.php');
+PathHelper::requireOnce('data/email_templates_class.php');
+PathHelper::requireOnce('data/queued_email_class.php');
+PathHelper::requireOnce('data/debug_email_logs_class.php');
 
 class EmailTemplateError extends Exception {}
 

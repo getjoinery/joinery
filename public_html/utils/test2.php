@@ -17,7 +17,8 @@
 	require_once($siteDir . '/includes/EmailTemplate.php');
 	require_once($siteDir . '/data/email_templates_class.php');
 */
-	require_once($siteDir . '/includes/ControlDHelper.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/ControlDHelper.php');
 
 
 

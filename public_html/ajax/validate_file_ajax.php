@@ -1,5 +1,7 @@
 <?php
-	require_once( __DIR__ . '/../includes/Globalvars.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
+	PathHelper::requireOnce('includes/Globalvars.php');
 	
 	$file_path = NULL;
 	if (!empty($_GET['apache_error_log'])) {
@@ -22,7 +24,7 @@
 			exit;
 		}
 		// Convert relative URL to filesystem path
-		$file_path = $_SERVER['DOCUMENT_ROOT'] . $file_path;
+		$file_path = PathHelper::getDocumentRoot() . $file_path;
 	}
 	
 	// Check if file exists and is readable

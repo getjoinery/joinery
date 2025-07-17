@@ -14,6 +14,14 @@ class PathHelper {
         return self::getRootDir() . '/' . ltrim($relativePath, '/');
     }
     
+    public static function getBasePath() {
+        return self::getRootDir();
+    }
+    
+    public static function getAbsolutePath($relativePath) {
+        return self::getRootDir() . '/' . ltrim($relativePath, '/');
+    }
+    
     public static function requireOnce($relativePath) {
         $fullPath = self::getIncludePath($relativePath);
         if (file_exists($fullPath)) {

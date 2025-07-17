@@ -145,7 +145,7 @@
 	
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
 	if($_GET['serve-upgrade'] && $settings->get_setting('upgrade_server_active')){
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/upgrades_class.php');
+		PathHelper::requireOnce('/data/upgrades_class.php');
 		$response = array();
 		$response['system_version'] = $settings->get_setting('system_version');
 		$major = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'));

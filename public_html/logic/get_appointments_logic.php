@@ -1,10 +1,11 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AcuityScheduling.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/AcuityScheduling.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));	
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	PathHelper::requireOnce('data/users_class.php');
 	
 
 	$session = SessionControl::get_instance();	

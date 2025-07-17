@@ -1,11 +1,13 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('/includes/AdminPage.php');
+	
+	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/public_menus_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/pages_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
+	PathHelper::requireOnce('/data/public_menus_class.php');
+	PathHelper::requireOnce('/data/pages_class.php');
+	PathHelper::requireOnce('/data/page_contents_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);

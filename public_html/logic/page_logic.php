@@ -1,11 +1,12 @@
 <?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function page_logic($get_vars, $post_vars, $page, $params){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/page_contents_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
+	PathHelper::requireOnce('data/page_contents_class.php');
+	PathHelper::requireOnce('data/pages_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

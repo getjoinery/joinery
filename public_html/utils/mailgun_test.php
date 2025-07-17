@@ -1,10 +1,11 @@
 <?php
-	require_once('../includes/Globalvars.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	$siteDir = $settings->get_setting('siteDir');	
-	require_once($siteDir . '/includes/EmailTemplate.php');
-	require_once($siteDir . '/data/email_templates_class.php');
-	require_once($siteDir . '/data/users_class.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('data/email_templates_class.php');
+	PathHelper::requireOnce('data/users_class.php');
 
 	if($_REQUEST['password'] != 'testemail'){
 		echo 'please enter the password for this utility';

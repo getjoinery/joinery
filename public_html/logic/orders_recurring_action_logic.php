@@ -1,10 +1,12 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/order_items_class.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/StripeHelper.php');
+	PathHelper::requireOnce('data/address_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/order_items_class.php');
 	
 	$stripe_helper = new StripeHelper();
 	

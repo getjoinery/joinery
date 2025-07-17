@@ -1,4 +1,5 @@
 <?php
+require_once('PathHelper.php');
 
 class Globalvars {
 	private static $instance_map = array();
