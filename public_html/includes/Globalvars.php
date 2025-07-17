@@ -10,14 +10,14 @@ class Globalvars {
 	}
 
 	public static function get_instance(){
-		$doc_root = $_SERVER['DOCUMENT_ROOT'];
-		// Check to see if we have a global vars instance for the particular document root
+		$root_dir = PathHelper::getRootDir();
+		// Check to see if we have a global vars instance for the particular root directory
 		// this is being read from.
-		if (!array_key_exists($doc_root, self::$instance_map)) {
+		if (!array_key_exists($root_dir, self::$instance_map)) {
 			// If not, create the new one and add it to the array
-			self::$instance_map[$doc_root] = new self;
+			self::$instance_map[$root_dir] = new self;
 		}
-		return self::$instance_map[$doc_root];
+		return self::$instance_map[$root_dir];
 	}
 
 	public function get_setting($setting, $calculated_values=true, $fail_silently=false){
