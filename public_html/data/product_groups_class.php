@@ -13,8 +13,6 @@ class ProductGroupException extends SystemClassException {}
 
 class ProductGroup extends SystemBase {
 	
-	//const TYPE_CATEGORY=1;
-	//const TYPE_PLAN=2;
 	
 	public static $prefix = 'prg';
 	public static $tablename = 'prg_product_groups';
