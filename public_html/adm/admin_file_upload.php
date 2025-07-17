@@ -35,7 +35,6 @@
 	
 	$pageoptions['title'] = "File Upload";
 	$page->begin_box($pageoptions);
-	echo '<p>Maximum upload file size is 40 megabytes</p>';
 	
 	/*
 	$formwriter = LibraryFunctions::get_formwriter_object('fileupload2', 'admin');

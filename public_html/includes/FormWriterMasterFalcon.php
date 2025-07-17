@@ -1238,13 +1238,35 @@ class FormWriterMaster {
 				$getargs.= '<input type="hidden" name="'.$getvar.'" value="'.$getval.'"/>';      
 			}
 		}
+		
+		$settings = Globalvars::get_instance();
+		$allowed_extensions = $settings->get_setting('allowed_upload_extensions');
+		$accept_attr = '.' . str_replace(',', ',.', $allowed_extensions);
+		
+		// Get actual PHP upload limits
+		$upload_max = ini_get('upload_max_filesize');
+		$post_max = ini_get('post_max_size');
+		// Convert to bytes to compare
+		function parseSize($size) {
+			$unit = preg_replace('/[^bkmgtpezy]/i', '', $size);
+			$size = preg_replace('/[^0-9\.]/', '', $size);
+			if ($unit) {
+				return round($size * pow(1024, stripos('bkmgtpezy', $unit[0])));
+			} else {
+				return round($size);
+			}
+		}
+		$upload_max_bytes = parseSize($upload_max);
+		$post_max_bytes = parseSize($post_max);
+		$max_size = min($upload_max_bytes, $post_max_bytes);
+		$max_size_display = round($max_size / (1024 * 1024)) . 'MB';
 	?>
 		<!-- File Drop Zone -->
 		<div id="file-drop-zone" class="border border-2 border-dashed rounded p-4 text-center mb-3" style="border-color: #dee2e6; background-color: #f8f9fa; transition: all 0.3s ease; cursor: pointer;">
 			<i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
 			<h5 class="text-muted">Drop files here or click to browse</h5>
-			<p class="text-muted mb-3">Maximum file size: 40MB</p>
-			<input type="file" id="file-input" multiple accept=".gif,.jpeg,.jpg,.png,.pdf,.xls,.doc,.xlsx,.docx,.mp3,.mp4,.m4a" style="display: none;">
+			<p class="text-muted mb-3">Maximum file size: <?php echo $max_size_display; ?> | Allowed types: <?php echo strtoupper(str_replace(',', ', ', $allowed_extensions)); ?></p>
+			<input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" style="display: none;">
 			<button type="button" id="browse-btn" class="btn btn-outline-primary">
 				<i class="fas fa-folder-open me-1"></i> Browse Files
 			</button>
@@ -1300,6 +1322,11 @@ class FormWriterMaster {
 			
 			let selectedFiles = [];
 			
+			// Get allowed file extensions from server setting
+			const allowedExtensions = '<?php echo $allowed_extensions; ?>';
+			const allowedTypes = new RegExp('\\.(' + allowedExtensions.replace(/,/g, '|') + ')$', 'i');
+			const maxFileSize = <?php echo $max_size; ?>; // Maximum file size in bytes
+			
 			// DOM elements
 			const $dropZone = $('#file-drop-zone');
 			const $fileInput = $('#file-input');
@@ -1348,16 +1375,15 @@ class FormWriterMaster {
 			// Add files to the list
 			function addFiles(files) {
 				Array.from(files).forEach(file => {
-					// Validate file type
-					const allowedTypes = /\.(gif|jpe?g|png|pdf|xls|doc|xlsx|docx|mp3|mp4|m4a)$/i;
+					// Validate file type using server setting
 					if (!allowedTypes.test(file.name)) {
-						showToast('Invalid file type: ' + file.name, 'error');
+						showToast('Invalid file type: ' + file.name + '. Allowed: ' + allowedExtensions, 'error');
 						return;
 					}
 
-					// Validate file size (40MB)
-					if (file.size > 40 * 1024 * 1024) {
-						showToast('File too large: ' + file.name, 'error');
+					// Validate file size using server limit
+					if (file.size > maxFileSize) {
+						showToast('File too large: ' + file.name + '. Maximum size: <?php echo $max_size_display; ?>', 'error');
 						return;
 					}
 
