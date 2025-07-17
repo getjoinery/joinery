@@ -128,7 +128,16 @@ class OrderItem extends SystemBase {
 		$data = unserialize(base64_decode($this->get('odi_product_info')));
 		$clean_data = array();
 		foreach($data as $key => $value) {
-			$clean_data[$key] = htmlspecialchars($value);
+			// Check if value is a string before applying htmlspecialchars
+			if (is_string($value)) {
+				$clean_data[$key] = htmlspecialchars($value);
+			} elseif (is_object($value) || is_array($value)) {
+				// For objects and arrays, keep them as-is
+				$clean_data[$key] = $value;
+			} else {
+				// For other scalar types (int, float, bool), convert to string first
+				$clean_data[$key] = htmlspecialchars((string)$value);
+			}
 		}
 		return $clean_data;
 	}
