@@ -1239,243 +1239,489 @@ class FormWriterMaster {
 			}
 		}
 	?>
-      <form
-        id="fileupload"
-        action="/admin/admin_file_upload_process"
-        method="POST"
-        enctype="multipart/form-data"
-      >
+		<!-- File Drop Zone -->
+		<div id="file-drop-zone" class="border border-2 border-dashed rounded p-4 text-center mb-3" style="border-color: #dee2e6; background-color: #f8f9fa; transition: all 0.3s ease; cursor: pointer;">
+			<i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+			<h5 class="text-muted">Drop files here or click to browse</h5>
+			<p class="text-muted mb-3">Maximum file size: 40MB</p>
+			<input type="file" id="file-input" multiple accept=".gif,.jpeg,.jpg,.png,.pdf,.xls,.doc,.xlsx,.docx,.mp3,.mp4,.m4a" style="display: none;">
+			<button type="button" id="browse-btn" class="btn btn-outline-primary">
+				<i class="fas fa-folder-open me-1"></i> Browse Files
+			</button>
+		</div>
+
+		<!-- Upload Controls -->
+		<div class="d-flex justify-content-between align-items-center mb-3">
+			<div>
+				<button type="button" id="upload-all-btn" class="btn btn-primary" disabled>
+					<i class="fas fa-upload me-1"></i> Upload All
+				</button>
+				<button type="button" id="clear-all-btn" class="btn btn-outline-secondary ms-2" disabled>
+					<i class="fas fa-trash-alt me-1"></i> Clear All
+				</button>
+			</div>
+			<div id="overall-progress" class="flex-grow-1 ms-3" style="display: none;">
+				<div class="progress" style="height: 8px;">
+					<div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: 0%"></div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Files Table -->
+		<div class="table-responsive">
+			<table class="table table-hover">
+				<thead class="table-light">
+					<tr>
+						<th><i class="fas fa-file me-1"></i>File Name</th>
+						<th><i class="fas fa-weight-hanging me-1"></i>Size</th>
+						<th><i class="fas fa-info-circle me-1"></i>Status</th>
+						<th><i class="fas fa-cogs me-1"></i>Actions</th>
+					</tr>
+				</thead>
+				<tbody id="files-list">
+					<tr id="no-files-message">
+						<td colspan="4" class="text-center text-muted py-4">
+							<i class="fas fa-file-upload fa-2x mb-2"></i>
+							<div>No files selected</div>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
+		<?php if($getargs): ?>
+		<form id="hidden-form-data" style="display: none;">
+			<?php echo $getargs; ?>
+		</form>
+		<?php endif; ?>
+		<script>
+		$(function() {
+			'use strict';
+			
+			let selectedFiles = [];
+			
+			// DOM elements
+			const $dropZone = $('#file-drop-zone');
+			const $fileInput = $('#file-input');
+			const $browseBtn = $('#browse-btn');
+			const $uploadAllBtn = $('#upload-all-btn');
+			const $clearAllBtn = $('#clear-all-btn');
+			const $filesList = $('#files-list');
+			const $noFilesMessage = $('#no-files-message');
+			const $overallProgress = $('#overall-progress');
+			const $progressBar = $overallProgress.find('.progress-bar');
+
+			// File size formatter
+			function formatFileSize(bytes) {
+				if (bytes === 0) return '0 Bytes';
+				const k = 1024;
+				const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+				const i = Math.floor(Math.log(bytes) / Math.log(k));
+				return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+			}
+
+			// Generate unique ID for each file
+			function generateFileId() {
+				return 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+			}
+
+			// Get file icon based on extension
+			function getFileIcon(filename) {
+				const ext = filename.split('.').pop().toLowerCase();
+				const iconMap = {
+					'pdf': 'fas fa-file-pdf text-danger',
+					'doc': 'fas fa-file-word text-primary',
+					'docx': 'fas fa-file-word text-primary',
+					'xls': 'fas fa-file-excel text-success',
+					'xlsx': 'fas fa-file-excel text-success',
+					'jpg': 'fas fa-file-image text-info',
+					'jpeg': 'fas fa-file-image text-info',
+					'png': 'fas fa-file-image text-info',
+					'gif': 'fas fa-file-image text-info',
+					'mp3': 'fas fa-file-audio text-warning',
+					'mp4': 'fas fa-file-video text-danger',
+					'm4a': 'fas fa-file-audio text-warning'
+				};
+				return iconMap[ext] || 'fas fa-file text-muted';
+			}
+
+			// Add files to the list
+			function addFiles(files) {
+				Array.from(files).forEach(file => {
+					// Validate file type
+					const allowedTypes = /\.(gif|jpe?g|png|pdf|xls|doc|xlsx|docx|mp3|mp4|m4a)$/i;
+					if (!allowedTypes.test(file.name)) {
+						showToast('Invalid file type: ' + file.name, 'error');
+						return;
+					}
+
+					// Validate file size (40MB)
+					if (file.size > 40 * 1024 * 1024) {
+						showToast('File too large: ' + file.name, 'error');
+						return;
+					}
+
+					const fileId = generateFileId();
+					const fileObj = {
+						id: fileId,
+						file: file,
+						status: 'pending'
+					};
+
+					selectedFiles.push(fileObj);
+					renderFileRow(fileObj);
+				});
+
+				updateUI();
+			}
+
+			// Render a file row in the table
+			function renderFileRow(fileObj) {
+				$noFilesMessage.hide();
+				
+				const fileIcon = getFileIcon(fileObj.file.name);
+				const $row = $(`
+					<tr data-file-id="${fileObj.id}" class="file-row">
+						<td>
+							<div class="d-flex align-items-center">
+								<i class="${fileIcon} me-2"></i>
+								<span class="file-name">${fileObj.file.name}</span>
+							</div>
+						</td>
+						<td class="file-size">${formatFileSize(fileObj.file.size)}</td>
+						<td class="file-status">
+							<span class="badge bg-secondary">Ready to upload</span>
+						</td>
+						<td class="file-actions">
+							<button type="button" class="btn btn-sm btn-outline-primary upload-single-btn" title="Upload this file">
+								<i class="fas fa-upload"></i>
+							</button>
+							<button type="button" class="btn btn-sm btn-outline-danger remove-file-btn ms-1" title="Remove this file">
+								<i class="fas fa-times"></i>
+							</button>
+						</td>
+					</tr>
+				`);
+
+				$filesList.append($row);
+			}
+
+			// Update UI state
+			function updateUI() {
+				const hasFiles = selectedFiles.length > 0;
+				const pendingFiles = selectedFiles.filter(f => f.status === 'pending').length;
+				
+				$uploadAllBtn.prop('disabled', pendingFiles === 0);
+				$clearAllBtn.prop('disabled', !hasFiles);
+				
+				if (!hasFiles) {
+					$noFilesMessage.show();
+				}
+				
+				// Update button text with count
+				if (pendingFiles > 0) {
+					$uploadAllBtn.html(`<i class="fas fa-upload me-1"></i> Upload All (${pendingFiles})`);
+				} else {
+					$uploadAllBtn.html('<i class="fas fa-upload me-1"></i> Upload All');
+				}
+			}
+
+			// Show toast notification
+			function showToast(message, type = 'info') {
+				console.log(type + ': ' + message);
+				// Simple alert for now - can be enhanced with proper toast notifications
+				if (type === 'error') {
+					alert('Error: ' + message);
+				}
+			}
+
+			// Upload a single file
+			function uploadFile(fileObj) {
+				return new Promise((resolve, reject) => {
+					const formData = new FormData();
+					formData.append('files[]', fileObj.file);
+					
+					// Add any additional form data
+					$('#hidden-form-data input').each(function() {
+						formData.append($(this).attr('name'), $(this).val());
+					});
+
+					const $row = $(`.file-row[data-file-id="${fileObj.id}"]`);
+					const $status = $row.find('.file-status');
+					const $actions = $row.find('.file-actions');
+
+					// Update UI to uploading state
+					$status.html('<span class="badge bg-primary">Uploading...</span>');
+					$actions.html(`
+						<div class="d-flex align-items-center">
+							<div class="progress me-2" style="width: 60px; height: 20px;">
+								<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+							</div>
+							<span class="text-muted small">0%</span>
+						</div>
+					`);
+
+					// Create XMLHttpRequest for progress tracking
+					const xhr = new XMLHttpRequest();
+
+					xhr.upload.addEventListener('progress', function(e) {
+						if (e.lengthComputable) {
+							const progress = Math.round((e.loaded / e.total) * 100);
+							$actions.find('.progress-bar').css('width', progress + '%');
+							$actions.find('.text-muted').text(progress + '%');
+							$status.html(`<span class="badge bg-primary">Uploading ${progress}%</span>`);
+						}
+					});
+
+					xhr.addEventListener('load', function() {
+						if (xhr.status === 200) {
+							try {
+								const response = JSON.parse(xhr.responseText);
+								if (response.files && response.files[0]) {
+									const file = response.files[0];
+									console.log('Upload response file object:', file); // Debug log
+									if (file.url) {
+										// Success
+										$status.html('<span class="badge bg-success"><i class="fas fa-check me-1"></i>Upload successful</span>');
+										$actions.html(`
+											<a href="${file.url}" target="_blank" class="btn btn-sm btn-outline-success" title="Download file">
+												<i class="fas fa-download"></i>
+											</a>
+											<button type="button" class="btn btn-sm btn-outline-danger remove-file-btn ms-1" title="Remove from list">
+												<i class="fas fa-times"></i>
+											</button>
+										`);
+										
+										// Make filename clickable if we have a file ID
+										console.log('Checking for file_id:', file.file_id); // Debug log
+										if (file.file_id) {
+											const $nameElement = $row.find('.file-name');
+											const fileName = $nameElement.text();
+											const $iconElement = $nameElement.siblings('i');
+											const fileIcon = $iconElement.attr('class');
+											
+											console.log('Making filename clickable:', fileName, 'with ID:', file.file_id); // Debug log
+											
+											$nameElement.parent().html(`
+												<div class="d-flex align-items-center">
+													<i class="${fileIcon} me-2"></i>
+													<a href="/admin/admin_file?fil_file_id=${file.file_id}" class="file-name-link text-decoration-none">${fileName}</a>
+												</div>
+											`);
+										} else {
+											console.log('No file_id found in response'); // Debug log
+										}
+										
+										fileObj.status = 'completed';
+										fileObj.url = file.url;
+										fileObj.file_id = file.file_id;
+										resolve(fileObj);
+									} else if (file.error) {
+										throw new Error(file.error);
+									}
+								} else {
+									throw new Error('Invalid response format');
+								}
+							} catch (e) {
+								reject(e);
+							}
+						} else {
+							reject(new Error('Upload failed with status: ' + xhr.status));
+						}
+					});
+
+					xhr.addEventListener('error', function() {
+						reject(new Error('Network error during upload'));
+					});
+
+					xhr.open('POST', '/admin/admin_file_upload_process');
+					xhr.send(formData);
+				}).catch(error => {
+					// Handle error
+					const $row = $(`.file-row[data-file-id="${fileObj.id}"]`);
+					const $status = $row.find('.file-status');
+					const $actions = $row.find('.file-actions');
+					
+					$status.html(`<span class="badge bg-danger"><i class="fas fa-exclamation-triangle me-1"></i>Error</span>`);
+					$actions.html(`
+						<button type="button" class="btn btn-sm btn-outline-primary upload-single-btn" title="Retry upload">
+							<i class="fas fa-redo"></i>
+						</button>
+						<button type="button" class="btn btn-sm btn-outline-danger remove-file-btn ms-1" title="Remove this file">
+							<i class="fas fa-times"></i>
+						</button>
+					`);
+					fileObj.status = 'error';
+					showToast(`Upload failed: ${fileObj.file.name} - ${error.message}`, 'error');
+					throw error;
+				});
+			}
+
+			// Event Handlers
+			$browseBtn.on('click', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$fileInput[0].click(); // Use native click instead of jQuery
+			});
+			
+			$fileInput.on('change', function() {
+				if (this.files.length > 0) {
+					addFiles(this.files);
+					this.value = ''; // Reset input
+				}
+			});
+
+			// Drag and drop styling
+			$dropZone.on('dragover dragenter', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).addClass('border-primary').css('background-color', '#e3f2fd');
+			});
+
+			$dropZone.on('dragleave', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).removeClass('border-primary').css('background-color', '#f8f9fa');
+			});
+
+			$dropZone.on('drop', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).removeClass('border-primary').css('background-color', '#f8f9fa');
+				
+				const files = e.originalEvent.dataTransfer.files;
+				if (files.length > 0) {
+					addFiles(files);
+				}
+			});
+
+			// Hover effect
+			$dropZone.on('mouseenter', function() {
+				$(this).css('background-color', '#e3f2fd');
+			}).on('mouseleave', function() {
+				$(this).css('background-color', '#f8f9fa');
+			});
+
+			// Upload all files
+			$uploadAllBtn.on('click', async function() {
+				const pendingFiles = selectedFiles.filter(f => f.status === 'pending');
+				if (pendingFiles.length === 0) return;
+
+				$overallProgress.show();
+				$uploadAllBtn.prop('disabled', true);
+				
+				let completed = 0;
+				const total = pendingFiles.length;
+
+				for (const fileObj of pendingFiles) {
+					try {
+						await uploadFile(fileObj);
+						completed++;
+						const progress = Math.round((completed / total) * 100);
+						$progressBar.css('width', progress + '%');
+					} catch (error) {
+						console.error('Upload failed:', error);
+						completed++; // Count errors as completed for progress
+						const progress = Math.round((completed / total) * 100);
+						$progressBar.css('width', progress + '%');
+					}
+				}
+
+				setTimeout(() => {
+					$overallProgress.hide();
+					$progressBar.css('width', '0%');
+					updateUI();
+				}, 1000);
+			});
+
+			// Clear all files
+			$clearAllBtn.on('click', function() {
+				if (confirm('Are you sure you want to clear all files?')) {
+					selectedFiles = [];
+					$filesList.find('.file-row').remove();
+					updateUI();
+				}
+			});
+
+			// Event delegation for dynamic buttons
+			$filesList.on('click', '.upload-single-btn', function() {
+				const fileId = $(this).closest('.file-row').data('file-id');
+				const fileObj = selectedFiles.find(f => f.id === fileId);
+				if (fileObj && (fileObj.status === 'pending' || fileObj.status === 'error')) {
+					uploadFile(fileObj).then(() => {
+						updateUI();
+					}).catch(() => {
+						updateUI();
+					});
+				}
+			});
+
+			$filesList.on('click', '.remove-file-btn', function() {
+				const $row = $(this).closest('.file-row');
+				const fileId = $row.data('file-id');
+				
+				// Remove from array
+				selectedFiles = selectedFiles.filter(f => f.id !== fileId);
+				
+				// Remove from DOM with animation
+				$row.fadeOut(300, function() {
+					$(this).remove();
+					updateUI();
+				});
+			});
+
+			// Click to browse anywhere in drop zone (except on buttons)
+			$dropZone.on('click', function(e) {
+				// Only trigger if clicking directly on the drop zone, not on child elements
+				if (e.target === this) {
+					e.preventDefault();
+					e.stopPropagation();
+					$fileInput[0].click(); // Use native click
+				}
+			});
+		});
+		</script>
+
+		<style>
+		#file-drop-zone:hover {
+			background-color: #e3f2fd !important;
+			border-color: #2196f3 !important;
+		}
 		
-		<?php if($getargs){ echo $getargs; } ?>
+		.file-row {
+			transition: background-color 0.2s ease;
+		}
 		
-        <!-- The fileupload-buttonbar contains buttons to add/delete files and start/cancel the upload -->
-        <div class="row fileupload-buttonbar">
-          <div class="col-lg-7">
-            <!-- The fileinput-button span is used to style the file input field as button -->
-            <span class="btn btn-success fileinput-button">
-              <i class="glyphicon glyphicon-plus"></i>
-              <span>Add files...</span>
-              <input type="file" name="files[]" multiple />
-            </span>
-            <button type="submit" class="btn btn-primary start">
-              <i class="glyphicon glyphicon-upload"></i>
-              <span>Start upload</span>
-            </button>
-            <button type="reset" class="btn btn-warning cancel">
-              <i class="glyphicon glyphicon-ban-circle"></i>
-              <span>Cancel upload</span>
-            </button>
-			<?php if($delete){ ?>
-            <button type="button" class="btn btn-danger delete">
-              <i class="glyphicon glyphicon-trash"></i>
-              <span>Delete selected</span>
-            </button>
-			<?php } ?>
-			<?php if($checkall){ ?>
-            <input type="checkbox" class="toggle" />
-			<?php } ?>
-            <!-- The global file processing state -->
-            <span class="fileupload-process"></span>
-          </div>
-          <!-- The global progress state -->
-          <div class="col-lg-5 fileupload-progress fade">
-            <!-- The global progress bar -->
-            <div
-              class="progress progress-striped active"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-            >
-              <div
-                class="progress-bar progress-bar-success"
-                style="width:0%;"
-              ></div>
-            </div>
-            <!-- The extended global progress state -->
-            <div class="progress-extended">&nbsp;</div>
-          </div>
-        </div>
-        <!-- The table listing the files available for upload/download -->
-        <table role="presentation" class="table table-striped">
-          <tbody class="files"></tbody>
-        </table>
-      </form>
-	   <div
-      id="blueimp-gallery"
-      class="blueimp-gallery blueimp-gallery-controls"
-      data-filter=":even"
-    >
-      <div class="slides"></div>
-      <h3 class="title"></h3>
-      <a class="prev">‹</a>
-      <a class="next">›</a>
-      <a class="close">×</a>
-      <a class="play-pause"></a>
-      <ol class="indicator"></ol>
-    </div>
-    <!-- The template to display files available for upload -->
-    <script id="template-upload" type="text/x-tmpl">
-      {% for (var i=0, file; file=o.files[i]; i++) { %}
-          <tr class="template-upload fade">
-              <td>
-                  <span class="preview"></span>
-              </td>
-              <td>
-                  {% if (window.innerWidth > 480 || !o.options.loadImageFileTypes.test(file.type)) { %}
-                      <p class="name">{%=file.name%}</p>
-                  {% } %}
-                  <strong class="error text-danger"></strong>
-              </td>
-              <td>
-                  <p class="size">Processing...</p>
-                  <div class="progress progress-striped active" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-bar progress-bar-success" style="width:0%;"></div></div>
-              </td>
-              <td>
-                  {% if (!o.options.autoUpload && o.options.edit && o.options.loadImageFileTypes.test(file.type)) { %}
-                    <button class="btn btn-success edit" data-index="{%=i%}" disabled>
-                        <i class="glyphicon glyphicon-edit"></i>
-                        <span>Edit</span>
-                    </button>
-                  {% } %}
-                  {% if (!i && !o.options.autoUpload) { %}
-                      <button class="btn btn-primary start" disabled>
-                          <i class="glyphicon glyphicon-upload"></i>
-                          <span>Start</span>
-                      </button>
-                  {% } %}
-                  {% if (!i) { %}
-                      <button class="btn btn-warning cancel">
-                          <i class="glyphicon glyphicon-ban-circle"></i>
-                          <span>Cancel</span>
-                      </button>
-                  {% } %}
-              </td>
-          </tr>
-      {% } %}
-    </script>
-    <!-- The template to display files available for download -->
-    <script id="template-download" type="text/x-tmpl">
-      {% for (var i=0, file; file=o.files[i]; i++) { %}
-          <tr class="template-download fade">
-              <td>
-                  <span class="preview">
-                      {% if (file.thumbnailUrl) { %}
-                          <a href="{%=file.url%}" title="{%=file.name%}" download="{%=file.name%}" data-gallery><img src="{%=file.thumbnailUrl%}"></a>
-                      {% } %}
-                  </span>
-              </td>
-              <td>
-                  {% if (window.innerWidth > 480 || !file.thumbnailUrl) { %}
-                      <p class="name"><a href="/admin/admin_files">{%=file.name%}</a>
-					  <?php /*
-                          {% if (file.url) { %}
-                              <a href="{%=file.url%}" title="{%=file.name%}" download="{%=file.name%}" {%=file.thumbnailUrl?'data-gallery':''%}>{%=file.name%}</a>
-                          {% } else { %}
-                              <span>{%=file.name%}</span>
-                          {% } %}
-						  */ 
-						  ?>
-                      </p>
-                  {% } %}
-                  {% if (file.error) { %}
-                      <div><span class="label label-danger">Error</span> {%=file.error%}</div>
-                  {% } %}
-              </td>
-              <td>
-                  <span class="size">{%=o.formatFileSize(file.size)%}</span>
-              </td>
-              <td> 
-				<?php if($delete){ ?>
-                  {% if (file.deleteUrl) { %}
-                      <button class="btn btn-danger delete" data-type="{%=file.deleteType%}" data-url="{%=file.deleteUrl%}"{% if (file.deleteWithCredentials) { %} data-xhr-fields='{"withCredentials":true}'{% } %}>
-                          <i class="glyphicon glyphicon-trash"></i>
-                          <span>Delete</span>
-                      </button>
-                      <input type="checkbox" name="delete" value="1" class="toggle">
-                  {% } else { %}
-                      <button class="btn btn-warning cancel">
-                          <i class="glyphicon glyphicon-ban-circle"></i>
-                          <span>Cancel</span>
-                      </button>
-                  {% } %}
-				<?php } ?>
-              </td>
-          </tr>
-      {% } %}
-    </script>
-	
-    <!-- The jQuery UI widget factory, can be omitted if jQuery UI is already included -->
-    <!--<script src="/includes/jquery-file-upload/js/vendor/jquery.ui.widget.js"></script>-->
-    <!-- The Templates plugin is included to render the upload/download listings -->
-    <script src="/includes/jquery-file-upload/js/tmpl.min.js"></script>
-    <!-- The Load Image plugin is included for the preview images and image resizing functionality -->
-    <!--<script src="/includes/jquery-file-upload/js/load-image.all.min.js"></script>-->
-    <!-- The Canvas to Blob plugin is included for image resizing functionality -->
-    <!--<script src="https://blueimp.github.io/JavaScript-Canvas-to-Blob/js/canvas-to-blob.min.js"></script>-->
-
-    <!-- blueimp Gallery script -->
-    <!--<script src="https://blueimp.github.io/Gallery/js/jquery.blueimp-gallery.min.js"></script>-->
-    <!-- The Iframe Transport is required for browsers without support for XHR file uploads -->
-    <script src="/includes/jquery-file-upload/js/jquery.iframe-transport.js"></script>
-    <!-- The basic File Upload plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload.js"></script>
-    <!-- The File Upload processing plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload-process.js"></script>
-    <!-- The File Upload image preview & resize plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-image.js"></script>-->
-    <!-- The File Upload audio preview plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-audio.js"></script>-->
-    <!-- The File Upload video preview plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-video.js"></script>-->
-    <!-- The File Upload validation plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-validate.js"></script>-->
-    <!-- The File Upload user interface plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload-ui.js"></script>
-    
-	<script>
-	$(function() {
-  'use strict';
-
-  // Initialize the jQuery File Upload widget:
-  $('#fileupload').fileupload({
-    // Uncomment the following to send cross-domain cookies:
-    //xhrFields: {withCredentials: true},
-    url: '/admin/admin_file_upload_process'
-  });
-
-  // Enable iframe cross-domain access via redirect option:
-  /*
-  $('#fileupload').fileupload(
-    'option',
-    'redirect',
-    window.location.href.replace(/\/[^/]*$/, '/cors/result.html?%s')
-  );
-  */
-
-  
-    // Load existing files:
-	/*
-    $('#fileupload').addClass('fileupload-processing');
-    $.ajax({
-      // Uncomment the following to send cross-domain cookies:
-      //xhrFields: {withCredentials: true},
-      url: $('#fileupload').fileupload('option', 'url'),
-      dataType: 'json',
-      context: $('#fileupload')[0]
-    })
-      .always(function() {
-        $(this).removeClass('fileupload-processing');
-      })
-      .done(function(result) {
-        $(this)
-          .fileupload('option', 'done')
-          // eslint-disable-next-line new-cap
-          .call(this, $.Event('done'), { result: result });
-      });
-	  */
-  }); 
-
-</script>
+		.file-row:hover {
+			background-color: #f8f9fa;
+		}
+		
+		.progress {
+			border-radius: 0.25rem;
+		}
+		
+		.badge {
+			font-size: 0.75em;
+		}
+		
+		.btn-sm {
+			font-size: 0.8rem;
+		}
+		
+		.table th {
+			font-weight: 600;
+			font-size: 0.9rem;
+		}
+		
+		.file-name-link {
+			color: #0d6efd !important;
+		}
+		
+		.file-name-link:hover {
+			color: #0a58ca !important;
+			text-decoration: underline !important;
+		}
+		</style>
 	
 	
     
