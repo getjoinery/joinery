@@ -164,7 +164,7 @@
 				//'max_height' => 80 // either specify height, or set to 0. Then height is automatically adjusted - keeping aspect ratio to a specified max_width.
 			//)
 		),
-		'print_response' => true
+		'print_response' => false
 	);
 	
 
@@ -213,6 +213,9 @@
 		$file->load();
 		$file->resize();
 		
+		// Add the file ID to the response object
+		$thisfile->file_id = $file->key;
+		
 		if($_REQUEST['evs_event_session_id']){
 			
 			//ATTACH THE FILE TO AN EVENT SESSION
@@ -229,6 +232,10 @@
 		print_r($thisfile->thumbnailUrl); 
 		*/
 	}
+	
+	// Output the modified response with file IDs
+	header('Content-Type: application/json; charset=utf-8');
+	echo json_encode($response);
 	
 	if(isset($_REQUEST['fallback'])){
 		$page = new AdminPage();
