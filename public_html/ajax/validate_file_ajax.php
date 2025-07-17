@@ -24,7 +24,7 @@
 			exit;
 		}
 		// Convert relative URL to filesystem path
-		$file_path = PathHelper::getDocumentRoot() . $file_path;
+		$file_path = PathHelper::getRootDir() . $file_path;
 	}
 	
 	// Check if file exists and is readable

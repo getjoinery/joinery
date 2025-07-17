@@ -16,7 +16,6 @@
 
 	if($_POST){
 		
-		
 		if($settings->get_setting('preview_image') != $_POST['preview_image']){
 			//AUTO INCREMENT THE PREVIEW IMAGE INDEX IF IT HAS CHANGED
 			$search_criteria = array();
@@ -1660,6 +1659,8 @@
 
 	if(!$settings->get_setting('allowed_upload_extensions')){
 		$allowed_upload_extensions = 'gif,jpeg,jpg,png,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a';
+	} else {
+		$allowed_upload_extensions = $settings->get_setting('allowed_upload_extensions');
 	}
 	echo $formwriter->textinput("Allowed file upload extensions (comma separated)", 'allowed_upload_extensions', '', 20, $allowed_upload_extensions, "" , 255, "");
 
