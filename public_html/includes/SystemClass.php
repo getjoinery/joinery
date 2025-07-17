@@ -1126,7 +1126,12 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 			$order_sql = 'ORDER BY ' . implode(', ', $order_clauses);
 		}
 
-		$sql = $only_count ? "SELECT COUNT(*) FROM $table $where_sql" : "SELECT * FROM $table $where_sql $order_sql";
+		if ($only_count) {
+			$sql = "SELECT COUNT(*) FROM $table $where_sql";
+		} else {
+			$limit_offset_sql = $this->generate_limit_and_offset(false);
+			$sql = "SELECT * FROM $table $where_sql $order_sql $limit_offset_sql";
+		}
 
 		if ($debug) {
 			echo "SQL Query: $sql<br>\n";
