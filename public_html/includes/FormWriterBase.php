@@ -16,6 +16,20 @@ abstract class FormWriterBase {
 	protected $use_tabindex;
 
 	/**
+	 * FormWriter constructor
+	 * @param string $formid Form ID
+	 * @param boolean $secure Secure mode (unused)
+	 * @param boolean $use_tabindex Enable tab indexing for form elements
+	 */
+	function __construct($formid='form1', $secure=FALSE, $use_tabindex=FALSE){
+		$this->formid = $formid;
+
+		$settings = Globalvars::get_instance();
+
+		$this->use_tabindex = $use_tabindex;
+	}
+
+	/**
 	 * Get the next tab index for form elements
 	 * @return string Tab index attribute or empty string
 	 */
