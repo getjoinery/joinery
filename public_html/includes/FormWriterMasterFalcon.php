@@ -1,16 +1,11 @@
 <?php
+require_once('FormWriterBase.php');
 require_once('DbConnector.php');
 require_once('Globalvars.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriterMaster {
-
-	public static $tab_count = 0;
-
-	protected $formid;
-	protected $captcha_public;
-	protected $captcha_private;
+class FormWriterMaster extends FormWriterBase {
 	public $validate_style_info = '
 							/* ignore: ":hidden:not(input[type=\'checkbox\'], input[type=\'radio\'])", */
 							errorElement: "p",
@@ -65,220 +60,11 @@ class FormWriterMaster {
 		$this->use_tabindex = $use_tabindex;
 	}
 
-	protected function _get_next_tab_index() {
-		if ($this->use_tabindex) {
-			++self::$tab_count;
-			return ' tabindex="' . self::$tab_count . '"';
-		}
-		return '';
-	}
 
 
-
-	function antispam_question_input($type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}
-
-		
-		if($correct_answer){
-			$output .= $this->textinput("Type '".strtolower($correct_answer)."' into this field (to prove you are human)", "antispam_question", "ctrlHolder", 30, '', "", 255, ""); 
-			$output .= $this->hiddeninput("antispam_question_answer", strtolower($correct_answer));			
-			return $output;
-		}
-		else{
-			return false;
-		}
-	}
-
-	static function antispam_question_validate($validation_rules, $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}
-		
-		if($correct_answer){
-			$validation_rules['antispam_question']['required']['value'] = 'true';
-			$validation_rules['antispam_question']['equalTo']['value'] = "'#antispam_question_answer'";
-			$validation_rules['antispam_question']['equalTo']['message'] = "'You must type the correct word here'";					
-		}
-		return $validation_rules;
-	}	
-	
-	static function antispam_question_check($postvars){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}		
-		if($correct_answer){
-			if(strtolower($postvars['antispam_question']) == strtolower($correct_answer)){
-				return true;		
-			}
-			else{
-				return false;
-			}
-		}
-		else{
-			return true;
-		}
-	}	
-	
-	function honeypot_hidden_input($label='Extra email', $name='email'){
-		$settings = Globalvars::get_instance();
-		$use_honeypot = $settings->get_setting('use_honeypot');	
-		if($use_honeypot){
-			$output = '
-			<script type="text/javascript">
-			$(document).ready(function() {
-				$("#'.$name.'_container").hide();
-			});
-			</script>';
-			$output .= $this->textinput($label, $name, "ctrlHolder", 30, '', "", 255, ""); 
-			return $output;
-		}
-		else{
-			return '';
-		}
-	}
 	
 	
-	static function honeypot_check($postvars, $name='email'){
-		$settings = Globalvars::get_instance();
-		$use_honeypot = $settings->get_setting('use_honeypot');	
-		if($use_honeypot){		
-			if(strlen($postvars['email'] > 0)){
-				return false;		
-			}
-			else{
-				return true;
-			}
-		}
-		else{
-			return true;
-		}
-	}
 	
-	function captcha_hidden_input($submit_button_id="submit1", $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$use_captcha = $settings->get_setting('use_captcha_comments');
-		}
-		else{
-			$use_captcha = $settings->get_setting('use_captcha');
-		}
-			
-		if($use_captcha == 0){
-			return false;
-		}	
-		
-		$output = '';
-	
-	
-		$output = '
-		<script type="text/javascript">
-		function isCaptchaChecked() {
-		  return grecaptcha && grecaptcha.getResponse().length !== 0;
-		}		
-		
-		$("form").submit(function(event) {
-		   if(!isCaptchaChecked()){
-			  event.preventDefault();
-			  alert("Please check the \"I am human\" in the hCaptcha field.");			   
-		   }	   
-		});
-		</script>';	
-			
-		if($settings->get_setting('hcaptcha_public')){
-			//HCAPTCHA
-			$output .= '<div id="captcha_container" class=" errorplacement ">';
-			$output .= "<script src='https://www.hCaptcha.com/1/api.js' async defer></script>";
-			$output .= '<div id="captcha_field" class="h-captcha" data-callback="enableBtn" data-sitekey="'.$settings->get_setting('hcaptcha_public').'"></div>';
-			$output .= '</div>';
-		}
-		else if($settings->get_setting('captcha_public')){
-			//GOOGLE
-			$output .= '<div id="captcha_container" class=" errorplacement ">';
-			$output .= '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
-			$output .= '<div id="captcha_field" class="g-recaptcha" data-sitekey="'.$settings->get_setting('captcha_public').'" data-callback="enableBtn"></div>';
-			$output .= '</div>';
-		}
-		
-		return $output;
-	}
-
-	
-	static function captcha_check($captcha_full_response, $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$use_captcha = $settings->get_setting('use_captcha_comments');
-		}
-		else{
-			$use_captcha = $settings->get_setting('use_captcha');
-		}
-		if($use_captcha == 0){
-			return true;
-		}	
-		
-		$captcha_private = $settings->get_setting('hcaptcha_private');
-		
-		if($settings->get_setting('hcaptcha_public')){
-			
-			$captcha_response = $captcha_full_response['h-captcha-response'];
-
-			$data = array(
-						'secret' => $captcha_private,
-						'response' => $captcha_response  //$_POST['h-captcha-response']
-					);
-			$verify = curl_init();
-			curl_setopt($verify, CURLOPT_URL, "https://hcaptcha.com/siteverify");
-			curl_setopt($verify, CURLOPT_POST, true);
-			curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($data));
-			curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
-			$response = curl_exec($verify);
-			// var_dump($response);
-			$responseData = json_decode($response);
-			if($responseData->success) {
-				return $responseData->success;
-			} 
-			else {
-			   // return error to user; they did not pass
-			   return false;
-			}	
-		}
-		else if($settings->get_setting('captcha_public')){
-			
-			$captcha_response = $captcha_full_response['g-recaptcha-response'];
-			
-			//GOOGLE CAPTCHA
-			
-			$ch = curl_init();
-			curl_setopt($ch, CURLOPT_URL, "https://www.google.com/recaptcha/api/siteverify");
-			curl_setopt($ch, CURLOPT_HEADER, 0);
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
-			curl_setopt($ch, CURLOPT_POST, 1);
-			curl_setopt($ch, CURLOPT_POSTFIELDS, [
-				'secret' => $captcha_private,
-				'response' => $captcha_response,
-				'remoteip' => $_SERVER['REMOTE_ADDR']
-			]);
-
-			$resp = json_decode(curl_exec($ch));
-			curl_close($ch);
-			
-			return $resp->success;	
-			
-		}
-	}	
 
 	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
 		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"><fieldset>';
@@ -697,9 +483,6 @@ class FormWriterMaster {
 		return $output;
 	}
 
-	function hiddeninput($id, $value) {
-		return '<input type="hidden" class="hidden" name="'.$id.'" id="'.$id.'" value="'.$value.'" />';
-	}
 	
 
 	/*******************************
