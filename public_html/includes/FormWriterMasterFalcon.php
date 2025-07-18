@@ -52,13 +52,6 @@ class FormWriterMaster extends FormWriterBase {
 	protected $button_primary_class = 'btn-primary';
 	protected $button_secondary_class = 'btn-secondary';
 
-	function __construct($formid='form1', $secure=FALSE, $use_tabindex=FALSE){
-		$this->formid = $formid;
-
-		$settings = Globalvars::get_instance();
-
-		$this->use_tabindex = $use_tabindex;
-	}
 
 
 
