@@ -1,4 +1,5 @@
 <?php
+require_once('FormWriterBase.php');
 require_once('DbConnector.php');
 require_once('Globalvars.php');
 
@@ -6,14 +7,9 @@ require_once('Globalvars.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriterMaster {
-
-	public static $tab_count = 0;
+class FormWriterMasterTailwind extends FormWriterBase {
 
 	protected $use_grid;
-	protected $formid;
-	protected $captcha_public;
-	protected $captcha_private;
 	public $validate_style_info = 'errorElement: "span",
 							errorClass: "text-red-500",
 							highlight: function(element, errorClass) {
@@ -67,220 +63,10 @@ class FormWriterMaster {
 		$this->use_tabindex = $use_tabindex;
 	}
 
-	protected function _get_next_tab_index() {
-		if ($this->use_tabindex) {
-			++self::$tab_count;
-			return ' tabindex="' . self::$tab_count . '"';
-		}
-		return '';
-	}
 
 
 
-	function antispam_question_input($type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}
-
-		
-		if($correct_answer){
-			$output .= $this->textinput("Type '".strtolower($correct_answer)."' into this field (to prove you are human)", "antispam_question", NULL, 30, '', "", 255, ""); 
-			$output .= $this->hiddeninput("antispam_question_answer", strtolower($correct_answer));			
-			return $output;
-		}
-		else{
-			return false;
-		}
-	}
-
-	function antispam_question_validate($validation_rules, $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}
-		
-		if($correct_answer){
-			$validation_rules['antispam_question']['required']['value'] = 'true';
-			$validation_rules['antispam_question']['equalTo']['value'] = "'#antispam_question_answer'";
-			$validation_rules['antispam_question']['equalTo']['message'] = "'You must type the correct word here'";					
-		}
-		return $validation_rules;
-	}	
 	
-	function antispam_question_check($postvars){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}		
-		if($correct_answer){
-			if(strtolower($postvars['antispam_question']) == strtolower($correct_answer)){
-				return true;		
-			}
-			else{
-				return false;
-			}
-		}
-		else{
-			return true;
-		}
-	}	
-	
-	function honeypot_hidden_input($label='Extra email', $name='email'){
-		$settings = Globalvars::get_instance();
-		$use_honeypot = $settings->get_setting('use_honeypot');	
-		if($use_honeypot){
-			$output = '
-			<script type="text/javascript">
-			$(document).ready(function() {
-				$("#'.$name.'_container").hide();
-			});
-			</script>';
-			$output .= $this->textinput($label, $name, NULL, 30, '', "", 255, ""); 
-			return $output;
-		}
-		else{
-			return '';
-		}
-	}
-	
-	
-	function honeypot_check($postvars, $name='email'){
-		$settings = Globalvars::get_instance();
-		$use_honeypot = $settings->get_setting('use_honeypot');	
-		if($use_honeypot){		
-			if(strlen($postvars['email'] > 0)){
-				return false;		
-			}
-			else{
-				return true;
-			}
-		}
-		else{
-			return true;
-		}
-	}
-	
-	function captcha_hidden_input($submit_button_id="submit1", $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$use_captcha = $settings->get_setting('use_captcha_comments');
-		}
-		else{
-			$use_captcha = $settings->get_setting('use_captcha');
-		}
-			
-		if($use_captcha == 0){
-			return false;
-		}	
-		
-		$output = '';
-	
-	
-		$output = '
-		<script type="text/javascript">
-		function isCaptchaChecked() {
-		  return grecaptcha && grecaptcha.getResponse().length !== 0;
-		}		
-		
-		$("form").submit(function(event) {
-		   if(!isCaptchaChecked()){
-			  event.preventDefault();
-			  alert("Please check the \"I am human\" in the hCaptcha field.");			   
-		   }	   
-		});
-		</script>';	
-			
-		if($settings->get_setting('hcaptcha_public')){
-			//HCAPTCHA
-			$output .= '<div id="captcha_container" class=" errorplacement ">';
-			$output .= "<script src='https://www.hCaptcha.com/1/api.js' async defer></script>";
-			$output .= '<div id="captcha_field" class="h-captcha" data-callback="enableBtn" data-sitekey="'.$settings->get_setting('hcaptcha_public').'"></div>';
-			$output .= '</div>';
-		}
-		else if($settings->get_setting('captcha_public')){
-			//GOOGLE
-			$output .= '<div id="captcha_container" class=" errorplacement ">';
-			$output .= '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
-			$output .= '<div id="captcha_field" class="g-recaptcha" data-sitekey="'.$settings->get_setting('captcha_public').'" data-callback="enableBtn"></div>';
-			$output .= '</div>';
-		}
-		
-		return $output;
-	}
-
-	
-	function captcha_check($captcha_full_response, $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$use_captcha = $settings->get_setting('use_captcha_comments');
-		}
-		else{
-			$use_captcha = $settings->get_setting('use_captcha');
-		}
-		if($use_captcha == 0){
-			return true;
-		}	
-		
-		$captcha_private = $settings->get_setting('hcaptcha_private');
-		
-		if($settings->get_setting('hcaptcha_public')){
-			
-			$captcha_response = $captcha_full_response['h-captcha-response'];
-
-			$data = array(
-						'secret' => $captcha_private,
-						'response' => $captcha_response  //$_POST['h-captcha-response']
-					);
-			$verify = curl_init();
-			curl_setopt($verify, CURLOPT_URL, "https://hcaptcha.com/siteverify");
-			curl_setopt($verify, CURLOPT_POST, true);
-			curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($data));
-			curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
-			$response = curl_exec($verify);
-			// var_dump($response);
-			$responseData = json_decode($response);
-			if($responseData->success) {
-				return $responseData->success;
-			} 
-			else {
-			   // return error to user; they did not pass
-			   return false;
-			}	
-		}
-		else if($settings->get_setting('captcha_public')){
-			
-			$captcha_response = $captcha_full_response['g-recaptcha-response'];
-			
-			//GOOGLE CAPTCHA
-			
-			$ch = curl_init();
-			curl_setopt($ch, CURLOPT_URL, "https://www.google.com/recaptcha/api/siteverify");
-			curl_setopt($ch, CURLOPT_HEADER, 0);
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
-			curl_setopt($ch, CURLOPT_POST, 1);
-			curl_setopt($ch, CURLOPT_POSTFIELDS, [
-				'secret' => $captcha_private,
-				'response' => $captcha_response,
-				'remoteip' => $_SERVER['REMOTE_ADDR']
-			]);
-
-			$resp = json_decode(curl_exec($ch));
-			curl_close($ch);
-			
-			return $resp->success;	
-			
-		}
-	}	
 
 	function begin_form($class, $method, $action, $use_grid = false, $charset = 'UTF-8'){
 		$this->use_grid = $use_grid;
@@ -612,9 +398,6 @@ class FormWriterMaster {
 		return $output;
 	}
 
-	function hiddeninput($id, $value) {
-		return '<input type="hidden" class="hidden" name="'.$id.'" id="'.$id.'" value="'.$value.'" />';
-	}
 	
 
 	
@@ -1002,260 +785,332 @@ class FormWriterMaster {
 
 
 
-	function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
+	static function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
 		$getargs = '';
 		if($getvars){ 
 			foreach($getvars as $getvar=>$getval){
 				$getargs.= '<input type="hidden" name="'.$getvar.'" value="'.$getval.'"/>';      
 			}
 		}
+		
+		$settings = Globalvars::get_instance();
+		$allowed_extensions = $settings->get_setting('allowed_upload_extensions');
+		$accept_attr = '.' . str_replace(',', ',.', $allowed_extensions);
+		
+		// Get actual PHP upload limits
+		$upload_max = ini_get('upload_max_filesize');
+		$post_max = ini_get('post_max_size');
+		// Convert to bytes to compare
+		function parseSize($size) {
+			$unit = preg_replace('/[^bkmgtpezy]/i', '', $size);
+			$size = preg_replace('/[^0-9\.]/', '', $size);
+			if ($unit) {
+				return round($size * pow(1024, stripos('bkmgtpezy', $unit[0])));
+			} else {
+				return round($size);
+			}
+		}
+		$upload_max_bytes = parseSize($upload_max);
+		$post_max_bytes = parseSize($post_max);
+		$max_size = min($upload_max_bytes, $post_max_bytes);
+		$max_size_display = round($max_size / (1024 * 1024)) . 'MB';
 	?>
-      <form
-        id="fileupload"
-        action="/admin/admin_file_upload_process"
-        method="POST"
-        enctype="multipart/form-data"
-      >
+		<!-- File Drop Zone -->
+		<div id="file-drop-zone" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center mb-6 bg-gray-50 transition-all duration-300 ease-in-out cursor-pointer hover:bg-blue-50 hover:border-blue-300">
+			<svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+				<path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+			</svg>
+			<h3 class="text-lg font-medium text-gray-700 mb-2">Drop files here or click to browse</h3>
+			<p class="text-sm text-gray-500 mb-4">Maximum file size: <?php echo $max_size_display; ?> | Allowed types: <?php echo strtoupper(str_replace(',', ', ', $allowed_extensions)); ?></p>
+			<input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" class="hidden">
+			<button type="button" id="browse-btn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded inline-flex items-center">
+				<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-5L12 5H5a2 2 0 00-2 2z"/>
+				</svg>
+				Browse Files
+			</button>
+		</div>
+
+		<!-- Upload Controls -->
+		<div class="flex justify-between items-center mb-6">
+			<div class="flex space-x-2">
+				<button type="button" id="upload-all-btn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded inline-flex items-center disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+					</svg>
+					Upload All
+				</button>
+				<button type="button" id="clear-all-btn" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded inline-flex items-center disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+					</svg>
+					Clear All
+				</button>
+			</div>
+			<div id="overall-progress" class="flex-1 ml-4 hidden">
+				<div class="bg-gray-200 rounded-full h-2">
+					<div id="progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Files Table -->
+		<div class="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg">
+			<table class="min-w-full divide-y divide-gray-200">
+				<thead class="bg-gray-50">
+					<tr>
+						<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+							<div class="flex items-center">
+								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+								</svg>
+								File Name
+							</div>
+						</th>
+						<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+							<div class="flex items-center">
+								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+								</svg>
+								Size
+							</div>
+						</th>
+						<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+							<div class="flex items-center">
+								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+								</svg>
+								Status
+							</div>
+						</th>
+						<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+							<div class="flex items-center">
+								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+								</svg>
+								Actions
+							</div>
+						</th>
+					</tr>
+				</thead>
+				<tbody id="files-list" class="bg-white divide-y divide-gray-200">
+					<tr id="no-files-message">
+						<td colspan="4" class="px-6 py-8 text-center text-gray-500">
+							<svg class="mx-auto h-16 w-16 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+								<path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+							<div class="text-lg font-medium">No files selected</div>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
+		<?php if($getargs): ?>
+		<form id="hidden-form-data" class="hidden">
+			<?php echo $getargs; ?>
+		</form>
+		<?php endif; ?>
 		
-		<?php if($getargs){ echo $getargs; } ?>
-		
-        <!-- The fileupload-buttonbar contains buttons to add/delete files and start/cancel the upload -->
-        <div class="row fileupload-buttonbar">
-          <div class="col-lg-7">
-            <!-- The fileinput-button span is used to style the file input field as button -->
-            <span class="btn btn-success fileinput-button">
-              <i class="glyphicon glyphicon-plus"></i>
-              <span>Add files...</span>
-              <input type="file" name="files[]" multiple />
-            </span>
-            <button type="submit" class="btn btn-primary start">
-              <i class="glyphicon glyphicon-upload"></i>
-              <span>Start upload</span>
-            </button>
-            <button type="reset" class="btn btn-warning cancel">
-              <i class="glyphicon glyphicon-ban-circle"></i>
-              <span>Cancel upload</span>
-            </button>
-			<?php if($delete){ ?>
-            <button type="button" class="btn btn-danger delete">
-              <i class="glyphicon glyphicon-trash"></i>
-              <span>Delete selected</span>
-            </button>
-			<?php } ?>
-			<?php if($checkall){ ?>
-            <input type="checkbox" class="toggle" />
-			<?php } ?>
-            <!-- The global file processing state -->
-            <span class="fileupload-process"></span>
-          </div>
-          <!-- The global progress state -->
-          <div class="col-lg-5 fileupload-progress fade">
-            <!-- The global progress bar -->
-            <div
-              class="progress progress-striped active"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-            >
-              <div
-                class="progress-bar progress-bar-success"
-                style="width:0%;"
-              ></div>
-            </div>
-            <!-- The extended global progress state -->
-            <div class="progress-extended">&nbsp;</div>
-          </div>
-        </div>
-        <!-- The table listing the files available for upload/download -->
-        <table role="presentation" class="table table-striped">
-          <tbody class="files"></tbody>
-        </table>
-      </form>
-	   <div
-      id="blueimp-gallery"
-      class="blueimp-gallery blueimp-gallery-controls"
-      data-filter=":even"
-    >
-      <div class="slides"></div>
-      <h3 class="title"></h3>
-      <a class="prev">‹</a>
-      <a class="next">›</a>
-      <a class="close">×</a>
-      <a class="play-pause"></a>
-      <ol class="indicator"></ol>
-    </div>
-    <!-- The template to display files available for upload -->
-    <script id="template-upload" type="text/x-tmpl">
-      {% for (var i=0, file; file=o.files[i]; i++) { %}
-          <tr class="template-upload fade">
-              <td>
-                  <span class="preview"></span>
-              </td>
-              <td>
-                  {% if (window.innerWidth > 480 || !o.options.loadImageFileTypes.test(file.type)) { %}
-                      <p class="name">{%=file.name%}</p>
-                  {% } %}
-                  <strong class="error text-danger"></strong>
-              </td>
-              <td>
-                  <p class="size">Processing...</p>
-                  <div class="progress progress-striped active" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-bar progress-bar-success" style="width:0%;"></div></div>
-              </td>
-              <td>
-                  {% if (!o.options.autoUpload && o.options.edit && o.options.loadImageFileTypes.test(file.type)) { %}
-                    <button class="btn btn-success edit" data-index="{%=i%}" disabled>
-                        <i class="glyphicon glyphicon-edit"></i>
-                        <span>Edit</span>
-                    </button>
-                  {% } %}
-                  {% if (!i && !o.options.autoUpload) { %}
-                      <button class="btn btn-primary start" disabled>
-                          <i class="glyphicon glyphicon-upload"></i>
-                          <span>Start</span>
-                      </button>
-                  {% } %}
-                  {% if (!i) { %}
-                      <button class="btn btn-warning cancel">
-                          <i class="glyphicon glyphicon-ban-circle"></i>
-                          <span>Cancel</span>
-                      </button>
-                  {% } %}
-              </td>
-          </tr>
-      {% } %}
-    </script>
-    <!-- The template to display files available for download -->
-    <script id="template-download" type="text/x-tmpl">
-      {% for (var i=0, file; file=o.files[i]; i++) { %}
-          <tr class="template-download fade">
-              <td>
-                  <span class="preview">
-                      {% if (file.thumbnailUrl) { %}
-                          <a href="{%=file.url%}" title="{%=file.name%}" download="{%=file.name%}" data-gallery><img src="{%=file.thumbnailUrl%}"></a>
-                      {% } %}
-                  </span>
-              </td>
-              <td>
-                  {% if (window.innerWidth > 480 || !file.thumbnailUrl) { %}
-                      <p class="name"><a href="/admin/admin_files">{%=file.name%}</a>
-					  <?php /*
-                          {% if (file.url) { %}
-                              <a href="{%=file.url%}" title="{%=file.name%}" download="{%=file.name%}" {%=file.thumbnailUrl?'data-gallery':''%}>{%=file.name%}</a>
-                          {% } else { %}
-                              <span>{%=file.name%}</span>
-                          {% } %}
-						  */ 
-						  ?>
-                      </p>
-                  {% } %}
-                  {% if (file.error) { %}
-                      <div><span class="label label-danger">Error</span> {%=file.error%}</div>
-                  {% } %}
-              </td>
-              <td>
-                  <span class="size">{%=o.formatFileSize(file.size)%}</span>
-              </td>
-              <td> 
-				<?php if($delete){ ?>
-                  {% if (file.deleteUrl) { %}
-                      <button class="btn btn-danger delete" data-type="{%=file.deleteType%}" data-url="{%=file.deleteUrl%}"{% if (file.deleteWithCredentials) { %} data-xhr-fields='{"withCredentials":true}'{% } %}>
-                          <i class="glyphicon glyphicon-trash"></i>
-                          <span>Delete</span>
-                      </button>
-                      <input type="checkbox" name="delete" value="1" class="toggle">
-                  {% } else { %}
-                      <button class="btn btn-warning cancel">
-                          <i class="glyphicon glyphicon-ban-circle"></i>
-                          <span>Cancel</span>
-                      </button>
-                  {% } %}
-				<?php } ?>
-              </td>
-          </tr>
-      {% } %}
-    </script>
-	
-    <!-- The jQuery UI widget factory, can be omitted if jQuery UI is already included -->
-    <!--<script src="/includes/jquery-file-upload/js/vendor/jquery.ui.widget.js"></script>-->
-    <!-- The Templates plugin is included to render the upload/download listings -->
-    <script src="/includes/jquery-file-upload/js/tmpl.min.js"></script>
-    <!-- The Load Image plugin is included for the preview images and image resizing functionality -->
-    <!--<script src="/includes/jquery-file-upload/js/load-image.all.min.js"></script>-->
-    <!-- The Canvas to Blob plugin is included for image resizing functionality -->
-    <!--<script src="https://blueimp.github.io/JavaScript-Canvas-to-Blob/js/canvas-to-blob.min.js"></script>-->
+		<script>
+		$(function() {
+			'use strict';
+			
+			let selectedFiles = [];
+			
+			// Get allowed file extensions from server setting
+			const allowedExtensions = '<?php echo $allowed_extensions; ?>';
+			const allowedTypes = new RegExp('\\\\.(' + allowedExtensions.replace(/,/g, '|') + ')$', 'i');
+			const maxFileSize = <?php echo $max_size; ?>; // Maximum file size in bytes
+			
+			// DOM elements
+			const $dropZone = $('#file-drop-zone');
+			const $fileInput = $('#file-input');
+			const $browseBtn = $('#browse-btn');
+			const $uploadAllBtn = $('#upload-all-btn');
+			const $clearAllBtn = $('#clear-all-btn');
+			const $filesList = $('#files-list');
+			const $noFilesMessage = $('#no-files-message');
+			const $overallProgress = $('#overall-progress');
+			const $progressBar = $('#progress-bar');
 
-    <!-- blueimp Gallery script -->
-    <!--<script src="https://blueimp.github.io/Gallery/js/jquery.blueimp-gallery.min.js"></script>-->
-    <!-- The Iframe Transport is required for browsers without support for XHR file uploads -->
-    <script src="/includes/jquery-file-upload/js/jquery.iframe-transport.js"></script>
-    <!-- The basic File Upload plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload.js"></script>
-    <!-- The File Upload processing plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload-process.js"></script>
-    <!-- The File Upload image preview & resize plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-image.js"></script>-->
-    <!-- The File Upload audio preview plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-audio.js"></script>-->
-    <!-- The File Upload video preview plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-video.js"></script>-->
-    <!-- The File Upload validation plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-validate.js"></script>-->
-    <!-- The File Upload user interface plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload-ui.js"></script>
-    
-	<script>
-	$(function() {
-  'use strict';
+			// File size formatter
+			function formatFileSize(bytes) {
+				if (bytes === 0) return '0 Bytes';
+				const k = 1024;
+				const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+				const i = Math.floor(Math.log(bytes) / Math.log(k));
+				return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+			}
 
-  // Initialize the jQuery File Upload widget:
-  $('#fileupload').fileupload({
-    // Uncomment the following to send cross-domain cookies:
-    //xhrFields: {withCredentials: true},
-    url: '/admin/admin_file_upload_process'
-  });
+			// Generate unique ID for each file
+			function generateFileId() {
+				return 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+			}
 
-  // Enable iframe cross-domain access via redirect option:
-  /*
-  $('#fileupload').fileupload(
-    'option',
-    'redirect',
-    window.location.href.replace(/\/[^/]*$/, '/cors/result.html?%s')
-  );
-  */
+			// Show toast notification
+			function showToast(message, type = 'info') {
+				console.log(type + ': ' + message);
+				if (type === 'error') {
+					alert('Error: ' + message);
+				} else {
+					alert(message);
+				}
+			}
 
-  
-    // Load existing files:
-	/*
-    $('#fileupload').addClass('fileupload-processing');
-    $.ajax({
-      // Uncomment the following to send cross-domain cookies:
-      //xhrFields: {withCredentials: true},
-      url: $('#fileupload').fileupload('option', 'url'),
-      dataType: 'json',
-      context: $('#fileupload')[0]
-    })
-      .always(function() {
-        $(this).removeClass('fileupload-processing');
-      })
-      .done(function(result) {
-        $(this)
-          .fileupload('option', 'done')
-          // eslint-disable-next-line new-cap
-          .call(this, $.Event('done'), { result: result });
-      });
-	  */
-  }); 
+			// Add files to the list
+			function addFiles(files) {
+				Array.from(files).forEach(file => {
+					// Validate file type using server setting
+					if (!allowedTypes.test(file.name)) {
+						showToast('Invalid file type: ' + file.name + '. Allowed: ' + allowedExtensions, 'error');
+						return;
+					}
 
-</script>
-	
-	
-    
-    <!-- The XDomainRequest Transport is included for cross-domain file deletion for IE 8 and IE 9 -->
-    <!--[if (gte IE 8)&(lt IE 10)]>
-      <script src="/includes/jquery-file-upload/js/cors/jquery.xdr-transport.js"></script>
-    <![endif]-->	
-	  <?php
-		
+					// Validate file size using server limit
+					if (file.size > maxFileSize) {
+						showToast('File too large: ' + file.name + '. Maximum size: <?php echo $max_size_display; ?>', 'error');
+						return;
+					}
+
+					const fileId = generateFileId();
+					const fileObj = {
+						id: fileId,
+						file: file,
+						status: 'pending'
+					};
+
+					selectedFiles.push(fileObj);
+					renderFileRow(fileObj);
+				});
+
+				updateUI();
+			}
+
+			// Render a file row in the table
+			function renderFileRow(fileObj) {
+				$noFilesMessage.addClass('hidden');
+				
+				const $row = $(`
+					<tr data-file-id="${fileObj.id}" class="file-row hover:bg-gray-50 transition-colors duration-200">
+						<td class="px-6 py-4 whitespace-nowrap">
+							<div class="flex items-center">
+								<svg class="w-5 h-5 text-gray-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+								</svg>
+								<span class="file-name text-sm font-medium text-gray-900">${fileObj.file.name}</span>
+							</div>
+						</td>
+						<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 file-size">${formatFileSize(fileObj.file.size)}</td>
+						<td class="px-6 py-4 whitespace-nowrap file-status">
+							<span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">Ready to upload</span>
+						</td>
+						<td class="px-6 py-4 whitespace-nowrap text-sm font-medium file-actions">
+							<button type="button" class="text-blue-600 hover:text-blue-900 mr-3 upload-single-btn" title="Upload this file">
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+								</svg>
+							</button>
+							<button type="button" class="text-red-600 hover:text-red-900 remove-file-btn" title="Remove this file">
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+								</svg>
+							</button>
+						</td>
+					</tr>
+				`);
+
+				$filesList.append($row);
+			}
+
+			// Update UI state
+			function updateUI() {
+				const hasFiles = selectedFiles.length > 0;
+				const pendingFiles = selectedFiles.filter(f => f.status === 'pending').length;
+				
+				$uploadAllBtn.prop('disabled', pendingFiles === 0);
+				$clearAllBtn.prop('disabled', !hasFiles);
+				
+				if (!hasFiles) {
+					$noFilesMessage.removeClass('hidden');
+				}
+				
+				// Update button text with count
+				if (pendingFiles > 0) {
+					$uploadAllBtn.find('svg').next().text(`Upload All (${pendingFiles})`);
+				} else {
+					$uploadAllBtn.find('svg').next().text('Upload All');
+				}
+			}
+
+			// Event Handlers
+			$browseBtn.on('click', () => $fileInput[0].click());
+			
+			$fileInput.on('change', function() {
+				if (this.files.length > 0) {
+					addFiles(this.files);
+					this.value = ''; // Reset input
+				}
+			});
+
+			// Drag and drop functionality
+			$dropZone.on('dragover dragenter', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).addClass('bg-blue-50 border-blue-300');
+			});
+
+			$dropZone.on('dragleave', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).removeClass('bg-blue-50 border-blue-300');
+			});
+
+			$dropZone.on('drop', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).removeClass('bg-blue-50 border-blue-300');
+				
+				const files = e.originalEvent.dataTransfer.files;
+				if (files.length > 0) {
+					addFiles(files);
+				}
+			});
+
+			// Clear all files
+			$clearAllBtn.on('click', function() {
+				if (confirm('Are you sure you want to clear all files?')) {
+					selectedFiles = [];
+					$filesList.find('.file-row').remove();
+					updateUI();
+				}
+			});
+
+			// Event delegation for dynamic buttons
+			$filesList.on('click', '.remove-file-btn', function() {
+				const $row = $(this).closest('.file-row');
+				const fileId = $row.data('file-id');
+				
+				// Remove from array
+				selectedFiles = selectedFiles.filter(f => f.id !== fileId);
+				
+				// Remove from DOM
+				$row.remove();
+				updateUI();
+			});
+
+			// Click to browse anywhere in drop zone
+			$dropZone.on('click', function(e) {
+				if (e.target === this || !$(e.target).closest('button').length) {
+					$fileInput[0].click();
+				}
+			});
+
+			console.log('Modern Tailwind file upload loaded');
+		});
+		</script>
+	<?php
 	}
 
 

@@ -1,16 +1,11 @@
 <?php
+require_once('FormWriterBase.php');
 require_once('DbConnector.php');
 require_once('Globalvars.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriterMaster {
-
-	public static $tab_count = 0;
-
-	protected $formid;
-	protected $captcha_public;
-	protected $captcha_private;
+class FormWriterMaster extends FormWriterBase {
 	public $validate_style_info = 'errorElement: "p",
 							errorClass: "error help-block text-red uk-form-danger",
 							highlight: function(element, errorClass) {
@@ -65,220 +60,11 @@ class FormWriterMaster {
 		$this->use_tabindex = $use_tabindex;
 	}
 
-	protected function _get_next_tab_index() {
-		if ($this->use_tabindex) {
-			++self::$tab_count;
-			return ' tabindex="' . self::$tab_count . '"';
-		}
-		return '';
-	}
 
 
-
-	function antispam_question_input($type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}
-
-		
-		if($correct_answer){
-			$output .= $this->textinput("Type '".strtolower($correct_answer)."' into this field (to prove you are human)", "antispam_question", "ctrlHolder", 30, '', "", 255, ""); 
-			$output .= $this->hiddeninput("antispam_question_answer", strtolower($correct_answer));			
-			return $output;
-		}
-		else{
-			return false;
-		}
-	}
-
-	static function antispam_question_validate($validation_rules, $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}
-		
-		if($correct_answer){
-			$validation_rules['antispam_question']['required']['value'] = 'true';
-			$validation_rules['antispam_question']['equalTo']['value'] = "'#antispam_question_answer'";
-			$validation_rules['antispam_question']['equalTo']['message'] = "'You must type the correct word here'";					
-		}
-		return $validation_rules;
-	}	
-	
-	static function antispam_question_check($postvars){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$correct_answer = $settings->get_setting('anti_spam_answer_comments');
-		}
-		else{
-			$correct_answer = $settings->get_setting('anti_spam_answer');
-		}		
-		if($correct_answer){
-			if(strtolower($postvars['antispam_question']) == strtolower($correct_answer)){
-				return true;		
-			}
-			else{
-				return false;
-			}
-		}
-		else{
-			return true;
-		}
-	}	
-	
-	function honeypot_hidden_input($label='Extra email', $name='email'){
-		$settings = Globalvars::get_instance();
-		$use_honeypot = $settings->get_setting('use_honeypot');	
-		if($use_honeypot){
-			$output = '
-			<script type="text/javascript">
-			$(document).ready(function() {
-				$("#'.$name.'_container").hide();
-			});
-			</script>';
-			$output .= $this->textinput($label, $name, "ctrlHolder", 30, '', "", 255, ""); 
-			return $output;
-		}
-		else{
-			return '';
-		}
-	}
 	
 	
-	static function honeypot_check($postvars, $name='email'){
-		$settings = Globalvars::get_instance();
-		$use_honeypot = $settings->get_setting('use_honeypot');	
-		if($use_honeypot){		
-			if(strlen($postvars['email'] > 0)){
-				return false;		
-			}
-			else{
-				return true;
-			}
-		}
-		else{
-			return true;
-		}
-	}
 	
-	function captcha_hidden_input($submit_button_id="submit1", $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$use_captcha = $settings->get_setting('use_captcha_comments');
-		}
-		else{
-			$use_captcha = $settings->get_setting('use_captcha');
-		}
-			
-		if($use_captcha == 0){
-			return false;
-		}	
-		
-		$output = '';
-	
-	
-		$output = '
-		<script type="text/javascript">
-		function isCaptchaChecked() {
-		  return grecaptcha && grecaptcha.getResponse().length !== 0;
-		}		
-		
-		$("form").submit(function(event) {
-		   if(!isCaptchaChecked()){
-			  event.preventDefault();
-			  alert("Please check the \"I am human\" in the hCaptcha field.");			   
-		   }	   
-		});
-		</script>';	
-			
-		if($settings->get_setting('hcaptcha_public')){
-			//HCAPTCHA
-			$output .= '<div id="captcha_container" class="uk-margin errorplacement ">';
-			$output .= "<script src='https://www.hCaptcha.com/1/api.js' async defer></script>";
-			$output .= '<div id="captcha_field" class="h-captcha" data-callback="enableBtn" data-sitekey="'.$settings->get_setting('hcaptcha_public').'"></div>';
-			$output .= '</div>';
-		}
-		else if($settings->get_setting('captcha_public')){
-			//GOOGLE
-			$output .= '<div id="captcha_container" class="uk-margin errorplacement ">';
-			$output .= '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
-			$output .= '<div id="captcha_field" class="g-recaptcha" data-sitekey="'.$settings->get_setting('captcha_public').'" data-callback="enableBtn"></div>';
-			$output .= '</div>';
-		}
-		
-		return $output;
-	}
-
-	
-	static function captcha_check($captcha_full_response, $type=NULL){
-		$settings = Globalvars::get_instance();
-		if($type == 'blog'){
-			$use_captcha = $settings->get_setting('use_captcha_comments');
-		}
-		else{
-			$use_captcha = $settings->get_setting('use_captcha');
-		}
-		if($use_captcha == 0){
-			return true;
-		}	
-		
-		$captcha_private = $settings->get_setting('hcaptcha_private');
-		
-		if($settings->get_setting('hcaptcha_public')){
-			
-			$captcha_response = $captcha_full_response['h-captcha-response'];
-
-			$data = array(
-						'secret' => $captcha_private,
-						'response' => $captcha_response  //$_POST['h-captcha-response']
-					);
-			$verify = curl_init();
-			curl_setopt($verify, CURLOPT_URL, "https://hcaptcha.com/siteverify");
-			curl_setopt($verify, CURLOPT_POST, true);
-			curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($data));
-			curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
-			$response = curl_exec($verify);
-			// var_dump($response);
-			$responseData = json_decode($response);
-			if($responseData->success) {
-				return $responseData->success;
-			} 
-			else {
-			   // return error to user; they did not pass
-			   return false;
-			}	
-		}
-		else if($settings->get_setting('captcha_public')){
-			
-			$captcha_response = $captcha_full_response['g-recaptcha-response'];
-			
-			//GOOGLE CAPTCHA
-			
-			$ch = curl_init();
-			curl_setopt($ch, CURLOPT_URL, "https://www.google.com/recaptcha/api/siteverify");
-			curl_setopt($ch, CURLOPT_HEADER, 0);
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
-			curl_setopt($ch, CURLOPT_POST, 1);
-			curl_setopt($ch, CURLOPT_POSTFIELDS, [
-				'secret' => $captcha_private,
-				'response' => $captcha_response,
-				'remoteip' => $_SERVER['REMOTE_ADDR']
-			]);
-
-			$resp = json_decode(curl_exec($ch));
-			curl_close($ch);
-			
-			return $resp->success;	
-			
-		}
-	}	
 
 	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
 		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"><fieldset class="uk-fieldset">';
@@ -573,9 +359,6 @@ class FormWriterMaster {
 		return $output;
 	}
 
-	function hiddeninput($id, $value) {
-		return '<input type="hidden" class="hidden" name="'.$id.'" id="'.$id.'" value="'.$value.'" />';
-	}
 	
 
 	
@@ -948,259 +731,72 @@ class FormWriterMaster {
 
 
 	static function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
-		$getargs = '';
+		$getargs = "";
 		if($getvars){ 
 			foreach($getvars as $getvar=>$getval){
-				$getargs.= '<input type="hidden" name="'.$getvar.'" value="'.$getval.'"/>';      
+				$getargs.= "<input type="hidden" name="".$getvar."" value="".$getval.""/>"; 
 			}
 		}
+		
+		$settings = Globalvars::get_instance();
+		$allowed_extensions = $settings->get_setting("allowed_upload_extensions");
+		$accept_attr = "." . str_replace(",", ",.", $allowed_extensions);
+		
+		// Get actual PHP upload limits
+		$upload_max = ini_get("upload_max_filesize");
+		$post_max = ini_get("post_max_size");
+		// Convert to bytes to compare
+		function parseSize($size) {
+			$unit = preg_replace("/[^bkmgtpezy]/i", "", $size);
+			$size = preg_replace("/[^0-9\\.]/", "", $size);
+			if ($unit) {
+				return round($size * pow(1024, stripos("bkmgtpezy", $unit[0])));
+			} else {
+				return round($size);
+			}
+		}
+		$upload_max_bytes = parseSize($upload_max);
+		$post_max_bytes = parseSize($post_max);
+		$max_size = min($upload_max_bytes, $post_max_bytes);
+		$max_size_display = round($max_size / (1024 * 1024)) . "MB";
 	?>
-      <form
-        id="fileupload"
-        action="/admin/admin_file_upload_process"
-        method="POST"
-        enctype="multipart/form-data"
-      >
-		
-		<?php if($getargs){ echo $getargs; } ?>
-		
-        <!-- The fileupload-buttonbar contains buttons to add/delete files and start/cancel the upload -->
-        <div class="row fileupload-buttonbar">
-          <div class="col-lg-7">
-            <!-- The fileinput-button span is used to style the file input field as button -->
-            <span class="btn btn-success fileinput-button">
-              <i class="glyphicon glyphicon-plus"></i>
-              <span>Add files...</span>
-              <input type="file" name="files[]" multiple />
-            </span>
-            <button type="submit" class="btn btn-primary start">
-              <i class="glyphicon glyphicon-upload"></i>
-              <span>Start upload</span>
-            </button>
-            <button type="reset" class="btn btn-warning cancel">
-              <i class="glyphicon glyphicon-ban-circle"></i>
-              <span>Cancel upload</span>
-            </button>
-			<?php if($delete){ ?>
-            <button type="button" class="btn btn-danger delete">
-              <i class="glyphicon glyphicon-trash"></i>
-              <span>Delete selected</span>
-            </button>
-			<?php } ?>
-			<?php if($checkall){ ?>
-            <input type="checkbox" class="toggle" />
-			<?php } ?>
-            <!-- The global file processing state -->
-            <span class="fileupload-process"></span>
-          </div>
-          <!-- The global progress state -->
-          <div class="col-lg-5 fileupload-progress fade">
-            <!-- The global progress bar -->
-            <div
-              class="progress progress-striped active"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-            >
-              <div
-                class="progress-bar progress-bar-success"
-                style="width:0%;"
-              ></div>
-            </div>
-            <!-- The extended global progress state -->
-            <div class="progress-extended">&nbsp;</div>
-          </div>
-        </div>
-        <!-- The table listing the files available for upload/download -->
-        <table role="presentation" class="table table-striped">
-          <tbody class="files"></tbody>
-        </table>
-      </form>
-	   <div
-      id="blueimp-gallery"
-      class="blueimp-gallery blueimp-gallery-controls"
-      data-filter=":even"
-    >
-      <div class="slides"></div>
-      <h3 class="title"></h3>
-      <a class="prev">‹</a>
-      <a class="next">›</a>
-      <a class="close">×</a>
-      <a class="play-pause"></a>
-      <ol class="indicator"></ol>
-    </div>
-    <!-- The template to display files available for upload -->
-    <script id="template-upload" type="text/x-tmpl">
-      {% for (var i=0, file; file=o.files[i]; i++) { %}
-          <tr class="template-upload fade">
-              <td>
-                  <span class="preview"></span>
-              </td>
-              <td>
-                  {% if (window.innerWidth > 480 || !o.options.loadImageFileTypes.test(file.type)) { %}
-                      <p class="name">{%=file.name%}</p>
-                  {% } %}
-                  <strong class="error text-danger"></strong>
-              </td>
-              <td>
-                  <p class="size">Processing...</p>
-                  <div class="progress progress-striped active" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-bar progress-bar-success" style="width:0%;"></div></div>
-              </td>
-              <td>
-                  {% if (!o.options.autoUpload && o.options.edit && o.options.loadImageFileTypes.test(file.type)) { %}
-                    <button class="btn btn-success edit" data-index="{%=i%}" disabled>
-                        <i class="glyphicon glyphicon-edit"></i>
-                        <span>Edit</span>
-                    </button>
-                  {% } %}
-                  {% if (!i && !o.options.autoUpload) { %}
-                      <button class="btn btn-primary start" disabled>
-                          <i class="glyphicon glyphicon-upload"></i>
-                          <span>Start</span>
-                      </button>
-                  {% } %}
-                  {% if (!i) { %}
-                      <button class="btn btn-warning cancel">
-                          <i class="glyphicon glyphicon-ban-circle"></i>
-                          <span>Cancel</span>
-                      </button>
-                  {% } %}
-              </td>
-          </tr>
-      {% } %}
-    </script>
-    <!-- The template to display files available for download -->
-    <script id="template-download" type="text/x-tmpl">
-      {% for (var i=0, file; file=o.files[i]; i++) { %}
-          <tr class="template-download fade">
-              <td>
-                  <span class="preview">
-                      {% if (file.thumbnailUrl) { %}
-                          <a href="{%=file.url%}" title="{%=file.name%}" download="{%=file.name%}" data-gallery><img src="{%=file.thumbnailUrl%}"></a>
-                      {% } %}
-                  </span>
-              </td>
-              <td>
-                  {% if (window.innerWidth > 480 || !file.thumbnailUrl) { %}
-                      <p class="name"><a href="/admin/admin_files">{%=file.name%}</a>
-					  <?php /*
-                          {% if (file.url) { %}
-                              <a href="{%=file.url%}" title="{%=file.name%}" download="{%=file.name%}" {%=file.thumbnailUrl?'data-gallery':''%}>{%=file.name%}</a>
-                          {% } else { %}
-                              <span>{%=file.name%}</span>
-                          {% } %}
-						  */ 
-						  ?>
-                      </p>
-                  {% } %}
-                  {% if (file.error) { %}
-                      <div><span class="label label-danger">Error</span> {%=file.error%}</div>
-                  {% } %}
-              </td>
-              <td>
-                  <span class="size">{%=o.formatFileSize(file.size)%}</span>
-              </td>
-              <td> 
-				<?php if($delete){ ?>
-                  {% if (file.deleteUrl) { %}
-                      <button class="btn btn-danger delete" data-type="{%=file.deleteType%}" data-url="{%=file.deleteUrl%}"{% if (file.deleteWithCredentials) { %} data-xhr-fields='{"withCredentials":true}'{% } %}>
-                          <i class="glyphicon glyphicon-trash"></i>
-                          <span>Delete</span>
-                      </button>
-                      <input type="checkbox" name="delete" value="1" class="toggle">
-                  {% } else { %}
-                      <button class="btn btn-warning cancel">
-                          <i class="glyphicon glyphicon-ban-circle"></i>
-                          <span>Cancel</span>
-                      </button>
-                  {% } %}
-				<?php } ?>
-              </td>
-          </tr>
-      {% } %}
-    </script>
-	
-    <!-- The jQuery UI widget factory, can be omitted if jQuery UI is already included -->
-    <!--<script src="/includes/jquery-file-upload/js/vendor/jquery.ui.widget.js"></script>-->
-    <!-- The Templates plugin is included to render the upload/download listings -->
-    <script src="/includes/jquery-file-upload/js/tmpl.min.js"></script>
-    <!-- The Load Image plugin is included for the preview images and image resizing functionality -->
-    <!--<script src="/includes/jquery-file-upload/js/load-image.all.min.js"></script>-->
-    <!-- The Canvas to Blob plugin is included for image resizing functionality -->
-    <!--<script src="https://blueimp.github.io/JavaScript-Canvas-to-Blob/js/canvas-to-blob.min.js"></script>-->
-
-    <!-- blueimp Gallery script -->
-    <!--<script src="https://blueimp.github.io/Gallery/js/jquery.blueimp-gallery.min.js"></script>-->
-    <!-- The Iframe Transport is required for browsers without support for XHR file uploads -->
-    <script src="/includes/jquery-file-upload/js/jquery.iframe-transport.js"></script>
-    <!-- The basic File Upload plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload.js"></script>
-    <!-- The File Upload processing plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload-process.js"></script>
-    <!-- The File Upload image preview & resize plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-image.js"></script>-->
-    <!-- The File Upload audio preview plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-audio.js"></script>-->
-    <!-- The File Upload video preview plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-video.js"></script>-->
-    <!-- The File Upload validation plugin -->
-    <!--<script src="/includes/jquery-file-upload/js/jquery.fileupload-validate.js"></script>-->
-    <!-- The File Upload user interface plugin -->
-    <script src="/includes/jquery-file-upload/js/jquery.fileupload-ui.js"></script>
-    
-	<script>
-	$(function() {
-  'use strict';
-
-  // Initialize the jQuery File Upload widget:
-  $('#fileupload').fileupload({
-    // Uncomment the following to send cross-domain cookies:
-    //xhrFields: {withCredentials: true},
-    url: '/admin/admin_file_upload_process'
-  });
-
-  // Enable iframe cross-domain access via redirect option:
-  /*
-  $('#fileupload').fileupload(
-    'option',
-    'redirect',
-    window.location.href.replace(/\/[^/]*$/, '/cors/result.html?%s')
-  );
-  */
-
-  
-    // Load existing files:
-	/*
-    $('#fileupload').addClass('fileupload-processing');
-    $.ajax({
-      // Uncomment the following to send cross-domain cookies:
-      //xhrFields: {withCredentials: true},
-      url: $('#fileupload').fileupload('option', 'url'),
-      dataType: 'json',
-      context: $('#fileupload')[0]
-    })
-      .always(function() {
-        $(this).removeClass('fileupload-processing');
-      })
-      .done(function(result) {
-        $(this)
-          .fileupload('option', 'done')
-          // eslint-disable-next-line new-cap
-          .call(this, $.Event('done'), { result: result });
-      });
-	  */
-  }); 
-
-</script>
-	
-	
-    
-    <!-- The XDomainRequest Transport is included for cross-domain file deletion for IE 8 and IE 9 -->
-    <!--[if (gte IE 8)&(lt IE 10)]>
-      <script src="/includes/jquery-file-upload/js/cors/jquery.xdr-transport.js"></script>
-    <![endif]-->	
-	  <?php
-		
+		<!-- File Drop Zone -->
+		<div id="file-drop-zone" class="uk-border-rounded uk-text-center uk-margin-bottom uk-padding" style="border: 2px dashed #e5e5e5; background-color: #f8f9fa; transition: all 0.3s ease; cursor: pointer;">
+			<div uk-icon="icon: cloud-upload; ratio: 3" class="uk-text-muted uk-margin-bottom"></div>
+			<h5 class="uk-text-muted">Drop files here or click to browse</h5>
+			<p class="uk-text-muted uk-margin-bottom">Maximum file size: <?php echo $max_size_display; ?>  < /dev/null |  Allowed types: <?php echo strtoupper(str_replace(",", ", ", $allowed_extensions)); ?></p>
+			<input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" style="display: none;">
+			<button type="button" id="browse-btn" class="uk-button uk-button-default">
+				<span uk-icon="icon: folder; ratio: 0.8"></span> Browse Files
+			</button>
+		</div>
+		<!-- Files Table -->
+		<div class="uk-overflow-auto">
+			<table class="uk-table uk-table-hover uk-table-divider">
+				<thead>
+					<tr>
+						<th><span uk-icon="icon: file; ratio: 0.8"></span> File Name</th>
+						<th><span uk-icon="icon: database; ratio: 0.8"></span> Size</th>
+						<th><span uk-icon="icon: info; ratio: 0.8"></span> Status</th>
+						<th><span uk-icon="icon: cog; ratio: 0.8"></span> Actions</th>
+					</tr>
+				</thead>
+				<tbody id="files-list">
+					<tr id="no-files-message">
+						<td colspan="4" class="uk-text-center uk-text-muted uk-padding">
+							<div uk-icon="icon: cloud-upload; ratio: 2" class="uk-margin-bottom"></div>
+							<div>No files selected</div>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+		<script>
+		$(function() {
+			console.log("Modern UIKit file upload loaded");
+		});
+		</script>
+	<?php
 	}
 
 
