@@ -5,7 +5,7 @@ require_once('Globalvars.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriterMaster extends FormWriterBase {
+class FormWriterMasterBootstrap extends FormWriterBase {
 	public $validate_style_info = '
 							/* ignore: ":hidden:not(input[type=\'checkbox\'], input[type=\'radio\'])", */
 							errorElement: "p",
@@ -28,7 +28,7 @@ class FormWriterMaster extends FormWriterBase {
 	
 	protected $text_container_class = 'mb-3';
 	protected $text_label_class = 'col-sm-2 col-form-label';
-	protected $text_input_class = 'form-control-plaintext outline-none';
+	protected $text_input_class = 'form-control-plaintext';
 	
 	protected $textinput_container_class = 'mb-3';
 	protected $textinput_label_class = 'form-label';
