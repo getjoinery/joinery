@@ -1527,10 +1527,7 @@ class FormWriterMasterBootstrap extends FormWriterBase {
 	
 	
     
-    <!-- The XDomainRequest Transport is included for cross-domain file deletion for IE 8 and IE 9 -->
-    <!--[if (gte IE 8)&(lt IE 10)]>
-      <script src="/includes/jquery-file-upload/js/cors/jquery.xdr-transport.js"></script>
-    <![endif]-->	
+    <!-- Modern browsers handle CORS natively, no IE8/9 support needed -->	
 	  <?php
 		
 	}

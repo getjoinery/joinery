@@ -78,14 +78,9 @@ class AdminPage{
 			<script type="text/javascript" src="/adm/includes/scripts/jquery.validate-1.9.1.js"></script>
 
 
-			<!--jQuery UI, needed for blueimp uploader -->
-			<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+			<!-- jQuery UI removed - was only needed for old file uploader -->
 
-			<!-- blueimp Gallery styles for uploader-->
-			<link rel="stylesheet" href="/includes/jquery-file-upload/css/blueimp-gallery.min.css"/>
-			<!-- CSS to style the file input field as button and adjust the Bootstrap progress bars -->
-
-			<!--end Gallery styles-->	
+			<!-- Modern file upload styles are handled by FormWriter CSS -->	
 
 			<?php
 		}
