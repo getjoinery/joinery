@@ -7,7 +7,7 @@ require_once('ShoppingCart.php');
 PathHelper::requireOnce('data/users_class.php');
 PathHelper::requireOnce('data/public_menus_class.php');
 
-class PublicPageMaster {
+class PublicPageBase {
 
 	protected $rowcount;
 
