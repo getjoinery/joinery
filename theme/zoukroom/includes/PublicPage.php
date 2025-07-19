@@ -1,7 +1,7 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageMaster.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageBase.php');
 
-class PublicPage extends PublicPageMaster {
+class PublicPage extends PublicPageBase {
 
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {

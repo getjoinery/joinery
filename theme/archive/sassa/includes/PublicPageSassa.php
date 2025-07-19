@@ -1,9 +1,9 @@
 <?php
 $settings = Globalvars::get_instance();
 $siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/PublicPageMaster.php');
+require_once($siteDir . '/includes/PublicPageBase.php');
 
-class PublicPageSassa extends PublicPageMaster {
+class PublicPageSassa extends PublicPageBase {
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPageTW();
