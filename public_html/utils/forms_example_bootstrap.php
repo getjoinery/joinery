@@ -12,11 +12,11 @@
 	$page = new PublicPage();
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
-		'title'=>'Log In'
+		'title'=>'Bootstrap Forms Example'
 		);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPage::BeginPage('Falcon forms example');
+	echo PublicPage::BeginPage('Bootstrap forms example');
 	
 	
 	//$formwriter = LibraryFunctions::get_formwriter_object('form1');
