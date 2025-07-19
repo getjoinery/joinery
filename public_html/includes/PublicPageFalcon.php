@@ -1,8 +1,8 @@
 <?php
-require_once('PublicPageMaster.php');
+require_once('PublicPageBase.php');
 require_once('Pager.php');
 
-class PublicPageFalcon extends PublicPageMaster {
+class PublicPageFalcon extends PublicPageBase {
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();

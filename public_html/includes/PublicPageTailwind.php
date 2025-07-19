@@ -1,7 +1,7 @@
 <?php
-require_once('PublicPageMaster.php');
+require_once('PublicPageBase.php');
 
-class PublicPageTailwind extends PublicPageMaster {
+class PublicPageTailwind extends PublicPageBase {
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
