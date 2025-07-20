@@ -428,6 +428,7 @@ class PublicPageBase {
 			
 			.joinery-admin-bar-right {
 				float: right !important;
+				padding-right: 10px !important;
 			}
 			
 			.joinery-admin-bar-logo,
@@ -442,11 +443,19 @@ class PublicPageBase {
 				line-height: 32px !important;
 			}
 			
+			#joinery-admin-bar .joinery-admin-bar-user {
+				padding-right: 10px !important;
+			}
+			
 			.joinery-admin-bar-logo {
 				background: #32373c !important;
 				font-weight: bold !important;
 				width: 32px !important;
 				text-align: center !important;
+			}
+			
+			#joinery-admin-bar > div > a {
+				padding: 0 15px !important;
 			}
 			
 			#joinery-admin-bar a:hover {
@@ -467,24 +476,27 @@ class PublicPageBase {
 				box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
 				top: 32px !important;
 				left: 0 !important;
+				padding: 4px 0 !important;
 			}
 			
 			.joinery-admin-bar-dropdown:hover .joinery-admin-bar-dropdown-content {
 				display: block !important;
 			}
 			
-			.joinery-admin-bar-dropdown-content a {
+			#joinery-admin-bar .joinery-admin-bar-dropdown-content a {
 				display: block !important;
-				padding: 0 20px !important;
-				line-height: 32px !important;
+				padding: 3px 12px !important;
+				line-height: 20px !important;
+				white-space: nowrap !important;
 			}
 			
-			.joinery-admin-bar-dropdown-content a:hover {
+			#joinery-admin-bar .joinery-admin-bar-dropdown-content a:hover {
 				background: #23282d !important;
 			}
 			
 			.joinery-admin-bar-new {
 				cursor: pointer !important;
+				padding: 0 15px !important;
 			}
 			
 			.joinery-admin-bar-new:hover {
