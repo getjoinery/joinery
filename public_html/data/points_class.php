@@ -30,6 +30,15 @@ class Point extends SystemBase {
 		'pnt_is_booted' => 'If booted'
 	);
 	
+	public static $field_specifications = array(
+		'pnt_point_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
+		'pnt_name' => array('type'=>'varchar(255)'),
+		'pnt_clan' => array('type'=>'varchar(255)'),
+		'pnt_sein' => array('type'=>'varchar(255)'),
+		'pnt_is_active' => array('type'=>'bool'),
+		'pnt_is_booted' => array('type'=>'bool'),
+	);	
+	
 	public static $required_fields = array();
 
 	public static $field_constraints = array();	
