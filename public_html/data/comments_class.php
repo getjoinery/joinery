@@ -1,9 +1,10 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SystemClass.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SystemClass.php');
 
 class CommentException extends SystemClassException {}
 class CommentNotSentException extends CommentException {};

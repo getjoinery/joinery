@@ -2,7 +2,6 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');	
 	PathHelper::requireOnce('includes/EmailTemplate.php');
 	PathHelper::requireOnce('data/email_templates_class.php');
 	PathHelper::requireOnce('data/users_class.php');

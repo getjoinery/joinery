@@ -1,9 +1,10 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/PublicPageFalcon.php');
-require_once($siteDir . '/includes/Pager.php');
-require_once($siteDir . '/data/admin_menus_class.php');
+require_once(__DIR__ . '/PathHelper.php');
+
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/PublicPageFalcon.php');
+PathHelper::requireOnce('includes/Pager.php');
+PathHelper::requireOnce('data/admin_menus_class.php');
 
 class AdminPage extends PublicPageFalcon {
 

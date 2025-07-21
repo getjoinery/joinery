@@ -1,16 +1,16 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/FieldConstraints.php');
-require_once($siteDir . '/includes/Globalvars.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SingleRowAccessor.php');
-require_once($siteDir . '/includes/SystemClass.php');
-require_once($siteDir . '/includes/Validator.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
-require_once($siteDir . '/data/content_versions_class.php');
-require_once($siteDir . '/data/groups_class.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/FieldConstraints.php');
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SingleRowAccessor.php');
+PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/Validator.php');
+
+PathHelper::requireOnce('data/content_versions_class.php');
+PathHelper::requireOnce('data/groups_class.php');
 
 class QuestionOptionException extends SystemClassException {}
 

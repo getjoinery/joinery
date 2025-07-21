@@ -1,13 +1,13 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/FieldConstraints.php');
-require_once($siteDir . '/includes/Globalvars.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SingleRowAccessor.php');
-require_once($siteDir . '/includes/SystemClass.php');
-require_once($siteDir . '/includes/Validator.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/FieldConstraints.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SingleRowAccessor.php');
+PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/Validator.php');
 
 
 class ApiKeyException extends SystemClassException {}
@@ -67,17 +67,13 @@ class ApiKey extends SystemBase {
 	);	
 	
 	public static function GenerateKey($key) {
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
-		require_once($siteDir . '/includes/PasswordHash.php');
+		PathHelper::requireOnce('includes/PasswordHash.php');
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->HashPassword($key);
 	}
 	
 	function check_secret_key($key) {
-		$settings = Globalvars::get_instance();
-		$siteDir = $settings->get_setting('siteDir');
-		require_once($siteDir . '/includes/PasswordHash.php');
+		PathHelper::requireOnce('includes/PasswordHash.php');
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->CheckPassword($key, $this->get('apk_secret_key'));
 	}

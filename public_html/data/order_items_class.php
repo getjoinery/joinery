@@ -1,19 +1,19 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/FieldConstraints.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SessionControl.php');
-require_once($siteDir . '/includes/SingleRowAccessor.php');
-require_once($siteDir . '/includes/SystemClass.php');
-require_once($siteDir . '/includes/Validator.php');
-require_once($siteDir . '/includes/EmailTemplate.php');
-require_once($siteDir . '/includes/StripeHelper.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
-require_once($siteDir . '/data/address_class.php');
-require_once($siteDir . '/data/order_item_requirements_class.php');
-require_once($siteDir . '/data/products_class.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/FieldConstraints.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/SingleRowAccessor.php');
+PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/Validator.php');
+PathHelper::requireOnce('includes/EmailTemplate.php');
+PathHelper::requireOnce('includes/StripeHelper.php');
+
+PathHelper::requireOnce('data/address_class.php');
+PathHelper::requireOnce('data/order_item_requirements_class.php');
+PathHelper::requireOnce('data/products_class.php');
 
 class OrderItemException extends SystemClassException {}
 

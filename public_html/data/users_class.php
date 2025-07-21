@@ -406,9 +406,8 @@ class User extends SystemBase {
 			
 			if($send_emails){
 				$settings = Globalvars::get_instance();
-				$siteDir = $settings->get_setting('siteDir');	
-				require_once($siteDir . '/includes/EmailTemplate.php');
-				require_once($siteDir . '/includes/Activation.php');
+				PathHelper::requireOnce('includes/EmailTemplate.php');
+				PathHelper::requireOnce('includes/Activation.php');
 				
 				//SEND NEW USER WELCOME EMAIL
 				$welcome_email = new EmailTemplate('new_account_content', $user);
@@ -669,8 +668,7 @@ class User extends SystemBase {
 		}
 		else{
 			$settings = Globalvars::get_instance();
-			$siteDir = $settings->get_setting('siteDir');
-			require_once($siteDir . '/includes/PasswordHash.php');
+			PathHelper::requireOnce('includes/PasswordHash.php');
 			$hasher = new PasswordHash(8, TRUE);
 			return $hasher->CheckPassword($password, trim($this->get('usr_password')));			
 		}
