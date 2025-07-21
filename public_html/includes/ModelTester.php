@@ -126,7 +126,12 @@ class ModelTester {
         
         if ($verbose) echo "About to save model...<br>\n"; flush();
         try {
-            $model->save();
+            $save_result = $model->save();
+            
+            // Some models return FALSE instead of throwing exceptions on certain conditions (like duplicates)
+            if ($save_result === FALSE) {
+                throw new Exception("Model save() returned FALSE - possibly due to duplicate detection or business logic constraint");
+            }
         } catch (Exception $e) {
             // Check if this is a database NOT NULL constraint violation
             if (strpos($e->getMessage(), 'Not null violation') !== false || 
@@ -446,14 +451,24 @@ class ModelTester {
             return 'US';
         }
         
-        // Default: generate based on field name, respecting max length
+        // Default: generate based on field name with timestamp for uniqueness, respecting max length
+        $timestamp_suffix = '_' . time() . '_' . rand(100, 999);
         $base_value = 'Test_' . ucfirst(str_replace(['_', '-'], '', $field));
         
-        if (strlen($base_value) > $max_length) {
-            return substr($base_value, 0, $max_length);
+        // Add timestamp suffix if there's room, otherwise truncate base and add shorter suffix
+        if (strlen($base_value . $timestamp_suffix) <= $max_length) {
+            return $base_value . $timestamp_suffix;
+        } else {
+            $available_space = $max_length - strlen($timestamp_suffix);
+            if ($available_space > 0) {
+                return substr($base_value, 0, $available_space) . $timestamp_suffix;
+            } else {
+                // If even the timestamp doesn't fit, use a shorter unique identifier
+                $short_suffix = '_' . rand(10000, 99999);
+                $available_space = $max_length - strlen($short_suffix);
+                return substr($base_value, 0, max(1, $available_space)) . $short_suffix;
+            }
         }
-        
-        return $base_value;
     }
     
     /**
@@ -465,7 +480,8 @@ class ModelTester {
         // Handle foreign keys (fields ending in _id)
         $model_class = $this->model_class;
         if (strpos($field_lower, '_id') !== false && $field_lower !== $model_class::$pkey_column) {
-            return 1; // Simple default value for foreign keys
+            // Use a random value for foreign keys to avoid duplicates
+            return rand(1, 1000);
         }
         
         // Handle specific field patterns
