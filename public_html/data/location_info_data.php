@@ -1,11 +1,11 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/SessionControl.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
-require_once($siteDir . '/data/address_class.php');
-require_once($siteDir . '/data/users_class.php');
+PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+
+PathHelper::requireOnce('data/address_class.php');
+PathHelper::requireOnce('data/users_class.php');
 
 class LocationInfo {
 

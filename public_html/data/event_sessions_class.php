@@ -1,23 +1,23 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/FieldConstraints.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SessionControl.php');
-require_once($siteDir . '/includes/SingleRowAccessor.php');
-require_once($siteDir . '/includes/SystemClass.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
-require_once($siteDir . '/data/event_registrants_class.php');
-require_once($siteDir . '/data/event_session_files_class.php');
-require_once($siteDir . '/data/session_analytics_class.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/FieldConstraints.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/SingleRowAccessor.php');
+PathHelper::requireOnce('includes/SystemClass.php');
 
-require_once($siteDir . '/includes/calendar-links/Link.php');
-require_once($siteDir . '/includes/calendar-links/Generator.php');
-require_once($siteDir . '/includes/calendar-links/Generators/Google.php');
-require_once($siteDir . '/includes/calendar-links/Generators/Ics.php');
-require_once($siteDir . '/includes/calendar-links/Generators/Yahoo.php');
-require_once($siteDir . '/includes/calendar-links/Generators/WebOutlook.php');
+PathHelper::requireOnce('data/event_registrants_class.php');
+PathHelper::requireOnce('data/event_session_files_class.php');
+PathHelper::requireOnce('data/session_analytics_class.php');
+
+PathHelper::requireOnce('includes/calendar-links/Link.php');
+PathHelper::requireOnce('includes/calendar-links/Generator.php');
+PathHelper::requireOnce('includes/calendar-links/Generators/Google.php');
+PathHelper::requireOnce('includes/calendar-links/Generators/Ics.php');
+PathHelper::requireOnce('includes/calendar-links/Generators/Yahoo.php');
+PathHelper::requireOnce('includes/calendar-links/Generators/WebOutlook.php');
 use Spatie\CalendarLinks\Link;
 
 class EventSessionsException extends SystemClassException {}

@@ -1,7 +1,7 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
+PathHelper::requireOnce('includes/DbConnector.php');
 
 class LoginClass {
 

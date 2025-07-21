@@ -1,10 +1,10 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir.'/data/videos_class.php');
-//require_once($siteDir.'/data/friend_reviews_class.php');
-require_once($siteDir.'/data/users_class.php');
-require_once($siteDir.'/data/queued_email_class.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
+PathHelper::requireOnce('data/videos_class.php');
+PathHelper::requireOnce('data/friend_reviews_class.php');
+PathHelper::requireOnce('data/users_class.php');
+PathHelper::requireOnce('data/queued_email_class.php');
 
 class RecurringMailerException extends SystemClassException {}
 

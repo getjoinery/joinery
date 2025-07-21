@@ -6,7 +6,6 @@
 	PathHelper::requireOnce('includes/SessionControl.php');	
 	
 	$settings = Globalvars::get_instance();
-	$siteDir = $settings->get_setting('siteDir');	
 	
 	if($_REQUEST['password'] != 'setupinfo'){
 		echo 'Bad access password';
