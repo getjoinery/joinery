@@ -181,7 +181,8 @@
 				$sql = 'SELECT
 					column_name,
 					data_type,
-					character_maximum_length
+					character_maximum_length,
+					is_nullable
 				FROM
 					information_schema.columns
 				WHERE
@@ -202,6 +203,7 @@
 				while ($row = $q->fetch()) {
 					$live_column_info[$row->column_name]['data_type'] = $row->data_type;
 					$live_column_info[$row->column_name]['character_maximum_length'] = $row->character_maximum_length;
+					$live_column_info[$row->column_name]['is_nullable'] = $row->is_nullable;
 				}			
 			
 		
@@ -313,49 +315,344 @@
 				}
 				
 				if($found){
-					if($verbose || $upgrade){
-						$upgrade_field = false;
+					if($verbose || $upgrade || $cleanup){
+						$upgrade_field_type = false;
+						$upgrade_field_length = false;
+						$upgrade_nullable = false;
+						
 						//CHECK THE COLUMN SPECS
 						$field_length = LibraryFunctions::extract_length_from_spec($field_specifications[$field]['type']);
 						$field_without_length = preg_replace('/[^a-z ]/', '', $field_specifications[$field]['type']);
 						if(LibraryFunctions::translate_data_types($live_column_info[$field]['data_type']) != $field_without_length){
 							echo 'NOTICE: Data types do not match on field '.$field.' (live: '. $live_column_info[$field]['data_type'] .'<->spec:'. $field_without_length .")<br>\n";
-							$upgrade_field = true;
+							$upgrade_field_type = true;
 						}
 						
-						//CHECK THE LENGTH
-						$length_phrase = '';
-						if($field_length){
-							$length_phrase = '('.$field_length.')';
-						}
-						if($live_column_info[$field]['character_maximum_length']){
-							if($live_column_info[$field]['character_maximum_length'] != $field_length){
-								echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field]['character_maximum_length'] .'<->spec: '. $field_length .")<br>\n";	
-								$upgrade_field = true;								
-							}
-						}
+						//CHECK THE LENGTH (only for character-based data types)
+						$is_character_type = in_array($live_column_info[$field]['data_type'], [
+							'character varying', 'varchar', 'character', 'char', 'text'
+						]);
 						
-						if($upgrade && $upgrade_field){
-							//IF COLUMN LENGTH OR TYPE DOESN'T MATCH, UPGRADE IT
-
-							$sql = 'ALTER TABLE '.$table_name.'
-								ALTER COLUMN '.$field.' TYPE '.$field_specifications[$field]['type'];
+						if($is_character_type){
+							$length_phrase = '';
+							if($field_length){
+								$length_phrase = '('.$field_length.')';
 								
-							$sql .= ';';
-							echo $sql."<br>\n";
-							
-							try{
-								$q = $dblink->prepare($sql);
-								$q->execute();
+								// Check if model specifies a length but database has no length limit
+								if(!$live_column_info[$field]['character_maximum_length']){
+									echo 'NOTICE: Model specifies max length '.$field_length.' but database column has no length limit on field '.$field."<br>\n";
+									$upgrade_field_length = true;
+								}
+								// Check if database has a different length limit than the model
+								else if($live_column_info[$field]['character_maximum_length'] != $field_length){
+									echo 'NOTICE: Max character length does not match on field '.$field.' (live: '. $live_column_info[$field]['character_maximum_length'] .'<->spec: '. $field_length .")<br>\n";	
+									$upgrade_field_length = true;								
+								}
 							}
-							catch(PDOException $e){
-								//DO NOT HALT THE PROGRAM, JUST NOTE IT
-								echo 'ERROR: Could not alter column '.$field.' ('.$sql.')'. "<br>\n";
-								$sql_error = $e->getMessage();
-								echo $sql_error;
-								$sql_output .= $sql_error;
-							}								
+							// Check if database has a length limit but model doesn't specify one
+							else if($live_column_info[$field]['character_maximum_length']){
+								echo 'NOTICE: Database has length limit '.$live_column_info[$field]['character_maximum_length'].' but model specifies no length limit on field '.$field."<br>\n";
+								$upgrade_field_length = true;
+							}
+						}
+						
+						//CHECK THE NULLABLE CONSTRAINT
+						$spec_nullable = true; // Default to nullable if not specified
+						if(isset($field_specifications[$field]['is_nullable'])){
+							$spec_nullable = $field_specifications[$field]['is_nullable'];
+						}
+						
+						$live_nullable = ($live_column_info[$field]['is_nullable'] == 'YES');
+						
+						if($spec_nullable != $live_nullable){
+							if($spec_nullable){
+								echo 'NOTICE: Column '.$field.' should allow NULL but currently has NOT NULL constraint (live: NOT NULL <-> spec: nullable)'."<br>\n";
+							} else {
+								echo 'NOTICE: Column '.$field.' should have NOT NULL constraint but currently allows NULL (live: nullable <-> spec: NOT NULL)'."<br>\n";
+							}
+							$upgrade_nullable = true;
+						}
+						
+						if(($upgrade || $cleanup) && ($upgrade_field_type || $upgrade_field_length)){
+							// DEBUG: Show what flags are set
+							if($verbose){
+								echo 'DEBUG: upgrade_field_type='.($upgrade_field_type ? 'true' : 'false').', upgrade_field_length='.($upgrade_field_length ? 'true' : 'false').', is_character_type='.($is_character_type ? 'true' : 'false')."<br>\n";
+							}
 							
+							// Determine if this is a simple length change vs a real type conversion
+							$current_type = LibraryFunctions::translate_data_types($live_column_info[$field]['data_type']);
+							$target_type = $field_without_length;
+							$is_simple_length_change = false;
+							
+							if($verbose){
+								echo 'DEBUG: current_type="'.$current_type.'", target_type="'.$target_type.'"'."<br>\n";
+							}
+							
+							// Check if this is just a varchar length change (not a real type conversion)
+							if($current_type == $target_type && $is_character_type && $upgrade_field_length){
+								$is_simple_length_change = true;
+								echo 'NOTICE: Simple length change detected for '.$field.' - no type conversion needed'."<br>\n";
+							}
+							
+							if($is_simple_length_change){
+								//SIMPLE LENGTH CHANGE - no USING clause needed
+								$sql = 'ALTER TABLE '.$table_name.'
+									ALTER COLUMN '.$field.' TYPE '.$field_specifications[$field]['type'];
+									
+								$sql .= ';';
+								echo $sql."<br>\n";
+								$sql_commands .= $sql;
+								
+								try{
+									$q = $dblink->prepare($sql);
+									$q->execute();
+									echo 'SUCCESS: Updated column '.$field.' length to match model specification'."<br>\n";
+								}
+								catch(PDOException $e){
+									//DO NOT HALT THE PROGRAM, JUST NOTE IT
+									echo 'ERROR: Could not alter column length for '.$field.' ('.$sql.')'. "<br>\n";
+									$sql_error = $e->getMessage();
+									echo $sql_error."<br>\n";
+									$sql_output .= $sql_error;
+									echo 'SUGGESTION: Check if existing data exceeds the new length limit'."<br>\n";
+								}
+							}
+							else if($upgrade_field_type){
+								//REAL TYPE CONVERSION - needs USING clause logic
+								$needs_conversion_logic = false;
+								$using_clause = '';
+								
+								// Check if we're converting from varchar to integer types
+								if(strpos($current_type, 'varchar') !== false || strpos($current_type, 'text') !== false){
+									if(in_array($target_type, ['integer', 'int4', 'int', 'bigint', 'int8', 'smallint', 'int2'])){
+										$needs_conversion_logic = true;
+										
+										// For varchar to integer conversion, use USING clause with safe conversion
+										// This handles empty strings and invalid values by converting them to NULL
+										$using_clause = ' USING CASE 
+											WHEN '.$field.' ~ \'^[0-9]+$\' THEN '.$field.'::integer 
+											WHEN '.$field.' = \'\' OR '.$field.' IS NULL THEN NULL
+											ELSE NULL 
+										END';
+										
+										echo 'NOTICE: Converting '.$field.' from '.$current_type.' to '.$target_type.' - non-numeric values will become NULL'."<br>\n";
+									}
+									else if(in_array($target_type, ['numeric', 'decimal', 'float', 'real', 'double precision'])){
+										$needs_conversion_logic = true;
+										
+										// For varchar to numeric conversion
+										$using_clause = ' USING CASE 
+											WHEN '.$field.' ~ \'^[0-9]*\.?[0-9]+$\' THEN '.$field.'::'.$target_type.' 
+											WHEN '.$field.' = \'\' OR '.$field.' IS NULL THEN NULL
+											ELSE NULL 
+										END';
+										
+										echo 'NOTICE: Converting '.$field.' from '.$current_type.' to '.$target_type.' - non-numeric values will become NULL'."<br>\n";
+									}
+								}
+								// Check if we're converting from integer types to varchar
+								else if(in_array($current_type, ['integer', 'int4', 'int', 'bigint', 'int8', 'smallint', 'int2', 'numeric', 'decimal', 'float', 'real', 'double precision'])){
+									if(strpos($target_type, 'varchar') !== false || strpos($target_type, 'text') !== false){
+										$needs_conversion_logic = true;
+										
+										// For integer to varchar conversion, simple cast is sufficient
+										// PostgreSQL handles this conversion safely
+										$using_clause = ' USING '.$field.'::text';
+										
+										echo 'NOTICE: Converting '.$field.' from '.$current_type.' to '.$target_type.' - all values will be preserved as text'."<br>\n";
+									}
+								}
+								
+								// Validate data before conversion for critical types
+								if($needs_conversion_logic && in_array($target_type, ['integer', 'int4', 'int', 'bigint', 'int8', 'smallint', 'int2'])){
+									// Check for data that would be lost in conversion (varchar->int only)
+									$validation_sql = 'SELECT COUNT(*) as invalid_count 
+										FROM '.$table_name.' 
+										WHERE '.$field.' IS NOT NULL 
+										AND '.$field.' != \'\' 
+										AND NOT ('.$field.' ~ \'^[0-9]+$\')';
+									
+									try{
+										$validation_q = $dblink->prepare($validation_sql);
+										$validation_q->execute();
+										$validation_result = $validation_q->fetch();
+										
+										if($validation_result['invalid_count'] > 0){
+											echo 'WARNING: Found '.$validation_result['invalid_count'].' non-integer values in '.$field.' that will become NULL during conversion'."<br>\n";
+											
+											// Optionally show sample invalid values
+											$sample_sql = 'SELECT DISTINCT '.$field.' 
+												FROM '.$table_name.' 
+												WHERE '.$field.' IS NOT NULL 
+												AND '.$field.' != \'\' 
+												AND NOT ('.$field.' ~ \'^[0-9]+$\')
+												LIMIT 5';
+											$sample_q = $dblink->prepare($sample_sql);
+											$sample_q->execute();
+											echo 'Sample invalid values: ';
+											while($sample_row = $sample_q->fetch()){
+												echo '"'.$sample_row[$field].'" ';
+											}
+											echo "<br>\n";
+										}
+									}
+									catch(PDOException $e){
+										echo 'WARNING: Could not validate data for conversion: '.$e->getMessage()."<br>\n";
+									}
+								}
+								else if($needs_conversion_logic && (strpos($target_type, 'varchar') !== false || strpos($target_type, 'text') !== false)){
+									// Integer to varchar conversion - no validation needed, always safe
+									echo 'INFO: Integer to varchar conversion is safe - all data will be preserved'."<br>\n";
+								}
+
+								$sql = 'ALTER TABLE '.$table_name.'
+									ALTER COLUMN '.$field.' TYPE '.$field_specifications[$field]['type'].$using_clause;
+									
+								$sql .= ';';
+								echo $sql."<br>\n";
+								$sql_commands .= $sql;
+								
+								try{
+									$q = $dblink->prepare($sql);
+									$q->execute();
+									
+									if($needs_conversion_logic){
+										echo 'SUCCESS: Converted column '.$field.' from '.$current_type.' to '.$target_type."<br>\n";
+										
+										// Additional success details based on conversion type
+										if(strpos($target_type, 'varchar') !== false || strpos($target_type, 'text') !== false){
+											echo 'INFO: All numeric data preserved as text values'."<br>\n";
+										}
+										else if(in_array($target_type, ['integer', 'int4', 'int', 'bigint', 'int8', 'smallint', 'int2'])){
+											echo 'INFO: Non-numeric text values converted to NULL'."<br>\n";
+										}
+									}
+									else{
+										echo 'SUCCESS: Updated column '.$field.' type'."<br>\n";
+									}
+								}
+								catch(PDOException $e){
+									//DO NOT HALT THE PROGRAM, JUST NOTE IT
+									echo 'ERROR: Could not alter column type for '.$field.' ('.$sql.')'. "<br>\n";
+									$sql_error = $e->getMessage();
+									echo $sql_error."<br>\n";
+									$sql_output .= $sql_error;
+									
+									// Provide helpful suggestions for common conversion failures
+									if($needs_conversion_logic){
+										echo 'SUGGESTION: The conversion failed. Consider:'."<br>\n";
+										
+										if(in_array($target_type, ['integer', 'int4', 'int', 'bigint', 'int8', 'smallint', 'int2'])){
+											echo '- Cleaning varchar data first (removing non-numeric values)'."<br>\n";
+											echo '- Using a custom migration script for complex data transformation'."<br>\n";
+											echo '- Manually converting problematic values before running upgrade'."<br>\n";
+										}
+										else if(strpos($target_type, 'varchar') !== false || strpos($target_type, 'text') !== false){
+											echo '- Checking for column constraints that might prevent the conversion'."<br>\n";
+											echo '- Verifying the target varchar length is sufficient'."<br>\n";
+											echo '- Running the conversion manually to see detailed error messages'."<br>\n";
+										}
+										else{
+											echo '- Using a custom migration script for this specific conversion'."<br>\n";
+											echo '- Manually converting the column in stages'."<br>\n";
+										}
+									}
+								}								
+							}
+						}
+						
+						if(($upgrade || $cleanup) && $upgrade_nullable){
+							//UPDATE THE NULLABLE CONSTRAINT
+							if($spec_nullable){
+								// Remove NOT NULL constraint - this is always safe
+								$sql = 'ALTER TABLE '.$table_name.'
+									ALTER COLUMN '.$field.' DROP NOT NULL;';
+								
+								echo $sql."<br>\n";
+								$sql_commands .= $sql;
+								
+								try{
+									$q = $dblink->prepare($sql);
+									$q->execute();
+									echo 'SUCCESS: Removed NOT NULL constraint from '.$field."<br>\n";
+								}
+								catch(PDOException $e){
+									//DO NOT HALT THE PROGRAM, JUST NOTE IT
+									echo 'ERROR: Could not remove NOT NULL constraint for column '.$field.' ('.$sql.')'. "<br>\n";
+									$sql_error = $e->getMessage();
+									echo $sql_error."<br>\n";
+									$sql_output .= $sql_error;
+								}
+							} else {
+								// Add NOT NULL constraint - need to check for existing NULL values first
+								
+								// Check if there are any NULL values in the column
+								$null_check_sql = 'SELECT COUNT(*) as null_count 
+									FROM '.$table_name.' 
+									WHERE '.$field.' IS NULL';
+								
+								try{
+									$null_check_q = $dblink->prepare($null_check_sql);
+									$null_check_q->execute();
+									$null_result = $null_check_q->fetch();
+									$null_count = $null_result['null_count'];
+									
+									if($null_count > 0){
+										echo 'WARNING: Cannot add NOT NULL constraint to '.$field.' - found '.$null_count.' NULL values in column'."<br>\n";
+										echo 'SUGGESTION: Choose one of these options:'."<br>\n";
+										echo '- Update NULL values to a default value first, then re-run upgrade'."<br>\n";
+										echo '- Change your model to allow NULL values (set is_nullable => true)'."<br>\n";
+										echo '- Manually clean the data and re-run the migration'."<br>\n";
+										
+										// Show sample NULL rows for context
+										$sample_sql = 'SELECT * FROM '.$table_name.' WHERE '.$field.' IS NULL LIMIT 3';
+										try{
+											$sample_q = $dblink->prepare($sample_sql);
+											$sample_q->execute();
+											$sample_rows = $sample_q->fetchAll();
+											if($sample_rows){
+												echo 'Sample rows with NULL values:<br>';
+												foreach($sample_rows as $row){
+													$row_info = [];
+													foreach($row as $col => $val){
+														if(!is_numeric($col)){ // Skip numeric indices from PDO
+															$row_info[] = $col.': '.($val === null ? 'NULL' : '"'.$val.'"');
+														}
+													}
+													echo '  - '.implode(', ', array_slice($row_info, 0, 3)).'...<br>';
+												}
+											}
+										}
+										catch(PDOException $e){
+											echo 'Could not retrieve sample rows: '.$e->getMessage()."<br>\n";
+										}
+									} else {
+										// No NULL values, safe to add NOT NULL constraint
+										$sql = 'ALTER TABLE '.$table_name.'
+											ALTER COLUMN '.$field.' SET NOT NULL;';
+										
+										echo $sql."<br>\n";
+										$sql_commands .= $sql;
+										
+										try{
+											$q = $dblink->prepare($sql);
+											$q->execute();
+											echo 'SUCCESS: Added NOT NULL constraint to '.$field."<br>\n";
+										}
+										catch(PDOException $e){
+											//DO NOT HALT THE PROGRAM, JUST NOTE IT
+											echo 'ERROR: Could not add NOT NULL constraint for column '.$field.' ('.$sql.')'. "<br>\n";
+											$sql_error = $e->getMessage();
+											echo $sql_error."<br>\n";
+											$sql_output .= $sql_error;
+										}
+									}
+								}
+								catch(PDOException $e){
+									echo 'ERROR: Could not check for NULL values in '.$field.': '.$e->getMessage()."<br>\n";
+									$sql_output .= $e->getMessage();
+								}
+							}
 						}
 					}
 
@@ -375,6 +672,7 @@
 						
 					$sql .= ';';
 					echo $sql."<br>\n";
+					$sql_commands .= $sql;
 					
 					try{
 						$q = $dblink->prepare($sql);
@@ -406,6 +704,7 @@
 								
 							$sql .= ';';
 							echo $sql."<br>\n";
+							$sql_commands .= $sql;
 							
 							try{
 								$q = $dblink->prepare($sql);
@@ -742,4 +1041,3 @@
 
 
 ?>
-
