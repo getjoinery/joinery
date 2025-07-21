@@ -17,9 +17,31 @@ class ModelTester {
     private static $test_pass_count = 0;
     private static $test_fail_count = 0;
     private static $test_warn_count = 0;
+    private static $verbose = false;
     
     public function __construct($model_class) {
         $this->model_class = $model_class;
+    }
+    
+    /**
+     * Set verbose mode
+     * @param mixed $verbose - true/1 for all classes, or a class name for specific class
+     */
+    public static function set_verbose($verbose) {
+        self::$verbose = $verbose;
+    }
+    
+    /**
+     * Check if verbose output should be shown for current class
+     */
+    private function is_verbose() {
+        if (self::$verbose === true || self::$verbose === 1) {
+            return true;
+        }
+        if (is_string(self::$verbose) && self::$verbose === $this->model_class) {
+            return true;
+        }
+        return false;
     }
     
     /**
@@ -27,6 +49,7 @@ class ModelTester {
      */
     public function test($model_instance = null, $debug = false) {
         $this->model_instance = $model_instance ?: new $this->model_class(null);
+        $verbose = $this->is_verbose();
         
         echo '<b style="color: #333;">TESTING CLASS: ' . $this->model_class . "</b><br>\n";
         
@@ -37,20 +60,32 @@ class ModelTester {
         }
         
         try {
-            echo "Starting CRUD tests...<br>\n"; flush();
+            if ($verbose) echo "Starting CRUD tests...<br>\n"; flush();
             $this->test_automated_crud($debug);
-            echo "CRUD tests completed, starting validation tests...<br>\n"; flush();
+            if ($verbose) echo "CRUD tests completed, starting validation tests...<br>\n"; flush();
             $this->test_automated_validation($debug);
-            echo "Validation tests completed, starting constraint tests...<br>\n"; flush();
+            if ($verbose) echo "Validation tests completed, starting constraint tests...<br>\n"; flush();
             $this->test_automated_constraints($debug);
-            echo "Constraint tests completed, starting edge case tests...<br>\n"; flush();
+            if ($verbose) echo "Constraint tests completed, starting edge case tests...<br>\n"; flush();
             $this->test_automated_edge_cases($debug);
-            echo "All tests completed successfully<br>\n"; flush();
+            if ($verbose) echo "All tests completed successfully<br>\n"; flush();
             
             echo "<span style='color: green;'>[PASS] {$this->model_class} - All automated tests passed</span><br>\n";
             
         } catch (Exception $e) {
-            echo "Caught exception during testing: " . $e->getMessage() . "<br>\n"; flush();
+            if ($verbose) echo "Caught exception during testing: " . $e->getMessage() . "<br>\n"; flush();
+            
+            // Handle configuration/dependency issues as skips rather than failures
+            if (strpos($e->getMessage(), 'api keys are not present') !== false) {
+                echo "<span style='color: #ff9800;'>[SKIP] {$this->model_class} - Configuration required: " . $e->getMessage() . "</span><br>\n";
+                
+                // Clean up and return skip status
+                if (method_exists($dbhelper, 'close_test_mode')) {
+                    $dbhelper->close_test_mode();
+                }
+                return 'SKIPPED';
+            }
+            
             // Clean up on failure and re-throw to let caller handle the error
             if (method_exists($dbhelper, 'close_test_mode')) {
                 $dbhelper->close_test_mode();
@@ -70,25 +105,26 @@ class ModelTester {
      * Test CRUD operations with automatically generated data
      */
     protected function test_automated_crud($debug = false) {
-        if ($debug) echo "Testing CRUD operations...<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing CRUD operations...<br>\n";
         
-        echo "Generating test data...<br>\n"; flush();
+        if ($verbose) echo "Generating test data...<br>\n"; flush();
         // Generate valid test data automatically
         $test_data = $this->generate_valid_test_data();
         
-        echo "Creating model instance...<br>\n"; flush();
+        if ($verbose) echo "Creating model instance...<br>\n"; flush();
         // Create a fresh model instance for testing
         $model = new $this->model_class(null);
         
-        echo "Setting field values...<br>\n"; flush();
+        if ($verbose) echo "Setting field values...<br>\n"; flush();
         // Test Create
         foreach ($test_data as $field => $value) {
-            echo "Setting $field = $value<br>\n"; flush();
+            if ($verbose) echo "Setting $field = $value<br>\n"; flush();
             $model->set($field, $value);
             if ($debug) echo "Set $field = $value<br>\n";
         }
         
-        echo "About to save model...<br>\n"; flush();
+        if ($verbose) echo "About to save model...<br>\n"; flush();
         try {
             $model->save();
         } catch (Exception $e) {
@@ -115,36 +151,36 @@ class ModelTester {
             
             throw new Exception("Failed to save model with test data [" . implode(', ', $field_info) . "]. " . $error_details);
         }
-        echo "Model saved successfully<br>\n"; flush();
-        echo "Model key after save: " . ($model->key ?? 'NULL') . "<br>\n"; flush();
-        echo "Model key type: " . gettype($model->key) . "<br>\n"; flush();
+        if ($verbose) echo "Model saved successfully<br>\n"; flush();
+        if ($verbose) echo "Model key after save: " . ($model->key ?? 'NULL') . "<br>\n"; flush();
+        if ($verbose) echo "Model key type: " . gettype($model->key) . "<br>\n"; flush();
         $this->assert_true($model->key !== null, "Record should be created");
         
         $original_key = $model->key;
-        echo "Created record with key: $original_key<br>\n"; flush();
+        if ($verbose) echo "Created record with key: $original_key<br>\n"; flush();
         if ($debug) echo "Created record with key: $original_key<br>\n";
         
         // Test Read
-        echo "Testing read operation...<br>\n"; flush();
+        if ($verbose) echo "Testing read operation...<br>\n"; flush();
         $model->load();
         $this->assert_equals($original_key, $model->key, "Record should be loaded correctly");
-        echo "Read operation completed<br>\n"; flush();
+        if ($verbose) echo "Read operation completed<br>\n"; flush();
         
         // Test Update
-        echo "Finding updateable field...<br>\n"; flush();
+        if ($verbose) echo "Finding updateable field...<br>\n"; flush();
         $updateable_field = $this->find_updateable_field($model);
-        echo "Found updateable field: " . ($updateable_field ?: 'none') . "<br>\n"; flush();
+        if ($verbose) echo "Found updateable field: " . ($updateable_field ?: 'none') . "<br>\n"; flush();
         if ($updateable_field) {
-            echo "Generating new value for update...<br>\n"; flush();
+            if ($verbose) echo "Generating new value for update...<br>\n"; flush();
             $new_value = $this->generate_different_value($updateable_field);
             
             // Skip update test if generate_different_value returns null (e.g., for timestamps)
             if ($new_value === null) {
-                echo "Skipping update test for timestamp/datetime field: $updateable_field<br>\n"; flush();
+                if ($verbose) echo "Skipping update test for timestamp/datetime field: $updateable_field<br>\n"; flush();
             } else {
-                echo "Setting $updateable_field = $new_value<br>\n"; flush();
+                if ($verbose) echo "Setting $updateable_field = $new_value<br>\n"; flush();
                 $model->set($updateable_field, $new_value);
-                echo "About to save update...<br>\n"; flush();
+                if ($verbose) echo "About to save update...<br>\n"; flush();
                 try {
                     $model->save();
                 } catch (Exception $e) {
@@ -157,43 +193,43 @@ class ModelTester {
                     }
                     throw new Exception("Failed to save model during update test for field '$updateable_field' with value '" . (is_string($new_value) ? $new_value : $new_value) . "'. Original error: " . $e->getMessage());
                 }
-                echo "Update saved successfully<br>\n"; flush();
+                if ($verbose) echo "Update saved successfully<br>\n"; flush();
                 $model->load();
                 $this->assert_equals($new_value, $model->get($updateable_field), "Field should be updated");
                 if ($debug) echo "Updated $updateable_field to $new_value<br>\n";
-                echo "Update test completed<br>\n"; flush();
+                if ($verbose) echo "Update test completed<br>\n"; flush();
             }
         }
         
         // Test Delete
-        echo "About to delete model...<br>\n"; flush();
-        echo "Model key: " . $model->key . "<br>\n"; flush();
-        echo "Model class: " . get_class($model) . "<br>\n"; flush();
-        echo "Memory usage before delete: " . memory_get_usage(true) . " bytes<br>\n"; flush();
+        if ($verbose) echo "About to delete model...<br>\n"; flush();
+        if ($verbose) echo "Model key: " . $model->key . "<br>\n"; flush();
+        if ($verbose) echo "Model class: " . get_class($model) . "<br>\n"; flush();
+        if ($verbose) echo "Memory usage before delete: " . memory_get_usage(true) . " bytes<br>\n"; flush();
         
         // Register a shutdown function to catch fatal errors
         register_shutdown_function(function() {
             $error = error_get_last();
             if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
-                echo "FATAL ERROR during delete: " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'] . "<br>\n";
+                if ($verbose) echo "FATAL ERROR during delete: " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'] . "<br>\n";
                 flush();
             }
         });
         
-        echo "Calling permanent_delete() now...<br>\n"; flush();
+        if ($verbose) echo "Calling permanent_delete() now...<br>\n"; flush();
         try {
             $model->permanent_delete();
-            echo "Delete completed<br>\n"; flush();
+            if ($verbose) echo "Delete completed<br>\n"; flush();
         } catch (Exception $e) {
-            echo "Delete failed with error: " . $e->getMessage() . "<br>\n"; flush();
-            echo "Exception type: " . get_class($e) . "<br>\n"; flush();
-            echo "File: " . $e->getFile() . " line " . $e->getLine() . "<br>\n"; flush();
+            if ($verbose) echo "Delete failed with error: " . $e->getMessage() . "<br>\n"; flush();
+            if ($verbose) echo "Exception type: " . get_class($e) . "<br>\n"; flush();
+            if ($verbose) echo "File: " . $e->getFile() . " line " . $e->getLine() . "<br>\n"; flush();
             // Re-throw to maintain test failure behavior
             throw $e;
         } catch (Error $e) {
-            echo "Delete failed with PHP Error: " . $e->getMessage() . "<br>\n"; flush();
-            echo "Error type: " . get_class($e) . "<br>\n"; flush();
-            echo "File: " . $e->getFile() . " line " . $e->getLine() . "<br>\n"; flush();
+            if ($verbose) echo "Delete failed with PHP Error: " . $e->getMessage() . "<br>\n"; flush();
+            if ($verbose) echo "Error type: " . get_class($e) . "<br>\n"; flush();
+            if ($verbose) echo "File: " . $e->getFile() . " line " . $e->getLine() . "<br>\n"; flush();
             
             // Check if this is an undefined method error
             if (strpos($e->getMessage(), 'Call to undefined method') !== false) {
@@ -205,74 +241,77 @@ class ModelTester {
         }
         
         // Verify deletion
-        echo "Verifying deletion...<br>\n"; flush();
+        if ($verbose) echo "Verifying deletion...<br>\n"; flush();
         $model_class = $this->model_class;
         if (!$model_class::check_if_exists($original_key)) {
             $this->test_pass("Record deleted successfully");
         } else {
             $this->test_fail("Record should be deleted but still exists");
         }
-        echo "Deletion verification completed<br>\n"; flush();
+        if ($verbose) echo "Deletion verification completed<br>\n"; flush();
         
-        if ($debug) echo "CRUD tests completed<br>\n";
+        if ($debug || $verbose) echo "CRUD tests completed<br>\n";
     }
     
     /**
      * Test field validation using field specifications
      */
     protected function test_automated_validation($debug = false) {
-        if ($debug) echo "Testing field validation...<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing field validation...<br>\n";
         
         $model_class = $this->model_class;
         
-        echo "Testing required fields...<br>\n"; flush();
+        if ($verbose) echo "Testing required fields...<br>\n"; flush();
         // Test required fields
         foreach ($model_class::$required_fields as $required_field) {
-            echo "Testing required field: $required_field<br>\n"; flush();
+            if ($verbose) echo "Testing required field: $required_field<br>\n"; flush();
             try {
                 $this->test_required_field($required_field, $debug);
-                echo "Required field test completed for: $required_field<br>\n"; flush();
+                if ($verbose) echo "Required field test completed for: $required_field<br>\n"; flush();
             } catch (Exception $e) {
-                echo "Required field test failed for $required_field: " . $e->getMessage() . "<br>\n"; flush();
+                if ($verbose) echo "Required field test failed for $required_field: " . $e->getMessage() . "<br>\n"; flush();
                 throw $e;
             }
         }
         
-        echo "Testing field type constraints...<br>\n"; flush();
+        if ($verbose) echo "Testing field type constraints...<br>\n"; flush();
         // Test field type constraints
         foreach ($model_class::$field_specifications as $field => $spec) {
-            echo "Testing field type constraint: $field<br>\n"; flush();
+            if ($verbose) echo "Testing field type constraint: $field<br>\n"; flush();
             try {
                 $this->test_field_type_constraints($field, $spec, $debug);
-                echo "Field type constraint test completed for: $field<br>\n"; flush();
+                if ($verbose) echo "Field type constraint test completed for: $field<br>\n"; flush();
             } catch (Exception $e) {
-                echo "Field type constraint test failed for $field: " . $e->getMessage() . "<br>\n"; flush();
+                if ($verbose) echo "Field type constraint test failed for $field: " . $e->getMessage() . "<br>\n"; flush();
                 throw $e;
             }
         }
         
-        if ($debug) echo "Validation tests completed<br>\n";
+        if ($debug || $verbose) echo "Validation tests completed<br>\n";
     }
     
     /**
      * Test database constraints
      */
     protected function test_automated_constraints($debug = false) {
-        if ($debug) echo "Testing database constraints...<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing database constraints...<br>\n";
         
         // Skip unique constraint testing - we can't reliably infer which fields are unique
         // TODO: Enable this when models can explicitly declare unique fields
         
         // Note: Foreign key and unique constraint testing skipped in automated phase
         
-        if ($debug) echo "Constraint tests completed<br>\n";
+        if ($debug || $verbose) echo "Constraint tests completed<br>\n";
     }
     
     /**
      * Test edge cases and boundary conditions
      */
     protected function test_automated_edge_cases($debug = false) {
-        if ($debug) echo "Testing edge cases...<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing edge cases...<br>\n";
         
         // Test with null values where allowed
         $nullable_fields = $this->get_nullable_fields();
@@ -292,7 +331,7 @@ class ModelTester {
             $this->test_numeric_boundaries($field, $type, $debug);
         }
         
-        if ($debug) echo "Edge case tests completed<br>\n";
+        if ($debug || $verbose) echo "Edge case tests completed<br>\n";
     }
     
     /**
@@ -692,9 +731,19 @@ class ModelTester {
     
     // Validation test methods
     protected function test_required_field($field, $debug) {
-        if ($debug) echo "Testing required field: $field<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing required field: $field<br>\n";
         
         $model_class = $this->model_class;
+        
+        // Check if this field has a default value
+        if (isset($model_class::$initial_default_values[$field])) {
+            $default_value = $model_class::$initial_default_values[$field];
+            echo "  <span style='color: #ff9800;'>[WARN] Required field $field has default value '$default_value' - save will succeed instead of failing when field is omitted</span><br>\n";
+            self::$test_warn_count++;
+            return;
+        }
+        
         $model = new $model_class(null);
         
         // Generate valid data for all other required fields
@@ -713,19 +762,20 @@ class ModelTester {
     }
     
     protected function test_field_type_constraints($field, $spec, $debug) {
-        if ($debug) echo "Testing field type constraints: $field<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing field type constraints: $field<br>\n";
         
         $type = $spec['type'] ?? '';
         $model_class = $this->model_class;
         
         // Test varchar length constraints
         if (strpos($type, 'varchar') !== false) {
-            echo "Testing varchar constraint for: $field<br>\n"; flush();
+            if ($verbose) echo "Testing varchar constraint for: $field<br>\n"; flush();
             preg_match('/varchar\\((\\d+)\\)/', $type, $matches);
             $max_length = isset($matches[1]) ? (int)$matches[1] : 255;
             try {
                 $this->test_varchar_length_constraint($field, $max_length, $debug);
-                echo "Varchar constraint test completed for: $field<br>\n"; flush();
+                if ($verbose) echo "Varchar constraint test completed for: $field<br>\n"; flush();
             } catch (Error $e) {
                 if (strpos($e->getMessage(), 'Call to undefined method') !== false) {
                     $this->test_fail("Varchar constraint test failed due to undefined method call for field: $field");
@@ -745,10 +795,10 @@ class ModelTester {
         
         // Test integer constraints  
         if (strpos($type, 'int') !== false) {
-            echo "Testing integer constraint for: $field<br>\n"; flush();
+            if ($verbose) echo "Testing integer constraint for: $field<br>\n"; flush();
             try {
                 $this->test_integer_constraint($field, $type, $debug);
-                echo "Integer constraint test completed for: $field<br>\n"; flush();
+                if ($verbose) echo "Integer constraint test completed for: $field<br>\n"; flush();
             } catch (Error $e) {
                 if (strpos($e->getMessage(), 'Call to undefined method') !== false) {
                     $this->test_fail("Integer constraint test failed due to undefined method call for field: $field");
@@ -768,7 +818,8 @@ class ModelTester {
     }
     
     protected function test_varchar_length_constraint($field, $max_length, $debug) {
-        if ($debug) echo "  Testing varchar constraint for $field (max: $max_length)<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "  Testing varchar constraint for $field (max: $max_length)<br>\n";
         
         $model_class = $this->model_class;
         $model = new $model_class(null);
@@ -863,7 +914,8 @@ class ModelTester {
     }
     
     protected function test_unique_constraint($field, $debug) {
-        if ($debug) echo "Testing unique constraint: $field<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing unique constraint: $field<br>\n";
         
         $model_class = $this->model_class;
         
@@ -891,7 +943,8 @@ class ModelTester {
     }
     
     protected function test_null_value($field, $debug) {
-        if ($debug) echo "Testing null value for: $field<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing null value for: $field<br>\n";
         
         $model_class = $this->model_class;
         $model = new $model_class(null);
@@ -916,13 +969,15 @@ class ModelTester {
     }
     
     protected function test_max_length($field, $max_length, $debug) {
-        if ($debug) echo "Testing max length for: $field ($max_length chars)<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing max length for: $field ($max_length chars)<br>\n";
         
         $this->test_varchar_length_constraint($field, $max_length, $debug);
     }
     
     protected function test_numeric_boundaries($field, $type, $debug) {
-        if ($debug) echo "Testing numeric boundaries for: $field ($type)<br>\n";
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing numeric boundaries for: $field ($type)<br>\n";
         
         $this->test_integer_constraint($field, $type, $debug);
     }
