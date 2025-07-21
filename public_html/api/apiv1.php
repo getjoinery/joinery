@@ -2,9 +2,11 @@
 	require_once( __DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('utils/class_list.php');
 	$settings = Globalvars::get_instance();
 	PathHelper::requireOnce('data/api_keys_class.php');
+	
+	// Discover all model classes available for API using centralized method
+	$classes = LibraryFunctions::discover_model_classes();
 
 
 	$source_ip = $_SERVER['REMOTE_ADDR'];

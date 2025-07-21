@@ -965,79 +965,14 @@ abstract class SystemBase {
 	
 	//TESTS FOR THIS CLASS
 	static function test($debug=false){
-		$dbhelper = DbConnector::get_instance();
-		$dbhelper->set_test_mode();
-		$dblink = $dbhelper->get_db_link();		
+		// Load testing infrastructure on demand
+		if (!class_exists('ModelTester')) {
+			require_once(PathHelper::getBasePath() . '/includes/ModelTester.php');
+		}
 		
-		//NEW
 		$current_class = get_called_class();
-		echo '<b>TESTING CLASS: '. $current_class . "</b><br>\n";
-		$object = new $current_class(NULL);
-	
-		foreach(static::$required_fields as $field) {
-			
-			//print_r(static::$field_specifications);
-			if($debug){
-				echo "<br>\n<b>" . $field . '</b>';
-			}
-			$field_type = static::$field_specifications[$field]['type'];
-			if($debug){
-				print_r(' -' .$field_type. '- ');
-			}
-			$field_length = LibraryFunctions::extract_length_from_spec($field_type);
-			if($debug){
-				print_r(' - Length: ' .$field_length. '- ');
-			}
-			if(str_contains($field_type, 'int')){
-				$object->set($field, random_int(1, 32000));
-			}
-			else if(str_contains($field_type, 'numeric')){
-				$object->set($field, random_int(1, 32000));
-			} 
-			else if(str_contains($field_type, 'bool')){
-				$object->set($field, false);
-			} 
-			else if(str_contains($field_type, 'timestamp')){
-				$object->set($field, 'now()');
-			} 
-			else if(str_contains($field_type, 'text')){
-				$object->set($field, 'test text');
-			} 
-			else{
-				$object->set($field, LibraryFunctions::random_string($field_length));
-			}
-		}
-		$object->save();
-		$object->load();
-		
-		if($debug){
-			print_r($object);
-		}
-			
-		
-		if(!$current_class::check_if_exists($object->key)){
-			echo 'ERROR:  '.$object->key.' does not exist, and it should.'. "\n<br>";
-			$dbhelper->close_test_mode(); 
-			return false;
-		}
-
-		if($debug){
-			print_r('Deleting row '. $object->key . "\n<br>");
-		}		
-		$object->permanent_delete();
-		
-		
-		
-		if($current_class::check_if_exists($object->key)){
-			echo 'ERROR:  '.$object->key.' exists, and it should not.'. "\n<br>";
-			$dbhelper->close_test_mode(); 
-			return false;
-		}
-		
-		$dbhelper->close_test_mode(); 
-
-		return true;
-			
+		$tester = new ModelTester($current_class);
+		return $tester->test(null, $debug);
 	}	
 
 }

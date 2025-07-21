@@ -51,97 +51,18 @@
 
 	function update_database($migrations, $verbose=false, $upgrade=false, $cleanup=false){
 
-		//LOAD ALL CLASSES 
-		$db_structure_contents = ''; 
-		$path =  realpath(__DIR__ . '/../data');
-		$classes = array();
-		if ($handle = opendir($path)) {
-			while (false !== ($file = readdir($handle))) {
-				if ('.' === $file) continue;
-				if ('..' === $file) continue;
-				$filepath = $path.'/'.$file;
-				
-				$file_parts = pathinfo($file);
-				if($file_parts['extension'] == 'php'){
-					if(file_exists($filepath)){
-						if (str_contains($file, '_class')) {
-							require_once($filepath);
-							if($verbose){
-								echo 'Requiring '.$filepath.'<br>'."\n";
-							}
-							
-							$fileContent = file_get_contents($filepath);
-							$tokens = token_get_all($fileContent);
-
-							for ($i = 0; $i < count($tokens); $i++) {
-								if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
-									$thisclass = $tokens[$i + 2][1];;
-									//TABLENAME AND FIELD SPECIFICATIONS ARE REQUIRED 
-									if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
-										if($verbose){
-											echo 'Loading '.$thisclass.'<br>';
-										}
-										$classes[] = $thisclass;
-										$db_structure_contents .= serialize($thisclass::$field_specifications);
-									}
-								}
-							}						
-							
-						}
-					}
-				}
-			}
-			closedir($handle);
-		}
+		//LOAD ALL CLASSES using centralized method
+		$classes = LibraryFunctions::discover_model_classes(array(
+			'require_tablename' => true,
+			'require_field_specifications' => true,
+			'include_plugins' => true,
+			'verbose' => $verbose
+		));
 		
-		
-		//LOAD ALL CLASSES FROM PLUGINS
-		$plugin_dir = realpath(__DIR__ . '/../plugins');
-		$plugins = LibraryFunctions::list_plugins($plugin_dir);
-		foreach($plugins as $plugin){
-			$plugin_data_dir = $plugin_dir.'/'.$plugin.'/data';
-			if($verbose){
-				echo 'Loading classes from plugin '.$plugin.'<br>'."\n";
-			}
-			if(is_dir($plugin_data_dir)){
-				if ($handle = opendir($plugin_data_dir)) {
-					while (false !== ($file = readdir($handle))) {
-						if ('.' === $file) continue;
-						if ('..' === $file) continue;
-						$filepath = $plugin_data_dir.'/'.$file;
-						$file_parts = pathinfo($file);
-						if ($file_parts['extension'] === 'php' && str_contains($file, '_class')) {
-							require_once($filepath);
-							if($verbose){
-								echo 'Requiring '.$filepath.'<br>'."\n";
-							}
-							$fileContent = file_get_contents($filepath);
-							$tokens = token_get_all($fileContent);
-
-							for ($i = 0; $i < count($tokens); $i++) {
-								if ($tokens[$i][0] === T_CLASS && $tokens[$i + 2][0] === T_STRING) {
-									$thisclass = $tokens[$i + 2][1];;
-									if(isset($thisclass::$tablename) && isset($thisclass::$field_specifications)){
-										$classes[] = $thisclass;
-										$db_structure_contents .= serialize($thisclass::$field_specifications);
-										if($verbose){
-											echo 'Loading plugin class '.$thisclass.'<br>';
-										}
-									}
-								}
-							}
-						
-						}
-
-					}
-					closedir($handle);
-				}
-			}
-			else{
-				if($verbose){
-					echo 'Requiring '.$filepath.'<br>';
-				}
-			}
+		// Build db structure hash from all field specifications
+		$db_structure_contents = '';
+		foreach ($classes as $class) {
+			$db_structure_contents .= serialize($class::$field_specifications);
 		}
 
 
