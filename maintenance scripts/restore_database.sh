@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-#Version 2.00 - Added encryption support and improved functionality
+#Version 2.01 - Fixed decryption, password prompts, and connection handling
 
 # Function to show help
 show_help() {
-    echo "PostgreSQL Database Restore Script v2.00"
+    echo "PostgreSQL Database Restore Script v2.01"
     echo ""
     echo "Usage:"
     echo "  $0 DB_NAME FILE_TO_RESTORE"
     echo ""
     echo "Supported file formats:"
     echo "  • .sql                 - Plain SQL dump"
-    echo "  • .sql.gz.enc          - Encrypted compressed dump (from backup script v2.00)"
+    echo "  • .sql.gz.enc          - Encrypted compressed dump (from backup script v2.00+)"
     echo "  • .sql.gz              - Compressed SQL dump"
     echo ""
     echo "Examples:"
@@ -22,7 +22,8 @@ show_help() {
     echo "  • Automatic backup of existing database before restore"
     echo "  • Support for encrypted backup files"
     echo "  • Automatic file format detection"
-    echo "  • Safe database recreation"
+    echo "  • Safe database recreation with connection handling"
+    echo "  • Clear password prompts"
 }
 
 # Function to decrypt and decompress file if needed
@@ -31,18 +32,23 @@ prepare_restore_file() {
     local output_var="$2"
     
     if [[ ! -f "$input_file" ]]; then
-        echo "Error: File '$input_file' does not exist."
+        echo "✗ Error: File '$input_file' does not exist."
         exit 1
     fi
     
+    echo "📁 Analyzing file: $input_file"
+    echo "   File size: $(ls -lh "$input_file" | awk '{print $5}')"
+    
     # Determine file type and prepare accordingly
     if [[ "$input_file" == *.sql.gz.enc ]]; then
-        echo "Detected encrypted compressed file."
-        echo "You will be prompted for the decryption password."
+        echo "🔍 Detected encrypted compressed file."
+        echo ""
         
         local temp_file=$(mktemp --suffix=.sql)
-        if openssl enc -aes-256-cbc -d -pbkdf2 -in "$input_file" | gunzip > "$temp_file"; then
+        echo "🔐 Enter decryption password for backup file:"
+        if openssl enc -aes-256-cbc -d -pbkdf2 -in "$input_file" 2>/dev/null | gunzip > "$temp_file" 2>/dev/null; then
             echo "✓ File decrypted and decompressed successfully."
+            echo "   Decompressed size: $(ls -lh "$temp_file" | awk '{print $5}')"
             eval "$output_var='$temp_file'"
             return 0
         else
@@ -52,11 +58,12 @@ prepare_restore_file() {
         fi
         
     elif [[ "$input_file" == *.sql.gz ]]; then
-        echo "Detected compressed file."
+        echo "🔍 Detected compressed file."
         
         local temp_file=$(mktemp --suffix=.sql)
-        if gunzip < "$input_file" > "$temp_file"; then
+        if gunzip < "$input_file" > "$temp_file" 2>/dev/null; then
             echo "✓ File decompressed successfully."
+            echo "   Decompressed size: $(ls -lh "$temp_file" | awk '{print $5}')"
             eval "$output_var='$temp_file'"
             return 0
         else
@@ -66,12 +73,12 @@ prepare_restore_file() {
         fi
         
     elif [[ "$input_file" == *.sql ]]; then
-        echo "Detected plain SQL file."
+        echo "🔍 Detected plain SQL file."
         eval "$output_var='$input_file'"
         return 0
         
     else
-        echo "Warning: Unknown file format. Treating as plain SQL file."
+        echo "⚠️  Warning: Unknown file format. Treating as plain SQL file."
         eval "$output_var='$input_file'"
         return 0
     fi
@@ -81,17 +88,22 @@ prepare_restore_file() {
 backup_existing_database() {
     local db_name="$1"
     local now=$(date +"%m_%d_%Y_%H%M%S")
-    local backup_file="${db_name}-${now}-auto.sql.gz.enc"
+    local backup_file="${db_name}-${now}-pre-restore.sql.gz.enc"
     
-    echo "Creating backup of existing database..."
-    echo "You will be prompted for PostgreSQL password, then encryption password."
+    echo "📦 Creating backup of existing database before restore..."
+    echo ""
     
-    local temp_file=$(mktemp)
-    if pg_dump -U postgres -W "$db_name" > "$temp_file"; then
-        if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file"; then
+    local temp_file=$(mktemp --suffix=.sql)
+    echo "🔑 Enter PostgreSQL password for user 'postgres':"
+    if pg_dump -U postgres -W "$db_name" > "$temp_file" 2>/dev/null; then
+        echo "✓ Database dump completed"
+        echo ""
+        echo "🔐 Enter encryption password for backup file:"
+        if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file" 2>/dev/null; then
             rm -f "$temp_file"
             chmod 600 "$backup_file"
-            echo "✓ Backup of existing '$db_name' complete: $backup_file"
+            echo "✓ Pre-restore backup complete: $backup_file"
+            echo "   File size: $(ls -lh "$backup_file" | awk '{print $5}')"
             return 0
         else
             rm -f "$temp_file"
@@ -105,6 +117,22 @@ backup_existing_database() {
     fi
 }
 
+# Function to terminate connections to a database
+terminate_connections() {
+    local db_name="$1"
+    echo "🔌 Terminating active connections to database '$db_name'..."
+    echo "🔑 Enter PostgreSQL password for user 'postgres':"
+    
+    if psql -U postgres -W -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db_name' AND pid <> pg_backend_pid();" > /dev/null 2>&1; then
+        echo "✓ Connections terminated successfully."
+        sleep 2  # Give a moment for connections to close
+        return 0
+    else
+        echo "✗ Error terminating connections."
+        return 1
+    fi
+}
+
 # Check command line arguments
 if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
     show_help
@@ -112,7 +140,7 @@ if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
 fi
 
 if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "Error: Missing required arguments."
+    echo "✗ Error: Missing required arguments."
     echo ""
     show_help
     exit 1
@@ -121,6 +149,7 @@ fi
 DB_NAME="$1"
 INPUT_FILE="$2"
 RESTORE_FILE=""
+TEMP_FILE_CREATED=false
 
 echo "========================================="
 echo "POSTGRESQL DATABASE RESTORE"
@@ -128,89 +157,131 @@ echo "Database: $DB_NAME"
 echo "Source file: $INPUT_FILE"
 echo "Date: $(date)"
 echo "========================================="
+echo ""
 
 # Check if OpenSSL is available for encrypted files
 if [[ "$INPUT_FILE" == *.enc ]] && ! command -v openssl &> /dev/null; then
-    echo "Error: OpenSSL is required to decrypt encrypted backup files."
+    echo "✗ Error: OpenSSL is required to decrypt encrypted backup files."
     echo "Please install OpenSSL first."
     exit 1
 fi
 
 # Prepare the restore file (decrypt/decompress if needed)
-echo "Preparing restore file..."
+echo "🔄 Preparing restore file..."
 prepare_restore_file "$INPUT_FILE" RESTORE_FILE
 
+# Mark if we created a temporary file for cleanup
+if [[ "$RESTORE_FILE" != "$INPUT_FILE" ]]; then
+    TEMP_FILE_CREATED=true
+fi
+
+echo ""
+
 # Check if database exists
-echo "Checking if database '$DB_NAME' exists..."
-if [ "$( psql -U postgres -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null )" = '1' ]; then
-    echo "Database '$DB_NAME' exists."
+echo "🔍 Checking if database '$DB_NAME' exists..."
+echo "🔑 Enter PostgreSQL password for user 'postgres':"
+if [ "$( psql -U postgres -W -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null )" = '1' ]; then
+    echo "✓ Database '$DB_NAME' exists."
+    echo ""
     
     read -p "Create backup before restore? (Y/n): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         if ! backup_existing_database "$DB_NAME"; then
-            echo "Backup failed. Aborting restore."
-            # Clean up temporary file if created
-            if [[ "$RESTORE_FILE" != "$INPUT_FILE" ]]; then
+            echo "❌ Backup failed. Aborting restore."
+            if [ "$TEMP_FILE_CREATED" = true ]; then
+                rm -f "$RESTORE_FILE"
+            fi
+            exit 1
+        fi
+        echo ""
+    fi
+    
+    echo "🗑️  Dropping existing database..."
+    echo "🔑 Enter PostgreSQL password for user 'postgres':"
+    if dropdb "$DB_NAME" -U postgres -W 2>/dev/null; then
+        echo "✓ Database '$DB_NAME' dropped successfully."
+    else
+        echo "⚠️  Database drop failed (likely due to active connections)."
+        read -p "Terminate active connections and retry? (Y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            if terminate_connections "$DB_NAME"; then
+                echo "🗑️  Retrying database drop..."
+                echo "🔑 Enter PostgreSQL password for user 'postgres':"
+                if dropdb "$DB_NAME" -U postgres -W 2>/dev/null; then
+                    echo "✓ Database '$DB_NAME' dropped successfully."
+                else
+                    echo "✗ Error dropping database even after terminating connections."
+                    if [ "$TEMP_FILE_CREATED" = true ]; then
+                        rm -f "$RESTORE_FILE"
+                    fi
+                    exit 1
+                fi
+            else
+                echo "✗ Could not terminate connections. Aborting restore."
+                if [ "$TEMP_FILE_CREATED" = true ]; then
+                    rm -f "$RESTORE_FILE"
+                fi
+                exit 1
+            fi
+        else
+            echo "❌ Cannot proceed without dropping existing database. Aborting."
+            if [ "$TEMP_FILE_CREATED" = true ]; then
                 rm -f "$RESTORE_FILE"
             fi
             exit 1
         fi
     fi
-    
-    echo "Dropping existing database..."
-    echo "You will be prompted for PostgreSQL password."
-    if dropdb "$DB_NAME" -U postgres; then
-        echo "✓ Database '$DB_NAME' dropped successfully."
-    else
-        echo "✗ Error dropping database."
-        # Clean up temporary file if created
-        if [[ "$RESTORE_FILE" != "$INPUT_FILE" ]]; then
-            rm -f "$RESTORE_FILE"
-        fi
-        exit 1
-    fi
 else
-    echo "Database '$DB_NAME' does not exist. Will create new database."
+    echo "ℹ️  Database '$DB_NAME' does not exist. Will create new database."
 fi
 
+echo ""
+
 # Create database
-echo "Creating database '$DB_NAME'..."
-echo "You will be prompted for PostgreSQL password."
-if createdb -T template0 "$DB_NAME" -U postgres; then
+echo "🏗️  Creating database '$DB_NAME'..."
+echo "🔑 Enter PostgreSQL password for user 'postgres':"
+if createdb -T template0 "$DB_NAME" -U postgres -W 2>/dev/null; then
     echo "✓ Database '$DB_NAME' created successfully."
 else
     echo "✗ Error creating database."
-    # Clean up temporary file if created
-    if [[ "$RESTORE_FILE" != "$INPUT_FILE" ]]; then
+    if [ "$TEMP_FILE_CREATED" = true ]; then
         rm -f "$RESTORE_FILE"
     fi
     exit 1
 fi
 
+echo ""
+
 # Restore database
-echo "Restoring database from file..."
-echo "You will be prompted for PostgreSQL password."
-if psql -U postgres -W -d "$DB_NAME" -f "$RESTORE_FILE" > /dev/null; then
-    echo "✓ Restore of '$DB_NAME' completed successfully."
+echo "📥 Restoring database from file..."
+echo "   This may take a while for large databases..."
+echo "🔑 Enter PostgreSQL password for user 'postgres':"
+
+if psql -U postgres -W -d "$DB_NAME" -f "$RESTORE_FILE" > /dev/null 2>&1; then
+    echo "✅ Restore of '$DB_NAME' completed successfully."
     
     # Clean up temporary file if created
-    if [[ "$RESTORE_FILE" != "$INPUT_FILE" ]]; then
+    if [ "$TEMP_FILE_CREATED" = true ]; then
         rm -f "$RESTORE_FILE"
-        echo "✓ Temporary files cleaned up."
+        echo "🧹 Temporary files cleaned up."
     fi
     
+    echo ""
     echo "========================================="
-    echo "RESTORE COMPLETE"
+    echo "✅ RESTORE COMPLETE"
     echo "Database: $DB_NAME"
     echo "Restored from: $INPUT_FILE"
+    echo "Completion time: $(date)"
     echo "========================================="
     exit 0
 else
     echo "✗ Error restoring database."
+    echo "💡 Check that the backup file is compatible with your PostgreSQL version."
     
     # Clean up temporary file if created
-    if [[ "$RESTORE_FILE" != "$INPUT_FILE" ]]; then
+    if [ "$TEMP_FILE_CREATED" = true ]; then
         rm -f "$RESTORE_FILE"
     fi
     exit 1
