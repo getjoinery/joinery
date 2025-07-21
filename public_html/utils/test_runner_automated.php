@@ -19,6 +19,7 @@ class AutomatedTestRunner {
     
     private $passed = 0;
     private $failed = 0;
+    private $skipped = 0;
     private $test_results = [];
     private $start_time;
     
@@ -74,7 +75,11 @@ class AutomatedTestRunner {
             // Use the static test method which delegates to ModelTester
             $result = $model_class::test($debug);
             
-            if ($result) {
+            if ($result === 'SKIPPED') {
+                $this->skipped++;
+                $this->test_results[$model_class] = 'SKIPPED: Configuration required';
+                // Skip message already printed by ModelTester
+            } else if ($result) {
                 $this->passed++;
                 $this->test_results[$model_class] = 'PASSED';
                 echo "<span style='color: green;'>✓ PASSED</span><br>\n";
@@ -108,15 +113,16 @@ class AutomatedTestRunner {
         
         echo "<h3>📊 Test Results Summary</h3>\n";
         
-        $total = $this->passed + $this->failed;
-        $pass_rate = $total > 0 ? round(($this->passed / $total) * 100, 1) : 0;
+        $total = $this->passed + $this->failed + $this->skipped;
+        $pass_rate = ($this->passed + $this->failed) > 0 ? round(($this->passed / ($this->passed + $this->failed)) * 100, 1) : 0;
         
         echo "<div style='background: #f9f9f9; padding: 15px; border: 1px solid #ddd; margin: 20px 0;'>\n";
         echo "<table style='width: 100%; border-collapse: collapse;'>\n";
-        echo "<tr><td style='padding: 5px; font-weight: bold;'>Total Tests:</td><td style='padding: 5px;'>$total</td></tr>\n";
+        echo "<tr><td style='padding: 5px; font-weight: bold;'>Total Models:</td><td style='padding: 5px;'>$total</td></tr>\n";
         echo "<tr style='color: green;'><td style='padding: 5px; font-weight: bold;'>Passed:</td><td style='padding: 5px;'>{$this->passed}</td></tr>\n";
         echo "<tr style='color: red;'><td style='padding: 5px; font-weight: bold;'>Failed:</td><td style='padding: 5px;'>{$this->failed}</td></tr>\n";
-        echo "<tr><td style='padding: 5px; font-weight: bold;'>Pass Rate:</td><td style='padding: 5px;'>{$pass_rate}%</td></tr>\n";
+        echo "<tr style='color: #ff9800;'><td style='padding: 5px; font-weight: bold;'>Skipped:</td><td style='padding: 5px;'>{$this->skipped}</td></tr>\n";
+        echo "<tr><td style='padding: 5px; font-weight: bold;'>Pass Rate:</td><td style='padding: 5px;'>{$pass_rate}% (of testable models)</td></tr>\n";
         echo "<tr><td style='padding: 5px; font-weight: bold;'>Duration:</td><td style='padding: 5px;'>{$duration} seconds</td></tr>\n";
         echo "</table>\n";
         echo "</div>\n";
@@ -160,6 +166,13 @@ class AutomatedTestRunner {
 
 // Handle web interface
 $debug = isset($_GET['debug']) && $_GET['debug'] === '1';
+$verbose = $_GET['verbose'] ?? false;
+
+// Set verbose mode in ModelTester
+if ($verbose) {
+    require_once(__DIR__ . '/../includes/ModelTester.php');
+    ModelTester::set_verbose($verbose);
+}
 
 echo "<!DOCTYPE html>\n";
 echo "<html><head><title>Automated Model Testing</title></head><body>\n";
@@ -177,7 +190,14 @@ try {
 }
 
 echo "<hr>\n";
-echo "<p><a href='?debug=1'>🐛 Run with debug output</a> | ";
-echo "<a href='?' style='text-decoration: none;'>🔄 Run again</a></p>\n";
+echo "<p>";
+echo "<a href='?'>🔄 Run again</a> | ";
+echo "<a href='?verbose=1'>📢 Verbose output (all)</a> | ";
+echo "<a href='?debug=1'>🐛 Debug mode</a>";
+echo "</p>\n";
+echo "<form method='get' style='margin: 10px 0;'>\n";
+echo "Verbose for specific class: <input type='text' name='verbose' placeholder='e.g., User' />\n";
+echo "<button type='submit'>Run</button>\n";
+echo "</form>\n";
 echo "</body></html>\n";
 ?>
