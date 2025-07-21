@@ -1689,5 +1689,139 @@ class LibraryFunctions {
 		}
 		return $ret;
 	}
+	
+	/**
+	 * Discover all model classes in the system
+	 * 
+	 * @param array $options Options for discovery:
+	 *   - 'require_tablename' (bool): Only include classes with $tablename property (default: false)
+	 *   - 'require_field_specifications' (bool): Only include classes with $field_specifications (default: false)
+	 *   - 'base_class' (string): Only include classes extending this base (default: 'SystemBase')
+	 *   - 'include_plugins' (bool): Include plugin directories (default: true)
+	 *   - 'verbose' (bool): Output debug information (default: false)
+	 * @return array Array of discovered class names
+	 */
+	static function discover_model_classes($options = array()) {
+		$defaults = array(
+			'require_tablename' => false,
+			'require_field_specifications' => false,
+			'base_class' => 'SystemBase',
+			'include_plugins' => true,
+			'verbose' => false
+		);
+		$options = array_merge($defaults, $options);
+		
+		$classes = array();
+		
+		// Load from main data directory
+		$data_path = PathHelper::getBasePath() . '/data';
+		if ($options['verbose']) {
+			echo "Discovering models in: $data_path<br>\n";
+		}
+		LibraryFunctions::load_models_from_directory($data_path, $classes, $options);
+		
+		// Load from plugin directories if requested
+		if ($options['include_plugins']) {
+			$plugin_dir = PathHelper::getBasePath() . '/plugins';
+			$plugins = LibraryFunctions::list_plugins($plugin_dir);
+			
+			foreach ($plugins as $plugin) {
+				$plugin_data_dir = $plugin_dir . '/' . $plugin . '/data';
+				if ($options['verbose']) {
+					echo "Discovering models in plugin: $plugin<br>\n";
+				}
+				if (is_dir($plugin_data_dir)) {
+					LibraryFunctions::load_models_from_directory($plugin_data_dir, $classes, $options);
+				}
+			}
+		}
+		
+		return $classes;
+	}
+	
+	/**
+	 * Load model classes from a specific directory
+	 * 
+	 * @param string $directory Directory path to scan
+	 * @param array &$classes Reference to array where class names will be added
+	 * @param array $options Discovery options (see discover_model_classes)
+	 */
+	private static function load_models_from_directory($directory, &$classes, $options) {
+		if (!is_dir($directory)) {
+			return;
+		}
+		
+		// Use glob for simplicity
+		$files = glob($directory . '/*_class.php');
+		
+		// First pass: Parse files to find class names WITHOUT requiring them
+		$class_files = [];
+		foreach ($files as $filepath) {
+			if ($options['verbose']) {
+				echo "  Parsing: $filepath<br>\n";
+			}
+			
+			try {
+				// Parse file to find class names without requiring
+				$fileContent = file_get_contents($filepath);
+				$tokens = token_get_all($fileContent);
+				
+				for ($i = 0; $i < count($tokens); $i++) {
+					if ($tokens[$i][0] === T_CLASS && isset($tokens[$i + 2]) && $tokens[$i + 2][0] === T_STRING) {
+						$class_name = $tokens[$i + 2][1];
+						$class_files[$class_name] = $filepath;
+						if ($options['verbose']) {
+							echo "    Found class: $class_name<br>\n";
+						}
+					}
+				}
+			} catch (Exception $e) {
+				if ($options['verbose']) {
+					echo "    Error parsing $filepath: " . $e->getMessage() . "<br>\n";
+				}
+			}
+		}
+		
+		// Second pass: Require files and check class requirements
+		foreach ($class_files as $class_name => $filepath) {
+			if ($options['verbose']) {
+				echo "  Loading: $filepath for $class_name<br>\n";
+			}
+			
+			try {
+				require_once($filepath);
+				
+				// Check if class exists and meets requirements
+				if (class_exists($class_name)) {
+					// Check base class requirement
+					if ($options['base_class'] && !is_subclass_of($class_name, $options['base_class'])) {
+						continue;
+					}
+					
+					// Check additional requirements
+					$include_class = true;
+					
+					if ($options['require_tablename'] && !isset($class_name::$tablename)) {
+						$include_class = false;
+					}
+					
+					if ($options['require_field_specifications'] && !isset($class_name::$field_specifications)) {
+						$include_class = false;
+					}
+					
+					if ($include_class && !in_array($class_name, $classes)) {
+						$classes[] = $class_name;
+						if ($options['verbose']) {
+							echo "    Added: $class_name<br>\n";
+						}
+					}
+				}
+			} catch (Exception $e) {
+				if ($options['verbose']) {
+					echo "    Error loading $filepath: " . $e->getMessage() . "<br>\n";
+				}
+			}
+		}
+	}
 }
 ?>
