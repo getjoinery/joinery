@@ -68,7 +68,7 @@ class AutomatedTestRunner {
      */
     private function run_model_tests($model_class, $debug = false) {
         echo "<div style='margin: 10px 0; padding: 5px; border-left: 3px solid #007cba;'>\n";
-        echo "<strong>Testing: $model_class</strong><br>\n";
+        echo "<strong style='color: #333;'>Testing: $model_class</strong><br>\n";
         
         try {
             // Use the static test method which delegates to ModelTester
@@ -90,7 +90,7 @@ class AutomatedTestRunner {
             echo "<span style='color: red;'>✗ FAILED: " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
             
             if ($debug) {
-                echo "<details><summary>Stack Trace</summary><pre>" . 
+                echo "<details style='color: red;'><summary>Stack Trace</summary><pre style='color: red;'>" . 
                      htmlspecialchars($e->getTraceAsString()) . "</pre></details>\n";
             }
         }
