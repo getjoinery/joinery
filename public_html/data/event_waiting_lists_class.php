@@ -29,14 +29,26 @@ class WaitingList extends SystemBase {
 		'ewl_create_time' => 'Time added to waiting list',
 	);
 
+	
+/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'ewl_waiting_list_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'ewl_evt_event_id' => array('type'=>'int4'),
+		'ewl_evt_event_id' => array('type'=>'int4', 'unique_with' => array('ewl_usr_user_id')),
 		'ewl_usr_user_id' => array('type'=>'int8'),
 		'ewl_create_time' => array('type'=>'timestamp(6)'),
 	);	
 
-	public static $required_fields = array('ewl_evt_event_id', 'ewl_usr_user_id');
+	
+
+public static $required_fields = array('ewl_evt_event_id', 'ewl_usr_user_id');
 
 	public static $field_constraints = array();	
 	
@@ -72,30 +84,13 @@ class WaitingList extends SystemBase {
 	}	
 	
 
-	function prepare() {	
-		
-		if(!$this->key){
-			if(WaitingList::CheckIfExists($this->get('ewl_usr_user_id'), $this->get('ewl_evt_event_id'))){
-				return false;
-			}
-		}
-	}
-	
+	// Unique constraints now handled automatically by SystemBase
 	
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
-	}
-
-	function save($debug=false) {
-		if(!$this->key){
-			if(WaitingList::CheckIfExists($this->get('ewl_usr_user_id'), $this->get('ewl_evt_event_id'))){
-				return FALSE;
-			}			
-		}
-		parent::save($debug);
 	}
 	
 

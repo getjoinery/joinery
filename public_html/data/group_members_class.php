@@ -28,13 +28,25 @@ class GroupMember extends SystemBase {
 		'grm_foreign_key_id' => 'Foreign key pointing to the member in this group',
 	);
 
+	
+/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'grm_group_member_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'grm_grp_group_id' => array('type'=>'int4'),
+		'grm_grp_group_id' => array('type'=>'int4', 'unique_with' => array('grm_foreign_key_id')),
 		'grm_foreign_key_id' => array('type'=>'int8'),
 	);	
 
-	public static $required_fields = array('grm_grp_group_id');
+	
+
+public static $required_fields = array('grm_grp_group_id');
 
 	public static $field_constraints = array();	
 	
@@ -56,29 +68,13 @@ class GroupMember extends SystemBase {
 	}	
 	
 
-	function prepare() {	
-		if(!$this->key){
-			if($this->check_for_duplicate(array('grm_grp_group_id', 'grm_foreign_key_id'))){
-				throw new GroupMemberException('This is a duplicate.');
-			}
-		}
-	}
-	
+	// Unique constraints now handled automatically by SystemBase
 	
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
-	}
-
-	function save($debug=false) {
-		if(!$this->key){
-			if($this->check_for_duplicate(array('grm_grp_group_id', 'grm_foreign_key_id'))){
-				return FALSE;
-			}			
-		}
-		parent::save($debug);
 	}
 	
 }

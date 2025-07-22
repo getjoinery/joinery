@@ -419,6 +419,46 @@ abstract class SystemBase {
 		return $count->total;
 	}	
 
+	/**
+	 * Check unique constraints defined in field_specifications
+	 * Returns array with constraint violation details or null if no violations
+	 */
+	protected function check_unique_constraints() {
+		if ($this->key) {
+			return null; // Only check on insert
+		}
+		
+		if (!isset(static::$field_specifications)) {
+			return null; // No field specifications defined
+		}
+		
+		foreach (static::$field_specifications as $field => $spec) {
+			// Check single field unique constraints
+			if (isset($spec['unique']) && $spec['unique']) {
+				if ($this->check_for_duplicate($field)) {
+					return array(
+						'field' => $field,
+						'message' => "Duplicate value for {$field}"
+					);
+				}
+			}
+			
+			// Check composite unique constraints
+			if (isset($spec['unique_with'])) {
+				$fields = array_merge(array($field), $spec['unique_with']);
+				if ($this->check_for_duplicate($fields)) {
+					$field_list = implode(', ', $fields);
+					return array(
+						'fields' => $fields,
+						'message' => "Duplicate combination for {$field_list}"
+					);
+				}
+			}
+		}
+		
+		return null;
+	}
+
 	function hash() {
 		if ($this->key) {
 			return md5(get_class($this) . " " . $this->key);
@@ -848,7 +888,14 @@ abstract class SystemBase {
 	}
 
 	// To prepare it is without error
-	function prepare() {}
+	function prepare() {
+		// Check unique constraints defined in field_specifications
+		$duplicate = $this->check_unique_constraints();
+		if ($duplicate) {
+			// Use DisplayableUserException for user-friendly errors
+			throw new DisplayableUserException($duplicate['message']);
+		}
+	}
 	
 	
 	// And to save it to the database
@@ -918,6 +965,11 @@ abstract class SystemBase {
 			}
 		}	
 
+		//CHECK UNIQUE CONSTRAINTS (safety net)
+		$duplicate = $this->check_unique_constraints();
+		if ($duplicate) {
+			throw new DisplayableUserException($duplicate['message']);
+		}
 
 		$rowdata = array();
 		foreach(array_keys(get_class($this)::$fields) as $field) {

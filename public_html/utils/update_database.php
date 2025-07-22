@@ -768,8 +768,8 @@
 		$migration_log->prepare();
 		$migration_log->save();
 
-
-
+		// Manage unique constraints based on field_specifications
+		manage_unique_constraints($classes, $cleanup, $upgrade, $verbose);
 
 		
 		echo "-----MIGRATIONS-----<br>\n";
@@ -1067,6 +1067,141 @@
 		}
 	}
 
+/**
+ * Manage unique constraints based on field_specifications
+ */
+function manage_unique_constraints($classes, $cleanup, $upgrade, $verbose) {
+	$dbhelper = DbConnector::get_instance();
+	$dblink = $dbhelper->get_db_link();
+	
+	echo "-----UNIQUE CONSTRAINTS-----<br>\n";
+	
+	foreach ($classes as $class) {
+		$table = $class::$tablename;
+		
+		// Add missing constraints (both cleanup and upgrade modes)
+		if ($cleanup || $upgrade) {
+			if (isset($class::$field_specifications)) {
+				foreach ($class::$field_specifications as $field => $spec) {
+					// Single field unique constraints
+					if (isset($spec['unique']) && $spec['unique']) {
+						$constraint_name = $table . '_' . $field . '_unique';
+						if (!constraint_exists($constraint_name, $dblink)) {
+							echo "Adding unique constraint: $constraint_name<br>\n";
+							$sql = "ALTER TABLE $table ADD CONSTRAINT $constraint_name UNIQUE ($field)";
+							execute_constraint_sql($sql, $dblink, $verbose);
+						} else if ($verbose) {
+							echo "Unique constraint already exists: $constraint_name<br>\n";
+						}
+					}
+					
+					// Composite unique constraints
+					if (isset($spec['unique_with'])) {
+						$fields = array_merge(array($field), $spec['unique_with']);
+						$constraint_name = $table . '_' . implode('_', $fields) . '_unique';
+						if (!constraint_exists($constraint_name, $dblink)) {
+							echo "Adding composite unique constraint: $constraint_name<br>\n";
+							$columns = implode(', ', $fields);
+							$sql = "ALTER TABLE $table ADD CONSTRAINT $constraint_name UNIQUE ($columns)";
+							execute_constraint_sql($sql, $dblink, $verbose);
+						} else if ($verbose) {
+							echo "Composite unique constraint already exists: $constraint_name<br>\n";
+						}
+					}
+				}
+			}
+		}
+		
+		// Remove obsolete constraints (cleanup mode only)
+		if ($cleanup) {
+			$existing_constraints = get_table_unique_constraints($table, $dblink);
+			$expected_constraints = get_expected_unique_constraints($class);
+			
+			foreach ($existing_constraints as $constraint_name) {
+				if (!in_array($constraint_name, $expected_constraints)) {
+					echo "Removing obsolete unique constraint: $constraint_name<br>\n";
+					$sql = "ALTER TABLE $table DROP CONSTRAINT $constraint_name";
+					execute_constraint_sql($sql, $dblink, $verbose);
+				}
+			}
+		}
+	}
+}
 
+/**
+ * Check if a constraint exists
+ */
+function constraint_exists($constraint_name, $dblink) {
+	$sql = "SELECT 1 FROM information_schema.table_constraints 
+			WHERE constraint_name = :constraint_name 
+			AND table_schema = 'public'";
+	try {
+		$q = $dblink->prepare($sql);
+		$q->bindValue(':constraint_name', $constraint_name, PDO::PARAM_STR);
+		$q->execute();
+		return $q->rowCount() > 0;
+	} catch(PDOException $e) {
+		echo "Error checking constraint existence: " . $e->getMessage() . "<br>\n";
+		return false;
+	}
+}
+
+/**
+ * Execute constraint SQL with error handling
+ */
+function execute_constraint_sql($sql, $dblink, $verbose) {
+	try {
+		if ($verbose) {
+			echo "Executing: $sql<br>\n";
+		}
+		$q = $dblink->prepare($sql);
+		$q->execute();
+		echo "✓ Success<br>\n";
+	} catch(PDOException $e) {
+		echo "✗ Error: " . $e->getMessage() . "<br>\n";
+	}
+}
+
+/**
+ * Get existing unique constraints for a table
+ */
+function get_table_unique_constraints($table, $dblink) {
+	$sql = "SELECT constraint_name FROM information_schema.table_constraints 
+			WHERE table_name = :table_name 
+			AND table_schema = 'public'
+			AND constraint_type = 'UNIQUE'";
+	try {
+		$q = $dblink->prepare($sql);
+		$q->bindValue(':table_name', $table, PDO::PARAM_STR);
+		$q->execute();
+		return $q->fetchAll(PDO::FETCH_COLUMN);
+	} catch(PDOException $e) {
+		echo "Error getting table constraints: " . $e->getMessage() . "<br>\n";
+		return array();
+	}
+}
+
+/**
+ * Get expected unique constraints from field_specifications
+ */
+function get_expected_unique_constraints($class) {
+	$constraints = array();
+	$table = $class::$tablename;
+	
+	if (isset($class::$field_specifications)) {
+		foreach ($class::$field_specifications as $field => $spec) {
+			if (isset($spec['unique']) && $spec['unique']) {
+				$constraints[] = $table . '_' . $field . '_unique';
+			}
+			
+			if (isset($spec['unique_with'])) {
+				$fields = array_merge(array($field), $spec['unique_with']);
+				$constraints[] = $table . '_' . implode('_', $fields) . '_unique';
+			}
+		}
+	}
+	
+	return $constraints;
+}
 
 ?>

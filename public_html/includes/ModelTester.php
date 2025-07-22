@@ -303,12 +303,147 @@ class ModelTester {
         $verbose = $this->is_verbose();
         if ($debug || $verbose) echo "Testing database constraints...<br>\n";
         
-        // Skip unique constraint testing - we can't reliably infer which fields are unique
-        // TODO: Enable this when models can explicitly declare unique fields
-        
-        // Note: Foreign key and unique constraint testing skipped in automated phase
+        // Test unique constraints declared in field_specifications
+        $this->test_declared_unique_constraints($debug);
         
         if ($debug || $verbose) echo "Constraint tests completed<br>\n";
+    }
+    
+    /**
+     * Test unique constraints declared in field_specifications
+     */
+    protected function test_declared_unique_constraints($debug = false) {
+        $verbose = $this->is_verbose();
+        $model_class = $this->model_class;
+        
+        if (!isset($model_class::$field_specifications)) {
+            return;
+        }
+        
+        foreach ($model_class::$field_specifications as $field => $spec) {
+            // Test single field unique constraints
+            if (isset($spec['unique']) && $spec['unique']) {
+                if ($debug || $verbose) echo "Testing unique constraint on $field<br>\n";
+                $this->test_single_field_unique($field, $debug);
+            }
+            
+            // Test composite unique constraints
+            if (isset($spec['unique_with'])) {
+                $fields = array_merge(array($field), $spec['unique_with']);
+                $field_list = implode(', ', $fields);
+                if ($debug || $verbose) echo "Testing composite unique constraint on $field_list<br>\n";
+                $this->test_composite_unique($field, $spec['unique_with'], $debug);
+            }
+        }
+    }
+    
+    /**
+     * Test single field unique constraint
+     */
+    protected function test_single_field_unique($field, $debug = false) {
+        $verbose = $this->is_verbose();
+        $model_class = $this->model_class;
+        
+        try {
+            // Create first record
+            $model1 = new $model_class(null);
+            $test_data = $this->generate_valid_test_data();
+            foreach ($test_data as $test_field => $value) {
+                $model1->set($test_field, $value);
+            }
+            $model1->save();
+            
+            // Try to create duplicate with same unique field value
+            $model2 = new $model_class(null);
+            foreach ($test_data as $test_field => $value) {
+                $model2->set($test_field, $value);
+            }
+            
+            // This should fail due to unique constraint
+            try {
+                $model2->save();
+                $this->add_failure("Unique constraint on $field was not enforced - duplicate was allowed");
+            } catch (DisplayableUserException $e) {
+                $this->add_success("Unique constraint on $field properly enforced");
+            } catch (Exception $e) {
+                // Accept any exception type for unique violations
+                $this->add_success("Unique constraint on $field properly enforced (Exception: " . get_class($e) . ")");
+            }
+            
+            // Clean up
+            $model1->permanent_delete(true);
+            if ($model2->key) {
+                $model2->permanent_delete(true);
+            }
+            
+        } catch (Exception $e) {
+            $this->add_failure("Error testing unique constraint on $field: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Test composite unique constraint
+     */
+    protected function test_composite_unique($main_field, $other_fields, $debug = false) {
+        $verbose = $this->is_verbose();
+        $model_class = $this->model_class;
+        $all_fields = array_merge(array($main_field), $other_fields);
+        $field_list = implode(', ', $all_fields);
+        
+        try {
+            // Create first record
+            $model1 = new $model_class(null);
+            $test_data = $this->generate_valid_test_data();
+            foreach ($test_data as $test_field => $value) {
+                $model1->set($test_field, $value);
+            }
+            $model1->save();
+            
+            // Try to create duplicate with same combination of unique fields
+            $model2 = new $model_class(null);
+            foreach ($test_data as $test_field => $value) {
+                $model2->set($test_field, $value);
+            }
+            
+            // This should fail due to composite unique constraint
+            try {
+                $model2->save();
+                $this->add_failure("Composite unique constraint on ($field_list) was not enforced - duplicate was allowed");
+            } catch (DisplayableUserException $e) {
+                $this->add_success("Composite unique constraint on ($field_list) properly enforced");
+            } catch (Exception $e) {
+                // Accept any exception type for unique violations
+                $this->add_success("Composite unique constraint on ($field_list) properly enforced (Exception: " . get_class($e) . ")");
+            }
+            
+            // Test that different combinations are allowed
+            $model3 = new $model_class(null);
+            foreach ($test_data as $test_field => $value) {
+                if ($test_field === $main_field) {
+                    // Change the main field value to make it non-duplicate
+                    $model3->set($test_field, $value . '_different');
+                } else {
+                    $model3->set($test_field, $value);
+                }
+            }
+            
+            try {
+                $model3->save();
+                $this->add_success("Composite unique constraint allows different combinations on ($field_list)");
+                $model3->permanent_delete(true);
+            } catch (Exception $e) {
+                $this->add_failure("Composite unique constraint incorrectly rejected different combination on ($field_list): " . $e->getMessage());
+            }
+            
+            // Clean up
+            $model1->permanent_delete(true);
+            if ($model2->key) {
+                $model2->permanent_delete(true);
+            }
+            
+        } catch (Exception $e) {
+            $this->add_failure("Error testing composite unique constraint on ($field_list): " . $e->getMessage());
+        }
     }
     
     /**
