@@ -417,7 +417,30 @@ The framework includes utilities for testing email authentication:
 - `/utils/email_setup_check.php` - Check SPF, DKIM, DMARC records for domains
 - `/utils/email_send_test.php` - Send test emails and analyze authentication results
 
+## Development Environment
+
+### PHP Runtime Available
+PHP is available locally for syntax checking, validation, and running scripts. This enables:
+- Syntax validation of all PHP files before completion
+- Running utility scripts and diagnostics
+- Testing migrations and database operations
+- Validating code changes locally
+
+**CRITICAL REQUIREMENT:** Always check PHP files for syntax errors using `php -l filename.php` before declaring any PHP development task complete. This prevents syntax errors from being introduced into the codebase.
+
 ## Common Development Commands
+
+### PHP Syntax Validation
+```bash
+# Check single file syntax
+php -l filename.php
+
+# Check multiple files syntax
+php -l file1.php && php -l file2.php
+
+# Check all PHP files in current directory
+find . -name "*.php" -exec php -l {} \;
+```
 
 ### Testing & Diagnostics
 ```bash
@@ -489,17 +512,18 @@ These directories contain critical system infrastructure. Changes should only be
 
 ## Best Practices
 
-1. **Security**: Always validate and sanitize user input
-2. **Consistency**: Follow the established patterns in existing admin files
-3. **FormWriter**: Always use FormWriter class for forms (`LibraryFunctions::get_formwriter_object()`)
-4. **No Nested Panels**: Avoid cards inside cards unless there's a specific reason
-5. **Accessibility**: Use proper labels and form structure
-6. **Responsive**: Ensure pages work on mobile devices
-7. **Performance**: Include only necessary CSS/JS files
-8. **Error Handling**: Provide clear error messages to users
-9. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
-10. **Documentation**: Update this file when discovering new patterns or conventions
-11. **Respect Restrictions**: Only modify restricted directories with explicit user permission
+1. **Syntax Validation**: ALWAYS run `php -l filename.php` on all PHP files before completing any task
+2. **Security**: Always validate and sanitize user input
+3. **Consistency**: Follow the established patterns in existing admin files
+4. **FormWriter**: Always use FormWriter class for forms (`LibraryFunctions::get_formwriter_object()`)
+5. **No Nested Panels**: Avoid cards inside cards unless there's a specific reason
+6. **Accessibility**: Use proper labels and form structure
+7. **Responsive**: Ensure pages work on mobile devices
+8. **Performance**: Include only necessary CSS/JS files
+9. **Error Handling**: Provide clear error messages to users
+10. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
+11. **Documentation**: Update this file when discovering new patterns or conventions
+12. **Respect Restrictions**: Only modify restricted directories with explicit user permission
 
 ## Example Admin Page Template
 
