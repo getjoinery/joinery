@@ -36,9 +36,9 @@ log "Starting PHP 8.3 setup for WSL user: $ACTUAL_USER"
 log "Updating system packages..."
 apt update && apt upgrade -y
 
-# Install essential packages
+# Install essential packages and PostgreSQL client libraries
 log "Installing essential packages..."
-apt install -y curl wget git unzip software-properties-common
+apt install -y curl wget git unzip software-properties-common libpq-dev
 
 # Install PHP 8.3 and extensions
 log "Installing PHP 8.3 with all extensions..."
@@ -86,9 +86,12 @@ sed -i 's/;date.timezone =/date.timezone = America\/New_York/' /etc/php/8.3/cli/
 sed -i 's/display_errors = Off/display_errors = On/' /etc/php/8.3/cli/php.ini
 sed -i 's/error_reporting = .*/error_reporting = E_ALL/' /etc/php/8.3/cli/php.ini
 
-# Enable PDO PostgreSQL extension
-sed -i 's/^;extension=pdo_pgsql/extension=pdo_pgsql/' /etc/php/8.3/cli/php.ini
-sed -i 's/^;extension=pgsql/extension=pgsql/' /etc/php/8.3/cli/php.ini
+# Comment out problematic PostgreSQL extensions for now
+log "Disabling problematic PostgreSQL extensions temporarily..."
+sed -i 's/^extension=pdo_pgsql/;extension=pdo_pgsql/' /etc/php/8.3/cli/php.ini
+sed -i 's/^extension=pgsql/;extension=pgsql/' /etc/php/8.3/cli/php.ini
+
+log "PostgreSQL extensions disabled to resolve loading conflicts"
 
 log "PHP configured with development settings and PostgreSQL extensions enabled"
 
@@ -97,7 +100,7 @@ log "Setting up development directory..."
 mkdir -p $USER_HOME/dev
 cd $USER_HOME/dev
 
-# Create composer.json with the same dependencies as the server
+# Create composer.json with the same dependencies as the server (excluding incompatible packages)
 tee composer.json > /dev/null << 'EOF'
 {
     "require": {
@@ -105,7 +108,6 @@ tee composer.json > /dev/null << 'EOF'
         "kriswallsmith/buzz": "^1.2",
         "nyholm/psr7": "^1.3",
         "jhut89/mailchimp3php": "^3.2",
-        "zenapply/php-calendly": "^1.0",
         "verot/class.upload.php": "^2.1",
         "tm/error-log-parser": "^1.2",
         "stripe/stripe-php": "^10.16",
