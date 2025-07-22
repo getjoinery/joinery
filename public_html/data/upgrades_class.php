@@ -26,6 +26,15 @@ class Upgrade extends SystemBase {
 		'upg_create_time' => 'Time_sent',
 	);
 
+	/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'upg_upgrade_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'upg_major_version' => array('type'=>'int4'),

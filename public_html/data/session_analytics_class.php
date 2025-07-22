@@ -28,6 +28,15 @@ class SessionAnalytic extends SystemBase {
 		'sev_time' => '',
 	);
 
+	/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'sev_session_analytic_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'sev_usr_user_id' => array('type'=>'int4'),
