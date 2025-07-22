@@ -147,7 +147,7 @@
 		}
 		
 		echo '<tr><td colspan="3">';
-		$formwriter = LibraryFunctions::get_formwriter_object('form3, 'admin');
+		$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
 		echo $formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
 
 		
