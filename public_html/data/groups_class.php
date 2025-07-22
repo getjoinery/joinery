@@ -40,9 +40,19 @@ class Group extends SystemBase {
 		'grp_category' => 'Dynamic replacement for group type',
 	);
 
+	
+/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'grp_group_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'grp_name' => array('type'=>'varchar(100)'),
+		'grp_name' => array('type'=>'varchar(100)', 'unique_with' => array('grp_category')),
 		'grp_usr_user_id_created' => array('type'=>'int4'),
 		'grp_create_time' => array('type'=>'timestamp(6)'),
 		'grp_update_time' => array('type'=>'timestamp(6)'),
@@ -51,7 +61,9 @@ class Group extends SystemBase {
 		'grp_category' => array('type'=>'varchar(24)'),
 	);	
 
-	public static $required_fields = array(
+	
+
+public static $required_fields = array(
 		'grp_name');
 
 	public static $field_constraints = array();	
@@ -388,16 +400,7 @@ class Group extends SystemBase {
 	}				
 	
 
-	function prepare() {
-		//CHECK FOR DUPLICATES
-		if(!$this->key){
-			if($this->check_for_duplicate(array('grp_name'))){
-				throw new GroupException(
-				'This group already exists');
-			}
-		}
-
-	}
+	// prepare() method now inherited from SystemBase with automatic unique constraint checking
 	
 	
 	function authenticate_write($data) {

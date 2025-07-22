@@ -30,17 +30,29 @@ class SurveyAnswer extends SystemBase {
 		'sva_answer' => 'Text answer of the question',
 		'sva_create_time' => 'Time of answer'
 	);
+
 	
+/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'sva_survey_answer_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'sva_svy_survey_id' => array('type'=>'int4', 'is_nullable'=>false),
+		'sva_svy_survey_id' => array('type'=>'int4', 'is_nullable'=>false, 'unique_with' => array('sva_qst_question_id', 'sva_usr_user_id')),
 		'sva_qst_question_id' => array('type'=>'int4'),
 		'sva_usr_user_id' => array('type'=>'int4'),
 		'sva_answer' => array('type'=>'text'),
 		'sva_create_time' => array('type'=>'timestamp(6)'),
 	);
 	
-	public static $required_fields = array('sva_svy_survey_id', 'sva_qst_question_id');
+	
+
+public static $required_fields = array('sva_svy_survey_id', 'sva_qst_question_id');
 
 	public static $field_constraints = array();	
 	
@@ -80,30 +92,13 @@ class SurveyAnswer extends SystemBase {
 	}	
 	
 
-	function prepare() {	
-		if(!$this->key){
-			if($this->check_for_duplicates()){
-				throw new SurveyAnswerException('This is a duplicate.');
-			}
-		}
-		
-	}
-
+	// Unique constraints now handled automatically by SystemBase
 	
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
-	}
-
-	function save($debug=false) {
-		if(!$this->key){
-			if($this->check_for_duplicates()){
-				return FALSE;
-			}			
-		}
-		parent::save($debug);
 	}
 	
 }
