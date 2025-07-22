@@ -40,6 +40,15 @@ class ContentVersion extends SystemBase {
 		'cnv_delete_time' => 'Time Deleted'
 	);
 
+	/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'cnv_content_version_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'cnv_title' => array('type'=>'varchar(255)'),

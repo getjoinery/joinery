@@ -41,6 +41,15 @@ class CouponCode extends SystemBase {
 		'ccd_applies_to' => 'Category of product that this coupon applies to ("All products"=>0, "Subscriptions only"=>1, "One time purchases only"=>2, "Custom"=>3)',
 	);
 
+	/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'ccd_coupon_code_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'ccd_code' => array('type'=>'varchar(64)'),

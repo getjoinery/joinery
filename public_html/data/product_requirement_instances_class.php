@@ -31,6 +31,15 @@ class ProductRequirementInstance extends SystemBase {
 		'pri_delete_time' => 'Time deleted'
 		); 
 
+	/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'pri_product_requirement_instance_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'pri_pro_product_id' => array('type'=>'int4'),
