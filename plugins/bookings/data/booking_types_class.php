@@ -1,9 +1,10 @@
 <?php
-$settings = Globalvars::get_instance();
-$siteDir = $settings->get_setting('siteDir');
-require_once($siteDir . '/includes/DbConnector.php');
-require_once($siteDir . '/includes/LibraryFunctions.php');
-require_once($siteDir . '/includes/SystemClass.php');
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
+
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/SystemClass.php');
 	
 class BookingTypeException extends SystemClassException {}
 
@@ -12,7 +13,12 @@ class BookingType extends SystemBase {
 	public static $prefix = 'bkt';
 	public static $tablename = 'bkt_booking_types';
 	public static $pkey_column = 'bkt_booking_type_id';
-
+	public static $permanent_delete_actions = array(
+		'bkt_booking_type_id' => 'delete',	
+		//'pac_itr_item_relation_id' => 'delete',
+		//'com_itr_item_relation_id' => 'null'
+	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	
 	const BOOKING_STATUS_INACTIVE = 0;
 	const BOOKING_STATUS_ACTIVE = 1;
 

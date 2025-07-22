@@ -2,7 +2,6 @@
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/Globalvars.php');
-$settings = Globalvars::get_instance();
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -10,12 +9,12 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-	require_once($siteDir . '/plugins/controld/data/ctldaccounts_class.php');
-	require_once($siteDir . '/plugins/controld/data/ctldprofiles_class.php');
-	require_once($siteDir . '/plugins/controld/data/ctldfilters_class.php');
-	require_once($siteDir . '/plugins/controld/data/ctldservices_class.php');
-	require_once($siteDir . '/plugins/controld/data/ctldrules_class.php');
-	require_once($siteDir . '/plugins/controld/data/ctlddevice_backups_class.php');
+PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
+PathHelper::requireOnce('plugins/controld/data/ctldprofiles_class.php');
+PathHelper::requireOnce('plugins/controld/data/ctldfilters_class.php');
+PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
+PathHelper::requireOnce('plugins/controld/data/ctldrules_class.php');
+PathHelper::requireOnce('plugins/controld/data/ctlddevice_backups_class.php');
 
 
 class CtldDeviceException extends SystemClassException {}

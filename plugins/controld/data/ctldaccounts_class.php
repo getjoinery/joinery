@@ -2,7 +2,6 @@
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/Globalvars.php');
-$settings = Globalvars::get_instance();
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -10,7 +9,7 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-require_once($siteDir . '/plugins/controld/data/ctlddevices_class.php');
+PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
 
 
 class CtldAccountException extends SystemClassException {}
@@ -125,6 +124,7 @@ class CtldAccount extends SystemBase {
 		if(!$this->is_active()){
 			return false;
 		}
+
 
 		$devices = new MultiCtldDevice(
 			array(
