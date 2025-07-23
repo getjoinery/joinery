@@ -35,7 +35,16 @@ class ItemRelation extends SystemBase {
 		'itr_create_time' => 'Time Created',
 		'itr_delete_time' => 'Time of deletion',
 	);
-
+	
+/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)'  < /dev/null |  |  'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'itr_item_relation_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'itr_itm_item_id_left' => array('type'=>'int4'),
@@ -48,7 +57,9 @@ class ItemRelation extends SystemBase {
 		'itr_delete_time' => array('type'=>'timestamp(6)'),
 	);
 	
-	public static $required_fields = array();
+	
+
+public static $required_fields = array();
 
 	public static $field_constraints = array();	
 	

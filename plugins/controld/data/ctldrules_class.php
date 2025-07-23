@@ -29,7 +29,16 @@ class CtldRule extends SystemBase {
 		'cdr_rule_action' => '0 = BLOCK. 1 = BYPASS, 2 = SPOOF, 3 = REDIRECT',
 		'cdr_rule_via' => 'Spoof/Redirect target. If SPOOF, this can be an IPv4 or hostname. If REDIRECT, this must be a valid proxy identifier.',
 	);
-
+	
+/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)'  < /dev/null |  |  'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'cdr_ctldrule_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'cdr_cdp_ctldprofile_id' => array('type'=>'varchar(64)'),
@@ -39,7 +48,9 @@ class CtldRule extends SystemBase {
 		'cdr_rule_via' => array('type'=>'varchar(32)'),
 	);
 			
-	public static $required_fields = array();
+	
+
+public static $required_fields = array();
 
 	public static $field_constraints = array(
 		/*'cdr_code' => array(

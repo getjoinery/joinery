@@ -49,7 +49,16 @@ class CtldDevice extends SystemBase {
 		'cdd_allow_device_edits' => 'Override for the edit restrictions',
 		'cdd_activate_time' => 'Time this was activated',
 	);
-
+	
+/**
+	 * Field specifications define database column properties and schema constraints
+	 * Available options:
+	 *   'type' => 'varchar(255)'  < /dev/null |  |  'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
+	 *   'serial' => true/false - Auto-incrementing field
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'unique' => true - Field must be unique (single field constraint)
+	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 */
 	public static $field_specifications = array(
 		'cdd_ctlddevice_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'cdd_device_id' => array('type'=>'varchar(64)'),
@@ -70,7 +79,9 @@ class CtldDevice extends SystemBase {
 		'cdd_activate_time' => array('type'=>'timestamp(6)'),
 	);
 			
-	public static $required_fields = array();
+	
+
+public static $required_fields = array();
 
 	public static $field_constraints = array(
 		/*'cdd_code' => array(
