@@ -42,7 +42,7 @@
 		$public_menu->prepare();
 		$public_menu->save();
 		LibraryFunctions::redirect('/admin/admin_public_menu');
-		exit;
+		return;
 	}
 
 

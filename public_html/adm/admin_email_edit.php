@@ -42,7 +42,7 @@
 		$email->load();
 		
 		LibraryFunctions::redirect('/admin/admin_email?eml_email_id='.$email->key);
-		exit;
+		return;
 	}
 
 	$settings = Globalvars::get_instance();

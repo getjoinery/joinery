@@ -28,7 +28,7 @@
 		$event_type->save();
 
 		LibraryFunctions::redirect('/admin/admin_event_types');	
-		exit;
+		return;
 	} 
 
 	$page = new AdminPage();

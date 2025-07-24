@@ -77,7 +77,7 @@
 		}
 		
 		LibraryFunctions::redirect('/admin/admin_product?pro_product_id='. $product->key);
-		exit;		
+		return;		
 	} 
 
 	if ($product_version->key) {

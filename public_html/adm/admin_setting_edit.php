@@ -36,7 +36,7 @@
 		$setting->load();
 		
 		LibraryFunctions::redirect('/admin/admin_settings');
-		exit;
+		return;
 	}
 
 

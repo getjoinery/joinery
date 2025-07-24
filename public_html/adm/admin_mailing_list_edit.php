@@ -55,7 +55,7 @@
 		$mailing_list->load();
 		
 		LibraryFunctions::redirect('/admin/admin_mailing_list?mlt_mailing_list_id='.$mailing_list->key);
-		exit;
+		return;
 	}
 
 	$page = new AdminPage();

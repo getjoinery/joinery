@@ -85,7 +85,7 @@
 		}
 
 		LibraryFunctions::redirect('/admin/admin_videos');						
-		exit();
+		return;
 
 	}
 	else{

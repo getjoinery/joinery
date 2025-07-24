@@ -65,7 +65,7 @@
 		}
 
 		LibraryFunctions::redirect('/admin/admin_post?pst_post_id='. $post->key);
-		exit;		
+		return;		
 	}
 
 	$title = $post->get('pst_title');

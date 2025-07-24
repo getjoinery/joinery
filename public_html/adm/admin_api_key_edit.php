@@ -55,7 +55,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		$api_key->load();
 		
 		LibraryFunctions::redirect('/admin/admin_api_key?apk_api_key_id='. $api_key->key);
-		exit;
+		return;
 	}
 
 

@@ -114,7 +114,7 @@ function product_logic($get_vars, $post_vars, $product){
 		$page_vars['display_empty_form'] = FALSE;  
 
 		LibraryFunctions::redirect('/cart');
-		exit;	
+		return;	
 	}
 
 

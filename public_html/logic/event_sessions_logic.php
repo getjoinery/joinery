@@ -47,7 +47,7 @@ function event_sessions_logic($get_vars, $post_vars){
 	if($event->get('evt_session_display_type') == 2){
 		//REDIRECT
 		LibraryFunctions::redirect('/profile/event_sessions_course?event_id='.$event->key);						
-		exit();
+		return;
 	}
 
 	if ($event && $session->get_user_id() && $session->get_permission() > 4) {

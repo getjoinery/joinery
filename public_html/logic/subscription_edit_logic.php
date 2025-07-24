@@ -103,7 +103,7 @@ function subscription_edit_logic($get_vars, $post_vars){
 
 			
 		LibraryFunctions::redirect('/profile');
-		exit;
+		return;
 
 	}
 

@@ -39,7 +39,7 @@
 		$order->save();
 		
 		LibraryFunctions::redirect('/admin/admin_order?ord_order_id='.$order->key);
-		exit;
+		return;
 	}
 
 	$breadcrumbs = array('Orders'=>'/admin/admin_orders');
