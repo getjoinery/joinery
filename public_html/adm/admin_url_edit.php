@@ -49,7 +49,7 @@
 		$url->load();
 
 		LibraryFunctions::redirect('/admin/admin_url?url_url_id='.$url->key);						
-		exit();
+		return;
 
 	}
 	else{

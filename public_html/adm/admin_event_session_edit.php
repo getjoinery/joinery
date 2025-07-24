@@ -39,7 +39,7 @@
 			$dbhelper->handle_query_error($e);
 		}
 		LibraryFunctions::redirect('/admin/admin_event_sessions?evt_event_id='.$event->key);
-		exit;		
+		return;		
 	}
 	else if($_REQUEST['action'] == 'addfile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
@@ -196,7 +196,7 @@
 		
 		
 		LibraryFunctions::redirect('/admin/admin_event_sessions?evt_event_id='.$event_session->get('evs_evt_event_id'));
-		exit;
+		return;
 	}
 
 

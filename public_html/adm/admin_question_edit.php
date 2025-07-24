@@ -91,7 +91,7 @@
 		
 
 		LibraryFunctions::redirect('/admin/admin_question?qst_question_id='. $question->key);
-		exit;		
+		return;		
 	}
 
 

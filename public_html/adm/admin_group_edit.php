@@ -20,7 +20,7 @@
 		Group::add_group(strip_tags($_POST['grp_name']), $session->get_user_id(), 'user');
 		
 		LibraryFunctions::redirect('/admin/admin_groups');
-		exit;
+		return;
 	}
 
 

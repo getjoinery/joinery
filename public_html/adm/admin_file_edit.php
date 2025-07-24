@@ -61,7 +61,7 @@
 		$file->load();
 		
 		LibraryFunctions::redirect('/admin/admin_file?fil_file_id='.$file->key);
-		exit;
+		return;
 	}
 
 

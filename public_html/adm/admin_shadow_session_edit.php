@@ -35,7 +35,7 @@
 		
 		
 		LibraryFunctions::redirect('/admin/admin_shadow_sessions');
-		exit;
+		return;
 	}
 
 

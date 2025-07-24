@@ -105,7 +105,7 @@
 				
 		
 		LibraryFunctions::redirect('/admin/admin_event?evt_event_id='.$event->key);
-		exit;
+		return;
 	}
 
 	$breadcrumbs = array('Events'=>'/admin/admin_events');

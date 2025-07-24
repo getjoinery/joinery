@@ -29,7 +29,7 @@
 		$product_group->save();
 
 		LibraryFunctions::redirect('/admin/admin_product_groups');	
-		exit;
+		return;
 	} 
 
 	$page = new AdminPage();

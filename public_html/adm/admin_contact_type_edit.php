@@ -28,7 +28,7 @@
 		$contact_type->load();
 		
 		LibraryFunctions::redirect('/admin/admin_contact_type?ctt_contact_type_id='.$contact_type->key);
-		exit;
+		return;
 	}
 
 	$page = new AdminPage();

@@ -59,7 +59,7 @@
 		$page->load();
 		
 		LibraryFunctions::redirect('/admin/admin_page?pag_page_id='. $page->key);
-		exit;
+		return;
 	}
 
 	$title = $page->get('pag_title');

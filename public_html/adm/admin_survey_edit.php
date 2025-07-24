@@ -28,7 +28,7 @@
 		$survey->load();
 		
 		LibraryFunctions::redirect('/admin/admin_survey?svy_survey_id='.$survey->key);
-		exit;
+		return;
 	}
 
 

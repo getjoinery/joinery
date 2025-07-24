@@ -59,7 +59,7 @@
 		$page_content->load();
 		
 		LibraryFunctions::redirect('/admin/admin_page_content?pac_page_content_id='. $page_content->key);
-		exit;
+		return;
 	}
 
 	$title = $page_content->get('pac_title');

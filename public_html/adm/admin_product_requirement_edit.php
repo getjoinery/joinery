@@ -44,7 +44,7 @@
 		
 		
 		LibraryFunctions::redirect('/admin/admin_product_requirements?pro_product_requirement_id='. $product_requirement->key);
-		exit;		
+		return;		
 	} 
 
 	if ($product_requirement->key) {

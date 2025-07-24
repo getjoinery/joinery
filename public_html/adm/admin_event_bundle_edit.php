@@ -29,7 +29,7 @@
 		}
 
 		LibraryFunctions::redirect('/admin/admin_event_bundle?grp_group_id='.$group->key);
-		exit;
+		return;
 	}
 
 	if(!$group){

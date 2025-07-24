@@ -95,7 +95,7 @@
 		}
 
 		LibraryFunctions::redirect('/admin/admin_coupon_code?ccd_coupon_code_id='.$coupon_code->key);
-		exit;
+		return;
 	}
 
 

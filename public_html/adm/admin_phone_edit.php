@@ -32,7 +32,7 @@ if($_POST){
 	
 	//NOW REDIRECT
 	LibraryFunctions::redirect('/admin/admin_user?usr_user_id='. $user_id );
-	exit();
+	return;
 
 
 }

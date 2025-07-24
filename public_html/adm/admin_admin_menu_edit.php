@@ -34,7 +34,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		$admin_menu->prepare();
 		$admin_menu->save();
 		LibraryFunctions::redirect('/admin/admin_admin_menu');
-		exit;
+		return;
 	}
 
 

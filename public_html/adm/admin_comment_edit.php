@@ -30,7 +30,7 @@
 		$comment->load();
 		
 		LibraryFunctions::redirect('/admin/admin_comment?cmt_comment_id='. $comment->key);
-		exit;
+		return;
 	}
 
 

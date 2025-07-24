@@ -30,7 +30,7 @@
 		$email_template->load();
 		
 		LibraryFunctions::redirect('/admin/admin_email_template?emt_email_template_id='. $email_template->key);
-		exit;
+		return;
 	}
 
 

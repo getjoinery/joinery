@@ -35,7 +35,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		}
 		
 		LibraryFunctions::redirect('/admin/admin_user?usr_user_id='. $user_id );
-		exit;
+		return;
 
 	} 
 

@@ -46,7 +46,7 @@
 		$location->load();
 		
 		LibraryFunctions::redirect('/admin/admin_location?loc_location_id='. $location->key);
-		exit;
+		return;
 	}
 
 	$title = $location->get('loc_name');
