@@ -20,14 +20,10 @@ class ProductRequirement extends SystemBase {
 	public static $prefix = 'prq';
 	public static $tablename = 'prq_product_requirements';
 	public static $pkey_column = 'prq_product_requirement_id';
-	public static $permanent_delete_actions = array(
-		'prq_product_requirement_id' => 'delete',	
-		'pri_prq_product_requirement_id' => 'delete',
+	public static $permanent_delete_actions = array(		'pri_prq_product_requirement_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(
-		'prq_product_requirement_id' => 'event session ID',
-		'prq_title' => 'Session title',
+	public static $fields = array(		'prq_title' => 'Session title',
 		'prq_link' => 'link to something',
 		'prq_is_required' => 'Is this required upon registration/purchase?',
 		'prq_order' => 'sort order',

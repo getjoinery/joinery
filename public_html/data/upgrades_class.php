@@ -14,7 +14,6 @@ class Upgrade extends SystemBase {
 	public static $tablename = 'upg_upgrades';
 	public static $pkey_column = 'upg_upgrade_id';
 	public static $permanent_delete_actions = array(
-		'upg_upgrade_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
 	public static $fields = array(

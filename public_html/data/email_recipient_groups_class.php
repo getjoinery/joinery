@@ -15,14 +15,10 @@ class EmailRecipientGroup extends SystemBase {
 	public static $prefix = 'erc';
 	public static $tablename = 'erg_email_recipient_groups';
 	public static $pkey_column = 'erg_email_recipient_group_id';
-	public static $permanent_delete_actions = array(
-		'erg_email_recipient_group_id' => 'delete',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 
-	public static $fields = array(
-		'erg_email_recipient_group_id' => 'EmailRecipientGroup id',
-		'erg_grp_group_id' => 'Group for recipients to be added',
+	public static $fields = array(		'erg_grp_group_id' => 'Group for recipients to be added',
 		'erg_evt_event_id' => 'Event for recipients to be added',
 		'erg_eml_email_id' => 'Email foreign key',
 		'erg_operation' => 'Add or remove'

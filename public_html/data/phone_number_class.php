@@ -16,15 +16,11 @@ class PhoneNumber extends SystemBase {
 	public static $prefix = 'phn';
 	public static $tablename = 'phn_phone_numbers';
 	public static $pkey_column = 'phn_phone_number_id';
-	public static $permanent_delete_actions = array(
-		'phn_phone_number_id' => 'delete',	
-		'act_activation_codes' => 'delete',
+	public static $permanent_delete_actions = array(		'act_activation_codes' => 'delete',
 		'usr_phn_phone_number_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
-	public static $fields = array(
-		'phn_phone_number_id' => 'Phone number id',
-		'phn_phone_number' => 'Phone number',
+	public static $fields = array(		'phn_phone_number' => 'Phone number',
 		'phn_is_private' => 'Is this phone number private?',
 		'phn_is_verified' => 'Is this phone number verified?',
 		'phn_usr_user_id' => 'User who owns this phone #',

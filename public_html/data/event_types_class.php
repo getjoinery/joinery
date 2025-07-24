@@ -15,14 +15,10 @@ class EventType extends SystemBase {
 	public static $prefix = 'ety';
 	public static $tablename = 'ety_event_types';
 	public static $pkey_column = 'ety_event_type_id';
-	public static $permanent_delete_actions = array(
-		'ety_event_type_id' => 'delete',	
-		'evt_ety_event_type_id' => 'prevent',
+	public static $permanent_delete_actions = array(		'evt_ety_event_type_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'ety_event_type_id' => 'ID for this event type',
-		'ety_name' => 'Name of the event type'
+	public static $fields = array(		'ety_name' => 'Name of the event type'
 	);
 
 	/**

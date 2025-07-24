@@ -48,15 +48,11 @@ class EventSession extends SystemBase {
 	public static $prefix = 'evs';
 	public static $tablename = 'evs_event_sessions';
 	public static $pkey_column = 'evs_event_session_id';
-	public static $permanent_delete_actions = array(
-		'evs_event_session_id' => 'delete',	
-		'sev_evs_event_session_id' => 'delete',
+	public static $permanent_delete_actions = array(		'sev_evs_event_session_id' => 'delete',
 		'esf_evs_event_session_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(
-		'evs_event_session_id' => 'event session ID',
-		'evs_evt_event_id' => 'event ID',
+	public static $fields = array(		'evs_evt_event_id' => 'event ID',
 		'evs_title' => 'Session title',
 		'evs_content' => 'Page content',
 		'evs_start_time' => 'start time',

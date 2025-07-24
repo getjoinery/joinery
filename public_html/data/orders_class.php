@@ -20,7 +20,6 @@ class Order extends SystemBase {
 	public static $tablename = 'ord_orders';
 	public static $pkey_column = 'ord_order_id';
 	public static $permanent_delete_actions = array(
-		'ord_order_id' => 'delete',	
 		'odi_ord_order_id' => 'delete',
 		'cls_ord_order_id' => 'delete',
 		'evr_ord_order_id' => 'null',

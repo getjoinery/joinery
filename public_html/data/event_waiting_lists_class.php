@@ -18,13 +18,9 @@ class WaitingList extends SystemBase {
 	public static $prefix = 'ewl';
 	public static $tablename = 'ewl_waiting_lists';
 	public static $pkey_column = 'ewl_waiting_list_id';
-	public static $permanent_delete_actions = array(
-		'ewl_waiting_list_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'ewl_waiting_list_id' => 'ID of the group member',
-		'ewl_evt_event_id' => 'group id',
+	public static $fields = array(		'ewl_evt_event_id' => 'group id',
 		'ewl_usr_user_id' => 'User on the waiting list',
 		'ewl_create_time' => 'Time added to waiting list',
 	);

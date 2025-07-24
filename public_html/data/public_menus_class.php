@@ -16,13 +16,9 @@ class PublicMenu extends SystemBase {
 	public static $prefix = 'pmu';
 	public static $tablename = 'pmu_public_menus';
 	public static $pkey_column = 'pmu_public_menu_id';
-	public static $permanent_delete_actions = array(
-		'pmu_public_menu_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(
-		'pmu_public_menu_id' => 'ID of the public_menu',
-		'pmu_name' => 'Display Name', 
+	public static $fields = array(		'pmu_name' => 'Display Name', 
 		'pmu_link' => 'link to the page, starting with a slash',
 		'pmu_is_active' => 'Is this public_menu active?',
 		'pmu_parent_menu_id' => 'pmu_public_menu_id of parent if a subitem',

@@ -18,9 +18,7 @@ class Address extends SystemBase {
 	public static $prefix = 'usa';
 	public static $tablename = 'usa_users_addrs';
 	public static $pkey_column = 'usa_users_addr_id';
-	public static $permanent_delete_actions = array(
-		'usa_users_addr_id' => 'delete', 
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	const PRIVACY_SHOW_ALL = 1;
 	const PRIVACY_SHOW_CLIENTS = 2;
@@ -101,9 +99,7 @@ class Address extends SystemBase {
 		'WY'=>"Wyoming"
 	);
 
-	public static $fields = array(
-		'usa_users_addr_id' => 'Address ID',
-		'usa_type' => 'Address type',
+	public static $fields = array(		'usa_type' => 'Address type',
 		'usa_address1' => 'Line 1 of address',
 		'usa_address2' => 'Line 2 of address',
 		'usa_city' => 'City',

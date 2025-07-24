@@ -20,13 +20,9 @@ class ProductRequirementInstance extends SystemBase {
 	public static $prefix = 'pri';
 	public static $tablename = 'pri_product_requirement_instances';
 	public static $pkey_column = 'pri_product_requirement_instance_id';
-	public static $permanent_delete_actions = array(
-		'pri_product_requirement_instance_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(
-		'pri_product_requirement_instance_id' => 'Product Requirement Instance ID',
-		'pri_pro_product_id' => 'Product it is attached to',
+	public static $fields = array(		'pri_pro_product_id' => 'Product it is attached to',
 		'pri_prq_product_requirement_id' => 'Product Requirement it is attached to',
 		'pri_delete_time' => 'Time deleted'
 		); 

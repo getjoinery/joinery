@@ -21,18 +21,14 @@ class OrderItem extends SystemBase {
 	public static $prefix = 'odi';
 	public static $tablename = 'odi_order_items';
 	public static $pkey_column = 'odi_order_item_id';
-	public static $permanent_delete_actions = array(
-		'odi_order_item_id' => 'delete',	
-		'evr_odi_order_item_id' => 'delete',
+	public static $permanent_delete_actions = array(		'evr_odi_order_item_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
 	public const STATUS_UNPAID = 1;
 	public const STATUS_PAID = 2;
 	public const STATUS_ERROR = 3;
 
-	public static $fields = array(
-		'odi_order_item_id' => 'OrderItem ID',
-		'odi_ord_order_id' => 'Order ID',
+	public static $fields = array(		'odi_ord_order_id' => 'Order ID',
 		'odi_pro_product_id' => 'Product ID',
 		'odi_prv_product_version_id' => 'Product Version (if there is one)',
 		'odi_product_info' => 'Serialized PHP array of the associated information with this product',

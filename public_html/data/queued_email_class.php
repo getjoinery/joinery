@@ -17,9 +17,7 @@ class QueuedEmail extends SystemBase {
 	public static $prefix = 'equ';
 	public static $tablename = 'equ_queued_emails';
 	public static $pkey_column = 'equ_queued_email_id';
-	public static $permanent_delete_actions = array(
-		'equ_queued_email_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	// The various states an email can be in
 	const QUEUED = 1; // Queued, but not approved yet
@@ -40,9 +38,7 @@ class QueuedEmail extends SystemBase {
 		self::NORMAL_MAILER_ERROR => 'Non-Recurring Email Error',
 	);
 
-	public static $fields = array(
-		'equ_queued_email_id' => 'ID for the email',
-		'equ_from_name' => 'Name the email is from',
+	public static $fields = array(		'equ_from_name' => 'Name the email is from',
 		'equ_from' => 'Address the email is from',
 		'equ_to' => 'Address the email is to',
 		'equ_to_name' => 'Name the email is to',

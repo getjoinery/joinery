@@ -18,7 +18,6 @@ class Survey extends SystemBase {
 	public static $tablename = 'svy_surveys';
 	public static $pkey_column = 'svy_survey_id';
 	public static $permanent_delete_actions = array(
-		'svy_survey_id' => 'delete',	
 		'srq_svy_survey_id' => 'prevent',
 		'sva_svy_survey_id' => 'prevent',
 		'evt_svy_survey_id' => 'prevent',

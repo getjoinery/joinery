@@ -20,9 +20,7 @@ class Question extends SystemBase {
 	public static $tablename = 'qst_questions';
 	public static $pkey_column = 'qst_question_id';
 	public static $permanent_delete_actions = array(
-		'qop_qst_question_id' => 'delete', 
-		'qst_question_id' => 'delete', 
-		'srq_qst_question_id' => 'prevent',
+		'qop_qst_question_id' => 'delete',		'srq_qst_question_id' => 'prevent',
 		'sva_qst_question_id' => 'prevent',
 		'oir_qst_question_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -36,9 +34,7 @@ class Question extends SystemBase {
 	const TYPE_CHECKBOX = 5;
 	const TYPE_CHECKBOX_LIST = 6;
 
-	public static $fields = array(
-		'qst_question_id' => 'ID of the question',
-		'qst_translation_of_question_id' => 'If this is a translation, id of the english question',
+	public static $fields = array(		'qst_translation_of_question_id' => 'If this is a translation, id of the english question',
 		'qst_language' => 'Integer representing language',
 		'qst_question' => 'Question',
 		'qst_options' => 'Array of options',

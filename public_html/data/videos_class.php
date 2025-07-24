@@ -15,15 +15,11 @@ class Video extends SystemBase {
 	public static $prefix = 'vid';
 	public static $tablename = 'vid_videos';
 	public static $pkey_column = 'vid_video_id';
-	public static $permanent_delete_actions = array(
-		'vid_video_id' => 'delete',	
-		'evs_vid_video_id' => 'prevent',
+	public static $permanent_delete_actions = array(		'evs_vid_video_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	public static $url_namespace = 'video'; 
 	
-	public static $fields = array(
-		'vid_video_id' => 'ID of the video',
-		'vid_title' => 'Video Title',
+	public static $fields = array(		'vid_title' => 'Video Title',
 		'vid_link' => 'Link to the video',
 		'vid_description' => 'Description',
 		'vid_usr_user_id' => 'User this video is associated with',

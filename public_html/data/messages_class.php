@@ -13,13 +13,9 @@ class Message extends SystemBase {
 	public static $prefix = 'msg';
 	public static $tablename = 'msg_messages';
 	public static $pkey_column = 'msg_message_id';
-	public static $permanent_delete_actions = array(
-		'msg_message_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(
-		'msg_message_id' => 'Message id',
-		'msg_usr_user_id_recipient' => 'Message recipient',
+	public static $fields = array(		'msg_usr_user_id_recipient' => 'Message recipient',
 		'msg_usr_user_id_sender' => 'Where is the message from',
 		'msg_evt_event_id' => 'Event id if sent to event recipients',
 		'msg_body' => 'The message',

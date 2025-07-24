@@ -15,13 +15,9 @@ class EventSessionFile extends SystemBase {
 	public static $prefix = 'esf';
 	public static $tablename = 'esf_event_session_files';
 	public static $pkey_column = 'esf_event_session_file_id';
-	public static $permanent_delete_actions = array(
-		'esf_event_session_file_id' => 'delete',		
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(
-		'esf_event_session_file_id' => 'ID of the event_session_file',
-		'esf_evs_event_session_id' => 'see above',
+	public static $fields = array(		'esf_evs_event_session_id' => 'see above',
 		'esf_fil_file_id' => 'User this event_session_file is associated with',
 	);
 

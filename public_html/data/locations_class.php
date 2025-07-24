@@ -17,14 +17,10 @@ class Location extends SystemBase {
 	public static $tablename = 'loc_locations';
 	public static $pkey_column = 'loc_location_id';
 	public static $url_namespace = 'location';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(
-		'loc_location_id' => 'delete',	
-		'evt_loc_location_id' => 'null',
+	public static $permanent_delete_actions = array(		'evt_loc_location_id' => 'null',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'loc_location_id' => 'ID of the location',
-		'loc_name' => 'Location Name',
+	public static $fields = array(		'loc_name' => 'Location Name',
 		'loc_link' => 'Link of the location',
 		'loc_address' => 'Address of the location',
 		'loc_website' => 'Address of the location',
