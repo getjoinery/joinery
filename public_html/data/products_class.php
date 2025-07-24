@@ -598,8 +598,7 @@ class Product extends SystemBase {
 	public static $tablename = 'pro_products';
 	public static $pkey_column = 'pro_product_id';
 	public static $url_namespace = 'product';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(
-		'pro_product_id' => 'delete',	
+	public static $permanent_delete_actions = array(	
 		'prd_pro_product_id' => 'delete',
 		'prv_pro_product_id' => 'delete',
 		'ccp_pro_product_id' => 'delete',
