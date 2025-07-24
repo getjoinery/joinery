@@ -1,0 +1,71 @@
+{
+  "products": [
+    {
+      "pro_name": "Test Product 1",
+      "pro_description": "This is a test product for automated testing",
+      "pro_short_description": "Test product 1",
+      "pro_is_active": "1",
+      "pro_max_purchase_count": "100",
+      "pro_max_cart_count": "5",
+      "pro_expires": "30",
+      "pro_link": "test-product-1",
+      "pro_digital_link": "https://example.com/download1",
+      "pro_evt_event_id": "",
+      "pro_grp_group_id": "",
+      "pro_prg_product_group_id": "",
+      "pro_requirements": {
+        "1": "1",
+        "64": "64"
+      },
+      "additional_pro_requirements": {},
+      "product_scripts": [],
+      "pro_after_purchase_message": "Thank you for your purchase!",
+      "pro_receipt_body": "Receipt for Test Product 1"
+    },
+    {
+      "pro_name": "Test Product 2", 
+      "pro_description": "Another test product with different settings",
+      "pro_short_description": "Test product 2",
+      "pro_is_active": "1",
+      "pro_max_purchase_count": "0",
+      "pro_max_cart_count": "0", 
+      "pro_expires": "0",
+      "pro_link": "test-product-2",
+      "pro_digital_link": "",
+      "pro_evt_event_id": "",
+      "pro_grp_group_id": "",
+      "pro_prg_product_group_id": "",
+      "pro_requirements": {
+        "1": "1",
+        "2": "2", 
+        "64": "64"
+      },
+      "additional_pro_requirements": {},
+      "product_scripts": [],
+      "pro_after_purchase_message": "Thank you for Test Product 2!",
+      "pro_receipt_body": "Your receipt for Test Product 2"
+    },
+    {
+      "pro_name": "Test Product 3",
+      "pro_description": "A third test product for comprehensive testing",
+      "pro_short_description": "Test product 3",
+      "pro_is_active": "0",
+      "pro_max_purchase_count": "1",
+      "pro_max_cart_count": "1",
+      "pro_expires": "7", 
+      "pro_link": "test-product-3",
+      "pro_digital_link": "https://example.com/download3",
+      "pro_evt_event_id": "",
+      "pro_grp_group_id": "",
+      "pro_prg_product_group_id": "",
+      "pro_requirements": {
+        "1": "1",
+        "64": "64"
+      },
+      "additional_pro_requirements": {},
+      "product_scripts": [],
+      "pro_after_purchase_message": "",
+      "pro_receipt_body": ""
+    }
+  ]
+}
