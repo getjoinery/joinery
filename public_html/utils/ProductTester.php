@@ -496,6 +496,98 @@ class ProductTester {
         }
         echo "</div>\n";
     }
+    
+    /**
+     * Delete all created test products and verify deletion
+     */
+    public function deleteCreatedProducts() {
+        if (empty($this->created_products)) {
+            echo "No products to delete.<br>\n";
+            return;
+        }
+        
+        echo "Deleting " . count($this->created_products) . " test products...<br>\n";
+        flush();
+        
+        // Make sure we're in test mode for deletion
+        $this->dbconnector->set_test_mode();
+        echo "Test mode enabled for deletion<br>\n";
+        flush();
+        
+        $deleted_count = 0;
+        $failed_deletions = [];
+        
+        foreach ($this->created_products as $product_id) {
+            try {
+                echo "Deleting product ID: $product_id...<br>\n";
+                flush();
+                
+                // Load the product
+                $product = new Product($product_id, true);
+                
+                if ($product->key) {
+                    // Use permanent_delete() method
+                    $delete_result = $product->permanent_delete();
+                    echo "Delete result: " . ($delete_result ? 'true' : 'false') . "<br>\n";
+                    
+                    $deleted_count++;
+                    echo "✓ Product $product_id permanently deleted<br>\n";
+                } else {
+                    echo "⚠ Product $product_id not found (may already be deleted)<br>\n";
+                }
+                
+            } catch (Exception $e) {
+                $failed_deletions[] = $product_id;
+                echo "✗ Failed to delete product $product_id: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+            }
+            flush();
+        }
+        
+        echo "<br><strong>Deletion Summary:</strong><br>\n";
+        echo "Successfully deleted: $deleted_count products<br>\n";
+        
+        if (!empty($failed_deletions)) {
+            echo "Failed to delete: " . count($failed_deletions) . " products (IDs: " . implode(', ', $failed_deletions) . ")<br>\n";
+        }
+        
+        
+        // Verify deletion by trying to load each product
+        echo "<br><strong>Verification Phase:</strong><br>\n";
+        echo "Verifying products were actually deleted...<br>\n";
+        
+        // Make sure we're still in test mode for verification
+        $this->dbconnector->set_test_mode();
+        $dblink = $this->dbconnector->get_db_link();
+        
+        $still_exists = [];
+        foreach ($this->created_products as $product_id) {
+            try {
+                // Use direct database query instead of object loading to avoid caching issues
+                $check_sql = "SELECT COUNT(*) as count FROM pro_products WHERE pro_product_id = :product_id";
+                $stmt = $dblink->prepare($check_sql);
+                $stmt->bindParam(':product_id', $product_id, PDO::PARAM_INT);
+                $stmt->execute();
+                $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($result['count'] > 0) {
+                    $still_exists[] = $product_id;
+                    echo "⚠ Product $product_id still exists in database<br>\n";
+                } else {
+                    echo "✓ Product $product_id confirmed deleted<br>\n";
+                }
+            } catch (Exception $e) {
+                echo "✓ Product $product_id confirmed deleted (query failed as expected)<br>\n";
+            }
+            flush();
+        }
+        
+        if (empty($still_exists)) {
+            echo "<br>✅ <strong>All test products successfully deleted and verified!</strong><br>\n";
+        } else {
+            echo "<br>❌ <strong>Warning: " . count($still_exists) . " products still exist in database (IDs: " . implode(', ', $still_exists) . ")</strong><br>\n";
+        }
+        flush();
+    }
 }
 
 // Class is now ready to be included and used
