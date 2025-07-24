@@ -25,6 +25,13 @@ try {
     echo "Running tests...<br>\n";
     flush();
     $tester->run();
+    
+    // Delete created test products and verify deletion
+    echo "<br><h3>Cleanup Phase</h3>\n";
+    echo "Deleting created test products...<br>\n";
+    flush();
+    $tester->deleteCreatedProducts();
+    
 } catch (Exception $e) {
     echo "<strong>ERROR:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
 }
