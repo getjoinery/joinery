@@ -513,17 +513,18 @@ These directories contain critical system infrastructure. Changes should only be
 ## Best Practices
 
 1. **Syntax Validation**: ALWAYS run `php -l filename.php` on all PHP files before completing any task
-2. **Security**: Always validate and sanitize user input
-3. **Consistency**: Follow the established patterns in existing admin files
-4. **FormWriter**: Always use FormWriter class for forms (`LibraryFunctions::get_formwriter_object()`)
-5. **No Nested Panels**: Avoid cards inside cards unless there's a specific reason
-6. **Accessibility**: Use proper labels and form structure
-7. **Responsive**: Ensure pages work on mobile devices
-8. **Performance**: Include only necessary CSS/JS files
-9. **Error Handling**: Provide clear error messages to users
-10. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
-11. **Documentation**: Update this file when discovering new patterns or conventions
-12. **Respect Restrictions**: Only modify restricted directories with explicit user permission
+2. **Method Verification**: NEVER assume available functions or infer argument structure without examining the actual function definition first. Always check the class file to verify method names, signatures, and proper usage patterns before calling any method.
+3. **Security**: Always validate and sanitize user input
+4. **Consistency**: Follow the established patterns in existing admin files
+5. **FormWriter**: Always use FormWriter class for forms (`LibraryFunctions::get_formwriter_object()`)
+6. **No Nested Panels**: Avoid cards inside cards unless there's a specific reason
+7. **Accessibility**: Use proper labels and form structure
+8. **Responsive**: Ensure pages work on mobile devices
+9. **Performance**: Include only necessary CSS/JS files
+10. **Error Handling**: Provide clear error messages to users
+11. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
+12. **Documentation**: Update this file when discovering new patterns or conventions
+13. **Respect Restrictions**: Only modify restricted directories with explicit user permission
 
 ## Example Admin Page Template
 
