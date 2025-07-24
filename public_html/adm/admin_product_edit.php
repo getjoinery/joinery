@@ -110,7 +110,6 @@
 						$product->set('pro_stripe_product_id_test', $stripe_product['id']);
 						if(!$stripe_product['id']){
 							throw new SystemDisplayablePermanentError("Unable to create a stripe product."); 
-							exit;
 						}
 					}
 				}
@@ -119,7 +118,6 @@
 						$stripe_product = $stripe_helper->create_product($product_info);
 						if(!$stripe_product['id']){
 							throw new SystemDisplayablePermanentError("Unable to create a stripe product."); 
-							exit;
 						}
 						$product->set('pro_stripe_product_id', $stripe_product['id']);
 					}
@@ -157,8 +155,13 @@
 			$product_version->save(); 
 		}
 		
+
+		if($_POST['json_confirm']){
+			echo json_encode($product->key);
+		}
 		LibraryFunctions::redirect('/admin/admin_product?pro_product_id='. $product->key);
-		exit;		
+		return;
+
 	} 
 
 	if ($product->key) {
@@ -433,7 +436,8 @@
 	 * @return array An array of function names found in the file.
 	 * @throws Exception If the file cannot be read.
 	 */
-	function getFunctionNamesFromFile($filePath) {
+	if (!function_exists('getFunctionNamesFromFile')) {
+function getFunctionNamesFromFile($filePath) {
 		if (!file_exists($filePath)) {
 			throw new Exception("File does not exist: $filePath");
 		}
@@ -460,4 +464,5 @@
 
 		return $functions;
 	}
+}
 ?>

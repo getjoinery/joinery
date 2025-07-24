@@ -557,7 +557,7 @@ class LibraryFunctions {
 	static function Redirect($new_page) {
 		//header('HTTP/1.1 301 Moved Permanently');
 		header('Location: ' . $new_page);
-		exit;
+		return true;
 	}
 
 	static function IsValidEmail($email) {

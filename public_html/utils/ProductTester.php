@@ -176,8 +176,8 @@ class ProductTester {
      * Create a product by directly including admin_product_edit logic
      */
     private function createProduct($spec) {
-        // Add action field and pass all other data directly
-        $post_data = array_merge(['action' => 'add'], $spec);
+        // Add action field and json_confirm flag, then pass all other data directly
+        $post_data = array_merge(['action' => 'add', 'json_confirm' => '1'], $spec);
         
         echo "POST data being sent:<br>\n";
         echo "<pre>" . htmlspecialchars(print_r($post_data, true)) . "</pre><br>\n";
@@ -194,19 +194,63 @@ class ProductTester {
         // Capture output from admin_product_edit
         ob_start();
         
+        echo "About to include admin_product_edit.php...<br>\n";
+        flush();
+        
+        // Register shutdown function to catch fatal errors
+        $fatal_error_caught = false;
+        register_shutdown_function(function() use (&$fatal_error_caught) {
+            $error = error_get_last();
+            if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+                $fatal_error_caught = true;
+                echo "Fatal error during include: " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'] . "<br>\n";
+                flush();
+            }
+        });
+        
         try {
             // Include the admin script directly
             include($_SERVER['DOCUMENT_ROOT'] . '/adm/admin_product_edit.php');
+            echo "Include completed successfully...<br>\n";
+            flush();
             $response = ob_get_contents();
         } catch (Exception $e) {
             ob_end_clean();
+            echo "Exception caught: " . $e->getMessage() . "<br>\n";
+            flush();
             throw new Exception("Error in admin_product_edit: " . $e->getMessage());
+        } catch (Error $e) {
+            ob_end_clean();
+            echo "Fatal error caught: " . $e->getMessage() . "<br>\n";
+            flush();
+            throw new Exception("Fatal error in admin_product_edit: " . $e->getMessage());
+        }
+        
+        if ($fatal_error_caught) {
+            ob_end_clean();
+            throw new Exception("Fatal error occurred during admin_product_edit include");
         }
         
         ob_end_clean();
         
+        echo "Response captured, length: " . strlen($response) . "<br>\n";
+        flush();
+        
+        // Since we're using direct includes, check for headers that were set
+        $headers = headers_list();
+        $location_header = '';
+        foreach ($headers as $header) {
+            if (stripos($header, 'Location:') === 0) {
+                $location_header = $header;
+                break;
+            }
+        }
+        
+        // Create a mock response with the location header for parsing
+        $response_with_headers = $location_header . "\n\n" . $response;
+        
         // Parse response to extract product ID
-        $product_id = $this->extractProductIdFromResponse($response);
+        $product_id = $this->extractProductIdFromResponse($response_with_headers);
         
         if (!$product_id) {
             throw new Exception("Failed to extract product ID from admin_product_edit response");
@@ -295,7 +339,15 @@ class ProductTester {
         echo "Parsing response for product ID...<br>\n";
         flush();
         
-        // First check for the comment format used when skip_redirect is set
+        // First check for JSON response (when json_confirm is set)
+        // Look for JSON pattern in the response (quoted number)
+        if (preg_match('/"(\d+)"/', $response, $matches)) {
+            echo "Found product ID in JSON response: " . $matches[1] . "<br>\n";
+            flush();
+            return intval($matches[1]);
+        }
+        
+        // Check for the comment format used when skip_redirect is set
         if (preg_match('/<!-- PRODUCT_ID:(\d+) -->/', $response, $matches)) {
             echo "Found product ID in comment: " . $matches[1] . "<br>\n";
             flush();
