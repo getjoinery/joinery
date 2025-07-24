@@ -59,6 +59,9 @@ class ModelTester {
             $dbhelper->set_test_mode();
         }
         
+        // Validate permanent_delete_actions configuration
+        $this->validate_permanent_delete_actions();
+        
         try {
             if ($verbose) echo "Starting CRUD tests...<br>\n"; flush();
             $this->test_automated_crud($debug);
@@ -1207,5 +1210,29 @@ class ModelTester {
             'warned' => self::$test_warn_count,
             'failed' => self::$test_fail_count
         ];
+    }
+    
+    /**
+     * Validate permanent_delete_actions configuration
+     * Checks that the primary key is not incorrectly included in the permanent_delete_actions array
+     */
+    private function validate_permanent_delete_actions() {
+        $model_class = $this->model_class;
+        
+        // Check if the class has permanent_delete_actions defined
+        if (!property_exists($model_class, 'permanent_delete_actions')) {
+            // No permanent_delete_actions defined - this is fine
+            return;
+        }
+        
+        $permanent_delete_actions = $model_class::$permanent_delete_actions;
+        $primary_key = $model_class::$pkey_column;
+        
+        // Check if the primary key is incorrectly included in permanent_delete_actions
+        if (is_array($permanent_delete_actions) && array_key_exists($primary_key, $permanent_delete_actions)) {
+            $this->test_fail("Primary key '$primary_key' should not be included in permanent_delete_actions. The main record deletion is handled automatically by the permanent_delete() method.");
+        } else {
+            $this->test_pass("permanent_delete_actions configuration is correct (primary key not included)");
+        }
     }
 }
