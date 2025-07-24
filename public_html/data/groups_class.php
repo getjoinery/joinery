@@ -18,9 +18,7 @@ class Group extends SystemBase {
 	public static $prefix = 'grp';
 	public static $tablename = 'grp_groups';
 	public static $pkey_column = 'grp_group_id';
-	public static $permanent_delete_actions = array(
-		'grp_group_id' => 'delete',	
-		'evr_grp_group_id' => 'prevent',
+	public static $permanent_delete_actions = array(		'evr_grp_group_id' => 'prevent',
 		'evt_grp_group_id' => 'null',
 		'grm_grp_group_id' => 'delete',
 		'pro_grp_group_id' => 'prevent',
@@ -29,9 +27,7 @@ class Group extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 
-	public static $fields = array(
-		'grp_group_id' => 'ID of the group',
-		'grp_name' => 'Group Name',
+	public static $fields = array(		'grp_name' => 'Group Name',
 		'grp_usr_user_id_created' => 'User who created the group',
 		'grp_create_time' => 'Created',
 		'grp_update_time' => 'Updated',

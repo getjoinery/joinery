@@ -15,13 +15,9 @@ class Url extends SystemBase {
 	public static $prefix = 'url';
 	public static $tablename = 'url_urls';
 	public static $pkey_column = 'url_url_id';
-	public static $permanent_delete_actions = array(
-		'url_url_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'url_url_id' => 'ID of the url',
-		'url_incoming' => 'Incoming url',
+	public static $fields = array(		'url_incoming' => 'Incoming url',
 		'url_redirect_url' => 'Url to redirect to',
 		'url_redirect_file' => 'File to load',
 		'url_type' => 'Type of redirect - 301, 302, etc',

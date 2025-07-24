@@ -19,7 +19,6 @@ class SurveyQuestion extends SystemBase {
 	public static $tablename = 'srq_survey_questions';
 	public static $pkey_column = 'srq_survey_question_id';
 	public static $permanent_delete_actions = array(
-		'srq_survey_question_id' => 'delete',	
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(

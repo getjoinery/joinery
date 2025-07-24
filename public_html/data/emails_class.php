@@ -17,9 +17,7 @@ class Email extends SystemBase {
 	public static $prefix = 'eml';
 	public static $tablename = 'eml_emails';
 	public static $pkey_column = 'eml_email_id';
-	public static $permanent_delete_actions = array(
-		'eml_email_id' => 'delete',
-		'erc_eml_email_id' => 'delete',
+	public static $permanent_delete_actions = array(		'erc_eml_email_id' => 'delete',
 		'erg_eml_email_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
@@ -39,9 +37,7 @@ class Email extends SystemBase {
 	public $webdir = '';
 	public $cdn = '';
 
-	public static $fields = array(
-		'eml_email_id' => 'Email id',
-		'eml_description' => 'Description of the email',
+	public static $fields = array(		'eml_description' => 'Description of the email',
 		'eml_usr_user_id' => 'Email creator, can be NULL',
 		'eml_from_address' => 'From address',
 		'eml_from_name' => 'From name',

@@ -18,16 +18,12 @@ class File extends SystemBase {
 	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
 	public static $pkey_column = 'fil_file_id';
-	public static $permanent_delete_actions = array(
-		'fil_file_id' => 'delete',	
-		'esf_fil_file_id' => 'prevent',
+	public static $permanent_delete_actions = array(		'esf_fil_file_id' => 'prevent',
 		'evt_fil_file_id' => 'prevent',
 		'mlt_fil_file_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'fil_file_id' => 'ID of the file',
-		'fil_name' => 'Name',
+	public static $fields = array(		'fil_name' => 'Name',
 		'fil_title' => 'Human readable title',
 		'fil_description' => 'Description',
 		'fil_type' => 'Type',

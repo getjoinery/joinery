@@ -27,7 +27,6 @@ class User extends SystemBase {
 	public static $pkey_column = 'usr_user_id';
 
 	public static $permanent_delete_actions = array(
-		'usr_user_id' => 'delete',
 		'act_usr_user_id' => 'delete',
 		'lfe_usr_user_id' => 'delete',
 		'log_usr_user_id' => 'delete',

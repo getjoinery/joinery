@@ -53,9 +53,7 @@ class Event extends SystemBase {
 	public static $tablename = 'evt_events';
 	public static $pkey_column = 'evt_event_id';
 	public static $url_namespace = 'event';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(
-		'evt_event_id' => 'delete',
-		'evs_evt_event_id' => 'delete',	
+	public static $permanent_delete_actions = array(		'evs_evt_event_id' => 'delete',	
 		'evr_evt_event_id' => 'prevent',
 		'erg_evt_event_id' => 'prevent',
 		'msg_evt_event_id' => 'delete',
@@ -76,9 +74,7 @@ class Event extends SystemBase {
 	const VISIBILITY_PUBLIC = 1;
 	const VISIBILITY_PUBLIC_UNLISTED = 2;	
 
-	public static $fields = array(
-		'evt_event_id' => 'event ID',
-		'evt_name' => 'Name',
+	public static $fields = array(		'evt_name' => 'Name',
 		'evt_description' => 'Description',
 		'evt_short_description' => 'Short description',
 		'evt_usr_user_id_leader' => 'Who is leading the retreat',

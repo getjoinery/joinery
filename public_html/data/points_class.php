@@ -13,17 +13,13 @@ class Point extends SystemBase {
 	public static $prefix = 'pnt';
 	public static $tablename = 'pnt_points';
 	public static $pkey_column = 'pnt_point_id';
-	public static $permanent_delete_actions = array(
-		'pnt_point_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
 	const POINT_TYPE_GALAXY = 1;
 	const POINT_TYPE_STAR = 2;
 	const POINT_TYPE_PLANET = 3;
 
-	public static $fields = array(
-		'pnt_point_id' => 'Point id',
-		'pnt_name' => 'Point name',
+	public static $fields = array(		'pnt_name' => 'Point name',
 		'pnt_clan' => 'Type',
 		'pnt_sein' => 'Parent id',
 		'pnt_is_active' => 'If active',

@@ -15,13 +15,9 @@ class VisitorEvent extends SystemBase {
 	public static $prefix = 'vse';
 	public static $tablename = 'vse_visitor_events';
 	public static $pkey_column = 'vse_visitor_event_id';
-	public static $permanent_delete_actions = array(
-		'vse_visitor_event_id' => 'delete',		
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(
-		'vse_visitor_event_id' => 'ID of the visitor_event',
-		'vse_visitor_id' => 'Visitor id',
+	public static $fields = array(		'vse_visitor_id' => 'Visitor id',
 		'vse_usr_user_id' => 'The user id',
 		'vse_type' => 'Type of record',
 		'vse_ip' => 'User ip',

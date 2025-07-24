@@ -18,12 +18,9 @@ class CouponCodeUse extends SystemBase {
 	public static $tablename = 'ccu_coupon_code_uses';
 	public static $pkey_column = 'ccu_coupon_code_use_id';
 	public static $permanent_delete_actions = array(
-		//'ccu_coupon_code_use_id' => 'delete', 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'ccu_coupon_code_use_id' => 'ID of the coupon_code_use use',
-		'ccu_ccd_coupon_code_id' => 'The ID of the coupon code',
+	public static $fields = array(		'ccu_ccd_coupon_code_id' => 'The ID of the coupon code',
 		'ccu_amount_discount' => 'Amount in currency of the coupon at time of use',
 		'ccu_percent_discount' => 'Percent of coupon at time of use',
 		'ccu_odi_order_item_id' => 'Order id of use',

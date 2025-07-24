@@ -18,15 +18,11 @@ class Page extends SystemBase {
 	public static $tablename = 'pag_pages';
 	public static $pkey_column = 'pag_page_id';
 	public static $url_namespace = 'page';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(
-		'pag_page_id' => 'delete',	
-		'pac_pag_page_id' => 'delete',
+	public static $permanent_delete_actions = array(		'pac_pag_page_id' => 'delete',
 		'com_pag_page_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'pag_page_id' => 'ID of the url',
-		'pag_title' => 'Name of page',
+	public static $fields = array(		'pag_title' => 'Name of page',
 		'pag_link' => 'Link to the page',
 		'pag_body' => 'Body of this page',
 		'pag_usr_user_id' => 'User this page is associated with',

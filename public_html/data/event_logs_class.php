@@ -15,13 +15,9 @@ class EventLog extends SystemBase {
 	public static $prefix = 'evl';
 	public static $tablename = 'evl_event_logs';
 	public static $pkey_column = 'evl_event_log_id';
-	public static $permanent_delete_actions = array(
-		'evl_event_log_id' => 'delete',		
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(
-		'evl_event_log_id' => 'ID of the event_log',
-		'evl_event' => 'see above',
+	public static $fields = array(		'evl_event' => 'see above',
 		'evl_usr_user_id' => 'User this event_log is associated with',
 		'evl_create_time' => 'Time added',
 		'evl_was_success' => 'Did it run to completion?',

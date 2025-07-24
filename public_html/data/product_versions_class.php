@@ -16,13 +16,9 @@ class ProductVersion extends SystemBase {
 	public static $tablename = 'prv_product_versions';
 	public static $pkey_column = 'prv_product_version_id';
 	
-	public static $permanent_delete_actions = array(
-		'prv_product_version_id' => 'delete',		
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(
-		'prv_product_version_id' => 'ID of the product_version',
-		'prv_pro_product_id' => 'Product this version is attached to',
+	public static $fields = array(		'prv_pro_product_id' => 'Product this version is attached to',
 		'prv_version_name' => 'Name of the product version',
 		'prv_version_price' => 'Price of this version',
 		'prv_status' => 'Status, 0 or 1',

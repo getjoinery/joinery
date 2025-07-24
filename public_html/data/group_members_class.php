@@ -18,13 +18,9 @@ class GroupMember extends SystemBase {
 	public static $prefix = 'grm';
 	public static $tablename = 'grm_group_members';
 	public static $pkey_column = 'grm_group_member_id';
-	public static $permanent_delete_actions = array(
-		'grm_group_member_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'grm_group_member_id' => 'ID of the group member',
-		'grm_grp_group_id' => 'group id',
+	public static $fields = array(		'grm_grp_group_id' => 'group id',
 		'grm_foreign_key_id' => 'Foreign key pointing to the member in this group',
 	);
 

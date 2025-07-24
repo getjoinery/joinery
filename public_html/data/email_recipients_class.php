@@ -15,18 +15,14 @@ class EmailRecipient extends SystemBase {
 	public static $prefix = 'erc';
 	public static $tablename = 'erc_email_recipients';
 	public static $pkey_column = 'erc_email_recipient_id';
-	public static $permanent_delete_actions = array(
-		'erc_email_recipient_id' => 'delete',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	// Status codes
 	const EMAIL_SENT = 1;
 	const UNSUBSCRIBED = 2;
 	const SEND_FAILURE = 3;
 
-	public static $fields = array(
-		'erc_email_recipient_id' => 'EmailRecipient id',
-		'erc_usr_user_id' => 'Owner of the recipient - user id (optional)',
+	public static $fields = array(		'erc_usr_user_id' => 'Owner of the recipient - user id (optional)',
 		'erc_email' => 'Recipient email address',
 		'erc_name' => 'Recipient name, if available',
 		'erc_eml_email_id' => 'Email foreign key',

@@ -18,13 +18,9 @@ class SurveyAnswer extends SystemBase {
 	public static $prefix = 'sva';
 	public static $tablename = 'sva_survey_answers';
 	public static $pkey_column = 'sva_survey_answer_id';
-	public static $permanent_delete_actions = array(
-		'sva_survey_answer_id' => 'delete',	
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'sva_survey_answer_id' => 'ID of the survey question',
-		'sva_svy_survey_id' => 'Survey id',
+	public static $fields = array(		'sva_svy_survey_id' => 'Survey id',
 		'sva_qst_question_id' => 'Question id',
 		'sva_usr_user_id' => 'User who is answering',
 		'sva_answer' => 'Text answer of the question',

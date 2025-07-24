@@ -20,15 +20,11 @@ class Post extends SystemBase {
 	public static $tablename = 'pst_posts';
 	public static $pkey_column = 'pst_post_id';
 	public static $url_namespace = 'post';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(
-		'pst_post_id' => 'delete',	
-		'cmt_pst_post_id' => 'delete',
+	public static $permanent_delete_actions = array(		'cmt_pst_post_id' => 'delete',
 		'grm_pst_post_id' => 'delete'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(
-		'pst_post_id' => 'ID of the post',
-		'pst_title' => 'Post Title',
+	public static $fields = array(		'pst_title' => 'Post Title',
 		'pst_link' => 'Link of the post',
 		'pst_usr_user_id' => 'User this post is associated with',
 		'pst_body' => 'Body of the post',
