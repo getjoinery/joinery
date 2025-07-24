@@ -20,7 +20,6 @@ class CtldAccount extends SystemBase {
 	public static $tablename = 'cda_ctldaccounts';
 	public static $pkey_column = 'cda_ctldaccount_id';
 	public static $permanent_delete_actions = array(
-		'cda_ctldaccount_id' => 'delete', 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	const BASIC_PLAN = 1;

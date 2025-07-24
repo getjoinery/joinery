@@ -25,7 +25,6 @@ class CtldDevice extends SystemBase {
 	public static $tablename = 'cdd_ctlddevices';
 	public static $pkey_column = 'cdd_ctlddevice_id';
 	public static $permanent_delete_actions = array(
-		'cdd_ctlddevice_id' => 'delete', 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 

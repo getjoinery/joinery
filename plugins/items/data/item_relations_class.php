@@ -19,7 +19,6 @@ class ItemRelation extends SystemBase {
 	public static $pkey_column = 'itr_item_relation_id';
 	public static $url_namespace = 'item_relation';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 	public static $permanent_delete_actions = array(
-		'itr_item_relation_id' => 'delete',	
 		//'pac_itr_item_relation_id' => 'delete',
 		//'com_itr_item_relation_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value

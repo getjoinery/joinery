@@ -14,7 +14,6 @@ class BookingType extends SystemBase {
 	public static $tablename = 'bkt_booking_types';
 	public static $pkey_column = 'bkt_booking_type_id';
 	public static $permanent_delete_actions = array(
-		'bkt_booking_type_id' => 'delete',	
 		//'pac_itr_item_relation_id' => 'delete',
 		//'com_itr_item_relation_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value

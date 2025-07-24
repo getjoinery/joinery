@@ -20,7 +20,6 @@ class CtldService extends SystemBase {
 	public static $tablename = 'cds_ctldservices';
 	public static $pkey_column = 'cds_ctldservice_id';
 	public static $permanent_delete_actions = array(
-		'cds_ctldservice_id' => 'delete', 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(

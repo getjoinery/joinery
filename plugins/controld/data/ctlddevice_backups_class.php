@@ -23,7 +23,6 @@ class CtldDeviceBackup extends SystemBase {
 	public static $tablename = 'cdb_ctlddevice_backups';
 	public static $pkey_column = 'cdb_ctlddevice_backup_id';
 	public static $permanent_delete_actions = array(
-		'cdb_ctlddevice_backup_id' => 'delete', 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 

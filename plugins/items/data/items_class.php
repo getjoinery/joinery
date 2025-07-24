@@ -19,7 +19,6 @@ class Item extends SystemBase {
 	public static $pkey_column = 'itm_item_id';
 	public static $url_namespace = 'item';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 	public static $permanent_delete_actions = array(
-		'itm_item_id' => 'delete',	
 		'itr_item_id_left' => 'delete',
 		'itr_item_id_right' => 'delete',
 		//'com_itm_item_id' => 'null'
