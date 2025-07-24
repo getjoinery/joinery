@@ -653,6 +653,11 @@ abstract class SystemBase {
 	//'prevent' = IF FOREIGN KEY ROWS ARE PRESENT, DO NOT ALLOW PERMANENT DELETE...THROWS AN ERROR
 	//DOES NOT CASCADE.  IF YOU NEED CASCADE DELETE, THEN CALL THE permanent_delete() FUNCTION DIRECTLY ON THE OTHER CLASS
 	function permanent_delete($debug=false){
+		// Check if the primary key is incorrectly included in permanent_delete_actions
+		if(isset(static::$permanent_delete_actions) && array_key_exists(static::$pkey_column, static::$permanent_delete_actions)){
+			throw new SystemClassException('Primary key ' . static::$pkey_column . ' should not be included in permanent_delete_actions for ' . static::$tablename . '. The main record deletion is handled automatically.');
+		}
+		
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();  
 		
@@ -836,6 +841,25 @@ abstract class SystemBase {
 		}			
 
 		
+		
+		// Finally, delete the main record itself
+		if(!$debug){
+			$sql = 'DELETE FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = :param1';
+			try{
+				$q = $dblink->prepare($sql);
+				$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
+				$q->execute();
+			}
+			catch(PDOException $e){
+				if($this_transaction){
+					$dblink->rollBack();
+				}
+				$dbhelper->handle_query_error($e);
+			}
+		} else {
+			$sql = 'DELETE FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = ' . $this->key;
+			echo $sql . "<br>";
+		}
 		
 		if(!$debug){
 			if($this_transaction){
