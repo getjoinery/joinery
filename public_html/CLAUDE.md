@@ -526,6 +526,222 @@ These directories contain critical system infrastructure. Changes should only be
 12. **Documentation**: Update this file when discovering new patterns or conventions
 13. **Respect Restrictions**: Only modify restricted directories with explicit user permission
 
+# Model Querying Patterns and Best Practices
+
+This section provides guidance on how to properly query and interact with data models in the system to avoid common mistakes and follow established patterns.
+
+## Single Object Access
+
+### Object Instantiation Patterns
+```php
+// Creates object but doesn't load data from database
+$product = new Product($id);
+
+// Creates object AND immediately loads data from database  
+$product = new Product($id, TRUE);
+
+// Creates new object for insertion
+$product = new Product(NULL);
+
+// Manual loading approach
+$product = new Product($id);
+$product->load();
+```
+
+### Key Single Object Methods
+- `get($field)` - Retrieve field value
+- `set($field, $value)` - Set field value  
+- `save()` - Save object to database
+- `load()` - Load data from database
+- `prepare()` - Prepare object for saving (validation, etc.)
+- `key` - Property containing the primary key value
+
+### Common Usage Example
+```php
+$product = new Product($_REQUEST['p'], TRUE);
+$product->set('pro_name', $_POST['pro_name']);
+$product->prepare();
+$product->save();
+```
+
+## Multi-Object Collections
+
+### Constructor Pattern
+```php
+new MultiClassName($search_criteria, $order_by, $limit, $offset)
+```
+
+### Essential Multi-Object Methods
+- `count_all()` - Get total count without loading objects
+- `load()` - Load all matching objects into collection
+- `get($index)` - Get object at specific index (0-based)
+- `get_by_key($key)` - Get object by primary key value
+- `add($object)` - Add object to collection
+- Implements `IteratorAggregate` - can use `foreach` loops
+
+### Search Criteria Examples
+```php
+// Simple field matching
+$criteria = array('pro_is_active' => 1);
+
+// Multiple criteria (AND by default)
+$criteria = array(
+    'pro_is_active' => 1,
+    'pro_expires' => 0
+);
+
+// Special operators
+$criteria = array('prv_status' => '> 0');
+
+// Complex criteria with null handling
+$criteria = array('pro_evt_event_id' => null);
+```
+
+### Order By Examples
+```php
+// Single field ascending
+$order_by = array('pro_name' => 'ASC');
+
+// Single field descending  
+$order_by = array('prv_product_version_id' => 'DESC');
+
+// Multiple fields
+$order_by = array('pro_name' => 'ASC', 'pro_created' => 'DESC');
+```
+
+### Complete Multi-Object Example
+```php
+$products = new MultiProduct(
+    array('pro_is_active' => 1),           // Search criteria
+    array('pro_name' => 'ASC'),            // Order by
+    10,                                    // Limit
+    0                                      // Offset
+);
+
+if ($products->count_all() > 0) {
+    $products->load();
+    
+    // Access first product
+    $first_product = $products->get(0);
+    
+    // Iterate through all products
+    foreach ($products as $product) {
+        echo $product->get('pro_name');
+    }
+}
+```
+
+## Model Hierarchy and Relationships
+
+### Class Relationships
+- **Single Classes** (e.g., `Product`) extend `SystemBase`
+- **Multi Classes** (e.g., `MultiProduct`) extend `SystemMultiBase`
+- Multi classes contain collections of their corresponding single class objects
+- Multi classes are NOT subclasses of their single counterparts
+
+### Static Methods
+```php
+// Get object by URL slug/link
+$product = Product::get_by_link($link_slug);
+
+// Access static properties
+$table_name = Product::$tablename;
+$fields = Product::$fields;
+```
+
+## Common Anti-Patterns to Avoid
+
+### ❌ Don't Do These
+```php
+// DON'T use direct SQL queries
+$sql = "SELECT * FROM products WHERE pro_name = ?";
+$result = $dbconnector->query($sql, $params);
+
+// DON'T assume methods exist without checking
+$product = $products->current(); // current() doesn't exist
+
+// DON'T use made-up method names
+$versions = $product->getVersions(); // Probably doesn't exist
+
+// DON'T forget to load data when needed
+$product = new Product($id); // Data not loaded yet!
+$name = $product->get('pro_name'); // Will be null
+```
+
+### ✅ Do These Instead
+```php
+// USE model collections for queries
+$products = new MultiProduct(array('pro_name' => $search_name));
+$products->load();
+
+// USE proper collection access methods
+$product = $products->get(0); // Gets first item
+
+// USE existing relationship methods or create new queries
+$versions = new MultiProductVersion(array('prv_pro_product_id' => $product->key));
+
+// USE immediate loading or explicit load calls
+$product = new Product($id, TRUE); // Data loaded immediately
+$name = $product->get('pro_name'); // Has data
+```
+
+## Method Verification Best Practice
+
+**ALWAYS verify method existence before using:** Check the actual class definition in `/data/[class]_class.php` to confirm:
+- Method names and signatures
+- Required vs optional parameters  
+- Return types and values
+- Available static methods and properties
+
+Never assume a method exists based on naming conventions or other frameworks. When in doubt, examine the source code of the class and its parent classes (`SystemBase` or `SystemMultiBase`).
+
+## Special Cases and Gotchas
+
+### Permanent Delete Actions
+Models define how related data should be handled when an object is permanently deleted via the `$permanent_delete_actions` array:
+
+```php
+// Example from a model class
+public static $permanent_delete_actions = array(
+    'related_table_field' => 'delete',    // Delete related records
+    'another_field' => 'null',            // Set field to NULL in related records  
+    'status_field' => 'skip',             // Skip this field entirely
+    'archive_field' => 'prevent',         // Prevent deletion if related records exist
+    'default_field' => 'some_value'       // Set field to specific value
+);
+```
+
+**Available Actions:**
+- `'delete'` - Delete all related records
+- `'null'` - Set the foreign key field to NULL in related records
+- `'skip'` - Ignore this relationship during deletion
+- `'prevent'` - Prevent deletion if related records exist
+- Any other value - Set the field to that specific value
+
+This system ensures referential integrity and prevents orphaned data when objects are permanently removed from the system.
+
+### Test Mode Compatibility
+Models automatically respect test mode when `DbConnector` is in test mode:
+```php
+$dbconnector = DbConnector::get_instance();
+$dbconnector->set_test_mode();
+
+// All model operations now use test database
+$product = new Product($id, TRUE);
+```
+
+### Soft Delete Patterns
+Many models support soft deletion:
+```php
+// Include deleted items in search
+$products = new MultiProduct(array('deleted' => false));
+
+// Some models have specific deleted field handling
+$criteria = array('pro_status' => '> 0'); // Active items only
+```
+
+This guidance should prevent common model querying mistakes and ensure consistent usage patterns throughout the codebase.
+
 ## Example Admin Page Template
 
 ```php
