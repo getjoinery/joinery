@@ -33,6 +33,7 @@ class ProductTester {
     private $settings;
     private $dbconnector;
     private $created_products = [];
+    private $successful_products = []; // Track products that passed individual cart tests
     private $test_results = [];
     
     public function __construct() {
@@ -94,6 +95,9 @@ class ProductTester {
                 $this->processProduct($index + 1, $product_spec);
             }
             
+            // Test cart functionality with all products together
+            $this->testAllProductsTogether($specifications['products']);
+            
             // Display results
             $this->displayResults();
             
@@ -147,7 +151,7 @@ class ProductTester {
             $cart_test_error = null;
             
             try {
-                $this->testShoppingCart($product_id, $product_spec);
+                $this->testIndividualProductCart($product_id, $product_spec);
                 echo "✓ Shopping cart test passed<br>\n";
             } catch (Exception $e) {
                 $cart_test_passed = false;
@@ -156,6 +160,12 @@ class ProductTester {
             }
             
             if ($cart_test_passed) {
+                // Track successful products for combined testing
+                $this->successful_products[] = [
+                    'id' => $product_id,
+                    'spec' => $product_spec
+                ];
+                
                 $this->test_results[] = [
                     'name' => $product_spec['pro_name'],
                     'id' => $product_id,
@@ -472,10 +482,85 @@ class ProductTester {
     }
     
     /**
-     * Test shopping cart functionality for a product
+     * Test cart functionality for an individual product (avoids business rule conflicts)
      */
-    private function testShoppingCart($product_id, $product_spec) {
+    private function testIndividualProductCart($product_id, $product_spec) {
+        // Clear cart first to avoid conflicts with business rules
+        $this->removeAllProductsFromCart();
         
+        // Test the product individually
+        $this->addProductToCartForTesting($product_id, $product_spec);
+        $this->displayCartSummary("After adding " . $product_spec['pro_name']);
+        
+        // Remove the product 
+        $this->removeProductFromCart($product_id);
+        $this->displayCartSummary("After removing " . $product_spec['pro_name']);
+    }
+    
+    /**
+     * Test adding all successful products together to see business rule interactions
+     */
+    private function testAllProductsTogether($all_products) {
+        if (empty($this->successful_products)) {
+            echo "<h3>Combined Cart Test</h3>\n";
+            echo "No products passed individual testing, skipping combined test.<br><br>\n";
+            return;
+        }
+        
+        echo "<h3>Combined Cart Test</h3>\n";
+        echo "Testing " . count($this->successful_products) . " successful products together...<br>\n";
+        
+        // Clear cart first
+        $this->removeAllProductsFromCart();
+        
+        $added_products = [];
+        $warnings = [];
+        
+        // Try to add each successful product
+        foreach ($this->successful_products as $product_info) {
+            $product_id = $product_info['id'];
+            $product_spec = $product_info['spec'];
+            
+            try {
+                $this->addProductToCart($product_id, $product_spec);
+                $added_products[] = $product_spec['pro_name'];
+                echo "✓ Added " . htmlspecialchars($product_spec['pro_name']) . " to cart<br>\n";
+            } catch (Exception $e) {
+                // Check if this is a business rule violation
+                if (strpos($e->getMessage(), 'cart may contain only one subscription') !== false ||
+                    strpos($e->getMessage(), 'can not have more than') !== false) {
+                    $warnings[] = "⚠ <span style='color: orange;'><strong>Business rule prevented adding " . htmlspecialchars($product_spec['pro_name']) . ":</strong> " . htmlspecialchars($e->getMessage()) . "</span>";
+                } else {
+                    // Real error - rethrow
+                    throw $e;
+                }
+            }
+        }
+        
+        // Display any warnings
+        if (!empty($warnings)) {
+            foreach ($warnings as $warning) {
+                echo $warning . "<br>\n";
+            }
+        }
+        
+        // Show final cart state
+        if (!empty($added_products)) {
+            $this->displayCartSummary("Final combined cart (" . implode(", ", $added_products) . ")");
+        } else {
+            echo "No products could be combined due to business rules.<br>\n";
+        }
+        
+        // Clean up
+        $this->removeAllProductsFromCart();
+        $this->displayCartSummary("After clearing combined cart");
+        echo "<br>\n";
+    }
+    
+    /**
+     * Add a product to the shopping cart for testing (validates versions first)
+     */
+    private function addProductToCartForTesting($product_id, $product_spec) {
         // Get the product and its versions for testing
         $product = new Product($product_id, TRUE);
         $versions = $product->get_product_versions(TRUE);
@@ -484,13 +569,8 @@ class ProductTester {
             throw new Exception("No product versions found - products must have at least one version");
         }
         
-        // Test adding product to cart
+        // Call the actual cart addition method
         $this->addProductToCart($product_id, $product_spec);
-        $this->displayCartSummary("After adding product");
-        
-        // Test removing product from cart
-        $this->removeProductFromCart($product_id);
-        $this->displayCartSummary("After removing product");
     }
     
     /**
@@ -573,6 +653,17 @@ class ProductTester {
                 break;
             }
         }
+    }
+    
+    /**
+     * Remove all products from the shopping cart
+     */
+    private function removeAllProductsFromCart() {
+        $session = SessionControl::get_instance();
+        $cart = $session->get_shopping_cart();
+        
+        // Clear the entire cart
+        $cart->clear_cart();
     }
     
     /**
