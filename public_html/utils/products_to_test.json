@@ -1,4 +1,5 @@
 {
+  "coupon_codes": ["15dollaroff", "10pctoff"],
   "products": [
     {
       "pro_name": "Test Product 1",

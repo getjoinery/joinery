@@ -35,6 +35,7 @@ class ProductTester {
     private $created_products = [];
     private $successful_products = []; // Track products that passed individual cart tests
     private $test_results = [];
+    private $coupon_codes = []; // Coupon codes to test
     
     public function __construct() {
         $this->settings = Globalvars::get_instance();
@@ -86,6 +87,12 @@ class ProductTester {
             
             if (!isset($specifications['products']) || !is_array($specifications['products'])) {
                 throw new Exception("JSON must contain a 'products' array");
+            }
+            
+            // Load coupon codes if provided
+            if (isset($specifications['coupon_codes']) && is_array($specifications['coupon_codes'])) {
+                $this->coupon_codes = $specifications['coupon_codes'];
+                echo "Loaded " . count($this->coupon_codes) . " coupon codes for testing: " . implode(", ", $this->coupon_codes) . "<br>\n";
             }
             
             echo "Testing " . count($specifications['products']) . " products...<br><br>\n";
@@ -492,6 +499,11 @@ class ProductTester {
         $this->addProductToCartForTesting($product_id, $product_spec);
         $this->displayCartSummary("After adding " . $product_spec['pro_name']);
         
+        // Test coupon codes if any are configured
+        if (!empty($this->coupon_codes)) {
+            $this->testCouponCodes($product_spec['pro_name']);
+        }
+        
         // Remove the product 
         $this->removeProductFromCart($product_id);
         $this->displayCartSummary("After removing " . $product_spec['pro_name']);
@@ -547,6 +559,11 @@ class ProductTester {
         // Show final cart state
         if (!empty($added_products)) {
             $this->displayCartSummary("Final combined cart (" . implode(", ", $added_products) . ")");
+            
+            // Test coupon codes with combined cart if any products were added
+            if (!empty($this->coupon_codes)) {
+                $this->testCouponCodes("combined cart");
+            }
         } else {
             echo "No products could be combined due to business rules.<br>\n";
         }
@@ -555,6 +572,35 @@ class ProductTester {
         $this->removeAllProductsFromCart();
         $this->displayCartSummary("After clearing combined cart");
         echo "<br>\n";
+    }
+    
+    /**
+     * Test coupon codes with the current cart contents
+     */
+    private function testCouponCodes($product_name) {
+        $session = SessionControl::get_instance();
+        $cart = $session->get_shopping_cart();
+        
+        echo "Testing coupon codes with " . htmlspecialchars($product_name) . "...<br>\n";
+        
+        foreach ($this->coupon_codes as $coupon_code) {
+            try {
+                // Add the coupon code
+                $result = $cart->add_coupon($coupon_code);
+                
+                if ($result === 1) {
+                    echo "✓ Applied coupon: " . htmlspecialchars($coupon_code) . "<br>\n";
+                    $this->displayCartSummary("After applying " . $coupon_code);
+                    
+                    // Remove the coupon for next test
+                    $cart->remove_coupon($coupon_code);
+                } else {
+                    echo "⚠ <span style='color: orange;'>Coupon " . htmlspecialchars($coupon_code) . " not applicable: " . htmlspecialchars($result) . "</span><br>\n";
+                }
+            } catch (Exception $e) {
+                echo "✗ <span style='color: red;'>Error testing coupon " . htmlspecialchars($coupon_code) . ": " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
+            }
+        }
     }
     
     /**
