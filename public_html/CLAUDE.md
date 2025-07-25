@@ -411,11 +411,6 @@ $emailTemplate->email_text = $text_content;
 $send_result = $emailTemplate->send(false);
 ```
 
-### Email Authentication Testing
-
-The framework includes utilities for testing email authentication:
-- `/utils/email_setup_check.php` - Check SPF, DKIM, DMARC records for domains
-- `/utils/email_send_test.php` - Send test emails and analyze authentication results
 
 ## Development Environment
 
@@ -460,7 +455,6 @@ php utils/phpmailer_test.php
 - Tailwind CSS configuration in `/theme/tailwind/includes/tailwind.config.js` (being phased out, ~70% complete)
 - UIKit 3.6.14 maintained as optional framework
 
-**Static files** served through `serve.php` routing with cache headers
 
 ## Security Notes
 
@@ -475,7 +469,7 @@ php utils/phpmailer_test.php
 
 **Payment Processing:** StripeHelper, PaypalHelper classes
 **Email:** SystemMailer with template support
-**External APIs:** Webhooks in `/ajax/` for Stripe, Calendly
+**External APIs:** Webhooks in `/ajax/` for Stripe
 **File Management:** Secure upload handling in `/includes/UploadHandler.php`
 
 ## Plugin Development
