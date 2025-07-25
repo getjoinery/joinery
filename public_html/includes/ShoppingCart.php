@@ -74,7 +74,7 @@ class ShoppingCart {
 
 		// First lets validate we can add this item to the cart!
 		// DO NOT ALLOW THE CART TO HOLD RECURRING AND NON RECURRING AT THE SAME time 
-		if(!$this->can_add_to_cart($product)){
+		if(!$this->can_add_to_cart($product_version)){
 			throw new ShoppingCartException(
 					'Sorry, the cart may contain only one subscription, and it cannot be mixed with other items.  Remove the other items or the subscription or check out with those first. <a href="/cart">Return to the cart</a>');
 		}
