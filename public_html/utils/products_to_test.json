@@ -20,7 +20,21 @@
       "additional_pro_requirements": {},
       "product_scripts": [],
       "pro_after_purchase_message": "Thank you for your purchase!",
-      "pro_receipt_body": "Receipt for Test Product 1"
+      "pro_receipt_body": "Receipt for Test Product 1",
+      "versions": [
+        {
+          "version_name": "Basic Monthly",
+          "version_price": "9.99",
+          "prv_price_type": "month",
+          "prv_trial_period_days": "7"
+        },
+        {
+          "version_name": "Pro Monthly",
+          "version_price": "19.99",
+          "prv_price_type": "month",
+          "prv_trial_period_days": "14"
+        }
+      ]
     },
     {
       "pro_name": "Test Product 2", 
@@ -43,7 +57,15 @@
       "additional_pro_requirements": {},
       "product_scripts": [],
       "pro_after_purchase_message": "Thank you for Test Product 2!",
-      "pro_receipt_body": "Your receipt for Test Product 2"
+      "pro_receipt_body": "Your receipt for Test Product 2",
+      "versions": [
+        {
+          "version_name": "One-time Purchase",
+          "version_price": "49.99",
+          "prv_price_type": "single",
+          "prv_trial_period_days": "0"
+        }
+      ]
     },
     {
       "pro_name": "Test Product 3",
@@ -65,7 +87,8 @@
       "additional_pro_requirements": {},
       "product_scripts": [],
       "pro_after_purchase_message": "",
-      "pro_receipt_body": ""
+      "pro_receipt_body": "",
+      "versions": []
     }
   ]
 }

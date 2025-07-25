@@ -21,6 +21,7 @@ PathHelper::requireOnce('/includes/DbConnector.php');
 
 PathHelper::requireOnce('/data/email_templates_class.php');
 PathHelper::requireOnce('/data/products_class.php');
+PathHelper::requireOnce('/data/product_versions_class.php');
 PathHelper::requireOnce('/data/product_groups_class.php');
 PathHelper::requireOnce('/data/product_requirements_class.php');
 PathHelper::requireOnce('/data/product_requirement_instances_class.php');
@@ -151,6 +152,27 @@ class ProductTester {
             echo "✓ Product verification completed<br>\n";
             flush();
             
+            // Create product versions if specified
+            if (isset($product_spec['versions']) && is_array($product_spec['versions'])) {
+                echo "Creating " . count($product_spec['versions']) . " product version(s)...<br>\n";
+                flush();
+                
+                foreach ($product_spec['versions'] as $version_index => $version_spec) {
+                    try {
+                        echo "Creating version " . ($version_index + 1) . ": " . htmlspecialchars($version_spec['version_name']) . "<br>\n";
+                        flush();
+                        
+                        $this->createProductVersion($product_id, $version_spec);
+                        
+                        echo "✓ Version created successfully<br>\n";
+                        flush();
+                    } catch (Exception $e) {
+                        echo "✗ <strong>Error creating version:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
+                        throw $e; // Re-throw to mark the product test as failed
+                    }
+                }
+            }
+            
             $this->test_results[] = [
                 'name' => $product_spec['pro_name'],
                 'id' => $product_id,
@@ -210,7 +232,7 @@ class ProductTester {
         
         try {
             // Include the admin script directly
-            include($_SERVER['DOCUMENT_ROOT'] . '/adm/admin_product_edit.php');
+            include(PathHelper::getRootDir() . '/adm/admin_product_edit.php');
             echo "Include completed successfully...<br>\n";
             flush();
             $response = ob_get_contents();
@@ -439,6 +461,74 @@ class ProductTester {
             
         } catch (Exception $e) {
             throw new Exception("Product verification failed: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Create a product version by directly including admin_product_edit logic
+     */
+    private function createProductVersion($product_id, $version_spec) {
+        // Prepare POST data for version creation
+        $post_data = [
+            'action' => 'new_version',
+            'p' => $product_id,
+            'version_name' => $version_spec['version_name'],
+            'version_price' => $version_spec['version_price'],
+            'prv_price_type' => $version_spec['prv_price_type'],
+            'prv_trial_period_days' => $version_spec['prv_trial_period_days']
+        ];
+        
+        echo "Creating version with data:<br>\n";
+        echo "<pre>" . htmlspecialchars(print_r($post_data, true)) . "</pre><br>\n";
+        flush();
+        
+        // Set up $_POST and $_REQUEST for the admin script
+        $_POST = $post_data;
+        $_REQUEST = $post_data;
+        
+        // Ensure test mode is enabled
+        $dbconnector = DbConnector::get_instance();
+        $dbconnector->set_test_mode();
+        
+        // Capture output from admin_product_edit
+        ob_start();
+        
+        try {
+            // Include the admin script directly
+            include(PathHelper::getRootDir() . '/adm/admin_product_edit.php');
+            $response = ob_get_contents();
+        } catch (Exception $e) {
+            ob_end_clean();
+            throw new Exception("Error creating version: " . $e->getMessage());
+        } catch (Error $e) {
+            ob_end_clean();
+            throw new Exception("Fatal error creating version: " . $e->getMessage());
+        }
+        
+        ob_end_clean();
+        
+        // Check if version was created successfully using the ProductVersion model
+        try {
+            // Use MultiProductVersion to find versions for this product
+            require_once(PathHelper::getRootDir() . '/data/product_versions_class.php');
+            
+            $versions = new MultiProductVersion(
+                array('prv_pro_product_id' => $product_id, 'prv_version_name' => $version_spec['version_name']),
+                array('prv_product_version_id' => 'DESC'),
+                1,
+                0
+            );
+            
+            if ($versions->count_all() > 0) {
+                $versions->load();
+                $version = $versions->get(0); // Get the first version
+                echo "✓ Version verified in database (ID: " . $version->key . ")<br>\n";
+                return true;
+            } else {
+                throw new Exception("Version not found in database after creation");
+            }
+        } catch (Exception $e) {
+            throw new Exception("Error verifying version creation: " . $e->getMessage());
         }
     }
     
