@@ -736,12 +736,13 @@ abstract class SystemBase {
 				try{
 					$q = $dblink->prepare($sql);
 					$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-					$count = $q->execute();
+					$q->execute();
+					$count = $q->fetchColumn();
 				}
 				catch(PDOException $e){
 					$dbhelper->handle_query_error($e);
 				}
-				if($count->count){
+				if($count > 0){
 					if($debug){
 						echo "Prevent: ".$column." <br>\n";
 					}
