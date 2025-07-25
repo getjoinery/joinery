@@ -21,6 +21,11 @@
       "product_scripts": [],
       "pro_after_purchase_message": "Thank you for your purchase!",
       "pro_receipt_body": "Receipt for Test Product 1",
+      "form_data": {
+        "full_name_first": "John",
+        "full_name_last": "Doe",
+        "email": "john.doe@example.com"
+      },
       "versions": [
         {
           "version_name": "Basic Monthly",
@@ -58,6 +63,12 @@
       "product_scripts": [],
       "pro_after_purchase_message": "Thank you for Test Product 2!",
       "pro_receipt_body": "Your receipt for Test Product 2",
+      "form_data": {
+        "full_name_first": "Jane",
+        "full_name_last": "Smith",
+        "email": "jane.smith@example.com",
+        "phn_phone_number": "555-123-4567"
+      },
       "versions": [
         {
           "version_name": "One-time Purchase",
@@ -88,6 +99,11 @@
       "product_scripts": [],
       "pro_after_purchase_message": "",
       "pro_receipt_body": "",
+      "form_data": {
+        "full_name_first": "Test",
+        "full_name_last": "Customer",
+        "email": "test.customer@example.com"
+      },
       "versions": []
     }
   ]
