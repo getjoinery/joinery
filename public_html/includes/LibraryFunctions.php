@@ -1823,5 +1823,40 @@ class LibraryFunctions {
 			}
 		}
 	}
+
+	/**
+	 * Extracts function names from a given PHP file.
+	 *
+	 * @param string $filePath The path to the PHP file.
+	 * @return array An array of function names found in the file.
+	 * @throws Exception If the file cannot be read.
+	 */
+	static function getFunctionNamesFromFile($filePath) {
+		if (!file_exists($filePath)) {
+			return array(); // Return empty array instead of throwing exception
+		}
+
+		$fileContent = file_get_contents($filePath);
+		if ($fileContent === false) {
+			throw new Exception("Failed to read the file: $filePath");
+		}
+
+		$tokens = token_get_all($fileContent);
+		$functions = [];
+		$isFunction = false;
+
+		foreach ($tokens as $token) {
+			if (is_array($token)) {
+				if ($token[0] === T_FUNCTION) {
+					$isFunction = true; // Next string token will be the function name
+				} elseif ($isFunction && $token[0] === T_STRING) {
+					$functions[] = $token[1]; // Add function name to the list
+					$isFunction = false;
+				}
+			}
+		}
+
+		return $functions;
+	}
 }
 ?>

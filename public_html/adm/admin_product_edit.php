@@ -352,13 +352,13 @@
 
 	//PRODUCT SCRIPTS
 	$optionvals = array();
-	$optionvals = array_merge($optionvals, getFunctionNamesFromFile(PathHelper::getRoot() . '/logic/product_scripts_logic.php'));
+	$optionvals = array_merge($optionvals, LibraryFunctions::getFunctionNamesFromFile(PathHelper::getRootDir() . '/logic/product_scripts_logic.php'));
 	
 	$plugins = LibraryFunctions::list_plugins();
 	foreach($plugins as $plugin){
-		$product_script_file = PathHelper::getRoot().'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
+		$product_script_file = PathHelper::getRootDir().'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
 		if(file_exists($product_script_file)){
-			$optionvals = array_merge($optionvals, getFunctionNamesFromFile($product_script_file));
+			$optionvals = array_merge($optionvals, LibraryFunctions::getFunctionNamesFromFile($product_script_file));
 		}
 	}
 	if(!empty($optionvals)){
@@ -429,40 +429,4 @@
 	$page->admin_footer();
 
 
-	/**
-	 * Extracts function names from a given PHP file.
-	 *
-	 * @param string $filePath The path to the PHP file.
-	 * @return array An array of function names found in the file.
-	 * @throws Exception If the file cannot be read.
-	 */
-	if (!function_exists('getFunctionNamesFromFile')) {
-function getFunctionNamesFromFile($filePath) {
-		if (!file_exists($filePath)) {
-			throw new Exception("File does not exist: $filePath");
-		}
-
-		$fileContent = file_get_contents($filePath);
-		if ($fileContent === false) {
-			throw new Exception("Failed to read the file: $filePath");
-		}
-
-		$tokens = token_get_all($fileContent);
-		$functions = [];
-		$isFunction = false;
-
-		foreach ($tokens as $token) {
-			if (is_array($token)) {
-				if ($token[0] === T_FUNCTION) {
-					$isFunction = true; // Next string token will be the function name
-				} elseif ($isFunction && $token[0] === T_STRING) {
-					$functions[] = $token[1]; // Add function name to the list
-					$isFunction = false;
-				}
-			}
-		}
-
-		return $functions;
-	}
-}
 ?>
