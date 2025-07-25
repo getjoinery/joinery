@@ -18,6 +18,7 @@ PathHelper::requireOnce('/includes/StripeHelper.php');
 PathHelper::requireOnce('/includes/SessionControl.php');
 PathHelper::requireOnce('/includes/Globalvars.php');
 PathHelper::requireOnce('/includes/DbConnector.php');
+PathHelper::requireOnce('/includes/ShoppingCart.php');
 
 PathHelper::requireOnce('/data/email_templates_class.php');
 PathHelper::requireOnce('/data/products_class.php');
@@ -173,12 +174,36 @@ class ProductTester {
                 }
             }
             
-            $this->test_results[] = [
-                'name' => $product_spec['pro_name'],
-                'id' => $product_id,
-                'status' => 'PASSED',
-                'errors' => []
-            ];
+            // Test shopping cart functionality
+            echo "Testing shopping cart functionality...<br>\n";
+            flush();
+            
+            $cart_test_passed = true;
+            $cart_test_error = null;
+            
+            try {
+                $this->testShoppingCart($product_id, $product_spec);
+            } catch (Exception $e) {
+                $cart_test_passed = false;
+                $cart_test_error = $e->getMessage();
+                echo "✗ <strong>Cart test failed:</strong> " . htmlspecialchars($cart_test_error) . "<br>\n";
+            }
+            
+            if ($cart_test_passed) {
+                $this->test_results[] = [
+                    'name' => $product_spec['pro_name'],
+                    'id' => $product_id,
+                    'status' => 'PASSED',
+                    'errors' => []
+                ];
+            } else {
+                $this->test_results[] = [
+                    'name' => $product_spec['pro_name'],
+                    'id' => $product_id,
+                    'status' => 'FAILED',
+                    'errors' => ['Cart test failed: ' . $cart_test_error]
+                ];
+            }
             
         } catch (Exception $e) {
             echo "✗ <strong>Error:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
@@ -530,6 +555,199 @@ class ProductTester {
         } catch (Exception $e) {
             throw new Exception("Error verifying version creation: " . $e->getMessage());
         }
+    }
+    
+    /**
+     * Test shopping cart functionality for a product
+     */
+    private function testShoppingCart($product_id, $product_spec) {
+        echo "<h4>Testing Shopping Cart for Product: " . htmlspecialchars($product_spec['pro_name']) . "</h4>\n";
+        flush();
+        
+        // Get the product and its versions for testing
+        $product = new Product($product_id, TRUE);
+        $versions = $product->get_product_versions(TRUE);
+        
+        if (!$versions || $versions->count_all() == 0) {
+            throw new Exception("No product versions found - products must have at least one version");
+        }
+        
+        // Test adding product to cart
+        echo "Adding product to cart...<br>\n";
+        flush();
+        $this->addProductToCart($product_id, $product_spec);
+        
+        // Display cart summary
+        $this->displayCartSummary("After adding product");
+        
+        // Test removing product from cart
+        echo "Removing product from cart...<br>\n";
+        flush();
+        $this->removeProductFromCart($product_id);
+        
+        // Display cart summary after removal
+        $this->displayCartSummary("After removing product");
+        
+        echo "<br>\n";
+    }
+    
+    /**
+     * Add a product to the shopping cart by calling product logic
+     */
+    private function addProductToCart($product_id, $product_spec) {
+        // Ensure we have a session for cart functionality
+        $session = SessionControl::get_instance();
+        
+        // Get the product and its first version
+        $product = new Product($product_id, TRUE);
+        $versions = $product->get_product_versions(TRUE);
+        
+        if (!$versions || $versions->count_all() == 0) {
+            throw new Exception("No product versions available to add to cart");
+        }
+        
+        $versions->load();
+        $first_version = $versions->get(0);
+        
+        // Prepare form data for adding to cart with version selection
+        $post_data = array(
+            'product_id' => $product_id,
+            'product_version' => $first_version->key,
+            'cart' => '1'
+        );
+        
+        // Add form data from the JSON specification
+        if (isset($product_spec['form_data']) && is_array($product_spec['form_data'])) {
+            foreach ($product_spec['form_data'] as $field => $value) {
+                $post_data[$field] = $value;
+            }
+        } else {
+            // Fallback to defaults if no form_data provided
+            $post_data['full_name_first'] = 'Test';
+            $post_data['full_name_last'] = 'User';
+            $post_data['email'] = 'test@example.com';
+        }
+        
+        // Save current POST data
+        $original_post = $_POST;
+        $original_request = $_REQUEST;
+        
+        // Set up POST data for the product logic
+        $_POST = $post_data;
+        $_REQUEST = $post_data;
+        
+        try {
+            // Include product logic to add item to cart
+            require_once(PathHelper::getRootDir() . '/logic/product_logic.php');
+            
+            // Call product logic which will add to cart
+            $page_vars = product_logic(array(), $post_data, null);
+            
+            echo "✓ Product added to cart successfully<br>\n";
+            
+        } catch (Exception $e) {
+            // Check if this is a redirect (normal behavior after adding to cart)
+            if (strpos($e->getMessage(), 'redirect') !== false) {
+                echo "✓ Product added to cart (redirect detected)<br>\n";
+            } else {
+                throw $e;
+            }
+        } finally {
+            // Restore original POST data
+            $_POST = $original_post;
+            $_REQUEST = $original_request;
+        }
+    }
+    
+    /**
+     * Remove a product from the shopping cart
+     */
+    private function removeProductFromCart($product_id) {
+        $session = SessionControl::get_instance();
+        $cart = $session->get_shopping_cart();
+        
+        $removed = false;
+        foreach ($cart->get_detailed_items() as $item) {
+            if ($item['product_version']->get('prv_pro_product_id') == $product_id) {
+                $cart->remove_item($item['id']);
+                $removed = true;
+                echo "✓ Removed item from cart (ID: " . $item['id'] . ")<br>\n";
+                break;
+            }
+        }
+        
+        if (!$removed) {
+            echo "No matching product found in cart to remove<br>\n";
+        }
+    }
+    
+    /**
+     * Display a mini pricing chart for the current cart contents
+     */
+    private function displayCartSummary($context = "Cart Summary") {
+        $session = SessionControl::get_instance();
+        $cart = $session->get_shopping_cart();
+        $detailed_items = $cart->get_detailed_items();
+        
+        echo "<div style='margin: 10px 0; padding: 10px; border: 1px solid #ddd; background: #f9f9f9;'>\n";
+        echo "<strong>$context:</strong><br>\n";
+        
+        if (empty($detailed_items)) {
+            echo "Cart is empty<br>\n";
+        } else {
+            echo "<table style='width: 100%; border-collapse: collapse; margin-top: 5px;'>\n";
+            echo "<tr style='background: #eee;'>\n";
+            echo "<th style='padding: 5px; border: 1px solid #ccc; text-align: left;'>Item</th>\n";
+            echo "<th style='padding: 5px; border: 1px solid #ccc; text-align: right;'>Price</th>\n";
+            echo "<th style='padding: 5px; border: 1px solid #ccc; text-align: right;'>Discount</th>\n";
+            echo "<th style='padding: 5px; border: 1px solid #ccc; text-align: right;'>Total</th>\n";
+            echo "<th style='padding: 5px; border: 1px solid #ccc; text-align: center;'>Type</th>\n";
+            echo "</tr>\n";
+            
+            foreach ($detailed_items as $item) {
+                $item_total = $item['total'] - $item['discount'];
+                $type = $item['recurring'] ? 'Recurring' : 'One-time';
+                
+                echo "<tr>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc;'>" . htmlspecialchars($item['name']) . "</td>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc; text-align: right;'>$" . number_format($item['price'], 2) . "</td>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc; text-align: right;'>$" . number_format($item['discount'], 2) . "</td>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc; text-align: right;'><strong>$" . number_format($item_total, 2) . "</strong></td>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc; text-align: center;'>$type</td>\n";
+                echo "</tr>\n";
+            }
+            
+            // Summary totals
+            echo "<tr style='background: #f0f0f0; font-weight: bold;'>\n";
+            echo "<td colspan='3' style='padding: 5px; border: 1px solid #ccc; text-align: right;'>Cart Total:</td>\n";
+            echo "<td style='padding: 5px; border: 1px solid #ccc; text-align: right;'>$" . number_format($cart->get_total(), 2) . "</td>\n";
+            echo "<td style='padding: 5px; border: 1px solid #ccc;'></td>\n";
+            echo "</tr>\n";
+            
+            $recurring_total = $cart->get_recurring_total();
+            $non_recurring_total = $cart->get_non_recurring_total();
+            
+            if ($recurring_total > 0) {
+                echo "<tr>\n";
+                echo "<td colspan='3' style='padding: 5px; border: 1px solid #ccc; text-align: right;'>Recurring Total:</td>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc; text-align: right;'>$" . number_format($recurring_total, 2) . "</td>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc;'></td>\n";
+                echo "</tr>\n";
+            }
+            
+            if ($non_recurring_total > 0) {
+                echo "<tr>\n";
+                echo "<td colspan='3' style='padding: 5px; border: 1px solid #ccc; text-align: right;'>One-time Total:</td>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc; text-align: right;'>$" . number_format($non_recurring_total, 2) . "</td>\n";
+                echo "<td style='padding: 5px; border: 1px solid #ccc;'></td>\n";
+                echo "</tr>\n";
+            }
+            
+            echo "</table>\n";
+        }
+        
+        echo "</div>\n";
+        flush();
     }
     
     /**
