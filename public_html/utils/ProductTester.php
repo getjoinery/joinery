@@ -36,30 +36,19 @@ class ProductTester {
     private $test_results = [];
     
     public function __construct() {
-        echo "Initializing ProductTester...<br>\n";
-        flush();
-        
         $this->settings = Globalvars::get_instance();
         
         // Enable test mode to use test database
         $this->dbconnector = DbConnector::get_instance();
         
         try {
-            echo "Setting test mode...<br>\n";
-            flush();
-            
             $this->dbconnector->set_test_mode();
-            echo "Test mode enabled - using test database<br>\n";
-            flush();
             
             // Test the database connection
             $test_connection = $this->dbconnector->get_db_link();
-            if ($test_connection) {
-                echo "Test database connection successful<br>\n";
-            } else {
+            if (!$test_connection) {
                 throw new Exception("Test database connection failed");
             }
-            flush();
             
         } catch (Exception $e) {
             throw new Exception("Failed to enable test mode: " . $e->getMessage() . "<br>Please ensure test database credentials are configured in Globalvars.");
@@ -70,7 +59,6 @@ class ProductTester {
         // Close test mode when done
         if ($this->dbconnector) {
             $this->dbconnector->close_test_mode();
-            echo "Test mode disabled<br>\n";
         }
     }
     
@@ -99,7 +87,7 @@ class ProductTester {
                 throw new Exception("JSON must contain a 'products' array");
             }
             
-            echo "Loaded " . count($specifications['products']) . " product specifications<br><br>\n";
+            echo "Testing " . count($specifications['products']) . " products...<br><br>\n";
             
             // Process each product
             foreach ($specifications['products'] as $index => $product_spec) {
@@ -122,7 +110,6 @@ class ProductTester {
     private function cleanup() {
         if ($this->dbconnector) {
             $this->dbconnector->close_test_mode();
-            echo "Test mode disabled (cleanup)<br>\n";
         }
     }
     
@@ -130,43 +117,24 @@ class ProductTester {
      * Process a single product specification
      */
     private function processProduct($index, $product_spec) {
-        echo "<h3>Processing Product $index: " . htmlspecialchars($product_spec['pro_name']) . "</h3>\n";
-        flush();
+        echo "<h3>Testing Product $index: " . htmlspecialchars($product_spec['pro_name']) . "</h3>\n";
         
         try {
-            echo "Starting product creation...<br>\n";
-            flush();
-            
             // Create the product
             $product_id = $this->createProduct($product_spec);
             $this->created_products[] = $product_id;
-            
-            echo "✓ Product created with ID: $product_id<br>\n";
-            flush();
-            
-            echo "Starting product verification...<br>\n";
-            flush();
+            echo "✓ Product created (ID: $product_id)<br>\n";
             
             // Verify the product
             $this->verifyProduct($product_id, $product_spec);
-            
-            echo "✓ Product verification completed<br>\n";
-            flush();
+            echo "✓ Product verified<br>\n";
             
             // Create product versions if specified
             if (isset($product_spec['versions']) && is_array($product_spec['versions'])) {
-                echo "Creating " . count($product_spec['versions']) . " product version(s)...<br>\n";
-                flush();
-                
                 foreach ($product_spec['versions'] as $version_index => $version_spec) {
                     try {
-                        echo "Creating version " . ($version_index + 1) . ": " . htmlspecialchars($version_spec['version_name']) . "<br>\n";
-                        flush();
-                        
                         $this->createProductVersion($product_id, $version_spec);
-                        
-                        echo "✓ Version created successfully<br>\n";
-                        flush();
+                        echo "✓ Version created: " . htmlspecialchars($version_spec['version_name']) . "<br>\n";
                     } catch (Exception $e) {
                         echo "✗ <strong>Error creating version:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
                         throw $e; // Re-throw to mark the product test as failed
@@ -175,14 +143,12 @@ class ProductTester {
             }
             
             // Test shopping cart functionality
-            echo "Testing shopping cart functionality...<br>\n";
-            flush();
-            
             $cart_test_passed = true;
             $cart_test_error = null;
             
             try {
                 $this->testShoppingCart($product_id, $product_spec);
+                echo "✓ Shopping cart test passed<br>\n";
             } catch (Exception $e) {
                 $cart_test_passed = false;
                 $cart_test_error = $e->getMessage();
@@ -226,9 +192,6 @@ class ProductTester {
         // Add action field and json_confirm flag, then pass all other data directly
         $post_data = array_merge(['action' => 'add', 'json_confirm' => '1'], $spec);
         
-        echo "POST data being sent:<br>\n";
-        echo "<pre>" . htmlspecialchars(print_r($post_data, true)) . "</pre><br>\n";
-        flush();
         
         // Set up $_POST and $_REQUEST for the admin script
         $_POST = $post_data;
@@ -240,9 +203,6 @@ class ProductTester {
         
         // Capture output from admin_product_edit
         ob_start();
-        
-        echo "About to include admin_product_edit.php...<br>\n";
-        flush();
         
         // Register shutdown function to catch fatal errors
         $fatal_error_caught = false;
@@ -258,18 +218,12 @@ class ProductTester {
         try {
             // Include the admin script directly
             include(PathHelper::getRootDir() . '/adm/admin_product_edit.php');
-            echo "Include completed successfully...<br>\n";
-            flush();
             $response = ob_get_contents();
         } catch (Exception $e) {
             ob_end_clean();
-            echo "Exception caught: " . $e->getMessage() . "<br>\n";
-            flush();
             throw new Exception("Error in admin_product_edit: " . $e->getMessage());
         } catch (Error $e) {
             ob_end_clean();
-            echo "Fatal error caught: " . $e->getMessage() . "<br>\n";
-            flush();
             throw new Exception("Fatal error in admin_product_edit: " . $e->getMessage());
         }
         
@@ -279,9 +233,6 @@ class ProductTester {
         }
         
         ob_end_clean();
-        
-        echo "Response captured, length: " . strlen($response) . "<br>\n";
-        flush();
         
         // Since we're using direct includes, check for headers that were set
         $headers = headers_list();
@@ -383,57 +334,36 @@ class ProductTester {
      * Extract product ID from admin_product_edit response
      */
     private function extractProductIdFromResponse($response) {
-        echo "Parsing response for product ID...<br>\n";
-        flush();
         
         // First check for JSON response (when json_confirm is set)
-        // Look for JSON pattern in the response (quoted number)
         if (preg_match('/"(\d+)"/', $response, $matches)) {
-            echo "Found product ID in JSON response: " . $matches[1] . "<br>\n";
-            flush();
             return intval($matches[1]);
         }
         
         // Check for the comment format used when skip_redirect is set
         if (preg_match('/<!-- PRODUCT_ID:(\d+) -->/', $response, $matches)) {
-            echo "Found product ID in comment: " . $matches[1] . "<br>\n";
-            flush();
             return intval($matches[1]);
         }
         
         // admin_product_edit redirects to admin_product?pro_product_id=X on success
-        // Look for the redirect location header (most common pattern)
         if (preg_match('/Location:.*admin_product\?pro_product_id=(\d+)/i', $response, $matches)) {
-            echo "Found product ID in Location header: " . $matches[1] . "<br>\n";
-            flush();
             return intval($matches[1]);
         }
         
         // Alternative: Look for admin_products redirect
         if (preg_match('/Location:.*admin_products.*pro_product_id=(\d+)/i', $response, $matches)) {
-            echo "Found product ID in admin_products redirect: " . $matches[1] . "<br>\n";
-            flush();
             return intval($matches[1]);
         }
         
         // Alternative: Look for any redirect with product_id parameter
         if (preg_match('/Location:.*pro_product_id=(\d+)/i', $response, $matches)) {
-            echo "Found product ID in redirect URL: " . $matches[1] . "<br>\n";
-            flush();
             return intval($matches[1]);
         }
         
         // Alternative: Look for product ID in the response body
         if (preg_match('/pro_product_id[=:](\d+)/i', $response, $matches)) {
-            echo "Found product ID in response body: " . $matches[1] . "<br>\n";
-            flush();
             return intval($matches[1]);
         }
-        
-        // Debug: Show first 500 chars of response if no ID found
-        echo "Could not find product ID. Response preview:<br>\n";
-        echo "<pre>" . htmlspecialchars(substr($response, 0, 500)) . "...</pre><br>\n";
-        flush();
         
         return null;
     }
@@ -443,35 +373,25 @@ class ProductTester {
      */
     private function verifyProduct($product_id, $spec) {
         try {
-            echo "Checking product $product_id in test database...<br>\n";
-            flush();
-            
             // Make sure we're in test mode for verification
             $this->dbconnector->set_test_mode();
             $product = new Product($product_id, TRUE);
             $test_name = $product->get('pro_name');
-            echo "Test database - Name: '" . htmlspecialchars($test_name) . "'<br>\n";
-            flush();
             
             // Also check production database to see if it was created there instead
-            echo "Checking product $product_id in production database...<br>\n";
-            flush();
             $this->dbconnector->close_test_mode();
+            $prod_name = null;
             try {
                 $prod_product = new Product($product_id, TRUE);
                 $prod_name = $prod_product->get('pro_name');
-                echo "Production database - Name: '" . htmlspecialchars($prod_name) . "'<br>\n";
-                flush();
                 
                 // If the product exists in production with the right name, that's where it was created
                 if ($prod_name === $spec['pro_name']) {
-                    echo "<strong>Product was created in PRODUCTION database, not test database!</strong><br>\n";
-                    flush();
+                    echo "<strong>WARNING: Product was created in PRODUCTION database, not test database!</strong><br>\n";
                     return true;
                 }
             } catch (Exception $e) {
-                echo "Product not found in production database<br>\n";
-                flush();
+                // Product not found in production - that's expected
             }
             
             // Switch back to test mode
@@ -503,9 +423,6 @@ class ProductTester {
             'prv_trial_period_days' => $version_spec['prv_trial_period_days']
         ];
         
-        echo "Creating version with data:<br>\n";
-        echo "<pre>" . htmlspecialchars(print_r($post_data, true)) . "</pre><br>\n";
-        flush();
         
         // Set up $_POST and $_REQUEST for the admin script
         $_POST = $post_data;
@@ -545,9 +462,6 @@ class ProductTester {
             );
             
             if ($versions->count_all() > 0) {
-                $versions->load();
-                $version = $versions->get(0); // Get the first version
-                echo "✓ Version verified in database (ID: " . $version->key . ")<br>\n";
                 return true;
             } else {
                 throw new Exception("Version not found in database after creation");
@@ -561,8 +475,6 @@ class ProductTester {
      * Test shopping cart functionality for a product
      */
     private function testShoppingCart($product_id, $product_spec) {
-        echo "<h4>Testing Shopping Cart for Product: " . htmlspecialchars($product_spec['pro_name']) . "</h4>\n";
-        flush();
         
         // Get the product and its versions for testing
         $product = new Product($product_id, TRUE);
@@ -573,22 +485,12 @@ class ProductTester {
         }
         
         // Test adding product to cart
-        echo "Adding product to cart...<br>\n";
-        flush();
         $this->addProductToCart($product_id, $product_spec);
-        
-        // Display cart summary
         $this->displayCartSummary("After adding product");
         
         // Test removing product from cart
-        echo "Removing product from cart...<br>\n";
-        flush();
         $this->removeProductFromCart($product_id);
-        
-        // Display cart summary after removal
         $this->displayCartSummary("After removing product");
-        
-        echo "<br>\n";
     }
     
     /**
@@ -643,12 +545,11 @@ class ProductTester {
             // Call product logic which will add to cart
             $page_vars = product_logic(array(), $post_data, null);
             
-            echo "✓ Product added to cart successfully<br>\n";
-            
+            // Cart addition successful - no output needed
         } catch (Exception $e) {
             // Check if this is a redirect (normal behavior after adding to cart)
             if (strpos($e->getMessage(), 'redirect') !== false) {
-                echo "✓ Product added to cart (redirect detected)<br>\n";
+                // Redirect is expected behavior - cart addition was successful
             } else {
                 throw $e;
             }
@@ -666,18 +567,11 @@ class ProductTester {
         $session = SessionControl::get_instance();
         $cart = $session->get_shopping_cart();
         
-        $removed = false;
         foreach ($cart->get_detailed_items() as $item) {
             if ($item['product_version']->get('prv_pro_product_id') == $product_id) {
                 $cart->remove_item($item['id']);
-                $removed = true;
-                echo "✓ Removed item from cart (ID: " . $item['id'] . ")<br>\n";
                 break;
             }
-        }
-        
-        if (!$removed) {
-            echo "No matching product found in cart to remove<br>\n";
         }
     }
     
@@ -747,7 +641,6 @@ class ProductTester {
         }
         
         echo "</div>\n";
-        flush();
     }
     
     /**
