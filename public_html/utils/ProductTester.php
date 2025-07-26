@@ -354,11 +354,9 @@ class ProductTester {
             
             // Verify the product
             $this->verifyProduct($product_id, $product_spec);
-            echo "✓ Product verified<br>\n";
             
             // Create Stripe product ID for payment testing
             $this->createStripeProduct($product_id);
-            echo "✓ Stripe product ID created<br>\n";
             
             // Create product versions if specified
             if (isset($product_spec['versions']) && is_array($product_spec['versions'])) {
@@ -1051,84 +1049,13 @@ class ProductTester {
             echo "<br><span style='color: green;'><strong>All tests passed successfully!</strong></span><br>\n";
         }
         
-        // Display created product IDs for cleanup if needed
+        // Display created product IDs for reference
         if (!empty($this->created_products)) {
-            echo "<br><strong>Created product IDs (for cleanup if needed):</strong> " . implode(', ', $this->created_products) . "<br>\n";
+            echo "<br><strong>Created test product IDs:</strong> " . implode(', ', $this->created_products) . "<br>\n";
         }
         echo "</div>\n";
     }
     
-    /**
-     * Delete all created test products and verify deletion
-     */
-    public function deleteCreatedProducts() {
-        if (empty($this->created_products)) {
-            echo "No products to delete.<br>\n";
-            return;
-        }
-        
-        echo "Cleaning up " . count($this->created_products) . " test products...<br>\n";
-        
-        // Make sure we're in test mode for deletion
-        $this->dbconnector->set_test_mode();
-        
-        $deleted_count = 0;
-        $failed_deletions = [];
-        
-        foreach ($this->created_products as $product_id) {
-            try {
-                // Load the product
-                $product = new Product($product_id, true);
-                
-                if ($product->key) {
-                    // Use permanent_delete() method
-                    $delete_result = $product->permanent_delete();
-                    $deleted_count++;
-                } else {
-                    echo "⚠ Product $product_id not found (may already be deleted)<br>\n";
-                }
-                
-            } catch (Exception $e) {
-                $failed_deletions[] = $product_id;
-                echo "✗ <span style='color: red;'>Failed to delete product $product_id: " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
-            }
-        }
-        
-        if ($deleted_count > 0) {
-            echo "✓ Deleted $deleted_count products<br>\n";
-        }
-        
-        if (!empty($failed_deletions)) {
-            echo "<span style='color: red;'>Failed to delete: " . count($failed_deletions) . " products (IDs: " . implode(', ', $failed_deletions) . ")</span><br>\n";
-        }
-        
-        
-        // Verify deletion by checking database
-        $this->dbconnector->set_test_mode();
-        $dblink = $this->dbconnector->get_db_link();
-        
-        $still_exists = [];
-        foreach ($this->created_products as $product_id) {
-            try {
-                // Use direct database query to verify deletion
-                $check_sql = "SELECT COUNT(*) as count FROM pro_products WHERE pro_product_id = :product_id";
-                $stmt = $dblink->prepare($check_sql);
-                $stmt->bindParam(':product_id', $product_id, PDO::PARAM_INT);
-                $stmt->execute();
-                $result = $stmt->fetch(PDO::FETCH_ASSOC);
-                
-                if ($result['count'] > 0) {
-                    $still_exists[] = $product_id;
-                }
-            } catch (Exception $e) {
-                // Query failed as expected if product was deleted
-            }
-        }
-        
-        if (!empty($still_exists)) {
-            echo "❌ <span style='color: red;'><strong>Warning: " . count($still_exists) . " products still exist in database (IDs: " . implode(', ', $still_exists) . ")</strong></span><br>\n";
-        }
-    }
     
     /**
      * Create a Stripe product ID for the test product
@@ -1163,10 +1090,9 @@ class ProductTester {
                 $product->set('pro_stripe_product_id_test', $stripe_product['id']);
                 $product->save();
                 
-                echo "Created Stripe product ID: " . htmlspecialchars($stripe_product['id']) . "<br>\n";
-            } else {
-                echo "Product already has Stripe ID: " . htmlspecialchars($product->get('pro_stripe_product_id_test')) . "<br>\n";
+                // Stripe product ID created successfully
             }
+            // Product already has Stripe ID - no action needed
             
         } catch (Exception $e) {
             throw new Exception("Failed to create Stripe product: " . $e->getMessage());
@@ -1180,37 +1106,12 @@ class ProductTester {
         $session = SessionControl::get_instance();
         $cart = $session->get_shopping_cart();
         
-        echo "Setting up billing information...<br>\n";
-        
-        // Debug: Show current billing user state
-        echo "Current billing_user state: ";
-        if (isset($cart->billing_user) && is_array($cart->billing_user)) {
-            echo "Array with keys: " . implode(', ', array_keys($cart->billing_user)) . "<br>\n";
-            echo "Values: " . print_r($cart->billing_user, true) . "<br>\n";
-        } else {
-            echo "Not set or not an array<br>\n";
-        }
-        
-        // Debug: Show cart items form data
-        if (!empty($cart->items)) {
-            echo "Cart has " . count($cart->items) . " items. First item form data:<br>\n";
-            list($quantity, $product, $data, $price, $discount) = $cart->items[0];
-            echo "Form data keys: " . implode(', ', array_keys($data)) . "<br>\n";
-            echo "Email: " . htmlspecialchars($data['email'] ?? 'N/A') . "<br>\n";
-            echo "First name: " . htmlspecialchars($data['full_name_first'] ?? 'N/A') . "<br>\n";
-            echo "Last name: " . htmlspecialchars($data['full_name_last'] ?? 'N/A') . "<br>\n";
-        } else {
-            echo "Cart items array is empty!<br>\n";
-        }
-        
         // First, try to prefill from cart items (this should work if cart has items with form_data)
         if (method_exists($cart, 'billing_user_prefill_from_items')) {
-            echo "Calling billing_user_prefill_from_items()...<br>\n";
             $prefill_result = $cart->billing_user_prefill_from_items();
-            echo "Prefill result: " . ($prefill_result ? 'true' : 'false') . "<br>\n";
             
             if ($prefill_result) {
-                echo "Billing info prefilled from cart items: " . 
+                echo "✓ Billing info setup: " . 
                      htmlspecialchars($cart->billing_user['first_name'] ?? 'N/A') . " " . 
                      htmlspecialchars($cart->billing_user['last_name'] ?? 'N/A') . " (" . 
                      htmlspecialchars($cart->billing_user['email'] ?? 'N/A') . ")<br>\n";
@@ -1353,7 +1254,6 @@ class ProductTester {
         // Need to include the MultiOrder class
         PathHelper::requireOnce('/data/orders_class.php');
         
-        echo "Looking for the most recent test order...<br>\n";
         
         // Since the cart is cleared after payment, find the most recent test order
         // Look for orders created in the last few minutes with test mode
@@ -1394,18 +1294,33 @@ class ProductTester {
         if ($order->get('ord_status') !== Order::STATUS_PAID) {
             throw new Exception("Order not marked as paid. Status: " . $order->get('ord_status'));
         }
-        echo "✓ Order status: PAID<br>\n";
         
         // Verify Stripe charge ID exists (for non-zero orders)
         if ($order->get('ord_total_cost') > 0 && !$order->get('ord_stripe_charge_id')) {
-            echo "⚠ Warning: No Stripe charge ID recorded (might be a subscription-only order)<br>\n";
-        } else if ($order->get('ord_stripe_charge_id')) {
-            echo "✓ Stripe charge ID: " . htmlspecialchars($order->get('ord_stripe_charge_id')) . "<br>\n";
-        }
-        
-        // Check if this is a test mode order
-        if ($order->get('ord_test_mode')) {
-            echo "✓ Order created in test mode<br>\n";
+            // Check if this is a subscription-only order by examining order items
+            PathHelper::requireOnce('/data/order_items_class.php');
+            $order_items = new MultiOrderItem(
+                array('odi_ord_order_id' => $order->key),
+                array('odi_order_item_id' => 'ASC')
+            );
+            
+            if ($order_items->count_all() > 0) {
+                $order_items->load();
+                $has_subscriptions = false;
+                
+                foreach ($order_items as $item) {
+                    if ($item->get('odi_is_subscription') && $item->get('odi_stripe_subscription_id')) {
+                        $has_subscriptions = true;
+                        break;
+                    }
+                }
+                
+                if (!$has_subscriptions) {
+                    throw new Exception("Order has cost but no Stripe charge ID and no active subscriptions");
+                }
+            } else {
+                throw new Exception("Order has cost but no Stripe charge ID and no order items found");
+            }
         }
         
         // Verify order items
@@ -1428,15 +1343,12 @@ class ProductTester {
     private function verifyOrderItems($order) {
         PathHelper::requireOnce('/data/order_items_class.php');
         
-        echo "Searching for order items with order ID: " . $order->key . "<br>\n";
-        
         $order_items = new MultiOrderItem(
             array('odi_ord_order_id' => $order->key),
             array('odi_order_item_id' => 'ASC')
         );
         
         $item_count = $order_items->count_all();
-        echo "Query found " . $item_count . " order items<br>\n";
         
         if ($item_count == 0) {
             throw new Exception("No order items found for order " . $order->key);
@@ -1448,10 +1360,11 @@ class ProductTester {
         
         $order_items->load();
         $items_checked = 0;
+        $subscription_ids = [];
+        
         foreach ($order_items as $item) {
             $items_checked++;
             if ($items_checked > 10) {
-                echo "... (stopping after checking 10 items)<br>\n";
                 break;
             }
             
@@ -1461,20 +1374,23 @@ class ProductTester {
                 throw new Exception("Order item " . $item->key . " not marked as paid. Status: '" . $status . "'");
             }
             
-            // Check subscription status if applicable
+            // Collect subscription IDs
             if ($item->get('odi_is_subscription')) {
                 $sub_id = $item->get('odi_stripe_subscription_id');
                 if ($sub_id) {
-                    echo "✓ Subscription created: " . htmlspecialchars($sub_id) . "<br>\n";
+                    $subscription_ids[] = $sub_id;
                 }
             }
         }
         
-        if ($items_checked <= 10) {
-            echo "✓ All order items verified as paid<br>\n";
-        } else {
-            echo "✓ First 10 order items verified (total: $item_count)<br>\n";
+        // Single summary line
+        $summary_parts = [];
+        if (!empty($subscription_ids)) {
+            $summary_parts[] = "subscription " . $subscription_ids[0];
         }
+        $summary_parts[] = "order verified";
+        
+        echo "✓ " . implode(', ', $summary_parts) . "<br>\n";
     }
     
     private function verifyStripePayment($order) {

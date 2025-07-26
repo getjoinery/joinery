@@ -26,11 +26,9 @@ try {
     flush();
     $tester->run();
     
-    // Delete created test products and verify deletion
+    // Cleanup Phase - only delete coupons
     echo "<br><h3>Cleanup Phase</h3>\n";
-    echo "Deleting created test products...<br>\n";
-    flush();
-    $tester->deleteCreatedProducts();
+    // Products with orders are not deleted to maintain referential integrity
     
 } catch (Exception $e) {
     echo "<strong>ERROR:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
