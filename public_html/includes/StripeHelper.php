@@ -1053,6 +1053,53 @@ class StripeHelper {
 		return $stripe_session;
 	}
 	
+	public function get_checkout_session($session_id) {
+		try {
+			$session = $this->stripe->checkout->sessions->retrieve($session_id);
+			return $session;
+		} catch (\Stripe\Exception $e) {
+			return false;
+		}
+	}
+	
+	public function verify_checkout_session($order) {
+		// Test/prod mode validation (following existing pattern from get_charge_from_order)
+		if ($order->get('ord_test_mode')) {
+			if (!$this->test_mode) {
+				// DON'T VERIFY TEST MODE ORDERS IF NOT IN TEST MODE
+				return false;
+			}
+		} else {
+			if ($this->test_mode) {
+				// DON'T VERIFY LIVE MODE ORDERS IF IN TEST MODE
+				return false;
+			}
+		}
+		
+		$session_id = $order->get('ord_stripe_session_id');
+		if (!$session_id) {
+			return false;
+		}
+		
+		try {
+			$session = $this->get_checkout_session($session_id);
+			if (!$session) {
+				return false;
+			}
+			
+			return [
+				'session_id' => $session->id,
+				'payment_status' => $session->payment_status, // 'paid', 'unpaid', 'no_payment_required'
+				'amount_total' => $session->amount_total / 100,
+				'currency' => $session->currency,
+				'status' => $session->status, // 'complete', 'expired', 'open'
+				'payment_intent' => $session->payment_intent
+			];
+		} catch (\Stripe\Exception $e) {
+			return false;
+		}
+	}
+	
 	public function webhook_construct_event($payload, $sig_header, $endpoint_secret){
 	
 		  $event = $this->stripe->Webhook->construct_event(
