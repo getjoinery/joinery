@@ -122,11 +122,48 @@ class ProductTester {
     }
     
     /**
-     * Cleanup method to ensure test mode is properly closed
+     * Cleanup method to ensure test mode is properly closed and test data is removed
      */
     private function cleanup() {
+        // Clean up created coupons even if there was an error
+        $this->deleteCreatedCoupons();
+        
         if ($this->dbconnector) {
             $this->dbconnector->close_test_mode();
+        }
+    }
+    
+    /**
+     * Delete any existing test coupons from previous runs
+     */
+    private function deleteExistingTestCoupons() {
+        $this->dbconnector->set_test_mode();
+        
+        $existing_coupons = [];
+        foreach ($this->coupon_codes as $coupon_spec) {
+            $coupon_code = $coupon_spec['ccd_code'];
+            try {
+                $existing_coupon = CouponCode::GetByColumn('ccd_code', $coupon_code);
+                if ($existing_coupon && $existing_coupon->key) {
+                    $existing_coupons[] = $existing_coupon->key;
+                }
+            } catch (Exception $e) {
+                // Coupon doesn't exist, which is fine
+            }
+        }
+        
+        if (!empty($existing_coupons)) {
+            echo "Cleaning up " . count($existing_coupons) . " existing test coupons from previous runs...<br>\n";
+            foreach ($existing_coupons as $coupon_id) {
+                try {
+                    $coupon = new CouponCode($coupon_id, true);
+                    if ($coupon->key) {
+                        $coupon->permanent_delete();
+                    }
+                } catch (Exception $e) {
+                    echo "⚠ Failed to delete existing coupon $coupon_id: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+                }
+            }
         }
     }
     
@@ -134,6 +171,9 @@ class ProductTester {
      * Create coupon codes from JSON specifications
      */
     private function createCouponCodes() {
+        // First, clean up any existing test coupons from previous runs
+        $this->deleteExistingTestCoupons();
+        
         foreach ($this->coupon_codes as $coupon_spec) {
             try {
                 $coupon_id = $this->createCouponCode($coupon_spec);
@@ -178,31 +218,44 @@ class ProductTester {
         
         ob_end_clean();
         
-        // Parse response to extract coupon ID
-        $coupon_id = $this->extractCouponIdFromResponse($response);
-        
-        if (!$coupon_id) {
-            throw new Exception("Failed to extract coupon ID from admin_coupon_code_edit response");
+        // Instead of parsing response, directly check database for created coupon
+        try {
+            $created_coupon = CouponCode::GetByColumn('ccd_code', $coupon_spec['ccd_code']);
+            if ($created_coupon && $created_coupon->key) {
+                return $created_coupon->key;
+            }
+        } catch (Exception $e) {
+            // Coupon not found in database
         }
         
-        return $coupon_id;
+        throw new Exception("Coupon was not created successfully or not found in database");
     }
     
     /**
      * Extract coupon ID from admin_coupon_code_edit response
      */
     private function extractCouponIdFromResponse($response) {
-        // Check for JSON response
+        // Check for JSON response first
         if (preg_match('/"(\d+)"/', $response, $matches)) {
             return intval($matches[1]);
         }
         
-        // Check for redirect with coupon ID
+        // Check for redirect patterns (similar to product extraction)
+        if (preg_match('/Location:.*admin_coupon_code\?ccd_coupon_code_id=(\d+)/i', $response, $matches)) {
+            return intval($matches[1]);
+        }
+        
+        // Check for admin_coupon_codes redirect
+        if (preg_match('/Location:.*admin_coupon_codes.*ccd_coupon_code_id=(\d+)/i', $response, $matches)) {
+            return intval($matches[1]);
+        }
+        
+        // Check for any redirect with coupon code ID parameter
         if (preg_match('/Location:.*ccd_coupon_code_id=(\d+)/i', $response, $matches)) {
             return intval($matches[1]);
         }
         
-        // Check for any coupon ID pattern
+        // Check for coupon ID in the response body
         if (preg_match('/ccd_coupon_code_id[=:](\d+)/i', $response, $matches)) {
             return intval($matches[1]);
         }
@@ -410,7 +463,7 @@ class ProductTester {
         $url = LibraryFunctions::get_absolute_url($endpoint);
         
         echo "Making request to: $url<br>\n";
-        flush();
+        flush(); 
         
         // Close the current session to prevent session locking
         if (session_status() === PHP_SESSION_ACTIVE) {
