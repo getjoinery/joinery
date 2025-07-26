@@ -313,28 +313,58 @@ class MultiOrderItem extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
 
+		// Order ID filtering
+		// DEPRECATED: Use 'odi_ord_order_id' instead of 'order_id' (kept for backward compatibility only)
 		if (isset($this->options['order_id'])) {
 			$filters['odi_ord_order_id'] = [$this->options['order_id'], PDO::PARAM_INT];
 		}
+		if (isset($this->options['odi_ord_order_id'])) {
+			$filters['odi_ord_order_id'] = [$this->options['odi_ord_order_id'], PDO::PARAM_INT];
+		}
 
+		// User ID filtering
+		// DEPRECATED: Use 'odi_usr_user_id' instead of 'user_id' (kept for backward compatibility only)
 		if (isset($this->options['user_id'])) {
 			$filters['odi_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
+		if (isset($this->options['odi_usr_user_id'])) {
+			$filters['odi_usr_user_id'] = [$this->options['odi_usr_user_id'], PDO::PARAM_INT];
+		}
 
+		// Event Registrant ID filtering
+		// DEPRECATED: Use 'odi_evr_event_registrant_id' instead of 'registrant_id' (kept for backward compatibility only)
 		if (isset($this->options['registrant_id'])) {
 			$filters['odi_evr_event_registrant_id'] = [$this->options['registrant_id'], PDO::PARAM_INT];
 		}
+		if (isset($this->options['odi_evr_event_registrant_id'])) {
+			$filters['odi_evr_event_registrant_id'] = [$this->options['odi_evr_event_registrant_id'], PDO::PARAM_INT];
+		}
 
+		// Product ID filtering
+		// DEPRECATED: Use 'odi_pro_product_id' instead of 'product_id' (kept for backward compatibility only)
 		if (isset($this->options['product_id'])) {
 			$filters['odi_pro_product_id'] = [$this->options['product_id'], PDO::PARAM_INT];
 		}
+		if (isset($this->options['odi_pro_product_id'])) {
+			$filters['odi_pro_product_id'] = [$this->options['odi_pro_product_id'], PDO::PARAM_INT];
+		}
 
+		// Stripe Subscription ID filtering
+		// DEPRECATED: Use 'odi_stripe_subscription_id' instead of 'stripe_subscription_id' (kept for backward compatibility only)
 		if (isset($this->options['stripe_subscription_id'])) {
 			$filters['odi_stripe_subscription_id'] = [$this->options['stripe_subscription_id'], PDO::PARAM_STR];
 		}
+		if (isset($this->options['odi_stripe_subscription_id'])) {
+			$filters['odi_stripe_subscription_id'] = [$this->options['odi_stripe_subscription_id'], PDO::PARAM_STR];
+		}
 
+		// Status filtering
+		// DEPRECATED: Use 'odi_status' instead of 'status' (kept for backward compatibility only)
 		if (isset($this->options['status'])) {
 			$filters['odi_status'] = [$this->options['status'], PDO::PARAM_INT];
+		}
+		if (isset($this->options['odi_status'])) {
+			$filters['odi_status'] = [$this->options['odi_status'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['order_date_after'])) {
