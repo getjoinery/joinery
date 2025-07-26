@@ -1122,17 +1122,14 @@ class ProductTester {
             }
         }
         
-        // If prefill didn't work, set billing user information manually
-        echo "Manual billing info setup...<br>\n";
-        
-        // Use hardcoded billing user for testing
+        // If prefill didn't work, set billing user information manually from JSON config
         $cart->billing_user = [
-            'first_name' => 'Jeremy',
-            'last_name' => 'Tunnell', 
-            'email' => 'jeremy.tunnell@gmail.com'
+            'first_name' => $billing_info['first_name'],
+            'last_name' => $billing_info['last_name'], 
+            'email' => $billing_info['email']
         ];
         
-        echo "Set billing info: " . htmlspecialchars($cart->billing_user['first_name']) . " " . 
+        echo "✓ Billing info setup: " . htmlspecialchars($cart->billing_user['first_name']) . " " . 
              htmlspecialchars($cart->billing_user['last_name']) . " (" . 
              htmlspecialchars($cart->billing_user['email']) . ")<br>\n";
     }

@@ -7,9 +7,9 @@
       "insufficient_funds": "tok_insufficientFunds"
     },
     "billing_info": {
-      "first_name": "Test",
-      "last_name": "Buyer",
-      "email": "test.buyer@example.com"
+      "first_name": "Jeremy",
+      "last_name": "Tunnell",
+      "email": "jeremy.tunnell@gmail.com"
     }
   },
   "coupon_codes": [
@@ -60,9 +60,9 @@
       "product_scripts": [],
       "pro_after_purchase_message": "Thank you for your purchase!",
       "form_data": {
-        "full_name_first": "John",
-        "full_name_last": "Doe",
-        "email": "john.doe@example.com"
+        "full_name_first": "Jeremy",
+        "full_name_last": "Tunnell",
+        "email": "jeremy.tunnell@gmail.com"
       },
       "versions": [
         {
