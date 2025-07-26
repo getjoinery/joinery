@@ -464,13 +464,13 @@ This script provides access to the Apache error.log from the joinerytest site. U
 **Usage Pattern:**
 1. Make code changes locally with Claude Code
 2. Run syntax validation (`php -l filename.php`)
-3. Wait ~10 seconds for automatic file sync to test server
+3. Wait ~6 seconds for automatic file sync to test server
 4. **Execute the changed files** (visit URLs like `https://joinerytest.site/path/to/file`)
 5. Run log fetcher script to check for new errors
 6. Fix any issues found in the logs
 
 **Important Notes:** 
-- **File Upload**: Claude Code does not upload files to the server. An automated script handles file synchronization to the test server (allow ~10 seconds for sync).
+- **File Upload**: Claude Code does not upload files to the server. An automated script handles file synchronization to the test server (allow ~6 seconds for sync).
 - **Runtime Errors Only**: The error logs only show runtime errors that occur when files are actually executed on the server. Simply having files uploaded will not generate log entries - you must visit the pages, run the scripts, or trigger the functionality to see any runtime errors in the logs.
 - **Error Identification**: New errors appear with recent timestamps at the end of the log output, making them easy to distinguish from existing warnings.
 
