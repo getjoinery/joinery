@@ -945,7 +945,10 @@ class ProductTester {
         echo "<strong>$context:</strong><br>\n";
         
         if (empty($detailed_items)) {
-            echo "Cart is empty<br>\n";
+            // Don't display empty cart status unless it's an error condition
+            if (strpos($context, "before payment") !== false || strpos($context, "Final combined cart") !== false) {
+                echo "Cart is empty<br>\n";
+            }
         } else {
             echo "<table style='width: 100%; border-collapse: collapse; margin-top: 5px;'>\n";
             echo "<tr style='background: #eee;'>\n";
