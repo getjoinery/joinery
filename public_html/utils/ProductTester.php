@@ -1274,15 +1274,6 @@ class ProductTester {
         // Display cart before payment
         $this->displayCartSummary("Cart before payment");
         
-        // Debug: Check billing user right before payment
-        echo "Billing user just before payment: ";
-        if (isset($cart->billing_user) && is_array($cart->billing_user)) {
-            echo "first_name='" . ($cart->billing_user['first_name'] ?? 'NULL') . "', ";
-            echo "last_name='" . ($cart->billing_user['last_name'] ?? 'NULL') . "', ";
-            echo "email='" . ($cart->billing_user['email'] ?? 'NULL') . "'<br>\n";
-        } else {
-            echo "NOT SET<br>\n";
-        }
         
         // Prepare POST data as if from checkout form
         // In normal flow, JavaScript would create a token from card details
@@ -1420,6 +1411,14 @@ class ProductTester {
         // Verify order items
         $this->verifyOrderItems($order);
         
+        // Verify payment with Stripe
+        echo "<br>Verifying payment with Stripe...<br>\n";
+        if ($this->verifyStripePayment($order)) {
+            echo "✓ <span style='color: green;'><strong>Stripe verification successful!</strong></span><br>\n";
+        } else {
+            echo "✗ <span style='color: red;'><strong>Stripe verification failed!</strong></span><br>\n";
+        }
+        
         echo "✓ <span style='color: green;'><strong>Payment test successful!</strong></span><br>\n";
     }
     
@@ -1443,42 +1442,11 @@ class ProductTester {
             throw new Exception("No order items found for order " . $order->key);
         }
         
-        // If there are too many items, something is wrong with the query
         if ($item_count > 50) {
-            echo "⚠ ERROR: Too many order items found ($item_count). This suggests the query is not filtering correctly.<br>\n";
-            echo "Order ID being searched: " . $order->key . "<br>\n";
-            
-            // Let's try a direct database query to see what's happening
-            try {
-                $dbconnector = DbConnector::get_instance();
-                $dbconnector->set_test_mode();
-                $dblink = $dbconnector->get_db_link();
-                
-                $sql = "SELECT COUNT(*) as count FROM odi_order_items WHERE odi_ord_order_id = :order_id";
-                $stmt = $dblink->prepare($sql);
-                $stmt->bindParam(':order_id', $order->key, PDO::PARAM_INT);
-                $stmt->execute();
-                $result = $stmt->fetch(PDO::FETCH_ASSOC);
-                
-                echo "Direct SQL query result: " . $result['count'] . " items for order " . $order->key . "<br>\n";
-                
-                // If direct query also returns many items, we might have picked the wrong order
-                if ($result['count'] > 50) {
-                    throw new Exception("Direct SQL also found " . $result['count'] . " items. Wrong order selected or database issue.");
-                }
-                
-            } catch (Exception $e) {
-                echo "Error running direct SQL: " . $e->getMessage() . "<br>\n";
-            }
+            throw new Exception("Too many order items found ($item_count). Query filtering issue.");
         }
         
         $order_items->load();
-        
-        // Debug: If there are too many items, show first few
-        if ($item_count > 10) {
-            echo "⚠ Warning: Unexpectedly high number of order items ($item_count). Checking first 10...<br>\n";
-        }
-        
         $items_checked = 0;
         foreach ($order_items as $item) {
             $items_checked++;
@@ -1488,11 +1456,8 @@ class ProductTester {
             }
             
             $status = $item->get('odi_status');
-            echo "Item " . $item->key . " status: '" . $status . "'<br>\n";
             
             if ($status !== OrderItem::STATUS_PAID) {
-                // Check what the STATUS_PAID constant actually is
-                echo "Expected status: '" . OrderItem::STATUS_PAID . "'<br>\n";
                 throw new Exception("Order item " . $item->key . " not marked as paid. Status: '" . $status . "'");
             }
             
@@ -1510,6 +1475,86 @@ class ProductTester {
         } else {
             echo "✓ First 10 order items verified (total: $item_count)<br>\n";
         }
+    }
+    
+    private function verifyStripePayment($order) {
+        $stripe_helper = new StripeHelper();
+        
+        // Determine verification method based on order type
+        if ($order->get('ord_stripe_session_id')) {
+            // Stripe Checkout verification
+            $verification = $stripe_helper->verify_checkout_session($order);
+            if ($verification && $verification['payment_status'] === 'paid') {
+                echo "✓ Stripe Checkout session verified: " . $verification['session_id'] . "<br>\n";
+                echo "  Amount: $" . $verification['amount_total'] . " " . strtoupper($verification['currency']) . "<br>\n";
+                echo "  Status: " . $verification['status'] . "<br>\n";
+                return true;
+            }
+        } elseif ($order->get('ord_stripe_charge_id') || $order->get('ord_stripe_payment_intent_id')) {
+            // Regular Stripe verification
+            $charge = $stripe_helper->get_charge_from_order($order);
+            if ($charge && $charge->paid && $charge->status === 'succeeded') {
+                echo "✓ Stripe charge verified: " . $charge->id . "<br>\n";
+                echo "  Amount: $" . ($charge->amount / 100) . " " . strtoupper($charge->currency) . "<br>\n";
+                echo "  Status: " . $charge->status . "<br>\n";
+                
+                // Verify amount matches order total
+                $order_total = $order->get('ord_total_cost');
+                $stripe_amount = $charge->amount / 100;
+                $amounts_match = abs($stripe_amount - $order_total) < 0.01;
+                
+                if ($amounts_match) {
+                    echo "✓ Payment amount matches order total<br>\n";
+                } else {
+                    echo "✗ Payment amount mismatch: Order=$" . $order_total . ", Stripe=$" . $stripe_amount . "<br>\n";
+                    return false;
+                }
+                
+                return true;
+            }
+        } else {
+            // Check if this is a subscription-only order
+            PathHelper::requireOnce('/data/order_items_class.php');
+            $order_items = new MultiOrderItem(
+                array('odi_ord_order_id' => $order->key),
+                array('odi_order_item_id' => 'ASC')
+            );
+            
+            if ($order_items->count_all() > 0) {
+                $order_items->load();
+                $has_subscriptions = false;
+                
+                foreach ($order_items as $item) {
+                    if ($item->get('odi_is_subscription') && $item->get('odi_stripe_subscription_id')) {
+                        $has_subscriptions = true;
+                        $sub_id = $item->get('odi_stripe_subscription_id');
+                        
+                        try {
+                            $subscription = $stripe_helper->get_subscription($sub_id);
+                            if ($subscription && $subscription->status === 'active') {
+                                echo "✓ Stripe subscription verified: " . $sub_id . "<br>\n";
+                                echo "  Status: " . $subscription->status . "<br>\n";
+                                echo "  Amount: $" . ($subscription->items->data[0]->price->unit_amount / 100) . " " . strtoupper($subscription->currency) . "<br>\n";
+                                echo "  Interval: " . $subscription->items->data[0]->price->recurring->interval . "<br>\n";
+                            } else {
+                                echo "✗ Subscription verification failed for: " . $sub_id . "<br>\n";
+                                return false;
+                            }
+                        } catch (Exception $e) {
+                            echo "✗ Error verifying subscription " . $sub_id . ": " . $e->getMessage() . "<br>\n";
+                            return false;
+                        }
+                    }
+                }
+                
+                if ($has_subscriptions) {
+                    return true;
+                }
+            }
+        }
+        
+        echo "✗ Stripe payment verification failed - no charge, session, or subscription found<br>\n";
+        return false;
     }
 }
 
