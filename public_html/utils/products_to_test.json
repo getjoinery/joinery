@@ -1,4 +1,17 @@
 {
+  "payment_testing": {
+    "enabled": true,
+    "test_tokens": {
+      "success": "tok_visa",
+      "declined": "tok_chargeDeclined",
+      "insufficient_funds": "tok_insufficientFunds"
+    },
+    "billing_info": {
+      "first_name": "Test",
+      "last_name": "Buyer",
+      "email": "test.buyer@example.com"
+    }
+  },
   "coupon_codes": [
     {
       "ccd_code": "test_15dollaroff",

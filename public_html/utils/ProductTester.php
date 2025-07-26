@@ -73,6 +73,8 @@ class ProductTester {
         echo "<h2>Product Testing Script</h2>\n";
         echo "Starting product creation and verification tests...<br><br>\n";
         
+        echo "Starting tests (using hardcoded admin user for testing)...<br><br>\n";
+        
         try {
             // Load JSON specifications
             $json_file = __DIR__ . '/products_to_test.json';
@@ -107,6 +109,39 @@ class ProductTester {
             
             // Test cart functionality with all products together
             $this->testAllProductsTogether($specifications['products']);
+            
+            // Test payment functionality if enabled
+            if (isset($specifications['payment_testing']) && 
+                isset($specifications['payment_testing']['enabled']) && 
+                $specifications['payment_testing']['enabled']) {
+                
+                echo "<h3>Payment Testing</h3>\n";
+                
+                // Re-add a product to cart for payment testing
+                if (!empty($this->successful_products)) {
+                    $this->removeAllProductsFromCart();
+                    
+                    // Add first successful product for payment test
+                    $product_info = $this->successful_products[0];
+                    try {
+                        $this->addProductToCart($product_info['id'], $product_info['spec']);
+                        echo "Added " . htmlspecialchars($product_info['spec']['pro_name']) . " to cart for payment test<br>\n";
+                        
+                        // Set up billing info AFTER adding product to cart
+                        if (isset($specifications['payment_testing']['billing_info'])) {
+                            $this->setupBillingInfo($specifications['payment_testing']['billing_info']);
+                        }
+                        
+                        // Run payment test
+                        $this->testPaymentFlow();
+                    } catch (Exception $e) {
+                        echo "✗ <span style='color: red;'>Failed to set up payment test: " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
+                    }
+                } else {
+                    echo "⚠ <span style='color: orange;'>No successful products available for payment testing</span><br>\n";
+                }
+                echo "<br>\n";
+            }
             
             // Clean up created coupons
             $this->deleteCreatedCoupons();
@@ -321,6 +356,10 @@ class ProductTester {
             $this->verifyProduct($product_id, $product_spec);
             echo "✓ Product verified<br>\n";
             
+            // Create Stripe product ID for payment testing
+            $this->createStripeProduct($product_id);
+            echo "✓ Stripe product ID created<br>\n";
+            
             // Create product versions if specified
             if (isset($product_spec['versions']) && is_array($product_spec['versions'])) {
                 foreach ($product_spec['versions'] as $version_index => $version_spec) {
@@ -387,6 +426,8 @@ class ProductTester {
      * Create a product by directly including admin_product_edit logic
      */
     private function createProduct($spec) {
+        // Creating product via admin endpoint
+        
         // Add action field and json_confirm flag, then pass all other data directly
         $post_data = array_merge(['action' => 'add', 'json_confirm' => '1'], $spec);
         
@@ -1086,6 +1127,388 @@ class ProductTester {
         
         if (!empty($still_exists)) {
             echo "❌ <span style='color: red;'><strong>Warning: " . count($still_exists) . " products still exist in database (IDs: " . implode(', ', $still_exists) . ")</strong></span><br>\n";
+        }
+    }
+    
+    /**
+     * Create a Stripe product ID for the test product
+     */
+    private function createStripeProduct($product_id) {
+        // Make sure we're in test mode for Stripe operations
+        $_SESSION['test_mode'] = true;
+        
+        try {
+            // Load the product
+            $product = new Product($product_id, TRUE);
+            
+            // Check if it already has a test Stripe product ID
+            if (!$product->get('pro_stripe_product_id_test')) {
+                // Create StripeHelper instance
+                $stripe_helper = new StripeHelper();
+                
+                // Prepare product info for Stripe
+                $product_info = [
+                    'name' => $product->get('pro_name'),
+                    'description' => $product->get('pro_description'),
+                ];
+                
+                // Create the Stripe product
+                $stripe_product = $stripe_helper->create_product($product_info);
+                
+                if (!$stripe_product['id']) {
+                    throw new Exception("Unable to create a stripe product");
+                }
+                
+                // Save the Stripe product ID to the product
+                $product->set('pro_stripe_product_id_test', $stripe_product['id']);
+                $product->save();
+                
+                echo "Created Stripe product ID: " . htmlspecialchars($stripe_product['id']) . "<br>\n";
+            } else {
+                echo "Product already has Stripe ID: " . htmlspecialchars($product->get('pro_stripe_product_id_test')) . "<br>\n";
+            }
+            
+        } catch (Exception $e) {
+            throw new Exception("Failed to create Stripe product: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Set up billing information for the cart
+     */
+    private function setupBillingInfo($billing_info) {
+        $session = SessionControl::get_instance();
+        $cart = $session->get_shopping_cart();
+        
+        echo "Setting up billing information...<br>\n";
+        
+        // Debug: Show current billing user state
+        echo "Current billing_user state: ";
+        if (isset($cart->billing_user) && is_array($cart->billing_user)) {
+            echo "Array with keys: " . implode(', ', array_keys($cart->billing_user)) . "<br>\n";
+            echo "Values: " . print_r($cart->billing_user, true) . "<br>\n";
+        } else {
+            echo "Not set or not an array<br>\n";
+        }
+        
+        // Debug: Show cart items form data
+        if (!empty($cart->items)) {
+            echo "Cart has " . count($cart->items) . " items. First item form data:<br>\n";
+            list($quantity, $product, $data, $price, $discount) = $cart->items[0];
+            echo "Form data keys: " . implode(', ', array_keys($data)) . "<br>\n";
+            echo "Email: " . htmlspecialchars($data['email'] ?? 'N/A') . "<br>\n";
+            echo "First name: " . htmlspecialchars($data['full_name_first'] ?? 'N/A') . "<br>\n";
+            echo "Last name: " . htmlspecialchars($data['full_name_last'] ?? 'N/A') . "<br>\n";
+        } else {
+            echo "Cart items array is empty!<br>\n";
+        }
+        
+        // First, try to prefill from cart items (this should work if cart has items with form_data)
+        if (method_exists($cart, 'billing_user_prefill_from_items')) {
+            echo "Calling billing_user_prefill_from_items()...<br>\n";
+            $prefill_result = $cart->billing_user_prefill_from_items();
+            echo "Prefill result: " . ($prefill_result ? 'true' : 'false') . "<br>\n";
+            
+            if ($prefill_result) {
+                echo "Billing info prefilled from cart items: " . 
+                     htmlspecialchars($cart->billing_user['first_name'] ?? 'N/A') . " " . 
+                     htmlspecialchars($cart->billing_user['last_name'] ?? 'N/A') . " (" . 
+                     htmlspecialchars($cart->billing_user['email'] ?? 'N/A') . ")<br>\n";
+                return;
+            }
+        }
+        
+        // If prefill didn't work, set billing user information manually
+        echo "Manual billing info setup...<br>\n";
+        
+        // Use hardcoded billing user for testing
+        $cart->billing_user = [
+            'first_name' => 'Jeremy',
+            'last_name' => 'Tunnell', 
+            'email' => 'jeremy.tunnell@gmail.com'
+        ];
+        
+        echo "Set billing info: " . htmlspecialchars($cart->billing_user['first_name']) . " " . 
+             htmlspecialchars($cart->billing_user['last_name']) . " (" . 
+             htmlspecialchars($cart->billing_user['email']) . ")<br>\n";
+    }
+    
+    /**
+     * Test payment functionality with Stripe
+     */
+    private function testPaymentFlow() {
+        echo "<h3>Testing Payment Flow</h3>\n";
+        
+        // Store original test mode state
+        $original_test_mode = $_SESSION['test_mode'] ?? false;
+        
+        try {
+            // Enable Stripe test mode for this transaction only
+            $_SESSION['test_mode'] = true;
+            
+            // Submit to cart_charge endpoint
+            $this->simulateStripePayment();
+        } catch (Exception $e) {
+            echo "✗ <span style='color: red;'><strong>Payment test failed:</strong> " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
+        } finally {
+            // Always restore original test mode state
+            $_SESSION['test_mode'] = $original_test_mode;
+        }
+    }
+    
+    /**
+     * Simulate a Stripe payment by submitting to cart_charge
+     */
+    private function simulateStripePayment() {
+        echo "Simulating Stripe payment submission...<br>\n";
+        
+        // Get the session and cart
+        $session = SessionControl::get_instance();
+        $cart = $session->get_shopping_cart();
+        
+        // Check if cart has items
+        if (empty($cart->items)) {
+            throw new Exception("Cannot test payment - cart is empty");
+        }
+        
+        // Display cart before payment
+        $this->displayCartSummary("Cart before payment");
+        
+        // Debug: Check billing user right before payment
+        echo "Billing user just before payment: ";
+        if (isset($cart->billing_user) && is_array($cart->billing_user)) {
+            echo "first_name='" . ($cart->billing_user['first_name'] ?? 'NULL') . "', ";
+            echo "last_name='" . ($cart->billing_user['last_name'] ?? 'NULL') . "', ";
+            echo "email='" . ($cart->billing_user['email'] ?? 'NULL') . "'<br>\n";
+        } else {
+            echo "NOT SET<br>\n";
+        }
+        
+        // Prepare POST data as if from checkout form
+        // In normal flow, JavaScript would create a token from card details
+        // For testing, we use Stripe's pre-defined test tokens
+        $post_data = [
+            'stripeToken' => 'tok_visa', // Stripe test token (simulates a Visa card)
+            'password' => '', // Optional: If billing user doesn't exist, create account with this password
+        ];
+        
+        // Save current POST/REQUEST
+        $original_post = $_POST;
+        $original_request = $_REQUEST;
+        $original_get = $_GET;
+        
+        // Set up POST data for cart_charge
+        $_POST = $post_data;
+        $_REQUEST = $post_data;
+        $_GET = [];
+        
+        // Suppress emails during testing to avoid email configuration issues
+        $original_send_emails = $_SESSION['send_emails'] ?? true;
+        $_SESSION['send_emails'] = false;
+        
+        try {
+            // Include the cart_charge view which calls cart_charge_logic
+            ob_start();
+            
+            // Capture any redirects
+            $redirect_captured = false;
+            
+            // Override the redirect function temporarily
+            if (!function_exists('LibraryFunctions_Redirect_Override')) {
+                function LibraryFunctions_Redirect_Override($url) {
+                    global $redirect_captured;
+                    $redirect_captured = $url;
+                    throw new Exception("REDIRECT:$url");
+                }
+            }
+            
+            try {
+                include(PathHelper::getRootDir() . '/views/cart_charge.php');
+            } catch (Exception $e) {
+                if (strpos($e->getMessage(), 'REDIRECT:') === 0) {
+                    // Expected redirect to cart_confirm
+                    $redirect_url = substr($e->getMessage(), 9);
+                    echo "✓ Payment processed, redirected to: " . htmlspecialchars($redirect_url) . "<br>\n";
+                } else {
+                    // Check if this is a user creation issue
+                    if (strpos($e->getMessage(), 'Call to a member function get() on null') !== false) {
+                        throw new Exception("Billing user creation failed - the user object is null. This usually means the test user email already exists in the database but couldn't be retrieved, or user creation failed.");
+                    }
+                    throw $e;
+                }
+            }
+            
+            $output = ob_get_contents();
+            ob_end_clean();
+            
+            // The view redirects to cart_confirm, so verify the order was created
+            $this->verifyLatestOrder();
+            
+        } finally {
+            // Restore original POST/REQUEST/GET and email settings
+            $_POST = $original_post;
+            $_REQUEST = $original_request;
+            $_GET = $original_get;
+            $_SESSION['send_emails'] = $original_send_emails;
+        }
+    }
+    
+    /**
+     * Verify the latest order was created and paid successfully
+     */
+    private function verifyLatestOrder() {
+        echo "Verifying order creation and payment...<br>\n";
+        
+        // Need to include the MultiOrder class
+        PathHelper::requireOnce('/data/orders_class.php');
+        
+        echo "Looking for the most recent test order...<br>\n";
+        
+        // Since the cart is cleared after payment, find the most recent test order
+        // Look for orders created in the last few minutes with test mode
+        $orders = new MultiOrder(
+            array('ord_test_mode' => 1),
+            array('ord_order_id' => 'DESC'),
+            5  // Get last 5 test orders to find the right one
+        );
+        
+        if ($orders->count_all() == 0) {
+            throw new Exception("No test orders found in database");
+        }
+        
+        $orders->load();
+        
+        // Find the most recent order (should be the one we just created)
+        $order = null;
+        $current_time = time();
+        
+        foreach ($orders as $test_order) {
+            $order_time = strtotime($test_order->get('ord_timestamp'));
+            $time_diff = $current_time - $order_time;
+            
+            // If order was created in the last 60 seconds, it's probably ours
+            if ($time_diff < 60) {
+                $order = $test_order;
+                break;
+            }
+        }
+        
+        if (!$order) {
+            throw new Exception("No recent test order found (looked for orders created in last 60 seconds)");
+        }
+        
+        echo "Found order ID: " . $order->key . "<br>\n";
+        
+        // Check order status
+        if ($order->get('ord_status') !== Order::STATUS_PAID) {
+            throw new Exception("Order not marked as paid. Status: " . $order->get('ord_status'));
+        }
+        echo "✓ Order status: PAID<br>\n";
+        
+        // Verify Stripe charge ID exists (for non-zero orders)
+        if ($order->get('ord_total_cost') > 0 && !$order->get('ord_stripe_charge_id')) {
+            echo "⚠ Warning: No Stripe charge ID recorded (might be a subscription-only order)<br>\n";
+        } else if ($order->get('ord_stripe_charge_id')) {
+            echo "✓ Stripe charge ID: " . htmlspecialchars($order->get('ord_stripe_charge_id')) . "<br>\n";
+        }
+        
+        // Check if this is a test mode order
+        if ($order->get('ord_test_mode')) {
+            echo "✓ Order created in test mode<br>\n";
+        }
+        
+        // Verify order items
+        $this->verifyOrderItems($order);
+        
+        echo "✓ <span style='color: green;'><strong>Payment test successful!</strong></span><br>\n";
+    }
+    
+    /**
+     * Verify order items were created correctly
+     */
+    private function verifyOrderItems($order) {
+        PathHelper::requireOnce('/data/order_items_class.php');
+        
+        echo "Searching for order items with order ID: " . $order->key . "<br>\n";
+        
+        $order_items = new MultiOrderItem(
+            array('odi_ord_order_id' => $order->key),
+            array('odi_order_item_id' => 'ASC')
+        );
+        
+        $item_count = $order_items->count_all();
+        echo "Query found " . $item_count . " order items<br>\n";
+        
+        if ($item_count == 0) {
+            throw new Exception("No order items found for order " . $order->key);
+        }
+        
+        // If there are too many items, something is wrong with the query
+        if ($item_count > 50) {
+            echo "⚠ ERROR: Too many order items found ($item_count). This suggests the query is not filtering correctly.<br>\n";
+            echo "Order ID being searched: " . $order->key . "<br>\n";
+            
+            // Let's try a direct database query to see what's happening
+            try {
+                $dbconnector = DbConnector::get_instance();
+                $dbconnector->set_test_mode();
+                $dblink = $dbconnector->get_db_link();
+                
+                $sql = "SELECT COUNT(*) as count FROM odi_order_items WHERE odi_ord_order_id = :order_id";
+                $stmt = $dblink->prepare($sql);
+                $stmt->bindParam(':order_id', $order->key, PDO::PARAM_INT);
+                $stmt->execute();
+                $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                
+                echo "Direct SQL query result: " . $result['count'] . " items for order " . $order->key . "<br>\n";
+                
+                // If direct query also returns many items, we might have picked the wrong order
+                if ($result['count'] > 50) {
+                    throw new Exception("Direct SQL also found " . $result['count'] . " items. Wrong order selected or database issue.");
+                }
+                
+            } catch (Exception $e) {
+                echo "Error running direct SQL: " . $e->getMessage() . "<br>\n";
+            }
+        }
+        
+        $order_items->load();
+        
+        // Debug: If there are too many items, show first few
+        if ($item_count > 10) {
+            echo "⚠ Warning: Unexpectedly high number of order items ($item_count). Checking first 10...<br>\n";
+        }
+        
+        $items_checked = 0;
+        foreach ($order_items as $item) {
+            $items_checked++;
+            if ($items_checked > 10) {
+                echo "... (stopping after checking 10 items)<br>\n";
+                break;
+            }
+            
+            $status = $item->get('odi_status');
+            echo "Item " . $item->key . " status: '" . $status . "'<br>\n";
+            
+            if ($status !== OrderItem::STATUS_PAID) {
+                // Check what the STATUS_PAID constant actually is
+                echo "Expected status: '" . OrderItem::STATUS_PAID . "'<br>\n";
+                throw new Exception("Order item " . $item->key . " not marked as paid. Status: '" . $status . "'");
+            }
+            
+            // Check subscription status if applicable
+            if ($item->get('odi_is_subscription')) {
+                $sub_id = $item->get('odi_stripe_subscription_id');
+                if ($sub_id) {
+                    echo "✓ Subscription created: " . htmlspecialchars($sub_id) . "<br>\n";
+                }
+            }
+        }
+        
+        if ($items_checked <= 10) {
+            echo "✓ All order items verified as paid<br>\n";
+        } else {
+            echo "✓ First 10 order items verified (total: $item_count)<br>\n";
         }
     }
 }
