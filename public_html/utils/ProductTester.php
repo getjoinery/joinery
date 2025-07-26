@@ -28,6 +28,7 @@ PathHelper::requireOnce('/data/product_requirements_class.php');
 PathHelper::requireOnce('/data/product_requirement_instances_class.php');
 PathHelper::requireOnce('/data/order_items_class.php');
 PathHelper::requireOnce('/data/events_class.php');
+PathHelper::requireOnce('/data/coupon_codes_class.php');
 
 class ProductTester {
     private $settings;
@@ -35,7 +36,8 @@ class ProductTester {
     private $created_products = [];
     private $successful_products = []; // Track products that passed individual cart tests
     private $test_results = [];
-    private $coupon_codes = []; // Coupon codes to test
+    private $coupon_codes = []; // Coupon code specifications from JSON
+    private $created_coupons = []; // Track created coupon IDs for cleanup
     
     public function __construct() {
         $this->settings = Globalvars::get_instance();
@@ -92,7 +94,8 @@ class ProductTester {
             // Load coupon codes if provided
             if (isset($specifications['coupon_codes']) && is_array($specifications['coupon_codes'])) {
                 $this->coupon_codes = $specifications['coupon_codes'];
-                echo "Loaded " . count($this->coupon_codes) . " coupon codes for testing: " . implode(", ", $this->coupon_codes) . "<br>\n";
+                echo "Creating " . count($this->coupon_codes) . " coupon codes for testing...<br>\n";
+                $this->createCouponCodes();
             }
             
             echo "Testing " . count($specifications['products']) . " products...<br><br>\n";
@@ -105,11 +108,14 @@ class ProductTester {
             // Test cart functionality with all products together
             $this->testAllProductsTogether($specifications['products']);
             
+            // Clean up created coupons
+            $this->deleteCreatedCoupons();
+            
             // Display results
             $this->displayResults();
             
         } catch (Exception $e) {
-            echo "<strong>ERROR:</strong> " . $e->getMessage() . "<br>\n";
+            echo "<span style='color: red;'><strong>ERROR:</strong> " . $e->getMessage() . "</span><br>\n";
             $this->cleanup();
             exit(1);
         }
@@ -122,6 +128,128 @@ class ProductTester {
         if ($this->dbconnector) {
             $this->dbconnector->close_test_mode();
         }
+    }
+    
+    /**
+     * Create coupon codes from JSON specifications
+     */
+    private function createCouponCodes() {
+        foreach ($this->coupon_codes as $coupon_spec) {
+            try {
+                $coupon_id = $this->createCouponCode($coupon_spec);
+                $this->created_coupons[] = $coupon_id;
+                echo "✓ Created coupon: " . htmlspecialchars($coupon_spec['ccd_code']) . " (ID: $coupon_id)<br>\n";
+            } catch (Exception $e) {
+                echo "✗ <span style='color: red;'><strong>Error creating coupon " . htmlspecialchars($coupon_spec['ccd_code']) . ":</strong> " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
+            }
+        }
+        echo "<br>\n";
+    }
+    
+    /**
+     * Create a single coupon code by calling admin_coupon_code_edit.php
+     */
+    private function createCouponCode($coupon_spec) {
+        // Add action field and json_confirm flag
+        $post_data = array_merge(['action' => 'add', 'json_confirm' => '1'], $coupon_spec);
+        
+        // Set up $_POST and $_REQUEST for the admin script
+        $_POST = $post_data;
+        $_REQUEST = $post_data;
+        
+        // Ensure test mode is enabled
+        $dbconnector = DbConnector::get_instance();
+        $dbconnector->set_test_mode();
+        
+        // Capture output from admin_coupon_code_edit
+        ob_start();
+        
+        try {
+            // Include the admin script directly
+            include(PathHelper::getRootDir() . '/adm/admin_coupon_code_edit.php');
+            $response = ob_get_contents();
+        } catch (Exception $e) {
+            ob_end_clean();
+            throw new Exception("Error in admin_coupon_code_edit: " . $e->getMessage());
+        } catch (Error $e) {
+            ob_end_clean();
+            throw new Exception("Fatal error in admin_coupon_code_edit: " . $e->getMessage());
+        }
+        
+        ob_end_clean();
+        
+        // Parse response to extract coupon ID
+        $coupon_id = $this->extractCouponIdFromResponse($response);
+        
+        if (!$coupon_id) {
+            throw new Exception("Failed to extract coupon ID from admin_coupon_code_edit response");
+        }
+        
+        return $coupon_id;
+    }
+    
+    /**
+     * Extract coupon ID from admin_coupon_code_edit response
+     */
+    private function extractCouponIdFromResponse($response) {
+        // Check for JSON response
+        if (preg_match('/"(\d+)"/', $response, $matches)) {
+            return intval($matches[1]);
+        }
+        
+        // Check for redirect with coupon ID
+        if (preg_match('/Location:.*ccd_coupon_code_id=(\d+)/i', $response, $matches)) {
+            return intval($matches[1]);
+        }
+        
+        // Check for any coupon ID pattern
+        if (preg_match('/ccd_coupon_code_id[=:](\d+)/i', $response, $matches)) {
+            return intval($matches[1]);
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Delete all created coupon codes
+     */
+    private function deleteCreatedCoupons() {
+        if (empty($this->created_coupons)) {
+            return;
+        }
+        
+        echo "Cleaning up " . count($this->created_coupons) . " test coupon codes...<br>\n";
+        
+        // Make sure we're in test mode for deletion
+        $this->dbconnector->set_test_mode();
+        
+        $deleted_count = 0;
+        $failed_deletions = [];
+        
+        foreach ($this->created_coupons as $coupon_id) {
+            try {
+                // Load the coupon
+                $coupon = new CouponCode($coupon_id, true);
+                
+                if ($coupon->key) {
+                    // Use permanent_delete() method
+                    $delete_result = $coupon->permanent_delete();
+                    $deleted_count++;
+                }
+                
+            } catch (Exception $e) {
+                $failed_deletions[] = $coupon_id;
+                echo "✗ <span style='color: red;'>Failed to delete coupon $coupon_id: " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
+            }
+        }
+        
+        if ($deleted_count > 0) {
+            echo "✓ Deleted $deleted_count coupon codes<br>\n";
+        }
+        if (!empty($failed_deletions)) {
+            echo "<span style='color: red;'>Failed to delete: " . count($failed_deletions) . " coupon codes</span><br>\n";
+        }
+        echo "<br>\n";
     }
     
     /**
@@ -147,7 +275,7 @@ class ProductTester {
                         $this->createProductVersion($product_id, $version_spec);
                         echo "✓ Version created: " . htmlspecialchars($version_spec['version_name']) . "<br>\n";
                     } catch (Exception $e) {
-                        echo "✗ <strong>Error creating version:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
+                        echo "✗ <span style='color: red;'><strong>Error creating version:</strong> " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
                         throw $e; // Re-throw to mark the product test as failed
                     }
                 }
@@ -163,7 +291,7 @@ class ProductTester {
             } catch (Exception $e) {
                 $cart_test_passed = false;
                 $cart_test_error = $e->getMessage();
-                echo "✗ <strong>Cart test failed:</strong> " . htmlspecialchars($cart_test_error) . "<br>\n";
+                echo "✗ <span style='color: red;'><strong>Cart test failed:</strong> " . htmlspecialchars($cart_test_error) . "</span><br>\n";
             }
             
             if ($cart_test_passed) {
@@ -189,7 +317,7 @@ class ProductTester {
             }
             
         } catch (Exception $e) {
-            echo "✗ <strong>Error:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
+            echo "✗ <span style='color: red;'><strong>Error:</strong> " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
             
             $this->test_results[] = [
                 'name' => $product_spec['pro_name'],
@@ -404,7 +532,7 @@ class ProductTester {
                 
                 // If the product exists in production with the right name, that's where it was created
                 if ($prod_name === $spec['pro_name']) {
-                    echo "<strong>WARNING: Product was created in PRODUCTION database, not test database!</strong><br>\n";
+                    echo "<span style='color: red;'><strong>WARNING: Product was created in PRODUCTION database, not test database!</strong></span><br>\n";
                     return true;
                 }
             } catch (Exception $e) {
@@ -583,7 +711,8 @@ class ProductTester {
         
         echo "Testing coupon codes with " . htmlspecialchars($product_name) . "...<br>\n";
         
-        foreach ($this->coupon_codes as $coupon_code) {
+        foreach ($this->coupon_codes as $coupon_spec) {
+            $coupon_code = $coupon_spec['ccd_code'];
             try {
                 // Add the coupon code
                 $result = $cart->add_coupon($coupon_code);
@@ -844,63 +973,50 @@ class ProductTester {
             return;
         }
         
-        echo "Deleting " . count($this->created_products) . " test products...<br>\n";
-        flush();
+        echo "Cleaning up " . count($this->created_products) . " test products...<br>\n";
         
         // Make sure we're in test mode for deletion
         $this->dbconnector->set_test_mode();
-        echo "Test mode enabled for deletion<br>\n";
-        flush();
         
         $deleted_count = 0;
         $failed_deletions = [];
         
         foreach ($this->created_products as $product_id) {
             try {
-                echo "Deleting product ID: $product_id...<br>\n";
-                flush();
-                
                 // Load the product
                 $product = new Product($product_id, true);
                 
                 if ($product->key) {
                     // Use permanent_delete() method
                     $delete_result = $product->permanent_delete();
-                    echo "Delete result: " . ($delete_result ? 'true' : 'false') . "<br>\n";
-                    
                     $deleted_count++;
-                    echo "✓ Product $product_id permanently deleted<br>\n";
                 } else {
                     echo "⚠ Product $product_id not found (may already be deleted)<br>\n";
                 }
                 
             } catch (Exception $e) {
                 $failed_deletions[] = $product_id;
-                echo "✗ Failed to delete product $product_id: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+                echo "✗ <span style='color: red;'>Failed to delete product $product_id: " . htmlspecialchars($e->getMessage()) . "</span><br>\n";
             }
-            flush();
         }
         
-        echo "<br><strong>Deletion Summary:</strong><br>\n";
-        echo "Successfully deleted: $deleted_count products<br>\n";
+        if ($deleted_count > 0) {
+            echo "✓ Deleted $deleted_count products<br>\n";
+        }
         
         if (!empty($failed_deletions)) {
-            echo "Failed to delete: " . count($failed_deletions) . " products (IDs: " . implode(', ', $failed_deletions) . ")<br>\n";
+            echo "<span style='color: red;'>Failed to delete: " . count($failed_deletions) . " products (IDs: " . implode(', ', $failed_deletions) . ")</span><br>\n";
         }
         
         
-        // Verify deletion by trying to load each product
-        echo "<br><strong>Verification Phase:</strong><br>\n";
-        echo "Verifying products were actually deleted...<br>\n";
-        
-        // Make sure we're still in test mode for verification
+        // Verify deletion by checking database
         $this->dbconnector->set_test_mode();
         $dblink = $this->dbconnector->get_db_link();
         
         $still_exists = [];
         foreach ($this->created_products as $product_id) {
             try {
-                // Use direct database query instead of object loading to avoid caching issues
+                // Use direct database query to verify deletion
                 $check_sql = "SELECT COUNT(*) as count FROM pro_products WHERE pro_product_id = :product_id";
                 $stmt = $dblink->prepare($check_sql);
                 $stmt->bindParam(':product_id', $product_id, PDO::PARAM_INT);
@@ -909,22 +1025,15 @@ class ProductTester {
                 
                 if ($result['count'] > 0) {
                     $still_exists[] = $product_id;
-                    echo "⚠ Product $product_id still exists in database<br>\n";
-                } else {
-                    echo "✓ Product $product_id confirmed deleted<br>\n";
                 }
             } catch (Exception $e) {
-                echo "✓ Product $product_id confirmed deleted (query failed as expected)<br>\n";
+                // Query failed as expected if product was deleted
             }
-            flush();
         }
         
-        if (empty($still_exists)) {
-            echo "<br>✅ <strong>All test products successfully deleted and verified!</strong><br>\n";
-        } else {
-            echo "<br>❌ <strong>Warning: " . count($still_exists) . " products still exist in database (IDs: " . implode(', ', $still_exists) . ")</strong><br>\n";
+        if (!empty($still_exists)) {
+            echo "❌ <span style='color: red;'><strong>Warning: " . count($still_exists) . " products still exist in database (IDs: " . implode(', ', $still_exists) . ")</strong></span><br>\n";
         }
-        flush();
     }
 }
 
