@@ -447,7 +447,40 @@ php utils/update_database.php
 
 # Test email configuration
 php utils/phpmailer_test.php
+
+# Check test server error logs (joinerytest site)
+"/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/maintenance scripts/log_fetcher.sh"
 ```
+
+### Test Server Monitoring
+
+**Log Fetcher Tool:** `/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/maintenance scripts/log_fetcher.sh`
+
+This script provides access to the Apache error.log from the joinerytest site. Use it to:
+- **Monitor runtime errors**: Check for errors after running changed code on the test server
+- **Debug issues**: View recent PHP warnings, errors, and stack traces
+- **Validate functionality**: Ensure new code works correctly when executed
+
+**Usage Pattern:**
+1. Make code changes locally with Claude Code
+2. Run syntax validation (`php -l filename.php`)
+3. Wait ~10 seconds for automatic file sync to test server
+4. **Execute the changed files** (visit URLs like `https://joinerytest.site/path/to/file`)
+5. Run log fetcher script to check for new errors
+6. Fix any issues found in the logs
+
+**Important Notes:** 
+- **File Upload**: Claude Code does not upload files to the server. An automated script handles file synchronization to the test server (allow ~10 seconds for sync).
+- **Runtime Errors Only**: The error logs only show runtime errors that occur when files are actually executed on the server. Simply having files uploaded will not generate log entries - you must visit the pages, run the scripts, or trigger the functionality to see any runtime errors in the logs.
+- **Error Identification**: New errors appear with recent timestamps at the end of the log output, making them easy to distinguish from existing warnings.
+
+**Common Error Types in Logs:**
+- **Undefined array keys**: Missing array key checks (use `isset()` or `??` operator)
+- **Undefined variables**: Variable initialization issues
+- **PHP warnings**: Non-fatal issues that should be addressed for code quality
+- **Fatal errors**: Critical issues that break functionality
+
+The log shows timestamps, client IPs, and full error details including file paths and line numbers for efficient debugging.
 
 ### Frontend Assets
 **Primary Theme:** Falcon (Bootstrap-based)
