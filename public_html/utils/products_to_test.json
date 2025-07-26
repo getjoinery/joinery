@@ -1,5 +1,30 @@
 {
-  "coupon_codes": ["15dollaroff", "10pctoff"],
+  "coupon_codes": [
+    {
+      "ccd_code": "test_15dollaroff",
+      "ccd_amount_discount": "15.00",
+      "ccd_percent_discount": "",
+      "ccd_start_time": "",
+      "ccd_end_time": "",
+      "ccd_is_active": "1",
+      "ccd_max_num_uses": "100",
+      "ccd_is_stackable": "0",
+      "ccd_usr_user_id_affiliate": "",
+      "ccd_applies_to": "0"
+    },
+    {
+      "ccd_code": "test_10pctoff",
+      "ccd_amount_discount": "",
+      "ccd_percent_discount": "10",
+      "ccd_start_time": "",
+      "ccd_end_time": "",
+      "ccd_is_active": "1",
+      "ccd_max_num_uses": "50",
+      "ccd_is_stackable": "0",
+      "ccd_usr_user_id_affiliate": "",
+      "ccd_applies_to": "0"
+    }
+  ],
   "products": [
     {
       "pro_name": "Test Product 1",
