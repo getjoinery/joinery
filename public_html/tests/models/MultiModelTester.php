@@ -238,7 +238,7 @@ class MultiModelTester extends ModelTester {
         $verbose = $this->is_verbose();
         $test_data = [];
         
-        $fields = $this->get_all_testable_fields();
+        $fields = $this->get_all_multi_testable_fields();
         
         if ($verbose) {
             echo "    Generating data for record $index with " . count($fields) . " fields...<br>\n";
@@ -280,6 +280,26 @@ class MultiModelTester extends ModelTester {
         }
         
         return $test_data;
+    }
+    
+    /**
+     * Get all testable fields for Multi class testing (includes primary keys)
+     * Unlike parent's get_all_testable_fields(), this includes primary keys since
+     * Multi class filtering often needs to filter by primary key values
+     */
+    protected function get_all_multi_testable_fields() {
+        $fields = $this->model_class::$fields;
+        $testable = [];
+        
+        foreach ($fields as $field => $properties) {
+            // Skip only auto-generated timestamp fields, but include primary keys
+            if (strpos(strtolower($field), 'create_time') === false &&
+                strpos(strtolower($field), 'update_time') === false) {
+                $testable[$field] = $properties;
+            }
+        }
+        
+        return $testable;
     }
     
     /**
@@ -431,13 +451,27 @@ class MultiModelTester extends ModelTester {
             echo "  Using filter '$filter_option' for field '$database_field'<br>\n";
         }
         
-        // Get test value for this field
-        if (!isset($this->test_records[0]['data'][$database_field])) {
-            echo "  <span style='color: #ff9800;'>[SKIP] Test data doesn't contain field {$database_field}</span><br>\n";
+        // Instead of using synthetic test data, get a real value from existing records
+        $multi_sample = new $this->multi_class([], [], 10); // Get sample of existing records
+        $multi_sample->load();
+        
+        $test_value = null;
+        foreach ($multi_sample as $sample_item) {
+            $sample_value = $sample_item->get($database_field);
+            if ($sample_value !== null && $sample_value !== '') {
+                $test_value = $sample_value;
+                break;
+            }
+        }
+        
+        if ($test_value === null) {
+            echo "<span style='color: #ff9800;'>[SKIP] No existing data found for field {$database_field}</span><br>\n";
             return;
         }
         
-        $test_value = $this->test_records[0]['data'][$database_field];
+        if ($debug) {
+            echo "  Filter: {$filter_option} = {$test_value} (field: {$database_field}) [using existing data]<br>\n";
+        }
         
         // Create Multi instance with the supported filter
         $multi = new $this->multi_class([$filter_option => $test_value]);
@@ -463,8 +497,12 @@ class MultiModelTester extends ModelTester {
             }
         }
         
+        if ($debug) {
+            echo "  Filter results: {$result_count} total, {$matching_results} matching<br>\n";
+        }
+        
         // Basic validation - we should get some results
-        $this->assert_true($result_count > 0, "Filter should return at least one result");
+        $this->assert_true($result_count > 0, "Filter should return at least one result (got {$result_count} results for filter {$filter_option}={$test_value})");
         
         // If we got results, at least some should match our filter criteria
         if ($result_count > 0) {
