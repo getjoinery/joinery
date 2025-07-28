@@ -18,20 +18,10 @@ class MultiModelTester extends ModelTester {
      * Constructor with debugging
      */
     public function __construct($model_class) {
-        echo "[CONSTRUCT] MultiModelTester($model_class)...";
-        flush();
-        
         // Set our own model_class property since parent's is private
         $this->model_class = $model_class;
         
-        try {
-            parent::__construct($model_class);
-            echo "parent-ok(model_class_now:'{$this->model_class}')...";
-            flush();
-        } catch (Exception $e) {
-            echo "CONSTRUCTOR ERROR: " . $e->getMessage() . "<br>\n";
-            throw $e;
-        }
+        parent::__construct($model_class);
     }
     
     /**
@@ -54,166 +44,71 @@ class MultiModelTester extends ModelTester {
         
         // Set execution time limit
         
-        echo "<b style='color: #333;'>TESTING MULTI CLASS: {$this->multi_class}</b><br>\n";
-        echo "  → Starting test execution...";
-        flush(); // Force output to browser
-        
-        if ($verbose) {
-            echo "  Step 1: Setting up test database mode...<br>\n";
-            flush();
-        }
         
         // Set up test database mode with timeout
         $dbhelper = DbConnector::get_instance();
         if (method_exists($dbhelper, 'set_test_mode')) {
             $dbhelper->set_test_mode();
-            if ($verbose) echo "  Test mode enabled<br>\n";
-        } else {
-            if ($verbose) echo "  Test mode not available<br>\n";
         }
         
         // Set database timeout if possible
         try {
             $dblink = $dbhelper->get_db_link();
             if ($dblink) {
-                // Set a query timeout at the database level
                 $dblink->exec("SET statement_timeout = 10000"); // 10 second timeout
-                if ($verbose) echo "  Database timeout set to 10s<br>\n";
             }
         } catch (Exception $e) {
-            if ($verbose) echo "  Could not set database timeout: " . $e->getMessage() . "<br>\n";
+            // Silently ignore timeout setting errors
         }
         
         flush();
         
         try {
-            echo " calc-records...";
-            flush();
+            // Calculate optimal number of test records
+            $required_records = $this->calculate_required_test_records();
             
-            if ($verbose) {
-                echo "<br>\n  Step 2: Calculating required test records...<br>\n";
-                flush();
+            // Create test data
+            $this->test_records = $this->create_multi_test_data($required_records);
+            echo "Created " . count($this->test_records) . " test records<br>\n";
+            
+            // If we couldn't create any records, skip the multi tests
+            if (empty($this->test_records)) {
+                echo "<span style='color: #ff9800;'>[SKIP] Could not create test records for Multi testing</span><br>\n";
+                return 'SKIPPED';
             }
             
-            try {
-                // Calculate optimal number of test records
-                $required_records = $this->calculate_required_test_records();
-                echo " need-$required_records...";
-                if ($verbose) echo "<br>\n  Calculated need for $required_records test records<br>\n";
-                flush();
-            } catch (Exception $e) {
-                echo " ERROR calculating records: " . $e->getMessage() . "<br>\n";
-                throw $e;
-            }
-            
-            echo " creating-data...";
-            flush();
-            
-            if ($verbose) {
-                echo "<br>\n  Step 3: Starting test data creation...<br>\n";
-                flush();
-            }
-            
-            try {
-                $this->test_records = $this->create_multi_test_data($required_records);
-                echo "  Created " . count($this->test_records) . " test records<br>\n";
-                flush();
-                
-                // If we couldn't create any records, skip the multi tests
-                if (empty($this->test_records)) {
-                    echo " SKIP-NO-RECORDS...";
-                    echo "  <span style='color: #ff9800;'>[SKIP] Could not create test records for Multi testing</span><br>\n";
-                    flush();
-                    return 'SKIPPED'; // Return SKIPPED instead of true
-                }
-                
-                echo " RECORDS-OK...";
-                flush();
-                
-            } catch (Exception $e) {
-                echo "  <span style='color: #ff9800;'>[ERROR] Test data creation failed: " . $e->getMessage() . "</span><br>\n";
-                
-                // If it's a timeout, return early rather than failing
-                if (strpos($e->getMessage(), 'timeout') !== false) {
-                    echo " TIMEOUT-SKIP...";
-                    echo "  <span style='color: #ff9800;'>[TIMEOUT] Skipping Multi tests due to timeout</span><br>\n";
-                    flush();
-                    return 'TIMEOUT'; // Return TIMEOUT instead of true
-                }
-                
-                throw $e; // Re-throw other exceptions
-            }
-            
-            if ($verbose) {
-                echo "  Step 4: Running test scenarios...<br>\n";
-                flush();
-            }
-            
-            echo " STARTING-SCENARIOS...";
-            flush();
-            
-            // Run test scenarios with clear progress indicators
-            if ($verbose) {
-                echo "<br>\n  <strong>Running test scenarios:</strong><br>\n";
-            } else {
-                echo " scenarios...";
-            }
-            flush();
-            
-            echo "  1/5 Basic Loading... ";
-            flush();
-            
-            $test_start = time();
+            // Run test scenarios
+            echo "1/5 Basic Loading... ";
             try {
                 $this->test_multi_basic_loading($debug);
-                $test_time = time() - $test_start;
-                echo "<span style='color: #28a745; font-weight: bold;'>✓ PASSED</span> ({$test_time}s)<br>\n";
-                flush();
+                echo "<span style='color: #28a745; font-weight: bold;'>✓ PASSED</span><br>\n";
             } catch (Exception $e) {
-                $test_time = time() - $test_start;
-                echo "<span style='color: #dc3545; font-weight: bold;'>✗ FAILED</span> after {$test_time}s: " . $e->getMessage() . "<br>\n";
-                flush();
+                echo "<span style='color: #dc3545; font-weight: bold;'>✗ FAILED</span>: " . $e->getMessage() . "<br>\n";
                 throw $e;
             }
             
-            echo "  2/5 Filtering... ";
-            flush();
+            echo "2/5 Filtering... ";
             $this->test_multi_filtering($debug);
             echo "<span style='color: #28a745; font-weight: bold;'>✓ PASSED</span><br>\n";
-            flush();
             
-            echo "  3/5 Ordering... ";
-            flush();
+            echo "3/5 Ordering... ";
             $this->test_multi_ordering($debug);
             echo "<span style='color: #28a745; font-weight: bold;'>✓ PASSED</span><br>\n";
-            flush();
             
-            echo "  4/5 Pagination... ";
-            flush();
+            echo "4/5 Pagination... ";
             $this->test_multi_pagination($debug);
             echo "<span style='color: #28a745; font-weight: bold;'>✓ PASSED</span><br>\n";
-            flush();
             
-            echo "  5/5 Combined Scenarios... ";
-            flush();
+            echo "5/5 Combined Scenarios... ";
             $this->test_multi_combined($debug);
             echo "<span style='color: #28a745; font-weight: bold;'>✓ PASSED</span><br>\n";
-            flush();
             
-            echo "<br>\n";
-            
-            echo " SUCCESS-OUTPUT...";
-            flush();
-            
-            // Clear, obvious success message
+            // Success message
             echo "<div style='background: #d4edda; border: 2px solid #28a745; padding: 15px; margin: 10px 0; border-radius: 8px;'>";
             echo "<h4 style='color: #155724; margin: 0 0 10px 0;'>✓ SUCCESS: {$this->multi_class}</h4>";
             echo "<p style='color: #155724; margin: 0;'><strong>All Multi class tests passed successfully!</strong></p>";
             echo "<small style='color: #155724;'>Test scenarios completed: Basic loading, Filtering, Ordering, Pagination, Combined queries</small>";
             echo "</div>\n";
-            
-            echo " SUCCESS-COMPLETE...";
-            flush();
             
         } catch (Exception $e) {
             // Clear, obvious failure message
@@ -249,9 +144,6 @@ class MultiModelTester extends ModelTester {
      * Create multiple test records using improved parent methods
      */
     protected function create_multi_test_data($count) {
-        echo " start-create($count)...";
-        flush();
-        
         $records = [];
         $start_time = time();
         $max_time = 10; // 10 second timeout for test data creation
@@ -265,54 +157,29 @@ class MultiModelTester extends ModelTester {
             
             // Check for timeout
             if (time() - $start_time > $max_time) {
-                echo "  <span style='color: #ff9800;'>[TIMEOUT] Test data creation taking too long, stopping at $successful_records records</span><br>\n";
                 break;
             }
             
             // Early exit if we have enough records for basic testing  
-            if ($successful_records >= 2) {
-                echo "  <span style='color: #008000;'>[EARLY EXIT] Have sufficient records for testing ($successful_records records)</span><br>\n";
+            if ($successful_records >= min($count, 5)) {
                 break;
             }
             
             try {
-                echo " attempt$attempts...";
-                flush();
-                
                 // Use parent's enhanced generate_field_value with reasonable unique index
                 // Keep index small but unique by using attempts + random component
                 $unique_index = ($attempts * 100) + rand(1, 99); // Generates values like 101, 202, 345, etc.
                 $test_data = $this->generate_test_data_with_index($unique_index);
                 
-                echo " data-gen...";
-                flush();
-                
-                if ($this->is_verbose()) {
-                    echo "<br>\n  Creating record attempt $attempts...<br>\n";
-                    flush();
-                }
-                
                 $model = new $this->model_class(null);
-                echo " model-created...";
-                flush();
                 
                 foreach ($test_data as $field => $value) {
                     $model->set($field, $value);
                 }
                 
-                echo " data-set...";
-                flush();
-                
                 $save_result = $model->save();
-                echo " save-result:" . ($save_result ? 'ok' : 'fail') . "...";
-                flush();
                 
                 if ($save_result === false) {
-                    if ($this->is_verbose()) {
-                        echo "<br>\n  <span style='color: #ff9800;'>[SKIP] Attempt $attempts could not be saved (duplicate or constraint)</span><br>\n";
-                    }
-                    echo " skip-attempt$attempts...";
-                    flush();
                     continue; // Try again with next attempt
                 }
                 
@@ -323,9 +190,6 @@ class MultiModelTester extends ModelTester {
                     'data' => $test_data,
                     'model' => $model
                 ];
-                
-                echo " success$successful_records(ID:{$model->key})...";
-                flush();
                 
                 // Verify the record was actually saved by trying to load it
                 if ($this->is_verbose()) {
@@ -371,20 +235,10 @@ class MultiModelTester extends ModelTester {
      * Generate test data using parent's improved methods with index
      */
     protected function generate_test_data_with_index($index) {
-        echo " gen-data($index)...";
-        flush();
-        
         $verbose = $this->is_verbose();
         $test_data = [];
         
-        try {
-            $fields = $this->get_all_testable_fields();
-            echo " fields:" . count($fields) . "...";
-            flush();
-        } catch (Exception $e) {
-            echo " ERROR-get-fields: " . $e->getMessage() . "...";
-            throw $e;
-        }
+        $fields = $this->get_all_testable_fields();
         
         if ($verbose) {
             echo "    Generating data for record $index with " . count($fields) . " fields...<br>\n";
@@ -490,8 +344,8 @@ class MultiModelTester extends ModelTester {
         
         $required = $max_patterns + ceil($nullable_fields * 0.2);
         
-        // Cap at minimal for debugging - temporarily limit to 3 records
-        return min($required, 3); // Temporarily reduced to 3 for debugging
+        // Cap at reasonable limit for testing
+        return min($required, 10);
     }
 
     /**
@@ -527,135 +381,45 @@ class MultiModelTester extends ModelTester {
      * Test basic loading without filters
      */
     protected function test_multi_basic_loading($debug = false) {
-        echo "  Testing basic loading...<br>\n";
-        flush();
-        
         if (empty($this->test_records)) {
-            echo "  <span style='color: #ff9800;'>[SKIP] No test records to validate basic loading</span><br>\n";
+            echo "<span style='color: #ff9800;'>[SKIP] No test records to validate basic loading</span><br>\n";
             return;
         }
         
-        echo "  Creating Multi instance...";
-        flush();
-        
         // Test that Multi class can load records (basic functionality)
-        // Add a reasonable limit to prevent loading huge datasets
         $multi = new $this->multi_class([], [], 100); // Limit to 100 records for testing
         
-        echo " calling load()...";
-        flush();
-        
-        // Add aggressive timeout protection for the load() call
-        $load_start = time();
-        $max_load_time = 10; // 10 second timeout for load()
-        
-        // Use a more aggressive approach with alarm (if available)
-        if (function_exists('pcntl_alarm')) {
-            pcntl_alarm($max_load_time);
-        }
-        
-        try {
-            // Force immediate failure if this takes too long
-            ignore_user_abort(false);
-            set_time_limit($max_load_time);
-            
-            $multi->load();
-            $load_time = time() - $load_start;
-            
-            // Clear any alarms
-            if (function_exists('pcntl_alarm')) {
-                pcntl_alarm(0);
-            }
-            
-            echo " loaded in {$load_time}s...";
-            flush();
-            
-        } catch (Exception $e) {
-            $load_time = time() - $load_start;
-            
-            // Clear any alarms
-            if (function_exists('pcntl_alarm')) {
-                pcntl_alarm(0);
-            }
-            
-            echo " LOAD FAILED after {$load_time}s: " . $e->getMessage() . "<br>\n";
-            
-            // For load failures, continue with an empty Multi instance
-            echo " Continuing with empty dataset for testing...<br>\n";
-            $multi = new $this->multi_class(); // Create fresh instance without loading
-        }
-        
-        echo " iterating results...";
-        flush();
+        $multi->load();
         
         $total_count = 0;
-        $found_test_records = 0;
-        $test_ids = array_column($this->test_records, 'id');
-        
-        $iteration_start = time();
-        
         foreach ($multi as $item) {
             $total_count++;
-            
-            if (in_array($item->key, $test_ids)) {
-                $found_test_records++;
-            }
-            
-            // Add timeout protection for iteration
-            if (time() - $iteration_start > 10) {
-                echo " [TIMEOUT] Iteration taking too long, stopping at $total_count records...";
-                break;
-            }
-            
-            // Progress indicator for large datasets
-            if ($total_count % 100 === 0) {
-                echo " $total_count...";
-                flush();
-            }
+            // Limit iteration for performance
+            if ($total_count >= 100) break;
         }
-        
-        echo " iteration complete ($total_count total)...";
-        flush();
         
         // Verify Multi class loaded records
         $this->assert_true($total_count > 0, "Multi class should load at least some records");
         
-        // Check if our test records are in the results (informational only)
         if ($debug) {
-            if ($found_test_records > 0) {
-                echo "  Found $found_test_records of our test records in results<br>\n";
-            } else {
-                echo "  Test records not in first $total_count results (expected for large datasets)<br>\n";
-            }
+            echo "Found $total_count records in basic loading test<br>\n";
         }
-        
-        // The main goal is to verify the Multi class can load records successfully
-        // Finding our specific test records is nice but not required for basic loading test
-        
-        if ($debug) echo "    Basic loading test completed successfully (found $found_test_records test records out of $total_count total)<br>\n";
     }
 
     /**
      * Test filtering capabilities
      */
     protected function test_multi_filtering($debug = false) {
-        echo "  Testing filtering...<br>\n";
-        flush();
-        
         if (empty($this->test_records)) {
-            echo "  <span style='color: #ff9800;'>[SKIP] No test records for filtering tests</span><br>\n";
+            echo "<span style='color: #ff9800;'>[SKIP] No test records for filtering tests</span><br>\n";
             return;
         }
         
         // Try to find a filter that this Multi class actually supports
         $filter_options = $this->detect_multi_class_filters();
         
-        if ($debug) {
-            echo "  Found " . count($filter_options) . " filter options<br>\n";
-        }
-        
         if (empty($filter_options)) {
-            echo "  <span style='color: #ff9800;'>[SKIP] No supported filter options detected for {$this->multi_class}</span><br>\n";
+            echo "<span style='color: #ff9800;'>[SKIP] No supported filter options detected for {$this->multi_class}</span><br>\n";
             return;
         }
         

@@ -80,29 +80,11 @@ foreach($classes as $class){
     }
     
     $multi_tested_classes++;
-    echo "<b style='color: #333;'>TESTING: {$class} (with {$multi_class})</b><br>\n";
-    echo "Step 1: Creating MultiModelTester instance...";
-    flush(); // Force output
+    echo "<b style='color: #333;'>{$class} (with {$multi_class})</b><br>\n";
     
     try {
-        // Directly instantiate and run MultiModelTester to ensure we only run Multi tests
         $multi_tester = new MultiModelTester($class);
-        echo " created...";
-        flush();
-        
-        // Debug: Make sure we're using the right tester
-        if ($verbose) {
-            echo "<br>\n  Using MultiModelTester for {$class}<br>\n";
-            flush();
-        }
-        
-        echo "Step 2: Calling test method...";
-        flush();
-        
         $result = $multi_tester->test(null, $verbose);
-        
-        echo " test-complete(result:" . var_export($result, true) . ")...";
-        flush();
         
         if ($result === 'SKIPPED') {
             $skipped_classes++;
