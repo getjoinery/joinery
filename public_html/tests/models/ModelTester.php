@@ -601,11 +601,11 @@ class ModelTester {
         
         if (strpos($field_lower, 'code') !== false) {
             $code_patterns = [
-                'ABC123',
-                'test_code_001',
-                '1234567890',
-                'CODE-' . time(),
-                'ACTIVATION_' . rand(1000, 9999)
+                'ABC123_' . $index,
+                'test_code_' . sprintf('%03d', $index),
+                'CODE_' . $index . '_' . substr(time(), -4),
+                'ACTIVATION_' . $index . '_' . rand(100, 999),
+                'UNIQUE_' . $index . '_' . uniqid()
             ];
             $patterns = array_merge($code_patterns, $patterns);
         }
@@ -754,8 +754,9 @@ class ModelTester {
             return $patterns[$index];
         }
         
-        // For higher indices, generate based on current time + offset
-        $offset_days = $index - count($patterns);
+        // For higher indices, generate based on current time + small offset
+        // Use modulo to keep offset reasonable (within 1 year)
+        $offset_days = ($index - count($patterns)) % 365;
         return date('Y-m-d H:i:s', strtotime("+$offset_days days"));
     }
     
