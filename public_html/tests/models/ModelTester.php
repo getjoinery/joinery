@@ -539,6 +539,10 @@ class ModelTester {
             return $this->generate_timestamp_value($field, $index);
         }
         
+        if (strpos($type, 'date') !== false) {
+            return $this->generate_date_value($field, $index);
+        }
+        
         if (strpos($type, 'text') !== false) {
             return $this->generate_text_value($field, $index);
         }
@@ -758,6 +762,29 @@ class ModelTester {
         // Use modulo to keep offset reasonable (within 1 year)
         $offset_days = ($index - count($patterns)) % 365;
         return date('Y-m-d H:i:s', strtotime("+$offset_days days"));
+    }
+    
+    /**
+     * Generate date value (date only, not timestamp)
+     */
+    protected function generate_date_value($field, $index = 0) {
+        $patterns = [
+            '2023-01-01',
+            '2024-06-15', 
+            '1990-12-25',
+            '2025-03-10',
+            '2022-08-20'
+        ];
+        
+        // Use index to select date pattern
+        if ($index < count($patterns)) {
+            return $patterns[$index];
+        }
+        
+        // For higher indices, generate based on current date + small offset
+        // Use modulo to keep offset reasonable (within 1 year)
+        $offset_days = ($index - count($patterns)) % 365;
+        return date('Y-m-d', strtotime("+$offset_days days"));
     }
     
     /**
@@ -982,6 +1009,11 @@ class ModelTester {
             // Skip timestamp fields in update tests since they often auto-update
             // and comparing 'now()' with actual timestamps is problematic
             return null; // Signal to skip this field
+        }
+        
+        if (strpos($type, 'date') !== false) {
+            // Generate a different date for update tests
+            return '2024-12-31'; // Use a fixed different date
         }
         
         // For varchar and text fields
