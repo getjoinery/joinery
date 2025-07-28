@@ -53,6 +53,9 @@ class ModelTester {
         
         echo '<b style="color: #333;">TESTING CLASS: ' . $this->model_class . "</b><br>\n";
         
+        // Remember the initial fail count for this model test
+        $initial_fail_count = self::$test_fail_count;
+        
         // Set up test database mode if available
         $dbhelper = DbConnector::get_instance();
         if (method_exists($dbhelper, 'set_test_mode')) {
@@ -101,7 +104,8 @@ class ModelTester {
             $dbhelper->close_test_mode();
         }
         
-        return true;
+        // Return false if any tests failed during this model's test
+        return self::$test_fail_count == $initial_fail_count;
     }
     
     /**
