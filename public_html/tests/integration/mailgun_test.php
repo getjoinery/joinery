@@ -1,5 +1,5 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(__DIR__ . '/../../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	PathHelper::requireOnce('includes/EmailTemplate.php');

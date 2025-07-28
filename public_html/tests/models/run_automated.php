@@ -6,7 +6,7 @@
  * using the new ModelTester automated testing infrastructure.
  */
 
-require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(__DIR__ . '/../../includes/PathHelper.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -170,7 +170,7 @@ $verbose = $_GET['verbose'] ?? false;
 
 // Set verbose mode in ModelTester
 if ($verbose) {
-    require_once(__DIR__ . '/../includes/ModelTester.php');
+    require_once(__DIR__ . '/ModelTester.php');
     ModelTester::set_verbose($verbose);
 }
 
