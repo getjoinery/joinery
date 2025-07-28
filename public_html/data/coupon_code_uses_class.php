@@ -20,7 +20,9 @@ class CouponCodeUse extends SystemBase {
 	public static $permanent_delete_actions = array(
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'ccu_ccd_coupon_code_id' => 'The ID of the coupon code',
+	public static $fields = array(
+		'ccu_coupon_code_use_id' => 'Primary key - Coupon code use ID',
+		'ccu_ccd_coupon_code_id' => 'The ID of the coupon code',
 		'ccu_amount_discount' => 'Amount in currency of the coupon at time of use',
 		'ccu_percent_discount' => 'Percent of coupon at time of use',
 		'ccu_odi_order_item_id' => 'Order id of use',
@@ -100,7 +102,7 @@ class MultiCouponCodeUse extends SystemMultiBase {
         $filters = [];
 
         if (isset($this->options['coupon_code_use_id'])) {
-            $filters['ccu_cco_coupon_code_use_id'] = [$this->options['coupon_code_use_id'], PDO::PARAM_INT];
+            $filters['ccu_coupon_code_use_id'] = [$this->options['coupon_code_use_id'], PDO::PARAM_INT];
         }
         
         if (isset($this->options['coupon_code_id'])) {
