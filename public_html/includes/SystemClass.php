@@ -709,21 +709,17 @@ abstract class SystemBase {
 			}
 		}
 		
-		//ABORT IF NO permanent_delete_actions SPECIFIED
-
-		if(count($found_foreign_keys) > 1){
-			if(!isset(static::$permanent_delete_actions) OR empty(static::$permanent_delete_actions)){
-				throw new SystemClassException('No permanent_delete_actions specified for  '.static::$tablename);
-				return false;
-			}
-		}
+		//If no permanent_delete_actions specified, we'll use default behavior (delete) for all foreign keys
+		$has_permanent_delete_actions = isset(static::$permanent_delete_actions) && !empty(static::$permanent_delete_actions);
 
 		//CHECK FOR 'PREVENT' CONSTRAINT FIRST AND IF FOUND, THEN ABORT THE PERMANENT DELETE WITH AN ERROR
 		foreach($found_foreign_keys as $column=>$table_name){
 			$action = 'delete';  //DELETE IS DEFAULT
-			foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
-				if($pcolumn == $column){
-					$action = $paction;
+			if($has_permanent_delete_actions){
+				foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
+					if($pcolumn == $column){
+						$action = $paction;
+					}
 				}
 			}
 			
@@ -766,10 +762,12 @@ abstract class SystemBase {
 		//IF NO PREVENT CONSTRAINT EXISTS, THEN DO THE DELETES
 		foreach($found_foreign_keys as $column=>$table_name){
 			
-			$action = 'delete';  //SKIP IS DEFAULT
-			foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
-				if($pcolumn == $column){
-					$action = $paction;
+			$action = 'delete';  //DELETE IS DEFAULT
+			if($has_permanent_delete_actions){
+				foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
+					if($pcolumn == $column){
+						$action = $paction;
+					}
 				}
 			}
 			
@@ -1044,7 +1042,7 @@ abstract class SystemBase {
 	static function test($debug=false){
 		// Load testing infrastructure on demand
 		if (!class_exists('ModelTester')) {
-			require_once(PathHelper::getBasePath() . '/includes/ModelTester.php');
+			require_once(PathHelper::getBasePath() . '/tests/models/ModelTester.php');
 		}
 		
 		$current_class = get_called_class();
