@@ -553,6 +553,79 @@ These directories contain critical system infrastructure. Changes should only be
 12. **Documentation**: Update this file when discovering new patterns or conventions
 13. **Respect Restrictions**: Only modify restricted directories with explicit user permission
 
+## SystemBase Methods Reference
+
+### Core CRUD Methods
+
+**Creation & Loading:**
+- `new SystemBase($key, $and_load = FALSE)` - Constructor, optionally loads data
+- `CreateNew($data)` - Static method to create new record from array
+- `load()` - Load data from database using current key
+- `safe_load_and_set($key, $value, $and_prepare = FALSE)` - Atomically load, set value, and save
+
+**Data Access:**
+- `get($key)` - Get field value
+- `set($key, $value, $check_existance = TRUE)` - Set field value
+- `get_array($key)` - Get JSON decoded array from field
+- `set_array($key, $value)` - Set array value (will be JSON encoded)
+- `getString($key, $max_len = NULL, $ellipsis = TRUE)` - Get truncated string
+- `export_as_array()` - Export all fields as array
+
+**Saving & Deletion:**
+- `prepare()` - Prepare record for saving (validation, etc)
+- `save($debug = false)` - Save record to database
+- `soft_delete()` - Mark record as deleted (sets deleted field)
+- `undelete()` - Restore soft-deleted record
+- `permanent_delete($debug = false)` - Permanently remove from database (requires $permanent_delete_actions configuration)
+- **Note: There is NO `delete()` method - use soft_delete() or permanent_delete()**
+
+### Utility Methods
+
+**Field Manipulation:**
+- `set_all_to_null()` - Set all fields to null
+- `add_flag($field, $flag)` - Add bitwise flag to field
+- `check_flag($field, $flag)` - Check if flag is set
+- `remove_flag($field, $flag)` - Remove bitwise flag
+
+**Validation & Constraints:**
+- `check_for_duplicate($fields = NULL, $search_deleted = false)` - Check if duplicate exists
+- `CheckForDuplicate($obj_to_check, $fields = NULL, $search_deleted = false)` - Static duplicate check
+- `check_unique_constraints()` - Validate unique field constraints
+
+**Special Lookups:**
+- `get_by_link($link, $search_deleted = false)` - Get record by URL slug
+- `GetByColumn($column, $value)` - Get single record by column value
+- `check_if_exists($key)` - Check if record exists
+
+**URL Generation:**
+- `create_url($input_url)` - Create URL-safe slug
+- `get_url($format = 'short')` - Get record's URL
+
+### SystemMultiBase Methods Reference
+
+**Construction & Loading:**
+- `new SystemMultiBase($options = [], $order_by = [], $limit = NULL, $offset = NULL, $operation = 'AND')` - Constructor
+- `load($debug = false)` - Execute query and load results
+- `count_all()` - Get count without loading objects
+
+**Collection Access:**
+- `get($index)` - Get object at index (0-based)
+- `get_by_key($key)` - Get object by primary key
+- `contains($item)` - Check if collection contains object
+- `contains_key($key)` - Check if collection contains key
+
+**Collection Manipulation:**
+- `add($value)` - Add object to collection
+- `remove($location)` - Remove object at index
+- `remove_by_key($key)` - Remove object by key
+- `clear()` - Empty the collection
+- `usort($callback)` - Sort collection with callback
+
+**Iteration:**
+- Implements `IteratorAggregate` - use in foreach loops
+- `count()` - Get number of loaded objects
+- `incremental_iterator($limit = 200)` - Get iterator for large datasets
+
 # Model Querying Patterns and Best Practices
 
 This section provides guidance on how to properly query and interact with data models in the system to avoid common mistakes and follow established patterns.
