@@ -1040,14 +1040,60 @@ abstract class SystemBase {
 	
 	//TESTS FOR THIS CLASS
 	static function test($debug=false){
-		// Load testing infrastructure on demand
-		if (!class_exists('ModelTester')) {
-			require_once(PathHelper::getBasePath() . '/tests/models/ModelTester.php');
+		$current_class = get_called_class();
+		$result = true;
+		
+		// Check if we should run only Multi tests
+		if (defined('MULTI_TESTS_ONLY') && MULTI_TESTS_ONLY) {
+			// Only run Multi tests
+			if (!class_exists('MultiModelTester')) {
+				require_once(PathHelper::getBasePath() . '/tests/models/MultiModelTester.php');
+			}
+			$multi_tester = new MultiModelTester($current_class);
+			return $multi_tester->test($debug);
 		}
 		
-		$current_class = get_called_class();
-		$tester = new ModelTester($current_class);
-		return $tester->test(null, $debug);
+		// Check if we should skip Multi tests
+		$skip_multi = false;
+		if (defined('SINGLE_TESTS_ONLY') && SINGLE_TESTS_ONLY) {
+			$skip_multi = true;
+		}
+		
+		// Run single model tests (unless we're in Multi-only mode)
+		if (!defined('MULTI_TESTS_ONLY') || !MULTI_TESTS_ONLY) {
+			// Load testing infrastructure on demand
+			if (!class_exists('ModelTester')) {
+				require_once(PathHelper::getBasePath() . '/tests/models/ModelTester.php');
+			}
+			
+			$tester = new ModelTester($current_class);
+			$result = $tester->test(null, $debug);
+		}
+		
+		// Multi tests only when explicitly requested AND not disabled
+		if (!$skip_multi) {
+			$run_multi = false;
+			
+			// Check multiple ways to enable Multi testing
+			if (isset($_GET['test_multi']) && $_GET['test_multi']) {
+				$run_multi = true;
+			} else if (getenv('TEST_MULTI')) {
+				$run_multi = true;
+			} else if (defined('TEST_MULTI') && TEST_MULTI) {
+				$run_multi = true;
+			}
+			
+			if ($run_multi) {
+				if (!class_exists('MultiModelTester')) {
+					require_once(PathHelper::getBasePath() . '/tests/models/MultiModelTester.php');
+				}
+				$multi_tester = new MultiModelTester($current_class);
+				$multi_result = $multi_tester->test($debug);
+				$result = $result && $multi_result;
+			}
+		}
+		
+		return $result;
 	}	
 
 }

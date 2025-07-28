@@ -1,7 +1,8 @@
 <?php
 	/*
-	This script runs tests on all known Classes in the project.
+	This script runs SINGLE MODEL tests on all known Classes in the project.
 	Classes are discovered dynamically from the data directories.
+	For Multi class tests, use run_multi.php
 	*/
 	
 	require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -10,9 +11,15 @@
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
+	// Explicitly disable Multi testing for this script
+	define('TEST_MULTI', false);
+	define('SINGLE_TESTS_ONLY', true);
+
 	// Discover all model classes using centralized method
 	$classes = LibraryFunctions::discover_model_classes();
+	echo '<h2>Single Model Testing</h2>';
 	echo 'Found ' . count($classes) . ' model classes<br>';
+	echo '<p><em>Running single model tests (CRUD, validation, constraints). For Multi class tests, use <a href="run_multi.php">run_multi.php</a></em></p><br>';
 	
 	$verbose = false;
 	if(isset($_GET['verbose']) && $_GET['verbose']){
