@@ -157,7 +157,8 @@ class ModelTester {
                 $error_details .= "\nStack trace: " . $e->getTraceAsString();
             }
             
-            throw new Exception("Failed to save model with test data [" . implode(', ', $field_info) . "]. " . $error_details);
+            $this->test_fail_no_throw("Failed to save model with test data [" . implode(', ', $field_info) . "]. " . $error_details);
+            return;
         }
         if ($verbose) echo "Model saved successfully<br>\n"; flush();
         if ($verbose) echo "Model key after save: " . ($model->key ?? 'NULL') . "<br>\n"; flush();
@@ -379,9 +380,9 @@ class ModelTester {
             }
             
             // Clean up
-            $model1->permanent_delete(true);
+            $model1->permanent_delete();
             if ($model2->key) {
-                $model2->permanent_delete(true);
+                $model2->permanent_delete();
             }
             
         } catch (Exception $e) {
@@ -444,15 +445,15 @@ class ModelTester {
             try {
                 $model3->save();
                 $this->test_pass("Composite unique constraint allows different combinations on ($field_list)");
-                $model3->permanent_delete(true);
+                $model3->permanent_delete();
             } catch (Exception $e) {
                 $this->test_fail("Composite unique constraint incorrectly rejected different combination on ($field_list): " . $e->getMessage());
             }
             
             // Clean up
-            $model1->permanent_delete(true);
+            $model1->permanent_delete();
             if ($model2->key) {
-                $model2->permanent_delete(true);
+                $model2->permanent_delete();
             }
             
         } catch (Exception $e) {
@@ -1068,6 +1069,13 @@ class ModelTester {
                 throw $e;
             }
             
+            // Check if it's a missing table error
+            if (strpos($e->getMessage(), 'Undefined table') !== false ||
+                strpos($e->getMessage(), 'relation') !== false && strpos($e->getMessage(), 'does not exist') !== false) {
+                $this->test_fail_no_throw("Cannot test field $field - database table does not exist: " . $e->getMessage());
+                return;
+            }
+            
             // Check if it's a database type error (which is expected and good)
             if (strpos($e->getMessage(), 'Invalid text representation') !== false ||
                 strpos($e->getMessage(), 'invalid input syntax') !== false) {
@@ -1131,6 +1139,13 @@ class ModelTester {
             $this->test_pass("Field $field accepts null values");
             $model->permanent_delete();
         } catch (Exception $e) {
+            // Check if it's a missing table error
+            if (strpos($e->getMessage(), 'Undefined table') !== false ||
+                strpos($e->getMessage(), 'relation') !== false && strpos($e->getMessage(), 'does not exist') !== false) {
+                $this->test_fail_no_throw("Cannot test null values for field $field - database table does not exist: " . $e->getMessage());
+                return;
+            }
+            
             $this->test_fail("Field $field should accept null values but threw: " . $e->getMessage());
         }
     }
@@ -1220,6 +1235,11 @@ class ModelTester {
         self::$test_fail_count++;
         echo "  <span style='color: red;'>[FAIL] $message</span><br>\n";
         throw new Exception("Test failed: $message");
+    }
+    
+    protected function test_fail_no_throw($message) {
+        self::$test_fail_count++;
+        echo "  <span style='color: red;'>[FAIL] $message</span><br>\n";
     }
     
     public static function get_test_stats() {
