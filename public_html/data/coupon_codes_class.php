@@ -23,7 +23,9 @@ class CouponCode extends SystemBase {
 		'ccu_cco_coupon_code_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'ccd_code' => 'The code',
+	public static $fields = array(
+		'ccd_coupon_code_id' => 'Primary key - Coupon code ID',
+		'ccd_code' => 'The code',
 		'ccd_amount_discount' => 'Amount in currency of the coupon',
 		'ccd_percent_discount' => 'Percent of coupon',
 		'ccd_start_time' => 'Start time of coupon',
@@ -190,7 +192,7 @@ class MultiCouponCode extends SystemMultiBase {
         $filters = [];
 
         if (isset($this->options['user_id'])) {
-            $filters['ccd_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+            $filters['ccd_usr_user_id_affiliate'] = [$this->options['user_id'], PDO::PARAM_INT];
         }
 
         if (isset($this->options['applies_to'])) {
