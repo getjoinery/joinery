@@ -465,8 +465,7 @@ class MultiModelTester extends ModelTester {
         }
         
         if ($test_value === null) {
-            echo "<span style='color: #ff9800;'>[SKIP] No existing data found for field {$database_field}</span><br>\n";
-            return;
+            $this->assert_true(false, "Multi class {$this->multi_class} supports filtering by '{$filter_option}' (field: {$database_field}) but no existing data found. This indicates either: 1) Wrong field name in filter, 2) Database has no data for this field, or 3) Field should not be filterable.");
         }
         
         if ($debug) {
@@ -602,12 +601,22 @@ class MultiModelTester extends ModelTester {
         $filter_option = array_keys($filter_options)[0];
         $database_field = $filter_options[$filter_option];
         
-        if (!isset($this->test_records[0]['data'][$database_field])) {
-            echo "  <span style='color: #ff9800;'>[SKIP] Test data doesn't contain field {$database_field} for combined test</span><br>\n";
-            return;
+        // Use existing data approach like filtering test
+        $multi_sample = new $this->multi_class([], [], 10);
+        $multi_sample->load();
+        
+        $test_value = null;
+        foreach ($multi_sample as $sample_item) {
+            $sample_value = $sample_item->get($database_field);
+            if ($sample_value !== null && $sample_value !== '') {
+                $test_value = $sample_value;
+                break;
+            }
         }
         
-        $test_value = $this->test_records[0]['data'][$database_field];
+        if ($test_value === null) {
+            $this->assert_true(false, "Multi class {$this->multi_class} supports filtering by '{$filter_option}' (field: {$database_field}) but no existing data found for combined test. This indicates either: 1) Wrong field name in filter, 2) Database has no data for this field, or 3) Field should not be filterable.");
+        }
         $pkey = $this->model_class::$pkey_column;
         
         try {
