@@ -4,10 +4,10 @@
   Type: phpmailer class
 ********************/
 
-$INCLUDE_DIR = "../includes/";
+require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-require("phpunit.php");
-require("../vendor/autoload.php");
+// require("phpunit.php"); // TODO: Check if phpunit.php exists and update path
+require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
 error_reporting(E_ALL);

@@ -1,5 +1,5 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(__DIR__ . '/../../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/ErrorHandler.php');
@@ -11,7 +11,7 @@ require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'booki
 
 $settings = Globalvars::get_instance();
 $composer_dir = $settings->get_setting('composerAutoLoad');	
-require_once $composer_dir.'autoload.php';	
+require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));	
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);

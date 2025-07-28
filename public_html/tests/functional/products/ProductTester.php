@@ -12,7 +12,7 @@
  * Usage: Access this file through your web browser while logged in as an admin user.
  */
 
-require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
 PathHelper::requireOnce('/includes/LibraryFunctions.php');
 PathHelper::requireOnce('/includes/StripeHelper.php');
 PathHelper::requireOnce('/includes/SessionControl.php');

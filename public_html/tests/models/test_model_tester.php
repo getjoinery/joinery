@@ -4,7 +4,7 @@
  * This tests the Phase 1 automated testing functionality
  */
 
-require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(__DIR__ . '/../../includes/PathHelper.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('data/activation_codes_class.php');
 

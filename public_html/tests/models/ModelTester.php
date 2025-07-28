@@ -7,8 +7,8 @@
  * without requiring custom code for each model.
  */
 
-require_once('PathHelper.php');
-require_once('LibraryFunctions.php');
+require_once(__DIR__ . '/../../includes/PathHelper.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 class ModelTester {
     
@@ -224,6 +224,11 @@ class ModelTester {
             }
         });
         
+        // Check if model has empty permanent_delete_actions and warn
+        if (!$this->can_permanent_delete($model)) {
+            $this->test_warn("Model has empty permanent_delete_actions array. Configure permanent_delete_actions if this model has foreign key references.");
+        }
+        
         if ($verbose) echo "Calling permanent_delete() now...<br>\n"; flush();
         try {
             $model->permanent_delete();
@@ -365,12 +370,12 @@ class ModelTester {
             // This should fail due to unique constraint
             try {
                 $model2->save();
-                $this->add_failure("Unique constraint on $field was not enforced - duplicate was allowed");
+                $this->test_fail("Unique constraint on $field was not enforced - duplicate was allowed");
             } catch (DisplayableUserException $e) {
-                $this->add_success("Unique constraint on $field properly enforced");
+                $this->test_pass("Unique constraint on $field properly enforced");
             } catch (Exception $e) {
                 // Accept any exception type for unique violations
-                $this->add_success("Unique constraint on $field properly enforced (Exception: " . get_class($e) . ")");
+                $this->test_pass("Unique constraint on $field properly enforced (Exception: " . get_class($e) . ")");
             }
             
             // Clean up
@@ -380,7 +385,7 @@ class ModelTester {
             }
             
         } catch (Exception $e) {
-            $this->add_failure("Error testing unique constraint on $field: " . $e->getMessage());
+            $this->test_fail("Error testing unique constraint on $field: " . $e->getMessage());
         }
     }
     
@@ -411,12 +416,12 @@ class ModelTester {
             // This should fail due to composite unique constraint
             try {
                 $model2->save();
-                $this->add_failure("Composite unique constraint on ($field_list) was not enforced - duplicate was allowed");
+                $this->test_fail("Composite unique constraint on ($field_list) was not enforced - duplicate was allowed");
             } catch (DisplayableUserException $e) {
-                $this->add_success("Composite unique constraint on ($field_list) properly enforced");
+                $this->test_pass("Composite unique constraint on ($field_list) properly enforced");
             } catch (Exception $e) {
                 // Accept any exception type for unique violations
-                $this->add_success("Composite unique constraint on ($field_list) properly enforced (Exception: " . get_class($e) . ")");
+                $this->test_pass("Composite unique constraint on ($field_list) properly enforced (Exception: " . get_class($e) . ")");
             }
             
             // Test that different combinations are allowed
@@ -424,7 +429,13 @@ class ModelTester {
             foreach ($test_data as $test_field => $value) {
                 if ($test_field === $main_field) {
                     // Change the main field value to make it non-duplicate
-                    $model3->set($test_field, $value . '_different');
+                    if (is_numeric($value)) {
+                        // For numeric values, add 9999 to make it different
+                        $model3->set($test_field, $value + 9999);
+                    } else {
+                        // For string values, append '_different'
+                        $model3->set($test_field, $value . '_different');
+                    }
                 } else {
                     $model3->set($test_field, $value);
                 }
@@ -432,10 +443,10 @@ class ModelTester {
             
             try {
                 $model3->save();
-                $this->add_success("Composite unique constraint allows different combinations on ($field_list)");
+                $this->test_pass("Composite unique constraint allows different combinations on ($field_list)");
                 $model3->permanent_delete(true);
             } catch (Exception $e) {
-                $this->add_failure("Composite unique constraint incorrectly rejected different combination on ($field_list): " . $e->getMessage());
+                $this->test_fail("Composite unique constraint incorrectly rejected different combination on ($field_list): " . $e->getMessage());
             }
             
             // Clean up
@@ -445,7 +456,7 @@ class ModelTester {
             }
             
         } catch (Exception $e) {
-            $this->add_failure("Error testing composite unique constraint on ($field_list): " . $e->getMessage());
+            $this->test_fail("Error testing composite unique constraint on ($field_list): " . $e->getMessage());
         }
     }
     
@@ -1147,14 +1158,18 @@ class ModelTester {
             $actual_float = (float)$actual;
             if ($expected_float !== $actual_float) {
                 $this->test_fail("Expected '$expected' ($expected_float), got '$actual' ($actual_float): $message");
+            } else {
+                // Values are numerically equal, even if string representations differ
+                $this->test_pass($message ?: "Values are numerically equal");
             }
         } else {
             // Use strict comparison for non-numeric values
             if ($expected !== $actual) {
                 $this->test_fail("Expected '$expected' (" . gettype($expected) . "), got '$actual' (" . gettype($actual) . "): $message");
+            } else {
+                $this->test_pass($message ?: "Values are equal");
             }
         }
-        $this->test_pass($message ?: "Values are equal");
     }
     
     protected function assert_true($condition, $message = '') {
@@ -1215,9 +1230,12 @@ class ModelTester {
     /**
      * Validate permanent_delete_actions configuration
      * Checks that the primary key is not incorrectly included in the permanent_delete_actions array
+     * Also checks for foreign keys that reference this table but aren't defined in permanent_delete_actions
      */
     private function validate_permanent_delete_actions() {
         $model_class = $this->model_class;
+        $dbhelper = DbConnector::get_instance();
+        $dblink = $dbhelper->get_db_link();
         
         // Check if the class has permanent_delete_actions defined
         if (!property_exists($model_class, 'permanent_delete_actions')) {
@@ -1234,5 +1252,68 @@ class ModelTester {
         } else {
             $this->test_pass("permanent_delete_actions configuration is correct (primary key not included)");
         }
+        
+        // Find all foreign keys that reference this table
+        $sql = 'SELECT
+            t.table_name,
+            array_agg(c.column_name::text) as columns
+        FROM
+            information_schema.tables t
+        INNER JOIN information_schema.columns c ON
+            t.table_name = c.table_name
+        WHERE
+            t.table_schema = \'public\'
+            AND c.table_schema = \'public\'
+        GROUP BY t.table_name';
+        
+        try {
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            $q->setFetchMode(PDO::FETCH_OBJ);
+        } catch(PDOException $e) {
+            $this->test_warn("Could not check foreign key references: " . $e->getMessage());
+            return;
+        }
+        
+        // Find foreign keys referencing this model's primary key
+        $found_foreign_keys = array();
+        while ($row = $q->fetch()) {
+            $table_name = $row->table_name;
+            $columns = $row->columns;
+            $columns_array = explode(',', trim($columns, '{}'));
+            
+            foreach($columns_array as $column) {
+                if(str_contains($column, $primary_key)) {
+                    $found_foreign_keys[$column] = $table_name;
+                }
+            }
+        }
+        
+        // Check for foreign keys not defined in permanent_delete_actions
+        $missing_foreign_keys = array();
+        foreach($found_foreign_keys as $column => $table) {
+            if (!array_key_exists($column, $permanent_delete_actions)) {
+                $missing_foreign_keys[] = "$column (in table $table)";
+            }
+        }
+        
+        if (!empty($missing_foreign_keys)) {
+            $this->test_warn("Foreign keys referencing this model are not defined in permanent_delete_actions: " . implode(', ', $missing_foreign_keys) . ". These will use the default 'delete' action.");
+        }
+    }
+    
+    /**
+     * Check if a model can safely call permanent_delete
+     * Returns true if safe, false if not (and issues a warning)
+     */
+    private function can_permanent_delete($model) {
+        $model_class = get_class($model);
+        if (property_exists($model_class, 'permanent_delete_actions') && 
+            is_array($model_class::$permanent_delete_actions) && 
+            empty($model_class::$permanent_delete_actions)) {
+            // Model has empty permanent_delete_actions - this will fail if there are foreign keys
+            return false;
+        }
+        return true;
     }
 }

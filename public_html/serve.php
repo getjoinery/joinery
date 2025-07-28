@@ -648,6 +648,33 @@ if($params[0] == 'utils'){
 	}  
 }
 
+//TESTS DIRECTORY
+if($params[0] == 'tests'){
+	if($params[1]){
+		// Build the path to the test file
+		$test_path = 'tests/';
+		for($i = 1; $i < count($params); $i++){
+			if($params[$i] != ''){
+				$test_path .= $params[$i] . '/';
+			}
+		}
+		$test_path = rtrim($test_path, '/');
+		
+		$base_file = ensure_extension(PathHelper::getIncludePath($test_path), 'php');
+		if(file_exists($base_file)){
+			$is_valid_page = true;
+			require_once($base_file); 
+			exit();		
+		}
+		else{
+			LibraryFunctions::display_404_page();	
+		}
+	}
+	else{
+		LibraryFunctions::display_404_page();	
+	}  
+}
+
 //ROOT PAGES
 if($params[0]){
 	$template_file = ensure_extension($template_directory.'/views/'.$params[0],'php');
