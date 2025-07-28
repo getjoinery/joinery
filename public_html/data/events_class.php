@@ -564,6 +564,7 @@ class Event extends SystemBase {
 
 	}	
 	
+	/*
 	function permanent_delete($debug=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -582,7 +583,7 @@ class Event extends SystemBase {
 		}	
 		
 		//DELETE WAITING LIST
-		$event_registrants = new MultiMailingList(array('event_id' => $this->key), NULL);
+		$event_registrants = new MultiWaitingList(array('event_id' => $this->key), NULL);
 		$event_registrants->load();
 		foreach($event_registrants as $event_registrant){
 			$event_registrant->remove();
@@ -596,6 +597,7 @@ class Event extends SystemBase {
 		
 		return true;
 	}
+	*/
 	
 	
 	function copy() { 

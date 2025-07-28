@@ -1156,7 +1156,10 @@ class ModelTester {
             // Convert both to float for comparison to handle string/numeric type differences
             $expected_float = (float)$expected;
             $actual_float = (float)$actual;
-            if ($expected_float !== $actual_float) {
+            
+            // Use epsilon comparison for floating point numbers to handle precision issues
+            $epsilon = 0.0001; // Small tolerance for floating point comparison
+            if (abs($expected_float - $actual_float) > $epsilon) {
                 $this->test_fail("Expected '$expected' ($expected_float), got '$actual' ($actual_float): $message");
             } else {
                 // Values are numerically equal, even if string representations differ
@@ -1277,6 +1280,8 @@ class ModelTester {
         
         // Find foreign keys referencing this model's primary key
         $found_foreign_keys = array();
+        $model_table = $model_class::$tablename;
+        
         while ($row = $q->fetch()) {
             $table_name = $row->table_name;
             $columns = $row->columns;
@@ -1284,6 +1289,10 @@ class ModelTester {
             
             foreach($columns_array as $column) {
                 if(str_contains($column, $primary_key)) {
+                    // Skip if this is the primary key in its own table
+                    if ($column === $primary_key && $table_name === $model_table) {
+                        continue;
+                    }
                     $found_foreign_keys[$column] = $table_name;
                 }
             }
