@@ -65,10 +65,6 @@ class MultiComponent extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
 
-        if (isset($this->options['link'])) {
-            $filters['com_link'] = [$this->options['link'], PDO::PARAM_STR];
-        }
-
         return $this->_get_resultsv2('com_components', $filters, $this->order_by, $only_count, $debug);
     }
 
