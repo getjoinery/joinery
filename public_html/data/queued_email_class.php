@@ -38,7 +38,8 @@ class QueuedEmail extends SystemBase {
 		self::NORMAL_MAILER_ERROR => 'Non-Recurring Email Error',
 	);
 
-	public static $fields = array(		'equ_from_name' => 'Name the email is from',
+	public static $fields = array(		'que_queued_email_id' => 'Primary key - QueuedEmail ID',
+		'equ_from_name' => 'Name the email is from',
 		'equ_from' => 'Address the email is from',
 		'equ_to' => 'Address the email is to',
 		'equ_to_name' => 'Name the email is to',

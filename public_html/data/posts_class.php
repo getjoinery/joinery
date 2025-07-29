@@ -24,7 +24,8 @@ class Post extends SystemBase {
 		'grm_pst_post_id' => 'delete'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'pst_title' => 'Post Title',
+	public static $fields = array(		'pst_post_id' => 'Primary key - Post ID',
+		'pst_title' => 'Post Title',
 		'pst_link' => 'Link of the post',
 		'pst_usr_user_id' => 'User this post is associated with',
 		'pst_body' => 'Body of the post',

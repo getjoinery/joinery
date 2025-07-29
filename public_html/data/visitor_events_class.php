@@ -17,7 +17,8 @@ class VisitorEvent extends SystemBase {
 	public static $pkey_column = 'vse_visitor_event_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(		'vse_visitor_id' => 'Visitor id',
+	public static $fields = array(		'vse_visitor_event_id' => 'Primary key - VisitorEvent ID',
+		'vse_visitor_id' => 'Visitor id',
 		'vse_usr_user_id' => 'The user id',
 		'vse_type' => 'Type of record',
 		'vse_ip' => 'User ip',

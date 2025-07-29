@@ -20,7 +20,8 @@ class MailingListRegistrant extends SystemBase {
 	public static $pkey_column = 'mlr_mailing_list_registrant_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'mlr_mlt_mailing_list_id' => 'Mailing list id',
+	public static $fields = array(		'mlr_mailing_list_registrant_id' => 'Primary key - MailingListRegistrant ID',
+		'mlr_mlt_mailing_list_id' => 'Mailing list id',
 		'mlr_usr_user_id' => 'Foreign key pointing to the member in this group',
 		'mlr_change_time' => 'Time created',
 		'mlr_delete_time' => 'Time created',

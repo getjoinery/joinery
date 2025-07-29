@@ -37,7 +37,9 @@ class Email extends SystemBase {
 	public $webdir = '';
 	public $cdn = '';
 
-	public static $fields = array(		'eml_description' => 'Description of the email',
+	public static $fields = array(
+		'eml_email_id' => 'Primary key - Email ID',
+		'eml_description' => 'Description of the email',
 		'eml_usr_user_id' => 'Email creator, can be NULL',
 		'eml_from_address' => 'From address',
 		'eml_from_name' => 'From name',

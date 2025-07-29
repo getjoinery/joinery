@@ -23,7 +23,7 @@ class AdminMenu extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
-		'amu_admin_menu_id' => 'ID of the admin_menu',
+		'amu_admin_menu_id' => 'Primary key - AdminMenu ID',
 		'amu_menudisplay' => 'Display Name', 
 		'amu_slug' => 'Display Name', 
 		'amu_parent_menu_id' => 'amu_admin_menu_id of parent if a subitem', 

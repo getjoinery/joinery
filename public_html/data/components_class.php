@@ -17,7 +17,9 @@ class Component extends SystemBase {
 	public static $pkey_column = 'com_component_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'com_title' => 'Name of component',
+	public static $fields = array(
+		'com_component_id' => 'Primary key - Component ID',
+		'com_title' => 'Name of component',
 		'com_order' => 'Order of the component on the page',
 		'com_published_time' => 'Time published',
 		'com_create_time' => 'Time Created',

@@ -17,7 +17,9 @@ class ActivationCode extends SystemBase {
 	public static $pkey_column = 'act_activation_code_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(		'act_usr_email' => 'Email of the user',
+	public static $fields = array(
+		'act_activation_code_id' => 'Primary key - Activation code ID',
+		'act_usr_email' => 'Email of the user',
 		'act_code' => 'The code',
 		'act_expires_time' => 'Code expires at this time',
 		'act_usr_user_id' => 'User attached to the code',

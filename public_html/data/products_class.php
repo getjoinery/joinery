@@ -621,7 +621,7 @@ class Product extends SystemBase {
 	const PRODUCT_ID_OPTIONAL_DONATION=4;
 
 	public static $fields = array(
-		'pro_product_id' => 'Product ID',
+		'pro_product_id' => 'Primary key - Product ID',
 		'pro_name' => 'Product name',
 		'pro_short_description' => 'Product Description',
 		'pro_description' => 'Product Description',

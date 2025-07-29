@@ -17,7 +17,8 @@ class Migration extends SystemBase {
 	public static $pkey_column = 'mig_migration_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(		'mig_version' => 'Minor Version',
+	public static $fields = array(		'mig_migration_id' => 'Primary key - Migration ID',
+		'mig_version' => 'Minor Version',
 		'mig_name' => 'Name of this release',
 		'mig_release_notes' => 'Release notes',
 		'mig_sql' => 'Sql of the migration',

@@ -17,7 +17,8 @@ class SessionAnalytic extends SystemBase {
 	public static $pkey_column = 'sev_session_analytic_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(		'sev_usr_user_id' => '',
+	public static $fields = array(		'san_session_analytic_id' => 'Primary key - SessionAnalytic ID',
+		'sev_usr_user_id' => '',
 		'sev_evt_event_id' => '',
 		'sev_evs_event_session_id' => '',
 		'sev_type' => '',

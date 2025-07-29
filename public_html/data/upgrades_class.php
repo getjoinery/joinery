@@ -17,7 +17,7 @@ class Upgrade extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
 	public static $fields = array(
-		'upg_upgrade_id' => 'Upgrade id',
+		'upg_upgrade_id' => 'Primary key - Upgrade ID',
 		'upg_major_version' => 'Major Version',
 		'upg_minor_version' => 'Minor Version',
 		'upg_name' => 'Event id if sent to event recipients',

@@ -23,7 +23,9 @@ class File extends SystemBase {
 		'mlt_fil_file_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'fil_name' => 'Name',
+	public static $fields = array(
+		'fil_file_id' => 'Primary key - File ID',
+		'fil_name' => 'Name',
 		'fil_title' => 'Human readable title',
 		'fil_description' => 'Description',
 		'fil_type' => 'Type',

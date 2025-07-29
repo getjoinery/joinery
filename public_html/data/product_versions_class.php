@@ -18,7 +18,8 @@ class ProductVersion extends SystemBase {
 	
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(		'prv_pro_product_id' => 'Product this version is attached to',
+	public static $fields = array(		'prv_product_version_id' => 'Primary key - ProductVersion ID',
+		'prv_pro_product_id' => 'Product this version is attached to',
 		'prv_version_name' => 'Name of the product version',
 		'prv_version_price' => 'Price of this version',
 		'prv_status' => 'Status, 0 or 1',

@@ -73,7 +73,7 @@ class User extends SystemBase {
 
 
 	public static $fields = array(
-		'usr_user_id' => 'User id',
+		'usr_user_id' => 'Primary key - User ID',
 		'usr_first_name' => 'First Name',
 		'usr_last_name' => 'Last Name',
 		'usr_email' => 'Email Address',

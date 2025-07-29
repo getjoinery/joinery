@@ -20,7 +20,8 @@ class PhoneNumber extends SystemBase {
 		'usr_phn_phone_number_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
-	public static $fields = array(		'phn_phone_number' => 'Phone number',
+	public static $fields = array(		'phn_phone_number_id' => 'Primary key - PhoneNumber ID',
+		'phn_phone_number' => 'Phone number',
 		'phn_is_private' => 'Is this phone number private?',
 		'phn_is_verified' => 'Is this phone number verified?',
 		'phn_usr_user_id' => 'User who owns this phone #',

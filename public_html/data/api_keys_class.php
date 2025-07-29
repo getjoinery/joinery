@@ -19,7 +19,9 @@ class ApiKey extends SystemBase {
 	public static $pkey_column = 'apk_api_key_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'apk_usr_user_id' => 'The user who owns the key',
+	public static $fields = array(
+		'apk_api_key_id' => 'Primary key - ApiKey ID',
+		'apk_usr_user_id' => 'The user who owns the key',
 		'apk_name' => 'Name of this key',
 		'apk_public_key' => 'The username, basically',
 		'apk_secret_key' => 'The key',

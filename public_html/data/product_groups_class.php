@@ -20,7 +20,8 @@ class ProductGroup extends SystemBase {
 	public static $permanent_delete_actions = array(		'pro_prg_product_group_id' => 'prevent'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'prg_max_items' => 'Max # of items allowed in the cart from this product group.',
+	public static $fields = array(		'prg_product_group_id' => 'Primary key - ProductGroup ID',
+		'prg_max_items' => 'Max # of items allowed in the cart from this product group.',
 		'prg_error' => 'Error message associated with too many items in the cart',
 		'prg_name' => 'Name of the product group',
 		'prg_description' => 'Description of the product group',

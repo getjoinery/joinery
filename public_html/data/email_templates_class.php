@@ -24,7 +24,9 @@ class EmailTemplateStore extends SystemBase {
 	const TEMPLATE_TYPE_INNER = 2;
 	const TEMPLATE_TYPE_FOOTER = 3;
 
-	public static $fields = array(		'emt_name' => 'Name',
+	public static $fields = array(
+		'emt_email_template_id' => 'Primary key - EmailTemplateStore ID',
+		'emt_name' => 'Name',
 		'emt_type' => 'Type of template - outer, inner, footer',
 		'emt_body' => 'Body of the template',
 		'emt_create_time' => 'Created',

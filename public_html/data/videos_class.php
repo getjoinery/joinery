@@ -19,7 +19,8 @@ class Video extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	public static $url_namespace = 'video'; 
 	
-	public static $fields = array(		'vid_title' => 'Video Title',
+	public static $fields = array(		'vid_video_id' => 'Primary key - Video ID',
+		'vid_title' => 'Video Title',
 		'vid_link' => 'Link to the video',
 		'vid_description' => 'Description',
 		'vid_usr_user_id' => 'User this video is associated with',

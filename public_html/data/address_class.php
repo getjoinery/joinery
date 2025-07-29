@@ -99,7 +99,9 @@ class Address extends SystemBase {
 		'WY'=>"Wyoming"
 	);
 
-	public static $fields = array(		'usa_type' => 'Address type',
+	public static $fields = array(
+		'usa_users_addr_id' => 'Primary key - Address ID',
+		'usa_type' => 'Address type',
 		'usa_address1' => 'Line 1 of address',
 		'usa_address2' => 'Line 2 of address',
 		'usa_city' => 'City',
