@@ -43,7 +43,9 @@ class EventRegistrant extends SystemBase {
 	public static $permanent_delete_actions = array(		'odi_evr_event_registrant_id' => 'prevent'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(		'evr_evt_event_id' => 'The event',
+	public static $fields = array(
+		'evr_event_registrant_id' => 'Primary key - EventRegistrant ID',
+		'evr_evt_event_id' => 'The event',
 		'evr_usr_user_id' => 'The attendee',
 		'evr_recording_consent' => 'Consent to record',
 		'evr_first_event' => 'Is this the persons first event',

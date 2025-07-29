@@ -23,7 +23,8 @@ class OrderItemRequirement extends SystemBase {
 	public static $pkey_column = 'oir_order_item_requirement_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(		'oir_odi_order_item_id' => 'Order item the requirement info is attached to',
+	public static $fields = array(		'oir_order_item_requirement_id' => 'Primary key - OrderItemRequirement ID',
+		'oir_odi_order_item_id' => 'Order item the requirement info is attached to',
 		'oir_prq_product_requirement_id' => 'Requirement ID',
 		'oir_qst_question_id' => 'Question ID',
 		'oir_label' => 'Label for the item in the database',

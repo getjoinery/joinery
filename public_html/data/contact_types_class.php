@@ -18,7 +18,9 @@ class ContactType extends SystemBase {
 	public static $pkey_column = 'ctt_contact_type_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(		'ctt_name' => 'The contact_type',
+	public static $fields = array(
+		'ctt_contact_type_id' => 'Primary key - ContactType ID',
+		'ctt_name' => 'The contact_type',
 		'ctt_description' => 'Description of this contact type',
 		'ctt_delete_time' => 'Time of deletion',
 		'ctt_mailchimp_list_id' => 'If mailchimp integration, the list id of the list.',

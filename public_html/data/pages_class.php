@@ -22,7 +22,8 @@ class Page extends SystemBase {
 		'com_pag_page_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'pag_title' => 'Name of page',
+	public static $fields = array(		'pag_page_id' => 'Primary key - Page ID',
+		'pag_title' => 'Name of page',
 		'pag_link' => 'Link to the page',
 		'pag_body' => 'Body of this page',
 		'pag_usr_user_id' => 'User this page is associated with',

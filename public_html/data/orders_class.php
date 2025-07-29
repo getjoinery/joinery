@@ -32,7 +32,7 @@ class Order extends SystemBase {
 
 
 	public static $fields = array(
-		'ord_order_id' => 'Order ID',
+		'ord_order_id' => 'Primary key - Order ID',
 		'ord_usr_user_id' => 'User of the order',
 		'ord_timestamp' => 'Time of order',
 		'ord_total_cost' => 'Total cost of the order',

@@ -27,7 +27,8 @@ class Group extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 
-	public static $fields = array(		'grp_name' => 'Group Name',
+	public static $fields = array(		'grp_group_id' => 'Primary key - Group ID',
+		'grp_name' => 'Group Name',
 		'grp_usr_user_id_created' => 'User who created the group',
 		'grp_create_time' => 'Created',
 		'grp_update_time' => 'Updated',

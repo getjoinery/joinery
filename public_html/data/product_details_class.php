@@ -15,7 +15,8 @@ class ProductDetail extends SystemBase {
 	public static $pkey_column = 'prd_product_detail_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'prd_pro_product_id' => 'Product id',
+	public static $fields = array(		'prd_product_detail_id' => 'Primary key - ProductDetail ID',
+		'prd_pro_product_id' => 'Product id',
 		'prd_prv_product_version_id' => 'Product version',
 		'prd_usr_user_id' => 'Person who purchased the item',
 		'prd_num_sessions' => 'Number of sessions purchased',

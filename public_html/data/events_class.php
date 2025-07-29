@@ -74,7 +74,9 @@ class Event extends SystemBase {
 	const VISIBILITY_PUBLIC = 1;
 	const VISIBILITY_PUBLIC_UNLISTED = 2;	
 
-	public static $fields = array(		'evt_name' => 'Name',
+	public static $fields = array(
+		'evt_event_id' => 'Primary key - Event ID',
+		'evt_name' => 'Name',
 		'evt_description' => 'Description',
 		'evt_short_description' => 'Short description',
 		'evt_usr_user_id_leader' => 'Who is leading the retreat',

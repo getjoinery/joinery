@@ -27,7 +27,7 @@ class ContentVersion extends SystemBase {
 	const TYPE_ITEM = 8;
 
 	public static $fields = array(
-		'cnv_content_version_id' => 'ID of the content_version',
+		'cnv_content_version_id' => 'Primary key - ContentVersion ID',
 		'cnv_title' => 'Title',
 		'cnv_usr_user_id' => 'User who created the version',
 		'cnv_description' => 'Description to recognize this version',

@@ -34,7 +34,8 @@ class Question extends SystemBase {
 	const TYPE_CHECKBOX = 5;
 	const TYPE_CHECKBOX_LIST = 6;
 
-	public static $fields = array(		'qst_translation_of_question_id' => 'If this is a translation, id of the english question',
+	public static $fields = array(		'qst_question_id' => 'Primary key - Question ID',
+		'qst_translation_of_question_id' => 'If this is a translation, id of the english question',
 		'qst_language' => 'Integer representing language',
 		'qst_question' => 'Question',
 		'qst_options' => 'Array of options',

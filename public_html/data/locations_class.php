@@ -20,7 +20,8 @@ class Location extends SystemBase {
 	public static $permanent_delete_actions = array(		'evt_loc_location_id' => 'null',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
-	public static $fields = array(		'loc_name' => 'Location Name',
+	public static $fields = array(		'loc_location_id' => 'Primary key - Location ID',
+		'loc_name' => 'Location Name',
 		'loc_link' => 'Link of the location',
 		'loc_address' => 'Address of the location',
 		'loc_website' => 'Address of the location',

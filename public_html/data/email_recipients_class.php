@@ -22,7 +22,9 @@ class EmailRecipient extends SystemBase {
 	const UNSUBSCRIBED = 2;
 	const SEND_FAILURE = 3;
 
-	public static $fields = array(		'erc_usr_user_id' => 'Owner of the recipient - user id (optional)',
+	public static $fields = array(
+		'erc_email_recipient_id' => 'Primary key - EmailRecipient ID',
+		'erc_usr_user_id' => 'Owner of the recipient - user id (optional)',
 		'erc_email' => 'Recipient email address',
 		'erc_name' => 'Recipient name, if available',
 		'erc_eml_email_id' => 'Email foreign key',

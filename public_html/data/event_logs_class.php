@@ -17,7 +17,9 @@ class EventLog extends SystemBase {
 	public static $pkey_column = 'evl_event_log_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(		'evl_event' => 'see above',
+	public static $fields = array(
+		'evl_event_log_id' => 'Primary key - EventLog ID',
+		'evl_event' => 'see above',
 		'evl_usr_user_id' => 'User this event_log is associated with',
 		'evl_create_time' => 'Time added',
 		'evl_was_success' => 'Did it run to completion?',

@@ -19,7 +19,7 @@ class Comment extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	public static $fields = array(
-		'cmt_comment_id' => 'Comment id',
+		'cmt_comment_id' => 'Primary key - Comment ID',
 		'cmt_comment_id_parent' => 'Parent comment for threaded',
 		'cmt_usr_user_id' => 'Comment author',
 		'cmt_author_name' => 'Author name',

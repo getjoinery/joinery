@@ -17,7 +17,8 @@ class PageContent extends SystemBase {
 	public static $pkey_column = 'pac_page_content_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 	
-	public static $fields = array(		'pac_pag_page_id' => 'ID of the page the content is part of',
+	public static $fields = array(		'pac_page_content_id' => 'Primary key - PageContent ID',
+		'pac_pag_page_id' => 'ID of the page the content is part of',
 		'pac_com_component_id' => 'ID of the component that the page content is part of',
 		'pac_location_name' => 'Location of the content',
 		'pac_title' => 'PageContent Title',

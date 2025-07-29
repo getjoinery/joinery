@@ -37,7 +37,8 @@ class MailingList extends SystemBase {
 	const VISIBILITY_PUBLIC = 1;  //LISTED ON /LISTS
 	const VISIBILITY_PUBLIC_UNLISTED = 2;  //NOT LISTED ON /LISTS BUT AVAILABLE TO REGISTER WITH THE LINK
 
-	public static $fields = array(		'mlt_name' => 'Name',
+	public static $fields = array(		'mlt_mailing_list_id' => 'Primary key - MailingList ID',
+		'mlt_name' => 'Name',
 		'mlt_description' => 'Description',
 		'mlt_mailchimp_list_id' => 'Mailchimp list id for sync',
 		'mlt_visibility'=>'0=private, 1=public,2=public but unlisted',
