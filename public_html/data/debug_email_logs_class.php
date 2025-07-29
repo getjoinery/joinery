@@ -58,14 +58,6 @@ class MultiDebugEmailLog extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
 
-        if (isset($this->options['user_id'])) {
-            $filters['del_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
-        }
-
-        if (isset($this->options['event'])) {
-            $filters['del_event'] = [$this->options['event'], PDO::PARAM_INT];
-        }
-
         return $this->_get_resultsv2('del_debug_email_logs', $filters, $this->order_by, $only_count, $debug);
     }
 
