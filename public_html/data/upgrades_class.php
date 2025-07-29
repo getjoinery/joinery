@@ -72,9 +72,7 @@ class MultiUpgrade extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
         
-        if (isset($this->options['user_id_recipient'])) {
-            $filters['upg_usr_user_id_recipient'] = [$this->options['user_id_recipient'], PDO::PARAM_INT];
-        }
+        // Note: 'user_id_recipient' filter removed - upg_usr_user_id_recipient field does not exist in model
         
         if (isset($this->options['major_version'])) {
             $filters['upg_major_version'] = [$this->options['major_version'], PDO::PARAM_INT];

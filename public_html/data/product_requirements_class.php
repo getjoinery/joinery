@@ -119,9 +119,7 @@ class MultiProductRequirement extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
 
-		if (isset($this->options['product_id'])) {
-			$filters['prq_pro_product_id'] = [$this->options['product_id'], PDO::PARAM_INT];
-		}
+		// Note: 'product_id' filter removed - prq_pro_product_id field does not exist in model
 
 		if (isset($this->options['required'])) {
 			$filters['prq_is_required'] = $this->options['required'] ? "= TRUE" : "= FALSE";
