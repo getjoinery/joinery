@@ -179,7 +179,7 @@ class ContentVersion extends SystemBase {
 class MultiContentVersion extends SystemMultiBase {
 
 
-	function get_dropdown_array($include_new=FALSE, $session) {
+	function get_dropdown_array($session, $include_new=FALSE) {
 		$items = array();
 		foreach($this as $content_version) {
 			if($content_version->get('cnv_description')){

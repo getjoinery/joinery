@@ -123,7 +123,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
 					}
 					echo $formwriter->end_form(true);
-					$product->output_javascript(array(), $formwriter);
+					$product->output_javascript($formwriter, array());
 				}
 				else if($product_version && !$cart->can_add_to_cart($product_version)){
 					if($product_version->is_subscription()){

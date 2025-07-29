@@ -350,7 +350,7 @@
 		NULL);  //OFFSET
 	$content_versions->load();
 	
-	$optionvals = $content_versions->get_dropdown_array(FALSE, $session);
+	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 	if(count($optionvals)){
 		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
