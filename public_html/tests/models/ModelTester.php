@@ -256,7 +256,14 @@ class ModelTester {
             if ($verbose) echo "Delete failed with error: " . $e->getMessage() . "<br>\n"; flush();
             if ($verbose) echo "Exception type: " . get_class($e) . "<br>\n"; flush();
             if ($verbose) echo "File: " . $e->getFile() . " line " . $e->getLine() . "<br>\n"; flush();
-            // Re-throw to maintain test failure behavior
+            
+            // Handle permanent delete configuration errors
+            if (strpos($e->getMessage(), 'Cannot permanent delete') !== false) {
+                $this->test_fail_no_throw("Model permanent_delete() failed due to configuration issue: " . $e->getMessage());
+                return; // Skip deletion verification
+            }
+            
+            // Re-throw other exceptions to maintain test failure behavior
             throw $e;
         } catch (Error $e) {
             if ($verbose) echo "Delete failed with PHP Error: " . $e->getMessage() . "<br>\n"; flush();
@@ -265,7 +272,7 @@ class ModelTester {
             
             // Check if this is an undefined method error
             if (strpos($e->getMessage(), 'Call to undefined method') !== false) {
-                $this->test_fail("Model has broken permanent_delete() logic - undefined method call");
+                $this->test_fail_no_throw("Model has broken permanent_delete() logic - undefined method call");
                 return; // Skip the rest of the CRUD test
             }
             
@@ -398,9 +405,17 @@ class ModelTester {
             }
             
             // Clean up
-            $model1->permanent_delete();
+            try {
+                $model1->permanent_delete();
+            } catch (Exception $e) {
+                $this->test_fail_no_throw("Cleanup failed for unique constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+            }
             if ($model2->key) {
-                $model2->permanent_delete();
+                try {
+                    $model2->permanent_delete();
+                } catch (Exception $e) {
+                    $this->test_fail_no_throw("Cleanup failed for unique constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+                }
             }
             
         } catch (Exception $e) {
@@ -463,15 +478,27 @@ class ModelTester {
             try {
                 $model3->save();
                 $this->test_pass("Composite unique constraint allows different combinations on ($field_list)");
-                $model3->permanent_delete();
+                try {
+                    $model3->permanent_delete();
+                } catch (Exception $delete_e) {
+                    $this->test_fail_no_throw("Cleanup failed for composite unique constraint test on ($field_list) - permanent_delete_actions may need configuration: " . $delete_e->getMessage());
+                }
             } catch (Exception $e) {
                 $this->test_fail("Composite unique constraint incorrectly rejected different combination on ($field_list): " . $e->getMessage());
             }
             
             // Clean up
-            $model1->permanent_delete();
+            try {
+                $model1->permanent_delete();
+            } catch (Exception $e) {
+                $this->test_fail_no_throw("Cleanup failed for unique constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+            }
             if ($model2->key) {
-                $model2->permanent_delete();
+                try {
+                    $model2->permanent_delete();
+                } catch (Exception $e) {
+                    $this->test_fail_no_throw("Cleanup failed for unique constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+                }
             }
             
         } catch (Exception $e) {
@@ -1254,11 +1281,19 @@ class ModelTester {
             
             if (strlen($saved_value) <= $max_length) {
                 $this->test_warn("Field $field was silently truncated by database to max length $max_length (input: " . strlen($too_long_string) . " chars, stored: " . strlen($saved_value) . " chars)");
-                $fresh_model->permanent_delete();
+                try {
+                    $fresh_model->permanent_delete();
+                } catch (Exception $e) {
+                    $this->test_fail_no_throw("Cleanup failed for varchar length test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+                }
             } else {
-                $fresh_model->permanent_delete();
+                try {
+                    $fresh_model->permanent_delete();
+                } catch (Exception $e) {
+                    $this->test_fail_no_throw("Cleanup failed for varchar length test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+                }
                 // Database field doesn't match model specification - no length constraint enforced
-                $this->test_fail("Field $field database constraint mismatch - model specifies max $max_length chars but database stored " . strlen($saved_value) . " chars from " . strlen($too_long_string) . " char input");
+                $this->test_fail_no_throw("Field $field database constraint mismatch - model specifies max $max_length chars but database stored " . strlen($saved_value) . " chars from " . strlen($too_long_string) . " char input");
             }
         } catch (Exception $e) {
             // Check if this is a test_fail exception - if so, re-throw it to fail the overall test
@@ -1317,9 +1352,13 @@ class ModelTester {
             if (is_numeric($saved_value)) {
                 $this->test_pass("Field $field converted non-numeric input to numeric value: $saved_value");
             } else {
-                $this->test_fail("Field $field accepted non-numeric value without conversion - stored: '$saved_value' (should be numeric or rejected)");
+                $this->test_fail_no_throw("Field $field accepted non-numeric value without conversion - stored: '$saved_value' (should be numeric or rejected)");
             }
-            $model->permanent_delete();
+            try {
+                $model->permanent_delete();
+            } catch (Exception $e) {
+                $this->test_fail_no_throw("Cleanup failed for integer constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+            }
         } catch (Exception $e) {
             // Check if this is a test_fail exception - if so, re-throw it to fail the overall test
             if (strpos($e->getMessage(), 'Test failed:') === 0) {
@@ -1396,7 +1435,18 @@ class ModelTester {
             $model->save();
             $model->load();
             $this->test_pass("Field $field accepts null values");
-            $model->permanent_delete();
+            
+            // Try to clean up - catch permanent delete failures
+            try {
+                $model->permanent_delete();
+            } catch (Exception $delete_e) {
+                // Handle permanent delete failures separately
+                if (strpos($delete_e->getMessage(), 'Cannot permanent delete') !== false) {
+                    $this->test_fail_no_throw("Field $field accepts null values but cleanup failed due to permanent_delete_actions configuration: " . $delete_e->getMessage());
+                } else {
+                    $this->test_fail_no_throw("Field $field accepts null values but cleanup failed: " . $delete_e->getMessage());
+                }
+            }
         } catch (Exception $e) {
             // Check if it's a missing table error
             if (strpos($e->getMessage(), 'Undefined table') !== false ||
@@ -1405,7 +1455,7 @@ class ModelTester {
                 return;
             }
             
-            $this->test_fail("Field $field should accept null values but threw: " . $e->getMessage());
+            $this->test_fail_no_throw("Field $field should accept null values but threw: " . $e->getMessage());
         }
     }
     
