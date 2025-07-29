@@ -177,10 +177,44 @@ class MultiModelTester extends ModelTester {
                     $model->set($field, $value);
                 }
                 
-                $save_result = $model->save();
+                echo "  DEBUG: Test data generated: " . json_encode($test_data) . "<br>\n";
+                echo "  DEBUG: About to save record, current key = {$model->key}<br>\n";
                 
-                if ($save_result === false) {
+                try {
+                    $save_result = $model->save();
+                    echo "  DEBUG: Save result = " . ($save_result ? 'TRUE' : 'FALSE') . ", post-save key = {$model->key}<br>\n";
+                    
+                    if ($save_result === false) {
+                        echo "  DEBUG: Save failed - checking for validation errors<br>\n";
+                        
+                        // Try to get more details about why save failed
+                        $model->prepare(); // This might reveal validation errors
+                        echo "  DEBUG: Prepare completed, trying save again<br>\n";
+                        $save_result = $model->save();
+                        echo "  DEBUG: Retry save result = " . ($save_result ? 'TRUE' : 'FALSE') . "<br>\n";
+                        
+                        if ($save_result === false) {
+                            echo "  DEBUG: Save still failed after prepare, trying next attempt<br>\n";
+                            continue; // Try again with next attempt
+                        }
+                    }
+                } catch (Exception $e) {
+                    echo "  DEBUG: Save threw exception: " . $e->getMessage() . "<br>\n";
                     continue; // Try again with next attempt
+                }
+                
+                // Ensure the record is committed to database for Multi class queries
+                try {
+                    $dbhelper = DbConnector::get_instance();
+                    $dblink = $dbhelper->get_db_link();
+                    if ($dblink->inTransaction()) {
+                        echo "  DEBUG: Committing transaction<br>\n";
+                        $dblink->commit();
+                    } else {
+                        echo "  DEBUG: No active transaction to commit<br>\n";
+                    }
+                } catch (Exception $e) {
+                    echo "  DEBUG: Commit error: " . $e->getMessage() . "<br>\n";
                 }
                 
                 // Success - add to records
@@ -192,17 +226,30 @@ class MultiModelTester extends ModelTester {
                 ];
                 
                 // Verify the record was actually saved by trying to load it
-                if ($this->is_verbose()) {
-                    try {
-                        $verify_model = new $this->model_class($model->key, true);
-                        if ($verify_model->key) {
+                try {
+                    // Always verify record creation, regardless of verbose mode
+                    $verify_model = new $this->model_class($model->key, true);
+                    if ($verify_model->key) {
+                        if ($this->is_verbose()) {
                             echo "<br>\n  Verified record {$model->key} exists in database<br>\n";
-                        } else {
-                            echo "<br>\n  WARNING: Record {$model->key} not found in database after save!<br>\n";
                         }
-                    } catch (Exception $e) {
-                        echo "<br>\n  WARNING: Could not verify record {$model->key}: " . $e->getMessage() . "<br>\n";
+                    } else {
+                        echo "<br>\n  WARNING: Record {$model->key} not found in database after save!<br>\n";
+                        
+                        // Also check with direct SQL
+                        $dbhelper = DbConnector::get_instance();
+                        $dblink = $dbhelper->get_db_link();
+                        $table_name = $this->model_class::$tablename;
+                        $pkey_column = $this->model_class::$pkey_column;
+                        
+                        $sql = "SELECT COUNT(*) as count FROM {$table_name} WHERE {$pkey_column} = ?";
+                        $stmt = $dblink->prepare($sql);
+                        $stmt->execute([$model->key]);
+                        $result = $stmt->fetch(PDO::FETCH_OBJ);
+                        echo "<br>\n  Direct SQL found {$result->count} records with ID {$model->key} immediately after save<br>\n";
                     }
+                } catch (Exception $e) {
+                    echo "<br>\n  WARNING: Could not verify record {$model->key}: " . $e->getMessage() . "<br>\n";
                 }
                 
                 if ($this->is_verbose()) {
@@ -451,16 +498,26 @@ class MultiModelTester extends ModelTester {
             echo "  Using filter '$filter_option' for field '$database_field'<br>\n";
         }
         
-        // Instead of using synthetic test data, get a real value from existing records
-        $multi_sample = new $this->multi_class([], [], 10); // Get sample of existing records
-        $multi_sample->load();
-        
+        // First try to get a test value from the synthetic test data we created
         $test_value = null;
-        foreach ($multi_sample as $sample_item) {
-            $sample_value = $sample_item->get($database_field);
-            if ($sample_value !== null && $sample_value !== '') {
-                $test_value = $sample_value;
+        foreach ($this->test_records as $test_record) {
+            $test_value = $test_record['model']->get($database_field);
+            if ($test_value !== null && $test_value !== '') {
                 break;
+            }
+        }
+        
+        // If no value found in synthetic test data, fall back to existing database records
+        if ($test_value === null) {
+            $multi_sample = new $this->multi_class([], [], 10); // Get sample of existing records
+            $multi_sample->load();
+            
+            foreach ($multi_sample as $sample_item) {
+                $sample_value = $sample_item->get($database_field);
+                if ($sample_value !== null && $sample_value !== '') {
+                    $test_value = $sample_value;
+                    break;
+                }
             }
         }
         
@@ -469,7 +526,60 @@ class MultiModelTester extends ModelTester {
         }
         
         if ($debug) {
-            echo "  Filter: {$filter_option} = {$test_value} (field: {$database_field}) [using existing data]<br>\n";
+            echo "  Filter: {$filter_option} = {$test_value} (field: {$database_field}) [using test data]<br>\n";
+        }
+        
+        // Debug: Check if the test record actually exists in the database
+        try {
+            // First check if SystemBase is just finding it in memory/cache
+            $verify_record = new $this->model_class($test_value); // Don't auto-load
+            echo "  DEBUG: Created SystemBase object with ID {$test_value}, key = {$verify_record->key}<br>\n";
+            
+            $verify_record->load(); // Explicitly load from database
+            if ($verify_record->key) {
+                echo "  DEBUG: SystemBase successfully loaded record with ID {$test_value} from database<br>\n";
+                
+                // Let's see what data SystemBase actually has
+                $sample_field = null;
+                $fields = $this->model_class::$fields;
+                foreach($fields as $field_name => $description) {
+                    if ($field_name !== $this->model_class::$pkey_column) {
+                        $sample_field = $field_name;
+                        break;
+                    }
+                }
+                if ($sample_field) {
+                    $field_value = $verify_record->get($sample_field);
+                    echo "  DEBUG: SystemBase record data - {$sample_field} = '{$field_value}'<br>\n";
+                }
+            } else {
+                echo "  DEBUG: SystemBase could NOT load record with ID {$test_value} from database<br>\n";
+            }
+            
+            // Debug: Also check using direct SQL query to see if we can find the record
+            $dbhelper = DbConnector::get_instance();
+            $dblink = $dbhelper->get_db_link();
+            $table_name = $this->model_class::$tablename;
+            $pkey_column = $this->model_class::$pkey_column;
+            
+            $sql = "SELECT COUNT(*) as count FROM {$table_name} WHERE {$pkey_column} = ?";
+            $stmt = $dblink->prepare($sql);
+            $stmt->execute([$test_value]);
+            $result = $stmt->fetch(PDO::FETCH_OBJ);
+            echo "  DEBUG: Direct SQL query found {$result->count} records with {$pkey_column}={$test_value}<br>\n";
+            
+            // Also try to see what records ARE in the table
+            $sql2 = "SELECT {$pkey_column} FROM {$table_name} ORDER BY {$pkey_column} DESC LIMIT 10";
+            $stmt2 = $dblink->prepare($sql2);
+            $stmt2->execute();
+            $existing_ids = [];
+            while ($row = $stmt2->fetch(PDO::FETCH_OBJ)) {
+                $existing_ids[] = $row->{$pkey_column};
+            }
+            echo "  DEBUG: Recent IDs in {$table_name}: " . implode(', ', $existing_ids) . "<br>\n";
+            
+        } catch (Exception $e) {
+            echo "  DEBUG: Error checking test record existence: " . $e->getMessage() . "<br>\n";
         }
         
         // Create Multi instance with the supported filter
@@ -478,7 +588,10 @@ class MultiModelTester extends ModelTester {
         // Add timeout protection for filtered load
         try {
             set_time_limit(15); // 15 second timeout
-            $multi->load();
+            
+            // Debug: Enable debug mode for the Multi class query to see the SQL
+            echo "  DEBUG: Running Multi class load with debug enabled...<br>\n";
+            $multi->load(true); // Enable debug mode
         } catch (Exception $e) {
             echo "  <span style='color: #ff9800;'>[SKIP] Filtering test failed: " . $e->getMessage() . "</span><br>\n";
             return;
@@ -487,17 +600,22 @@ class MultiModelTester extends ModelTester {
         // Count results and verify filter worked
         $result_count = 0;
         $matching_results = 0;
+        $found_ids = [];
         
         foreach ($multi as $item) {
             $result_count++;
             $item_value = $item->get($database_field);
+            $found_ids[] = $item_value;
             if ($item_value === $test_value) {
                 $matching_results++;
             }
         }
         
-        if ($debug) {
-            echo "  Filter results: {$result_count} total, {$matching_results} matching<br>\n";
+        echo "  Filter results: {$result_count} total, {$matching_results} matching<br>\n";
+        if ($result_count == 0) {
+            echo "  DEBUG: Filter query returned 0 results. Looking for {$database_field}={$test_value}<br>\n";
+        } else {
+            echo "  DEBUG: Found {$database_field} values: " . implode(', ', $found_ids) . "<br>\n";
         }
         
         // Basic validation - we should get some results
