@@ -1154,7 +1154,7 @@ class Product extends SystemBase {
 		return array($form_data, $form_display_data);
 	}
 
-	function output_javascript($extra_data=array(), $formwriter, $form_id='product_form') {
+	function output_javascript($formwriter, $extra_data=array(), $form_id='product_form') {
 		
 		$validation_info = array();
 

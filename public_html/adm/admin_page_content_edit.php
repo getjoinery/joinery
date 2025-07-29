@@ -164,7 +164,7 @@
 		NULL);  //OFFSET
 	$content_versions->load();
 	
-	$optionvals = $content_versions->get_dropdown_array(FALSE, $session);
+	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 	
 	if(count($optionvals)){
 
