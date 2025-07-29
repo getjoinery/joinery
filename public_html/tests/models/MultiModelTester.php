@@ -420,7 +420,7 @@ class MultiModelTester extends ModelTester {
         $required = $max_patterns + ceil($nullable_fields * 0.2);
         
         // Cap at reasonable limit for testing
-        return min($required, 10);
+        return min($required, 20);
     }
 
     /**

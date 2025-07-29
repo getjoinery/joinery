@@ -42,8 +42,8 @@ foreach($classes as $class) {
 
 echo '<h2>Multi Class Testing</h2>';
 echo '<div style="background: #d1ecf1; padding: 10px; border: 1px solid #bee5eb; margin: 10px 0; border-radius: 4px;">';
-echo '<strong>ℹ️ INFO:</strong> Testing with <strong>3 records per model</strong> for faster execution<br>';
-echo '<small>This setting can be increased in MultiModelTester.php once testing is stable.</small>';
+echo '<strong>ℹ️ INFO:</strong> Testing with <strong>dynamically calculated records per model</strong> (capped at 20) for faster execution<br>';
+echo '<small>Record count is calculated based on field complexity to ensure adequate test coverage.</small>';
 echo '</div>';
 echo 'Found ' . count($classes) . ' model classes<br>';
 echo '<p><em>Multi class testing validates collection classes (MultiUser, MultiProduct, etc.) by testing their query generation, filtering, ordering, and pagination against direct SQL queries.</em></p>';
