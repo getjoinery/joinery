@@ -21,7 +21,7 @@ class CtldRule extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
-		'cdr_ctldrule_id' => 'ID of the ctldfilter',
+		'cdr_ctld_rule_id' => 'Primary key - CtldRule ID',
 		'cdr_cdp_ctldprofile_id' => 'Foreign key to profile',
 		'cdr_rule_hostname' => 'Hostname of the rule',
 		'cdr_is_active' => 'Is it active?',

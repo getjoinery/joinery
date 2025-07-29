@@ -23,7 +23,7 @@ class CtldService extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
-		'cds_ctldservice_id' => 'ID of the ctldservice',
+		'cds_ctld_service_id' => 'Primary key - CtldService ID',
 		'cds_cdp_ctldprofile_id' => 'Foreign key to profile',
 		'cds_service_pk' => 'Primary key at controld',
 		'cds_is_active' => 'Is it active?',

@@ -24,7 +24,7 @@ class ItemRelation extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
-		'itr_item_relation_id' => 'ID of the url',
+		'itr_item_relation_id' => 'Primary key - ItemRelation ID',
 		'itr_itm_item_id_left' => 'Name of item_relation',
 		'itr_itm_item_id_right' => 'Name of item_relation',
 		'itr_external_link' => 'External link if no right relation',

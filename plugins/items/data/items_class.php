@@ -25,7 +25,7 @@ class Item extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
-		'itm_item_id' => 'ID of the url',
+		'itm_item_id' => 'Primary key - Item ID',
 		'itm_name' => 'Name of item',
 		'itm_description' => 'Name of item',
 		'itm_link' => 'Link to the item',
