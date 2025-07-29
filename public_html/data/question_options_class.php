@@ -87,16 +87,10 @@ class MultiQuestionOption extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
 
-		if (isset($this->options['user_id'])) {
-			$filters['qop_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
-		}
+		// Note: Invalid filters removed - qop_usr_user_id and qop_is_published fields do not exist in model
 
 		if (isset($this->options['question_id'])) {
 			$filters['qop_qst_question_id'] = [$this->options['question_id'], PDO::PARAM_INT];
-		}
-
-		if (isset($this->options['published'])) {
-			$filters['qop_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
 		}
 
 		return $this->_get_resultsv2('qop_question_options', $filters, $this->order_by, $only_count, $debug);

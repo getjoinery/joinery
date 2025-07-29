@@ -74,9 +74,7 @@ class MultiVisitorEvent extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
         
-        if (isset($this->options['code'])) {
-            $filters['vse_code'] = [$this->options['code'], PDO::PARAM_STR];
-        }
+        // Note: 'code' filter removed - vse_code field does not exist in model
         
         return $this->_get_resultsv2('vse_visitor_events', $filters, $this->order_by, $only_count, $debug);
     }

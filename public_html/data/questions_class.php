@@ -377,21 +377,7 @@ class MultiQuestion extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
 
-		if (isset($this->options['user_id'])) {
-			$filters['qst_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
-		}
-
-		if (isset($this->options['identifier'])) {
-			$filters['qst_identifier'] = [$this->options['identifier'], PDO::PARAM_INT];
-		}
-
-		if (isset($this->options['identifier_not'])) {
-			$filters['qst_identifier'] = '!= '.$this->options['identifier_not'].' OR qst_identifier IS NULL';
-		}
-
-		if (isset($this->options['link'])) {
-			$filters['qst_link'] = [$this->options['link'], PDO::PARAM_STR];
-		}
+		// Note: Invalid filters removed - qst_usr_user_id, qst_identifier, qst_link fields do not exist in model
 
 		if (isset($this->options['published'])) {
 			$filters['qst_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
