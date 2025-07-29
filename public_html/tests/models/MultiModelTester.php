@@ -759,16 +759,26 @@ class MultiModelTester extends ModelTester {
         $filter_option = array_keys($filter_options)[0];
         $database_field = $filter_options[$filter_option];
         
-        // Use existing data approach like filtering test
-        $multi_sample = new $this->multi_class([], [], 10);
-        $multi_sample->load();
-        
+        // First try to get a test value from the synthetic test data we created
         $test_value = null;
-        foreach ($multi_sample as $sample_item) {
-            $sample_value = $sample_item->get($database_field);
-            if ($sample_value !== null && $sample_value !== '') {
-                $test_value = $sample_value;
+        foreach ($this->test_records as $test_record) {
+            $test_value = $test_record['model']->get($database_field);
+            if ($test_value !== null && $test_value !== '') {
                 break;
+            }
+        }
+        
+        // If no value found in synthetic test data, fall back to existing database records
+        if ($test_value === null) {
+            $multi_sample = new $this->multi_class([], [], 10);
+            $multi_sample->load();
+            
+            foreach ($multi_sample as $sample_item) {
+                $sample_value = $sample_item->get($database_field);
+                if ($sample_value !== null && $sample_value !== '') {
+                    $test_value = $sample_value;
+                    break;
+                }
             }
         }
         
