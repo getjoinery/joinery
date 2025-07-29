@@ -236,9 +236,16 @@ class ModelTester {
             }
         });
         
-        // Check if model has empty permanent_delete_actions and warn
+        // Check if model has empty permanent_delete_actions and warn only if foreign keys exist
         if (!$this->can_permanent_delete($model)) {
-            $this->test_warn("Model has empty permanent_delete_actions array. Configure permanent_delete_actions if this model has foreign key references.");
+            $foreign_keys = $this->find_foreign_key_references(get_class($model));
+            if (!empty($foreign_keys)) {
+                $foreign_key_list = array();
+                foreach ($foreign_keys as $column => $table) {
+                    $foreign_key_list[] = "$column (in table $table)";
+                }
+                $this->test_warn("Model has empty permanent_delete_actions array but foreign key references were detected: " . implode(', ', $foreign_key_list) . ". Configure permanent_delete_actions to handle these relationships.");
+            }
         }
         
         if ($verbose) echo "Calling permanent_delete() now...<br>\n"; flush();
@@ -1528,46 +1535,13 @@ class ModelTester {
             $this->test_pass("permanent_delete_actions configuration is correct (primary key not included)");
         }
         
-        // Find all foreign keys that reference this table
-        $sql = 'SELECT
-            t.table_name,
-            array_agg(c.column_name::text) as columns
-        FROM
-            information_schema.tables t
-        INNER JOIN information_schema.columns c ON
-            t.table_name = c.table_name
-        WHERE
-            t.table_schema = \'public\'
-            AND c.table_schema = \'public\'
-        GROUP BY t.table_name';
-        
-        try {
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            $q->setFetchMode(PDO::FETCH_OBJ);
-        } catch(PDOException $e) {
-            $this->test_warn("Could not check foreign key references: " . $e->getMessage());
-            return;
-        }
-        
         // Find foreign keys referencing this model's primary key
-        $found_foreign_keys = array();
-        $model_table = $model_class::$tablename;
+        $found_foreign_keys = $this->find_foreign_key_references($model_class);
         
-        while ($row = $q->fetch()) {
-            $table_name = $row->table_name;
-            $columns = $row->columns;
-            $columns_array = explode(',', trim($columns, '{}'));
-            
-            foreach($columns_array as $column) {
-                if(str_contains($column, $primary_key)) {
-                    // Skip if this is the primary key in its own table
-                    if ($column === $primary_key && $table_name === $model_table) {
-                        continue;
-                    }
-                    $found_foreign_keys[$column] = $table_name;
-                }
-            }
+        // Handle case where foreign key detection failed
+        if (isset($found_foreign_keys['unknown'])) {
+            $this->test_warn("Could not check foreign key references");
+            return;
         }
         
         // Check for foreign keys not defined in permanent_delete_actions
@@ -1592,9 +1566,64 @@ class ModelTester {
         if (property_exists($model_class, 'permanent_delete_actions') && 
             is_array($model_class::$permanent_delete_actions) && 
             empty($model_class::$permanent_delete_actions)) {
-            // Model has empty permanent_delete_actions - this will fail if there are foreign keys
-            return false;
+            // Model has empty permanent_delete_actions - check if there are foreign keys
+            $foreign_keys = $this->find_foreign_key_references($model_class);
+            return empty($foreign_keys);
         }
         return true;
+    }
+    
+    /**
+     * Find foreign keys that reference this model's primary key
+     * Returns array of foreign key references
+     */
+    private function find_foreign_key_references($model_class) {
+        $dbhelper = DbConnector::get_instance();
+        $dblink = $dbhelper->get_db_link();
+        
+        // Find all foreign keys that reference this table
+        $sql = 'SELECT
+            t.table_name,
+            array_agg(c.column_name::text) as columns
+        FROM
+            information_schema.tables t
+        INNER JOIN information_schema.columns c ON
+            t.table_name = c.table_name
+        WHERE
+            t.table_schema = \'public\'
+            AND c.table_schema = \'public\'
+        GROUP BY t.table_name';
+        
+        try {
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            $q->setFetchMode(PDO::FETCH_OBJ);
+        } catch(PDOException $e) {
+            // If we can't check, assume there might be foreign keys (be conservative)
+            return array('unknown' => 'unknown');
+        }
+        
+        // Find foreign keys referencing this model's primary key
+        $found_foreign_keys = array();
+        $primary_key = $model_class::$pkey_column;
+        $model_table = $model_class::$tablename;
+        
+        while ($row = $q->fetch()) {
+            $table_name = $row->table_name;
+            $columns = $row->columns;
+            $columns_array = explode(',', trim($columns, '{}'));
+            
+            foreach($columns_array as $column) {
+                if(str_contains($column, $primary_key)) {
+                    // Skip if this is the primary key in its own table
+                    if ($column === $primary_key && $table_name === $model_table) {
+                        continue;
+                    }
+                    $found_foreign_keys[$column] = $table_name;
+                }
+            }
+        }
+        
+        return $found_foreign_keys;
     }
 }
