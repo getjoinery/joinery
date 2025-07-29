@@ -330,8 +330,6 @@
 					if($verbose || $upgrade || $cleanup){
 						if($verbose){
 							echo 'DEBUG: Entering field specification checking for '.$field."<br>\n";
-							echo 'DEBUG: field_specifications['.$field.'] = '.print_r($field_specifications[$field], true)."<br>\n";
-							echo 'DEBUG: live_column_info['.$field.'] = '.print_r($live_column_info[$field], true)."<br>\n";
 						}
 						$upgrade_field_type = false;
 						$upgrade_field_length = false;
@@ -413,35 +411,45 @@
 							
 							if($is_simple_length_change){
 								//SIMPLE LENGTH CHANGE - no USING clause needed
-								echo 'DEBUG: Processing simple length change for '.$field."<br>\n";
-								echo 'DEBUG: field_specifications['.$field.'][type] = "'.$field_specifications[$field]['type'].'"'."<br>\n";
+								if($verbose){
+									echo 'DEBUG: Processing simple length change for '.$field."<br>\n";
+									echo 'DEBUG: field_specifications['.$field.'][type] = "'.$field_specifications[$field]['type'].'"'."<br>\n";
+								}
 								
 								$sql = 'ALTER TABLE '.$table_name.'
 									ALTER COLUMN '.$field.' TYPE '.$field_specifications[$field]['type'];
 									
 								$sql .= ';';
-								echo 'DEBUG: Generated SQL: '.$sql."<br>\n";
+								if($verbose){
+									echo 'DEBUG: Generated SQL: '.$sql."<br>\n";
+								}
 								echo $sql."<br>\n";
 								$sql_commands .= $sql;
 								
 								try{
-									echo 'DEBUG: Executing SQL...'."<br>\n";
+									if($verbose){
+										echo 'DEBUG: Executing SQL...'."<br>\n";
+									}
 									$q = $dblink->prepare($sql);
 									$q->execute();
 									echo 'SUCCESS: Updated column '.$field.' length to match model specification'."<br>\n";
 									
 									// Verify the change was applied
-									$verify_sql = 'SELECT character_maximum_length FROM information_schema.columns WHERE table_name = \''.$table_name.'\' AND column_name = \''.$field.'\'';
-									$verify_q = $dblink->prepare($verify_sql);
-									$verify_q->execute();
-									$verify_result = $verify_q->fetch();
-									echo 'DEBUG: After ALTER, character_maximum_length = '.($verify_result['character_maximum_length'] ?: 'NULL')."<br>\n";
+									if($verbose){
+										$verify_sql = 'SELECT character_maximum_length FROM information_schema.columns WHERE table_name = \''.$table_name.'\' AND column_name = \''.$field.'\'';
+										$verify_q = $dblink->prepare($verify_sql);
+										$verify_q->execute();
+										$verify_result = $verify_q->fetch();
+										echo 'DEBUG: After ALTER, character_maximum_length = '.($verify_result['character_maximum_length'] ?: 'NULL')."<br>\n";
+									}
 								}
 								catch(PDOException $e){
 									//DO NOT HALT THE PROGRAM, JUST NOTE IT
 									echo 'ERROR: Could not alter column length for '.$field.' ('.$sql.')'. "<br>\n";
 									$sql_error = $e->getMessage();
-									echo 'DEBUG: PDO Error: '.$sql_error."<br>\n";
+									if($verbose){
+										echo 'DEBUG: PDO Error: '.$sql_error."<br>\n";
+									}
 									$sql_output .= $sql_error;
 									echo 'SUGGESTION: Check if existing data exceeds the new length limit'."<br>\n";
 								}
