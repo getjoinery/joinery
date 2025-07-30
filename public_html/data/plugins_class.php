@@ -54,23 +54,6 @@ class Plugin extends SystemBase {
 			}
 	}
 
-	/**
-	 * Activate plugin
-	 * @return bool Success status
-	 */
-	public function activate() {
-		$this->set('plg_activated_time', date('Y-m-d H:i:s'));
-		return $this->save();
-	}
-	
-	/**
-	 * Deactivate plugin
-	 * @return bool Success status
-	 */
-	public function deactivate() {
-		$this->set('plg_activated_time', null);
-		return $this->save();
-	}
 	
 	/**
 	 * Check if plugin is currently active
@@ -218,6 +201,58 @@ class Plugin extends SystemBase {
 		}
 		
 		return parent::prepare();
+	}
+
+	// Static cache for plugin activation status
+	private static $activation_cache = array();
+	
+	/**
+	 * Check if plugin is active with caching
+	 * @param string $plugin_name Plugin directory name
+	 * @return bool True if plugin is active
+	 */
+	public static function is_plugin_active($plugin_name) {
+		if (!isset(self::$activation_cache[$plugin_name])) {
+			$plugin = self::get_by_plugin_name($plugin_name);
+			self::$activation_cache[$plugin_name] = $plugin ? $plugin->is_active() : false;
+		}
+		return self::$activation_cache[$plugin_name];
+	}
+	
+	/**
+	 * Clear activation cache for a specific plugin
+	 * @param string $plugin_name Plugin directory name
+	 */
+	public static function clear_activation_cache($plugin_name = null) {
+		if ($plugin_name) {
+			unset(self::$activation_cache[$plugin_name]);
+		} else {
+			self::$activation_cache = array();
+		}
+	}
+	
+	/**
+	 * Activate plugin (override to clear cache)
+	 * @return bool Success status
+	 */
+	public function activate() {
+		$this->set('plg_activated_time', date('Y-m-d H:i:s'));
+		$result = $this->save();
+		// Clear cache after activation
+		self::clear_activation_cache($this->get('plg_name'));
+		return $result;
+	}
+	
+	/**
+	 * Deactivate plugin (override to clear cache)
+	 * @return bool Success status
+	 */
+	public function deactivate() {
+		$this->set('plg_activated_time', null);
+		$result = $this->save();
+		// Clear cache after deactivation
+		self::clear_activation_cache($this->get('plg_name'));
+		return $result;
 	}
 }
 

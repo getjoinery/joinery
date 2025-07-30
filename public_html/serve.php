@@ -87,15 +87,25 @@ if($params[0] == 'plugins' && $params[2] == 'includes'){
 	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
 
 	if(file_exists($base_file)){
-		$seconds_to_cache = 43200;
-		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-		header("Expires: $ts");
-		header("Pragma: cache");
-		header("Cache-Control: max-age=$seconds_to_cache");
-		$the_content_type = 'Content-type: '.mime_type($base_file);
-		header($the_content_type);
-		readfile($base_file);
-		exit();
+		// Check if plugin is active before serving include files
+		$plugin_name = $params[1]; // Extract plugin name from URL
+		PathHelper::requireOnce('data/plugins_class.php');
+		
+		if(Plugin::is_plugin_active($plugin_name)){
+			$seconds_to_cache = 43200;
+			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+			header("Expires: $ts");
+			header("Pragma: cache");
+			header("Cache-Control: max-age=$seconds_to_cache");
+			$the_content_type = 'Content-type: '.mime_type($base_file);
+			header($the_content_type);
+			readfile($base_file);
+			exit();
+		}
+		else{
+			// Plugin not active - return 404
+			LibraryFunctions::display_404_page();
+		}
 	}
 	else{
 		LibraryFunctions::display_404_page();
@@ -185,9 +195,15 @@ if($params[0] == 'ajax'){
 		foreach($plugins as $plugin){
 			$plugin_file = ensure_extension(PathHelper::getIncludePath('plugins/'.$plugin.'/ajax/'.$params[1]), 'php');
 			if(file_exists($plugin_file)){
-				$is_valid_page = true;
-				require_once($plugin_file);
-				exit();
+				// Check if plugin is active before loading AJAX file
+				PathHelper::requireOnce('data/plugins_class.php');
+				
+				if(Plugin::is_plugin_active($plugin)){
+					$is_valid_page = true;
+					require_once($plugin_file);
+					exit();
+				}
+				// If plugin is not active, skip this AJAX file
 			}
 		}	
 		
@@ -617,7 +633,13 @@ foreach($plugins as $plugin){
 	$site_file = PathHelper::getIncludePath('plugins/'.$plugin.'/serve.php');
 	
 	if(file_exists($site_file)){
-		include_once($site_file);
+		// Check if plugin is active before including serve.php
+		PathHelper::requireOnce('data/plugins_class.php');
+		
+		if(Plugin::is_plugin_active($plugin)){
+			include_once($site_file);
+		}
+		// If plugin is not active, skip including its serve.php
 	}
 }	
 
@@ -630,9 +652,15 @@ if($params[0] == 'utils'){
 		foreach($plugins as $plugin){
 			$plugin_file = ensure_extension(PathHelper::getIncludePath('plugins/'.$plugin.'/utils/'.$params[1]), 'php');
 			if(file_exists($plugin_file)){
-				$is_valid_page = true;
-				require_once($plugin_file);
-				exit();
+				// Check if plugin is active before loading utils file
+				PathHelper::requireOnce('data/plugins_class.php');
+				
+				if(Plugin::is_plugin_active($plugin)){
+					$is_valid_page = true;
+					require_once($plugin_file);
+					exit();
+				}
+				// If plugin is not active, skip this utils file
 			}
 		}	
 		
