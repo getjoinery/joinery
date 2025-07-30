@@ -54,7 +54,171 @@ class Plugin extends SystemBase {
 			}
 	}
 
+	/**
+	 * Activate plugin
+	 * @return bool Success status
+	 */
+	public function activate() {
+		$this->set('plg_activated_time', date('Y-m-d H:i:s'));
+		return $this->save();
+	}
 	
+	/**
+	 * Deactivate plugin
+	 * @return bool Success status
+	 */
+	public function deactivate() {
+		$this->set('plg_activated_time', null);
+		return $this->save();
+	}
+	
+	/**
+	 * Check if plugin is currently active
+	 * @return bool Active status
+	 */
+	public function is_active() {
+		return !is_null($this->get('plg_activated_time'));
+	}
+	
+	/**
+	 * Get plugin by plugin name
+	 * @param string $plugin_name Plugin directory name
+	 * @return Plugin|null
+	 */
+	public static function get_by_plugin_name($plugin_name) {
+		$plugins = new MultiPlugin(
+			array('plg_name' => $plugin_name)
+		);
+		$plugins->load();
+		return $plugins->count() > 0 ? $plugins->get(0) : null;
+	}
+	
+	/**
+	 * Get formatted activation status for display
+	 * @return string HTML badge showing status
+	 */
+	public function get_status_badge() {
+		if ($this->is_active()) {
+			return '<span class="badge bg-success">Active</span>';
+		} else {
+			return '<span class="badge bg-secondary">Inactive</span>';
+		}
+	}
+	
+	/**
+	 * Validate plugin name to prevent directory traversal
+	 * @param string $plugin_name Plugin name to validate
+	 * @return bool True if valid
+	 */
+	public static function is_valid_plugin_name($plugin_name) {
+		// Only allow alphanumeric, underscore, and hyphen
+		return preg_match('/^[a-zA-Z0-9_-]+$/', $plugin_name);
+	}
+	
+	/**
+	 * Check if plugin directory exists
+	 * @return bool True if plugin directory exists
+	 */
+	public function plugin_directory_exists() {
+		$plugin_name = $this->get('plg_name');
+		if (!$plugin_name) {
+			return false;
+		}
+		
+		$plugin_dir = $_SERVER['DOCUMENT_ROOT'] . '/plugins/' . $plugin_name;
+		return is_dir($plugin_dir);
+	}
+	
+	/**
+	 * Get plugin metadata from plugin.json if it exists
+	 * @return array|null Metadata array or null if not found
+	 */
+	public function get_plugin_metadata() {
+		$plugin_name = $this->get('plg_name');
+		if (!$plugin_name) {
+			return null;
+		}
+		
+		$metadata_file = $_SERVER['DOCUMENT_ROOT'] . '/plugins/' . $plugin_name . '/plugin.json';
+		if (!file_exists($metadata_file)) {
+			return null;
+		}
+		
+		$json_data = file_get_contents($metadata_file);
+		$metadata = json_decode($json_data, true);
+		
+		// Return null if JSON is invalid
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			return null;
+		}
+		
+		return $metadata;
+	}
+	
+	/**
+	 * Get display name for plugin (from metadata or directory name)
+	 * @return string Display name
+	 */
+	public function get_display_name() {
+		$metadata = $this->get_plugin_metadata();
+		if ($metadata && isset($metadata['name'])) {
+			return $metadata['name'];
+		}
+		
+		// Fallback to directory name
+		return $this->get('plg_name');
+	}
+	
+	/**
+	 * Get description for plugin (from metadata)
+	 * @return string|null Description or null if not available
+	 */
+	public function get_description() {
+		$metadata = $this->get_plugin_metadata();
+		if ($metadata && isset($metadata['description'])) {
+			return $metadata['description'];
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * Get version for plugin (from metadata)
+	 * @return string|null Version or null if not available
+	 */
+	public function get_version() {
+		$metadata = $this->get_plugin_metadata();
+		if ($metadata && isset($metadata['version'])) {
+			return $metadata['version'];
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * Get author for plugin (from metadata)
+	 * @return string|null Author or null if not available
+	 */
+	public function get_author() {
+		$metadata = $this->get_plugin_metadata();
+		if ($metadata && isset($metadata['author'])) {
+			return $metadata['author'];
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * Override prepare to add plugin name validation
+	 */
+	public function prepare() {
+		$plugin_name = $this->get('plg_name');
+		if ($plugin_name && !self::is_valid_plugin_name($plugin_name)) {
+			throw new PluginException('Invalid plugin name: ' . $plugin_name);
+		}
+		
+		return parent::prepare();
+	}
 }
 
 class MultiPlugin extends SystemMultiBase {
@@ -82,6 +246,118 @@ class MultiPlugin extends SystemMultiBase {
         return $q;
     }
 
+    /**
+     * Get all available plugins from filesystem with their activation status
+     * @return array Array of plugin data with activation info
+     */
+    public static function get_all_plugins_with_status() {
+        $plugins_dir = $_SERVER['DOCUMENT_ROOT'] . '/plugins';
+        $plugins = array();
+        
+        if (!is_dir($plugins_dir)) {
+            return $plugins;
+        }
+        
+        // Get all plugin directories
+        $plugin_dirs = array_diff(scandir($plugins_dir), array('.', '..'));
+        
+        // Load all plugin records at once for efficiency
+        $all_plugins = new MultiPlugin();
+        $all_plugins->load();
+        
+        // Create lookup array for plugins
+        $plugins_lookup = array();
+        foreach ($all_plugins as $plugin) {
+            $plugins_lookup[$plugin->get('plg_name')] = $plugin;
+        }
+        
+        // Process each plugin directory
+        foreach ($plugin_dirs as $plugin_name) {
+            $plugin_path = $plugins_dir . '/' . $plugin_name;
+            
+            if (!is_dir($plugin_path)) {
+                continue;
+            }
+            
+            // Skip invalid plugin names
+            if (!Plugin::is_valid_plugin_name($plugin_name)) {
+                continue;
+            }
+            
+            $plugin_data = array(
+                'name' => $plugin_name,
+                'directory_exists' => true
+            );
+            
+            // Get plugin record if it exists
+            if (isset($plugins_lookup[$plugin_name])) {
+                $plugin = $plugins_lookup[$plugin_name];
+                $plugin_data['plugin'] = $plugin;
+                $plugin_data['is_active'] = $plugin->is_active();
+                $plugin_data['status_badge'] = $plugin->get_status_badge();
+                $plugin_data['display_name'] = $plugin->get_display_name();
+                $plugin_data['description'] = $plugin->get_description();
+                $plugin_data['version'] = $plugin->get_version();
+                $plugin_data['author'] = $plugin->get_author();
+            } else {
+                // No plugin record - plugin is inactive
+                $plugin_data['plugin'] = null;
+                $plugin_data['is_active'] = false;
+                $plugin_data['status_badge'] = '<span class="badge bg-secondary">Inactive</span>';
+                
+                // Try to get metadata directly
+                $metadata_file = $plugin_path . '/plugin.json';
+                if (file_exists($metadata_file)) {
+                    $json_data = file_get_contents($metadata_file);
+                    $metadata = json_decode($json_data, true);
+                    if (json_last_error() === JSON_ERROR_NONE) {
+                        $plugin_data['display_name'] = isset($metadata['name']) ? $metadata['name'] : $plugin_name;
+                        $plugin_data['description'] = isset($metadata['description']) ? $metadata['description'] : null;
+                        $plugin_data['version'] = isset($metadata['version']) ? $metadata['version'] : null;
+                        $plugin_data['author'] = isset($metadata['author']) ? $metadata['author'] : null;
+                    } else {
+                        $plugin_data['display_name'] = $plugin_name;
+                        $plugin_data['description'] = null;
+                        $plugin_data['version'] = null;
+                        $plugin_data['author'] = null;
+                    }
+                } else {
+                    $plugin_data['display_name'] = $plugin_name;
+                    $plugin_data['description'] = null;
+                    $plugin_data['version'] = null;
+                    $plugin_data['author'] = null;
+                }
+            }
+            
+            $plugins[] = $plugin_data;
+        }
+        
+        // Check for orphaned database records (plugins in DB but not on filesystem)
+        foreach ($plugins_lookup as $plugin_name => $plugin) {
+            $plugin_path = $plugins_dir . '/' . $plugin_name;
+            if (!is_dir($plugin_path)) {
+                $plugin_data = array(
+                    'name' => $plugin_name,
+                    'directory_exists' => false,
+                    'plugin' => $plugin,
+                    'is_active' => $plugin->is_active(),
+                    'status_badge' => '<span class="badge bg-warning">Missing</span>',
+                    'display_name' => $plugin->get_display_name(),
+                    'description' => 'Plugin directory not found',
+                    'version' => null,
+                    'author' => null
+                );
+                $plugins[] = $plugin_data;
+            }
+        }
+        
+        // Sort plugins by display name
+        usort($plugins, function($a, $b) {
+            return strcasecmp($a['display_name'], $b['display_name']);
+        });
+        
+        return $plugins;
+    }
 }
 
 
