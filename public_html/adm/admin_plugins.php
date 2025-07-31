@@ -103,94 +103,89 @@ $page->admin_header(array(
             </div>
         <?php else: ?>
             
-            <div class="card">
-                <div class="card-header bg-body-tertiary">
-                    <h6 class="mb-0">Plugin Status Overview</h6>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Plugin</th>
-                                    <th>Description</th>
-                                    <th>Version</th>
-                                    <th>Status</th>
-                                    <th>Activation Time</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($plugins as $plugin): ?>
-                                    <tr<?php if (!$plugin['directory_exists']): ?> class="table-warning"<?php endif; ?>>
-                                        <td>
-                                            <strong><?php echo htmlspecialchars($plugin['display_name']); ?></strong>
-                                            <?php if ($plugin['display_name'] !== $plugin['name']): ?>
-                                                <br><small class="text-muted"><?php echo htmlspecialchars($plugin['name']); ?></small>
-                                            <?php endif; ?>
-                                            <?php if ($plugin['author']): ?>
-                                                <br><small class="text-muted">by <?php echo htmlspecialchars($plugin['author']); ?></small>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php if ($plugin['description']): ?>
-                                                <?php echo htmlspecialchars($plugin['description']); ?>
-                                            <?php else: ?>
-                                                <em class="text-muted">No description available</em>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php if ($plugin['version']): ?>
-                                                <code><?php echo htmlspecialchars($plugin['version']); ?></code>
-                                            <?php else: ?>
-                                                <em class="text-muted">Unknown</em>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php echo $plugin['status_badge']; ?>
-                                            <?php if (!$plugin['directory_exists']): ?>
-                                                <br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Directory missing</small>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php 
-                                            if ($plugin['plugin'] && $plugin['plugin']->get('plg_activated_time')) {
-                                                echo $plugin['plugin']->get_timezone_corrected_time('plg_activated_time', $session, 'M j, Y g:i A');
-                                            } else {
-                                                echo '<em class="text-muted">Never activated</em>';
-                                            }
-                                            ?>
-                                        </td>
-                                        <td>
-                                            <?php if ($plugin['directory_exists']): ?>
-                                                <?php
-                                                $formwriter = LibraryFunctions::get_formwriter_object('plugin_action_' . $plugin['name'], 'admin');
-                                                
-                                                if ($plugin['is_active']):
-                                                    echo $formwriter->begin_form('plugin_action_' . $plugin['name'], 'POST', '', true);
-                                                    echo $formwriter->hiddeninput('action', 'deactivate');
-                                                    echo $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                                                    echo $formwriter->new_form_button('Deactivate', 'btn btn-outline-secondary btn-sm');
-                                                    echo $formwriter->end_form(true);
-                                                else:
-                                                    echo $formwriter->begin_form('plugin_action_' . $plugin['name'], 'POST', '', true);
-                                                    echo $formwriter->hiddeninput('action', 'activate');
-                                                    echo $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                                                    echo $formwriter->new_form_button('Activate', 'btn btn-primary btn-sm');
-                                                    echo $formwriter->end_form(true);
-                                                endif;
-                                                ?>
-                                            <?php else: ?>
-                                                <em class="text-muted">N/A</em>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+            <?php
+            // Set up table headers
+            $headers = array('Plugin', 'Description', 'Version', 'Status', 'Activation Time', 'Actions');
+            
+            // Set up table options
+            $table_options = array(
+                'title' => 'Plugin Status Overview'
+            );
+            
+            // Start the table
+            $page->tableheader($headers, $table_options);
+            
+            // Display each plugin row
+            foreach ($plugins as $plugin) {
+                $rowvalues = array();
+                
+                // Plugin name column
+                $plugin_cell = '<strong>' . htmlspecialchars($plugin['display_name']) . '</strong>';
+                if ($plugin['display_name'] !== $plugin['name']) {
+                    $plugin_cell .= '<br><small class="text-muted">' . htmlspecialchars($plugin['name']) . '</small>';
+                }
+                if ($plugin['author']) {
+                    $plugin_cell .= '<br><small class="text-muted">by ' . htmlspecialchars($plugin['author']) . '</small>';
+                }
+                array_push($rowvalues, $plugin_cell);
+                
+                // Description column
+                if ($plugin['description']) {
+                    array_push($rowvalues, htmlspecialchars($plugin['description']));
+                } else {
+                    array_push($rowvalues, '<em class="text-muted">No description available</em>');
+                }
+                
+                // Version column
+                if ($plugin['version']) {
+                    array_push($rowvalues, '<code>' . htmlspecialchars($plugin['version']) . '</code>');
+                } else {
+                    array_push($rowvalues, '<em class="text-muted">Unknown</em>');
+                }
+                
+                // Status column
+                $status_cell = $plugin['status_badge'];
+                if (!$plugin['directory_exists']) {
+                    $status_cell .= '<br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Directory missing</small>';
+                }
+                array_push($rowvalues, $status_cell);
+                
+                // Activation Time column
+                if ($plugin['plugin'] && $plugin['plugin']->get('plg_activated_time')) {
+                    array_push($rowvalues, $plugin['plugin']->get_timezone_corrected_time('plg_activated_time', $session, 'M j, Y g:i A'));
+                } else {
+                    array_push($rowvalues, '<em class="text-muted">Never activated</em>');
+                }
+                
+                // Actions column
+                if ($plugin['directory_exists']) {
+                    $formwriter = LibraryFunctions::get_formwriter_object('plugin_action_' . $plugin['name'], 'admin');
+                    
+                    if ($plugin['is_active']) {
+                        $action_cell = $formwriter->begin_form('plugin_action_' . $plugin['name'], 'POST', '', true);
+                        $action_cell .= $formwriter->hiddeninput('action', 'deactivate');
+                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                        $action_cell .= $formwriter->new_form_button('Deactivate', 'btn btn-outline-secondary btn-sm');
+                        $action_cell .= $formwriter->end_form(true);
+                    } else {
+                        $action_cell = $formwriter->begin_form('plugin_action_' . $plugin['name'], 'POST', '', true);
+                        $action_cell .= $formwriter->hiddeninput('action', 'activate');
+                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                        $action_cell .= $formwriter->new_form_button('Activate', 'btn btn-primary btn-sm');
+                        $action_cell .= $formwriter->end_form(true);
+                    }
+                    array_push($rowvalues, $action_cell);
+                } else {
+                    array_push($rowvalues, '<em class="text-muted">N/A</em>');
+                }
+                
+                // Display the row
+                $page->disprow($rowvalues);
+            }
+            
+            // End the table
+            $page->endtable();
+            ?>
             
             <?php
             // Count active/inactive plugins
