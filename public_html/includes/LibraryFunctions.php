@@ -9,13 +9,13 @@ class LibraryFunctions {
 	//TRANSLATES INTERNAL POSTGRES TYPES TO USER TYPES
 	static function translate_data_types($data_type){
 		if($data_type == 'smallint'){
-			return 'int';
+			return 'int2';
 		}
 		else if($data_type == 'integer'){
-			return 'int';
+			return 'int4';
 		}
 		else if($data_type == 'bigint'){
-			return 'int';
+			return 'int8';
 		}		
 		else if($data_type == 'character varying'){
 			return 'varchar';

@@ -68,8 +68,8 @@
 			echo implode('<br>', $table_result['messages']) . "<br>\n";
 		}
 		
-		// Display warnings from column validation
-		if (!empty($table_result['warnings'])) {
+		// Display warnings from column validation (only in verbose mode)
+		if ($verbose && !empty($table_result['warnings'])) {
 			foreach ($table_result['warnings'] as $warning) {
 				echo 'NOTICE: ' . $warning . "<br>\n";
 			}

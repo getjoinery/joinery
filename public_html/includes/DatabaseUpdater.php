@@ -260,8 +260,8 @@ class DatabaseUpdater {
         $live_columns = $this->getDetailedColumnInfo($table_name, $dblink);
         $field_specifications = $class::$field_specifications ?? [];
         
-        // Handle column modifications if upgrade mode is enabled
-        if ($this->upgrade) {
+        // Handle column modifications if upgrade OR cleanup mode is enabled
+        if ($this->upgrade || $this->cleanup) {
             foreach ($field_specifications as $field_name => $field_specs) {
                 if (isset($live_columns[$field_name])) {
                     $this->processColumnModifications($table_name, $field_name, $field_specs, $live_columns[$field_name], $dblink, $results);
@@ -307,7 +307,7 @@ class DatabaseUpdater {
         $needs_type_change = false;
         $needs_length_change = false;
         
-        if ($live_data_type != $field_without_length) {
+        if (!$this->areTypesEquivalent($live_data_type, $field_without_length)) {
             $needs_type_change = true;
         }
         
@@ -514,8 +514,8 @@ class DatabaseUpdater {
             return; // Skip this column
         }
         
-        // Check data type mismatch
-        if ($live_data_type != $field_without_length) {
+        // Check data type mismatch (considering PostgreSQL type aliases)
+        if (!$this->areTypesEquivalent($live_data_type, $field_without_length)) {
             $results['warnings'][] = "Data type mismatch on {$table_name}.{$field_name} (live: {$live_data_type} <-> spec: {$field_without_length})";
         }
         
@@ -762,6 +762,38 @@ class DatabaseUpdater {
             }
             return array();
         }
+    }
+    
+    /**
+     * Check if two PostgreSQL types are equivalent
+     * Handles common aliases like int/int4/integer, int8/bigint, etc.
+     */
+    private function areTypesEquivalent($type1, $type2) {
+        // Direct match
+        if ($type1 === $type2) {
+            return true;
+        }
+        
+        // Define equivalent type groups
+        $equivalents = [
+            ['int', 'int4', 'integer'],
+            ['int8', 'bigint'],
+            ['int2', 'smallint'],
+            ['varchar', 'character varying'],
+            ['char', 'character'],
+            ['bool', 'boolean'],
+            ['timestamp', 'timestamp without time zone'],
+            ['timestamptz', 'timestamp with time zone']
+        ];
+        
+        // Check if both types belong to the same equivalence group
+        foreach ($equivalents as $group) {
+            if (in_array($type1, $group) && in_array($type2, $group)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
     
     /**
