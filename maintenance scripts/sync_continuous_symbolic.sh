@@ -4,6 +4,7 @@
 # ===============================================
 #
 # PURPOSE: Monitor main directory + symbolic link targets for faster sync
+#          Shows detailed file changes (added/removed/modified)
 #
 # USAGE: ./sync_continuous.sh [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]
 #
@@ -29,6 +30,7 @@
 # FEATURES:
 #   - Monitors main directory + follows symbolic links
 #   - Fast change detection (typically 3-8s vs 15-18s)
+#   - Shows detailed file changes (added/removed/modified)
 #   - WSL/Windows mount compatible
 #   - SSH key authentication
 #
@@ -343,11 +345,70 @@ watch_with_polling() {
                 print_change "File count changed: $last_count -> $current_count"
             fi
             
+            # Show changed files with proper logic for add/remove/modify
+            local added_files=$(comm -13 "$last_state_file" "$current_state_file")
+            local removed_files=$(comm -23 "$last_state_file" "$current_state_file")
+            
+            # Extract filenames only for proper add/remove detection
+            awk '{$NF=""; $(NF-1)=""; print}' "$last_state_file" | sed 's/[[:space:]]*$//' | sort > "/tmp/last_files_$$"
+            awk '{$NF=""; $(NF-1)=""; print}' "$current_state_file" | sed 's/[[:space:]]*$//' | sort > "/tmp/current_files_$$"
+            
+            local truly_added=$(comm -13 "/tmp/last_files_$$" "/tmp/current_files_$$")
+            local truly_removed=$(comm -23 "/tmp/last_files_$$" "/tmp/current_files_$$")
+            local common_files=$(comm -12 "/tmp/last_files_$$" "/tmp/current_files_$$")
+            
+            # Show truly added files
+            if [ -n "$truly_added" ]; then
+                print_change "Files added:"
+                echo "$truly_added" | head -5 | while read filename; do
+                    echo "    + $filename"
+                done
+                local added_count=$(echo "$truly_added" | wc -l)
+                if [ "$added_count" -gt 5 ]; then
+                    echo "    ... and $((added_count - 5)) more files"
+                fi
+            fi
+            
+            # Show truly removed files
+            if [ -n "$truly_removed" ]; then
+                print_change "Files removed:"
+                echo "$truly_removed" | head -5 | while read filename; do
+                    echo "    - $filename"
+                done
+                local removed_count=$(echo "$truly_removed" | wc -l)
+                if [ "$removed_count" -gt 5 ]; then
+                    echo "    ... and $((removed_count - 5)) more files"
+                fi
+            fi
+            
+            # Show modified files (files that exist in both states but with different timestamps/sizes)
+            if [ -n "$common_files" ] && [ -n "$added_files" ]; then
+                local modified_files=""
+                echo "$common_files" | while read filename; do
+                    # Check if this filename appears in the stat differences (meaning it was modified)
+                    if echo "$added_files" | awk '{$NF=""; $(NF-1)=""; print}' | sed 's/[[:space:]]*$//' | grep -Fxq "$filename"; then
+                        echo "$filename"
+                    fi
+                done > "/tmp/modified_files_$$"
+                
+                modified_files=$(cat "/tmp/modified_files_$$")
+                if [ -n "$modified_files" ]; then
+                    print_change "Files modified:"
+                    echo "$modified_files" | head -5 | while read filename; do
+                        echo "    ~ $filename"
+                    done
+                    local modified_count=$(echo "$modified_files" | wc -l)
+                    if [ "$modified_count" -gt 5 ]; then
+                        echo "    ... and $((modified_count - 5)) more files"
+                    fi
+                fi
+                rm -f "/tmp/modified_files_$$"
+            fi
+            
+            rm -f "/tmp/last_files_$$" "/tmp/current_files_$$"
+            
             if [ "$VERBOSE" = true ]; then
                 print_status "Scan took ${scan_duration}s - changes detected"
-                comm -13 "$last_state_file" "$current_state_file" | head -3 | while read line; do
-                    echo "    + $line"
-                done
             fi
             
             print_change "Detected changes in directory"
@@ -416,7 +477,27 @@ watch_with_inotify() {
             continue
         fi
         
-        print_change "Detected: $event on $file"
+        # Show the change
+        local relative_file=$(echo "$file" | sed "s|^$resolved_dir/||")
+        case "$event" in
+            CREATE|MOVED_TO)
+                print_change "File added:"
+                echo "    + $relative_file"
+                ;;
+            DELETE|MOVED_FROM)
+                print_change "File removed:"
+                echo "    - $relative_file"
+                ;;
+            MODIFY)
+                print_change "File modified:"
+                echo "    ~ $relative_file"
+                ;;
+            *)
+                print_change "File changed ($event):"
+                echo "    * $relative_file"
+                ;;
+        esac
+        
         perform_sync &
         SYNC_PID=$!
     done
@@ -452,6 +533,7 @@ show_usage() {
     echo ""
     echo "Features:"
     echo "  - Monitors main directory + follows symbolic links"
+    echo "  - Shows detailed file changes (added/removed/modified)"
     echo "  - Fast change detection (typically 3-8s)"
     echo "  - WSL/Windows mount compatible"
     echo ""
