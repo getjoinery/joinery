@@ -1168,102 +1168,144 @@ class PluginSystemRepair {
     }
     
     /**
-     * Check and create missing plugin system tables
+     * Check and create missing plugin system tables using DatabaseUpdater
      */
     private function checkPluginTables($dblink, $dry_run) {
-        $required_tables = [
-            'plm_plugin_migrations' => "CREATE TABLE plm_plugin_migrations (
-                plm_plugin_migration_id SERIAL PRIMARY KEY,
-                plm_plugin_name VARCHAR(255) NOT NULL,
-                plm_migration_id VARCHAR(255) NOT NULL,
-                plm_version VARCHAR(20) NOT NULL,
-                plm_applied_time TIMESTAMP DEFAULT NOW(),
-                plm_rollback_time TIMESTAMP NULL,
-                plm_status VARCHAR(20) DEFAULT 'applied',
-                plm_up_sql TEXT,
-                plm_down_sql TEXT,
-                plm_error_message TEXT,
-                UNIQUE(plm_plugin_name, plm_migration_id)
-            )",
-            'plv_plugin_versions' => "CREATE TABLE plv_plugin_versions (
-                plv_plugin_version_id SERIAL PRIMARY KEY,
-                plv_plugin_name VARCHAR(255) NOT NULL UNIQUE,
-                plv_installed_version VARCHAR(20) NOT NULL,
-                plv_available_version VARCHAR(20),
-                plv_last_check_time TIMESTAMP DEFAULT NOW(),
-                plv_update_available BOOLEAN DEFAULT FALSE,
-                plv_fingerprint VARCHAR(64),
-                plv_metadata JSONB
-            )",
-            'pld_plugin_dependencies' => "CREATE TABLE pld_plugin_dependencies (
-                pld_plugin_dependency_id SERIAL PRIMARY KEY,
-                pld_plugin_name VARCHAR(255) NOT NULL,
-                pld_depends_on VARCHAR(255) NOT NULL,
-                pld_version_constraint VARCHAR(50),
-                pld_dependency_type VARCHAR(20) DEFAULT 'requires',
-                UNIQUE(pld_plugin_name, pld_depends_on)
-            )"
-        ];
-        
-        foreach ($required_tables as $table_name => $create_sql) {
-            try {
-                // Check if table exists
-                $check_sql = "SELECT to_regclass('public.{$table_name}') IS NOT NULL as exists";
-                $q = $dblink->prepare($check_sql);
-                $q->execute();
-                $result = $q->fetch(PDO::FETCH_ASSOC);
+        try {
+            // Load plugin system model classes
+            PathHelper::requireOnce('data/plugins_class.php');
+            PathHelper::requireOnce('data/plugin_migrations_class.php');
+            PathHelper::requireOnce('data/plugin_versions_class.php');
+            PathHelper::requireOnce('data/plugin_dependencies_class.php');
+            
+            // Get plugin system classes only
+            $plugin_classes = [
+                'PluginMigration',
+                'PluginVersion', 
+                'PluginDependency'
+            ];
+            
+            if (!$dry_run) {
+                // Use DatabaseUpdater to create missing plugin system tables
+                PathHelper::requireOnce('includes/DatabaseUpdater.php');
+                $database_updater = new DatabaseUpdater(false, false, false); // No verbose, upgrade, or cleanup
                 
-                if (!$result['exists']) {
-                    $this->results['issues_found'][] = "Missing table: {$table_name}";
+                // Create tables for the plugin system classes that are missing
+                $any_tables_created = false;
+                foreach ($plugin_classes as $class) {
+                    $table_name = $class::$tablename;
                     
-                    if (!$dry_run) {
-                        $dblink->exec($create_sql);
-                        $this->results['repairs_made'][] = "Created table: {$table_name}";
+                    // Check if table exists
+                    $check_sql = "SELECT to_regclass('public.{$table_name}') IS NOT NULL as exists";
+                    $q = $dblink->prepare($check_sql);
+                    $q->execute();
+                    $result = $q->fetch(PDO::FETCH_ASSOC);
+                    
+                    if (!$result['exists']) {
+                        $this->results['issues_found'][] = "Missing table: {$table_name}";
+                        $any_tables_created = true;
                     }
                 }
                 
-            } catch (Exception $e) {
-                $this->results['errors'][] = "Error checking table {$table_name}: " . $e->getMessage();
+                // If any tables are missing, run core table creation which includes plugin system tables
+                if ($any_tables_created) {
+                    $table_result = $database_updater->runCoreTablesOnly();
+                    
+                    if (!empty($table_result['tables_created'])) {
+                        // Only report plugin system tables that were created
+                        foreach ($table_result['tables_created'] as $table) {
+                            if (in_array($table, ['plm_plugin_migrations', 'plv_plugin_versions', 'pld_plugin_dependencies'])) {
+                                $this->results['repairs_made'][] = "Created table: {$table}";
+                            }
+                        }
+                    }
+                    if (!empty($table_result['errors'])) {
+                        $this->results['errors'] = array_merge($this->results['errors'], $table_result['errors']);
+                    }
+                }
+            } else {
+                // Dry run - just check for missing tables
+                foreach ($plugin_classes as $class) {
+                    $table_name = $class::$tablename;
+                    
+                    $check_sql = "SELECT to_regclass('public.{$table_name}') IS NOT NULL as exists";
+                    $q = $dblink->prepare($check_sql);
+                    $q->execute();
+                    $result = $q->fetch(PDO::FETCH_ASSOC);
+                    
+                    if (!$result['exists']) {
+                        $this->results['issues_found'][] = "Missing table: {$table_name}";
+                    }
+                }
             }
+            
+        } catch (Exception $e) {
+            $this->results['errors'][] = "Error checking plugin system tables: " . $e->getMessage();
         }
     }
     
     /**
-     * Check and add missing columns to plg_plugins table
+     * Check and add missing columns to plg_plugins table using DatabaseUpdater
      */
     private function checkPluginColumns($dblink, $dry_run) {
-        $required_columns = [
-            'plg_installed_time' => 'TIMESTAMP DEFAULT NOW()',
-            'plg_last_activated_time' => 'TIMESTAMP',
-            'plg_last_deactivated_time' => 'TIMESTAMP',
-            'plg_uninstalled_time' => 'TIMESTAMP',
-            'plg_status' => "VARCHAR(20) DEFAULT 'inactive'",
-            'plg_install_error' => 'TEXT',
-            'plg_metadata' => 'JSONB'
-        ];
-        
-        foreach ($required_columns as $column_name => $column_definition) {
-            try {
-                // Check if column exists
-                $check_sql = "SELECT column_name FROM information_schema.columns 
-                             WHERE table_name = 'plg_plugins' AND column_name = ?";
-                $q = $dblink->prepare($check_sql);
-                $q->execute([$column_name]);
-                $result = $q->fetch(PDO::FETCH_ASSOC);
+        try {
+            // Load Plugin class to get field specifications
+            PathHelper::requireOnce('data/plugins_class.php');
+            
+            if (!$dry_run) {
+                // Check for missing columns first
+                $missing_columns = [];
+                $field_specifications = Plugin::$field_specifications;
                 
-                if (!$result) {
-                    $this->results['issues_found'][] = "Missing column: plg_plugins.{$column_name}";
+                foreach ($field_specifications as $field_name => $field_specs) {
+                    $check_sql = "SELECT column_name FROM information_schema.columns 
+                                 WHERE table_name = 'plg_plugins' AND column_name = ?";
+                    $q = $dblink->prepare($check_sql);
+                    $q->execute([$field_name]);
+                    $result = $q->fetch(PDO::FETCH_ASSOC);
                     
-                    if (!$dry_run) {
-                        $alter_sql = "ALTER TABLE plg_plugins ADD COLUMN IF NOT EXISTS {$column_name} {$column_definition}";
-                        $dblink->exec($alter_sql);
-                        $this->results['repairs_made'][] = "Added column: plg_plugins.{$column_name}";
+                    if (!$result) {
+                        $missing_columns[] = $field_name;
+                        $this->results['issues_found'][] = "Missing column: plg_plugins.{$field_name}";
                     }
                 }
                 
-            } catch (Exception $e) {
-                $this->results['errors'][] = "Error checking column {$column_name}: " . $e->getMessage();
+                // If there are missing columns, use DatabaseUpdater to fix them
+                if (!empty($missing_columns)) {
+                    PathHelper::requireOnce('includes/DatabaseUpdater.php');
+                    $database_updater = new DatabaseUpdater(false, false, false);
+                    $table_result = $database_updater->runCoreTablesOnly();
+                    
+                    if (!empty($table_result['columns_added'])) {
+                        foreach ($table_result['columns_added'] as $column) {
+                            if (strpos($column, 'plg_plugins.') === 0) {
+                                $this->results['repairs_made'][] = "Added column: {$column}";
+                            }
+                        }
+                    }
+                    if (!empty($table_result['errors'])) {
+                        $this->results['errors'] = array_merge($this->results['errors'], $table_result['errors']);
+                    }
+                }
+            } else {
+                // Dry run - manually check columns
+                $field_specifications = Plugin::$field_specifications;
+                
+                foreach ($field_specifications as $field_name => $field_specs) {
+                    $check_sql = "SELECT column_name FROM information_schema.columns 
+                                 WHERE table_name = 'plg_plugins' AND column_name = ?";
+                    $q = $dblink->prepare($check_sql);
+                    $q->execute([$field_name]);
+                    $result = $q->fetch(PDO::FETCH_ASSOC);
+                    
+                    if (!$result) {
+                        $this->results['issues_found'][] = "Missing column: plg_plugins.{$field_name}";
+                    }
+                }
             }
+            
+        } catch (Exception $e) {
+            $this->results['errors'][] = "Error checking plugin columns: " . $e->getMessage();
         }
     }
     
