@@ -446,12 +446,14 @@ class Plugin extends SystemBase {
 			$this->set('plg_status', 'uninstalled');
 			$this->save();
 			
-			// Clear version tracking
-			$sql = "DELETE FROM plv_plugin_versions WHERE plv_plugin_name = ?";
-			$dbconnector = DbConnector::get_instance();
-			$dblink = $dbconnector->get_db_link();
-			$q = $dblink->prepare($sql);
-			$q->execute([$plugin_name]);
+			// Clear version tracking using model class
+			PathHelper::requireOnce('data/plugin_versions_class.php');
+			$plugin_versions = new MultiPluginVersion(['plv_plugin_name' => $plugin_name]);
+			$plugin_versions->load();
+			
+			foreach ($plugin_versions as $version) {
+				$version->permanent_delete();
+			}
 			
 			// Delete plugin record
 			$this->permanent_delete();
