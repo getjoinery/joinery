@@ -333,24 +333,6 @@ watch_with_selective_polling() {
         print_status "  Themes: ALL (no filter)"
     fi
     
-    # Debug: Test main directory scanning
-    if [ "$VERBOSE" = true ]; then
-        print_status "Debug: Testing main directory scan..."
-        local test_main_count=$(find "$monitor_dir" -maxdepth 5 -type f -not -path "*/.*" 2>/dev/null | head -10 | wc -l)
-        print_status "Debug: Found $test_main_count files in main directory (first 10, maxdepth 5)"
-        
-        print_status "Debug: Directory structure:"
-        ls -la "$monitor_dir" | head -10
-        
-        print_status "Debug: Symlink info:"
-        if [ -L "$monitor_dir/plugins" ]; then
-            print_status "  plugins -> $(readlink "$monitor_dir/plugins")"
-        fi
-        if [ -L "$monitor_dir/theme" ]; then
-            print_status "  theme -> $(readlink "$monitor_dir/theme")"
-        fi
-    fi
-    
     # Build selective find commands
     local find_commands=()
     readarray -t find_commands < <(build_selective_find "$monitor_dir" monitor_plugins monitor_themes)
@@ -375,11 +357,6 @@ watch_with_selective_polling() {
         
         if [ "$VERBOSE" = true ]; then
             print_status "Debug: Command [$i] found $count files"
-            if [ "$count" -lt 10 ] && [ "$count" -gt 0 ]; then
-                eval "$cmd" | head -5 | while read file; do
-                    echo "      $file"
-                done
-            fi
         fi
         
         # Classify the command type more precisely
@@ -448,49 +425,67 @@ watch_with_selective_polling() {
                 print_change "File count changed: $last_count -> $current_count"
             fi
             
-            # Show changed files
+            # Show changed files with proper logic for add/remove/modify
             local added_files=$(comm -13 "$last_state_file" "$current_state_file")
             local removed_files=$(comm -23 "$last_state_file" "$current_state_file")
             
-            if [ -n "$added_files" ]; then
+            # Extract filenames only for proper add/remove detection
+            awk '{$NF=""; $(NF-1)=""; print}' "$last_state_file" | sed 's/[[:space:]]*$//' | sort > "/tmp/last_files_$"
+            awk '{$NF=""; $(NF-1)=""; print}' "$current_state_file" | sed 's/[[:space:]]*$//' | sort > "/tmp/current_files_$"
+            
+            local truly_added=$(comm -13 "/tmp/last_files_$" "/tmp/current_files_$")
+            local truly_removed=$(comm -23 "/tmp/last_files_$" "/tmp/current_files_$")
+            local common_files=$(comm -12 "/tmp/last_files_$" "/tmp/current_files_$")
+            
+            # Show truly added files
+            if [ -n "$truly_added" ]; then
                 print_change "Files added:"
-                echo "$added_files" | head -5 | while read line; do
-                    local filename=$(echo "$line" | cut -d' ' -f1)
+                echo "$truly_added" | head -5 | while read filename; do
                     echo "    + $filename"
                 done
-                local added_count=$(echo "$added_files" | wc -l)
+                local added_count=$(echo "$truly_added" | wc -l)
                 if [ "$added_count" -gt 5 ]; then
                     echo "    ... and $((added_count - 5)) more files"
                 fi
             fi
             
-            if [ -n "$removed_files" ]; then
+            # Show truly removed files
+            if [ -n "$truly_removed" ]; then
                 print_change "Files removed:"
-                echo "$removed_files" | head -5 | while read line; do
-                    local filename=$(echo "$line" | cut -d' ' -f1)
+                echo "$truly_removed" | head -5 | while read filename; do
                     echo "    - $filename"
                 done
-                local removed_count=$(echo "$removed_files" | wc -l)
+                local removed_count=$(echo "$truly_removed" | wc -l)
                 if [ "$removed_count" -gt 5 ]; then
                     echo "    ... and $((removed_count - 5)) more files"
                 fi
             fi
             
-            # Check for modified files (same filename, different timestamp/size)
-            if [ "$current_count" -eq "$last_count" ] && [ -z "$added_files" ] && [ -z "$removed_files" ]; then
-                print_change "Files modified:"
-                # Extract just filenames from both states and find changes
-                cut -d' ' -f1 "$last_state_file" | sort > "/tmp/last_files_$"
-                cut -d' ' -f1 "$current_state_file" | sort > "/tmp/current_files_$"
-                comm -12 "/tmp/last_files_$" "/tmp/current_files_$" | head -5 | while read filename; do
-                    echo "    ~ $filename"
-                done
-                local common_count=$(comm -12 "/tmp/last_files_$" "/tmp/current_files_$" | wc -l)
-                if [ "$common_count" -gt 5 ]; then
-                    echo "    ... and $((common_count - 5)) more files"
+            # Show modified files (files that exist in both states but with different timestamps/sizes)
+            if [ -n "$common_files" ] && [ -n "$added_files" ]; then
+                local modified_files=""
+                echo "$common_files" | while read filename; do
+                    # Check if this filename appears in the stat differences (meaning it was modified)
+                    if echo "$added_files" | awk '{$NF=""; $(NF-1)=""; print}' | sed 's/[[:space:]]*$//' | grep -Fxq "$filename"; then
+                        echo "$filename"
+                    fi
+                done > "/tmp/modified_files_$"
+                
+                modified_files=$(cat "/tmp/modified_files_$")
+                if [ -n "$modified_files" ]; then
+                    print_change "Files modified:"
+                    echo "$modified_files" | head -5 | while read filename; do
+                        echo "    ~ $filename"
+                    done
+                    local modified_count=$(echo "$modified_files" | wc -l)
+                    if [ "$modified_count" -gt 5 ]; then
+                        echo "    ... and $((modified_count - 5)) more files"
+                    fi
                 fi
-                rm -f "/tmp/last_files_$" "/tmp/current_files_$"
+                rm -f "/tmp/modified_files_$"
             fi
+            
+            rm -f "/tmp/last_files_$" "/tmp/current_files_$"
             
             if [ "$VERBOSE" = true ]; then
                 print_status "Scan took ${scan_duration}s - changes detected"
