@@ -742,6 +742,9 @@ This section provides guidance on how to properly query and interact with data m
 ## Single Object Access
 
 ### Object Instantiation Patterns
+
+**CRITICAL**: All SystemBase-derived classes require at least one parameter in their constructor!
+
 ```php
 // Creates object but doesn't load data from database
 $product = new Product($id);
@@ -749,12 +752,24 @@ $product = new Product($id);
 // Creates object AND immediately loads data from database  
 $product = new Product($id, TRUE);
 
-// Creates new object for insertion
-$product = new Product(NULL);
+// Creates new object for insertion - MUST pass NULL, not empty constructor!
+$product = new Product(NULL);  // ✅ CORRECT
+$product = new Product();      // ❌ WRONG - will cause "Too few arguments" error
 
 // Manual loading approach
 $product = new Product($id);
 $product->load();
+```
+
+**Common Mistake to Avoid:**
+```php
+// ❌ WRONG - SystemBase requires a key parameter
+$user = new User();
+$migration = new Migration();
+
+// ✅ CORRECT - Pass NULL for new records
+$user = new User(NULL);
+$migration = new Migration(NULL);
 ```
 
 ### Key Single Object Methods
