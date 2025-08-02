@@ -50,7 +50,7 @@ class Plugin extends SystemBase {
 		'plg_uninstalled_time' => array('type'=>'timestamp(6)'),
 		'plg_status' => array('type'=>'varchar(20)'),
 		'plg_install_error' => array('type'=>'text'),
-		'plg_metadata' => array('type'=>'jsonb'),
+		'plg_metadata' => array('type'=>'text'),
 	);
 
 	public static $required_fields = array('plg_name');
