@@ -155,6 +155,8 @@ if ($_POST) {
 // Get all plugins with their status
 $plugins = MultiPlugin::get_all_plugins_with_status();
 
+// Plugin data loaded successfully
+
 // Check for updates
 $version_detector = new PluginVersionDetector();
 $plugin_updates = array();
@@ -168,6 +170,9 @@ foreach ($plugins as &$plugin) {
         }
     }
 }
+unset($plugin); // Critical: Unset the reference to prevent corruption
+
+// Update checking completed
 
 $page->admin_header(array(
     'menu-id' => 'plugins',
