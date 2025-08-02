@@ -17,7 +17,7 @@ $page = new AdminPage();
 $message = '';
 $message_type = '';
 
-// Check if Phase 3 plugin system is properly set up
+// Check if plugin system is properly set up
 $system_health = null;
 try {
     $repair = new PluginSystemRepair();

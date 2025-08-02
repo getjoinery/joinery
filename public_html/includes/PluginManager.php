@@ -3,7 +3,7 @@
 /**
  * PluginManager - Combined plugin management system
  * 
- * This file contains all the Phase 3 plugin management classes:
+ * This file contains all the enhanced plugin management classes:
  * - PluginMigrationRunner: Handles plugin-specific database migrations
  * - PluginVersionDetector: Detects plugin version changes and updates
  * - PluginDependencyValidator: Validates plugin dependencies and requirements
@@ -1472,13 +1472,13 @@ class PluginSystemRepair {
             }
             
             if ($health['overall_status'] === 'needs_repair') {
-                $missing_phase3_tables = array_intersect(['plm_plugin_migrations', 'plv_plugin_versions', 'pld_plugin_dependencies'], 
+                $missing_plugin_tables = array_intersect(['plm_plugin_migrations', 'plv_plugin_versions', 'pld_plugin_dependencies'], 
                     array_map(function($issue) { 
                         return str_replace('Missing table: ', '', $issue); 
                     }, $health['issues']));
                 
-                if (!empty($missing_phase3_tables)) {
-                    $health['recommendations'][] = "Run update_database.php to create the Phase 3 plugin system tables.";
+                if (!empty($missing_plugin_tables)) {
+                    $health['recommendations'][] = "Run update_database.php to create the plugin system tables.";
                     $health['recommendations'][] = "Navigate to your site's /utils/update_database.php or run it via command line.";
                 } else {
                     $health['recommendations'][] = "Run the plugin system repair to fix missing tables and columns.";

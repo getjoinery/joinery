@@ -643,10 +643,4 @@
 		$migration['migration_sql'] = NULL;
 		$migrations[] = $migration;
 
-		// Plugin System Phase 3 - Enhanced plugin management
-		$migration = array(); // Clear previous migration data
-		$migration['database_version'] = '0.52';
-		$migration['test'] = "SELECT count(1) as count FROM information_schema.tables WHERE table_name = 'plm_plugin_migrations'";
-		$migration['migration_file'] = 'plugin_system_phase3.php';
-		$migration['migration_sql'] = NULL;
-		$migrations[] = $migration; 
+ 
