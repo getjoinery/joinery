@@ -4,6 +4,7 @@
 # ========================================================
 #
 # PURPOSE: Monitor only specific plugins/themes for faster sync (1-5s vs 15-18s)
+#          Shows detailed file changes (added/removed/modified)
 #
 # USAGE: ./selective_sync.sh [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]
 #
@@ -32,6 +33,7 @@
 #   Selective:     491 files,  8-10s detection  
 #   Single plugin: 452 files,  6-8s detection
 #   Plugins only:  51 files,   3-4s detection
+#   Shows detailed file changes (added/removed/modified)
 #
 # ========================================================
 
@@ -446,11 +448,52 @@ watch_with_selective_polling() {
                 print_change "File count changed: $last_count -> $current_count"
             fi
             
+            # Show changed files
+            local added_files=$(comm -13 "$last_state_file" "$current_state_file")
+            local removed_files=$(comm -23 "$last_state_file" "$current_state_file")
+            
+            if [ -n "$added_files" ]; then
+                print_change "Files added:"
+                echo "$added_files" | head -5 | while read line; do
+                    local filename=$(echo "$line" | cut -d' ' -f1)
+                    echo "    + $filename"
+                done
+                local added_count=$(echo "$added_files" | wc -l)
+                if [ "$added_count" -gt 5 ]; then
+                    echo "    ... and $((added_count - 5)) more files"
+                fi
+            fi
+            
+            if [ -n "$removed_files" ]; then
+                print_change "Files removed:"
+                echo "$removed_files" | head -5 | while read line; do
+                    local filename=$(echo "$line" | cut -d' ' -f1)
+                    echo "    - $filename"
+                done
+                local removed_count=$(echo "$removed_files" | wc -l)
+                if [ "$removed_count" -gt 5 ]; then
+                    echo "    ... and $((removed_count - 5)) more files"
+                fi
+            fi
+            
+            # Check for modified files (same filename, different timestamp/size)
+            if [ "$current_count" -eq "$last_count" ] && [ -z "$added_files" ] && [ -z "$removed_files" ]; then
+                print_change "Files modified:"
+                # Extract just filenames from both states and find changes
+                cut -d' ' -f1 "$last_state_file" | sort > "/tmp/last_files_$"
+                cut -d' ' -f1 "$current_state_file" | sort > "/tmp/current_files_$"
+                comm -12 "/tmp/last_files_$" "/tmp/current_files_$" | head -5 | while read filename; do
+                    echo "    ~ $filename"
+                done
+                local common_count=$(comm -12 "/tmp/last_files_$" "/tmp/current_files_$" | wc -l)
+                if [ "$common_count" -gt 5 ]; then
+                    echo "    ... and $((common_count - 5)) more files"
+                fi
+                rm -f "/tmp/last_files_$" "/tmp/current_files_$"
+            fi
+            
             if [ "$VERBOSE" = true ]; then
                 print_status "Scan took ${scan_duration}s - changes detected"
-                comm -13 "$last_state_file" "$current_state_file" | head -3 | while read line; do
-                    echo "    + $line"
-                done
             fi
             
             print_change "Detected changes in selected plugins/themes"
@@ -494,6 +537,7 @@ show_usage() {
     echo "  Monitor 1 plugin:  ~6-8s detection time"
     echo "  Monitor 3 plugins: ~8-10s detection time" 
     echo "  Monitor all:       ~15-18s detection time"
+    echo "  Shows detailed file changes (added/removed/modified)"
     echo ""
     echo "See documentation at top of script file for config file format and advanced usage."
 }
