@@ -31,7 +31,7 @@ class CtldAccount extends SystemBase {
 	const PRO_PLAN_MAX_DEVICES = 10;	
 	
 	public static $fields = array(
-		'cda_ctld_account_id' => 'Primary key - CtldAccount ID',
+		'cda_ctldaccount_id' => 'Primary key - CtldAccount ID',
 		'cda_plan' => 'Plan of this user',
 		'cda_plan_max_devices' => 'Max devices allowed',
 		'cda_usr_user_id' => 'User id this profile is assigned to',

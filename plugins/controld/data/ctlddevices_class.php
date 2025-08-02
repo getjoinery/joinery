@@ -30,7 +30,7 @@ class CtldDevice extends SystemBase {
 
 
 	public static $fields = array(
-		'cdd_ctld_device_id' => 'Primary key - CtldDevice ID',
+		'cdd_ctlddevice_id' => 'Primary key - CtldDevice ID',
 		'cdd_device_id' => 'ID from controld',
 		'cdd_device_name' => 'Name of device',
 		'cdd_device_type' => 'Type of OS on the device',

@@ -21,7 +21,7 @@ class CtldFilter extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
-		'cdf_ctld_filter_id' => 'Primary key - CtldFilter ID',
+		'cdf_ctldfilter_id' => 'Primary key - CtldFilter ID',
 		'cdf_cdp_ctldprofile_id' => 'Foreign key to profile',
 		'cdf_filter_pk' => 'Primary key at controld',
 		'cdf_is_active' => 'Is it active?',

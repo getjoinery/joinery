@@ -25,7 +25,7 @@ class CtldProfile extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
-		'cdp_ctld_profile_id' => 'Primary key - CtldProfile ID',
+		'cdp_ctldprofile_id' => 'Primary key - CtldProfile ID',
 		'cdp_profile_id' => 'ID from controld',
 		'cdp_usr_user_id' => 'User id this profile is assigned to',
 		'cdp_is_active' => 'Is it active?',

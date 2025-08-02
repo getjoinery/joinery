@@ -28,7 +28,7 @@ class CtldDeviceBackup extends SystemBase {
 
 
 	public static $fields = array(
-		'cdb_ctld_device_backup_id' => 'Primary key - CtldDeviceBackup ID',
+		'cdb_ctlddevice_backup_id' => 'Primary key - CtldDeviceBackup ID',
 		'cdb_device_backup_name' => 'Name of device_backup',
 		'cdb_usr_user_id' => 'User id this profile is assigned to',
 		'cdb_create_time' => 'Time Created',

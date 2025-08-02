@@ -21,7 +21,7 @@ class CtldRule extends SystemBase {
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	
 	public static $fields = array(
-		'cdr_ctld_rule_id' => 'Primary key - CtldRule ID',
+		'cdr_ctldrule_id' => 'Primary key - CtldRule ID',
 		'cdr_cdp_ctldprofile_id' => 'Foreign key to profile',
 		'cdr_rule_hostname' => 'Hostname of the rule',
 		'cdr_is_active' => 'Is it active?',
@@ -72,7 +72,7 @@ class MultiCtldRule extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $ctldrule) {
-			$items['('.$ctldrule->key.') '.$ctldrule->get('cdr_rule_pk')] = $ctldrule->key;
+			$items['('.$ctldrule->key.') '.$ctldrule->get('cdr_rule_hostname')] = $ctldrule->key;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
@@ -83,10 +83,6 @@ class MultiCtldRule extends SystemMultiBase {
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
-        
-        if (isset($this->options['rule'])) {
-            $filters['cdr_rule_pk'] = [$this->options['rule'], PDO::PARAM_STR];
-        }
         
         if (isset($this->options['profile_id'])) {
             $filters['cdr_cdp_ctldprofile_id'] = [$this->options['profile_id'], PDO::PARAM_INT];
