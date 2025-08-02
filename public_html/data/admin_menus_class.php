@@ -129,7 +129,7 @@ class MultiAdminMenu extends SystemMultiBase {
 		$current_parent_menu = null;
 		foreach ($entries as $entry){
 			//IF THE SETTING IS OFF, SKIP IT 
-			if($entry->amu_setting_activate && !$settings->get_setting($entry->amu_setting_activate)){
+			if($entry->amu_setting_activate && !$settings->get_setting($entry->amu_setting_activate, true, true)){
 				//DO NOT DISPLAY IT
 				continue;
 			}

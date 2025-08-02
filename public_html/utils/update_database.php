@@ -51,11 +51,11 @@
 
 	function update_database($migrations, $verbose=false, $upgrade=false, $cleanup=false){
 
-		//LOAD ALL CLASSES using centralized method
+		//LOAD CORE CLASSES ONLY (plugins managed separately)
 		$classes = LibraryFunctions::discover_model_classes(array(
 			'require_tablename' => true,
 			'require_field_specifications' => true,
-			'include_plugins' => true,
+			'include_plugins' => false,
 			'verbose' => $verbose
 		));
 		

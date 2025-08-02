@@ -20,6 +20,14 @@ class Plugin extends SystemBase {
 		'plg_plugin_id' => 'Primary key - Plugin ID',
 		'plg_name' => 'Name of the plugin',
 		'plg_activated_time' => 'Activation time',
+		'plg_active' => 'Active status (1/0)',
+		'plg_installed_time' => 'Installation time',
+		'plg_last_activated_time' => 'Last activation time',
+		'plg_last_deactivated_time' => 'Last deactivation time',
+		'plg_uninstalled_time' => 'Uninstall time',
+		'plg_status' => 'Plugin status (installed/active/inactive/error)',
+		'plg_install_error' => 'Installation error message',
+		'plg_metadata' => 'Plugin metadata JSON',
 	);
 
 	/**
@@ -33,8 +41,16 @@ class Plugin extends SystemBase {
 	 */
 	public static $field_specifications = array(
 		'plg_plugin_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'plg_name' => array('type'=>'varchar(128)'),
+		'plg_name' => array('type'=>'varchar(128)', 'unique'=>true),
 		'plg_activated_time' => array('type'=>'timestamp(6)'),
+		'plg_active' => array('type'=>'int4', 'is_nullable'=>true),
+		'plg_installed_time' => array('type'=>'timestamp(6)'),
+		'plg_last_activated_time' => array('type'=>'timestamp(6)'),
+		'plg_last_deactivated_time' => array('type'=>'timestamp(6)'),
+		'plg_uninstalled_time' => array('type'=>'timestamp(6)'),
+		'plg_status' => array('type'=>'varchar(20)'),
+		'plg_install_error' => array('type'=>'text'),
+		'plg_metadata' => array('type'=>'jsonb'),
 	);
 
 	public static $required_fields = array('plg_name');
@@ -60,6 +76,12 @@ class Plugin extends SystemBase {
 	 * @return bool Active status
 	 */
 	public function is_active() {
+		// Use new status field if available, fall back to activated_time
+		$status = $this->get('plg_status');
+		if ($status) {
+			return $status === 'active';
+		}
+		// Legacy support
 		return !is_null($this->get('plg_activated_time'));
 	}
 	
@@ -81,10 +103,36 @@ class Plugin extends SystemBase {
 	 * @return string HTML badge showing status
 	 */
 	public function get_status_badge() {
-		if ($this->is_active()) {
-			return '<span class="badge bg-success">Active</span>';
-		} else {
-			return '<span class="badge bg-secondary">Inactive</span>';
+		$status = $this->get('plg_status');
+		$install_error = $this->get('plg_install_error');
+		
+		// If there's an install error, show that regardless of status
+		if ($install_error) {
+			if ($status === 'uninstalled') {
+				return '<span class="badge bg-warning">Install Failed</span>';
+			} else {
+				return '<span class="badge bg-danger">Error</span>';
+			}
+		}
+		
+		switch ($status) {
+			case 'active':
+				return '<span class="badge bg-success">Active</span>';
+			case 'inactive':
+				return '<span class="badge bg-secondary">Inactive</span>';
+			case 'installed':
+				return '<span class="badge bg-info">Installed</span>';
+			case 'error':
+				return '<span class="badge bg-danger">Error</span>';
+			case 'uninstalled':
+				return '<span class="badge bg-secondary">Not Installed</span>';
+			default:
+				// Legacy support
+				if ($this->is_active()) {
+					return '<span class="badge bg-success">Active</span>';
+				} else {
+					return '<span class="badge bg-secondary">Inactive</span>';
+				}
 		}
 	}
 	
@@ -231,25 +279,239 @@ class Plugin extends SystemBase {
 		}
 	}
 	
+	
 	/**
-	 * Activate plugin (override to clear cache)
+	 * Install plugin - runs migrations and sets up initial state
+	 * @return array Result with success status and messages
+	 */
+	public function install() {
+		$results = [
+			'success' => false,
+			'messages' => [],
+			'errors' => []
+		];
+		
+		try {
+			$plugin_name = $this->get('plg_name');
+			if (!$plugin_name) {
+				throw new PluginException('Plugin name not set');
+			}
+			
+			// Validate plugin name
+			if (!self::is_valid_plugin_name($plugin_name)) {
+				throw new PluginException('Invalid plugin name');
+			}
+			
+			// Check if plugin directory exists
+			if (!$this->plugin_directory_exists()) {
+				throw new PluginException('Plugin directory not found');
+			}
+			
+			// Check dependencies
+			PathHelper::requireOnce('includes/PluginManager.php');
+			$dependency_validator = new PluginDependencyValidator();
+			$dependency_result = $dependency_validator->validate($plugin_name);
+			
+			if (!$dependency_result['valid']) {
+				$results['errors'] = $dependency_result['errors'];
+				return $results;
+			}
+			
+			// Create plugin tables first
+			PathHelper::requireOnce('includes/DatabaseUpdater.php');
+			$database_updater = new DatabaseUpdater();
+			$table_result = $database_updater->runPluginTablesOnly($plugin_name);
+			
+			if (!$table_result['success']) {
+				$results['errors'] = array_merge($results['errors'], $table_result['errors']);
+				$this->set('plg_install_error', implode('; ', $table_result['errors']));
+				$this->set('plg_status', 'error');
+				$this->save();
+				return $results;
+			}
+			
+			// Add table creation messages to results
+			$results['messages'] = array_merge($results['messages'], $table_result['messages']);
+			
+			// Run migrations
+			PathHelper::requireOnce('includes/PluginManager.php');
+			$migration_runner = new PluginMigrationRunner($plugin_name);
+			$migration_result = $migration_runner->migrate();
+			
+			if (!$migration_result['success']) {
+				$results['errors'] = $migration_result['errors'];
+				$this->set('plg_install_error', implode('; ', $migration_result['errors']));
+				$this->set('plg_status', 'error');
+				$this->save();
+				return $results;
+			}
+			
+			// Update plugin record
+			$this->set('plg_installed_time', date('Y-m-d H:i:s'));
+			$this->set('plg_status', 'inactive');
+			$this->set('plg_install_error', null);
+			
+			// Store metadata
+			$metadata = $this->get_plugin_metadata();
+			if ($metadata) {
+				$this->set('plg_metadata', json_encode($metadata));
+			}
+			
+			$this->save();
+			
+			// Mark version as installed
+			PathHelper::requireOnce('includes/PluginManager.php');
+			$version_detector = new PluginVersionDetector();
+			$version = $metadata['version'] ?? '0.0.0';
+			$version_detector->markAsUpdated($plugin_name, $version);
+			
+			$results['success'] = true;
+			$results['messages'][] = "Plugin '{$plugin_name}' installed successfully";
+			$results['messages'] = array_merge($results['messages'], $migration_result['messages']);
+			
+		} catch (Exception $e) {
+			$results['errors'][] = $e->getMessage();
+			$this->set('plg_install_error', $e->getMessage());
+			$this->set('plg_status', 'error');
+			$this->save();
+		}
+		
+		return $results;
+	}
+	
+	/**
+	 * Uninstall plugin - runs uninstall script and rollback migrations
+	 * @return array Result with success status and messages
+	 */
+	public function uninstall() {
+		$results = [
+			'success' => false,
+			'messages' => [],
+			'errors' => []
+		];
+		
+		try {
+			$plugin_name = $this->get('plg_name');
+			if (!$plugin_name) {
+				throw new PluginException('Plugin name not set');
+			}
+			
+			// Check if plugin is active
+			if ($this->is_active()) {
+				$results['errors'][] = 'Cannot uninstall active plugin. Deactivate it first.';
+				return $results;
+			}
+			
+			// Check dependencies
+			PathHelper::requireOnce('includes/PluginManager.php');
+			$dependency_validator = new PluginDependencyValidator();
+			$deactivation_check = $dependency_validator->checkDeactivation($plugin_name);
+			
+			if (!$deactivation_check['can_deactivate']) {
+				$results['errors'][] = 'Cannot uninstall plugin. Other plugins depend on it: ' . 
+					implode(', ', $deactivation_check['dependent_plugins']);
+				return $results;
+			}
+			
+			// Run uninstall script if exists
+			$uninstall_file = PathHelper::getIncludePath('plugins/' . $plugin_name . '/uninstall.php');
+			if (file_exists($uninstall_file)) {
+				include_once($uninstall_file);
+				
+				$uninstall_function = $plugin_name . '_uninstall';
+				if (function_exists($uninstall_function)) {
+					$uninstall_result = call_user_func($uninstall_function);
+					if ($uninstall_result === false) {
+						$results['errors'][] = 'Uninstall script failed';
+						return $results;
+					}
+					$results['messages'][] = 'Ran uninstall script';
+				}
+			}
+			
+			// Rollback migrations
+			PathHelper::requireOnce('includes/PluginManager.php');
+			$migration_runner = new PluginMigrationRunner($plugin_name);
+			$rollback_result = $migration_runner->rollback();
+			
+			if (!$rollback_result['success']) {
+				$results['errors'] = array_merge($results['errors'], $rollback_result['errors']);
+				$results['warnings'][] = 'Some migrations could not be rolled back';
+			} else {
+				$results['messages'] = array_merge($results['messages'], $rollback_result['messages']);
+			}
+			
+			// Update plugin record
+			$this->set('plg_uninstalled_time', date('Y-m-d H:i:s'));
+			$this->set('plg_status', 'uninstalled');
+			$this->save();
+			
+			// Clear version tracking
+			$sql = "DELETE FROM plv_plugin_versions WHERE plv_plugin_name = ?";
+			$dbconnector = DbConnector::get_instance();
+			$dblink = $dbconnector->get_db_link();
+			$q = $dblink->prepare($sql);
+			$q->execute([$plugin_name]);
+			
+			// Delete plugin record
+			$this->permanent_delete();
+			
+			$results['success'] = true;
+			$results['messages'][] = "Plugin '{$plugin_name}' uninstalled successfully";
+			
+		} catch (Exception $e) {
+			$results['errors'][] = $e->getMessage();
+		}
+		
+		return $results;
+	}
+	
+	/**
+	 * Update plugin activation method to use new fields
 	 * @return bool Success status
 	 */
 	public function activate() {
+		// Check dependencies before activation
+		PathHelper::requireOnce('includes/PluginManager.php');
+		$dependency_validator = new PluginDependencyValidator();
+		$dependency_result = $dependency_validator->validate($this->get('plg_name'));
+		
+		if (!$dependency_result['valid']) {
+			throw new PluginException('Cannot activate plugin: ' . implode('; ', $dependency_result['errors']));
+		}
+		
 		$this->set('plg_activated_time', date('Y-m-d H:i:s'));
+		$this->set('plg_last_activated_time', date('Y-m-d H:i:s'));
+		$this->set('plg_active', 1);
+		$this->set('plg_status', 'active');
 		$result = $this->save();
+		
 		// Clear cache after activation
 		self::clear_activation_cache($this->get('plg_name'));
 		return $result;
 	}
 	
 	/**
-	 * Deactivate plugin (override to clear cache)
+	 * Update plugin deactivation method to use new fields
 	 * @return bool Success status
 	 */
 	public function deactivate() {
+		// Check if other plugins depend on this one
+		PathHelper::requireOnce('includes/PluginManager.php');
+		$dependency_validator = new PluginDependencyValidator();
+		$deactivation_check = $dependency_validator->checkDeactivation($this->get('plg_name'));
+		
+		if (!$deactivation_check['can_deactivate']) {
+			throw new PluginException('Cannot deactivate plugin. Other plugins depend on it: ' . 
+				implode(', ', $deactivation_check['dependent_plugins']));
+		}
+		
 		$this->set('plg_activated_time', null);
+		$this->set('plg_last_deactivated_time', date('Y-m-d H:i:s'));
+		$this->set('plg_active', 0);
+		$this->set('plg_status', 'inactive');
 		$result = $this->save();
+		
 		// Clear cache after deactivation
 		self::clear_activation_cache($this->get('plg_name'));
 		return $result;
