@@ -92,6 +92,7 @@ if($params[0] == 'plugins' && $params[2] == 'includes'){
 		PathHelper::requireOnce('data/plugins_class.php');
 		
 		if(Plugin::is_plugin_active($plugin_name)){
+			check_plugin_version_if_needed($plugin_name);
 			$seconds_to_cache = 43200;
 			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
 			header("Expires: $ts");
@@ -199,6 +200,7 @@ if($params[0] == 'ajax'){
 				PathHelper::requireOnce('data/plugins_class.php');
 				
 				if(Plugin::is_plugin_active($plugin)){
+					check_plugin_version_if_needed($plugin);
 					$is_valid_page = true;
 					require_once($plugin_file);
 					exit();
@@ -637,6 +639,7 @@ foreach($plugins as $plugin){
 		PathHelper::requireOnce('data/plugins_class.php');
 		
 		if(Plugin::is_plugin_active($plugin)){
+			check_plugin_version_if_needed($plugin);
 			include_once($site_file);
 		}
 		// If plugin is not active, skip including its serve.php
@@ -656,6 +659,7 @@ if($params[0] == 'utils'){
 				PathHelper::requireOnce('data/plugins_class.php');
 				
 				if(Plugin::is_plugin_active($plugin)){
+					check_plugin_version_if_needed($plugin);
 					$is_valid_page = true;
 					require_once($plugin_file);
 					exit();
@@ -732,6 +736,37 @@ function ensure_extension($path, $extension){
 	}
 }
 
+
+// Plugin version check cache to avoid repeated checks per request
+$plugin_version_check_cache = array();
+
+/**
+ * Check plugin version if needed (with caching and sampling)
+ * @param string $plugin_name Plugin name
+ */
+function check_plugin_version_if_needed($plugin_name) {
+	global $plugin_version_check_cache;
+	
+	// Only check once per request
+	if (isset($plugin_version_check_cache[$plugin_name])) {
+		return;
+	}
+	$plugin_version_check_cache[$plugin_name] = true;
+	
+	// Random sampling - only check 20% of requests to reduce overhead
+	if (mt_rand(1, 100) > 20) {
+		return;
+	}
+	
+	try {
+		PathHelper::requireOnce('includes/PluginManager.php');
+		$detector = new PluginVersionDetector();
+		$detector->checkForUpdate($plugin_name);
+	} catch (Exception $e) {
+		// Silently ignore version check errors
+		error_log("Plugin version check failed for {$plugin_name}: " . $e->getMessage());
+	}
+}
 
 function mime_type($filename) {
 

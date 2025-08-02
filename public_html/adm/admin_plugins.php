@@ -7,6 +7,7 @@ PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('data/plugins_class.php');
 PathHelper::requireOnce('data/users_class.php');
+PathHelper::requireOnce('includes/PluginManager.php');
 
 $session = SessionControl::get_instance();
 $session->check_permission(10); // System admin only
@@ -15,6 +16,19 @@ $session->set_return();
 $page = new AdminPage();
 $message = '';
 $message_type = '';
+
+// Check if Phase 3 plugin system is properly set up
+$system_health = null;
+try {
+    $repair = new PluginSystemRepair();
+    $system_health = $repair->healthCheck();
+} catch (Exception $e) {
+    $system_health = [
+        'overall_status' => 'error',
+        'issues' => ['Failed to check system health: ' . $e->getMessage()],
+        'recommendations' => ['Contact system administrator']
+    ];
+}
 
 // Handle form submissions
 if ($_POST) {
@@ -27,7 +41,7 @@ if ($_POST) {
         $message_type = 'danger';
     } else {
         try {
-            if ($action === 'activate') {
+            if ($action === 'install') {
                 // Get or create plugin record
                 $plugin = Plugin::get_by_plugin_name($plugin_name);
                 if (!$plugin) {
@@ -35,13 +49,30 @@ if ($_POST) {
                     $plugin->set('plg_name', $plugin_name);
                 }
                 
-                try {
-                    $plugin->activate();
-                    $message = 'Plugin "' . htmlspecialchars($plugin_name) . '" activated successfully.';
+                $result = $plugin->install();
+                if ($result['success']) {
+                    $message = implode('<br>', $result['messages']);
                     $message_type = 'success';
-                } catch (Exception $activate_error) {
-                    $message = 'Failed to activate plugin "' . htmlspecialchars($plugin_name) . '": ' . $activate_error->getMessage();
+                } else {
+                    $message = 'Installation failed:<br>' . implode('<br>', $result['errors']);
                     $message_type = 'danger';
+                }
+                
+            } elseif ($action === 'activate') {
+                // Get plugin record
+                $plugin = Plugin::get_by_plugin_name($plugin_name);
+                if (!$plugin) {
+                    $message = 'Plugin must be installed first.';
+                    $message_type = 'warning';
+                } else {
+                    try {
+                        $plugin->activate();
+                        $message = 'Plugin "' . htmlspecialchars($plugin_name) . '" activated successfully.';
+                        $message_type = 'success';
+                    } catch (Exception $activate_error) {
+                        $message = 'Failed to activate plugin "' . htmlspecialchars($plugin_name) . '": ' . $activate_error->getMessage();
+                        $message_type = 'danger';
+                    }
                 }
                 
             } elseif ($action === 'deactivate') {
@@ -59,6 +90,57 @@ if ($_POST) {
                     $message = 'Plugin record not found.';
                     $message_type = 'warning';
                 }
+                
+            } elseif ($action === 'uninstall') {
+                $plugin = Plugin::get_by_plugin_name($plugin_name);
+                if ($plugin) {
+                    $result = $plugin->uninstall();
+                    if ($result['success']) {
+                        $message = implode('<br>', $result['messages']);
+                        $message_type = 'success';
+                    } else {
+                        $message = 'Uninstall failed:<br>' . implode('<br>', $result['errors']);
+                        $message_type = 'danger';
+                    }
+                } else {
+                    $message = 'Plugin record not found.';
+                    $message_type = 'warning';
+                }
+                
+            } elseif ($action === 'check_updates') {
+                $version_detector = new PluginVersionDetector();
+                $updates = $version_detector->checkAllPlugins();
+                if (empty($updates)) {
+                    $message = 'All plugins are up to date.';
+                    $message_type = 'info';
+                } else {
+                    $message = 'Updates available for: ' . implode(', ', array_keys($updates));
+                    $message_type = 'warning';
+                }
+                
+            } elseif ($action === 'repair_plugin') {
+                // Run repair for specific plugin
+                $plugin = Plugin::get_by_plugin_name($plugin_name);
+                if (!$plugin) {
+                    $message = 'Plugin record not found.';
+                    $message_type = 'warning';
+                } else {
+                    // Clear the install error and reset status to allow retry
+                    $plugin->set('plg_install_error', null);
+                    $plugin->set('plg_status', 'inactive');
+                    $plugin->save();
+                    
+                    // Run the installation process again
+                    $result = $plugin->install();
+                    if ($result['success']) {
+                        $message = 'Plugin "' . htmlspecialchars($plugin_name) . '" repaired successfully:<br>' . implode('<br>', $result['messages']);
+                        $message_type = 'success';
+                    } else {
+                        $message = 'Plugin repair failed:<br>' . implode('<br>', $result['errors']);
+                        $message_type = 'danger';
+                    }
+                }
+                
             } else {
                 $message = 'Invalid action.';
                 $message_type = 'danger';
@@ -72,6 +154,20 @@ if ($_POST) {
 
 // Get all plugins with their status
 $plugins = MultiPlugin::get_all_plugins_with_status();
+
+// Check for updates
+$version_detector = new PluginVersionDetector();
+$plugin_updates = array();
+foreach ($plugins as &$plugin) {
+    if ($plugin['directory_exists'] && $plugin['plugin']) {
+        $update_info = $version_detector->checkForUpdate($plugin['name']);
+        $plugin['update_available'] = $update_info['update_available'];
+        $plugin['available_version'] = $update_info['available_version'];
+        if ($update_info['update_available']) {
+            $plugin_updates[$plugin['name']] = $update_info;
+        }
+    }
+}
 
 $page->admin_header(array(
     'menu-id' => 'plugins',
@@ -87,6 +183,24 @@ $page->admin_header(array(
 
 <div class="row">
     <div class="col-12">
+        
+        <?php if ($system_health && ($system_health['overall_status'] === 'needs_repair' || $system_health['overall_status'] === 'error')): ?>
+            <div class="alert alert-danger" role="alert">
+                <h6 class="alert-heading mb-2"><i class="fas fa-exclamation-triangle"></i> System Configuration Issue</h6>
+                <p><strong>The plugin system is not properly configured.</strong> Please address the following issues:</p>
+                <ul class="mb-3">
+                    <?php foreach ($system_health['issues'] as $issue): ?>
+                        <li><?php echo htmlspecialchars($issue); ?></li>
+                    <?php endforeach; ?>
+                </ul>
+                <p class="mb-0"><strong>Recommended action:</strong></p>
+                <ul class="mb-0">
+                    <?php foreach ($system_health['recommendations'] as $recommendation): ?>
+                        <li><?php echo htmlspecialchars($recommendation); ?></li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+        <?php endif; ?>
         
         <?php if ($message): ?>
             <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
@@ -105,11 +219,17 @@ $page->admin_header(array(
             
             <?php
             // Set up table headers
-            $headers = array('Plugin', 'Description', 'Version', 'Status', 'Activation Time', 'Actions');
+            $headers = array('Plugin', 'Description', 'Version', 'Status', 'Actions');
+            
+            // Set up alt links for table header buttons
+            $altlinks = array(
+                'Check for Updates' => 'javascript:void(0);',
+            );
             
             // Set up table options
             $table_options = array(
-                'title' => 'Plugin Status Overview'
+                'title' => 'Plugin Status Overview',
+                'altlinks' => $altlinks
             );
             
             // Start the table
@@ -137,43 +257,113 @@ $page->admin_header(array(
                 }
                 
                 // Version column
+                $version_cell = '';
                 if ($plugin['version']) {
-                    array_push($rowvalues, '<code>' . htmlspecialchars($plugin['version']) . '</code>');
+                    $version_cell = '<code>' . htmlspecialchars($plugin['version']) . '</code>';
                 } else {
-                    array_push($rowvalues, '<em class="text-muted">Unknown</em>');
+                    $version_cell = '<em class="text-muted">Unknown</em>';
                 }
+                
+                // Show update available
+                if (isset($plugin['update_available']) && $plugin['update_available']) {
+                    $version_cell .= '<br><span class="badge bg-warning">Update: ' . htmlspecialchars($plugin['available_version']) . '</span>';
+                }
+                array_push($rowvalues, $version_cell);
                 
                 // Status column
                 $status_cell = $plugin['status_badge'];
                 if (!$plugin['directory_exists']) {
                     $status_cell .= '<br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Directory missing</small>';
                 }
-                array_push($rowvalues, $status_cell);
                 
-                // Activation Time column
-                if ($plugin['plugin'] && $plugin['plugin']->get('plg_activated_time')) {
-                    array_push($rowvalues, $plugin['plugin']->get_timezone_corrected_time('plg_activated_time', $session, 'M j, Y g:i A'));
-                } else {
-                    array_push($rowvalues, '<em class="text-muted">Never activated</em>');
+                // Show install error if any
+                if ($plugin['plugin'] && $plugin['plugin']->get('plg_install_error')) {
+                    $error_msg = htmlspecialchars($plugin['plugin']->get('plg_install_error'));
+                    $status_cell .= '<br><div class="alert alert-danger alert-sm p-1 mt-1 mb-0" style="font-size: 0.8em;">';
+                    $status_cell .= '<i class="fas fa-exclamation-circle"></i> <strong>Error:</strong><br>';
+                    $status_cell .= '<span class="text-wrap" style="word-break: break-word;">' . $error_msg . '</span>';
+                    $status_cell .= '</div>';
                 }
+                
+                array_push($rowvalues, $status_cell);
                 
                 // Actions column
                 if ($plugin['directory_exists']) {
+                    $action_cell = '<div class="btn-group" role="group">';
                     $formwriter = LibraryFunctions::get_formwriter_object('plugin_action_' . $plugin['name'], 'admin');
                     
-                    if ($plugin['is_active']) {
-                        $action_cell = $formwriter->begin_form('plugin_action_' . $plugin['name'], 'POST', '', true);
+                    // Get plugin status
+                    $plugin_status = $plugin['plugin'] ? $plugin['plugin']->get('plg_status') : null;
+                    
+                    if (!$plugin['plugin'] || !$plugin_status) {
+                        // Not installed - show Install button
+                        $action_cell .= $formwriter->begin_form('plugin_install_' . $plugin['name'], 'POST', '', true);
+                        $action_cell .= $formwriter->hiddeninput('action', 'install');
+                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                        $action_cell .= $formwriter->new_form_button('Install', 'btn btn-success btn-sm');
+                        $action_cell .= $formwriter->end_form(true);
+                        
+                    } elseif ($plugin_status === 'uninstalled') {
+                        // Uninstalled - could be legacy plugin or failed installation
+                        if ($plugin['plugin']->get('plg_install_error')) {
+                            // Has install error - show Repair button
+                            $action_cell .= $formwriter->begin_form('plugin_repair_' . $plugin['name'], 'POST', '', true);
+                            $action_cell .= $formwriter->hiddeninput('action', 'repair_plugin');
+                            $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                            $action_cell .= $formwriter->new_form_button('Repair', 'btn btn-warning btn-sm');
+                            $action_cell .= $formwriter->end_form(true);
+                        } else {
+                            // No error - treat as fresh install
+                            $action_cell .= $formwriter->begin_form('plugin_install_' . $plugin['name'], 'POST', '', true);
+                            $action_cell .= $formwriter->hiddeninput('action', 'install');
+                            $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                            $action_cell .= $formwriter->new_form_button('Install', 'btn btn-success btn-sm');
+                            $action_cell .= $formwriter->end_form(true);
+                        }
+                        
+                    } elseif ($plugin_status === 'active') {
+                        // Active - show Deactivate button
+                        $action_cell .= $formwriter->begin_form('plugin_deactivate_' . $plugin['name'], 'POST', '', true);
                         $action_cell .= $formwriter->hiddeninput('action', 'deactivate');
                         $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
                         $action_cell .= $formwriter->new_form_button('Deactivate', 'btn btn-outline-secondary btn-sm');
                         $action_cell .= $formwriter->end_form(true);
-                    } else {
-                        $action_cell = $formwriter->begin_form('plugin_action_' . $plugin['name'], 'POST', '', true);
+                        
+                    } elseif ($plugin_status === 'inactive' || $plugin_status === 'installed') {
+                        // Inactive - show Activate and Uninstall buttons
+                        $action_cell .= $formwriter->begin_form('plugin_activate_' . $plugin['name'], 'POST', '', true);
                         $action_cell .= $formwriter->hiddeninput('action', 'activate');
                         $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
                         $action_cell .= $formwriter->new_form_button('Activate', 'btn btn-primary btn-sm');
                         $action_cell .= $formwriter->end_form(true);
+                        
+                        $action_cell .= ' ';
+                        
+                        $action_cell .= $formwriter->begin_form('plugin_uninstall_' . $plugin['name'], 'POST', '', true);
+                        $action_cell .= $formwriter->hiddeninput('action', 'uninstall');
+                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                        $action_cell .= $formwriter->new_form_button('Uninstall', 'btn btn-danger btn-sm', '', 'return confirm(\'Are you sure you want to uninstall this plugin?\');');
+                        $action_cell .= $formwriter->end_form(true);
+                        
+                    } elseif ($plugin_status === 'error') {
+                        // Error - show Repair and Uninstall buttons
+                        $action_cell .= $formwriter->begin_form('plugin_repair_' . $plugin['name'], 'POST', '', true);
+                        $action_cell .= $formwriter->hiddeninput('action', 'repair_plugin');
+                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                        $action_cell .= $formwriter->new_form_button('Repair', 'btn btn-warning btn-sm');
+                        $action_cell .= $formwriter->end_form(true);
+                        
+                        $action_cell .= ' ';
+                        
+                        $action_cell .= $formwriter->begin_form('plugin_uninstall_' . $plugin['name'], 'POST', '', true);
+                        $action_cell .= $formwriter->hiddeninput('action', 'uninstall');
+                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                        $action_cell .= $formwriter->new_form_button('Uninstall', 'btn btn-danger btn-sm', '', 'return confirm(\'Are you sure you want to uninstall this plugin?\');');
+                        $action_cell .= $formwriter->end_form(true);
+                        
                     }
+                    
+                    $action_cell .= '</div>';
                     array_push($rowvalues, $action_cell);
                 } else {
                     array_push($rowvalues, '<em class="text-muted">N/A</em>');
@@ -188,50 +378,90 @@ $page->admin_header(array(
             ?>
             
             <?php
-            // Count active/inactive plugins
+            // Count plugin statistics
             $active_count = 0;
             $inactive_count = 0;
             $missing_count = 0;
+            $installed_count = 0;
+            $not_installed_count = 0;
+            $error_count = 0;
             
             foreach ($plugins as $plugin) {
                 if (!$plugin['directory_exists']) {
                     $missing_count++;
-                } elseif ($plugin['is_active']) {
-                    $active_count++;
                 } else {
-                    $inactive_count++;
+                    if ($plugin['plugin']) {
+                        $installed_count++;
+                        $status = $plugin['plugin']->get('plg_status');
+                        
+                        // Check for install errors regardless of status
+                        if ($plugin['plugin']->get('plg_install_error')) {
+                            $error_count++;
+                        } elseif ($status === 'active') {
+                            $active_count++;
+                        } else {
+                            $inactive_count++;
+                        }
+                    } else {
+                        $not_installed_count++;
+                    }
                 }
             }
             ?>
             
+            <?php if (!empty($plugin_updates)): ?>
+            <div class="alert alert-warning mt-4">
+                <h6 class="alert-heading"><i class="fas fa-download"></i> Updates Available</h6>
+                <p class="mb-0">The following plugins have updates available:</p>
+                <ul class="mb-0 mt-2">
+                    <?php foreach ($plugin_updates as $name => $info): ?>
+                        <li><strong><?php echo htmlspecialchars($name); ?></strong> - Version <?php echo htmlspecialchars($info['available_version']); ?> available (currently <?php echo htmlspecialchars($info['installed_version']); ?>)</li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+            <?php endif; ?>
+            
             <h5 class="mb-3 mt-4">Plugin Statistics</h5>
             
             <div class="row g-3">
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="text-center p-3 bg-light rounded">
                         <h5 class="text-success mb-1"><?php echo $active_count; ?></h5>
-                        <p class="mb-0">Active Plugins</p>
+                        <p class="mb-0">Active</p>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="text-center p-3 bg-light rounded">
                         <h5 class="text-secondary mb-1"><?php echo $inactive_count; ?></h5>
-                        <p class="mb-0">Inactive Plugins</p>
+                        <p class="mb-0">Inactive</p>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
+                    <div class="text-center p-3 bg-light rounded">
+                        <h5 class="text-info mb-1"><?php echo $not_installed_count; ?></h5>
+                        <p class="mb-0">Not Installed</p>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="text-center p-3 bg-light rounded">
+                        <h5 class="text-danger mb-1"><?php echo $error_count; ?></h5>
+                        <p class="mb-0">Errors</p>
+                    </div>
+                </div>
+                <div class="col-md-2">
                     <div class="text-center p-3 bg-light rounded">
                         <h5 class="text-warning mb-1"><?php echo $missing_count; ?></h5>
-                        <p class="mb-0">Missing Directories</p>
+                        <p class="mb-0">Missing</p>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="text-center p-3 bg-light rounded">
                         <h5 class="text-primary mb-1"><?php echo count($plugins); ?></h5>
-                        <p class="mb-0">Total Plugins</p>
+                        <p class="mb-0">Total</p>
                     </div>
                 </div>
             </div>
+            
             
         <?php endif; ?>
         
@@ -243,14 +473,23 @@ $page->admin_header(array(
                 <h6>Plugin Structure</h6>
                 <p>Plugins should be created in <code>/plugins/[plugin-name]/</code> with the following structure:</p>
                 <ul>
-                    <li><code>plugin.json</code> - Optional metadata file (name, description, version, author)</li>
+                    <li><code>plugin.json</code> - <strong>Required</strong> metadata file (name, description, version, author)</li>
                     <li><code>serve.php</code> - Optional custom routing</li>
+                    <li><code>uninstall.php</code> - Optional uninstall script</li>
                     <li><code>adm/</code> - Admin interface files</li>
                     <li><code>data/</code> - Data model classes</li>
                     <li><code>logic/</code> - Business logic</li>
                     <li><code>views/</code> - Template files</li>
                     <li><code>migrations/</code> - Database migrations</li>
                 </ul>
+                
+                <h6 class="mt-3">Plugin Lifecycle</h6>
+                <ol>
+                    <li><strong>Install</strong> - Creates database tables and runs migrations</li>
+                    <li><strong>Activate</strong> - Enables plugin routing and functionality</li>
+                    <li><strong>Deactivate</strong> - Disables plugin but keeps data</li>
+                    <li><strong>Uninstall</strong> - Removes plugin data and tables</li>
+                </ol>
                 
                 <h6 class="mt-3">Plugin.json Example</h6>
                 <pre class="bg-light p-2 rounded"><code>{
@@ -259,15 +498,47 @@ $page->admin_header(array(
     "version": "1.0.0",
     "author": "Plugin Developer",
     "requires": {
-        "php": ">=7.4",
-        "joinery": ">=1.0"
-    }
+        "php": ">=8.0",
+        "joinery": ">=1.0",
+        "extensions": ["pdo", "json"]
+    },
+    "depends": {
+        "core-plugin": ">=1.0"
+    },
+    "conflicts": ["old-plugin-name"]
 }</code></pre>
             </div>
         </div>
         
     </div>
 </div>
+
+<script>
+// Handle "Check for Updates" button click
+document.addEventListener('DOMContentLoaded', function() {
+    // Find the Check for Updates link and make it submit the form
+    const updateLink = document.querySelector('a[href="javascript:void(0);"]');
+    if (updateLink && updateLink.textContent.includes('Check for Updates')) {
+        updateLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            
+            // Create and submit a form to check for updates
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = window.location.href;
+            
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'check_updates';
+            
+            form.appendChild(actionInput);
+            document.body.appendChild(form);
+            form.submit();
+        });
+    }
+});
+</script>
 
 <?php
 $page->admin_footer();

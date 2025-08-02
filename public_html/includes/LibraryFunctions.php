@@ -1697,7 +1697,7 @@ class LibraryFunctions {
 	 *   - 'require_tablename' (bool): Only include classes with $tablename property (default: false)
 	 *   - 'require_field_specifications' (bool): Only include classes with $field_specifications (default: false)
 	 *   - 'base_class' (string): Only include classes extending this base (default: 'SystemBase')
-	 *   - 'include_plugins' (bool): Include plugin directories (default: true)
+	 *   - 'include_plugins' (bool): Include plugin directories (default: false)
 	 *   - 'verbose' (bool): Output debug information (default: false)
 	 * @return array Array of discovered class names
 	 */
@@ -1706,14 +1706,15 @@ class LibraryFunctions {
 			'require_tablename' => false,
 			'require_field_specifications' => false,
 			'base_class' => 'SystemBase',
-			'include_plugins' => true,
+			'include_plugins' => false,
+			'plugin_filter' => null,
 			'verbose' => false
 		);
 		$options = array_merge($defaults, $options);
 		
 		$classes = array();
 		
-		// Load from main data directory
+		// Load from main data directory (always load core classes)
 		$data_path = PathHelper::getBasePath() . '/data';
 		if ($options['verbose']) {
 			echo "Discovering models in: $data_path<br>\n";
@@ -1723,7 +1724,13 @@ class LibraryFunctions {
 		// Load from plugin directories if requested
 		if ($options['include_plugins']) {
 			$plugin_dir = PathHelper::getBasePath() . '/plugins';
-			$plugins = LibraryFunctions::list_plugins($plugin_dir);
+			
+			// If plugin_filter is specified, only load that plugin
+			if ($options['plugin_filter']) {
+				$plugins = array($options['plugin_filter']);
+			} else {
+				$plugins = LibraryFunctions::list_plugins($plugin_dir);
+			}
 			
 			foreach ($plugins as $plugin) {
 				$plugin_data_dir = $plugin_dir . '/' . $plugin . '/data';
