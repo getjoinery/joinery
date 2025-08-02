@@ -55,6 +55,103 @@ class TableName extends SystemBase {
 }
 ```
 
+### DbConnector Usage and Database Calls
+
+The `DbConnector` class is a singleton that provides access to the PostgreSQL database using PDO.
+
+**CRITICAL RULE:** **NEVER use DbConnector directly if there is a model class available!**
+- ✅ Use `User`, `MultiUser`, `Product`, `MultiProduct`, etc. when they exist
+- ✅ Use model methods like `load()`, `save()`, `get()`, `set()`, etc.
+- ❌ Only use DbConnector for tables that don't have model classes
+- ❌ Only use DbConnector for complex queries that models can't handle
+
+#### **When to Use Models vs DbConnector:**
+
+**USE MODELS (Preferred):**
+```php
+// Getting a user - USE THE MODEL
+$user = new User($user_id, TRUE); // Load user by ID
+$email = $user->get('usr_email');
+
+// Finding users - USE THE MULTI MODEL
+$users = new MultiUser(['usr_active' => 1], ['usr_id' => 'DESC']);
+$users->load();
+
+// Creating records - USE THE MODEL
+$product = new Product(NULL);
+$product->set('pro_name', 'New Product');
+$product->save();
+```
+
+**USE DbConnector (Only when no model exists):**
+```php
+// Example: Custom reporting query with no model
+$dbconnector = DbConnector::get_instance();
+$dblink = $dbconnector->get_db_link();
+$sql = "SELECT COUNT(*) FROM some_table WHERE complex_condition = ?";
+$q = $dblink->prepare($sql);
+$q->execute([$value]);
+```
+
+#### **Common Database Patterns:**
+
+**SELECT Queries (with parameters):**
+```php
+$sql = "SELECT * FROM users WHERE usr_email = ? AND usr_active = ?";
+$q = $dblink->prepare($sql);
+$q->execute([$email, 1]);
+$results = $q->fetchAll(PDO::FETCH_ASSOC);
+
+// Single row
+$result = $q->fetch(PDO::FETCH_ASSOC);
+```
+
+**INSERT/UPDATE/DELETE (with parameters):**
+```php
+$sql = "INSERT INTO stg_settings (stg_name, stg_value, stg_create_time) VALUES (?, ?, NOW())";
+$q = $dblink->prepare($sql);
+$q->execute([$setting_name, $setting_value]);
+
+// For updates
+$sql = "UPDATE users SET usr_last_login = NOW() WHERE usr_id = ?";
+$q = $dblink->prepare($sql);
+$q->execute([$user_id]);
+```
+
+**Transactions:**
+```php
+$dblink->beginTransaction();
+try {
+    // Multiple database operations
+    $q1 = $dblink->prepare("INSERT INTO...");
+    $q1->execute([...]);
+    
+    $q2 = $dblink->prepare("UPDATE...");
+    $q2->execute([...]);
+    
+    $dblink->commit();
+} catch (Exception $e) {
+    $dblink->rollback();
+    throw $e;
+}
+```
+
+**Checking Existence:**
+```php
+$sql = "SELECT COUNT(*) as count FROM stg_settings WHERE stg_name = ?";
+$q = $dblink->prepare($sql);
+$q->execute([$setting_name]);
+$result = $q->fetch(PDO::FETCH_ASSOC);
+$exists = ($result['count'] > 0);
+```
+
+**CRITICAL RULES:**
+1. **Always use prepared statements** - Never concatenate user input directly into SQL
+2. **Always use the PDO connection** from `$dbconnector->get_db_link()`
+3. **Never call DbConnector methods directly** - It doesn't have query(), exec(), etc.
+4. **Use proper PDO fetch modes** - `PDO::FETCH_ASSOC` for arrays, `PDO::FETCH_OBJ` for objects
+5. **Handle transactions properly** - Always rollback on exceptions
+
 ## Admin Page Structure and Conventions
 
 ### Required Includes and Setup
@@ -414,12 +511,24 @@ $send_result = $emailTemplate->send(false);
 
 ## Development Environment
 
-### PHP Runtime Available
-PHP is available locally for syntax checking, validation, and running scripts. This enables:
-- Syntax validation of all PHP files before completion
-- Running utility scripts and diagnostics
-- Testing migrations and database operations
-- Validating code changes locally
+### Local Development Setup
+**Available Locally:**
+- **PHP Runtime** - Available for syntax checking, validation, and running scripts
+- **File system access** - Can read, write, and modify files
+- **Command line tools** - Basic bash commands available
+
+**NOT Available Locally:**
+- **Database connections** - Cannot connect to PostgreSQL from local environment
+- **Web server** - Cannot run the application locally
+- **External services** - No network access to APIs, mail servers, etc.
+
+### What This Enables:
+- ✅ Syntax validation of all PHP files before completion (`php -l filename.php`)
+- ✅ Running utility scripts and diagnostics (non-database)
+- ✅ File manipulation and code generation
+- ✅ Testing file operations and parsing logic
+- ❌ Database operations (testing must be done on server)
+- ❌ Full application testing (requires server environment)
 
 **CRITICAL REQUIREMENT:** Always check PHP files for syntax errors using `php -l filename.php` before declaring any PHP development task complete. This prevents syntax errors from being introduced into the codebase.
 
