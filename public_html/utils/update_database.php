@@ -197,6 +197,11 @@
 
 	// Run the database update if not included from another script
 	if(!isset($noautorun)){
+		// Ensure $migrations is defined
+		if (!isset($migrations)) {
+			$migrations = array();
+		}
+		
 		if(update_database($migrations, $verbose, $upgrade, $cleanup)){
 			echo 'Database update script successful'. "<br>\n";
 			exit(1);  // RETURN 1 FOR THE DEPLOY SCRIPT
