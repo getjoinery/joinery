@@ -2,19 +2,22 @@
 
 require_once(__DIR__ . '/Globalvars.php');
 
-// Get the composer autoload path from settings
+// Get the composer directory from settings
 $settings = Globalvars::get_instance();
-$composerAutoLoad = $settings->get_setting('composerAutoLoad');
+$composer_dir = $settings->get_setting('composerAutoLoad');
 
-if (!$composerAutoLoad) {
+if (!$composer_dir) {
     throw new Exception('composerAutoLoad setting is not configured in the database.');
 }
 
-if (!file_exists($composerAutoLoad)) {
-    throw new Exception('Composer autoload file not found at configured location: ' . $composerAutoLoad);
+// The setting contains the vendor directory path, we need to append autoload.php
+$autoload_path = $composer_dir . 'autoload.php';
+
+if (!file_exists($autoload_path)) {
+    throw new Exception('Composer autoload.php not found at: ' . $autoload_path);
 }
 
-require_once($composerAutoLoad);
+require_once($autoload_path);
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
