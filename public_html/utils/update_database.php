@@ -40,6 +40,19 @@
 	} elseif (isset($argv) && in_array('--cleanup', $argv)) {
 		$cleanup = true;
 	}
+	
+	// Validate Composer setup before proceeding
+	echo "\n=== COMPOSER VALIDATION ===\n";
+	PathHelper::requireOnce('includes/ComposerValidator.php');
+	$composerValidator = new ComposerValidator();
+	
+	if (!$composerValidator->validate()) {
+		echo $composerValidator->getFormattedOutput();
+		echo "\n\033[31mERROR: Composer validation failed. Please fix the issues above before running database updates.\033[0m\n\n";
+		exit(1);
+	} else {
+		echo $composerValidator->getFormattedOutput();
+	}
 
 	/*
 	THIS WILL CHECK THE SPECS IN THE $fields and $field_specifications VARIABLES AND CREATE AND/OR UPDATE THE TABLES AS NEEDED
