@@ -54,7 +54,27 @@ class ErrorHandler{
 			$title = "There was an error";
 		}
 
-	
+		$settings = Globalvars::get_instance();
+		$show_errors = $settings->get_setting('show_errors');
+		
+		// If show_errors is enabled, use minimal display without header/footer
+		if ($show_errors) {
+			echo '<!DOCTYPE html><html><head><title>' . htmlspecialchars($title) . '</title>';
+			echo '<style>body{font-family:monospace;margin:20px;background:#f5f5f5;}';
+			echo '.error-container{background:white;padding:20px;border:1px solid #ddd;border-radius:4px;}';
+			echo '.error-title{color:#d32f2f;margin-bottom:15px;font-size:18px;font-weight:bold;}';
+			echo '.error-content{white-space:pre-wrap;word-wrap:break-word;}</style>';
+			echo '</head><body>';
+			echo '<div class="error-container">';
+			echo '<div class="error-title">' . htmlspecialchars($title) . '</div>';
+			if ($errortext) {
+				echo '<div class="error-content">' . htmlspecialchars($errortext) . '</div>';
+			}
+			echo '</div></body></html>';
+			exit;
+		}
+
+		// Standard error display with header/footer
 		if(!isset($_GLOBALS['page_header_loaded'])){
 			
 			// Try to load PublicPage, fall back to basic output if it fails
@@ -84,7 +104,6 @@ class ErrorHandler{
 		}
 		echo '<br />';
 
-		$settings = Globalvars::get_instance();
 		try {
 			$email = $settings->get_setting('webmaster_email');
 			echo '<p>If you need quick help, you can contact the webmaster at '.$email.'.</p>';
@@ -102,7 +121,29 @@ class ErrorHandler{
 		exit;
 	}
 
-	function handle_admin_error($errortext){
+	function handle_admin_error($errortext, $error_type=self::DEFAULT_ERROR){
+		$settings = Globalvars::get_instance();
+		$show_errors = $settings->get_setting('show_errors');
+		
+		// If show_errors is enabled, use minimal display without header/footer
+		if ($show_errors) {
+			$title = "Admin Error";
+			echo '<!DOCTYPE html><html><head><title>' . htmlspecialchars($title) . '</title>';
+			echo '<style>body{font-family:monospace;margin:20px;background:#f5f5f5;}';
+			echo '.error-container{background:white;padding:20px;border:1px solid #ddd;border-radius:4px;}';
+			echo '.error-title{color:#d32f2f;margin-bottom:15px;font-size:18px;font-weight:bold;}';
+			echo '.error-content{white-space:pre-wrap;word-wrap:break-word;}</style>';
+			echo '</head><body>';
+			echo '<div class="error-container">';
+			echo '<div class="error-title">' . htmlspecialchars($title) . '</div>';
+			if ($errortext) {
+				echo '<div class="error-content">' . htmlspecialchars($errortext) . '</div>';
+			}
+			echo '</div></body></html>';
+			exit;
+		}
+
+		// Standard admin error display with header/footer
 		PathHelper::requireOnce('includes/AdminPage.php');
 		$session = SessionControl::get_instance();
 
@@ -127,9 +168,12 @@ class ErrorHandler{
 		}
 		echo '<br />';
 
-		$settings = Globalvars::get_instance();
-		$email = $settings->get_setting('webmaster_email');
-		echo '<p>If you need quick help, you can contact the webmaster at '.$email.'.</p>';	
+		try {
+			$email = $settings->get_setting('webmaster_email');
+			echo '<p>If you need quick help, you can contact the webmaster at '.$email.'.</p>';	
+		} catch (Exception $e) {
+			// Skip email display if settings not available
+		}
 		echo '<p>Press your Back button or <a href="#" onclick="history.go(-1);return false;">click here</a> to go to the last page</p>';
 		echo '</div>';
 		$page->end_box();
