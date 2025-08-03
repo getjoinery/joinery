@@ -438,7 +438,12 @@
 			'https' => 'HTTPS only',
 			'https_redirect' => 'HTTPS with redirects'
 		);
-		echo $formwriter->dropinput("Protocol Mode", "protocol_mode", '', $optionvals, $settings->get_setting('protocol_mode'), 'Controls protocol for generated URLs and redirect behavior', FALSE);	
+		// Handle case where protocol_mode setting doesn't exist or is empty
+		$protocol_mode_value = $settings->get_setting('protocol_mode', true, true); // fail_silently = true
+		if (empty($protocol_mode_value)) {
+			$protocol_mode_value = 'auto'; // Default value
+		}
+		echo $formwriter->dropinput("Protocol Mode", "protocol_mode", '', $optionvals, $protocol_mode_value, 'Controls protocol for generated URLs and redirect behavior', FALSE);	
 
 		$optionvals = array("Yes"=>1, 'No' => 0);
 		echo $formwriter->dropinput("Payment Debug Mode ", "debug", '', $optionvals, $settings->get_setting('debug'), '', FALSE);
