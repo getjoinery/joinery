@@ -2,6 +2,7 @@
 #version 2.3 - Fixed deployment order and theme/plugin deployment
 # MODIFIED: Preserve staging directory on deployment failures for debugging
 # MODIFIED: Added --norollback flag to disable rollback functionality
+# MODIFIED: Improved rollback functionality to handle directory conflicts
 
 GITHUB_USER="jeremytunnell"
 GITHUB_TOKEN="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"
@@ -11,6 +12,68 @@ REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/Tunnell-Software/mem
 THEME_PLUGIN_USER="getjoinery"
 THEME_PLUGIN_TOKEN="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"
 THEME_PLUGIN_REPO_URL="https://${THEME_PLUGIN_USER}:${THEME_PLUGIN_TOKEN}@github.com/getjoinery/joinery.git"
+
+# Improved rollback function
+perform_rollback() {
+    local target_site="$1"
+    local public_html_dir="/var/www/html/$target_site/public_html"
+    local backup_dir="/var/www/html/$target_site/public_html_last"
+    
+    echo "Starting rollback process..."
+    
+    # Check if backup exists
+    if [[ ! -d "$backup_dir" ]] || [[ -z "$(ls -A "$backup_dir" 2>/dev/null)" ]]; then
+        echo "ERROR: No backup available to rollback to."
+        return 1
+    fi
+    
+    # Create a temporary directory for the failed deployment
+    local failed_dir="/var/www/html/$target_site/public_html_failed_$(date +%Y%m%d_%H%M%S)"
+    echo "Moving failed deployment to: $failed_dir"
+    
+    # Move the entire failed public_html to preserve it for debugging
+    if [[ -d "$public_html_dir" ]]; then
+        mv "$public_html_dir" "$failed_dir" || {
+            echo "ERROR: Could not move failed deployment. Attempting alternative cleanup..."
+            
+            # Alternative: Thorough directory-by-directory cleanup
+            cd "$public_html_dir" || return 1
+            
+            # Remove each subdirectory individually
+            for item in */; do
+                if [[ -d "$item" ]]; then
+                    echo "  Removing: $item"
+                    rm -rf "$item" || echo "    Warning: Could not remove $item"
+                fi
+            done
+            
+            # Remove files
+            find . -maxdepth 1 -type f -delete 2>/dev/null || true
+            
+            # Remove any remaining hidden files/directories
+            find . -maxdepth 1 -name ".*" -not -name "." -not -name ".." -exec rm -rf {} + 2>/dev/null || true
+        }
+    fi
+    
+    # Recreate public_html directory if it doesn't exist
+    mkdir -p "$public_html_dir"
+    
+    # Restore from backup using copy (safer than move)
+    echo "Restoring from backup..."
+    cp -r "$backup_dir"/* "$public_html_dir/" || {
+        echo "ERROR: Failed to restore from backup"
+        return 1
+    }
+    
+    # Fix permissions
+    echo "Fixing permissions after rollback..."
+    chown -R www-data:user1 "$public_html_dir" 2>/dev/null || echo "Warning: Could not change ownership"
+    chmod -R 775 "$public_html_dir" 2>/dev/null || echo "Warning: Could not change permissions"
+    
+    echo "Rollback completed successfully."
+    echo "Failed deployment preserved at: $failed_dir"
+    return 0
+}
 
 # Function to fix permissions
 fix_permissions() {
@@ -71,22 +134,15 @@ show_usage() {
     echo "Test site will be available at: https://test.[domain].com"
 }
 
-# Function to deploy themes and plugins directly to public_html
+# Function to deploy themes and plugins to directories outside public_html
 deploy_theme_plugin() {
     local target_site="$1"
     local site_root="/var/www/html/$target_site"
-    local public_html_dir="$site_root/public_html"
     
-    echo "Deploying themes and plugins for $target_site directly to public_html..."
+    echo "Downloading themes and plugins from joinery repository to $target_site..."
     
-    # Ensure public_html directory exists
-    if [[ ! -d "$public_html_dir" ]]; then
-        echo "Creating public_html directory..."
-        mkdir -p "$public_html_dir"
-    fi
-    
-    # DEPLOY THEMES directly to public_html/theme
-    echo "Setting up theme deployment to public_html/theme..."
+    # DEPLOY THEMES to /var/www/html/sitename/theme (outside public_html)
+    echo "Setting up theme deployment to $site_root/theme..."
     local theme_stage_dir="$site_root/theme_stage"
     rm -rf "$theme_stage_dir"
     mkdir -p "$theme_stage_dir"
@@ -101,8 +157,8 @@ deploy_theme_plugin() {
     rm -rf .git
     cd - > /dev/null
 
-    # DEPLOY PLUGINS directly to public_html/plugins
-    echo "Setting up plugin deployment to public_html/plugins..."
+    # DEPLOY PLUGINS to /var/www/html/sitename/plugins (outside public_html)
+    echo "Setting up plugin deployment to $site_root/plugins..."
     local plugins_stage_dir="$site_root/plugins_stage"
     rm -rf "$plugins_stage_dir"
     mkdir -p "$plugins_stage_dir"
@@ -117,34 +173,47 @@ deploy_theme_plugin() {
     rm -rf .git
     cd - > /dev/null
 
-    # Deploy themes directly to public_html/theme
+    # Deploy themes to /var/www/html/sitename/theme (outside public_html)
     if [[ -d "$theme_stage_dir/theme" ]]; then
-        echo "Deploying themes to public_html/theme..."
-        rm -rf "$public_html_dir/theme_old"
-        if [[ -d "$public_html_dir/theme" ]]; then
-            mv "$public_html_dir/theme" "$public_html_dir/theme_old"
+        echo "Deploying themes to $site_root/theme..."
+        rm -rf "$site_root/theme_old"
+        if [[ -d "$site_root/theme" ]]; then
+            mv "$site_root/theme" "$site_root/theme_old"
         fi
-        mv "$theme_stage_dir/theme" "$public_html_dir/theme"
-        chown -R www-data:user1 "$public_html_dir/theme" 2>/dev/null || true
-        chmod -R 775 "$public_html_dir/theme" 2>/dev/null || true
-        echo "Themes deployed successfully to public_html/theme"
+        mv "$theme_stage_dir/theme" "$site_root/theme"
+        chown -R www-data:user1 "$site_root/theme" 2>/dev/null || true
+        chmod -R 775 "$site_root/theme" 2>/dev/null || true
+        echo "Themes deployed successfully to $site_root/theme"
     else
-        echo "WARNING: No theme directory found in repository"
+        echo "ERROR: No theme directory found in joinery repository - deployment cannot continue"
+        return 1
     fi
 
-    # Deploy plugins directly to public_html/plugins
+    # Deploy plugins to /var/www/html/sitename/plugins (outside public_html)  
     if [[ -d "$plugins_stage_dir/plugins" ]]; then
-        echo "Deploying plugins to public_html/plugins..."
-        rm -rf "$public_html_dir/plugins_old"
-        if [[ -d "$public_html_dir/plugins" ]]; then
-            mv "$public_html_dir/plugins" "$public_html_dir/plugins_old"
+        echo "Deploying plugins to $site_root/plugins..."
+        rm -rf "$site_root/plugins_old"
+        if [[ -d "$site_root/plugins" ]]; then
+            mv "$site_root/plugins" "$site_root/plugins_old"
         fi
-        mv "$plugins_stage_dir/plugins" "$public_html_dir/plugins"
-        chown -R www-data:user1 "$public_html_dir/plugins" 2>/dev/null || true
-        chmod -R 775 "$public_html_dir/plugins" 2>/dev/null || true
-        echo "Plugins deployed successfully to public_html/plugins"
+        mv "$plugins_stage_dir/plugins" "$site_root/plugins"
+        chown -R www-data:user1 "$site_root/plugins" 2>/dev/null || true
+        chmod -R 775 "$site_root/plugins" 2>/dev/null || true
+        echo "Plugins deployed successfully to $site_root/plugins"
     else
-        echo "WARNING: No plugins directory found in repository"
+        echo "ERROR: No plugins directory found in joinery repository - deployment cannot continue"
+        return 1
+    fi
+
+    # Validate that directories were created successfully
+    if [[ ! -d "$site_root/theme" ]]; then
+        echo "ERROR: Theme directory was not created successfully at $site_root/theme"
+        return 1
+    fi
+    
+    if [[ ! -d "$site_root/plugins" ]]; then
+        echo "ERROR: Plugins directory was not created successfully at $site_root/plugins"
+        return 1
     fi
 
     # Cleanup staging directories
@@ -152,18 +221,99 @@ deploy_theme_plugin() {
     rm -rf "$theme_stage_dir"
     rm -rf "$plugins_stage_dir"
     
-    # Also create backup theme/plugins directories outside public_html for compatibility
-    echo "Creating backup theme/plugins directories outside public_html..."
-    if [[ -d "$public_html_dir/theme" ]]; then
-        rm -rf "$site_root/theme"
-        cp -r "$public_html_dir/theme" "$site_root/theme"
-    fi
-    if [[ -d "$public_html_dir/plugins" ]]; then
-        rm -rf "$site_root/plugins"
-        cp -r "$public_html_dir/plugins" "$site_root/plugins"
+    echo "Theme and plugin download from joinery repository complete."
+    return 0
+}
+
+# Function to merge themes and plugins into public_html after main code deployment
+merge_themes_plugins_to_public_html() {
+    local target_site="$1"
+    local site_root="/var/www/html/$target_site"
+    local public_html_dir="$site_root/public_html"
+    
+    echo "Merging themes and plugins into public_html..."
+    
+    # Ensure public_html theme and plugins directories exist
+    mkdir -p "$public_html_dir/theme"
+    mkdir -p "$public_html_dir/plugins"
+    
+    # MERGE THEMES: overwrite same names, preserve different names
+    echo "Merging themes from $site_root/theme to $public_html_dir/theme..."
+    if [[ -d "$site_root/theme" ]]; then
+        # Copy all themes from joinery repo, overwriting any with same names
+        for theme_path in "$site_root/theme"/*/; do
+            if [[ -d "$theme_path" ]]; then
+                theme_name=$(basename "$theme_path")
+                target_theme_path="$public_html_dir/theme/$theme_name"
+                
+                if [[ -d "$target_theme_path" ]]; then
+                    echo "  OVERWRITING existing theme: $theme_name (from joinery repo)"
+                    rm -rf "$target_theme_path"
+                else
+                    echo "  Adding theme: $theme_name (from joinery repo)"
+                fi
+                
+                cp -r "$theme_path" "$public_html_dir/theme/" || {
+                    echo "ERROR: Failed to copy theme $theme_name"
+                    return 1
+                }
+                
+                # Fix permissions for theme
+                chown -R www-data:user1 "$target_theme_path" 2>/dev/null || true
+                chmod -R 775 "$target_theme_path" 2>/dev/null || true
+            fi
+        done
+        echo "Theme merge completed."
+    else
+        echo "ERROR: No themes directory found at $site_root/theme"
+        return 1
     fi
     
-    echo "Theme and plugin deployment complete."
+    # MERGE PLUGINS: overwrite same names, preserve different names  
+    echo "Merging plugins from $site_root/plugins to $public_html_dir/plugins..."
+    if [[ -d "$site_root/plugins" ]]; then
+        # Copy all plugins from joinery repo, overwriting any with same names
+        for plugin_path in "$site_root/plugins"/*/; do
+            if [[ -d "$plugin_path" ]]; then
+                plugin_name=$(basename "$plugin_path")
+                target_plugin_path="$public_html_dir/plugins/$plugin_name"
+                
+                if [[ -d "$target_plugin_path" ]]; then
+                    echo "  OVERWRITING existing plugin: $plugin_name (from joinery repo)"
+                    rm -rf "$target_plugin_path"
+                else
+                    echo "  Adding plugin: $plugin_name (from joinery repo)"
+                fi
+                
+                cp -r "$plugin_path" "$public_html_dir/plugins/" || {
+                    echo "ERROR: Failed to copy plugin $plugin_name"
+                    return 1
+                }
+                
+                # Fix permissions for plugin
+                chown -R www-data:user1 "$target_plugin_path" 2>/dev/null || true
+                chmod -R 775 "$target_plugin_path" 2>/dev/null || true
+            fi
+        done
+        echo "Plugin merge completed."
+    else
+        echo "ERROR: No plugins directory found at $site_root/plugins"
+        return 1
+    fi
+    
+    # Final validation
+    if [[ ! -d "$public_html_dir/theme" ]]; then
+        echo "ERROR: Theme directory missing after merge: $public_html_dir/theme"
+        return 1
+    fi
+    
+    if [[ ! -d "$public_html_dir/plugins" ]]; then
+        echo "ERROR: Plugins directory missing after merge: $public_html_dir/plugins"
+        return 1
+    fi
+    
+    echo "Theme and plugin merge to public_html complete."
+    return 0
 }
 
 # Parse arguments
@@ -370,8 +520,12 @@ if [ "$IS_TEST_DEPLOY" = true ] && [ "$IS_THEME_ONLY" = false ]; then
     fi
 fi
 
-# DEPLOY THEMES AND PLUGINS FROM REPOSITORY FIRST
-deploy_theme_plugin "$TARGET_SITE"
+# DOWNLOAD THEMES AND PLUGINS FROM JOINERY REPOSITORY
+echo "Downloading themes and plugins from joinery repository..."
+if ! deploy_theme_plugin "$TARGET_SITE"; then
+    echo "ERROR: Theme/plugin download failed. Aborting deployment."
+    exit 1
+fi
 
 # IF THEME-ONLY DEPLOYMENT, SKIP THE REST
 if [ "$IS_THEME_ONLY" = true ]; then
@@ -421,85 +575,92 @@ cd /var/www/html/$TARGET_SITE/public_html_stage || {
 }
 
 for item in *; do
-    if [ "$item" = "theme" ]; then
-        echo "Smart merging themes (preserving ALL existing themes, adding only new ones)..."
-        
-        # Ensure theme directory exists in target
-        mkdir -p "/var/www/html/$TARGET_SITE/public_html/theme"
-        
-        # FIRST: Restore all themes from backup (these include theme repository themes + any custom themes)
-        if [[ -d "/var/www/html/$TARGET_SITE/public_html_last/theme" ]]; then
-            echo "  Restoring all existing themes from backup..."
-            cp -r /var/www/html/$TARGET_SITE/public_html_last/theme/* "/var/www/html/$TARGET_SITE/public_html/theme/" 2>/dev/null || true
-        fi
-        
-        # SECOND: Add any new themes from main code repo (if they don't already exist)
-        if [ -d "theme" ]; then
-            for theme_path in theme/*/; do
-                if [ -d "$theme_path" ]; then
-                    theme_name=$(basename "$theme_path")
-                    target_theme_path="/var/www/html/$TARGET_SITE/public_html/theme/$theme_name"
-                    
-                    if [ -d "$target_theme_path" ]; then
-                        echo "  PRESERVING existing theme: $theme_name (not overwriting)"
-                    else
-                        echo "  Adding new theme from main repo: $theme_name"
-                        cp -r "$theme_path" "/var/www/html/$TARGET_SITE/public_html/theme/" || {
-                            echo "ERROR: Failed to copy theme $theme_name"
-                            exit 1
-                        }
-                        # Fix permissions for newly added theme
-                        chown -R www-data:user1 "$target_theme_path" 2>/dev/null || true
-                        chmod -R 775 "$target_theme_path" 2>/dev/null || true
-                    fi
-                fi
-            done
-        fi
-    elif [ "$item" = "plugins" ]; then
-        echo "Smart merging plugins (preserving ALL existing plugins, adding only new ones)..."
-        
-        # Ensure plugins directory exists in target
-        mkdir -p "/var/www/html/$TARGET_SITE/public_html/plugins"
-        
-        # FIRST: Restore all plugins from backup (these include theme repository plugins + any custom plugins)
-        if [[ -d "/var/www/html/$TARGET_SITE/public_html_last/plugins" ]]; then
-            echo "  Restoring all existing plugins from backup..."
-            cp -r /var/www/html/$TARGET_SITE/public_html_last/plugins/* "/var/www/html/$TARGET_SITE/public_html/plugins/" 2>/dev/null || true
-        fi
-        
-        # SECOND: Add any new plugins from main code repo (if they don't already exist)
-        if [ -d "plugins" ]; then
-            for plugin_path in plugins/*/; do
-                if [ -d "$plugin_path" ]; then
-                    plugin_name=$(basename "$plugin_path")
-                    target_plugin_path="/var/www/html/$TARGET_SITE/public_html/plugins/$plugin_name"
-                    
-                    if [ -d "$target_plugin_path" ]; then
-                        echo "  PRESERVING existing plugin: $plugin_name (not overwriting)"
-                    else
-                        echo "  Adding new plugin from main repo: $plugin_name"
-                        cp -r "$plugin_path" "/var/www/html/$TARGET_SITE/public_html/plugins/" || {
-                            echo "ERROR: Failed to copy plugin $plugin_name"
-                            exit 1
-                        }
-                        # Fix permissions for newly added plugin
-                        chown -R www-data:user1 "$target_plugin_path" 2>/dev/null || true
-                        chmod -R 775 "$target_plugin_path" 2>/dev/null || true
-                    fi
-                fi
-            done
-        fi
-    else
-        echo "Copying $item..."
-        cp -r "$item" "/var/www/html/$TARGET_SITE/public_html/" || {
-            echo "ERROR: Failed to copy $item"
-            exit 1
-        }
-    fi
+    echo "Copying $item..."
+    cp -r "$item" "/var/www/html/$TARGET_SITE/public_html/" || {
+        echo "ERROR: Failed to copy $item"
+        exit 1
+    }
 done
 cd - > /dev/null
 
-# Note: Themes and plugins use SAFE smart merging - existing themes/plugins are NEVER overwritten, only new ones are added
+# MERGE THEMES AND PLUGINS INTO PUBLIC_HTML
+echo "Merging themes and plugins into public_html..."
+if ! merge_themes_plugins_to_public_html "$TARGET_SITE"; then
+    echo "ERROR: Theme/plugin merge failed. Attempting rollback."
+    
+    # Check if rollback is disabled
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
+        echo "Manual intervention required to fix the theme/plugin merge issue."
+        exit 1
+    fi
+    
+    # Check if this is an initial deployment (no backup to restore)
+    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
+        if ! perform_rollback "$TARGET_SITE"; then
+            echo "ERROR: Rollback failed. Manual intervention required."
+            exit 1
+        fi
+    else
+        echo "This appears to be an initial deployment - no previous version to rollback to."
+        echo "Keeping current deployment in place for debugging."
+    fi
+    exit 1
+fi
+
+# VALIDATE CRITICAL DIRECTORIES EXIST AFTER DEPLOYMENT
+echo "Validating critical directories after deployment and merge..."
+if [[ ! -d "/var/www/html/$TARGET_SITE/public_html/theme" ]]; then
+    echo "ERROR: Theme directory missing after merge: /var/www/html/$TARGET_SITE/public_html/theme"
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    echo "DEBUGGING: Theme source directory: /var/www/html/$TARGET_SITE/theme"
+    
+    # Check if rollback is disabled
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
+        echo "Manual intervention required to fix the missing theme directory."
+        exit 1
+    fi
+    
+    # Check if this is an initial deployment (no backup to restore)
+    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
+        if ! perform_rollback "$TARGET_SITE"; then
+            echo "ERROR: Rollback failed. Manual intervention required."
+            exit 1
+        fi
+    else
+        echo "This appears to be an initial deployment - no previous version to rollback to."
+        echo "Keeping current deployment in place for debugging."
+    fi
+    exit 1
+fi
+
+if [[ ! -d "/var/www/html/$TARGET_SITE/public_html/plugins" ]]; then
+    echo "ERROR: Plugins directory missing after merge: /var/www/html/$TARGET_SITE/public_html/plugins"
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    echo "DEBUGGING: Plugins source directory: /var/www/html/$TARGET_SITE/plugins"
+    
+    # Check if rollback is disabled
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
+        echo "Manual intervention required to fix the missing plugins directory."
+        exit 1
+    fi
+    
+    # Check if this is an initial deployment (no backup to restore)
+    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
+        if ! perform_rollback "$TARGET_SITE"; then
+            echo "ERROR: Rollback failed. Manual intervention required."
+            exit 1
+        fi
+    else
+        echo "This appears to be an initial deployment - no previous version to rollback to."
+        echo "Keeping current deployment in place for debugging."
+    fi
+    exit 1
+fi
+
+echo "Critical directories validation passed."
 
 # FIX PERMISSIONS AFTER DEPLOYMENT
 echo "Fixing permissions after deployment..."
@@ -520,16 +681,10 @@ if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; 
     
     # Check if this is an initial deployment (no backup to restore)
     if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
-        echo "Rolling back to previous deployment..."
-        # MODIFIED: Don't clean up staging directory on rollback
-        # rm -rf /var/www/html/$TARGET_SITE/public_html_stage
-        
-        # Remove current broken deployment
-        rm -rf /var/www/html/$TARGET_SITE/public_html/*
-        
-        # Restore from backup
-        mv /var/www/html/$TARGET_SITE/public_html_last/* /var/www/html/$TARGET_SITE/public_html/ 2>/dev/null || true
-        echo "Rollback completed."
+        if ! perform_rollback "$TARGET_SITE"; then
+            echo "ERROR: Rollback failed. Manual intervention required."
+            exit 1
+        fi
     else
         echo "This appears to be an initial deployment - no previous version to rollback to."
         echo "Keeping current deployment in place for debugging."
@@ -557,16 +712,10 @@ if [[ "$returnvalue" != 1 ]]; then
     
     # Check if this is an initial deployment (no backup to restore)
     if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
-        echo "Rolling back to previous deployment..."
-        # MODIFIED: Don't clean up staging directory on rollback
-        # rm -rf /var/www/html/$TARGET_SITE/public_html_stage
-        
-        # Remove current broken deployment
-        rm -rf /var/www/html/$TARGET_SITE/public_html/*
-        
-        # Restore from backup
-        mv /var/www/html/$TARGET_SITE/public_html_last/* /var/www/html/$TARGET_SITE/public_html/ 2>/dev/null || true
-        echo "Rollback completed."
+        if ! perform_rollback "$TARGET_SITE"; then
+            echo "ERROR: Rollback failed. Manual intervention required."
+            exit 1
+        fi
     else
         echo "This appears to be an initial deployment - no previous version to rollback to."
         echo "Keeping current deployment in place for debugging."
