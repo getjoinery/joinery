@@ -1164,19 +1164,37 @@ class ControlDHelper{
 	}		
 	
 	public function modifyProfileFilter($profile_id, $filter_key, $status){
-		$data = array( 
-			'status' => $status,
-		);
-		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/filter/'.$filter_key;
-
-		if($this->debug){
-			echo 'modifyProfileFilter:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
-			if($this->debug == 'debug_nosend'){
-				return true;
+		// Handle special case for ip_malware which uses ipfilter endpoint
+		if ($filter_key === 'ip_malware') {
+			$data = array( 
+				'status' => $status,
+			);
+			$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/ipfilter/ip_malware';
+			
+			if($this->debug){
+				echo 'modifyProfileFilter (ipfilter):  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+				if($this->debug == 'debug_nosend'){
+					return true;
+				}
 			}
+			
+			return $this->putRequest($endpoint, $data);
+		} else {
+			// Standard filters use the regular endpoint
+			$data = array( 
+				'status' => $status,
+			);
+			$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/filter/'.$filter_key;
+
+			if($this->debug){
+				echo 'modifyProfileFilter:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+				if($this->debug == 'debug_nosend'){
+					return true;
+				}
+			}
+			
+			return $this->putRequest($endpoint, $data);
 		}
-		
-		return $this->putRequest($endpoint, $data);
 	}
 	
 	//RULE FOLDERS
