@@ -4,9 +4,8 @@ require_once('Globalvars.php');
 $settings = Globalvars::get_instance();
 require_once('systemmailer.php');
 require_once('LibraryFunctions.php');
-	
-$composer_dir = $settings->get_setting('composerAutoLoad');	
-require $composer_dir.'autoload.php';
+
+// Composer autoload is already loaded by systemmailer.php
 use Mailgun\Mailgun;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
