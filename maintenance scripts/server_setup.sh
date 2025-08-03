@@ -142,7 +142,6 @@ tee composer.json > /dev/null << 'EOF'
         "kriswallsmith/buzz": "^1.2",
         "nyholm/psr7": "^1.3",
         "jhut89/mailchimp3php": "^3.2",
-        "zenapply/php-calendly": "^1.0",
         "verot/class.upload.php": "^2.1",
         "tm/error-log-parser": "^1.2",
         "stripe/stripe-php": "^10.16",
