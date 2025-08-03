@@ -4,7 +4,21 @@ require_once('Globalvars.php');
 require_once('SessionControl.php');
 require_once('DbConnector.php');
 require_once('LibraryFunctions.php');
-require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
+
+// Lazy load PublicPage to avoid circular dependencies during database updates
+// The theme file will be loaded only when PublicPage is actually needed
+function load_public_page_if_needed() {
+    if (!class_exists('PublicPage', false)) {
+        try {
+            $theme_file = LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes');
+            require_once($theme_file);
+        } catch (Exception $e) {
+            // If theme loading fails (e.g., during database update), use basic error output
+            return false;
+        }
+    }
+    return true;
+}
 
 
 class ErrorHandler{
@@ -43,19 +57,27 @@ class ErrorHandler{
 	
 		if(!isset($_GLOBALS['page_header_loaded'])){
 			
-			$page = new PublicPage();
-			$hoptions= array(
-				'title' => self::$ERROR_TYPE_TITLES[$error_type],
-				'showmap' => FALSE,
-				'showheader' => TRUE, 
+			// Try to load PublicPage, fall back to basic output if it fails
+			if (load_public_page_if_needed()) {
+				$page = new PublicPage();
+				$hoptions= array(
+					'title' => self::$ERROR_TYPE_TITLES[$error_type],
+					'showmap' => FALSE,
+					'showheader' => TRUE, 
 				'sectionstyle' => 'neutral', 
 				'headertext' => '', 
 				'contentattached' => FALSE, 
 				'toggleTabs' => FALSE
 			);
-			$page->public_header($hoptions,NULL);
-			
-			echo PublicPage::BeginPage($title);
+				$page->public_header($hoptions,NULL);
+				
+				echo PublicPage::BeginPage($title);
+			} else {
+				// Fallback when PublicPage can't be loaded (e.g., during database updates)
+				echo '<!DOCTYPE html><html><head><title>' . htmlspecialchars($title) . '</title></head><body>';
+				echo '<div style="max-width: 600px; margin: 50px auto; padding: 20px; font-family: Arial, sans-serif;">';
+				echo '<h1>' . htmlspecialchars($title) . '</h1>';
+			}
 		}
 		if ($errortext) {
 			echo '<div class="form-error"><strong>'.$errortext.'</strong></div>';
@@ -63,12 +85,20 @@ class ErrorHandler{
 		echo '<br />';
 
 		$settings = Globalvars::get_instance();
-		$email = $settings->get_setting('webmaster_email');
-		echo '<p>If you need quick help, you can contact the webmaster at '.$email.'.</p>';	
+		try {
+			$email = $settings->get_setting('webmaster_email');
+			echo '<p>If you need quick help, you can contact the webmaster at '.$email.'.</p>';
+		} catch (Exception $e) {
+			// Skip email display if settings not available
+		}
 		echo '<p>Press your Back button or <a href="#" onclick="history.go(-1);return false;">click here</a> to go to the last page</p>';
 		
-		echo PublicPage::EndPage();
-		$page->public_footer($foptions=array('track'=>FALSE));
+		if (class_exists('PublicPage', false)) {
+			echo PublicPage::EndPage();
+			$page->public_footer($foptions=array('track'=>FALSE));
+		} else {
+			echo '</div></body></html>';
+		}
 		exit;
 	}
 
