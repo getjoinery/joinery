@@ -6,7 +6,7 @@ TO A LOGIN PAGE IF NOT
 require_once ('PathHelper.php');
 require_once ('DbConnector.php');
 require_once ('LibraryFunctions.php');
-//require_once ('ShoppingCart.php');
+require_once ('ShoppingCart.php');
 
 PathHelper::requireOnce('data/login_class.php');
 
