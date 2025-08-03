@@ -443,7 +443,7 @@ public static $required_fields = array();
 		foreach($filters as $filter){
 			$cached_filters[$filter->get('cdf_filter_pk')] = $filter->get('cdf_is_active');
 		}
-
+/*
 $result = $cd->modifyProfileFilter('689209jfkncn', 'ai_malware', 1);
 require_once($_SERVER['DOCUMENT_ROOT'].'/plugins/controld/includes/ControlDHelper.php');
 	$cd = new ControlDHelper();
@@ -454,7 +454,7 @@ require_once($_SERVER['DOCUMENT_ROOT'].'/plugins/controld/includes/ControlDHelpe
 
 //$result = $cd->modifyProfileFilter('689209jfkncn', 'malware', 1);
 exit;
-
+*/
 		foreach($all_filters as $all_filter_key=>$all_filter_desc){
 			if(isset($newvalues['block_'.$all_filter_key])){
 				echo 'Found block_'.$all_filter_key."<br>\n";

@@ -1164,19 +1164,61 @@ class ControlDHelper{
 	}		
 	
 	public function modifyProfileFilter($profile_id, $filter_key, $status){
-		$data = array( 
-			'status' => $status,
-		);
-		$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/filter/'.$filter_key;
-
-		if($this->debug){
-			echo 'modifyProfileFilter:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
-			if($this->debug == 'debug_nosend'){
-				return true;
+		// Handle special cases for ip_malware and ai_malware
+		if ($filter_key === 'ip_malware') {
+			// ip_malware uses a different endpoint structure
+			$data = array( 
+				'status' => $status,
+			);
+			$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/ipfilter/ip_malware';
+			
+			if($this->debug){
+				echo 'modifyProfileFilter (ipfilter):  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+				if($this->debug == 'debug_nosend'){
+					return true;
+				}
 			}
+			
+			return $this->putRequest($endpoint, $data);
+		} elseif ($filter_key === 'ai_malware') {
+			// ai_malware uses the options endpoint
+			return $this->modifyProfileOptions($profile_id, 'ai_malware', $status);
+		} elseif ($filter_key === 'porn_strict') {
+			// porn_strict is handled as a level on the porn filter
+			$data = array( 
+				'status' => $status,
+				'lvl' => 'porn_strict'
+			);
+			$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/filter/porn';
+			
+			if($this->debug){
+				echo 'modifyProfileFilter (porn_strict):  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+				if($this->debug == 'debug_nosend'){
+					return true;
+				}
+			}
+			
+			return $this->putRequest($endpoint, $data);
+		} else {
+			// Standard filters use the regular endpoint
+			$data = array( 
+				'status' => $status,
+			);
+			// Handle porn filter with correct level
+			if ($filter_key === 'porn' && $status == 1) {
+				$data['lvl'] = 'porn'; // Set to regular porn level when enabling
+			}
+			$endpoint = 'https://api.controld.com/profiles/'.$profile_id.'/filters/filter/'.$filter_key;
+
+			if($this->debug){
+				echo 'modifyProfileFilter:  '.$endpoint.' '.print_r($data, TRUE).'<br>';
+				if($this->debug == 'debug_nosend'){
+					return true;
+				}
+			}
+			
+			return $this->putRequest($endpoint, $data);
 		}
-		
-		return $this->putRequest($endpoint, $data);
 	}
 	
 	//RULE FOLDERS

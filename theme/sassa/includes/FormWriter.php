@@ -1,11 +1,13 @@
 <?php
-require_once( __DIR__ . '/../../../includes/Globalvars.php');
-require_once( __DIR__ . '/../../../includes/DbConnector.php');
-require_once( __DIR__ . '/../../../includes/FormWriterMaster.php');
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
+
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriter extends FormWriterMaster { 
+class FormWriter extends FormWriterMasterBootstrap { 
 
 	public $validate_style_info = '
 							ignore: ":hidden:not(input[type=\'checkbox\'], input[type=\'radio\'])",
