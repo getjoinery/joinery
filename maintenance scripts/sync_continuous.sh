@@ -146,6 +146,74 @@ read_ignore_patterns() {
     printf '%s\n' "${patterns[@]}"
 }
 
+# Function to build rsync exclude options (reusable for sync and counting)
+build_rsync_excludes() {
+    local excludes=(
+        --exclude='.git/'
+        --exclude='.gitignore'
+        --exclude='.DS_Store'
+        --exclude='Thumbs.db'
+        --exclude='node_modules/'
+        --exclude='venv/'
+        --exclude='__pycache__/'
+        --exclude='*.pyc'
+        --exclude='.env'
+        --exclude='*.log'
+        --exclude='tmp/'
+        --exclude='temp/'
+        --exclude='.cache/'
+        --exclude='dist/'
+        --exclude='build/'
+        --exclude='.syncignore'
+    )
+    
+    # Add custom ignore patterns
+    if [ -n "$FULL_IGNORE_PATH" ]; then
+        readarray -t CUSTOM_EXCLUDES < <(read_ignore_patterns "$FULL_IGNORE_PATH")
+        excludes+=("${CUSTOM_EXCLUDES[@]}")
+    fi
+    
+    printf '%s\n' "${excludes[@]}"
+}
+
+# Function to count trackable files
+count_trackable_files() {
+    local local_dir="$1"
+    
+    # Build exclude patterns for find command
+    local find_excludes=()
+    
+    # Convert rsync excludes to find excludes
+    readarray -t rsync_excludes < <(build_rsync_excludes)
+    
+    for exclude in "${rsync_excludes[@]}"; do
+        # Remove --exclude= prefix
+        local pattern="${exclude#--exclude=}"
+        
+        # Convert rsync patterns to find patterns
+        if [[ "$pattern" == */ ]]; then
+            # Directory pattern - use -path with wildcard
+            find_excludes+=(-path "*/${pattern%/}" -prune -o)
+        elif [[ "$pattern" == *.* ]]; then
+            # File extension pattern
+            find_excludes+=(-name "$pattern" -prune -o)
+        else
+            # General pattern
+            find_excludes+=(-name "$pattern" -prune -o)
+        fi
+    done
+    
+    # Count files, excluding the patterns (follow symlinks like rsync does)
+    local count
+    if [ ${#find_excludes[@]} -gt 0 ]; then
+        count=$(find -L "$local_dir" "${find_excludes[@]}" -type f -print 2>/dev/null | wc -l)
+    else
+        count=$(find -L "$local_dir" -type f 2>/dev/null | wc -l)
+    fi
+    
+    echo "$count"
+}
+
 # Signal handlers
 cleanup() {
     SHOULD_EXIT=true
@@ -197,33 +265,15 @@ perform_sync() {
         --stats
         --omit-dir-times
         -e "ssh -p $SSH_PORT"
-        --exclude='.git/'
-        --exclude='.gitignore'
-        --exclude='.DS_Store'
-        --exclude='Thumbs.db'
-        --exclude='node_modules/'
-        --exclude='venv/'
-        --exclude='__pycache__/'
-        --exclude='*.pyc'
-        --exclude='.env'
-        --exclude='*.log'
-        --exclude='tmp/'
-        --exclude='temp/'
-        --exclude='.cache/'
-        --exclude='dist/'
-        --exclude='build/'
-        --exclude='.syncignore'
     )
+    
+    # Add exclude patterns
+    readarray -t EXCLUDE_OPTS < <(build_rsync_excludes)
+    RSYNC_OPTS+=("${EXCLUDE_OPTS[@]}")
     
     # Add delete option if not disabled
     if [ "$NO_DELETE" = false ]; then
         RSYNC_OPTS+=("--delete")
-    fi
-    
-    # Add custom ignore patterns
-    if [ -n "$FULL_IGNORE_PATH" ]; then
-        readarray -t CUSTOM_EXCLUDES < <(read_ignore_patterns "$FULL_IGNORE_PATH")
-        RSYNC_OPTS+=("${CUSTOM_EXCLUDES[@]}")
     fi
     
     # Run rsync
@@ -348,7 +398,7 @@ watch_with_polling() {
     
     # Store initial state
     local last_state_file="/tmp/.sync_state_$"
-    find "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$last_state_file"
+    find -L "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$last_state_file"
     
     while [ "$SHOULD_EXIT" = false ]; do
         sleep "$SYNC_INTERVAL"
@@ -357,9 +407,9 @@ watch_with_polling() {
             break
         fi
         
-        # Get current state
+        # Get current state (follow symlinks like rsync does)
         local current_state_file="/tmp/.sync_state_current_$"
-        find "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$current_state_file"
+        find -L "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$current_state_file"
         
         # Check if state changed
         if ! diff -q "$last_state_file" "$current_state_file" >/dev/null 2>&1; then
@@ -649,6 +699,10 @@ fi
 # Build remote path
 REMOTE_PATH="$SSH_USER@$REMOTE_HOST:$REMOTE_DIR"
 
+# Count trackable files
+print_status "Analyzing directory structure..."
+TRACKABLE_FILES=$(count_trackable_files "${LOCAL_DIR%/}")
+
 # Print configuration
 echo ""
 print_status "Continuous Directory Synchronization"
@@ -666,6 +720,7 @@ fi
 if [ "$VERBOSE" = true ]; then
     echo "  Verbose:  Enabled (detailed rsync statistics)"
 fi
+echo "  Files:    $TRACKABLE_FILES files being tracked"
 echo "====================================="
 echo ""
 
@@ -755,33 +810,15 @@ if [ "$INITIAL_SYNC" = true ]; then
             --stats
             --omit-dir-times
             -e "ssh -p $SSH_PORT"
-            --exclude='.git/'
-            --exclude='.gitignore'
-            --exclude='.DS_Store'
-            --exclude='Thumbs.db'
-            --exclude='node_modules/'
-            --exclude='venv/'
-            --exclude='__pycache__/'
-            --exclude='*.pyc'
-            --exclude='.env'
-            --exclude='*.log'
-            --exclude='tmp/'
-            --exclude='temp/'
-            --exclude='.cache/'
-            --exclude='dist/'
-            --exclude='build/'
-            --exclude='.syncignore'
         )
+        
+        # Add exclude patterns
+        readarray -t EXCLUDE_OPTS < <(build_rsync_excludes)
+        RSYNC_OPTS+=("${EXCLUDE_OPTS[@]}")
         
         # Add delete option if not disabled
         if [ "$NO_DELETE" = false ]; then
             RSYNC_OPTS+=("--delete")
-        fi
-        
-        # Add custom ignore patterns
-        if [ -n "$FULL_IGNORE_PATH" ]; then
-            readarray -t CUSTOM_EXCLUDES < <(read_ignore_patterns "$FULL_IGNORE_PATH")
-            RSYNC_OPTS+=("${CUSTOM_EXCLUDES[@]}")
         fi
         
         # Run rsync directly (will prompt for password)
