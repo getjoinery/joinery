@@ -24,6 +24,7 @@ SHOULD_EXIT=false
 LAST_SYNC_TIME=0
 SYNC_IN_PROGRESS=false
 SSH_KEY_AUTH=false
+CHANGE_DETECTED_TIME=0
 
 # Colors for output
 RED='\033[0;31m'
@@ -523,9 +524,9 @@ perform_sync() {
         echo "  Files transferred: $files_transferred, Total size: $total_size"
     fi
     
-    local exit_code=${PIPESTATUS[0]}
+    local exit_code=$rsync_exit_code
     local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
+    local duration=$((end_time - CHANGE_DETECTED_TIME))
     
     if [ $exit_code -eq 0 ]; then
         print_success "Sync completed successfully (${duration}s)"
@@ -598,6 +599,7 @@ watch_with_inotify() {
         fi
         
         print_change "Detected: $event on $file"
+        CHANGE_DETECTED_TIME=$(date +%s)
         perform_sync &
         SYNC_PID=$!
     done
@@ -625,6 +627,7 @@ watch_with_polling() {
         # Check if state changed
         if ! diff -q "$last_state_file" "$current_state_file" >/dev/null 2>&1; then
             print_change "Detected changes in directory"
+            CHANGE_DETECTED_TIME=$(date +%s)
             perform_sync &
             SYNC_PID=$!
             wait "$SYNC_PID" 2>/dev/null || true
