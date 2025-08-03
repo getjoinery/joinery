@@ -1,6 +1,7 @@
 <?php
 
-require_once($_SERVER['DOCUMENT_ROOT'] . '/vendor/autoload.php');
+require_once(__DIR__ . '/PathHelper.php');
+require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
