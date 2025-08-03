@@ -571,6 +571,8 @@ watch_with_inotify() {
         print_status "Selective monitoring enabled - rsync will filter files"
     fi
     
+    print_status "Tracking changes..."
+    
     # Start inotifywait in background
     inotifywait -mr --format '%w%f %e' \
         -e modify,create,delete,move \
@@ -608,10 +610,13 @@ watch_with_inotify() {
 # Function to watch with polling
 watch_with_polling() {
     print_status "Using polling method (checking every ${SYNC_INTERVAL}s)"
+    print_status "Building initial file state baseline..."
     
     # Store initial state
-    local last_state_file="/tmp/.sync_state_$$"
+    local last_state_file="/tmp/.sync_state_$"
     find -L "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$last_state_file"
+    
+    print_status "Tracking changes..."
     
     while [ "$SHOULD_EXIT" = false ]; do
         sleep "$SYNC_INTERVAL"
@@ -621,7 +626,7 @@ watch_with_polling() {
         fi
         
         # Get current state (follow symlinks like rsync does)
-        local current_state_file="/tmp/.sync_state_current_$$"
+        local current_state_file="/tmp/.sync_state_current_$"
         find -L "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$current_state_file"
         
         # Check if state changed
