@@ -45,6 +45,12 @@ Plugins in `/plugins/[name]/` have full MVC structure and can:
 - Database-stored settings in `stg_settings` table
 - File-based config: `config/Globalvars_site.php` (gitignored)
 
+### Important Settings
+- **composerAutoLoad**: Path to vendor directory (e.g., `/home/user1/vendor/`)
+  - This setting contains the path to the vendor directory, NOT the full path to autoload.php
+  - Code should append `autoload.php` to this path when using it
+  - Example: `$autoload_path = $settings->get_setting('composerAutoLoad') . 'autoload.php';`
+
 ### Data Classes Pattern
 ```php
 class TableName extends SystemBase {
