@@ -1,18 +1,17 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
+	require_once(__DIR__ . '/../../../includes/PathHelper.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-
-
-	require_once(__DIR__.'/../data/ctldaccounts_class.php');
-	require_once(__DIR__.'/../data/ctlddevices_class.php');
-	require_once(__DIR__.'/../data/ctldfilters_class.php');
-	require_once(__DIR__.'/../data/ctldprofiles_class.php');
-	require_once(__DIR__.'/../data/ctldservices_class.php');
-	require_once(__DIR__.'/../includes/ControlDHelper.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	PathHelper::requireOnce('includes/ErrorHandler.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/DbConnector.php');
+	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctldfilters_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctldprofiles_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
+	PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
 
 
 
