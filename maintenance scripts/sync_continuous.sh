@@ -15,6 +15,8 @@ DEFAULT_REMOTE_HOST=""
 DEFAULT_REMOTE_DIR=""
 DEFAULT_SYNC_INTERVAL=2  # seconds between sync checks
 DEFAULT_WATCH_METHOD="auto"  # auto, inotify, or polling
+DEFAULT_MONITOR_PLUGINS=""  # comma-separated list of plugins to monitor
+DEFAULT_MONITOR_THEMES=""   # comma-separated list of themes to monitor
 
 # Runtime variables
 SYNC_PID=""
@@ -87,7 +89,7 @@ read_config() {
             line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             if [ -n "$line" ] && [[ ! "$line" =~ ^[[:space:]]*# ]]; then
                 # Only allow specific variables for security
-                if [[ "$line" =~ ^DEFAULT_(LOCAL_DIR|REMOTE_HOST|REMOTE_DIR|SSH_USER|SSH_PORT|SYNC_INTERVAL|WATCH_METHOD)= ]]; then
+                if [[ "$line" =~ ^DEFAULT_(LOCAL_DIR|REMOTE_HOST|REMOTE_DIR|SSH_USER|SSH_PORT|SYNC_INTERVAL|WATCH_METHOD|MONITOR_PLUGINS|MONITOR_THEMES)= ]]; then
                     # Extract key and value
                     local key="${line%%=*}"
                     local value="${line#*=}"
@@ -116,6 +118,12 @@ read_config() {
                             ;;
                         DEFAULT_WATCH_METHOD)
                             DEFAULT_WATCH_METHOD="$value"
+                            ;;
+                        DEFAULT_MONITOR_PLUGINS)
+                            DEFAULT_MONITOR_PLUGINS="$value"
+                            ;;
+                        DEFAULT_MONITOR_THEMES)
+                            DEFAULT_MONITOR_THEMES="$value"
                             ;;
                     esac
                 fi
@@ -146,9 +154,107 @@ read_ignore_patterns() {
     printf '%s\n' "${patterns[@]}"
 }
 
+# Function to build selective plugin/theme includes and excludes
+build_selective_monitoring() {
+    local monitor_plugins="$1"
+    local monitor_themes="$2"
+    local local_dir="$3"
+    local patterns=()
+    
+    # Only add selective monitoring if plugins or themes are specified
+    if [ -n "$monitor_plugins" ] || [ -n "$monitor_themes" ]; then
+        # Handle plugins
+        if [ -n "$monitor_plugins" ]; then
+            # Convert comma-separated list to array
+            IFS=',' read -ra PLUGIN_ARRAY <<< "$monitor_plugins"
+            local plugin_list=""
+            
+            # First include the plugins directory itself
+            patterns+=("--include=plugins/")
+            patterns+=("--include=/plugins/")
+            
+            for plugin in "${PLUGIN_ARRAY[@]}"; do
+                # Trim whitespace
+                plugin=$(echo "$plugin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                if [ -n "$plugin" ]; then
+                    # Check if the plugin directory actually exists
+                    if [ -d "${local_dir%/}/plugins/$plugin" ] || [ -L "${local_dir%/}/plugins/$plugin" ]; then
+                        patterns+=("--include=plugins/$plugin/")
+                        patterns+=("--include=plugins/$plugin/***")
+                        patterns+=("--include=/plugins/$plugin/")
+                        patterns+=("--include=/plugins/$plugin/***")
+                        plugin_list="${plugin_list}${plugin_list:+, }$plugin"
+                    else
+                        echo "WARNING: Plugin directory not found: plugins/$plugin" >&2
+                    fi
+                fi
+            done
+            # Exclude all other plugins
+            patterns+=("--exclude=plugins/*/")
+            patterns+=("--exclude=/plugins/*/")
+        fi
+        
+        # Handle themes
+        if [ -n "$monitor_themes" ]; then
+            # Convert comma-separated list to array
+            IFS=',' read -ra THEME_ARRAY <<< "$monitor_themes"
+            local theme_list=""
+            
+            # First include the theme directory itself
+            patterns+=("--include=theme/")
+            patterns+=("--include=/theme/")
+            
+            for theme in "${THEME_ARRAY[@]}"; do
+                # Trim whitespace
+                theme=$(echo "$theme" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                if [ -n "$theme" ]; then
+                    # Check if the theme directory actually exists
+                    if [ -d "${local_dir%/}/theme/$theme" ] || [ -L "${local_dir%/}/theme/$theme" ]; then
+                        patterns+=("--include=theme/$theme/")
+                        patterns+=("--include=theme/$theme/***")
+                        patterns+=("--include=/theme/$theme/")
+                        patterns+=("--include=/theme/$theme/***")
+                        theme_list="${theme_list}${theme_list:+, }$theme"
+                    else
+                        echo "WARNING: Theme directory not found: theme/$theme" >&2
+                    fi
+                fi
+            done
+            # Exclude all other themes
+            patterns+=("--exclude=theme/*/")
+            patterns+=("--exclude=/theme/*/")
+        fi
+        
+        # If only plugins specified, exclude all themes
+        if [ -n "$monitor_plugins" ] && [ -z "$monitor_themes" ]; then
+            patterns+=("--exclude=theme/")
+            patterns+=("--exclude=/theme/")
+        fi
+        
+        # If only themes specified, exclude all plugins
+        if [ -z "$monitor_plugins" ] && [ -n "$monitor_themes" ]; then
+            patterns+=("--exclude=plugins/")
+            patterns+=("--exclude=/plugins/")
+        fi
+    fi
+    
+    # Return patterns as array elements
+    printf '%s\n' "${patterns[@]}"
+}
+
 # Function to build rsync exclude options (reusable for sync and counting)
 build_rsync_excludes() {
-    local excludes=(
+    local monitor_plugins="$1"
+    local monitor_themes="$2"
+    local local_dir="$3"
+    local excludes=()
+    
+    # Add selective monitoring patterns first (order matters in rsync)
+    readarray -t SELECTIVE_PATTERNS < <(build_selective_monitoring "$monitor_plugins" "$monitor_themes" "$local_dir")
+    excludes+=("${SELECTIVE_PATTERNS[@]}")
+    
+    # Add standard excludes
+    excludes+=(
         --exclude='.git/'
         --exclude='.gitignore'
         --exclude='.DS_Store'
@@ -179,36 +285,119 @@ build_rsync_excludes() {
 # Function to count trackable files
 count_trackable_files() {
     local local_dir="$1"
+    local monitor_plugins="$2"
+    local monitor_themes="$3"
     
-    # Build exclude patterns for find command
-    local find_excludes=()
-    
-    # Convert rsync excludes to find excludes
-    readarray -t rsync_excludes < <(build_rsync_excludes)
-    
-    for exclude in "${rsync_excludes[@]}"; do
-        # Remove --exclude= prefix
-        local pattern="${exclude#--exclude=}"
-        
-        # Convert rsync patterns to find patterns
-        if [[ "$pattern" == */ ]]; then
-            # Directory pattern - use -path with wildcard
-            find_excludes+=(-path "*/${pattern%/}" -prune -o)
-        elif [[ "$pattern" == *.* ]]; then
-            # File extension pattern
-            find_excludes+=(-name "$pattern" -prune -o)
+    # Debug: Show directory structure if selective monitoring is enabled
+    if ([ -n "$monitor_plugins" ] || [ -n "$monitor_themes" ]) && [ "$DEBUG" = true ]; then
+        print_status "Debug: Checking directory structure..."
+        if [ -d "$local_dir/plugins" ] || [ -L "$local_dir/plugins" ]; then
+            echo "  plugins/ directory exists"
+            if [ -n "$monitor_plugins" ]; then
+                IFS=',' read -ra PLUGIN_ARRAY <<< "$monitor_plugins"
+                for plugin in "${PLUGIN_ARRAY[@]}"; do
+                    plugin=$(echo "$plugin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    if [ -d "$local_dir/plugins/$plugin" ] || [ -L "$local_dir/plugins/$plugin" ]; then
+                        local file_count=$(find -L "$local_dir/plugins/$plugin" -type f 2>/dev/null | wc -l)
+                        echo "    plugins/$plugin exists ($file_count files)"
+                    else
+                        echo "    plugins/$plugin NOT FOUND"
+                    fi
+                done
+            fi
         else
-            # General pattern
-            find_excludes+=(-name "$pattern" -prune -o)
+            echo "  plugins/ directory NOT FOUND"
         fi
-    done
+        
+        if [ -d "$local_dir/theme" ] || [ -L "$local_dir/theme" ]; then
+            echo "  theme/ directory exists"
+            if [ -n "$monitor_themes" ]; then
+                IFS=',' read -ra THEME_ARRAY <<< "$monitor_themes"
+                for theme in "${THEME_ARRAY[@]}"; do
+                    theme=$(echo "$theme" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    if [ -d "$local_dir/theme/$theme" ] || [ -L "$local_dir/theme/$theme" ]; then
+                        local file_count=$(find -L "$local_dir/theme/$theme" -type f 2>/dev/null | wc -l)
+                        echo "    theme/$theme exists ($file_count files)"
+                    else
+                        echo "    theme/$theme NOT FOUND"
+                    fi
+                done
+            fi
+        else
+            echo "  theme/ directory NOT FOUND"
+        fi
+        
+        # Debug: Show rsync patterns being used
+        print_status "Debug: Rsync patterns being used:"
+        readarray -t DEBUG_PATTERNS < <(build_rsync_excludes "$monitor_plugins" "$monitor_themes" "$local_dir")
+        for pattern in "${DEBUG_PATTERNS[@]}"; do
+            echo "    $pattern"
+        done
+    fi
     
-    # Count files, excluding the patterns (follow symlinks like rsync does)
+    # Use rsync dry-run to count files that would be transferred
+    local RSYNC_OPTS=(
+        -avzhL
+        --dry-run
+        --stats
+        --no-perms
+        --no-owner
+        --no-group
+        --omit-dir-times
+    )
+    
+    # Add exclude patterns
+    readarray -t EXCLUDE_OPTS < <(build_rsync_excludes "$monitor_plugins" "$monitor_themes" "$local_dir")
+    RSYNC_OPTS+=("${EXCLUDE_OPTS[@]}")
+    
+    # Run rsync dry-run and extract file count
     local count
-    if [ ${#find_excludes[@]} -gt 0 ]; then
-        count=$(find -L "$local_dir" "${find_excludes[@]}" -type f -print 2>/dev/null | wc -l)
-    else
-        count=$(find -L "$local_dir" -type f 2>/dev/null | wc -l)
+    count=$(rsync "${RSYNC_OPTS[@]}" "$local_dir/" /tmp/dummy_target_$ 2>/dev/null | \
+            grep "Number of regular files transferred:" | \
+            sed 's/Number of regular files transferred: //' | \
+            sed 's/,.*$//' || echo "0")
+    
+    # If that didn't work, fall back to find method with approximation
+    if [ "$count" = "0" ] || [ -z "$count" ]; then
+        print_warning "Rsync dry-run didn't work, using find approximation..."
+        
+        # If selective monitoring is enabled, count files in selected directories only
+        if [ -n "$monitor_plugins" ] || [ -n "$monitor_themes" ]; then
+            local total_count=0
+            
+            # Count plugin files
+            if [ -n "$monitor_plugins" ]; then
+                IFS=',' read -ra PLUGIN_ARRAY <<< "$monitor_plugins"
+                for plugin in "${PLUGIN_ARRAY[@]}"; do
+                    plugin=$(echo "$plugin" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    if [ -d "$local_dir/plugins/$plugin" ] || [ -L "$local_dir/plugins/$plugin" ]; then
+                        local plugin_count=$(find -L "$local_dir/plugins/$plugin" -type f 2>/dev/null | wc -l)
+                        total_count=$((total_count + plugin_count))
+                    fi
+                done
+            fi
+            
+            # Count theme files
+            if [ -n "$monitor_themes" ]; then
+                IFS=',' read -ra THEME_ARRAY <<< "$monitor_themes"
+                for theme in "${THEME_ARRAY[@]}"; do
+                    theme=$(echo "$theme" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    if [ -d "$local_dir/theme/$theme" ] || [ -L "$local_dir/theme/$theme" ]; then
+                        local theme_count=$(find -L "$local_dir/theme/$theme" -type f 2>/dev/null | wc -l)
+                        total_count=$((total_count + theme_count))
+                    fi
+                done
+            fi
+            
+            # Count other files (excluding plugins/themes directories entirely)
+            local other_count=$(find -L "$local_dir" -path "$local_dir/plugins" -prune -o -path "$local_dir/theme" -prune -o -type f -print 2>/dev/null | wc -l)
+            total_count=$((total_count + other_count))
+            
+            count=$total_count
+        else
+            # Standard counting without selective monitoring
+            count=$(find -L "$local_dir" -type f 2>/dev/null | wc -l)
+        fi
     fi
     
     echo "$count"
@@ -267,8 +456,8 @@ perform_sync() {
         -e "ssh -p $SSH_PORT"
     )
     
-    # Add exclude patterns
-    readarray -t EXCLUDE_OPTS < <(build_rsync_excludes)
+    # Add exclude patterns (without status messages during sync)
+    readarray -t EXCLUDE_OPTS < <(build_rsync_excludes "$MONITOR_PLUGINS" "$MONITOR_THEMES" "${LOCAL_DIR%/}")
     RSYNC_OPTS+=("${EXCLUDE_OPTS[@]}")
     
     # Add delete option if not disabled
@@ -276,11 +465,22 @@ perform_sync() {
         RSYNC_OPTS+=("--delete")
     fi
     
-    # Run rsync
-    print_status "Starting sync..."
-    rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1 | while IFS= read -r line; do
-        # Filter and format rsync output based on verbose setting
-        if [ "$VERBOSE" = true ]; then
+    # Run rsync and capture output
+    local rsync_output
+    rsync_output=$(rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1)
+    local rsync_exit_code=$?
+    
+    # Process output line by line
+    local files_transferred=""
+    local total_size=""
+    
+    while IFS= read -r line; do
+        # Capture stats for combined output
+        if [[ "$line" =~ "Number of regular files transferred:" ]]; then
+            files_transferred=$(echo "$line" | sed 's/Number of regular files transferred: //')
+        elif [[ "$line" =~ "Total file size:" ]]; then
+            total_size=$(echo "$line" | sed 's/Total file size: //')
+        elif [ "$VERBOSE" = true ]; then
             # Verbose mode: show detailed statistics and most output
             if [[ "$line" =~ "Number of" ]] || [[ "$line" =~ "Total" ]] || [[ "$line" =~ "sent" ]] || 
                [[ "$line" =~ "Literal data:" ]] || [[ "$line" =~ "Matched data:" ]] || 
@@ -299,9 +499,7 @@ perform_sync() {
             fi
         else
             # Non-verbose mode: show minimal output
-            if [[ "$line" =~ "Number of regular files transferred:" ]] || [[ "$line" =~ "Total file size:" ]]; then
-                echo "  $line"
-            elif [[ "$line" =~ "building file list" ]] || [[ "$line" =~ "sending incremental" ]]; then
+            if [[ "$line" =~ "building file list" ]] || [[ "$line" =~ "sending incremental" ]]; then
                 # Skip these lines
                 :
             elif [[ "$line" =~ "failed to set times on" ]] && [[ "$line" =~ "/\." ]]; then
@@ -312,12 +510,18 @@ perform_sync() {
                  [[ ! "$line" =~ "Number of deleted" ]] && [[ ! "$line" =~ "Total transferred" ]] &&
                  [[ ! "$line" =~ "Total bytes" ]] && [[ ! "$line" =~ "bytes/sec" ]] &&
                  [[ ! "$line" =~ "speedup is" ]] && [[ ! "$line" =~ "Literal data:" ]] &&
-                 [[ ! "$line" =~ "Matched data:" ]] && [[ ! "$line" =~ "File list" ]]; then
+                 [[ ! "$line" =~ "Matched data:" ]] && [[ ! "$line" =~ "File list" ]] &&
+                 [[ ! "$line" =~ "Number of regular files transferred:" ]] && [[ ! "$line" =~ "Total file size:" ]]; then
                 # Show only file transfers and important messages (not detailed stats)
                 print_change "$line"
             fi
         fi
-    done
+    done <<< "$rsync_output"
+    
+    # Show combined stats if we captured them
+    if [ -n "$files_transferred" ] && [ -n "$total_size" ]; then
+        echo "  Files transferred: $files_transferred, Total size: $total_size"
+    fi
     
     local exit_code=${PIPESTATUS[0]}
     local end_time=$(date +%s)
@@ -359,6 +563,13 @@ watch_with_inotify() {
     INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.log"
     INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.sw[px]"
     
+    # Add selective monitoring excludes for inotify
+    if [ -n "$MONITOR_PLUGINS" ] || [ -n "$MONITOR_THEMES" ]; then
+        # If selective monitoring is enabled, we need to be more careful with inotify
+        # For now, let inotify watch everything and let rsync handle the filtering
+        print_status "Selective monitoring enabled - rsync will filter files"
+    fi
+    
     # Start inotifywait in background
     inotifywait -mr --format '%w%f %e' \
         -e modify,create,delete,move \
@@ -397,7 +608,7 @@ watch_with_polling() {
     print_status "Using polling method (checking every ${SYNC_INTERVAL}s)"
     
     # Store initial state
-    local last_state_file="/tmp/.sync_state_$"
+    local last_state_file="/tmp/.sync_state_$$"
     find -L "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$last_state_file"
     
     while [ "$SHOULD_EXIT" = false ]; do
@@ -408,7 +619,7 @@ watch_with_polling() {
         fi
         
         # Get current state (follow symlinks like rsync does)
-        local current_state_file="/tmp/.sync_state_current_$"
+        local current_state_file="/tmp/.sync_state_current_$$"
         find -L "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$current_state_file"
         
         # Check if state changed
@@ -501,6 +712,8 @@ show_usage() {
     echo "  --setup-ssh-key        - Interactive SSH key setup helper"
     echo "  --skip-ssh-test        - Skip SSH connection test (if you know it works)"
     echo "  --verbose              - Show detailed rsync statistics after each sync"
+    echo "  --monitor-plugins <list> - Comma-separated list of plugins to monitor (e.g., bookings,controld)"
+    echo "  --monitor-themes <list>  - Comma-separated list of themes to monitor (e.g., default,custom)"
     echo ""
     echo "Arguments (all optional if defaults configured):"
     echo "  local_dir   - Local directory to sync FROM"
@@ -514,6 +727,13 @@ show_usage() {
     echo "  inotify - Use inotify for instant file change detection (Linux only)"
     echo "  polling - Check for changes at regular intervals"
     echo ""
+    echo "Selective Monitoring:"
+    echo "  By default, all files are monitored except standard exclusions (.git, node_modules, etc.)"
+    echo "  Use --monitor-plugins and --monitor-themes to track only specific plugins/themes:"
+    echo "    --monitor-plugins bookings,controld,items"
+    echo "    --monitor-themes default"
+    echo "  This will exclude all other plugins and themes, significantly reducing tracked files."
+    echo ""
     echo "Note: On WSL monitoring Windows drives (/mnt/*), use polling mode as inotify"
     echo "      doesn't work with Windows filesystems."
     echo ""
@@ -526,10 +746,13 @@ show_usage() {
     echo "    DEFAULT_SSH_PORT=22"
     echo "    DEFAULT_SYNC_INTERVAL=2"
     echo "    DEFAULT_WATCH_METHOD=auto"
+    echo "    DEFAULT_MONITOR_PLUGINS=bookings,controld,items"
+    echo "    DEFAULT_MONITOR_THEMES=default"
     echo ""
     echo "Examples:"
     echo "  $0 ./my-project server.example.com /home/user/my-project"
     echo "  $0 --method inotify --initial-sync"
+    echo "  $0 --monitor-plugins bookings,controld --monitor-themes default"
     echo "  $0 --interval 10 --method polling ./docs server.com /var/www/docs"
     echo "  $0 --setup-ssh-key ./project server.com /var/www/project deploy"
     echo "  $0 --skip-ssh-test ./src server.com /var/www (if connection test fails)"
@@ -542,6 +765,7 @@ show_usage() {
     echo "  - Real-time file change monitoring"
     echo "  - SSH key authentication setup"
     echo "  - Custom ignore patterns"
+    echo "  - Selective plugin/theme monitoring to reduce tracked files"
     echo ""
     echo "To stop the continuous sync, press Ctrl+C"
 }
@@ -567,6 +791,8 @@ INITIAL_SYNC=false
 NO_DELETE=false
 SKIP_SSH_TEST=false
 VERBOSE=false
+MONITOR_PLUGINS="$DEFAULT_MONITOR_PLUGINS"
+MONITOR_THEMES="$DEFAULT_MONITOR_THEMES"
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -596,6 +822,24 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             IGNORE_FILE="$2"
+            shift 2
+            ;;
+        --monitor-plugins)
+            if [ -z "$2" ]; then
+                print_error "--monitor-plugins requires a comma-separated list argument"
+                show_usage
+                exit 1
+            fi
+            MONITOR_PLUGINS="$2"
+            shift 2
+            ;;
+        --monitor-themes)
+            if [ -z "$2" ]; then
+                print_error "--monitor-themes requires a comma-separated list argument"
+                show_usage
+                exit 1
+            fi
+            MONITOR_THEMES="$2"
             shift 2
             ;;
         --initial-sync)
@@ -701,7 +945,30 @@ REMOTE_PATH="$SSH_USER@$REMOTE_HOST:$REMOTE_DIR"
 
 # Count trackable files
 print_status "Analyzing directory structure..."
-TRACKABLE_FILES=$(count_trackable_files "${LOCAL_DIR%/}")
+
+# Show selective monitoring status if enabled
+if [ -n "$MONITOR_PLUGINS" ] || [ -n "$MONITOR_THEMES" ]; then
+    print_status "Using selective monitoring mode"
+    
+    if [ -n "$MONITOR_PLUGINS" ]; then
+        print_status "Monitoring plugins: $MONITOR_PLUGINS"
+    fi
+    if [ -n "$MONITOR_THEMES" ]; then
+        print_status "Monitoring themes: $MONITOR_THEMES"
+    fi
+    
+    # If only plugins specified, exclude all themes
+    if [ -n "$MONITOR_PLUGINS" ] && [ -z "$MONITOR_THEMES" ]; then
+        print_status "Excluding all themes (none specified)"
+    fi
+    
+    # If only themes specified, exclude all plugins
+    if [ -z "$MONITOR_PLUGINS" ] && [ -n "$MONITOR_THEMES" ]; then
+        print_status "Excluding all plugins (none specified)"
+    fi
+fi
+
+TRACKABLE_FILES=$(count_trackable_files "${LOCAL_DIR%/}" "$MONITOR_PLUGINS" "$MONITOR_THEMES")
 
 # Print configuration
 echo ""
@@ -716,6 +983,15 @@ if [ "$WATCH_METHOD" = "polling" ] || [ "$WATCH_METHOD" = "auto" ]; then
 fi
 if [ -n "$FULL_IGNORE_PATH" ]; then
     echo "  Ignores:  $FULL_IGNORE_PATH"
+fi
+if [ -n "$MONITOR_PLUGINS" ] || [ -n "$MONITOR_THEMES" ]; then
+    echo "  Selective Monitoring:"
+    if [ -n "$MONITOR_PLUGINS" ]; then
+        echo "    Plugins: $MONITOR_PLUGINS"
+    fi
+    if [ -n "$MONITOR_THEMES" ]; then
+        echo "    Themes:  $MONITOR_THEMES"
+    fi
 fi
 if [ "$VERBOSE" = true ]; then
     echo "  Verbose:  Enabled (detailed rsync statistics)"
@@ -794,7 +1070,6 @@ fi
 
 # Perform initial sync if requested
 if [ "$INITIAL_SYNC" = true ]; then
-    print_status "Performing initial sync..."
     if [ "$SSH_KEY_AUTH" = false ]; then
         print_warning "Initial sync with password authentication - you'll need to enter your password."
         echo ""
@@ -813,7 +1088,7 @@ if [ "$INITIAL_SYNC" = true ]; then
         )
         
         # Add exclude patterns
-        readarray -t EXCLUDE_OPTS < <(build_rsync_excludes)
+        readarray -t EXCLUDE_OPTS < <(build_rsync_excludes "$MONITOR_PLUGINS" "$MONITOR_THEMES" "${LOCAL_DIR%/}")
         RSYNC_OPTS+=("${EXCLUDE_OPTS[@]}")
         
         # Add delete option if not disabled
