@@ -457,14 +457,14 @@ exit;
 */
 		foreach($all_filters as $all_filter_key=>$all_filter_desc){
 			if(isset($newvalues['block_'.$all_filter_key])){
-				echo 'Found block_'.$all_filter_key."<br>\n";
+				//echo 'Found block_'.$all_filter_key."<br>\n";
 				//FORM VALUE WAS SUBMITTED
 				if(isset($cached_filters[$all_filter_key])){
 					//CACHED FILTER EXISTS
-					echo 'Cached filter '.$all_filter_key."<br>\n";
+					//echo 'Cached filter '.$all_filter_key."<br>\n";
 					if($cached_filters[$all_filter_key] != $newvalues['block_'.$all_filter_key]){
 						//CHANGED, UPDATE REMOTE AND LOCAL
-						echo 'Changed, update remote and local'."<br>\n";
+						//echo 'Changed, update remote and local'."<br>\n";
 						$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, $newvalues['block_'.$all_filter_key]);
 						if($result['success']){
 							foreach($filters as $filter){
@@ -479,12 +479,12 @@ exit;
 					}
 					else{
 						//NO NEED TO DO ANYTHING
-						echo 'Skipping'."<br>\n";
+						//echo 'Skipping'."<br>\n";
 					}
 				}
 				else{
 					//CACHED FILTER DOES NOT EXIST, UPDATE REMOTE FIRST AND THEN ADD LOCALLY
-					echo 'Cache does not exist '.$all_filter_key.', update remote then local'."<br>\n";
+					//echo 'Cache does not exist '.$all_filter_key.', update remote then local'."<br>\n";
 					$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, $newvalues['block_'.$all_filter_key]);
 					if($result['success']){
 						$new_cached_filter = new CtldFilter(NULL);
@@ -502,9 +502,9 @@ exit;
 				if(isset($cached_filters[$all_filter_key])){
 					//CACHED FILTER EXISTS
 					if($cached_filters[$all_filter_key]){
-						echo 'Cached filter exists '.$all_filter_key."<br>\n";
+						//echo 'Cached filter exists '.$all_filter_key."<br>\n";
 						//CACHED IS NOT ZERO, SO UPDATE CACHE AND UPDATE REMOTE
-						echo 'Update local and remote'."<br>\n";
+						//echo 'Update local and remote'."<br>\n";
 						$result = $cd->modifyProfileFilter($this->get('cdp_profile_id'), $all_filter_key, 0);
 						if($result['success']){
 							foreach($filters as $filter){
@@ -520,7 +520,7 @@ exit;
 					}
 					else{
 						//NO NEED TO DO ANYTHING
-						echo 'Skipping'."<br>\n";
+						//echo 'Skipping'."<br>\n";
 					}
 				}
 			}

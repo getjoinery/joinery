@@ -128,10 +128,10 @@
 	
 	if($account->get('cda_plan') == CtldAccount::PREMIUM_PLAN || $account->get('cda_plan') == CtldAccount::PRO_PLAN ){
 		echo '<h5>Ad and Malware</h5>';
-		$optionvals = array("No blocking" => 0, "Light blocking"=>'ads_small', 'Medium blocking'=>'ads_medium', 'Aggressive blocking'=>'ads');
+		$optionvals = array("No blocking" => 0, "Light blocking"=>'ads_small', 'Medium blocking'=>'ads_medium' /*, 'Aggressive blocking'=>'ads'*/);
 		echo $formwriter->dropinput("Ads", "block_ads", "", $optionvals, $filters['ads'], '', TRUE);
 
-		$optionvals = array("No blocking" => 0, "Light blocking"=>'malware', 'Medium blocking'=>'ip_malware', 'Aggressive blocking'=>'ai_malware');
+		$optionvals = array("No blocking" => 0,/* "Light blocking"=>'malware', */'Medium blocking'=>'ip_malware' /*, 'Aggressive blocking'=>'ai_malware'*/);
 		echo $formwriter->dropinput("Malware", "block_malware", "", $optionvals, $filters['malware'], '', TRUE);	
 		
 		echo $formwriter->toggleinput("Clickbait and disinformation sites", "block_fakenews", '', $filters['fakenews'], 1, '');
