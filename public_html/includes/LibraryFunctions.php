@@ -358,9 +358,17 @@ class LibraryFunctions {
 			}
 		}
 		else{
-			$theme_template = $settings->get_setting('theme_template', true, true);
+			// Try to get theme template, but handle cases where database might not be available
+			try {
+				$theme_template = $settings->get_setting('theme_template', true, true);
+			} catch (Exception $e) {
+				// If database is not available (e.g., during update_database.php), use fallback
+				$theme_template = null;
+			}
 		}
-		$theme_file = $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename;
+		
+		// Build file paths
+		$theme_file = $theme_template ? $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename : null;
 		$default_file = $siteDir.$subdirectory.'/'.$filename;
 		
 		if($debug){
@@ -372,7 +380,7 @@ class LibraryFunctions {
 
 
 
-		if($theme_template && file_exists($theme_file)){
+		if($theme_file && $theme_template && file_exists($theme_file)){
 			if($debug){
 				echo 'Found theme file.<br>';
 			}
@@ -399,7 +407,13 @@ class LibraryFunctions {
 			}
 		}
 		else{
-			throw new SystemDisplayablePermanentError('Could not find the specified theme file: '. $theme_file);					
+			// Provide more helpful error message
+			$error_msg = 'Could not find the specified file: ' . $filename;
+			if($theme_file) {
+				$error_msg .= '. Looked in theme: ' . $theme_file;
+			}
+			$error_msg .= ' and default location: ' . $default_file;
+			throw new SystemDisplayablePermanentError($error_msg);					
 		}
 	}
 	
