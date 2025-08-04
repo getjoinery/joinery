@@ -1,6 +1,6 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
@@ -29,8 +29,8 @@ if ($_POST){
 			$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			$user->save();
 		} catch (TTClassException $e) {
-			$errorhandler = new ErrorHandler();
-			$errorhandler->handle_general_error($e->getMessage());
+			require_once(__DIR__ . '/../includes/Exceptions/AuthorizationException.php');
+			throw new AuthorizationException($e->getMessage());
 		}
 
 		

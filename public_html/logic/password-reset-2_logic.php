@@ -3,7 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function password_reset_2_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/Activation.php');
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 

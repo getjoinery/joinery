@@ -2,7 +2,7 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 

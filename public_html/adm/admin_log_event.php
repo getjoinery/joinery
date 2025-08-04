@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
@@ -16,9 +16,8 @@
 	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to edit.');
 	$log_type = LibraryFunctions::fetch_variable('log_type', NULL, 1, 'You must provide a log_type.');	
 	if($log_type != EventLog::SURVEY_COMPLETED && $log_type != EventLog::WEB_LINK_ADDED_1 && $log_type != EventLog::WEB_LINK_ADDED_2 ) {
-		$errortext = 'Bad log type: ' . $log_type;
-		$errorhandler = new ErrorHandler();
-		$errorhandler->handle_general_error($errortext);		
+		require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
+		throw new ValidationException('Bad log type: ' . $log_type);		
 	}
 	
 if ($_POST){

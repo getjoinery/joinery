@@ -2,7 +2,7 @@
 
 	function groups_to_waiting_list_migration(){
 		require_once( __DIR__ . '/../includes/Globalvars.php');	
-		require_once( __DIR__ . '/../includes/ErrorHandler.php');
+		// ErrorHandler.php no longer needed - using new ErrorManager system
 		require_once( __DIR__ . '/../includes/LibraryFunctions.php');
 		require_once( __DIR__ . '/../includes/SessionControl.php');
 

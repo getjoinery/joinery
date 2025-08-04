@@ -3,7 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function address_edit_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SystemClass.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
@@ -27,21 +27,7 @@ function address_edit_logic($get_vars, $post_vars){
 		
 		
 		
-		/*
-		if (!$new_address && $session->get_permission() == 0) {
-			if ($address->get('usa_address_is_verified')) {
-				$errorhandler = new ErrorHandler();
-				$errorhandler->handle_general_error(
-					'Sorry, you cannot edit a verified address.');
-			}
-
-			if (!$address->get('usa_is_bad')) {
-				$errorhandler = new ErrorHandler();
-				$errorhandler->handle_general_error(
-					'Sorry, you cannot edit a mappable and valid address.  If you need to enter a new address, you can <a href="/profile/users_addrs_deleted?a=' . LibraryFunctions::encode($address->key) . '">delete this one</a> and <a href="/profile/addresses_edit">add a new one</a>.');
-			}
-		}
-		*/
+		// Address editing restrictions removed - handled by new validation system
 
 		$address = Address::CreateAddressFromForm($post_vars, $session->get_user_id(), $address);
 		

@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	PathHelper::requireOnce('/includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	PathHelper::requireOnce('/includes/SessionControl.php');
@@ -39,8 +39,8 @@ if ($_POST){
 	if(isset($_POST['usr_email_new']) && $_POST['usr_email_new'] != $user->get('usr_email')) {
 
 		if (User::GetByEmail(trim($_POST['usr_email_new']))) {
-			$errorhandler = new ErrorHandler();
-			$errorhandler->handle_general_error('An account has already been registered with the email address '. htmlspecialchars($_POST['usr_email_new']) .'.');
+			require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
+			throw new ValidationException('An account has already been registered with the email address '. htmlspecialchars($_POST['usr_email_new']) .'.');
 		} else {
 			if($_SESSION['permission'] == 0){
 				Activation::email_change_send($user->key, trim($_POST['usr_email_new']));

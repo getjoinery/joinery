@@ -403,8 +403,8 @@ class User extends SystemBase {
 					new DateTimeZone($data['usr_timezone']);
 					$user->set('usr_timezone', $data['usr_timezone']);
 				} catch (Exception $e) {
-					$errorhandler = new ErrorHandler();
-					$errorhandler->handle_general_error('The timezone you entered is invalid.');
+					require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
+					throw new ValidationException('The timezone you entered is invalid.');
 				}
 			}
 			

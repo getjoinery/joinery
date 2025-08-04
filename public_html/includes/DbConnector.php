@@ -113,6 +113,8 @@ class DbConnector {
 	}				
 
 	function handle_query_error($e) {
+		require_once(__DIR__ . '/Exceptions/DatabaseException.php');
+		
 		$error_context = "DATABASE ERROR CONTEXT:\n";
 		
 		// Include last query parameters (already collected!)
@@ -123,11 +125,11 @@ class DbConnector {
 			}
 		}
 		
-		// Add context to the exception message
-		$message = $e->getMessage() . "\n\n" . $error_context;
+		// Create DatabaseException with context
+		$dbException = new DatabaseException($e->getMessage(), $e->getCode(), $e);
+		$dbException->setContext(['query_params' => $this->last_query_params]);
 		
-		// Re-throw with enhanced message
-		throw new PDOException($message, $e->getCode(), $e);
+		throw $dbException;
 	}
 
 	function _destruct() {
