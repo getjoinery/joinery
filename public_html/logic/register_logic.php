@@ -5,10 +5,6 @@ function register_logic($get_vars, $post_vars){
 	// Check if the page was requested with jQuery, if so, we should process this page differently
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
-	if ($ajax) { 
-		PathHelper::requireOnce('includes/AjaxErrorHandler.php');
-	}
-
 	PathHelper::requireOnce('includes/Activation.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
 	PathHelper::requireOnce('includes/ErrorHandler.php');

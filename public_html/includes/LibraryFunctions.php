@@ -1610,7 +1610,19 @@ class LibraryFunctions {
 			echo '</pre>';
 		}
 		
-		$dbhelper->execute_query();
+		try {
+			$dbhelper->execute_query();
+		} catch (PDOException $e) {
+			// Add context about the operation
+			$operation = $op == 'add' ? 'INSERT' : 'UPDATE';
+			$context = "Database $operation failed on table '$tablename'";
+			
+			if ($op == 'edit' && $p_keys) {
+				$context .= " for record: " . json_encode($p_keys);
+			}
+			
+			throw new PDOException($context . " - " . $e->getMessage(), $e->getCode(), $e);
+		}
 
 			
 		if($op == 'edit'){

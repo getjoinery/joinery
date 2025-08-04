@@ -113,15 +113,21 @@ class DbConnector {
 	}				
 
 	function handle_query_error($e) {
-		$error_context .= 'POSTGRES DEBUG INFO:';;
-		if(count($this->query_history)){
-			$error_context .= print_r($this->query_history, true);
-		}
+		$error_context = "DATABASE ERROR CONTEXT:\n";
+		
+		// Include last query parameters (already collected!)
 		if(count($this->last_query_params)){
-			$error_context .= print_r($this->last_query_params, true);
+			$error_context .= "\nLast Query Parameters:\n";
+			foreach($this->last_query_params as $param => $value) {
+				$error_context .= "  $param => $value\n";
+			}
 		}
 		
-		throw $e;
+		// Add context to the exception message
+		$message = $e->getMessage() . "\n\n" . $error_context;
+		
+		// Re-throw with enhanced message
+		throw new PDOException($message, $e->getCode(), $e);
 	}
 
 	function _destruct() {

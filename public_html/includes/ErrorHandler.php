@@ -13,7 +13,8 @@ function load_public_page_if_needed() {
             $theme_file = LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes');
             require_once($theme_file);
         } catch (Exception $e) {
-            // If theme loading fails (e.g., during database update), use basic error output
+            // Log the failure so we know theme loading failed
+            error_log("ErrorHandler: Failed to load theme PublicPage - " . $e->getMessage());
             return false;
         }
     }
@@ -100,7 +101,7 @@ class ErrorHandler{
 			}
 		}
 		if ($errortext) {
-			echo '<div class="form-error"><strong>'.$errortext.'</strong></div>';
+			echo '<div class="form-error"><strong>'.htmlspecialchars($errortext, ENT_QUOTES, 'UTF-8').'</strong></div>';
 		}
 		echo '<br />';
 
@@ -164,7 +165,7 @@ class ErrorHandler{
 		echo "<div><h2>Something didn't work</h2>";
 
 		if ($errortext) {
-			echo '<div class="form-error"><strong>'.$errortext.'</strong></div>';
+			echo '<div class="form-error"><strong>'.htmlspecialchars($errortext, ENT_QUOTES, 'UTF-8').'</strong></div>';
 		}
 		echo '<br />';
 
