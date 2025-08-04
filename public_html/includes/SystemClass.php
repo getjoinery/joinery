@@ -1012,8 +1012,13 @@ abstract class SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, static::$tablename, $p_keys, $rowdata, FALSE, $debug);
+		try {
+			$p_keys_return = LibraryFunctions::edit_table(
+				$dbhelper, $dblink, static::$tablename, $p_keys, $rowdata, FALSE, $debug);
+		} catch (PDOException $e) {
+			// Use the existing handle_query_error method
+			$dbhelper->handle_query_error($e);
+		}
 
 		$this->key = $p_keys_return[static::$pkey_column];
 			
@@ -1433,23 +1438,66 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 			exit;
 		}
 		
+		// Early AJAX detection
+		$is_ajax = (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && 
+		            $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') ||
+		           (isset($_SERVER['CONTENT_TYPE']) && 
+		            strpos($_SERVER['CONTENT_TYPE'], 'application/json') !== false);
 
 		$params = explode("/", $_SERVER['REQUEST_URI']);
 		
-		if($params[1] == 'admin'){
+		if(isset($params[1]) && $params[1] == 'admin'){
 			$errorpage = 'admin';
 		}
 		else{
 			$errorpage = 'public';
 		}
 
-		$show_errors = Globalvars::get_instance()->get_setting('show_errors');
+		try {
+			$show_errors = Globalvars::get_instance()->get_setting('show_errors');
+		} catch (Exception $e2) {
+			$show_errors = false;
+		}
+		
+		// Log all errors regardless of type
+		try {
+			GeneralError::LogGeneralError($e, $_SESSION ?? [], $_REQUEST ?? []);
+		} catch (Exception $logError) {
+			error_log("Failed to log error: " . $logError->getMessage());
+		}
+		
+		// Handle AJAX requests
+		if ($is_ajax) {
+			header('Content-Type: application/json');
+			
+			$response = ['success' => false];
+			
+			if ($e instanceof SystemDisplayableError || 
+			    $e instanceof SystemAjaxError ||
+			    $e instanceof DisplayableErrorMessage) {
+				$response['error'] = $e->getMessage();
+			} else {
+				$response['error'] = $show_errors ? 
+				                     $e->getMessage() : 
+				                     'An error occurred processing your request';
+			}
+			
+			if ($show_errors && !($e instanceof DisplayableErrorMessage)) {
+				$response['debug'] = [
+					'type' => get_class($e),
+					'file' => $e->getFile(),
+					'line' => $e->getLine()
+				];
+			}
+			
+			echo json_encode($response);
+			exit;
+		}
 
 		$errorhandler = new ErrorHandler($_SERVER["SERVER_PORT"] == 443);
 		if ($show_errors) {
 			$debug_message = 'Debug Message: ' . $e->getMessage() . '<br>' . $e->getCode() . '<br>' .$e->getTraceAsString(). '<br>' . $e->getFile() . '('.$e->getLine().')';
-			GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
-			error_log($debug_message);
+			error_log(strip_tags($debug_message));
 			if($errorpage == 'admin'){
 				$errorhandler->handle_admin_error($debug_message, ErrorHandler::PERMANENT_ERROR);
 			}
@@ -1460,7 +1508,6 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 		else {
 			if ($e instanceof PDOException) { 
 				error_log('DATABASE ERROR: ' . $e->getTraceAsString() . ' | ' . $e->getCode() . ' | ' . $e->getMessage());
-				GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
 				if($errorpage == 'admin'){
 					$errorhandler->handle_admin_error('');
 				}
@@ -1479,7 +1526,6 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 			}
 			else if ($e instanceof DisplayablePermanentErrorMessage) {
 				error_log('EXCEPTION: (DISPLAYABLE PERMANENT ERROR) ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
-				GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
 				if($errorpage == 'admin'){
 					$errorhandler->handle_admin_error($e->getMessage(), ErrorHandler::PERMANENT_ERROR);
 				}
@@ -1508,7 +1554,6 @@ if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) {
 			} 
 			else {
 				error_log('EXCEPTION: ' . $e->getMessage() . ' TRACE: ' . $e->getTraceAsString());
-				GeneralError::LogGeneralError($e, $_SESSION, $_REQUEST);
 				if($errorpage == 'admin'){
 					$errorhandler->handle_admin_error('');
 				}

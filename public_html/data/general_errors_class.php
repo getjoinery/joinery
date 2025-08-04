@@ -76,8 +76,12 @@ class GeneralError extends SystemBase {
 
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
+		
+		// Sanitize session data before storing
+		$safe_session = self::sanitizeSessionData($session);
+		$safe_request = self::sanitizeSessionData($request);
 	
-		$error_context = $e->getTraceAsString(). "\r\n \r\n REQUEST_URI: ". $_SERVER['REQUEST_URI']. "\r\n \r\n $_SESSION: " . print_r($session, true). ' $_REQUEST: '.print_r($request, true);
+		$error_context = $e->getTraceAsString(). "\r\n \r\n REQUEST_URI: ". $_SERVER['REQUEST_URI']. "\r\n \r\n $_SESSION: " . print_r($safe_session, true). ' $_REQUEST: '.print_r($safe_request, true);
 	
 
 		$error = new GeneralError(NULL);
@@ -107,6 +111,40 @@ class GeneralError extends SystemBase {
 			$error->set('err_usr_user_id', $session_obj->get_user_id());
 		}
 		$error->save();
+	}
+	
+	private static function sanitizeSessionData($data) {
+		if (!is_array($data)) {
+			return $data;
+		}
+		
+		$safe_data = $data;
+		
+		// Remove sensitive keys
+		$sensitive_keys = ['password', 'token', 'api_key', 'secret', 'credit_card', 'cvv', 'pin'];
+		
+		foreach ($sensitive_keys as $key) {
+			if (isset($safe_data[$key])) {
+				$safe_data[$key] = '[REDACTED]';
+			}
+			// Also check with different cases and patterns
+			foreach ($safe_data as $k => $v) {
+				if (stripos($k, $key) !== false) {
+					$safe_data[$k] = '[REDACTED]';
+				}
+			}
+		}
+		
+		// Handle nested arrays recursively
+		array_walk_recursive($safe_data, function(&$value, $k) use ($sensitive_keys) {
+			foreach ($sensitive_keys as $key) {
+				if (stripos($k, $key) !== false) {
+					$value = '[REDACTED]';
+				}
+			}
+		});
+		
+		return $safe_data;
 	}
 		
 }
