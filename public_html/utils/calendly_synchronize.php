@@ -1,7 +1,7 @@
 <?php
 	error_reporting(E_ERROR | E_PARSE);
 	require_once( __DIR__ . '/../includes/Globalvars.php');	
-	require_once( __DIR__ . '/../includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
 

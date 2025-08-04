@@ -2,7 +2,7 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function contact_preferences_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 

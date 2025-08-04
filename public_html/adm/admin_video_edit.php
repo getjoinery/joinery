@@ -24,15 +24,13 @@
 		
 			//WHEN USER FEED IN TEXT CONTAINING VIDEO INFO
 			if(!$source = Video::extract_source_from_url($_POST['vid_url'])) {
-				$errortext = 'We could not verify that the link you entered is from a video site we support.  Please check the link again and if you continue to have difficulty <a href="/contact">contact us</a> to help.';
-				$errorhandler = new ErrorHandler();
-				$errorhandler->handle_general_error($errortext);
+				require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
+				throw new ValidationException('We could not verify that the link you entered is from a video site we support.  Please check the link again and if you continue to have difficulty <a href="/contact">contact us</a> to help.');
 			}	
 
 			if(!$vid_video_number = Video::extract_number_from_url($source, $_POST['vid_url'])) {
-				$errortext = 'We could not verify that the link you entered is valid.  Please check the link again and if you continue to have difficulty <a href="/contact">contact us</a> to help.';
-				$errorhandler = new ErrorHandler();
-				$errorhandler->handle_general_error($errortext);		
+				require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
+				throw new ValidationException('We could not verify that the link you entered is valid.  Please check the link again and if you continue to have difficulty <a href="/contact">contact us</a> to help.');		
 			}
 
 			
@@ -80,8 +78,8 @@
 				}
 			}
 		} catch (TTClassException $e) {
-			$errorhandler = new ErrorHandler();
-			$errorhandler->handle_general_error($e->getMessage());
+			require_once(__DIR__ . '/../includes/Exceptions/SystemException.php');
+			throw new SystemException($e->getMessage());
 		}
 
 		LibraryFunctions::redirect('/admin/admin_videos');						

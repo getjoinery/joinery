@@ -3,7 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function login_logic($get_vars, $post_vars){
 	
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/Activation.php');
@@ -68,7 +68,8 @@ function login_logic($get_vars, $post_vars){
 			}
 		}
 		else {
-			throw new SystemDisplayableError('You cannot activate a user while being logged in as another user.');
+			require_once(__DIR__ . '/../includes/Exceptions/BusinessLogicException.php');
+			throw new BusinessLogicException('You cannot activate a user while being logged in as another user.');
 			exit();
 		}
 	}
@@ -80,16 +81,18 @@ function login_logic($get_vars, $post_vars){
 	// Check if the page was requested with jQuery, if so, we should process this page differently
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
-	if ($ajax) {
-		PathHelper::requireOnce('includes/AjaxErrorHandler.php');
-	}
+	// AJAX requests will be handled by the new ErrorManager system
 
 
 	if($post_vars){
 		if ((empty($post_vars['email']) && empty($post_vars['lbx_email'])) ||
 			(empty($post_vars['password']) && empty($post_vars['lbx_password']))) {
 			if ($ajax) {
-				throw new SystemDisplayableError('Please enter both a username and a password to login.');
+				require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
+				throw new ValidationException('Please enter both a username and a password to login.', [
+					'email' => 'Email is required',
+					'password' => 'Password is required'
+				]);
 			} else {
 				header("Location: /login?retry=1");
 				exit;
@@ -104,7 +107,8 @@ function login_logic($get_vars, $post_vars){
 		if (!$user || !$user->check_password($password)) {
 			// Email or password was incorrect
 			if ($ajax) {
-				throw new SystemDisplayableError('Your username or password was incorrect. Please try again, or sign up if you don\'t have an account.');
+				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
+				throw new AuthenticationException('Your username or password was incorrect. Please try again, or sign up if you don\'t have an account.');
 			} else {
 				header("Location: /login?retry=1&e=" . rawurlencode($email));
 				exit;

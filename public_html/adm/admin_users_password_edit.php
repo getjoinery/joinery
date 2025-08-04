@@ -1,6 +1,6 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
@@ -20,8 +20,8 @@
 			$user->set('usr_password', User::GeneratePassword($_POST['usr_password']));
 			$user->save();
 		} catch (UserException $e) {
-			$errorhandler = new ErrorHandler();
-			$errorhandler->handle_general_error($e->getMessage());
+			require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
+			throw new ValidationException($e->getMessage());
 		}
 		
 		

@@ -3,7 +3,7 @@
 	
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	

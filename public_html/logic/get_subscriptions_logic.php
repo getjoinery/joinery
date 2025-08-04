@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Activation.php');
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/StripeHelper.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 	

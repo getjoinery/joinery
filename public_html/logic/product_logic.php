@@ -2,7 +2,7 @@
 function product_logic($get_vars, $post_vars, $product){
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/ErrorHandler.php');
+	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/ShoppingCart.php');
 	PathHelper::requireOnce('includes/SystemClass.php');
