@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AcuityScheduling.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));	
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));	
 	
 	PathHelper::requireOnce('data/users_class.php');
 	

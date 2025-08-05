@@ -216,7 +216,7 @@ class PublicPageTailwind extends PublicPageBase {
 		<?php
 		if (!$this->debug_css) {
 			?>
-			<link rel="stylesheet" type="text/css" href="<?php echo LibraryFunctions::get_theme_file_path('output.css', '/includes', 'web'); ?>">
+			<link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'includes', 'web'); ?>">
 			<?php
 		}
 		?>
