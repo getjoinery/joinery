@@ -70,49 +70,56 @@ class GeneralError extends SystemBase {
 			$this->get('err_log_time'), 'UTC', $session->get_timezone(), '%a, %d %b %Y %R:%S');
 	}	
 
-
-	public static function LogGeneralError($e, $session, $request) { 
+	/**
+	 * Instance method for logging errors following standard SystemBase patterns
+	 * 
+	 * @param \Throwable $exception The exception to log
+	 * @param array $session Session data (optional)
+	 * @param array $request Request data (optional)
+	 */
+	public function logError(\Throwable $exception, $session = [], $request = []) {
 		$session_obj = SessionControl::get_instance();
-
 		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
 		
-		// Sanitize session data before storing
+		// Sanitize data
 		$safe_session = self::sanitizeSessionData($session);
 		$safe_request = self::sanitizeSessionData($request);
-	
-		$error_context = $e->getTraceAsString(). "\r\n \r\n REQUEST_URI: ". $_SERVER['REQUEST_URI']. "\r\n \r\n $_SESSION: " . print_r($safe_session, true). ' $_REQUEST: '.print_r($safe_request, true);
-	
-
-		$error = new GeneralError(NULL);
-		if ($e instanceof PDOException) {
-			$error->set('err_level', 'Database Error');
-			$error_context .= 'POSTGRES DEBUG INFO:';;
+		
+		$error_context = $exception->getTraceAsString() . "\r\n \r\n REQUEST_URI: " . 
+		                 $_SERVER['REQUEST_URI'] . "\r\n \r\n $_SESSION: " . 
+		                 print_r($safe_session, true) . ' $_REQUEST: ' . 
+		                 print_r($safe_request, true);
+		
+		// Set fields using standard model methods
+		if ($exception instanceof PDOException) {
+			$this->set('err_level', 'Database Error');
+			$error_context .= 'POSTGRES DEBUG INFO:';
 			if(count($dbhelper->query_history)){
 				$error_context .= print_r($dbhelper->query_history, true);
 			}
 			if(count($dbhelper->last_query_params)){
 				$error_context .= print_r($dbhelper->last_query_params, true);
 			}
-
+		} else {
+			$this->set('err_level', 'Exception');
 		}
-		else{
-			$error->set('err_level', 'Exception');
-		}
-
+		
 		$error_context = '<pre>'.htmlentities($error_context).'</pre>';
 		
-		$error->set('err_code', $e->getCode());
-		$error->set('err_file', $e->getFile());
-		$error->set('err_line', $e->getLine());
-		$error->set('err_context', $error_context);
-		$error->set('err_message', $e->getMessage());
+		$this->set('err_code', $exception->getCode());
+		$this->set('err_file', $exception->getFile());
+		$this->set('err_line', $exception->getLine());
+		$this->set('err_context', $error_context);
+		$this->set('err_message', $exception->getMessage());
+		
 		if($session_obj->get_user_id()){
-			$error->set('err_usr_user_id', $session_obj->get_user_id());
+			$this->set('err_usr_user_id', $session_obj->get_user_id());
 		}
-		$error->save();
+		
+		// Use standard save method
+		$this->save();
 	}
-	
+
 	private static function sanitizeSessionData($data) {
 		if (!is_array($data)) {
 			return $data;

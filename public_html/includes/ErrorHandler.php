@@ -106,40 +106,20 @@ class DatabaseErrorLogger implements ErrorLoggerInterface {
     
     public function log(\Throwable $exception, ErrorContext $context): void {
         try {
-            // Use existing GeneralError class for database logging
             PathHelper::requireOnce('data/general_errors_class.php');
             
-            $errorData = [
-                'exception_type' => get_class($exception),
-                'message' => $exception->getMessage(),
-                'file' => $exception->getFile(),
-                'line' => $exception->getLine(),
-                'user_id' => $context->getUserId(),
-                'request_uri' => $context->getRequestUri(),
-                'ip_address' => $context->getIpAddress(),
-                'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
-                'timestamp' => $context->getTimestamp()
-            ];
+            // Create new instance using standard pattern
+            $errorLog = new GeneralError(NULL);
             
-            // Add exception-specific context
-            if ($exception instanceof BaseException) {
-                $exceptionContext = $exception->getContext();
-                if (!empty($exceptionContext)) {
-                    $errorData['context'] = json_encode($exceptionContext);
-                }
-            }
-            
-            // Add stack trace for debugging
-            $errorData['stack_trace'] = $exception->getTraceAsString();
-            
-            GeneralError::LogGeneralError(
+            // Use the new instance method
+            $errorLog->logError(
                 $exception,
                 $_SESSION ?? [],
                 $_REQUEST ?? []
             );
             
         } catch (\Throwable $e) {
-            // If database logging fails, fall back to error_log
+            // Fallback logging to file if database fails
             error_log("Database error logging failed: " . $e->getMessage());
             error_log("Original error: " . $exception->getMessage());
         }
