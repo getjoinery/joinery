@@ -133,10 +133,9 @@ class DatabaseErrorLogger implements ErrorLoggerInterface {
             $errorData['stack_trace'] = $exception->getTraceAsString();
             
             GeneralError::LogGeneralError(
-                $errorData['message'],
-                $errorData['file'],
-                $errorData['line'],
-                $errorData
+                $exception,
+                $_SESSION ?? [],
+                $_REQUEST ?? []
             );
             
         } catch (\Throwable $e) {
