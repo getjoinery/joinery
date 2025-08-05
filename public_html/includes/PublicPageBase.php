@@ -386,6 +386,12 @@ class PublicPageBase {
 				top: 32px !important;
 			}
 			
+			/* Fix for Falcon theme admin sidebar */
+			body.joinery-admin-bar-active .navbar-vertical {
+				top: 32px !important;
+				height: calc(100vh - 32px) !important;
+			}
+			
 			/* Fix for any other sticky/fixed elements */
 			body.joinery-admin-bar-active .sticky-top {
 				top: 32px !important;
