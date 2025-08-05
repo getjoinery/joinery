@@ -385,11 +385,27 @@ class PublicPageFalcon extends PublicPageBase {
 	public function get_logo($choice='all'){
 			$settings = Globalvars::get_instance();
 			
-			if($settings->get_setting('logo_link')){
+			// Check if we're in admin context by looking for vertical_menu in the call stack
+			$is_admin = false;
+			$backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
+			foreach($backtrace as $trace) {
+				if(isset($trace['function']) && $trace['function'] === 'admin_header') {
+					$is_admin = true;
+					break;
+				}
+			}
+			
+			// Only show logo image for non-admin contexts
+			if(!$is_admin && $settings->get_setting('logo_link')){
 				echo '<img class="me-2" src="'.$settings->get_setting('logo_link').'" alt="" width="40" />';
 			}
 			 
-			echo '<span class="font-sans-serif text-primary">';
+			// Use smaller font size for admin contexts
+			if($is_admin) {
+				echo '<span class="font-sans-serif text-primary" style="font-size: 0.95rem;">';
+			} else {
+				echo '<span class="font-sans-serif text-primary">';
+			}
 			
 					 echo $settings->get_setting('site_name'); 
 			
