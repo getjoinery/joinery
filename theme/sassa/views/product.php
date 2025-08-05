@@ -1,6 +1,7 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
+require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
 	$page_vars = product_logic($_GET, $_POST, $product);
