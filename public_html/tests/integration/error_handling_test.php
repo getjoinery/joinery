@@ -62,6 +62,9 @@ class ErrorHandlingTester {
         // Test 10: Context Detection
         $this->testContextDetection();
         
+        // Test 11: Database Logging
+        $this->testDatabaseLogging();
+        
         $this->outputResults();
     }
     
@@ -299,6 +302,73 @@ class ErrorHandlingTester {
         } catch (Exception $e) {
             $this->testResults['Context Detection'] = 'FAIL: ' . $e->getMessage();
             $this->output("✗ Context detection tests failed: " . $e->getMessage() . "\n\n");
+        }
+    }
+    
+    private function testDatabaseLogging(): void {
+        try {
+            $this->output("Test 11: Database Error Logging\n");
+            
+            // Test that errors are logged to database
+            PathHelper::requireOnce('data/general_errors_class.php');
+            PathHelper::requireOnce('includes/DbConnector.php');
+            
+            // Create a test exception with unique message
+            $testMessage = 'Test database logging ' . uniqid();
+            $testException = new ValidationException($testMessage);
+            
+            // Directly log the error without propagating it
+            try {
+                $logger = new DatabaseErrorLogger();
+                $context = new ErrorContext([
+                    'request_uri' => $_SERVER['REQUEST_URI'] ?? '/test',
+                    'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'GET',
+                    'is_ajax' => false,
+                    'is_admin' => false,
+                    'is_cli' => php_sapi_name() === 'cli',
+                    'user_id' => null,
+                    'session_id' => session_id(),
+                    'timestamp' => time(),
+                    'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'
+                ]);
+                $logger->log($testException, $context);
+            } catch (Exception $e) {
+                // Ignore any errors during logging for test purposes
+            }
+            
+            // Wait a moment for database write
+            sleep(1);
+            
+            // Check if error was logged
+            $dbconnector = DbConnector::get_instance();
+            $dblink = $dbconnector->get_db_link();
+            
+            $sql = "SELECT COUNT(*) as count FROM err_general_errors 
+                    WHERE err_message = ? 
+                    AND err_create_time > NOW() - INTERVAL '5 seconds'";
+            $stmt = $dblink->prepare($sql);
+            $stmt->execute([$testMessage]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            $this->assert($result['count'] > 0, 'Error was logged to database');
+            
+            // Test context data is properly stored
+            $sql = "SELECT err_context FROM err_general_errors 
+                    WHERE err_message = ? 
+                    ORDER BY err_create_time DESC LIMIT 1";
+            $stmt = $dblink->prepare($sql);
+            $stmt->execute([$testMessage]);
+            $contextResult = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            $this->assert(!empty($contextResult['err_context']), 'Error context was stored');
+            $this->assert(strpos($contextResult['err_context'], 'REQUEST_URI') !== false, 'Context includes request URI');
+            
+            $this->testResults['Database Logging'] = 'PASS';
+            $this->output("✓ Database logging tests passed\n\n");
+            
+        } catch (Exception $e) {
+            $this->testResults['Database Logging'] = 'FAIL: ' . $e->getMessage();
+            $this->output("✗ Database logging tests failed: " . $e->getMessage() . "\n\n");
         }
     }
     
