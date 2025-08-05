@@ -247,7 +247,7 @@ class LibraryFunctions {
 		
 		
 		//FIRST CHECK THE CURRENT ACTIVE THEME
-		$theme_form = LibraryFunctions::get_theme_file_path('FormWriter.php',  'includes', 'system');
+		$theme_form = PathHelper::getThemeFilePath('FormWriter.php', 'includes', 'system');
 
 		if($theme_form){
 
@@ -338,84 +338,6 @@ class LibraryFunctions {
 	}
 
 	
-	//LOOK IN THE THEME DIRECTORY FIRST, THEN THE DEFAULT THEME
-	//PATH FORMAT RETURNS A URL OR A SYSTEM PATH
-	//THEME NAME FORCES IT TO LOOK IN THE SPECIFIED THEME LOCATION
-	//subdirectory starts with a slash
-	static function get_theme_file_path($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $debug = false){
-		$settings = Globalvars::get_instance();
-		$siteDir = PathHelper::getBasePath();
-		
-		//SUBDIRECTORY WORKS WITH OR WITHOUT SLASH
-		if (substr($subdirectory, 0, 1) !== '/') {
-			$subdirectory = '/' . $subdirectory; // Add a forward slash if it doesn't exist
-		}
-		
-		if($theme_name){
-			$theme_template = $theme_name;
-			if(!is_dir($siteDir.'/theme/'.$theme_template)){
-				throw new SystemDisplayablePermanentError('Could not find the specified theme: '. $theme_name);
-			}
-		}
-		else{
-			// Try to get theme template, but handle cases where database might not be available
-			try {
-				$theme_template = $settings->get_setting('theme_template', true, true);
-			} catch (Exception $e) {
-				// If database is not available (e.g., during update_database.php), use fallback
-				$theme_template = null;
-			}
-		}
-		
-		// Build file paths
-		$theme_file = $theme_template ? $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename : null;
-		$default_file = $siteDir.$subdirectory.'/'.$filename;
-		
-		if($debug){
-			echo 'Theme template: '.$theme_template.'<br>';
-			echo 'Theme file: '.$theme_file.'<br>';
-			echo 'Default file: '.$default_file.'<br>';
-			
-		}
-
-
-
-		if($theme_file && $theme_template && file_exists($theme_file)){
-			if($debug){
-				echo 'Found theme file.<br>';
-			}
-			if($path_format == 'system'){
-				//WE WANT A FILE PATH
-				return $theme_file;
-			}
-			else{
-				//WE WANT A URL
-				return '/theme/'.$theme_template.$subdirectory.'/'.basename($filename, '.php');
-			}
-		}
-		else if(file_exists($default_file)){
-			if($debug){
-				echo 'Found default file.<br>';
-			}
-			if($path_format == 'system'){
-				//WE WANT A FILE PATH
-				return $default_file;
-			}
-			else{
-				//WE WANT A URL
-				return $subdirectory.'/'.basename($filename, '.php');
-			}
-		}
-		else{
-			// Provide more helpful error message
-			$error_msg = 'Could not find the specified file: ' . $filename;
-			if($theme_file) {
-				$error_msg .= '. Looked in theme: ' . $theme_file;
-			}
-			$error_msg .= ' and default location: ' . $default_file;
-			throw new SystemDisplayablePermanentError($error_msg);					
-		}
-	}
 	
 	
 	static function get_logic_file_path($filename, $path_format='system', $debug=0){

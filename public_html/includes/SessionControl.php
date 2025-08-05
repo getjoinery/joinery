@@ -687,12 +687,12 @@ class SessionControl{
 			if($msgtext) {
 				$msgtext= urlencode($msgtext);
 				header("HTTP/1.1 401 Unauthorized");
-				require_once(LibraryFunctions::get_theme_file_path('login.php', '/views', 'system').'?msgtext='.$msgtext);			
+				require_once(PathHelper::getThemeFilePath('login.php', 'views', 'system').'?msgtext='.$msgtext);			
 				exit();
 			}
 			else {
 				header("HTTP/1.1 401 Unauthorized");
-				require_once(LibraryFunctions::get_theme_file_path('login.php', '/views', 'system'));	
+				require_once(PathHelper::getThemeFilePath('login.php', 'views', 'system'));	
 				exit();
 			}
 

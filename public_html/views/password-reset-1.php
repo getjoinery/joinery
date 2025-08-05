@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once (LibraryFunctions::get_logic_file_path('password-reset-1_logic.php'));
 
 	$page_vars = password_reset_1_logic($_GET, $_POST);

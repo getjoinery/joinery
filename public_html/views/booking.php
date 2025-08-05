@@ -2,7 +2,7 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('booking_logic.php'));
-	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
 	$page_vars = booking_logic($_GET, $_POST);
 	$booking_type = $page_vars['booking_type'];

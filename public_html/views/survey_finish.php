@@ -2,7 +2,7 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	PathHelper::requireOnce('/data/surveys_class.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$survey_id = LibraryFunctions::decode(LibraryFunctions::fetch_variable('survey_id', NULL, 0, 'Survey id is required'));
 
