@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Version 1.01
+
 # Continuous Directory Synchronization Script
 # Monitors and syncs local directory with remote directory using rsync over SSH
 # Usage: ./sync-continuous.sh [config_file] [options] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]
@@ -342,6 +344,7 @@ count_trackable_files() {
         --dry-run
         --stats
         --no-perms
+		--copy-unsafe-links
         --no-owner
         --no-group
         --omit-dir-times
@@ -450,6 +453,7 @@ perform_sync() {
     local RSYNC_OPTS=(
         -avzhL
         --no-perms
+		--copy-unsafe-links
         --no-owner
         --no-group
         --stats
@@ -519,10 +523,14 @@ perform_sync() {
         fi
     done <<< "$rsync_output"
     
-    # Show combined stats if we captured them
-    if [ -n "$files_transferred" ] && [ -n "$total_size" ]; then
-        echo "  Files transferred: $files_transferred, Total size: $total_size"
-    fi
+	# Show combined stats if we captured them
+	if [ -n "$files_transferred" ] && [ -n "$total_size" ]; then
+		if [ "$files_transferred" = "0" ]; then
+			echo "  Files transferred: 0 (no changes needed)"
+		else
+			echo "  Files transferred: $files_transferred, Total size tracked: $total_size"
+		fi
+	fi
     
     local exit_code=$rsync_exit_code
     local end_time=$(date +%s)
@@ -1088,6 +1096,7 @@ if [ "$INITIAL_SYNC" = true ]; then
         RSYNC_OPTS=(
             -avzhL
             --no-perms
+			--copy-unsafe-links
             --no-owner
             --no-group
             --stats
