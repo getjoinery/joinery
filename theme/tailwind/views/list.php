@@ -1,7 +1,8 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once (LibraryFunctions::get_logic_file_path('list_logic.php'));
 
 	$page_vars = list_logic($_GET, $_POST, $mailing_list, $params);

@@ -1,9 +1,10 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Pager.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php'); 	
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/Pager.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	PathHelper::requireOnce('data/posts_class.php'); 	
 
 	$session = SessionControl::get_instance();
 	$session->set_return();

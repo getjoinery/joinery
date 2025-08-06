@@ -2,7 +2,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AcuityScheduling.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));	
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));	
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	
