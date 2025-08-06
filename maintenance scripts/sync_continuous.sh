@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Version 1.01
+# Version 1.02
 
 # Continuous Directory Synchronization Script
 # Monitors and syncs local directory with remote directory using rsync over SSH
@@ -340,11 +340,12 @@ count_trackable_files() {
     
     # Use rsync dry-run to count files that would be transferred
     local RSYNC_OPTS=(
-        -avzhL
+        -avzh
+        --copy-links
+        --copy-unsafe-links
         --dry-run
         --stats
         --no-perms
-		--copy-unsafe-links
         --no-owner
         --no-group
         --omit-dir-times
@@ -356,7 +357,7 @@ count_trackable_files() {
     
     # Run rsync dry-run and extract file count
     local count
-    count=$(rsync "${RSYNC_OPTS[@]}" "$local_dir/" /tmp/dummy_target_$ 2>/dev/null | \
+    count=$(rsync "${RSYNC_OPTS[@]}" "$local_dir/" /tmp/dummy_target_$$ 2>/dev/null | \
             grep "Number of regular files transferred:" | \
             sed 's/Number of regular files transferred: //' | \
             sed 's/,.*$//' || echo "0")
@@ -419,7 +420,7 @@ cleanup() {
     fi
     
     # Kill any inotifywait process
-    pkill -P $ inotifywait 2>/dev/null || true
+    pkill -P $$ inotifywait 2>/dev/null || true
     
     print_status "Continuous sync stopped."
     exit 0
@@ -451,9 +452,10 @@ perform_sync() {
     
     # Build rsync options
     local RSYNC_OPTS=(
-        -avzhL
+        -avzh
+        --copy-links         # Transform symlinks into their referent files/dirs
+        --copy-unsafe-links  # Copy links outside the source tree
         --no-perms
-		--copy-unsafe-links
         --no-owner
         --no-group
         --stats
@@ -523,14 +525,14 @@ perform_sync() {
         fi
     done <<< "$rsync_output"
     
-	# Show combined stats if we captured them
-	if [ -n "$files_transferred" ] && [ -n "$total_size" ]; then
-		if [ "$files_transferred" = "0" ]; then
-			echo "  Files transferred: 0 (no changes needed)"
-		else
-			echo "  Files transferred: $files_transferred, Total size tracked: $total_size"
-		fi
-	fi
+    # Show combined stats if we captured them - improved display
+    if [ -n "$files_transferred" ] && [ -n "$total_size" ]; then
+        if [ "$files_transferred" = "0" ]; then
+            echo "  Files transferred: 0 (no changes needed)"
+        else
+            echo "  Files transferred: $files_transferred"
+        fi
+    fi
     
     local exit_code=$rsync_exit_code
     local end_time=$(date +%s)
@@ -568,9 +570,9 @@ watch_with_inotify() {
     INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.git($|/)'"
     INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude 'node_modules($|/)'"
     INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '__pycache__($|/)'"
-    INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.pyc"
-    INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.log"
-    INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.sw[px]"
+    INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.pyc'"
+    INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.log'"
+    INOTIFY_EXCLUDES="$INOTIFY_EXCLUDES --exclude '\.sw[px]'"
     
     # Add selective monitoring excludes for inotify
     if [ -n "$MONITOR_PLUGINS" ] || [ -n "$MONITOR_THEMES" ]; then
@@ -621,7 +623,7 @@ watch_with_polling() {
     print_status "Building initial file state baseline..."
     
     # Store initial state
-    local last_state_file="/tmp/.sync_state_$"
+    local last_state_file="/tmp/.sync_state_$$"
     find -L "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$last_state_file"
     
     print_status "Tracking changes..."
@@ -634,7 +636,7 @@ watch_with_polling() {
         fi
         
         # Get current state (follow symlinks like rsync does)
-        local current_state_file="/tmp/.sync_state_current_$"
+        local current_state_file="/tmp/.sync_state_current_$$"
         find -L "$LOCAL_DIR" -type f -newer /dev/null -exec stat -c '%n %Y' {} \; 2>/dev/null | sort > "$current_state_file"
         
         # Check if state changed
@@ -1094,9 +1096,10 @@ if [ "$INITIAL_SYNC" = true ]; then
         
         # Build rsync options
         RSYNC_OPTS=(
-            -avzhL
+            -avzh
+            --copy-links
+            --copy-unsafe-links
             --no-perms
-			--copy-unsafe-links
             --no-owner
             --no-group
             --stats

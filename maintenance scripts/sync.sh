@@ -3,6 +3,7 @@
 # Directory Synchronization Script with Content Analysis
 # Syncs local directory with remote directory using rsync over SSH
 # Enhanced to differentiate between substantive content changes and format-only changes
+# Updated to properly handle symbolic links
 # Usage: ./sync.sh [config_file] [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
 #    or: ./sync.sh [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
 
@@ -701,8 +702,8 @@ if ! ls "$LOCAL_DIR" >/dev/null 2>&1; then
     exit 1
 fi
 
-FILE_COUNT=$(find "$LOCAL_DIR" -type f 2>/dev/null | wc -l)
-print_status "Local directory contains $FILE_COUNT files"
+FILE_COUNT=$(find -L "$LOCAL_DIR" -type f 2>/dev/null | wc -l)
+print_status "Local directory contains $FILE_COUNT files (following symlinks)"
 
 # Add trailing slash to local directory for rsync
 if [[ "$LOCAL_DIR" != */ ]]; then
@@ -781,7 +782,9 @@ print_status "Analyzing changes (dry run)..."
 
 # Create dry-run specific options (same as main options but with dry-run and itemize)
 DRY_RUN_OPTS=(
-    -avzhL
+    -avzh
+    --copy-links         # Transform symlinks into their referent files/dirs
+    --copy-unsafe-links  # Copy links outside the source tree
     --dry-run
     --itemize-changes
     --delete
@@ -1023,7 +1026,9 @@ fi
 
 # Rsync options for the actual sync (similar to dry run but without --dry-run and --itemize-changes)
 RSYNC_OPTS=(
-    -avzhL
+    -avzh
+    --copy-links         # Transform symlinks into their referent files/dirs
+    --copy-unsafe-links  # Copy links outside the source tree
     --delete
     --progress
     --stats
@@ -1106,4 +1111,4 @@ print_status "Sync operation completed"
 echo ""
 echo "To verify the sync, you can run:"
 echo "  ssh -p $SSH_PORT $SSH_USER@$REMOTE_HOST 'find $REMOTE_DIR -type f | wc -l'"
-echo "  find $LOCAL_DIR -type f | wc -l"
+echo "  find -L $LOCAL_DIR -type f | wc -l"
