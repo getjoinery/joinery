@@ -245,24 +245,63 @@ class LibraryFunctions {
 			return $formwriter;	
 		}
 		
+		// Use ThemeHelper for theme-based selection
+		try {
+			PathHelper::requireOnce('includes/ThemeHelper.php');
+			$theme = ThemeHelper::getInstance(); // Gets current theme
+			
+			// First check if theme has custom FormWriter
+			$formWriterPath = $theme->getIncludePath('includes/FormWriter.php');
+			if (file_exists($formWriterPath)) {
+				require_once($formWriterPath);
+				return new FormWriter($form_id);
+			}
+			
+			// Use base class from theme manifest
+			$baseClass = $theme->getFormWriterBase();
+			if ($baseClass && $baseClass !== 'FormWriter') {
+				$baseClassPath = PathHelper::getIncludePath("includes/{$baseClass}.php");
+				if (file_exists($baseClassPath)) {
+					require_once($baseClassPath);
+					return new $baseClass($form_id);
+				}
+			}
+			
+			// If theme doesn't specify, determine from CSS framework
+			$cssFramework = $theme->getCssFramework();
+			switch($cssFramework) {
+				case 'bootstrap':
+					PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
+					return new FormWriterMasterBootstrap($form_id);
+					
+				case 'tailwind':
+					PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
+					return new FormWriterMasterTailwind($form_id);
+					
+				case 'uikit':
+					PathHelper::requireOnce('includes/FormWriterMaster.php');
+					return new FormWriterMaster($form_id);
+			}
+			
+		} catch (Exception $e) {
+			// Log error but don't break - fall through to legacy method
+			error_log("ThemeHelper error in get_formwriter_object: " . $e->getMessage());
+		}
 		
-		//FIRST CHECK THE CURRENT ACTIVE THEME
-		$theme_form = PathHelper::getThemeFilePath('FormWriter.php', 'includes', 'system');
-
+		// LEGACY FALLBACK: Original method for backward compatibility
+		$settings = Globalvars::get_instance();
+		$theme_template = $settings->get_setting('theme_template', true, true);
+		
+		// Try theme-specific FormWriter
+		$theme_form = PathHelper::getThemeFilePath('FormWriter.php', 'includes', 'system', $theme_template);
 		if($theme_form){
-
 			require_once($theme_form);
+			return new FormWriter($form_id);
+		}
 		
-			$formwriter = new FormWriter($form_id);
-
-			return $formwriter;		
-		}				
-		
-		
-		//FINALLY GRAB THE DEFAULT FORM
+		// Final default - Bootstrap
 		PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
-		$formwriter = new FormWriterMasterBootstrap($form_id);
-		return $formwriter;		
+		return new FormWriterMasterBootstrap($form_id);	
 							
 	}
 	
