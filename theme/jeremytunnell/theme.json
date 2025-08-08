@@ -1,0 +1,14 @@
+{
+  "name": "jeremytunnell",
+  "displayName": "Jeremy Tunnell Theme",
+  "version": "1.0.0",
+  "description": "Custom theme for Jeremy Tunnell",
+  "author": "Joinery Team",
+  "requires": {
+    "php": ">=7.4",
+    "joinery": ">=1.0.0"
+  },
+  "cssFramework": "custom",
+  "formWriterBase": "FormWriterMasterBootstrap",
+  "publicPageBase": "PublicPageFalcon"
+}

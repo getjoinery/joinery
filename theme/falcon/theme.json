@@ -1,0 +1,14 @@
+{
+  "name": "falcon",
+  "displayName": "Falcon Theme",
+  "version": "2.0.0",
+  "description": "Bootstrap 5 based responsive theme with modern UI components",
+  "author": "Joinery Team",
+  "requires": {
+    "php": ">=7.4",
+    "joinery": ">=1.0.0"
+  },
+  "cssFramework": "bootstrap",
+  "formWriterBase": "FormWriterMasterBootstrap",
+  "publicPageBase": "PublicPageFalcon"
+}

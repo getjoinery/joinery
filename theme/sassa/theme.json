@@ -1,0 +1,14 @@
+{
+  "name": "sassa",
+  "displayName": "SASSA Theme",
+  "version": "1.0.0",
+  "description": "SASSA organization theme",
+  "author": "Joinery Team",
+  "requires": {
+    "php": ">=7.4",
+    "joinery": ">=1.0.0"
+  },
+  "cssFramework": "bootstrap",
+  "formWriterBase": "FormWriterMasterBootstrap",
+  "publicPageBase": "PublicPageFalcon"
+}

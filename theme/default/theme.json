@@ -1,0 +1,14 @@
+{
+  "name": "default",
+  "displayName": "Default Theme",
+  "version": "1.0.0",
+  "description": "Default system theme",
+  "author": "Joinery Team",
+  "requires": {
+    "php": ">=7.4",
+    "joinery": ">=1.0.0"
+  },
+  "cssFramework": "tailwind",
+  "formWriterBase": "FormWriterMasterTailwind",
+  "publicPageBase": "PublicPageFalcon"
+}
