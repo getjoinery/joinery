@@ -1,9 +1,10 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
+PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/Pager.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	PathHelper::requireOnce('data/posts_class.php'); 	
 
 	$session = SessionControl::get_instance();

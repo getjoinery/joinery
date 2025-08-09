@@ -3,7 +3,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AcuityScheduling.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));	
+PathHelper::requireOnce('includes/ThemeHelper.php');
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');	
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	

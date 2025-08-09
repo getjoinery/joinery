@@ -1,7 +1,8 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+PathHelper::requireOnce('includes/ThemeHelper.php');
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
 
 	$page_vars = post_logic($_GET, $_POST, $post);
@@ -66,7 +67,7 @@
 							
 								<?php
 								$settings = Globalvars::get_instance();
-								$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
+								$formwriter = LibraryFunctions::get_formwriter_object('form1');
 								$validation_rules = array();
 								$validation_rules['cmt']['required']['value'] = 'true';
 								$validation_rules['cmt']['minlength']['value'] = 20;
@@ -155,7 +156,7 @@
 									if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
 											echo '<div id="comment'.$comment->key.'container" style="display:none;">';
 											$settings = Globalvars::get_instance();
-											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key, $settings->get_setting('form_style'));
+											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key);
 	
 											$validation_rules = array();
 											$validation_rules['cmt']['required']['value'] = 'true';

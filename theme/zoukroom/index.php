@@ -1,8 +1,9 @@
 <?php
+PathHelper::requireOnce('includes/ThemeHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/Pager.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/PublicPage.php');
-	require_once(LibraryFunctions::get_theme_path().'/includes/FormWriterPublic.php');
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	ThemeHelper::includeThemeFile('includes/FormWriterPublic.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');

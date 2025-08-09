@@ -1,8 +1,9 @@
 <?php
+PathHelper::requireOnce('includes/ThemeHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_theme_file_path('PublicPageTW.php', '/includes'));
-	require_once(LibraryFunctions::get_theme_file_path('FormWriterPublicTW.php', '/includes'));
+	ThemeHelper::includeThemeFile('includes/PublicPageTW.php');
+	ThemeHelper::includeThemeFile('includes/FormWriterPublicTW.php');
 
 	$logic_path = LibraryFunctions::get_logic_file_path('schedule-meeting.php');
 	require_once ($logic_path);

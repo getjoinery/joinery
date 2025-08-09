@@ -2,7 +2,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once (LibraryFunctions::get_logic_file_path('event_logic.php'));
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+PathHelper::requireOnce('includes/ThemeHelper.php');
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	
 	$page_vars = event_logic($_GET, $_POST, $event);
 	$event = $page_vars['event'];
@@ -232,7 +233,7 @@
 
 							foreach($page_vars['register_urls'] as $register_url){
 								
-								$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
+								$formwriter = LibraryFunctions::get_formwriter_object('form1');
 								echo $formwriter->new_button($register_url['label'], $register_url['link'], 'primary', 'full');	
 								echo $formwriter->end_form();
 							}			

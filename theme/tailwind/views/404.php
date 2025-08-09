@@ -1,7 +1,8 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+PathHelper::requireOnce('includes/ThemeHelper.php');
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 
 	$page = new PublicPage();
 	$hoptions = array(

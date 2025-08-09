@@ -1,7 +1,8 @@
 <?php
 require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+PathHelper::requireOnce('includes/ThemeHelper.php');
+ThemeHelper::includeThemeFile('includes/PublicPage.php');
 require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 
 	$page_vars = product_logic($_GET, $_POST, $product);
@@ -25,7 +26,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 	
 	if (!$page_vars['display_empty_form']) {
 		echo '<p>Is everything correct?</p>';
-		$formwriter = LibraryFunctions::get_formwriter_object('product_form', $settings->get_setting('form_style'));
+		$formwriter = LibraryFunctions::get_formwriter_object('product_form');
 		echo $formwriter->begin_form("", "POST", "/product"); 
 
 		echo $formwriter->hiddeninput('product_id', $product_id);
@@ -112,7 +113,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT OR IF IT CANNOT BE ADDED TO THE CART
 				if(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)){
 
-					$formwriter = LibraryFunctions::get_formwriter_object('product_form', $settings->get_setting('form_style'));
+					$formwriter = LibraryFunctions::get_formwriter_object('product_form');
 					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 					echo $formwriter->hiddeninput('product_id', $product_id);
 	

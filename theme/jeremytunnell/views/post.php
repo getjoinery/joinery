@@ -1,9 +1,10 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
+PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('FormWriterPublic.php', 'includes'));
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	ThemeHelper::includeThemeFile('includes/FormWriterPublic.php');
 	
 	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
 	$page_vars = post_logic($_GET, $_POST, $post);

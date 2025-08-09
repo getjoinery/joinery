@@ -2,7 +2,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+PathHelper::requireOnce('includes/ThemeHelper.php');
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	require_once(LibraryFunctions::get_logic_file_path('account_edit_logic.php'));	
 	
 	$page_vars = account_edit_logic($_GET, $_POST);
