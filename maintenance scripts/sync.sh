@@ -4,8 +4,8 @@
 # Syncs local directory with remote directory using rsync over SSH
 # Enhanced to differentiate between substantive content changes and format-only changes
 # Updated to properly handle symbolic links
-# Usage: ./sync.sh [config_file] [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
-#    or: ./sync.sh [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
+# Usage: ./sync.sh [config_file] [--autodelete] [--skipconfirm] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
+#    or: ./sync.sh [--autodelete] [--skipconfirm] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
 
 set -e  # Exit on any error
 
@@ -460,8 +460,8 @@ read_ignore_patterns() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 [config_file] [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
-    echo "   or: $0 [--autodelete] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo "Usage: $0 [config_file] [--autodelete] [--skipconfirm] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo "   or: $0 [--autodelete] [--skipconfirm] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
     echo ""
     echo "Config File:"
     echo "  config_file            - Path to custom configuration file (e.g., .testserver)"
@@ -469,6 +469,7 @@ show_usage() {
     echo ""
     echo "Options:"
     echo "  --autodelete           - Skip confirmation prompt for deleting remote files"
+    echo "  --skipconfirm          - Skip ALL confirmation prompts and proceed automatically"
     echo "  --ignore-file <file>   - Use custom ignore file (default: .syncignore)"
     echo "  --no-key               - Skip SSH key authentication, use password only"
     echo "  --setup-ssh-key        - Interactive SSH key setup helper"
@@ -491,12 +492,14 @@ show_usage() {
     echo ""
     echo "Examples:"
     echo "  $0 ./my-project server.example.com /home/user/my-project"
+    echo "  $0 --skipconfirm ./website web.example.com /var/www/html deploy 2222"
     echo "  $0 --autodelete ./website web.example.com /var/www/html deploy 2222"
     echo "  $0 --ignore-file custom.ignore ./docs server.com /var/www/docs deploy"
+    echo "  $0 --skipconfirm   # Uses defaults from .syncconfig, no prompts"
     echo "  $0 --autodelete   # Uses defaults from .syncconfig"
     echo "  $0 ./different-dir   # Uses config defaults for host/remote dir"
     echo "  $0 /path/to/.testserver --fast   # Uses custom config file"
-    echo "  $0 ~/.configs/production.sync --autodelete   # Uses config in home dir"
+    echo "  $0 ~/.configs/production.sync --skipconfirm   # Auto-sync with custom config"
     echo ""
     echo "SSH Authentication:"
     echo "  The script will try SSH key authentication first, then fall back to password."
@@ -523,6 +526,7 @@ show_usage() {
     echo "  - SSH connection multiplexing for faster content analysis"
     echo "  - Differentiates between content changes and format-only changes"
     echo "  - Follows symbolic links and copies actual files"
+    echo "  - --skipconfirm option for automated syncing without prompts"
 }
 
 # Function to set up SSH key authentication
@@ -595,6 +599,7 @@ read_config "$CUSTOM_CONFIG_FILE"
 
 # Parse arguments
 AUTO_DELETE=false
+SKIP_CONFIRM=false
 IGNORE_FILE=".syncignore"
 USE_SSH_KEY=true
 FAST_MODE=false
@@ -604,6 +609,11 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --autodelete)
             AUTO_DELETE=true
+            shift
+            ;;
+        --skipconfirm)
+            SKIP_CONFIRM=true
+            AUTO_DELETE=true  # --skipconfirm implies --autodelete
             shift
             ;;
         --ignore-file)
@@ -731,6 +741,9 @@ print_status "Starting directory synchronization..."
 echo "  Local:  $LOCAL_DIR"
 echo "  Remote: $REMOTE_PATH"
 echo "  Port:   $SSH_PORT"
+if [ "$SKIP_CONFIRM" = true ]; then
+    print_status "Mode: Auto-sync (--skipconfirm enabled)"
+fi
 echo ""
 
 # Test SSH connection
@@ -986,11 +999,15 @@ if [ $SUBSTANTIVE_CHANGES -eq 0 ] && [ $FORMAT_CHANGES -gt 0 ]; then
     if [ "$SSH_KEY_AUTH" = false ]; then
         print_warning "You will be prompted for your SSH password"
     fi
-    read -p "Proceed with format normalization? (Y/n): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        print_status "Synchronization cancelled"
-        exit 0
+    if [ "$SKIP_CONFIRM" = false ]; then
+        read -p "Proceed with format normalization? (Y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            print_status "Synchronization cancelled"
+            exit 0
+        fi
+    else
+        print_status "Auto-proceeding with format normalization (--skipconfirm enabled)"
     fi
 elif [ $SUBSTANTIVE_CHANGES -gt 0 ]; then
     echo ""
@@ -1001,15 +1018,19 @@ elif [ $SUBSTANTIVE_CHANGES -gt 0 ]; then
     if [ "$SSH_KEY_AUTH" = false ]; then
         print_warning "You will be prompted for your SSH password"
     fi
-    read -p "Proceed with synchronization? (y/N): " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_status "Synchronization cancelled"
-        exit 0
+    if [ "$SKIP_CONFIRM" = false ]; then
+        read -p "Proceed with synchronization? (y/N): " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_status "Synchronization cancelled"
+            exit 0
+        fi
+    else
+        print_status "Auto-proceeding with synchronization (--skipconfirm enabled)"
     fi
 fi
 
-# Additional confirmation for deletions (unless --autodelete is used)
+# Additional confirmation for deletions (unless --autodelete or --skipconfirm is used)
 if [ $FILES_TO_DELETE -gt 0 ] && [ "$AUTO_DELETE" = false ]; then
     echo ""
     print_warning "This sync will DELETE $FILES_TO_DELETE files from the remote server!"
