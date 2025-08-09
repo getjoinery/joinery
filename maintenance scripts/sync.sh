@@ -4,8 +4,9 @@
 # Syncs local directory with remote directory using rsync over SSH
 # Enhanced to differentiate between substantive content changes and format-only changes
 # Updated to properly handle symbolic links
-# Usage: ./sync.sh [config_file] [--autodelete] [--skipconfirm] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
-#    or: ./sync.sh [--autodelete] [--skipconfirm] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
+# Added auto-update mode for continuous monitoring
+# Usage: ./sync.sh [config_file] [--autodelete] [--skipconfirm] [--autoupdate] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
+#    or: ./sync.sh [--autodelete] [--skipconfirm] [--autoupdate] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user]
 
 set -e  # Exit on any error
 
@@ -460,8 +461,8 @@ read_ignore_patterns() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 [config_file] [--autodelete] [--skipconfirm] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
-    echo "   or: $0 [--autodelete] [--skipconfirm] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo "Usage: $0 [config_file] [--autodelete] [--skipconfirm] [--autoupdate] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
+    echo "   or: $0 [--autodelete] [--skipconfirm] [--autoupdate] [--ignore-file <file>] [local_dir] [remote_host] [remote_dir] [ssh_user] [ssh_port]"
     echo ""
     echo "Config File:"
     echo "  config_file            - Path to custom configuration file (e.g., .testserver)"
@@ -470,6 +471,7 @@ show_usage() {
     echo "Options:"
     echo "  --autodelete           - Skip confirmation prompt for deleting remote files"
     echo "  --skipconfirm          - Skip ALL confirmation prompts and proceed automatically"
+    echo "  --autoupdate           - Monitor for changes and auto-sync every 5 seconds (implies --skipconfirm)"
     echo "  --ignore-file <file>   - Use custom ignore file (default: .syncignore)"
     echo "  --no-key               - Skip SSH key authentication, use password only"
     echo "  --setup-ssh-key        - Interactive SSH key setup helper"
@@ -493,13 +495,16 @@ show_usage() {
     echo "Examples:"
     echo "  $0 ./my-project server.example.com /home/user/my-project"
     echo "  $0 --skipconfirm ./website web.example.com /var/www/html deploy 2222"
+    echo "  $0 --autoupdate ./website web.example.com /var/www/html deploy"
     echo "  $0 --autodelete ./website web.example.com /var/www/html deploy 2222"
     echo "  $0 --ignore-file custom.ignore ./docs server.com /var/www/docs deploy"
     echo "  $0 --skipconfirm   # Uses defaults from .syncconfig, no prompts"
+    echo "  $0 --autoupdate    # Monitor and auto-sync with defaults from .syncconfig"
     echo "  $0 --autodelete   # Uses defaults from .syncconfig"
     echo "  $0 ./different-dir   # Uses config defaults for host/remote dir"
     echo "  $0 /path/to/.testserver --fast   # Uses custom config file"
     echo "  $0 ~/.configs/production.sync --skipconfirm   # Auto-sync with custom config"
+    echo "  $0 ~/.configs/production.sync --autoupdate   # Monitor mode with custom config"
     echo ""
     echo "SSH Authentication:"
     echo "  The script will try SSH key authentication first, then fall back to password."
@@ -514,6 +519,13 @@ show_usage() {
     echo "    - Directories: 'temp/' or 'cache/'"
     echo "    - Comments: '# This is a comment'"
     echo ""
+    echo "Auto-Update Mode:"
+    echo "  When using --autoupdate, the script will:"
+    echo "    - Check for changes every 5 seconds"
+    echo "    - Only show output when changes are detected"
+    echo "    - Automatically sync any changes found"
+    echo "    - Continue running until you press Ctrl+C"
+    echo ""
     echo "Features:"
     echo "  - Only transfers changed files (efficient)"
     echo "  - Deletes remote files that don't exist locally"
@@ -527,6 +539,7 @@ show_usage() {
     echo "  - Differentiates between content changes and format-only changes"
     echo "  - Follows symbolic links and copies actual files"
     echo "  - --skipconfirm option for automated syncing without prompts"
+    echo "  - --autoupdate option for continuous monitoring and syncing"
 }
 
 # Function to set up SSH key authentication
@@ -584,6 +597,458 @@ setup_ssh_key() {
     return 0
 }
 
+# Function to perform a single sync operation
+perform_sync() {
+    local suppress_no_changes="${1:-false}"
+    
+    # Test SSH connection (only show output on first run or if not suppressing)
+    if [ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]; then
+        print_status "Testing SSH connection..."
+    fi
+    
+    # Try to find SSH key if enabled
+    if [ "$USE_SSH_KEY" = true ] && find_ssh_key; then
+        if [ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]; then
+            print_status "Found SSH key at: $SSH_KEY_PATH"
+        fi
+        
+        # Test key authentication
+        if ssh -p "$SSH_PORT" -i "$SSH_KEY_PATH" -o BatchMode=yes -o PasswordAuthentication=no "$SSH_USER@$REMOTE_HOST" exit 2>/dev/null; then
+            if [ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]; then
+                print_success "SSH key authentication successful"
+            fi
+            SSH_KEY_AUTH=true
+        else
+            if [ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]; then
+                print_warning "SSH key authentication failed, will fall back to password"
+            fi
+            SSH_KEY_AUTH=false
+        fi
+    else
+        if [ "$USE_SSH_KEY" = true ] && ([ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]); then
+            print_warning "No SSH key found. Consider setting up SSH keys for passwordless sync:"
+            echo "  Run: $0 --setup-ssh-key $LOCAL_DIR $REMOTE_HOST $REMOTE_DIR $SSH_USER $SSH_PORT"
+            echo ""
+        fi
+        SSH_KEY_AUTH=false
+    fi
+    
+    # If key auth failed, test password auth
+    if [ "$SSH_KEY_AUTH" = false ]; then
+        if [ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]; then
+            print_status "Testing password authentication..."
+        fi
+        if ! ssh -p "$SSH_PORT" -o ConnectTimeout=10 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$SSH_USER@$REMOTE_HOST" exit 2>&1; then
+            if [ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]; then
+                print_warning "SSH connection test failed. You'll be prompted for password during sync."
+            fi
+        else
+            if [ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]; then
+                print_success "Password authentication available"
+            fi
+        fi
+    fi
+    
+    # Build SSH command based on authentication method
+    if [ "$SSH_KEY_AUTH" = true ]; then
+        SSH_CMD="ssh -p $SSH_PORT -i $SSH_KEY_PATH"
+    else
+        SSH_CMD="ssh -p $SSH_PORT"
+    fi
+    
+    # Build rsync options arrays now that SSH_CMD is set
+    # Create dry-run specific options
+    DRY_RUN_OPTS=(
+        -avzh
+        --copy-links         # Transform symlinks into their referent files/dirs
+        --copy-unsafe-links  # Copy links outside the source tree
+        --dry-run
+        --itemize-changes
+        --delete
+        --stats
+        --omit-dir-times
+        -e "$SSH_CMD"
+        --exclude='.git/'
+        --exclude='.gitignore'
+        --exclude='.DS_Store'
+        --exclude='Thumbs.db'
+        --exclude='node_modules/'
+        --exclude='venv/'
+        --exclude='__pycache__/'
+        --exclude='*.pyc'
+        --exclude='.env'
+        --exclude='*.log'
+        --exclude='tmp/'
+        --exclude='temp/'
+        --exclude='.cache/'
+        --exclude='dist/'
+        --exclude='build/'
+        --exclude='.syncignore'
+    )
+    
+    # Add custom ignore patterns
+    if [ ${#CUSTOM_EXCLUDES[@]} -gt 0 ]; then
+        DRY_RUN_OPTS+=("${CUSTOM_EXCLUDES[@]}")
+    fi
+    
+    # Rsync options for the actual sync
+    RSYNC_OPTS=(
+        -avzh
+        --copy-links         # Transform symlinks into their referent files/dirs
+        --copy-unsafe-links  # Copy links outside the source tree
+        --delete
+        --progress
+        --stats
+        --omit-dir-times
+        -e "$SSH_CMD"
+        --exclude='.git/'
+        --exclude='.gitignore'
+        --exclude='.DS_Store'
+        --exclude='Thumbs.db'
+        --exclude='node_modules/'
+        --exclude='venv/'
+        --exclude='__pycache__/'
+        --exclude='*.pyc'
+        --exclude='.env'
+        --exclude='*.log'
+        --exclude='tmp/'
+        --exclude='temp/'
+        --exclude='.cache/'
+        --exclude='dist/'
+        --exclude='build/'
+        --exclude='.syncignore'
+    )
+    
+    # Add custom ignore patterns
+    if [ ${#CUSTOM_EXCLUDES[@]} -gt 0 ]; then
+        RSYNC_OPTS+=("${CUSTOM_EXCLUDES[@]}")
+    fi
+    
+    # Setup SSH multiplexing for faster connections during content analysis
+    if [ "$suppress_no_changes" != "true" ] || [ "$FIRST_RUN" = "true" ]; then
+        setup_ssh_multiplexing "$SSH_USER" "$REMOTE_HOST" "$SSH_PORT" "$SSH_KEY_PATH"
+    fi
+    
+    # First, do a dry run to see what would change
+    if [ "$suppress_no_changes" != "true" ]; then
+        print_status "Analyzing changes (dry run)..."
+    fi
+    
+    # Temporarily disable exit on error so we can handle rsync failure gracefully
+    set +e
+    DRY_RUN_OUTPUT=$(rsync "${DRY_RUN_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1)
+    DRY_RUN_EXIT_CODE=$?
+    set -e  # Re-enable exit on error
+    
+    # Handle rsync exit codes
+    if [ $DRY_RUN_EXIT_CODE -eq 0 ]; then
+        # Complete success
+        if [ "$suppress_no_changes" != "true" ]; then
+            print_status "Dry run completed successfully"
+        fi
+    elif [ $DRY_RUN_EXIT_CODE -eq 23 ]; then
+        # Partial transfer due to error - often just permission warnings, proceed
+        if [ "$suppress_no_changes" != "true" ]; then
+            print_warning "Dry run completed with warnings (exit code 23)"
+            print_warning "Some files may have permission or attribute issues, but transfer should work"
+        fi
+    elif [ $DRY_RUN_EXIT_CODE -eq 24 ]; then
+        # Partial transfer due to vanished source files - proceed
+        if [ "$suppress_no_changes" != "true" ]; then
+            print_warning "Dry run completed with warnings (exit code 24)"
+            print_warning "Some source files disappeared during analysis, but transfer should work"
+        fi
+    else
+        # Real error
+        print_error "Failed to analyze changes (dry run failed with exit code $DRY_RUN_EXIT_CODE)"
+        if [ "$suppress_no_changes" = "true" ] && [ "$AUTO_UPDATE" = "true" ]; then
+            # In auto-update mode, don't exit, just return
+            return 1
+        fi
+        echo ""
+        echo "Full error output:"
+        echo "=================="
+        echo "$DRY_RUN_OUTPUT"
+        echo "=================="
+        echo ""
+        echo "Common causes:"
+        echo "  - SSH authentication failed (check your password or SSH keys)"
+        echo "  - Network connectivity issues"
+        echo "  - Remote directory doesn't exist or isn't accessible"
+        echo ""
+        if [ "$SSH_KEY_AUTH" = false ]; then
+            echo "Consider setting up SSH keys for easier authentication:"
+            echo "  $0 --setup-ssh-key $LOCAL_DIR $REMOTE_HOST $REMOTE_DIR $SSH_USER $SSH_PORT"
+        fi
+        exit 1
+    fi
+    
+    # Parse the results with detailed analysis
+    if [ "$FAST_MODE" = true ]; then
+        if [ "$suppress_no_changes" != "true" ]; then
+            print_status "Fast mode enabled - using simplified analysis..."
+        fi
+        # Simple parsing without content analysis
+        CHANGE_ANALYSIS=$(count_changes_simple "$DRY_RUN_OUTPUT")
+        FILES_TO_TRANSFER=$(echo "$CHANGE_ANALYSIS" | cut -d':' -f1)
+        FILES_TO_DELETE=$(echo "$CHANGE_ANALYSIS" | cut -d':' -f2)
+        CONTENT_CHANGES=$FILES_TO_TRANSFER
+        FORMAT_CHANGES=0
+        NEW_FILES=0
+        SUBSTANTIVE_CHANGES=$((CONTENT_CHANGES + FILES_TO_DELETE))
+        TOTAL_CHANGES=$((FILES_TO_TRANSFER + FILES_TO_DELETE))
+    else
+        if [ "$suppress_no_changes" != "true" ] && [ "$TOTAL_CHANGES" -gt 0 ]; then
+            print_status "Analyzing changes (this may take a moment for content comparison)..."
+            if [ "$SSH_MULTIPLEXING" = true ]; then
+                print_status "Using SSH multiplexing for faster analysis..."
+            fi
+        fi
+        
+        # Quick count first to see if we need detailed analysis
+        QUICK_COUNT=$(count_changes_simple "$DRY_RUN_OUTPUT")
+        QUICK_TRANSFER=$(echo "$QUICK_COUNT" | cut -d':' -f1)
+        QUICK_DELETE=$(echo "$QUICK_COUNT" | cut -d':' -f2)
+        QUICK_TOTAL=$((QUICK_TRANSFER + QUICK_DELETE))
+        
+        if [ $QUICK_TOTAL -eq 0 ]; then
+            # No changes at all
+            FILES_TO_TRANSFER=0
+            FILES_TO_DELETE=0
+            CONTENT_CHANGES=0
+            FORMAT_CHANGES=0
+            NEW_FILES=0
+            SUBSTANTIVE_CHANGES=0
+            TOTAL_CHANGES=0
+        else
+            # Extract remote connection details for content analysis
+            REMOTE_USER_HOST="${SSH_USER}@${REMOTE_HOST}"
+            
+            # Get detailed change analysis
+            CHANGE_ANALYSIS=$(analyze_changes "$DRY_RUN_OUTPUT" "$LOCAL_DIR" "$SSH_CMD" "$REMOTE_USER_HOST" "$REMOTE_DIR")
+            
+            # Parse the analysis results
+            FILES_TO_TRANSFER=$(echo "$CHANGE_ANALYSIS" | grep "^transfer:" | cut -d':' -f2)
+            FILES_TO_DELETE=$(echo "$CHANGE_ANALYSIS" | grep "^delete:" | cut -d':' -f2)
+            CONTENT_CHANGES=$(echo "$CHANGE_ANALYSIS" | grep "^content:" | cut -d':' -f2)
+            FORMAT_CHANGES=$(echo "$CHANGE_ANALYSIS" | grep "^format:" | cut -d':' -f2)
+            NEW_FILES=$(echo "$CHANGE_ANALYSIS" | grep "^new:" | cut -d':' -f2)
+            
+            TOTAL_CHANGES=$((FILES_TO_TRANSFER + FILES_TO_DELETE))
+            SUBSTANTIVE_CHANGES=$((CONTENT_CHANGES + NEW_FILES + FILES_TO_DELETE))
+        fi
+    fi
+    
+    # If in suppress mode and no changes, return early
+    if [ "$suppress_no_changes" = "true" ] && [ $TOTAL_CHANGES -eq 0 ]; then
+        return 0
+    fi
+    
+    # Show analysis results
+    if [ "$FAST_MODE" = true ] && [ $TOTAL_CHANGES -gt 0 ]; then
+        echo ""
+        print_status "Fast analysis complete:"
+        echo "  📝 Files to transfer: $FILES_TO_TRANSFER"
+        echo "  🗑️  Files to delete: $FILES_TO_DELETE" 
+        echo "  📊 TOTAL changes: $TOTAL_CHANGES"
+        echo ""
+        print_warning "Note: Use without --fast for detailed content vs format analysis"
+    elif [ "$FAST_MODE" = false ] && [ $TOTAL_CHANGES -gt 0 ]; then
+        echo ""
+        print_status "Detailed analysis complete:"
+        echo "  📝 Content changes (substantive): $CONTENT_CHANGES files"
+        echo "  📄 New files: $NEW_FILES files"
+        echo "  🗑️  Files to delete: $FILES_TO_DELETE files"
+        echo "  🔧 Format changes only (line endings/permissions): $FORMAT_CHANGES files"
+        echo "  ─────────────────────────────────────────────────"
+        echo "  📊 TOTAL substantive changes: $SUBSTANTIVE_CHANGES files"
+        echo "  📊 TOTAL format-only changes: $FORMAT_CHANGES files"
+        echo "  📊 TOTAL all changes: $TOTAL_CHANGES files"
+    fi
+    
+    # Show detailed file lists if there are substantive changes
+    if [ $SUBSTANTIVE_CHANGES -gt 0 ] && [ $TOTAL_CHANGES -gt 0 ]; then
+        echo ""
+        print_warning "Files with substantive changes:"
+        
+        # Show content changes
+        CONTENT_FILES=$(echo "$CHANGE_ANALYSIS" | grep "^content_files:" | cut -d':' -f2)
+        if [ -n "$CONTENT_FILES" ] && [ "$CONTENT_FILES" != "" ]; then
+            echo ""
+            echo "📝 Modified files (content changed):"
+            echo "$CONTENT_FILES" | tr '|' '\n' | head -20 | sed 's/^/    /'
+            if [ $(echo "$CONTENT_FILES" | tr '|' '\n' | wc -l) -gt 20 ]; then
+                echo "    ... and $((CONTENT_CHANGES - 20)) more files"
+            fi
+        fi
+        
+        # Show new files
+        NEW_FILES_LIST=$(echo "$CHANGE_ANALYSIS" | grep "^new_files:" | cut -d':' -f2)
+        if [ -n "$NEW_FILES_LIST" ] && [ "$NEW_FILES_LIST" != "" ]; then
+            echo ""
+            echo "📄 New files:"
+            echo "$NEW_FILES_LIST" | tr '|' '\n' | head -10 | sed 's/^/    /'
+            if [ $(echo "$NEW_FILES_LIST" | tr '|' '\n' | wc -l) -gt 10 ]; then
+                echo "    ... and $((NEW_FILES - 10)) more files"
+            fi
+        fi
+        
+        # Show deleted files
+        DELETED_FILES=$(echo "$CHANGE_ANALYSIS" | grep "^deleted_files:" | cut -d':' -f2)
+        if [ -n "$DELETED_FILES" ] && [ "$DELETED_FILES" != "" ]; then
+            echo ""
+            echo "🗑️  Files to be deleted:"
+            echo "$DELETED_FILES" | tr '|' '\n' | head -10 | sed 's/^/    /'
+            if [ $(echo "$DELETED_FILES" | tr '|' '\n' | wc -l) -gt 10 ]; then
+                echo "    ... and $((FILES_TO_DELETE - 10)) more files"
+            fi
+        fi
+    fi
+    
+    # Show format-only changes summary (but don't list all files unless requested)
+    if [ $FORMAT_CHANGES -gt 0 ] && [ $TOTAL_CHANGES -gt 0 ]; then
+        echo ""
+        print_status "Format-only changes:"
+        echo "  🔧 $FORMAT_CHANGES files have only line ending, permission, or timestamp differences"
+        echo "  ℹ️  These are typically safe Windows→Linux format conversions"
+        
+        # Option to show format-only files
+        if [ $FORMAT_CHANGES -le 20 ]; then
+            FORMAT_FILES=$(echo "$CHANGE_ANALYSIS" | grep "^format_files:" | cut -d':' -f2)
+            if [ -n "$FORMAT_FILES" ] && [ "$FORMAT_FILES" != "" ]; then
+                echo ""
+                echo "Files with format-only changes:"
+                echo "$FORMAT_FILES" | tr '|' '\n' | sed 's/^/    /'
+            fi
+        else
+            echo "  (Use --show-format-details to see full list)"
+        fi
+    fi
+    
+    # Decide whether to proceed based on substantive changes
+    if [ $TOTAL_CHANGES -eq 0 ]; then
+        print_success "No changes detected - directories are already in sync!"
+        return 0
+    fi
+    
+    if [ $SUBSTANTIVE_CHANGES -eq 0 ] && [ $FORMAT_CHANGES -gt 0 ]; then
+        echo ""
+        print_status "Only format changes detected (line endings, permissions, timestamps)"
+        print_status "These changes will normalize your files for the Linux environment"
+        echo ""
+        if [ "$SSH_KEY_AUTH" = false ]; then
+            print_warning "You will be prompted for your SSH password"
+        fi
+        if [ "$SKIP_CONFIRM" = false ]; then
+            read -p "Proceed with format normalization? (Y/n): " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Nn]$ ]]; then
+                print_status "Synchronization cancelled"
+                return 0
+            fi
+        else
+            print_status "Auto-proceeding with format normalization (--skipconfirm enabled)"
+        fi
+    elif [ $SUBSTANTIVE_CHANGES -gt 0 ]; then
+        echo ""
+        print_warning "Ready to sync $SUBSTANTIVE_CHANGES substantive changes"
+        if [ $FORMAT_CHANGES -gt 0 ]; then
+            print_status "Plus $FORMAT_CHANGES format-only changes"
+        fi
+        if [ "$SSH_KEY_AUTH" = false ]; then
+            print_warning "You will be prompted for your SSH password"
+        fi
+        if [ "$SKIP_CONFIRM" = false ]; then
+            read -p "Proceed with synchronization? (y/N): " -n 1 -r
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_status "Synchronization cancelled"
+                return 0
+            fi
+        else
+            print_status "Auto-proceeding with synchronization (--skipconfirm enabled)"
+        fi
+    fi
+    
+    # Additional confirmation for deletions (unless --autodelete or --skipconfirm is used)
+    if [ $FILES_TO_DELETE -gt 0 ] && [ "$AUTO_DELETE" = false ]; then
+        echo ""
+        print_warning "This sync will DELETE $FILES_TO_DELETE files from the remote server!"
+        print_warning "Files on remote that do not exist locally will be permanently removed."
+        read -p "Are you sure you want to delete these remote files? (y/N): " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_status "Synchronization cancelled due to deletion confirmation"
+            return 0
+        fi
+    elif [ $FILES_TO_DELETE -gt 0 ] && [ "$AUTO_DELETE" = true ]; then
+        print_status "Auto-delete mode enabled - skipping deletion confirmation for $FILES_TO_DELETE files"
+    fi
+    
+    print_status "Starting rsync transfer..."
+    if [ "$SSH_KEY_AUTH" = true ]; then
+        print_status "Using SSH key authentication"
+    else
+        print_status "Using password authentication"
+    fi
+    echo ""
+    
+    # Perform the sync with better error handling
+    set +e
+    rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH"
+    SYNC_EXIT_CODE=$?
+    set -e
+    
+    if [ $SYNC_EXIT_CODE -eq 0 ]; then
+        echo ""
+        print_success "Directory synchronization completed successfully!"
+        if [ $SUBSTANTIVE_CHANGES -gt 0 ]; then
+            print_success "Synchronized $SUBSTANTIVE_CHANGES substantive changes"
+        fi
+        if [ $FORMAT_CHANGES -gt 0 ]; then
+            print_success "Normalized $FORMAT_CHANGES files for Linux environment"
+        fi
+    elif [ $SYNC_EXIT_CODE -eq 23 ]; then
+        echo ""
+        print_success "Directory synchronization completed with warnings!"
+        print_warning "Some files had permission or attribute issues (exit code 23)"
+        print_warning "This is usually not a problem - the files were still transferred"
+    elif [ $SYNC_EXIT_CODE -eq 24 ]; then
+        echo ""
+        print_success "Directory synchronization completed with warnings!"
+        print_warning "Some source files vanished during transfer (exit code 24)"
+        print_warning "This can happen with temporary files - sync was successful"
+    else
+        echo ""
+        print_error "Synchronization failed with exit code $SYNC_EXIT_CODE"
+        if [ "$AUTO_UPDATE" = "true" ]; then
+            print_warning "Will retry in next update cycle..."
+            return 1
+        fi
+        echo ""
+        echo "This might be due to:"
+        echo "  - Network connectivity issues"
+        echo "  - Permission problems on remote server"
+        echo "  - Disk space issues on remote server"
+        echo "  - File path issues (especially with spaces in names)"
+        echo ""
+        echo "Try running with verbose SSH output:"
+        echo "  rsync -avzh -e 'ssh -v' \"$LOCAL_DIR\" \"$REMOTE_PATH\""
+        exit 1
+    fi
+    
+    # Optional: verify sync by comparing file counts
+    print_status "Sync operation completed"
+    if [ "$AUTO_UPDATE" != "true" ]; then
+        echo ""
+        echo "To verify the sync, you can run:"
+        echo "  ssh -p $SSH_PORT $SSH_USER@$REMOTE_HOST 'find $REMOTE_DIR -type f | wc -l'"
+        echo "  find -L $LOCAL_DIR -type f | wc -l"
+    fi
+    
+    return 0
+}
+
 # Read configuration
 CUSTOM_CONFIG_FILE=""
 
@@ -600,6 +1065,7 @@ read_config "$CUSTOM_CONFIG_FILE"
 # Parse arguments
 AUTO_DELETE=false
 SKIP_CONFIRM=false
+AUTO_UPDATE=false
 IGNORE_FILE=".syncignore"
 USE_SSH_KEY=true
 FAST_MODE=false
@@ -614,6 +1080,13 @@ while [[ $# -gt 0 ]]; do
         --skipconfirm)
             SKIP_CONFIRM=true
             AUTO_DELETE=true  # --skipconfirm implies --autodelete
+            shift
+            ;;
+        --autoupdate)
+            AUTO_UPDATE=true
+            SKIP_CONFIRM=true  # --autoupdate implies --skipconfirm
+            AUTO_DELETE=true   # and --autodelete
+            FAST_MODE=true     # Use fast mode for quick checks
             shift
             ;;
         --ignore-file)
@@ -737,399 +1210,55 @@ fi
 # Build remote path
 REMOTE_PATH="$SSH_USER@$REMOTE_HOST:$REMOTE_DIR"
 
-print_status "Starting directory synchronization..."
-echo "  Local:  $LOCAL_DIR"
-echo "  Remote: $REMOTE_PATH"
-echo "  Port:   $SSH_PORT"
-if [ "$SKIP_CONFIRM" = true ]; then
-    print_status "Mode: Auto-sync (--skipconfirm enabled)"
-fi
-echo ""
-
-# Test SSH connection
-print_status "Testing SSH connection..."
-
-# Try to find SSH key if enabled
-if [ "$USE_SSH_KEY" = true ] && find_ssh_key; then
-    print_status "Found SSH key at: $SSH_KEY_PATH"
-    
-    # Test key authentication
-    if ssh -p "$SSH_PORT" -i "$SSH_KEY_PATH" -o BatchMode=yes -o PasswordAuthentication=no "$SSH_USER@$REMOTE_HOST" exit 2>/dev/null; then
-        print_success "SSH key authentication successful"
-        SSH_KEY_AUTH=true
-    else
-        print_warning "SSH key authentication failed, will fall back to password"
-        SSH_KEY_AUTH=false
-    fi
-else
-    if [ "$USE_SSH_KEY" = true ]; then
-        print_warning "No SSH key found. Consider setting up SSH keys for passwordless sync:"
-        echo "  Run: $0 --setup-ssh-key $LOCAL_DIR $REMOTE_HOST $REMOTE_DIR $SSH_USER $SSH_PORT"
-        echo ""
-    fi
-    SSH_KEY_AUTH=false
-fi
-
-# If key auth failed, test password auth
-if [ "$SSH_KEY_AUTH" = false ]; then
-    print_status "Testing password authentication..."
-    if ! ssh -p "$SSH_PORT" -o ConnectTimeout=10 -o PreferredAuthentications=password -o PubkeyAuthentication=no "$SSH_USER@$REMOTE_HOST" exit 2>&1; then
-        print_warning "SSH connection test failed. You'll be prompted for password during sync."
-    else
-        print_success "Password authentication available"
-    fi
-fi
-
-# Build SSH command based on authentication method
-if [ "$SSH_KEY_AUTH" = true ]; then
-    SSH_CMD="ssh -p $SSH_PORT -i $SSH_KEY_PATH"
-else
-    SSH_CMD="ssh -p $SSH_PORT"
-fi
-
-# Setup SSH multiplexing for faster connections during content analysis
-setup_ssh_multiplexing "$SSH_USER" "$REMOTE_HOST" "$SSH_PORT" "$SSH_KEY_PATH"
-
-# First, do a dry run to see what would change
-print_status "Analyzing changes (dry run)..."
-
-# Create dry-run specific options (same as main options but with dry-run and itemize)
-DRY_RUN_OPTS=(
-    -avzh
-    --copy-links         # Transform symlinks into their referent files/dirs
-    --copy-unsafe-links  # Copy links outside the source tree
-    --dry-run
-    --itemize-changes
-    --delete
-    --stats
-    --omit-dir-times
-    -e "$SSH_CMD"
-    --exclude='.git/'
-    --exclude='.gitignore'
-    --exclude='.DS_Store'
-    --exclude='Thumbs.db'
-    --exclude='node_modules/'
-    --exclude='venv/'
-    --exclude='__pycache__/'
-    --exclude='*.pyc'
-    --exclude='.env'
-    --exclude='*.log'
-    --exclude='tmp/'
-    --exclude='temp/'
-    --exclude='.cache/'
-    --exclude='dist/'
-    --exclude='build/'
-    --exclude='.syncignore'
-)
-
-# Add custom ignore patterns to dry run
+# Read custom ignore patterns once
+CUSTOM_EXCLUDES=()
 if [ -n "$FULL_IGNORE_PATH" ]; then
     readarray -t CUSTOM_EXCLUDES < <(read_ignore_patterns "$FULL_IGNORE_PATH")
-    DRY_RUN_OPTS+=("${CUSTOM_EXCLUDES[@]}")
 elif [ "$IGNORE_FILE" != ".syncignore" ]; then
     print_error "Specified ignore file '$IGNORE_FILE' not found"
     exit 1
 fi
 
-print_status "Running analysis..."
-
-# Temporarily disable exit on error so we can handle rsync failure gracefully
-set +e
-DRY_RUN_OUTPUT=$(rsync "${DRY_RUN_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1)
-DRY_RUN_EXIT_CODE=$?
-set -e  # Re-enable exit on error
-
-# Handle rsync exit codes
-if [ $DRY_RUN_EXIT_CODE -eq 0 ]; then
-    # Complete success
-    print_status "Dry run completed successfully"
-elif [ $DRY_RUN_EXIT_CODE -eq 23 ]; then
-    # Partial transfer due to error - often just permission warnings, proceed
-    print_warning "Dry run completed with warnings (exit code 23)"
-    print_warning "Some files may have permission or attribute issues, but transfer should work"
-elif [ $DRY_RUN_EXIT_CODE -eq 24 ]; then
-    # Partial transfer due to vanished source files - proceed
-    print_warning "Dry run completed with warnings (exit code 24)"
-    print_warning "Some source files disappeared during analysis, but transfer should work"
+# Main execution
+if [ "$AUTO_UPDATE" = true ]; then
+    # Auto-update mode - continuous monitoring
+    print_success "Starting auto-update mode - monitoring for changes every 5 seconds"
+    print_status "Press Ctrl+C to stop monitoring"
+    echo ""
+    print_status "Local:  $LOCAL_DIR"
+    print_status "Remote: $REMOTE_PATH"
+    print_status "Port:   $SSH_PORT"
+    echo ""
+    
+    FIRST_RUN=true
+    
+    while true; do
+        # Perform sync with suppression if no changes
+        perform_sync "true"
+        
+        # Mark first run as complete
+        if [ "$FIRST_RUN" = "true" ]; then
+            if [ $TOTAL_CHANGES -eq 0 ]; then
+                print_success "Initial check complete - directories are in sync"
+                print_status "Monitoring for changes..."
+            fi
+            FIRST_RUN=false
+        fi
+        
+        # Wait before next check
+        sleep 5
+    done
 else
-    # Real error
-    print_error "Failed to analyze changes (dry run failed with exit code $DRY_RUN_EXIT_CODE)"
-    echo ""
-    echo "Full error output:"
-    echo "=================="
-    echo "$DRY_RUN_OUTPUT"
-    echo "=================="
-    echo ""
-    echo "Common causes:"
-    echo "  - SSH authentication failed (check your password or SSH keys)"
-    echo "  - Network connectivity issues"
-    echo "  - Remote directory doesn't exist or isn't accessible"
-    echo ""
-    if [ "$SSH_KEY_AUTH" = false ]; then
-        echo "Consider setting up SSH keys for easier authentication:"
-        echo "  $0 --setup-ssh-key $LOCAL_DIR $REMOTE_HOST $REMOTE_DIR $SSH_USER $SSH_PORT"
+    # Normal mode - single sync
+    print_status "Starting directory synchronization..."
+    echo "  Local:  $LOCAL_DIR"
+    echo "  Remote: $REMOTE_PATH"
+    echo "  Port:   $SSH_PORT"
+    if [ "$SKIP_CONFIRM" = true ]; then
+        print_status "Mode: Auto-sync (--skipconfirm enabled)"
     fi
-    exit 1
-fi
-
-# Parse the results with detailed analysis
-if [ "$FAST_MODE" = true ]; then
-    print_status "Fast mode enabled - using simplified analysis..."
-    # Simple parsing without content analysis
-    CHANGE_ANALYSIS=$(count_changes_simple "$DRY_RUN_OUTPUT")
-    FILES_TO_TRANSFER=$(echo "$CHANGE_ANALYSIS" | cut -d':' -f1)
-    FILES_TO_DELETE=$(echo "$CHANGE_ANALYSIS" | cut -d':' -f2)
-    CONTENT_CHANGES=$FILES_TO_TRANSFER
-    FORMAT_CHANGES=0
-    NEW_FILES=0
-    SUBSTANTIVE_CHANGES=$((CONTENT_CHANGES + FILES_TO_DELETE))
-    TOTAL_CHANGES=$((FILES_TO_TRANSFER + FILES_TO_DELETE))
+    echo ""
     
-    echo ""
-    print_status "Fast analysis complete:"
-    echo "  📝 Files to transfer: $FILES_TO_TRANSFER"
-    echo "  🗑️  Files to delete: $FILES_TO_DELETE" 
-    echo "  📊 TOTAL changes: $TOTAL_CHANGES"
-    echo ""
-    print_warning "Note: Use without --fast for detailed content vs format analysis"
-else
-    print_status "Analyzing changes (this may take a moment for content comparison)..."
-    if [ "$SSH_MULTIPLEXING" = true ]; then
-        print_status "Using SSH multiplexing for faster analysis..."
-    fi
-    
-    # Extract remote connection details for content analysis
-    REMOTE_USER_HOST="${SSH_USER}@${REMOTE_HOST}"
-    
-    # Get detailed change analysis
-    CHANGE_ANALYSIS=$(analyze_changes "$DRY_RUN_OUTPUT" "$LOCAL_DIR" "$SSH_CMD" "$REMOTE_USER_HOST" "$REMOTE_DIR")
-    
-    # Parse the analysis results
-    FILES_TO_TRANSFER=$(echo "$CHANGE_ANALYSIS" | grep "^transfer:" | cut -d':' -f2)
-    FILES_TO_DELETE=$(echo "$CHANGE_ANALYSIS" | grep "^delete:" | cut -d':' -f2)
-    CONTENT_CHANGES=$(echo "$CHANGE_ANALYSIS" | grep "^content:" | cut -d':' -f2)
-    FORMAT_CHANGES=$(echo "$CHANGE_ANALYSIS" | grep "^format:" | cut -d':' -f2)
-    NEW_FILES=$(echo "$CHANGE_ANALYSIS" | grep "^new:" | cut -d':' -f2)
-    
-    TOTAL_CHANGES=$((FILES_TO_TRANSFER + FILES_TO_DELETE))
-    SUBSTANTIVE_CHANGES=$((CONTENT_CHANGES + NEW_FILES + FILES_TO_DELETE))
-    
-    echo ""
-    print_status "Detailed analysis complete:"
-    echo "  📝 Content changes (substantive): $CONTENT_CHANGES files"
-    echo "  📄 New files: $NEW_FILES files"
-    echo "  🗑️  Files to delete: $FILES_TO_DELETE files"
-    echo "  🔧 Format changes only (line endings/permissions): $FORMAT_CHANGES files"
-    echo "  ─────────────────────────────────────────────────"
-    echo "  📊 TOTAL substantive changes: $SUBSTANTIVE_CHANGES files"
-    echo "  📊 TOTAL format-only changes: $FORMAT_CHANGES files"
-    echo "  📊 TOTAL all changes: $TOTAL_CHANGES files"
+    FIRST_RUN=true
+    perform_sync "false"
 fi
-
-# Show detailed file lists if there are substantive changes
-if [ $SUBSTANTIVE_CHANGES -gt 0 ]; then
-    echo ""
-    print_warning "Files with substantive changes:"
-    
-    # Show content changes
-    CONTENT_FILES=$(echo "$CHANGE_ANALYSIS" | grep "^content_files:" | cut -d':' -f2)
-    if [ -n "$CONTENT_FILES" ] && [ "$CONTENT_FILES" != "" ]; then
-        echo ""
-        echo "📝 Modified files (content changed):"
-        echo "$CONTENT_FILES" | tr '|' '\n' | head -20 | sed 's/^/    /'
-        if [ $(echo "$CONTENT_FILES" | tr '|' '\n' | wc -l) -gt 20 ]; then
-            echo "    ... and $((CONTENT_CHANGES - 20)) more files"
-        fi
-    fi
-    
-    # Show new files
-    NEW_FILES_LIST=$(echo "$CHANGE_ANALYSIS" | grep "^new_files:" | cut -d':' -f2)
-    if [ -n "$NEW_FILES_LIST" ] && [ "$NEW_FILES_LIST" != "" ]; then
-        echo ""
-        echo "📄 New files:"
-        echo "$NEW_FILES_LIST" | tr '|' '\n' | head -10 | sed 's/^/    /'
-        if [ $(echo "$NEW_FILES_LIST" | tr '|' '\n' | wc -l) -gt 10 ]; then
-            echo "    ... and $((NEW_FILES - 10)) more files"
-        fi
-    fi
-    
-    # Show deleted files
-    DELETED_FILES=$(echo "$CHANGE_ANALYSIS" | grep "^deleted_files:" | cut -d':' -f2)
-    if [ -n "$DELETED_FILES" ] && [ "$DELETED_FILES" != "" ]; then
-        echo ""
-        echo "🗑️  Files to be deleted:"
-        echo "$DELETED_FILES" | tr '|' '\n' | head -10 | sed 's/^/    /'
-        if [ $(echo "$DELETED_FILES" | tr '|' '\n' | wc -l) -gt 10 ]; then
-            echo "    ... and $((FILES_TO_DELETE - 10)) more files"
-        fi
-    fi
-fi
-
-# Show format-only changes summary (but don't list all files unless requested)
-if [ $FORMAT_CHANGES -gt 0 ]; then
-    echo ""
-    print_status "Format-only changes:"
-    echo "  🔧 $FORMAT_CHANGES files have only line ending, permission, or timestamp differences"
-    echo "  ℹ️  These are typically safe Windows→Linux format conversions"
-    
-    # Option to show format-only files
-    if [ $FORMAT_CHANGES -le 20 ]; then
-        FORMAT_FILES=$(echo "$CHANGE_ANALYSIS" | grep "^format_files:" | cut -d':' -f2)
-        if [ -n "$FORMAT_FILES" ] && [ "$FORMAT_FILES" != "" ]; then
-            echo ""
-            echo "Files with format-only changes:"
-            echo "$FORMAT_FILES" | tr '|' '\n' | sed 's/^/    /'
-        fi
-    else
-        echo "  (Use --show-format-details to see full list)"
-    fi
-fi
-
-# Decide whether to proceed based on substantive changes
-if [ $TOTAL_CHANGES -eq 0 ]; then
-    print_success "No changes detected - directories are already in sync!"
-    exit 0
-fi
-
-if [ $SUBSTANTIVE_CHANGES -eq 0 ] && [ $FORMAT_CHANGES -gt 0 ]; then
-    echo ""
-    print_status "Only format changes detected (line endings, permissions, timestamps)"
-    print_status "These changes will normalize your files for the Linux environment"
-    echo ""
-    if [ "$SSH_KEY_AUTH" = false ]; then
-        print_warning "You will be prompted for your SSH password"
-    fi
-    if [ "$SKIP_CONFIRM" = false ]; then
-        read -p "Proceed with format normalization? (Y/n): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            print_status "Synchronization cancelled"
-            exit 0
-        fi
-    else
-        print_status "Auto-proceeding with format normalization (--skipconfirm enabled)"
-    fi
-elif [ $SUBSTANTIVE_CHANGES -gt 0 ]; then
-    echo ""
-    print_warning "Ready to sync $SUBSTANTIVE_CHANGES substantive changes"
-    if [ $FORMAT_CHANGES -gt 0 ]; then
-        print_status "Plus $FORMAT_CHANGES format-only changes"
-    fi
-    if [ "$SSH_KEY_AUTH" = false ]; then
-        print_warning "You will be prompted for your SSH password"
-    fi
-    if [ "$SKIP_CONFIRM" = false ]; then
-        read -p "Proceed with synchronization? (y/N): " -n 1 -r
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_status "Synchronization cancelled"
-            exit 0
-        fi
-    else
-        print_status "Auto-proceeding with synchronization (--skipconfirm enabled)"
-    fi
-fi
-
-# Additional confirmation for deletions (unless --autodelete or --skipconfirm is used)
-if [ $FILES_TO_DELETE -gt 0 ] && [ "$AUTO_DELETE" = false ]; then
-    echo ""
-    print_warning "This sync will DELETE $FILES_TO_DELETE files from the remote server!"
-    print_warning "Files on remote that do not exist locally will be permanently removed."
-    read -p "Are you sure you want to delete these remote files? (y/N): " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_status "Synchronization cancelled due to deletion confirmation"
-        exit 0
-    fi
-elif [ $FILES_TO_DELETE -gt 0 ] && [ "$AUTO_DELETE" = true ]; then
-    print_status "Auto-delete mode enabled - skipping deletion confirmation for $FILES_TO_DELETE files"
-fi
-
-# Rsync options for the actual sync (similar to dry run but without --dry-run and --itemize-changes)
-RSYNC_OPTS=(
-    -avzh
-    --copy-links         # Transform symlinks into their referent files/dirs
-    --copy-unsafe-links  # Copy links outside the source tree
-    --delete
-    --progress
-    --stats
-    --omit-dir-times
-    -e "$SSH_CMD"
-    --exclude='.git/'
-    --exclude='.gitignore'
-    --exclude='.DS_Store'
-    --exclude='Thumbs.db'
-    --exclude='node_modules/'
-    --exclude='venv/'
-    --exclude='__pycache__/'
-    --exclude='*.pyc'
-    --exclude='.env'
-    --exclude='*.log'
-    --exclude='tmp/'
-    --exclude='temp/'
-    --exclude='.cache/'
-    --exclude='dist/'
-    --exclude='build/'
-    --exclude='.syncignore'
-)
-
-# Add the same custom excludes we used in the dry run
-if [ -n "$FULL_IGNORE_PATH" ]; then
-    readarray -t CUSTOM_EXCLUDES < <(read_ignore_patterns "$FULL_IGNORE_PATH")
-    RSYNC_OPTS+=("${CUSTOM_EXCLUDES[@]}")
-fi
-
-print_status "Starting rsync transfer..."
-if [ "$SSH_KEY_AUTH" = true ]; then
-    print_status "Using SSH key authentication"
-else
-    print_status "Using password authentication"
-fi
-echo ""
-
-# Perform the sync with better error handling
-set +e
-rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH"
-SYNC_EXIT_CODE=$?
-set -e
-
-if [ $SYNC_EXIT_CODE -eq 0 ]; then
-    echo ""
-    print_success "Directory synchronization completed successfully!"
-    if [ $SUBSTANTIVE_CHANGES -gt 0 ]; then
-        print_success "Synchronized $SUBSTANTIVE_CHANGES substantive changes"
-    fi
-    if [ $FORMAT_CHANGES -gt 0 ]; then
-        print_success "Normalized $FORMAT_CHANGES files for Linux environment"
-    fi
-elif [ $SYNC_EXIT_CODE -eq 23 ]; then
-    echo ""
-    print_success "Directory synchronization completed with warnings!"
-    print_warning "Some files had permission or attribute issues (exit code 23)"
-    print_warning "This is usually not a problem - the files were still transferred"
-elif [ $SYNC_EXIT_CODE -eq 24 ]; then
-    echo ""
-    print_success "Directory synchronization completed with warnings!"
-    print_warning "Some source files vanished during transfer (exit code 24)"
-    print_warning "This can happen with temporary files - sync was successful"
-else
-    echo ""
-    print_error "Synchronization failed with exit code $SYNC_EXIT_CODE"
-    echo ""
-    echo "This might be due to:"
-    echo "  - Network connectivity issues"
-    echo "  - Permission problems on remote server"
-    echo "  - Disk space issues on remote server"
-    echo "  - File path issues (especially with spaces in names)"
-    echo ""
-    echo "Try running with verbose SSH output:"
-    echo "  rsync -avzh -e 'ssh -v' \"$LOCAL_DIR\" \"$REMOTE_PATH\""
-    exit 1
-fi
-
-# Optional: verify sync by comparing file counts
-print_status "Sync operation completed"
-echo ""
-echo "To verify the sync, you can run:"
-echo "  ssh -p $SSH_PORT $SSH_USER@$REMOTE_HOST 'find $REMOTE_DIR -type f | wc -l'"
-echo "  find -L $LOCAL_DIR -type f | wc -l"
