@@ -13,7 +13,7 @@ $static_routes_path = ltrim($static_routes_path, '/');
 
 $settings = Globalvars::get_instance();
 $session = SessionControl::get_instance();
-$theme_template = $settings->get_setting('theme_template') ?: 'default';
+$theme_template = $settings->get_setting('theme_template');
 
 // Try directory theme first, then plugin
 if (ThemeHelper::themeExists($theme_template)) {
@@ -26,9 +26,9 @@ if (ThemeHelper::themeExists($theme_template)) {
 	$template_directory = PathHelper::getIncludePath('plugins/'.$theme_template);
 	$is_plugin_theme = true;
 } else {
-	// Fallback to default theme
-	$template_directory = PathHelper::getIncludePath('theme/default');
-	$theme_template = 'default';
+	// No valid theme found - let individual file lookups handle fallbacks to base files
+	$template_directory = null;
+	$theme_template = null;
 	$is_plugin_theme = false;
 }
 

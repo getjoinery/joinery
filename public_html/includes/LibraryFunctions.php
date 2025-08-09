@@ -1,6 +1,8 @@
 <?php
 require_once('PathHelper.php');
 require_once('SystemClass.php');
+require_once('ThemeHelper.php');
+require_once('PluginHelper.php');
 
 class LibraryFunctions {
 
@@ -148,17 +150,24 @@ class LibraryFunctions {
 		$settings = Globalvars::get_instance();
 
 		$theme_template = $settings->get_setting('theme_template');
-		$theme_file = PathHelper::getBasePath() . '/theme/'.$theme_template.'/404.php';	
+		
+		// Try directory theme first, then plugin
+		$theme_file = null;
+		if (ThemeHelper::themeExists($theme_template)) {
+			$theme_file = PathHelper::getBasePath() . '/theme/'.$theme_template.'/404.php';
+		} elseif (PluginHelper::isPluginActive($theme_template)) {
+			$theme_file = PathHelper::getBasePath() . '/plugins/'.$theme_template.'/views/404.php';
+		}
 
 		$base_file = PathHelper::getBasePath() . '/views/404.php';
 
 		header("HTTP/1.0 404 Not Found");
-		if(file_exists($theme_file)){
+		if($theme_file && file_exists($theme_file)){
 			//WE WANT A FILE PATH
 			require_once($theme_file);
 			exit();
 		}
-		else if(file_exists($base_file)){
+		elseif(file_exists($base_file)){
 			//WE WANT A FILE PATH
 			require_once($base_file);
 			exit();
@@ -288,17 +297,26 @@ class LibraryFunctions {
 			error_log("ThemeHelper error in get_formwriter_object: " . $e->getMessage());
 		}
 		
-		// LEGACY FALLBACK: Original method for backward compatibility
+		// LEGACY FALLBACK: Updated to support plugin themes
 		$settings = Globalvars::get_instance();
 		$theme_template = $settings->get_setting('theme_template', true, true);
-		
-		// Try theme-specific FormWriter
-		$theme_form = PathHelper::getThemeFilePath('FormWriter.php', 'includes', 'system', $theme_template);
-		if($theme_form){
-			require_once($theme_form);
-			return new FormWriter($form_id);
+
+		// Try directory theme FormWriter first
+		if (ThemeHelper::themeExists($theme_template)) {
+			$theme_form = PathHelper::getBasePath() . '/theme/' . $theme_template . '/includes/FormWriter.php';
+			if (file_exists($theme_form)) {
+				require_once($theme_form);
+				return new FormWriter($form_id);
+			}
+		} elseif (PluginHelper::isPluginActive($theme_template)) {
+			// Try plugin theme FormWriter
+			$plugin_form = PathHelper::getBasePath() . '/plugins/' . $theme_template . '/includes/FormWriter.php';
+			if (file_exists($plugin_form)) {
+				require_once($plugin_form);
+				return new FormWriter($form_id);
+			}
 		}
-		
+
 		// Final default - Bootstrap
 		PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
 		return new FormWriterMasterBootstrap($form_id);	
@@ -384,14 +402,24 @@ class LibraryFunctions {
 		$siteDir = PathHelper::getBasePath();
 		$theme_template = $settings->get_setting('theme_template');
 
-		$theme_file = $siteDir.'/theme/'.$theme_template.'/logic/'.$filename;
+		// Try directory theme first, then plugin
+		$theme_file = null;
+		$theme_url_path = null;
+		if (ThemeHelper::themeExists($theme_template)) {
+			$theme_file = $siteDir.'/theme/'.$theme_template.'/logic/'.$filename;
+			$theme_url_path = '/theme/'.$theme_template.'/logic/'.basename($filename, '.php');
+		} elseif (PluginHelper::isPluginActive($theme_template)) {
+			$theme_file = $siteDir.'/plugins/'.$theme_template.'/logic/'.$filename;
+			$theme_url_path = '/plugins/'.$theme_template.'/logic/'.basename($filename, '.php');
+		}
+		
 		$main_file = $siteDir.'/logic/'.$filename;
 
 		if($debug){
 			echo 'Looking for theme logic file: '. $theme_file.'<br>';
 			echo 'Looking for main logic file: '. $main_file.'<br>';
 		}
-		if($theme_template && file_exists($theme_file)){
+		if($theme_file && file_exists($theme_file)){
 			if($debug){
 				echo 'Found: '. $theme_file.'<br>';
 				exit;
@@ -402,7 +430,7 @@ class LibraryFunctions {
 			}
 			else{
 				//WE WANT A URL
-				return '/theme/'.$theme_template.'/logic/'.basename($filename, '.php');
+				return $theme_url_path;
 			}
 		}
 		else if(file_exists($main_file)){
