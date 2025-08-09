@@ -113,6 +113,34 @@ if($params[0] == 'plugins' && $params[2] == 'includes'){
 	}
 }
 
+//PLUGIN ASSET FILES
+if($params[0] == 'plugins' && $params[2] == 'assets'){
+	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
+	if(file_exists($base_file)){
+		// Check if plugin is active
+		$plugin_name = $params[1];
+		PathHelper::requireOnce('data/plugins_class.php');
+		
+		if(Plugin::is_plugin_active($plugin_name)){
+			$seconds_to_cache = 43200;
+			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
+			header("Expires: $ts");
+			header("Pragma: cache");
+			header("Cache-Control: max-age=$seconds_to_cache");
+			$the_content_type = 'Content-type: '.mime_type($base_file);
+			header($the_content_type);
+			readfile($base_file);
+			exit();
+		}
+		else{
+			LibraryFunctions::display_404_page();
+		}
+	}
+	else{
+		LibraryFunctions::display_404_page();
+	}
+}
+
 //THEME INCLUDE FILES.  LOAD ANYTHING UNDER /theme/
 if($params[0] == 'theme'){
 
