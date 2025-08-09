@@ -8,6 +8,8 @@
 		PathHelper::requireOnce('includes/Globalvars.php');
 		PathHelper::requireOnce('includes/LibraryFunctions.php');
 		PathHelper::requireOnce('includes/DbConnector.php');
+		PathHelper::requireOnce('includes/ThemeHelper.php');
+		PathHelper::requireOnce('includes/PluginHelper.php');
 		PathHelper::requireOnce('data/settings_class.php');
 	} catch (Exception $e) {
 		echo json_encode(array('success' => false, 'message' => 'Failed to load dependencies: ' . $e->getMessage()));
@@ -29,16 +31,25 @@
 		exit;
 	}
 
-	// Validate theme exists
-	$theme_dir = PathHelper::getBasePath() . '/theme/' . $theme;
-	if (!is_dir($theme_dir)) {
-		echo json_encode(array('success' => false, 'message' => 'Theme not found'));
+	// Validate theme name (security check first)
+	if (!preg_match('/^[a-zA-Z0-9_-]+$/', $theme)) {
+		echo json_encode(array('success' => false, 'message' => 'Invalid theme name'));
 		exit;
 	}
 
-	// Validate theme name (security check)
-	if (!preg_match('/^[a-zA-Z0-9_-]+$/', $theme)) {
-		echo json_encode(array('success' => false, 'message' => 'Invalid theme name'));
+	// Validate theme exists - try directory theme first, then plugin
+	$valid_theme = false;
+
+	if (ThemeHelper::themeExists($theme)) {
+		// It's a valid directory theme
+		$valid_theme = true;
+	} elseif (PluginHelper::isPluginActive($theme)) {
+		// It's an active plugin that can act as theme
+		$valid_theme = true;
+	} 
+
+	if (!$valid_theme) {
+		echo json_encode(array('success' => false, 'message' => 'Theme not found'));
 		exit;
 	}
 

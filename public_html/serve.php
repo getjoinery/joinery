@@ -3,6 +3,8 @@ require_once(__DIR__ . '/includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/ThemeHelper.php');
+PathHelper::requireOnce('includes/PluginHelper.php');
 $params = explode("/", $_REQUEST['path']);
 
 $full_path = $_REQUEST['path'];
@@ -11,8 +13,24 @@ $static_routes_path = ltrim($static_routes_path, '/');
 
 $settings = Globalvars::get_instance();
 $session = SessionControl::get_instance();
-$theme_template = $settings->get_setting('theme_template');
-$template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
+$theme_template = $settings->get_setting('theme_template') ?: 'default';
+
+// Try directory theme first, then plugin
+if (ThemeHelper::themeExists($theme_template)) {
+	// Existing directory-based theme logic
+	$template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
+	$is_plugin_theme = false;
+} elseif (PluginHelper::isPluginActive($theme_template)) {
+	// This is a plugin acting as theme
+	$plugin = PluginHelper::getInstance($theme_template);
+	$template_directory = PathHelper::getIncludePath('plugins/'.$theme_template);
+	$is_plugin_theme = true;
+} else {
+	// Fallback to default theme
+	$template_directory = PathHelper::getIncludePath('theme/default');
+	$theme_template = 'default';
+	$is_plugin_theme = false;
+}
 
 
 
