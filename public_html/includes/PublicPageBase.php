@@ -3,6 +3,8 @@ require_once('PathHelper.php');
 require_once('Globalvars.php');
 require_once('SessionControl.php');
 require_once('ShoppingCart.php');
+require_once('ThemeHelper.php');
+require_once('PluginHelper.php');
 
 PathHelper::requireOnce('data/users_class.php');
 PathHelper::requireOnce('data/public_menus_class.php');
@@ -560,18 +562,9 @@ class PublicPageBase {
 		$user_name = $user->display_name();
 		$permission = $session->get_permission();
 		
-		// Get available themes
-		$theme_dir = PathHelper::getBasePath() . '/theme/';
-		$themes = array();
-		if (is_dir($theme_dir)) {
-			$dirs = scandir($theme_dir);
-			foreach ($dirs as $dir) {
-				if ($dir != '.' && $dir != '..' && is_dir($theme_dir . $dir) && $dir != 'archive') {
-					$themes[] = $dir;
-				}
-			}
-			sort($themes);
-		}
+		// Get themes from both sources
+		$directory_themes = ThemeHelper::getAvailableThemes();
+		$plugins = PluginHelper::getActivePlugins();
 		
 		?>
 		<div id="joinery-admin-bar">
@@ -592,11 +585,32 @@ class PublicPageBase {
 				<div class="joinery-admin-bar-theme-dropdown joinery-admin-bar-dropdown">
 					<span class="joinery-admin-bar-theme-current">Theme: <?php echo htmlspecialchars($theme_template); ?></span>
 					<div class="joinery-admin-bar-dropdown-content">
-						<?php foreach ($themes as $theme): ?>
-							<a href="#" onclick="joineryAdminBarSwitchTheme('<?php echo htmlspecialchars($theme); ?>'); return false;" 
-							   <?php echo ($theme == $theme_template) ? 'style="font-weight: bold !important;"' : ''; ?>>
-								<?php echo htmlspecialchars($theme); ?>
-								<?php echo ($theme == $theme_template) ? ' ✓' : ''; ?>
+						<?php 
+						// Display directory themes
+						foreach ($directory_themes as $theme_key => $theme_obj): 
+							if (method_exists($theme_obj, 'get')) {
+								$display_name = $theme_obj->get('display_name', $theme_key);
+							} else {
+								$display_name = $theme_key;
+							}
+							?>
+							<a href="#" onclick="joineryAdminBarSwitchTheme('<?php echo htmlspecialchars($theme_key); ?>'); return false;" 
+							   <?php echo ($theme_key == $theme_template) ? 'style="font-weight: bold !important;"' : ''; ?>>
+								<?php echo htmlspecialchars($display_name); ?>
+								<?php echo ($theme_key == $theme_template) ? ' ✓' : ''; ?>
+							</a>
+						<?php endforeach; ?>
+
+						<?php 
+						// Display plugins as themes
+						foreach ($plugins as $plugin_name => $plugin): 
+							$display_name = $plugin->getPluginName();
+							?>
+							<a href="#" onclick="joineryAdminBarSwitchTheme('<?php echo htmlspecialchars($plugin_name); ?>'); return false;" 
+							   <?php echo ($plugin_name == $theme_template) ? 'style="font-weight: bold !important;"' : ''; ?>>
+								<?php echo htmlspecialchars($display_name); ?>
+								<span style="font-size: 0.8em; opacity: 0.7;">(Plugin)</span>
+								<?php echo ($plugin_name == $theme_template) ? ' ✓' : ''; ?>
 							</a>
 						<?php endforeach; ?>
 					</div>

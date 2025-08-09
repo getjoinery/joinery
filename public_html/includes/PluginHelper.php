@@ -436,4 +436,32 @@ class PluginHelper extends ComponentBase {
         $plugin = self::getInstance($pluginName);
         return $plugin->deactivate();
     }
+    
+    /**
+     * Get plugin display name for UI
+     */
+    public function getPluginName() {
+        // Use plugin's display name from manifest, or plugin directory name
+        return $this->get('name', $this->name);
+    }
+    
+    /**
+     * Get plugin description for UI
+     */
+    public function getPluginDescription() {
+        // Use plugin description if available
+        return $this->get('description', '');
+    }
+    
+    /**
+     * Check if a plugin is active (static convenience method)
+     */
+    public static function isPluginActive($pluginName) {
+        try {
+            $plugin = self::getInstance($pluginName);
+            return $plugin->isActive();
+        } catch (Exception $e) {
+            return false;
+        }
+    }
 }
