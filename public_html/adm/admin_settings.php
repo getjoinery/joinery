@@ -3,6 +3,8 @@
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/ThemeHelper.php');
+	PathHelper::requireOnce('includes/PluginHelper.php');
 	PathHelper::requireOnce('data/settings_class.php');
 	PathHelper::requireOnce('data/email_templates_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
@@ -455,11 +457,23 @@
 		$optionvals = array("Yes (show to screen)"=>1, 'No (logged)' => 0);
 		echo $formwriter->dropinput("Show errors", "show_errors", '', $optionvals, $settings->get_setting('show_errors'), '', FALSE);		
 		
-		$theme_dir = PathHelper::getAbsolutePath('/theme/');
-		$directories = LibraryFunctions::list_directories_in_directory($theme_dir, 'filename');
+		// Get themes from both sources
+		$directory_themes = ThemeHelper::getAvailableThemes();
+		$plugins = PluginHelper::getActivePlugins();
+
+		// Build options array
 		$optionvals = array();
-		foreach($directories as $directory){
-			$optionvals[$directory] = $directory;
+
+		// Add directory themes
+		foreach($directory_themes as $theme_name => $theme_helper) {
+			$display_name = $theme_helper->get('display_name', $theme_name);
+			$optionvals[$theme_name] = $display_name;
+		}
+
+		// Add plugins as themes
+		foreach($plugins as $plugin_name => $plugin) {
+			$display_name = $plugin->getPluginName() . ' (Plugin)';
+			$optionvals[$plugin_name] = $display_name;
 		}
 		
 		
