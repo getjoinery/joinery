@@ -151,12 +151,10 @@ class LibraryFunctions {
 
 		$theme_template = $settings->get_setting('theme_template');
 		
-		// Try directory theme first, then plugin
+		// Only check directory themes
 		$theme_file = null;
 		if (ThemeHelper::themeExists($theme_template)) {
 			$theme_file = PathHelper::getBasePath() . '/theme/'.$theme_template.'/404.php';
-		} elseif (PluginHelper::isPluginActive($theme_template)) {
-			$theme_file = PathHelper::getBasePath() . '/plugins/'.$theme_template.'/views/404.php';
 		}
 
 		$base_file = PathHelper::getBasePath() . '/views/404.php';
@@ -308,13 +306,6 @@ class LibraryFunctions {
 				require_once($theme_form);
 				return new FormWriter($form_id);
 			}
-		} elseif (PluginHelper::isPluginActive($theme_template)) {
-			// Try plugin theme FormWriter
-			$plugin_form = PathHelper::getBasePath() . '/plugins/' . $theme_template . '/includes/FormWriter.php';
-			if (file_exists($plugin_form)) {
-				require_once($plugin_form);
-				return new FormWriter($form_id);
-			}
 		}
 
 		// Final default - Bootstrap
@@ -402,15 +393,12 @@ class LibraryFunctions {
 		$siteDir = PathHelper::getBasePath();
 		$theme_template = $settings->get_setting('theme_template');
 
-		// Try directory theme first, then plugin
+		// Only check directory themes
 		$theme_file = null;
 		$theme_url_path = null;
 		if (ThemeHelper::themeExists($theme_template)) {
 			$theme_file = $siteDir.'/theme/'.$theme_template.'/logic/'.$filename;
 			$theme_url_path = '/theme/'.$theme_template.'/logic/'.basename($filename, '.php');
-		} elseif (PluginHelper::isPluginActive($theme_template)) {
-			$theme_file = $siteDir.'/plugins/'.$theme_template.'/logic/'.$filename;
-			$theme_url_path = '/plugins/'.$theme_template.'/logic/'.basename($filename, '.php');
 		}
 		
 		$main_file = $siteDir.'/logic/'.$filename;

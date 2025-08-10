@@ -182,6 +182,11 @@ class PluginHelper extends ComponentBase {
             $errors[] = "Plugin manifest missing required field: name";
         }
         
+        // Check that plugin doesn't claim to provide theme functionality
+        if (isset($this->manifestData['provides']) && in_array('theme', $this->manifestData['provides'])) {
+            $errors[] = "Plugins cannot provide theme functionality. Use a separate theme in /theme/ directory.";
+        }
+        
         // Validate admin menu items if present
         $menuItems = $this->getAdminMenuItems();
         foreach ($menuItems as $index => $item) {
@@ -351,6 +356,10 @@ class PluginHelper extends ComponentBase {
      * Check if plugin provides a specific feature
      */
     public function providesFeature($feature) {
+        // Explicitly prevent plugins from providing theme functionality
+        if ($feature === 'theme') {
+            return false;
+        }
         $provides = $this->manifestData['provides'] ?? [];
         return in_array($feature, $provides);
     }

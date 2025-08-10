@@ -50,13 +50,9 @@ class PathHelper {
         if($theme_name){
             $theme_template = $theme_name;
             
-            // Check if it's a directory theme first, then plugin
+            // Only check directory themes
             if(is_dir($siteDir.'/theme/'.$theme_template)){
-                // It's a directory theme - existing logic
-                $is_plugin_theme = false;
-            } elseif(PluginHelper::isPluginActive($theme_template)) {
-                // It's a plugin theme
-                $is_plugin_theme = true;
+                // It's a directory theme
             } else {
                 throw new SystemDisplayablePermanentError('Could not find the specified theme: '. $theme_name);
             }
@@ -66,34 +62,20 @@ class PathHelper {
             try {
                 $theme_template = $settings->get_setting('theme_template', true, true);
                 
-                // Determine if it's a plugin theme
                 if($theme_template) {
-                    if(is_dir($siteDir.'/theme/'.$theme_template)){
-                        $is_plugin_theme = false;
-                    } elseif(PluginHelper::isPluginActive($theme_template)) {
-                        $is_plugin_theme = true;
-                    } else {
+                    if(!is_dir($siteDir.'/theme/'.$theme_template)){
                         // Invalid theme, set to null
                         $theme_template = null;
-                        $is_plugin_theme = false;
                     }
-                } else {
-                    $is_plugin_theme = false;
                 }
             } catch (Exception $e) {
                 // If database is not available (e.g., during update_database.php), use fallback
                 $theme_template = null;
-                $is_plugin_theme = false;
             }
         }
         
-        // Build file paths based on theme type
         if($theme_template) {
-            if($is_plugin_theme) {
-                $theme_file = $siteDir.'/plugins/'.$theme_template.$subdirectory.'/'.$filename;
-            } else {
-                $theme_file = $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename;
-            }
+            $theme_file = $siteDir.'/theme/'.$theme_template.$subdirectory.'/'.$filename;
         } else {
             $theme_file = null;
         }
@@ -110,11 +92,7 @@ class PathHelper {
                 return $theme_file;
             }
             else{
-                if($is_plugin_theme) {
-                    return '/plugins/'.$theme_template.$subdirectory.'/'.$filename;
-                } else {
-                    return '/theme/'.$theme_template.$subdirectory.'/'.$filename;
-                }
+                return '/theme/'.$theme_template.$subdirectory.'/'.$filename;
             }
         }
         else if(file_exists($default_file)){

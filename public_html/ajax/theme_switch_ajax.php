@@ -37,16 +37,13 @@
 		exit;
 	}
 
-	// Validate theme exists - try directory theme first, then plugin
+	// Validate theme exists - directory themes only
 	$valid_theme = false;
 
 	if (ThemeHelper::themeExists($theme)) {
 		// It's a valid directory theme
 		$valid_theme = true;
-	} elseif (PluginHelper::isPluginActive($theme)) {
-		// It's an active plugin that can act as theme
-		$valid_theme = true;
-	} 
+	}
 
 	if (!$valid_theme) {
 		echo json_encode(array('success' => false, 'message' => 'Theme not found'));
