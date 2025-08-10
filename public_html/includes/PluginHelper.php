@@ -140,15 +140,22 @@ class PluginHelper extends ComponentBase {
         }
         
         // Check if plugin has activation record in database
-        $dbconnector = DbConnector::get_instance();
-        $dblink = $dbconnector->get_db_link();
-        
-        $sql = "SELECT COUNT(*) as count FROM plg_plugins WHERE plg_name = ? AND plg_active = 1";
-        $q = $dblink->prepare($sql);
-        $q->execute([$this->name]);
-        $result = $q->fetch(PDO::FETCH_ASSOC);
-        
-        return ($result['count'] > 0);
+        // SAFETY: Handle case where plg_plugins table doesn't exist yet (during initial setup/migrations)
+        try {
+            $dbconnector = DbConnector::get_instance();
+            $dblink = $dbconnector->get_db_link();
+            
+            $sql = "SELECT COUNT(*) as count FROM plg_plugins WHERE plg_name = ? AND plg_active = 1";
+            $q = $dblink->prepare($sql);
+            $q->execute([$this->name]);
+            $result = $q->fetch(PDO::FETCH_ASSOC);
+            
+            return ($result['count'] > 0);
+        } catch (PDOException $e) {
+            // Table doesn't exist yet (likely during initial database setup)
+            // Return false to indicate plugin is not active during migration phase
+            return false;
+        }
     }
     
     /**
@@ -209,25 +216,31 @@ class PluginHelper extends ComponentBase {
         }
         
         // Update database
-        $dbconnector = DbConnector::get_instance();
-        $dblink = $dbconnector->get_db_link();
-        
-        // Check if plugin record exists
-        $sql = "SELECT plg_id FROM plg_plugins WHERE plg_name = ?";
-        $q = $dblink->prepare($sql);
-        $q->execute([$this->name]);
-        $existing = $q->fetch(PDO::FETCH_ASSOC);
-        
-        if ($existing) {
-            // Update existing record
-            $sql = "UPDATE plg_plugins SET plg_active = 1, plg_activated_date = NOW() WHERE plg_name = ?";
+        // SAFETY: Handle case where plg_plugins table doesn't exist yet (during initial setup)
+        try {
+            $dbconnector = DbConnector::get_instance();
+            $dblink = $dbconnector->get_db_link();
+            
+            // Check if plugin record exists
+            $sql = "SELECT plg_id FROM plg_plugins WHERE plg_name = ?";
             $q = $dblink->prepare($sql);
             $q->execute([$this->name]);
-        } else {
-            // Insert new record
-            $sql = "INSERT INTO plg_plugins (plg_name, plg_active, plg_activated_date, plg_version) VALUES (?, 1, NOW(), ?)";
-            $q = $dblink->prepare($sql);
-            $q->execute([$this->name, $this->getVersion()]);
+            $existing = $q->fetch(PDO::FETCH_ASSOC);
+            
+            if ($existing) {
+                // Update existing record
+                $sql = "UPDATE plg_plugins SET plg_active = 1, plg_activated_date = NOW() WHERE plg_name = ?";
+                $q = $dblink->prepare($sql);
+                $q->execute([$this->name]);
+            } else {
+                // Insert new record
+                $sql = "INSERT INTO plg_plugins (plg_name, plg_active, plg_activated_date, plg_version) VALUES (?, 1, NOW(), ?)";
+                $q = $dblink->prepare($sql);
+                $q->execute([$this->name, $this->getVersion()]);
+            }
+        } catch (PDOException $e) {
+            // Table doesn't exist yet (likely during initial database setup)
+            // Skip database update during migration phase - plugin will be activated later
         }
         
         // Clear any cached plugin states
@@ -252,12 +265,18 @@ class PluginHelper extends ComponentBase {
         }
         
         // Update database
-        $dbconnector = DbConnector::get_instance();
-        $dblink = $dbconnector->get_db_link();
-        
-        $sql = "UPDATE plg_plugins SET plg_active = 0, plg_deactivated_date = NOW() WHERE plg_name = ?";
-        $q = $dblink->prepare($sql);
-        $q->execute([$this->name]);
+        // SAFETY: Handle case where plg_plugins table doesn't exist yet (during initial setup)
+        try {
+            $dbconnector = DbConnector::get_instance();
+            $dblink = $dbconnector->get_db_link();
+            
+            $sql = "UPDATE plg_plugins SET plg_active = 0, plg_deactivated_date = NOW() WHERE plg_name = ?";
+            $q = $dblink->prepare($sql);
+            $q->execute([$this->name]);
+        } catch (PDOException $e) {
+            // Table doesn't exist yet (likely during initial database setup)
+            // Skip database update during migration phase
+        }
         
         // Clear cached plugin state
         $settings = Globalvars::get_instance();
