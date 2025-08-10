@@ -355,11 +355,18 @@ class DatabaseUpdater {
     
     /**
      * Clean up columns that don't exist in specifications
+     * CRITICAL SAFETY: Never drop primary key columns
      */
     private function processColumnCleanup($table_name, $field_specifications, $live_columns, $dblink, &$results) {
         foreach ($live_columns as $column_name => $column_info) {
             if (!isset($field_specifications[$column_name])) {
-                // Column exists in database but not in specifications
+                // SAFETY CHECK: Never drop primary key columns
+                if ($this->isPrimaryKeyColumn($table_name, $column_name, $dblink)) {
+                    $results['warnings'][] = "SAFETY: Skipped dropping primary key column {$table_name}.{$column_name}";
+                    continue;
+                }
+                
+                // Column exists in database but not in specifications - safe to drop
                 $sql = "ALTER TABLE {$table_name} DROP COLUMN {$column_name}";
                 
                 try {
@@ -374,6 +381,33 @@ class DatabaseUpdater {
         }
     }
     
+    /**
+     * Check if a column is a primary key column
+     * CRITICAL SAFETY METHOD: Prevents accidental deletion of primary keys
+     */
+    private function isPrimaryKeyColumn($table_name, $column_name, $dblink) {
+        $sql = "SELECT 1 FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu 
+                  ON tc.constraint_name = kcu.constraint_name
+                WHERE tc.table_name = ? 
+                  AND tc.table_schema = 'public'
+                  AND tc.constraint_type = 'PRIMARY KEY' 
+                  AND kcu.column_name = ?";
+        
+        try {
+            $q = $dblink->prepare($sql);
+            $q->execute([$table_name, $column_name]);
+            return $q->rowCount() > 0;
+        } catch (PDOException $e) {
+            // If we can't determine, err on the side of caution
+            if ($this->verbose) {
+                echo "Error checking primary key status for {$table_name}.{$column_name}: " . $e->getMessage() . "\n";
+            }
+            return true; // Assume it's a primary key to prevent dropping
+        }
+    }
+    
+
     /**
      * Get detailed column information for a table
      */
