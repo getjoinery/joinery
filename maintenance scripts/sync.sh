@@ -40,7 +40,10 @@ print_success() {
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    # Suppress warnings in auto-update mode
+    if [ "$AUTO_UPDATE" != "true" ]; then
+        echo -e "${YELLOW}[WARNING]${NC} $1"
+    fi
 }
 
 print_error() {
@@ -50,7 +53,10 @@ print_error() {
 # SSH multiplexing cleanup function
 cleanup_ssh() {
     if [ "$SSH_MULTIPLEXING" = true ]; then
-        print_status "Cleaning up SSH connections..." >&2
+        # Suppress in auto-update mode
+        if [ "$AUTO_UPDATE" != "true" ]; then
+            print_status "Cleaning up SSH connections..." >&2
+        fi
         ssh -O exit -o ControlPath="$SSH_CONTROL_PATH" "$SSH_USER@$REMOTE_HOST" 2>/dev/null || true
         rm -f "$SSH_CONTROL_PATH" 2>/dev/null || true
     fi
@@ -67,7 +73,7 @@ setup_ssh_multiplexing() {
     local ssh_key_path="$4"
     
     # Create unique control path
-    SSH_CONTROL_PATH="/tmp/sync_ssh_${ssh_host}_${ssh_port}_${ssh_user}_$$"
+    SSH_CONTROL_PATH="/tmp/sync_ssh_${ssh_host}_${ssh_port}_${ssh_user}_$"
     
     # SSH multiplexing options
     local ssh_multiplex_opts="-o ControlMaster=auto -o ControlPath=$SSH_CONTROL_PATH -o ControlPersist=300"
@@ -79,11 +85,15 @@ setup_ssh_multiplexing() {
         SSH_CMD_WITH_MULTIPLEX="ssh -p $ssh_port $ssh_multiplex_opts"
     fi
     
-    print_status "Testing SSH multiplexing..."
+    if [ "$QUIET_MODE" != "true" ]; then
+        print_status "Testing SSH multiplexing..."
+    fi
     
     # Test if multiplexing works by establishing master connection
     if $SSH_CMD_WITH_MULTIPLEX -o BatchMode=yes "$ssh_user@$ssh_host" exit 2>/dev/null; then
-        print_success "SSH multiplexing enabled - connections will be much faster!"
+        if [ "$QUIET_MODE" != "true" ]; then
+            print_success "SSH multiplexing enabled - connections will be much faster!"
+        fi
         SSH_MULTIPLEXING=true
         SSH_CMD="$SSH_CMD_WITH_MULTIPLEX"
         return 0
