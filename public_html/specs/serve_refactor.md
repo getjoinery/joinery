@@ -350,6 +350,19 @@ class RouteHelper {
         
         // Determine view file
         $view_file = $route['view'] ?? strtolower($model_name) . '.php';
+        // Views are always in /views - strip any leading views/ or / to avoid duplication
+        $original_view_file = $view_file;
+        
+        if (strpos($view_file, '/') === 0) {
+            $view_file = ltrim($view_file, '/');
+            error_log("RouteHelper: WARNING - view file '{$original_view_file}' has leading slash, stripped to '{$view_file}'");
+        }
+        
+        if (strpos($view_file, 'views/') === 0) {
+            $view_file = substr($view_file, 6); // Remove 'views/' prefix
+            error_log("RouteHelper: WARNING - view file '{$original_view_file}' has views/ prefix, stripped to '{$view_file}'");
+        }
+        
         $view_path = 'views/' . $view_file;
         
         // Load view with theme override and extract data into scope
@@ -732,6 +745,9 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * '/post/{slug}' => ['model' => 'Post', 'check_setting' => 'blog_active']  // With feature flag check
  * '/item/{id}' => ['model' => 'Item', 'valid_page' => false]      // Don't count for stats
  * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class.php']  // Plugin-specific model
+ * '/item/{slug}' => ['model' => 'Item', 'view' => 'profile/item.php']  // Custom view: views/profile/item.php  
+ * '/item/{slug}' => ['model' => 'Item', 'view' => '/profile/item.php']  // Same result: views/profile/item.php (warning logged)
+ * '/item/{slug}' => ['model' => 'Item', 'view' => 'views/profile/item.php']  // Same result: views/profile/item.php (warning logged)
  * 
  * NOTE: All routes set $is_valid_page = true by default
  * Use ['valid_page' => false] to override for non-tracked pages
