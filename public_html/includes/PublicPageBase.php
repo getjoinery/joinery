@@ -562,9 +562,8 @@ class PublicPageBase {
 		$user_name = $user->display_name();
 		$permission = $session->get_permission();
 		
-		// Get themes from both sources
+		// Get themes from directory only
 		$directory_themes = ThemeHelper::getAvailableThemes();
-		$plugins = PluginHelper::getActivePlugins();
 		
 		?>
 		<div id="joinery-admin-bar">
@@ -601,18 +600,6 @@ class PublicPageBase {
 							</a>
 						<?php endforeach; ?>
 
-						<?php 
-						// Display plugins as themes
-						foreach ($plugins as $plugin_name => $plugin): 
-							$display_name = $plugin->getPluginName();
-							?>
-							<a href="#" onclick="joineryAdminBarSwitchTheme('<?php echo htmlspecialchars($plugin_name); ?>'); return false;" 
-							   <?php echo ($plugin_name == $theme_template) ? 'style="font-weight: bold !important;"' : ''; ?>>
-								<?php echo htmlspecialchars($display_name); ?>
-								<span style="font-size: 0.8em; opacity: 0.7;">(Plugin)</span>
-								<?php echo ($plugin_name == $theme_template) ? ' ✓' : ''; ?>
-							</a>
-						<?php endforeach; ?>
 					</div>
 				</div>
 				<a href="/admin/admin_users" class="joinery-admin-bar-admin">Dashboard</a>
