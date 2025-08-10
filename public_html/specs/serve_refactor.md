@@ -563,15 +563,40 @@ class RouteHelper {
      * 7. 404 fallback
      * 
      * @param array $routes Route configuration array
-     * @param string $full_path Full request path
-     * @param string $static_routes_path Static routes path for redirects
-     * @param array $params URL parameters
-     * @param object $settings Globalvars settings instance
-     * @param object $session SessionControl instance
-     * @param string $template_directory Theme directory path
+     * @param string $request_path The request path from $_REQUEST['path']
      * @return void Exits on successful route match
      */
-    public static function processRoutes($routes, $full_path, $static_routes_path, $params, $settings, $session, $template_directory) {
+    public static function processRoutes($routes, $request_path) {
+        // Parse request parameters internally
+        $params = explode("/", $request_path);
+        $full_path = $request_path;
+        $static_routes_path = rtrim($request_path, '/');
+        $static_routes_path = ltrim($static_routes_path, '/');
+        
+        // Initialize required dependencies internally
+        PathHelper::requireOnce('includes/Globalvars.php');
+        PathHelper::requireOnce('includes/SessionControl.php');
+        PathHelper::requireOnce('includes/PluginHelper.php');
+        
+        $settings = Globalvars::get_instance();
+        $session = SessionControl::get_instance();
+        
+        // Load THE theme's serve.php (only one theme active at a time)
+        ThemeHelper::includeThemeFile('serve.php');
+        
+        // Load ALL active plugins' serve.php files (multiple plugins can be active)
+        $activePlugins = PluginHelper::getActivePlugins();
+        foreach ($activePlugins as $pluginName => $plugin) {
+            $plugin->includeFile('serve.php');
+        }
+        
+        // Get theme directory for theme overrides (themes only, never plugins)
+        $theme_template = $settings->get_setting('theme_template');
+        $template_directory = null;
+        if (ThemeHelper::themeExists($theme_template)) {
+            $template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
+        }
+		
         // 1. Check for database-stored URL redirects
         if (self::checkUrlRedirects($static_routes_path, $settings)) {
             exit(); // Redirect handled
@@ -629,11 +654,9 @@ class RouteHelper {
 Use a hybrid approach - simple configuration for standard routes, custom PHP closures for complex logic:
 
 ```php
-// serve.php - Hybrid routing system with smart path inference
 <?php
+// serve.php - Hybrid routing system with smart path inference
 require_once(__DIR__ . '/includes/RouteHelper.php');
-
-// ... existing setup code ...
 
 /*
  * ROUTING SYSTEM DOCUMENTATION
@@ -820,7 +843,7 @@ $routes = [
 ];
 
 // ROUTE PROCESSING - All logic moved to RouteHelper::processRoutes()
-RouteHelper::processRoutes($routes, $full_path, $static_routes_path, $params, $settings, $session, $template_directory);
+RouteHelper::processRoutes($routes, $_REQUEST['path']);
 ```
 
 ### 3. How the Hybrid Approach Works
@@ -927,7 +950,7 @@ The RouteHelper class above provides complete functionality for:
 ### Core Features Implemented
 - **Static file serving** with configurable caching and MIME type detection
 - **Route pattern matching** with wildcard and parameter support (`/page/{slug}`, `/admin/*`)
-- **Theme system integration** - uses PathHelper's sophisticated theme detection (directory themes, plugin themes, fallbacks)
+- **Theme system integration** - uses PathHelper's theme detection (directory themes with fallbacks)
 - **Plugin integration** - leverages PluginHelper for activation checks and file discovery
 - **Parameter extraction** - automatically extracts URL parameters from patterns
 - **Simple, focused design** - only the essential methods needed for routing
@@ -1001,7 +1024,7 @@ The RouteHelper class is designed to integrate seamlessly with the existing code
 - Uses `ThemeHelper::getInstance()` for current theme detection and management
 - Integrates with `ThemeHelper::asset()` for theme asset URL generation with fallbacks
 - Leverages `PathHelper::getThemeFilePath()` for sophisticated theme file resolution
-- Supports both directory themes and plugin themes through existing architecture
+- Supports directory themes through existing architecture
 - Accesses theme configuration and CSS framework information through ThemeHelper
 
 **Plugin System Integration:**
@@ -1081,7 +1104,7 @@ $controld_routes = [
 ];
 
 // Use the same RouteHelper as main serve.php - gets all the same features!
-RouteHelper::processRoutes($controld_routes, $full_path, $static_routes_path, $params, $settings, $session, $template_directory);
+RouteHelper::processRoutes($controld_routes, $_REQUEST['path']);
 ```
 
 ### 2. plugins/items/serve.php (Refactored)
@@ -1147,7 +1170,7 @@ $items_routes = [
 ];
 
 // Use the same RouteHelper as main serve.php - gets all the same features!
-RouteHelper::processRoutes($items_routes, $full_path, $static_routes_path, $params, $settings, $session, $template_directory);
+RouteHelper::processRoutes($items_routes, $_REQUEST['path']);
 ```
 
 ### Summary of Plugin Refactoring
