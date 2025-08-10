@@ -1135,10 +1135,10 @@ Here are the actual refactored versions of the two plugin serve.php files:
  * }
  * 
  * PLUGIN PATH RESOLUTION RULES:
- * - Explicit view paths: '/pricing' with 'plugins/controld/views/pricing.php' -> exact file
- * - {path} placeholder: '/plugins/controld/admin/settings' with 'plugins/controld/admin/{path}.php' -> plugins/controld/admin/settings.php
- * - Content routes: '/item/{slug}' with model_file -> load plugin-specific model + theme-overridden view
- * - Theme overrides: plugin views can be overridden by active theme
+ * - Simple routes: Use standard views/ files (e.g., 'views/pricing.php'), not plugin-specific view files
+ * - Admin routes: '/plugins/plugin/admin/*' with 'plugins/plugin/admin/{path}.php' -> plugin admin files only
+ * - Content routes: Plugin models + standard theme-overridden views (no plugin views)
+ * - Theme overrides: Standard theme override system applies to all plugin routes
  * 
  * AUTOMATIC FEATURES:
  * - Database URL redirect checking (before route processing)
@@ -1155,13 +1155,13 @@ Here are the actual refactored versions of the two plugin serve.php files:
 $controld_routes = [
     // Simple routes (explicit view files for all routes)
     'simple' => [
-        '/profile/device_edit' => ['view' => 'plugins/controld/views/profile/ctlddevice_edit.php'],
-        '/profile/filters_edit' => ['view' => 'plugins/controld/views/profile/ctldfilters_edit.php'],
-        '/profile/devices' => ['view' => 'plugins/controld/views/profile/ctlddevices.php'],
-        '/profile/rules' => ['view' => 'plugins/controld/views/profile/ctldrules.php'],
-        '/profile/ctld_activation' => ['view' => 'plugins/controld/views/profile/ctldctld_activation.php'],
-        '/create_account' => ['view' => 'plugins/controld/views/create_account.php'],
-        '/pricing' => ['view' => 'plugins/controld/views/pricing.php'],
+        '/profile/device_edit' => ['view' => 'views/profile/ctlddevice_edit.php'],
+        '/profile/filters_edit' => ['view' => 'views/profile/ctldfilters_edit.php'],
+        '/profile/devices' => ['view' => 'views/profile/ctlddevices.php'],
+        '/profile/rules' => ['view' => 'views/profile/ctldrules.php'],
+        '/profile/ctld_activation' => ['view' => 'views/profile/ctldctld_activation.php'],
+        '/create_account' => ['view' => 'views/create_account.php'],
+        '/pricing' => ['view' => 'views/pricing.php'],
         '/plugins/controld/admin/*' => ['view' => 'plugins/controld/admin/{path}.php'],
     ],
 ];
@@ -1196,8 +1196,9 @@ RouteHelper::processRoutes($controld_routes, $_REQUEST['path']);
  * }
  * 
  * PLUGIN PATH RESOLUTION RULES:
- * - Content routes: '/item/{slug}' with model 'Item' + model_file 'plugins/items/data/items_class.php' -> load plugin model + theme-overridden view
- * - Simple routes: '/items/custom' with view 'plugins/items/views/itemscustom.php' -> exact plugin file with theme override support
+ * - Content routes: '/item/{slug}' with model 'Item' + model_file 'plugins/items/data/items_class.php' -> load plugin model + standard theme-overridden view
+ * - Simple routes: Use standard views/ files, not plugin-specific view files
+ * - Admin routes: '/plugins/plugin/admin/*' -> plugins/plugin/admin/{path}.php (plugin admin files only)
  * 
  * AUTOMATIC FEATURES:
  * - Database URL redirect checking (before route processing)
@@ -1216,7 +1217,6 @@ $items_routes = [
         '/item/{slug}' => [
             'model' => 'Item',
             'model_file' => 'plugins/items/data/items_class.php',
-            'view' => 'item.php',
         ],
     ],
     
@@ -1228,7 +1228,7 @@ $items_routes = [
             if($params[1] && $params[1] != 'tag') return false;
             
             // Use ThemeHelper for consistent theme override support
-            return ThemeHelper::includeThemeFile('plugins/views/items.php');
+            return ThemeHelper::includeThemeFile('views/items.php');
         },
     ],
 ];
