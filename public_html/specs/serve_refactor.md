@@ -326,9 +326,12 @@ class RouteHelper {
         }
         
         // Load model class - only if needed for content routes
-        $model_file = 'data/' . strtolower($model_name) . 's_class.php';
+        if (empty($route['model_file'])) {
+            return false; // model_file is required for content routes
+        }
+        
         try {
-            PathHelper::requireOnce($model_file);
+            PathHelper::requireOnce($route['model_file']);
         } catch (Exception $e) {
             return false;
         }
@@ -686,6 +689,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * '/page/{slug}' => ['model' => 'Page']                           // -> data/pages_class.php, views/page.php
  * '/post/{slug}' => ['model' => 'Post', 'check_setting' => 'blog_active']  // With feature flag check
  * '/item/{id}' => ['model' => 'Item', 'valid_page' => false]      // Don't count for stats
+ * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class.php']  // Plugin-specific model
  * 
  * NOTE: All routes set $is_valid_page = true by default
  * Use ['valid_page' => false] to override for non-tracked pages
@@ -724,6 +728,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * 
  * ROUTE OPTIONS:
  * - 'model' => 'ClassName' - Load model class and instantiate object (content routes)
+ * - 'model_file' => 'path/to/model_class.php' - Explicit model file path (required for content routes)
  * - 'check_setting' => 'setting_name' - Only serve if setting is active
  * - 'valid_page' => false - Don't count this route for statistics (default: true)
  * - 'cache' => 43200 - Cache time in seconds for static files
@@ -748,13 +753,13 @@ $routes = [
     
     // Simple content routes (RouteHelper auto-builds paths from route patterns)
     'content' => [
-        '/post/{slug}' => ['model' => 'Post', 'check_setting' => 'blog_active'],
-        '/page/{slug}' => ['model' => 'Page', 'check_setting' => 'page_contents_active'],
-        '/event/{slug}' => ['model' => 'Event', 'check_setting' => 'events_active'],
-        '/location/{slug}' => ['model' => 'Location', 'check_setting' => 'events_active'],
-        '/product/{slug}' => ['model' => 'Product', 'check_setting' => 'products_active'],
-        '/list/{slug}' => ['model' => 'MailingList'],
-		'/video/{slug}' => ['model' => 'Video', 'check_setting' => 'videos_active'],
+        '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class.php', 'check_setting' => 'blog_active'],
+        '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class.php', 'check_setting' => 'page_contents_active'],
+        '/event/{slug}' => ['model' => 'Event', 'model_file' => 'data/events_class.php', 'check_setting' => 'events_active'],
+        '/location/{slug}' => ['model' => 'Location', 'model_file' => 'data/locations_class.php', 'check_setting' => 'events_active'],
+        '/product/{slug}' => ['model' => 'Product', 'model_file' => 'data/products_class.php', 'check_setting' => 'products_active'],
+        '/list/{slug}' => ['model' => 'MailingList', 'model_file' => 'data/mailinglists_class.php'],
+		'/video/{slug}' => ['model' => 'Video', 'model_file' => 'data/videos_class.php', 'check_setting' => 'videos_active'],
     ],
     
     // Routes with custom handling (complex logic preserved)
@@ -1071,6 +1076,7 @@ Here are the actual refactored versions of the two plugin serve.php files:
  * '/item/{slug}' => ['model' => 'Item']                           // -> data/items_class.php, views/item.php
  * '/post/{slug}' => ['model' => 'Post', 'check_setting' => 'blog_active']  // With feature flag check
  * '/item/{id}' => ['model' => 'Item', 'valid_page' => false]      // Don't count for stats
+ * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class.php']  // Plugin-specific model
  * 
  * SIMPLE ROUTES - Direct file serving with smart path inference
  * '/profile/edit' => []                       // -> plugins/controld/views/profile/ctldprofileedit.php
@@ -1165,6 +1171,7 @@ $items_routes = [
     'content' => [
         '/item/{slug}' => [
             'model' => 'Item',
+            'model_file' => 'plugins/items/data/items_class.php',
             'view' => 'item.php',
         ],
     ],
