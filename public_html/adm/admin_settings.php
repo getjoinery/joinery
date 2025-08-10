@@ -457,23 +457,16 @@
 		$optionvals = array("Yes (show to screen)"=>1, 'No (logged)' => 0);
 		echo $formwriter->dropinput("Show errors", "show_errors", '', $optionvals, $settings->get_setting('show_errors'), '', FALSE);		
 		
-		// Get themes from both sources
+		// Get themes from directory only
 		$directory_themes = ThemeHelper::getAvailableThemes();
-		$plugins = PluginHelper::getActivePlugins();
 
 		// Build options array
 		$optionvals = array();
 
-		// Add directory themes
+		// Add directory themes only
 		foreach($directory_themes as $theme_name => $theme_helper) {
 			$display_name = $theme_helper->get('display_name', $theme_name);
 			$optionvals[$theme_name] = $display_name;
-		}
-
-		// Add plugins as themes
-		foreach($plugins as $plugin_name => $plugin) {
-			$display_name = $plugin->getPluginName() . ' (Plugin)';
-			$optionvals[$plugin_name] = $display_name;
 		}
 		
 		
