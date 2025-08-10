@@ -214,6 +214,9 @@
 	);
 	$page->tableheader($headers, $box_vars, $rpager);
 
+	// Initialize FormWriter for form buttons
+	$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+
 	$registrant_emails = '';
 	foreach($event_registrants as $event_registrant){
 
