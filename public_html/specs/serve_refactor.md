@@ -20,9 +20,14 @@ Move repeated logic into helper functions with route matching capabilities:
 /**
  * RouteHelper - Simplified routing and file serving utilities  
  * Handles route matching, parameter extraction, and file serving for serve.php refactoring
+ * 
+ * DEPENDENCY REQUIREMENTS:
+ * - PathHelper is always available (system requirement)
+ * - All other dependencies loaded on-demand within methods to minimize overhead
  */
+
+// Load PathHelper - required for all routing operations
 require_once('PathHelper.php');
-require_once('PluginHelper.php');
 
 class RouteHelper {
     
@@ -106,7 +111,7 @@ class RouteHelper {
             return false;
         }
         
-        // Load URL redirect system
+        // Load URL redirect system - only if needed
         try {
             PathHelper::requireOnce('data/urls_class.php');
         } catch (Exception $e) {
@@ -255,7 +260,7 @@ class RouteHelper {
         $pattern = $route['pattern'];
         $path = $route['path'];
         
-        // Check plugin activation requirement
+        // Check plugin activation requirement (for plugin assets only, not themes)
         if (!empty($route['require_plugin_active'])) {
             if (preg_match('#^/plugins/([^/]+)/#', $path, $matches)) {
                 $plugin_name = $matches[1];
@@ -320,7 +325,7 @@ class RouteHelper {
             }
         }
         
-        // Load model class
+        // Load model class - only if needed for content routes
         $model_file = 'data/' . strtolower($model_name) . 's_class.php';
         try {
             PathHelper::requireOnce($model_file);
@@ -380,10 +385,15 @@ class RouteHelper {
             }
         }
         
-        // Check for plugin files first (ajax/utils override)
+        // Check for plugin files first (ajax/utils override) - lazy load plugin system
         if (preg_match('#^/(ajax|utils)/(.+)$#', $path, $matches)) {
             $type = $matches[1];
             $file = $matches[2];
+            
+            // Only load PluginHelper if we actually need plugin overrides and it's not already loaded
+            if (!class_exists('PluginHelper')) {
+                PathHelper::requireOnce('PluginHelper.php');
+            }
             
             $activePlugins = PluginHelper::getActivePlugins();
             foreach ($activePlugins as $pluginName => $pluginHelper) {
@@ -573,10 +583,11 @@ class RouteHelper {
         $static_routes_path = rtrim($request_path, '/');
         $static_routes_path = ltrim($static_routes_path, '/');
         
-        // Initialize required dependencies internally
-        PathHelper::requireOnce('includes/Globalvars.php');
-        PathHelper::requireOnce('includes/SessionControl.php');
-        PathHelper::requireOnce('includes/PluginHelper.php');
+        // Load core dependencies - these are almost always needed for routing
+        PathHelper::requireOnce('Globalvars.php');
+        PathHelper::requireOnce('SessionControl.php');
+        PathHelper::requireOnce('ThemeHelper.php');
+        PathHelper::requireOnce('PluginHelper.php');
         
         $settings = Globalvars::get_instance();
         $session = SessionControl::get_instance();
@@ -656,6 +667,7 @@ Use a hybrid approach - simple configuration for standard routes, custom PHP clo
 ```php
 <?php
 // serve.php - Hybrid routing system with smart path inference
+// RouteHelper loads PathHelper and manages all other dependencies
 require_once(__DIR__ . '/includes/RouteHelper.php');
 
 /*
@@ -1023,16 +1035,17 @@ The RouteHelper class is designed to integrate seamlessly with the existing code
 **Theme System Integration:**
 - Uses `ThemeHelper::getInstance()` for current theme detection and management
 - Integrates with `ThemeHelper::asset()` for theme asset URL generation with fallbacks
-- Leverages `PathHelper::getThemeFilePath()` for sophisticated theme file resolution
-- Supports directory themes through existing architecture
+- Leverages `PathHelper::getThemeFilePath()` for directory theme file resolution (plugin themes no longer supported)
+- Supports directory themes only - plugins cannot act as themes
 - Accesses theme configuration and CSS framework information through ThemeHelper
 
 **Plugin System Integration:**
-- Uses `PluginHelper::isPluginActive()` and `PluginHelper::getActivePlugins()` for sophisticated plugin management
+- Uses `PluginHelper::isPluginActive()` and `PluginHelper::getActivePlugins()` for plugin management
 - Leverages `ComponentBase::getIncludePath()` and `ComponentBase::fileExists()` for plugin file operations
 - Integrates with plugin manifest system through PluginHelper instances
 - Automatically discovers active plugins and checks their routing capabilities
 - Supports plugin validation and requirement checking through ComponentBase
+- **Clear separation**: Plugins provide functionality, themes provide presentation - no overlap
 
 This complete implementation provides all the functionality needed for the serve.php refactoring while maintaining backward compatibility and security.
 
