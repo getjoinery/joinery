@@ -388,7 +388,29 @@ class RouteHelper {
             }
         }
         
-        // Check for plugin files first (ajax/utils override) - lazy load plugin system
+        // Get explicit view path - required for simple routes
+        if (empty($route['view'])) {
+            return false; // view is required for simple routes
+        }
+        
+        $view_path = $route['view'];
+        
+        // Handle dynamic placeholders in view path
+        if (strpos($view_path, '{path}') !== false) {
+            // Replace {path} with the remaining path after route prefix
+            $remaining_path = substr($path, strlen(rtrim(str_replace('*', '', $pattern), '/')));
+            $remaining_path = ltrim($remaining_path, '/');
+            $view_path = str_replace('{path}', $remaining_path, $view_path);
+        }
+        
+        if (strpos($view_path, '{file}') !== false) {
+            // Replace {file} with the file portion of the path
+            $path_parts = explode('/', ltrim($path, '/'));
+            $file = end($path_parts);
+            $view_path = str_replace('{file}', $file, $view_path);
+        }
+        
+        // Check for plugin override (automatic for ajax/utils routes)
         if (preg_match('#^/(ajax|utils)/(.+)$#', $path, $matches)) {
             $type = $matches[1];
             $file = $matches[2];
@@ -407,15 +429,7 @@ class RouteHelper {
             }
         }
         
-        // Derive view path from pattern
-        $view_path = 'views' . $path . '.php';
-        if (strpos($pattern, '{') !== false) {
-            // Remove parameter placeholders: /page/{slug} -> /page
-            $clean_pattern = preg_replace('/\\/{[^}]+}/', '', $pattern);
-            $view_path = 'views' . $clean_pattern . '.php';
-        }
-        
-        // Check theme override
+        // Check theme override for the explicit view path
         if (ThemeHelper::includeThemeFile($view_path)) {
             return true;
         }
@@ -694,13 +708,13 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * NOTE: All routes set $is_valid_page = true by default
  * Use ['valid_page' => false] to override for non-tracked pages
  * 
- * SIMPLE ROUTES - Direct file serving with smart path inference (for dynamic content)
+ * SIMPLE ROUTES - Direct file serving with explicit view paths (for dynamic content)
  * 'robots.txt' => ['view' => 'views/robots.php']  // Dynamic content (PHP-generated)
- * '/api/v1/*' => []                           // -> api/apiv1.php
- * '/admin/*' => []                            // -> adm/{path}.php
- * '/profile/*' => ['default_view' => 'profile/profile.php']  // /profile/edit -> views/profile/edit.php, /profile -> views/profile/profile.php
- * '/ajax/*' => []  // Automatically checks plugins/{name}/ajax/{file}.php before ajax/{file}.php
- * '/utils/*' => []  // Automatically checks plugins/{name}/utils/{file}.php before utils/{file}.php
+ * '/api/v1/*' => ['view' => 'api/apiv1.php']     // Explicit view file
+ * '/admin/*' => ['view' => 'adm/{path}.php']     // {path} placeholder for dynamic part
+ * '/profile/*' => ['view' => 'views/profile/{path}.php', 'default_view' => 'views/profile/profile.php']  // With fallback
+ * '/ajax/*' => ['view' => 'ajax/{file}.php']     // Plugin override automatic
+ * '/utils/*' => ['view' => 'utils/{file}.php']    // Plugin override automatic
  * 
  * CUSTOM ROUTES - Complex logic with PHP closures
  * '/complex' => function($params, $settings, $session, $template_directory) {
@@ -708,12 +722,12 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  *     // Return true if handled, false if not
  * }
  * 
- * PATH INFERENCE RULES:
- * - /profile/edit -> views/profile/edit.php
- * - /admin/settings -> adm/settings.php 
- * - /plugins/name/admin/page -> plugins/name/admin/page.php
+ * PATH RESOLUTION RULES:
+ * - {path} placeholder: /admin/settings with 'adm/{path}.php' -> adm/settings.php
+ * - {file} placeholder: /ajax/endpoint with 'ajax/{file}.php' -> ajax/endpoint.php  
  * - /page/{slug} with model 'Page' -> data/pages_class.php + views/page.php
  * - Static files -> serve directly with proper MIME types and caching
+ * - Plugin overrides: ajax/utils routes automatically check plugins first, then main files
  * 
  * AUTOMATIC FEATURES:
  * - Database URL redirect checking (before route processing)
@@ -734,8 +748,8 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - 'cache' => 43200 - Cache time in seconds for static files
  * - 'exclude_from_cache' => ['.ext'] - File extensions to not cache (short cache instead)
  * - 'require_plugin_active' => true - Only serve if plugin is active
- * - 'default_view' => 'path/file.php' - Fallback view when no specific file matches
- * - 'view' => 'path/file.php' - Explicit view file to serve (validated for correct format)
+ * - 'default_view' => 'path/file.php' - Fallback view when no specific file matches  
+ * - 'view' => 'path/file.php' - Explicit view file to serve (required for simple routes)
  */
 
 // ROUTE DEFINITIONS - Hybrid approach with proper asset/dynamic separation
@@ -846,16 +860,16 @@ $routes = [
         },
     ],
     
-    // Simple routes (RouteHelper derives paths from route patterns)
+    // Simple routes (explicit view files for all routes)
     'simple' => [
-        'robots.txt' => ['view' => 'views/robots.php'],  // Dynamic content moved from static routes
-        '/api/v1/*' => [],  // -> api/apiv1.php
-        '/admin/*' => [],   // -> adm/{path}.php
-        '/ajax/*' => [],    // -> plugins/{name}/ajax/{file}.php, then ajax/{file}.php (automatic)
-        '/utils/*' => [],   // -> plugins/{name}/utils/{file}.php, then utils/{file}.php (automatic)
-        '/tests/*' => [],   // -> tests/{path}.php
-        '/profile/*' => ['default_view' => 'profile/profile.php'],  // -> views/profile/{path}.php
-		'/events' => ['view' => 'views/events.php', 'check_setting' => 'events_active'],  
+        'robots.txt' => ['view' => 'views/robots.php'],
+        '/api/v1/*' => ['view' => 'api/apiv1.php'],
+        '/admin/*' => ['view' => 'adm/{path}.php'],
+        '/ajax/*' => ['view' => 'ajax/{file}.php'],
+        '/utils/*' => ['view' => 'utils/{file}.php'],
+        '/tests/*' => ['view' => 'tests/{path}.php'],
+        '/profile/*' => ['view' => 'views/profile/{path}.php', 'default_view' => 'views/profile/profile.php'],
+        '/events' => ['view' => 'views/events.php', 'check_setting' => 'events_active'],
     ],
 ];
 
@@ -1078,11 +1092,11 @@ Here are the actual refactored versions of the two plugin serve.php files:
  * '/item/{id}' => ['model' => 'Item', 'valid_page' => false]      // Don't count for stats
  * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class.php']  // Plugin-specific model
  * 
- * SIMPLE ROUTES - Direct file serving with smart path inference
- * '/profile/edit' => []                       // -> plugins/controld/views/profile/ctldprofileedit.php
- * '/pricing' => []                            // -> plugins/controld/views/pricing.php
- * '/plugins/controld/admin/*' => []           // -> plugins/controld/admin/{path}.php
- * '/custom/path' => ['default_view' => 'default.php']  // With default view file
+ * SIMPLE ROUTES - Direct file serving with explicit view paths
+ * '/profile/device_edit' => ['view' => 'plugins/controld/views/profile/ctlddevice_edit.php']
+ * '/pricing' => ['view' => 'plugins/controld/views/pricing.php']
+ * '/plugins/controld/admin/*' => ['view' => 'plugins/controld/admin/{path}.php']  // {path} placeholder
+ * '/custom/path' => ['view' => 'plugins/controld/views/custom_path.php', 'default_view' => 'plugins/controld/views/default.php']  // With fallback
  * 
  * CUSTOM ROUTES - Complex logic with PHP closures
  * '/complex' => function($params, $settings, $session, $template_directory) {
@@ -1090,11 +1104,11 @@ Here are the actual refactored versions of the two plugin serve.php files:
  *     // Return true if handled, false if not
  * }
  * 
- * PLUGIN PATH INFERENCE RULES:
- * - /profile/device_edit -> plugins/controld/views/profile/ctlddevice_edit.php
- * - /pricing -> plugins/controld/views/pricing.php
- * - /plugins/controld/admin/settings -> plugins/controld/admin/settings.php
- * - /create_account -> plugins/controld/views/create_account.php
+ * PLUGIN PATH RESOLUTION RULES:
+ * - Explicit view paths: '/pricing' with 'plugins/controld/views/pricing.php' -> exact file
+ * - {path} placeholder: '/plugins/controld/admin/settings' with 'plugins/controld/admin/{path}.php' -> plugins/controld/admin/settings.php
+ * - Content routes: '/item/{slug}' with model_file -> load plugin-specific model + theme-overridden view
+ * - Theme overrides: plugin views can be overridden by active theme
  * 
  * AUTOMATIC FEATURES:
  * - Database URL redirect checking (before route processing)
@@ -1109,16 +1123,16 @@ Here are the actual refactored versions of the two plugin serve.php files:
 
 // Define ControlD plugin routes
 $controld_routes = [
-    // Simple routes (RouteHelper automatically infers all paths from patterns)
+    // Simple routes (explicit view files for all routes)
     'simple' => [
-        '/profile/device_edit' => [],
-        '/profile/filters_edit' => [],
-        '/profile/devices' => [],
-        '/profile/rules' => [],
-        '/profile/ctld_activation' => [],
-        '/create_account' => [],
-        '/pricing' => [],
-        '/plugins/controld/admin/*' => [],
+        '/profile/device_edit' => ['view' => 'plugins/controld/views/profile/ctlddevice_edit.php'],
+        '/profile/filters_edit' => ['view' => 'plugins/controld/views/profile/ctldfilters_edit.php'],
+        '/profile/devices' => ['view' => 'plugins/controld/views/profile/ctlddevices.php'],
+        '/profile/rules' => ['view' => 'plugins/controld/views/profile/ctldrules.php'],
+        '/profile/ctld_activation' => ['view' => 'plugins/controld/views/profile/ctldctld_activation.php'],
+        '/create_account' => ['view' => 'plugins/controld/views/create_account.php'],
+        '/pricing' => ['view' => 'plugins/controld/views/pricing.php'],
+        '/plugins/controld/admin/*' => ['view' => 'plugins/controld/admin/{path}.php'],
     ],
 ];
 
@@ -1141,9 +1155,9 @@ RouteHelper::processRoutes($controld_routes, $_REQUEST['path']);
  * '/post/{slug}' => ['model' => 'Post', 'check_setting' => 'blog_active']  // With feature flag check
  * '/item/{id}' => ['model' => 'Item', 'valid_page' => false]      // Don't count for stats
  * 
- * SIMPLE ROUTES - Direct file serving with smart path inference
- * '/items/list' => []                         // -> plugins/items/views/itemslist.php
- * '/items/custom' => ['default_view' => 'default.php']  // With default view file
+ * SIMPLE ROUTES - Direct file serving with explicit view paths
+ * '/items/list' => ['view' => 'plugins/items/views/itemslist.php']
+ * '/items/custom' => ['view' => 'plugins/items/views/itemscustom.php', 'default_view' => 'plugins/items/views/default.php']  // With fallback
  * 
  * CUSTOM ROUTES - Complex logic with PHP closures
  * '/items' => function($params, $settings, $session, $template_directory) {
@@ -1151,9 +1165,9 @@ RouteHelper::processRoutes($controld_routes, $_REQUEST['path']);
  *     // Return true if handled, false if not
  * }
  * 
- * PLUGIN PATH INFERENCE RULES:
- * - /item/{slug} with model 'Item' -> plugins/items/data/items_class.php + views/item.php (theme override)
- * - /items/custom -> plugins/items/views/itemscustom.php
+ * PLUGIN PATH RESOLUTION RULES:
+ * - Content routes: '/item/{slug}' with model 'Item' + model_file 'plugins/items/data/items_class.php' -> load plugin model + theme-overridden view
+ * - Simple routes: '/items/custom' with view 'plugins/items/views/itemscustom.php' -> exact plugin file with theme override support
  * 
  * AUTOMATIC FEATURES:
  * - Database URL redirect checking (before route processing)
