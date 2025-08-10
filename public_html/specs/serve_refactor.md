@@ -29,15 +29,14 @@ class RouteHelper {
     /**
      * Serve static file with proper HTTP caching headers and MIME type detection
      * 
-     * This method handles serving static files (CSS, JS, images, etc.) with appropriate
-     * caching headers for performance. It supports excluding certain file types from 
-     * long-term caching (useful for files like .upg.zip that should not be cached).
-     * Automatically detects MIME type based on file extension and sets proper headers.
+     * This method handles serving static files (CSS, JS, images, fonts, etc.) with appropriate
+     * caching headers for performance. It includes security validation to prevent serving
+     * PHP files as static assets. Supports excluding certain file types from long-term caching.
      * 
      * @param string $file_path Path to file to serve
      * @param int $cache_seconds Cache time in seconds (default: 43200 = 12 hours)
      * @param array $exclude_from_cache File extensions to exclude from long caching
-     * @return bool True if file served, false if not found
+     * @return bool True if file served, false if rejected or not found
      */
     public static function serveStaticFile($file_path, $cache_seconds = 43200, $exclude_from_cache = []) {
         if (!file_exists($file_path)) {
@@ -45,6 +44,15 @@ class RouteHelper {
         }
         
         $file_extension = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
+        
+        // BACKWARD COMPATIBILITY: Execute PHP files as scripts, not static assets
+        if ($file_extension === 'php') {
+            error_log("RouteHelper: WARNING - serving PHP file as script instead of static asset: {$file_path}");
+            // Execute the PHP file instead of serving it as static content
+            require_once($file_path);
+            return true;
+        }
+        
         $actual_cache_seconds = $cache_seconds;
         
         // Check if this file type should be excluded from long caching
@@ -233,10 +241,10 @@ class RouteHelper {
     /**
      * Handle static file routes with caching and plugin activation checks
      * 
-     * Processes static file routes (CSS, JS, images, etc.) with support for explicit
-     * view files, wildcard patterns, and plugin activation requirements. Handles
-     * caching exclusions for specific file types and serves files with appropriate
-     * HTTP headers. Used for routes like 'includes/*' and 'plugins/*/assets/*'.
+     * Processes ONLY static asset files (CSS, JS, images, fonts, etc.) with proper
+     * caching headers and MIME type detection. This method should NEVER handle PHP
+     * files or dynamic content - it only serves actual static assets using readfile().
+     * Used for routes like '/theme/*' and '/plugins/*/assets/*'.
      * 
      * @param array $route Route configuration
      * @param array $params URL parameters  
@@ -257,15 +265,12 @@ class RouteHelper {
             }
         }
         
-        // Handle explicit view file
-        if (!empty($route['view'])) {
-            // Use ThemeHelper for consistent file loading with theme override support
-            return ThemeHelper::includeThemeFile($route['view']);
-        }
+        // Static routes should NEVER handle view files - that's dynamic content
+        // View files should be handled by simple or content routes
         
         // Handle wildcard static routes
         if (strpos($pattern, '*') !== false) {
-            // /includes/* -> /includes/file.css becomes full path
+            // /theme/* -> /theme/falcon/css/style.css becomes full path
             $prefix = str_replace('*', '', $pattern);
             if (strpos($path, $prefix) === 0) {
                 $file_path = PathHelper::getAbsolutePath($path);
@@ -544,6 +549,78 @@ class RouteHelper {
         
         return false;
     }
+    
+    /**
+     * Process all routes and handle the request
+     * 
+     * This is the main routing method that processes routes in the correct order:
+     * 1. Database URL redirects (if enabled)
+     * 2. Static asset routes
+     * 3. Custom routes with complex logic
+     * 4. Content routes (model-view pattern)
+     * 5. Simple routes (direct file serving)
+     * 6. Plugin routes (backward compatibility)
+     * 7. 404 fallback
+     * 
+     * @param array $routes Route configuration array
+     * @param string $full_path Full request path
+     * @param string $static_routes_path Static routes path for redirects
+     * @param array $params URL parameters
+     * @param object $settings Globalvars settings instance
+     * @param object $session SessionControl instance
+     * @param string $template_directory Theme directory path
+     * @return void Exits on successful route match
+     */
+    public static function processRoutes($routes, $full_path, $static_routes_path, $params, $settings, $session, $template_directory) {
+        // 1. Check for database-stored URL redirects
+        if (self::checkUrlRedirects($static_routes_path, $settings)) {
+            exit(); // Redirect handled
+        }
+        
+        // 2. Check static routes (assets only)
+        if ($route = self::matchRoute($full_path, $routes['static'] ?? [])) {
+            if (self::handleStaticRoute($route, $params, $template_directory)) {
+                exit();
+            }
+        }
+        
+        // 3. Check custom routes (complex logic)
+        if (!empty($routes['custom'])) {
+            foreach ($routes['custom'] as $pattern => $handler) {
+                if (self::matchesPattern($pattern, $full_path)) {
+                    if ($handler($params, $settings, $session, $template_directory)) {
+                        exit();
+                    }
+                }
+            }
+        }
+        
+        // 4. Check content routes (model-view pattern)
+        if ($route = self::matchRoute($full_path, $routes['content'] ?? [])) {
+            // Check setting requirement if specified
+            if (empty($route['check_setting']) || $settings->get_setting($route['check_setting'])) {
+                if (self::handleContentRoute($route, $params, $template_directory)) {
+                    exit();
+                }
+            }
+        }
+        
+        // 5. Check simple routes (direct file serving)
+        if ($route = self::matchRoute($full_path, $routes['simple'] ?? [])) {
+            if (self::handleSimpleRoute($route, $params, $template_directory)) {
+                exit();
+            }
+        }
+        
+        // 6. Allow plugins to add custom routes (backward compatibility)
+        // Check if global plugin route handler exists
+        if (function_exists('handlePluginRoutes')) {
+            handlePluginRoutes($params);
+        }
+        
+        // 7. Final fallback - 404
+        LibraryFunctions::display_404_page();
+    }
 }
 ```
 
@@ -563,12 +640,12 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * 
  * Route types and their options:
  * 
- * STATIC ROUTES - Serve files with caching
- * 'robots.txt' => ['view' => 'views/robots.php']  // Explicit view file
- * 'favicon.ico' => ['cache' => 43200]         // Custom cache time
- * '/includes/*' => ['cache' => 43200]         // Static files with caching
+ * STATIC ROUTES - Serve ONLY static assets (CSS, JS, images, fonts) with caching
+ * 'favicon.ico' => ['cache' => 43200]         // Static asset file
+ * '/theme/*' => ['cache' => 43200]            // Theme assets with caching
  * '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']]  // Don't cache upgrade files
- * '/plugins/*/includes/*' => ['require_plugin_active' => true, 'cache' => 43200]  // Plugin files with activation check
+ * '/plugins/*/assets/*' => ['require_plugin_active' => true, 'cache' => 43200]  // Plugin assets with activation check
+ * NOTE: Static routes should NEVER serve PHP files or dynamic content
  * 
  * CONTENT ROUTES - Model-view pattern with theme overrides
  * '/page/{slug}' => ['model' => 'Page']                           // -> data/pages_class.php, views/page.php
@@ -578,7 +655,8 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * NOTE: All routes set $is_valid_page = true by default
  * Use ['valid_page' => false] to override for non-tracked pages
  * 
- * SIMPLE ROUTES - Direct file serving with smart path inference
+ * SIMPLE ROUTES - Direct file serving with smart path inference (for dynamic content)
+ * 'robots.txt' => ['view' => 'views/robots.php']  // Dynamic content (PHP-generated)
  * '/api/v1/*' => []                           // -> api/apiv1.php
  * '/admin/*' => []                            // -> adm/{path}.php
  * '/profile/*' => ['default_view' => 'profile/profile.php']  // /profile/edit -> views/profile/edit.php, /profile -> views/profile/profile.php
@@ -620,18 +698,17 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - 'view' => 'path/file.php' - Explicit view file to serve (validated for correct format)
  */
 
-// ROUTE DEFINITIONS - Hybrid approach with simple routes and custom handlers
+// ROUTE DEFINITIONS - Hybrid approach with proper asset/dynamic separation
 $routes = [
-    // Simple static file routes (RouteHelper knows the standard paths)
+    // Static file routes - ONLY for actual assets (CSS, JS, images, fonts, etc.)
     'static' => [
-        'robots.txt' => ['view' => 'views/robots.php'],  // Explicit view file
         'favicon.ico' => ['cache' => 43200],
-        '/includes/*' => ['cache' => 43200],
-        '/theme/*' => [],
+        '/theme/*' => ['cache' => 43200],
         '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']],  // Don't cache upgrade files
         '/plugins/*/includes/*' => ['require_plugin_active' => true, 'cache' => 43200],
         '/plugins/*/assets/*' => ['require_plugin_active' => true, 'cache' => 43200],
         '/adm/includes/*' => ['cache' => 43200],
+        '/includes/*' => ['cache' => 43200],
     ],
     
     // Simple content routes (RouteHelper auto-builds paths from route patterns)
@@ -642,6 +719,7 @@ $routes = [
         '/location/{slug}' => ['model' => 'Location', 'check_setting' => 'events_active'],
         '/product/{slug}' => ['model' => 'Product', 'check_setting' => 'products_active'],
         '/list/{slug}' => ['model' => 'MailingList'],
+		'/video/{slug}' => ['model' => 'Video', 'check_setting' => 'videos_active'],
     ],
     
     // Routes with custom handling (complex logic preserved)
@@ -730,55 +808,19 @@ $routes = [
     
     // Simple routes (RouteHelper derives paths from route patterns)
     'simple' => [
+        'robots.txt' => ['view' => 'views/robots.php'],  // Dynamic content moved from static routes
         '/api/v1/*' => [],  // -> api/apiv1.php
         '/admin/*' => [],   // -> adm/{path}.php
         '/ajax/*' => [],    // -> plugins/{name}/ajax/{file}.php, then ajax/{file}.php (automatic)
         '/utils/*' => [],   // -> plugins/{name}/utils/{file}.php, then utils/{file}.php (automatic)
         '/tests/*' => [],   // -> tests/{path}.php
         '/profile/*' => ['default_view' => 'profile/profile.php'],  // -> views/profile/{path}.php
+		'/events' => ['view' => 'views/events.php', 'check_setting' => 'events_active'],  
     ],
 ];
 
-// Check for database-stored URL redirects (handled by RouteHelper)
-if (RouteHelper::checkUrlRedirects($static_routes_path, $settings)) {
-    exit(); // Redirect handled
-}
-
-// ROUTE PROCESSING - Process routes in order
-// 1. Check static routes (simple configuration)
-if ($route = RouteHelper::matchRoute($full_path, $routes['static'])) {
-    RouteHelper::handleStaticRoute($route, $params, $template_directory);
-    exit();
-}
-
-// 2. Check custom routes (complex logic)
-foreach ($routes['custom'] as $pattern => $handler) {
-    if (RouteHelper::matchesPattern($pattern, $full_path)) {
-        if ($handler($params, $settings, $session, $template_directory)) {
-            exit();
-        }
-    }
-}
-
-// 3. Check content routes (model-view pattern)
-if ($route = RouteHelper::matchRoute($full_path, $routes['content'])) {
-    if (!$route['check_setting'] || $settings->get_setting($route['check_setting'])) {
-        RouteHelper::handleContentRoute($route, $params, $template_directory);
-        exit();
-    }
-}
-
-// 4. Check simple routes
-if ($route = RouteHelper::matchRoute($full_path, $routes['simple'])) {
-    RouteHelper::handleSimpleRoute($route, $params, $template_directory);
-    exit();
-}
-
-// 5. Allow plugins to add custom routes (backward compatibility)
-handlePluginRoutes($params);
-
-// 6. Final fallback
-LibraryFunctions::display_404_page();
+// ROUTE PROCESSING - All logic moved to RouteHelper::processRoutes()
+RouteHelper::processRoutes($routes, $full_path, $static_routes_path, $params, $settings, $session, $template_directory);
 ```
 
 ### 3. How the Hybrid Approach Works
@@ -985,10 +1027,9 @@ Here are the actual refactored versions of the two plugin serve.php files:
  * 
  * Route types and their options (same as main serve.php):
  * 
- * STATIC ROUTES - Serve files with caching
- * 'robots.txt' => ['view' => 'views/robots.php']  // Explicit view file
- * 'favicon.ico' => ['cache' => 43200]         // Custom cache time
- * '/includes/*' => ['cache' => 43200]         // Static files with caching
+ * STATIC ROUTES - Serve ONLY static assets (CSS, JS, images, fonts) with caching
+ * 'favicon.ico' => ['cache' => 43200]         // Static asset file
+ * '/theme/*' => ['cache' => 43200]            // Theme assets with caching
  * 
  * CONTENT ROUTES - Model-view pattern with theme overrides  
  * '/item/{slug}' => ['model' => 'Item']                           // -> data/items_class.php, views/item.php
