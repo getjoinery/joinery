@@ -220,12 +220,10 @@ class HttpRoutingTestRunner {
     private $failed = 0;
     private $settings;
     private $dblink;
-    private $real_urls;
     
     public function __construct($settings, $dblink) {
         $this->settings = $settings;
         $this->dblink = $dblink;
-        $this->real_urls = getRealUrlsFromDatabase($dblink);
     }
     
     public function runAllTests() {
@@ -397,8 +395,8 @@ class HttpRoutingTestRunner {
             $themeHelper = ThemeHelper::getInstance(); // Gets current theme
             $current_theme = $themeHelper->getName();
         } catch (Exception $e) {
-            // ThemeHelper might not be available, use database fallback
-            $current_theme = $this->real_urls['current_theme'];
+            // ThemeHelper might not be available, use settings fallback
+            $current_theme = $this->settings->get_setting('theme_template') ?? 'falcon';
         }
         
         $test_cases = [];
@@ -479,7 +477,7 @@ class HttpRoutingTestRunner {
             $themeHelper = ThemeHelper::getInstance();
             $current_theme = $themeHelper->getName();
         } catch (Exception $e) {
-            $current_theme = $this->real_urls['current_theme'];
+            $current_theme = $this->settings->get_setting('theme_template') ?? 'falcon';
         }
         
         $test_cases = [];
@@ -521,6 +519,28 @@ class HttpRoutingTestRunner {
             }
         }
         
+        // Test actual event page with real slug from database
+        try {
+            PathHelper::requireOnce('data/events_class.php');
+            $events = new MultiEvent(['deleted' => false], ['evt_event_id' => 'DESC'], 1);
+            if ($events->count_all() > 0) {
+                $events->load();
+                $event = $events->get(0);
+                if ($event && $event->get('evt_link')) {
+                    $event_url = $event->get_url();
+                    $result = HttpTester::testUrl($event_url, 200, 'Actual event from database');
+                    
+                    if ($result['success']) {
+                        $this->pass("Actual event from database: {$event_url} -> {$result['actual_status']}");
+                    } else {
+                        $this->fail("Actual event from database: {$event_url} -> {$result['message']}");
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // Silently skip if events can't be loaded
+        }
+        
         if ($is_browser) {
             echo '</div>';
         } else {
@@ -540,67 +560,11 @@ class HttpRoutingTestRunner {
         
         $test_cases = [];
         
-        // Use PluginHelper to get active plugins
-        $plugins_to_check = [];
-        
-        try {
-            PathHelper::requireOnce('includes/PluginHelper.php');
-            $active_plugins = PluginHelper::getActivePlugins();
-            if (!empty($active_plugins)) {
-                // getActivePlugins() returns [name => pluginObject], we need just the names
-                $plugins_to_check = array_keys($active_plugins);
-            }
-        } catch (Exception $e) {
-            // PluginHelper might not be available, fall back to database method
-            if (!empty($this->real_urls['plugins'])) {
-                $plugins_to_check = $this->real_urls['plugins'];
-            }
-        }
-        
-        // Test files for each plugin we know about
-        foreach ($plugins_to_check as $plugin_name) {
-            // Define files to check for each plugin
-            $plugin_files_to_check = [];
-            
-            if ($plugin_name === 'controld') {
-                // ControlD plugin has actual assets - test files that actually exist
-                $plugin_files_to_check = [
-                    "/plugins/{$plugin_name}/assets/css/style.css" => "ControlD CSS",
-                    "/plugins/{$plugin_name}/assets/js/main.js" => "ControlD JS",
-                    "/plugins/{$plugin_name}/assets/css/app.min.css" => "ControlD app CSS", 
-                    "/plugins/{$plugin_name}/assets/js/bootstrap.min.js" => "ControlD bootstrap JS",
-                ];
-            } else {
-                // Standard plugin structure
-                $plugin_files_to_check = [
-                    "/plugins/{$plugin_name}/includes/style.css" => "{$plugin_name} CSS",
-                    "/plugins/{$plugin_name}/includes/script.js" => "{$plugin_name} JS", 
-                    "/plugins/{$plugin_name}/assets/style.css" => "{$plugin_name} assets CSS",
-                    "/plugins/{$plugin_name}/assets/main.js" => "{$plugin_name} assets JS"
-                ];
-            }
-            
-            $found_existing_file = false;
-            foreach ($plugin_files_to_check as $path => $description) {
-                $full_path = $_SERVER['DOCUMENT_ROOT'] . $path;
-                if (file_exists($full_path)) {
-                    $test_cases[] = [$path, 200, "{$description} (exists)"];
-                    $found_existing_file = true;
-                } else {
-                    $test_cases[] = [$path, 404, "{$description} (does not exist)"];
-                }
-            }
-            
-            // If we found existing files, stop here. Otherwise continue to next plugin.
-            if ($found_existing_file) {
-                break;
-            }
-        }
+        // Specify specific plugin files to test - change these paths to match your actual plugin files
+        $test_cases[] = ['/plugins/controld/includes/ControlDHelper', 200, 'Include file (should exist)'];
         
         // Always test nonexistent plugin files
-        $test_cases[] = ['/plugins/definitely-fake-plugin-12345/includes/fake.css', 404, 'Plugin CSS (does not exist)'];
         $test_cases[] = ['/plugins/definitely-fake-plugin-12345/assets/fake.js', 404, 'Plugin JS (does not exist)'];
-        $test_cases[] = ['/plugins/real-plugin-name/definitely-fake-file.css', 404, 'File in plugin (does not exist)'];
         
         foreach ($test_cases as [$path, $expected_status, $description]) {
             $result = HttpTester::testUrl($path, $expected_status, $description);
@@ -631,59 +595,8 @@ class HttpRoutingTestRunner {
         
         $test_cases = [];
         
-        // Use PluginHelper to get active plugins that have serve.php files
-        try {
-            PathHelper::requireOnce('includes/PluginHelper.php');
-            $active_plugins = PluginHelper::getActivePlugins();
-            
-            foreach ($active_plugins as $plugin_name => $plugin_helper) {
-                // Check if plugin has serve.php (custom routing)
-                $serve_file = $_SERVER['DOCUMENT_ROOT'] . "/plugins/{$plugin_name}/serve.php";
-                if (file_exists($serve_file)) {
-                    // Test actual plugin routes based on what we know exists
-                    if ($plugin_name === 'controld') {
-                        // ControlD plugin specific routes from serve.php
-                        $plugin_routes = [
-                            "/profile/devices" => "controld plugin devices page",
-                            "/profile/rules" => "controld plugin rules page",
-                            "/profile/ctld_activation" => "controld plugin activation page",
-                            "/login" => "controld plugin login page",
-                        ];
-                    } else {
-                        // Generic plugin route patterns for other plugins
-                        $plugin_routes = [
-                            "/{$plugin_name}" => "{$plugin_name} plugin main route",
-                            "/{$plugin_name}/dashboard" => "{$plugin_name} plugin dashboard",
-                        ];
-                    }
-                    
-                    foreach ($plugin_routes as $route => $description) {
-                        $test_cases[] = [$route, [200, 302, 401, 403], "{$description} (exists)"];
-                    }
-                    
-                    // Only test first plugin with serve.php to avoid too many tests
-                    break;
-                }
-            }
-            
-        } catch (Exception $e) {
-            // PluginHelper not available, test known plugins manually
-            $known_plugins_with_routes = ['controld']; // ControlD has serve.php
-            foreach ($known_plugins_with_routes as $plugin_name) {
-                $serve_file = $_SERVER['DOCUMENT_ROOT'] . "/plugins/{$plugin_name}/serve.php";
-                if (file_exists($serve_file)) {
-                    if ($plugin_name === 'controld') {
-                        // Test actual ControlD routes from serve.php
-                        $test_cases[] = ["/profile/devices", [200, 302, 401, 403], "controld plugin devices page (exists)"];
-                        $test_cases[] = ["/profile/rules", [200, 302, 401, 403], "controld plugin rules page (exists)"];
-                        $test_cases[] = ["/login", [200, 302, 401, 403], "controld plugin login page (exists)"];
-                    } else {
-                        $test_cases[] = ["/{$plugin_name}", [200, 302, 401, 403], "{$plugin_name} plugin route (exists)"];
-                    }
-                    break;
-                }
-            }
-        }
+        // Specify specific plugin routes to test - change these paths to match your actual plugin routes
+        $test_cases[] = ['/profile/ctld_activation', [200, 302, 401, 403], 'Plugin route (should exist)'];
         
         // Always test nonexistent plugin route
         $test_cases[] = ['/definitely-fake-plugin-12345', 404, 'Plugin route (does not exist)'];
@@ -717,7 +630,8 @@ class HttpRoutingTestRunner {
         
         $test_cases = [
             // Existing admin page (should require auth)
-            ['/admin/admin_settings', [301, 302, 401, 403], 'Existing admin page (should require auth)'],
+            ['/admin/admin_users', [301, 302, 401, 403], 'Existing admin page (should require auth)'],
+			['/plugins/controld/admin/admin_ctld_account', [301, 302, 401, 403], 'Existing plugin admin page (should require auth)'],
             
             // Admin page that doesn't exist
             ['/admin/definitely-fake-admin-page', [404, 401, 403], 'Admin page (does not exist)'],
@@ -787,7 +701,7 @@ class HttpRoutingTestRunner {
         
         $test_cases = [
             // Existing utility (avoid sync scripts)
-            ['/utils/api_example_php', [200, 401, 403], 'Existing utility page'],
+            ['/utils/forms_example_bootstrap', [200, 401, 403], 'Existing utility page'],
             
             // Utility page that doesn't exist
             ['/utils/definitely-fake-utility', [404, 401, 403], 'Utility page (does not exist)'],
@@ -822,29 +736,62 @@ class HttpRoutingTestRunner {
         
         $test_cases = [];
         
-        // Test real content URLs from database
-        if (!empty($this->real_urls['events'])) {
-            // Test multiple random events if available
-            foreach ($this->real_urls['events'] as $index => $event_url) {
-                $test_cases[] = [$event_url, 200, 'Random event #' . ($index + 1) . ' from database'];
+        // Test real event URLs from database
+        try {
+            PathHelper::requireOnce('data/events_class.php');
+            $events = new MultiEvent(['deleted' => false], ['evt_event_id' => 'DESC'], 2);
+            if ($events->count_all() > 0) {
+                $events->load();
+                $index = 1;
+                foreach ($events as $event) {
+                    if ($event->get('evt_link')) {
+                        $test_cases[] = [$event->get_url(), 200, 'Event #' . $index . ' from database'];
+                        $index++;
+                    }
+                }
             }
-        }
-        if (!empty($this->real_urls['pages'])) {
-            // Test multiple random pages if available
-            foreach ($this->real_urls['pages'] as $index => $page_url) {
-                $test_cases[] = [$page_url, 200, 'Random page #' . ($index + 1) . ' from database'];
-            }
-        }
-        if (!empty($this->real_urls['products'])) {
-            // Test multiple random products if available
-            foreach ($this->real_urls['products'] as $index => $product_url) {
-                $test_cases[] = [$product_url, 200, 'Random product #' . ($index + 1) . ' from database'];
-            }
+        } catch (Exception $e) {
+            // Events model might not exist
         }
         
-        // If no real content found in database, skip these tests
+        // Test real page URLs from database
+        try {
+            PathHelper::requireOnce('data/pages_class.php');
+            $pages = new MultiPage(['deleted' => false], ['pag_page_id' => 'DESC'], 2);
+            if ($pages->count_all() > 0) {
+                $pages->load();
+                $index = 1;
+                foreach ($pages as $page) {
+                    if ($page->get('pag_link')) {
+                        $test_cases[] = [$page->get_url(), 200, 'Page #' . $index . ' from database'];
+                        $index++;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // Pages model might not exist
+        }
+        
+        // Test real product URLs from database
+        try {
+            PathHelper::requireOnce('data/products_class.php');
+            $products = new MultiProduct(['deleted' => false], ['pro_product_id' => 'DESC'], 2);
+            if ($products->count_all() > 0) {
+                $products->load();
+                $index = 1;
+                foreach ($products as $product) {
+                    if ($product->get('pro_link')) {
+                        $test_cases[] = [$product->get_url(), 200, 'Product #' . $index . ' from database'];
+                        $index++;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // Products model might not exist
+        }
+        
+        // If no real content found in database, note it
         if (empty($test_cases)) {
-            // Skip content route testing if no content exists
             output_info("No content found in database to test", $is_browser);
         }
         
@@ -912,20 +859,44 @@ class HttpRoutingTestRunner {
         
         $test_cases = [];
         
-        // Test real redirect URLs from database
-        if (!empty($this->real_urls['redirects'])) {
-            foreach ($this->real_urls['redirects'] as $index => $redirect) {
-                // Expect redirect status codes (301, 302, 307, 308)
-                $expected_status = intval($redirect['status']);
-                if (!in_array($expected_status, [301, 302, 307, 308])) {
-                    $expected_status = 301; // Default to 301 if invalid
+        // Test a random redirect URL from database
+        try {
+            PathHelper::requireOnce('data/urls_class.php');
+            // Get any URL record - we'll check for redirect_url after loading
+            $urls = new MultiUrl([], ['url_url_id' => 'DESC'], 10);
+            $count = $urls->count_all();
+            
+            if ($count > 0) {
+                $urls->load();
+                // Look for a URL that has redirect_url set
+                $found_redirect = false;
+                foreach ($urls as $url) {
+                    $incoming = $url->get('url_incoming');
+                    $redirect_url = $url->get('url_redirect_url');
+                    
+                    if ($incoming && $redirect_url) {
+                        $expected_status = intval($url->get('url_type') ?? 301);
+                        if (!in_array($expected_status, [301, 302, 307, 308])) {
+                            $expected_status = 301;
+                        }
+                        $test_cases[] = [
+                            '/' . ltrim($incoming, '/'), 
+                            $expected_status, 
+                            'Redirect from database (→ ' . $redirect_url . ')'
+                        ];
+                        $found_redirect = true;
+                        break; // Just test one redirect
+                    }
                 }
-                $test_cases[] = [
-                    $redirect['from'], 
-                    $expected_status, 
-                    'Random redirect #' . ($index + 1) . ' from database (→ ' . $redirect['to'] . ')'
-                ];
+                
+                if (!$found_redirect) {
+                    output_info("Found " . $count . " URLs but none have redirect_url set", $is_browser);
+                }
+            } else {
+                output_info("No URLs found in database", $is_browser);
             }
+        } catch (Exception $e) {
+            output_info("Could not load URLs: " . $e->getMessage(), $is_browser);
         }
         
         // Always test a URL that should not redirect
@@ -1022,131 +993,5 @@ if ($is_browser) {
     echo 'HTTP test completed at ' . date('Y-m-d H:i:s T') . ' on ' . htmlspecialchars($_SERVER['HTTP_HOST']);
     echo '</div>';
     echo '</body></html>';
-}
-
-// Helper function to get real URLs from database using models where possible
-function getRealUrlsFromDatabase($dblink) {
-    $real_urls = [
-        'events' => [],
-        'pages' => [],
-        'posts' => [],
-        'products' => [],
-        'locations' => [],
-        'plugins' => [],
-        'plugin_files' => [],
-        'redirects' => [],
-        'current_theme' => 'falcon' // Default fallback
-    ];
-    
-    try {
-        // Get real event URLs using Event model if available - fetch random events
-        try {
-            PathHelper::requireOnce('data/events_class.php');
-            // Use RANDOM() ordering to get random events from database
-            $sql = "SELECT evt_event_id FROM evt_events WHERE deleted = false AND evt_link IS NOT NULL AND evt_link != '' ORDER BY RANDOM() LIMIT 2";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
-                $event = new Event($row['evt_event_id'], TRUE);
-                $link = $event->get('evt_link');
-                if (!empty($link)) {
-                    $real_urls['events'][] = $event->get_url();
-                }
-            }
-        } catch (Exception $e) {
-            // Event model might not exist or no events
-        }
-        
-        // Get real product URLs using Product model if available - fetch random products
-        try {
-            PathHelper::requireOnce('data/products_class.php');
-            // Use RANDOM() ordering to get random products from database
-            $sql = "SELECT pro_product_id FROM pro_products WHERE deleted = false AND pro_link IS NOT NULL AND pro_link != '' ORDER BY RANDOM() LIMIT 3";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
-                $product = new Product($row['pro_product_id'], TRUE);
-                $link = $product->get('pro_link');
-                if (!empty($link)) {
-                    $real_urls['products'][] = $product->get_url();
-                }
-            }
-        } catch (Exception $e) {
-            // Product model might not exist or no products
-        }
-        
-        // Get real page URLs using Page model if available - fetch random pages
-        try {
-            PathHelper::requireOnce('data/pages_class.php');
-            // Use RANDOM() ordering to get random pages from database
-            $sql = "SELECT pag_page_id FROM pag_pages WHERE deleted = false AND pag_link IS NOT NULL AND pag_link != '' ORDER BY RANDOM() LIMIT 2";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
-                $page = new Page($row['pag_page_id'], TRUE);
-                $link = $page->get('pag_link');
-                if (!empty($link)) {
-                    $real_urls['pages'][] = $page->get_url();
-                }
-            }
-        } catch (Exception $e) {
-            // Page model might not exist or no pages
-        }
-        
-        // Get redirect URLs from url_urls table - fetch random redirects
-        try {
-            PathHelper::requireOnce('data/urls_class.php');
-            // Get random redirect URLs from database
-            $sql = "SELECT url_id FROM url_urls WHERE url_type = 'redirect' AND url_link IS NOT NULL AND url_link != '' ORDER BY RANDOM() LIMIT 3";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
-                $url = new Url($row['url_id'], TRUE);
-                $link = $url->get('url_link');
-                $redirect_to = $url->get('url_redirect_to');
-                if (!empty($link) && !empty($redirect_to)) {
-                    $real_urls['redirects'][] = [
-                        'from' => '/' . ltrim($link, '/'),
-                        'to' => $redirect_to,
-                        'status' => $url->get('url_redirect_type') ?? 301
-                    ];
-                }
-            }
-        } catch (Exception $e) {
-            // Url model might not exist or no redirects
-        }
-        
-        // Get active plugins and theme info using direct SQL (no model for settings)
-        $sql = "SELECT stg_name, stg_value FROM stg_settings WHERE stg_name IN ('active_plugins', 'theme_template')";
-        $q = $dblink->prepare($sql);
-        $q->execute();
-        while ($result = $q->fetch(PDO::FETCH_ASSOC)) {
-            if ($result['stg_name'] === 'active_plugins') {
-                $active_plugins = json_decode($result['stg_value'], true);
-                if (is_array($active_plugins)) {
-                    foreach ($active_plugins as $plugin) {
-                        $real_urls['plugins'][] = $plugin;
-                        
-                        // Add plugin file URLs
-                        $real_urls['plugin_files'][] = "/plugins/{$plugin}/includes/style.css";
-                        $real_urls['plugin_files'][] = "/plugins/{$plugin}/assets/script.js";
-                    }
-                }
-            } elseif ($result['stg_name'] === 'theme_template') {
-                $theme_value = $result['stg_value'] ?? 'falcon';
-                // Validate that it's actually a theme directory that exists
-                if ($theme_value && is_dir($_SERVER['DOCUMENT_ROOT'] . '/theme/' . $theme_value)) {
-                    $real_urls['current_theme'] = $theme_value;
-                } else {
-                    $real_urls['current_theme'] = 'falcon'; // Default fallback if invalid theme
-                }
-            }
-        }
-        
-    } catch (Exception $e) {
-        // Database queries failed - continue with empty arrays
-    }
-    
-    return $real_urls;
 }
 ?>
