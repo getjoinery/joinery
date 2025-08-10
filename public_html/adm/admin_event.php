@@ -100,7 +100,7 @@
 	//WAITING LIST
 	$wnumperpage = 20;
 	$woffset = LibraryFunctions::fetch_variable('woffset', 0, 0, '');
-	$wsort = LibraryFunctions::fetch_variable('wsort', 'waiting_list_id', 0, '');
+	$wsort = LibraryFunctions::fetch_variable('wsort', 'ewl_id', 0, '');
 	$wsdirection = LibraryFunctions::fetch_variable('wsdirection', 'DESC', 0, '');
 	$wsearchterm = LibraryFunctions::fetch_variable('wsearchterm', '', 0, '');
 	$wsearch_criteria = array();

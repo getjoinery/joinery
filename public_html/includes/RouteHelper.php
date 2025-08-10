@@ -370,6 +370,21 @@ class RouteHelper {
                     return true;
                 }
             }
+            
+            // For utils files, also check the main utils directory (like legacy handler)
+            if ($type === 'utils') {
+                $utils_file = $file;
+                if (substr($utils_file, -4) !== '.php') {
+                    $utils_file .= '.php';
+                }
+                $base_file = PathHelper::getAbsolutePath('utils/' . $utils_file);
+                if (file_exists($base_file)) {
+                    global $is_valid_page;
+                    $is_valid_page = true;
+                    require_once($base_file);
+                    return true;
+                }
+            }
         }
         
         // Handle admin routes specially
