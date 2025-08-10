@@ -1,0 +1,512 @@
+//
+
+
+.accordion-item-wrapp {
+    border-top: 1px solid $title-color;
+    padding-top: 30px;
+    margin-left: 40px;
+
+    @include lg {
+        padding-left: 30px;
+        padding-top: 30px;
+        margin-left: 30px;
+
+    }
+
+    @include md {
+        margin-left: 0;
+        padding: 0;
+        border: none;
+    }
+
+    &:not(:last-child) {
+        margin-bottom: 24px;
+
+    }
+}
+
+.accordion-item-content {
+    &:not(:last-child) {
+        .accordion-item {
+            margin-bottom: 30px;
+        }
+    }
+}
+
+.accordion-item {
+    transition: 0.4s ease-in-out;
+    background: transparent;
+    overflow: hidden;
+    border-bottom: 1px solid $title-color;
+    padding-bottom: 30px;
+    transition: all 0.4s ease-in-out;
+
+
+
+    &_info {
+        display: flex;
+        justify-content: space-between;
+    }
+
+    &_wrapp {
+        display: flex;
+        gap: 40px;
+
+        @include xs {
+            display: block;
+        }
+    }
+
+    &_number {
+        border: 1px solid #7A8392;
+        width: 50px;
+        height: 50px;
+        line-height: 50px;
+        text-align: center;
+        border-radius: 30px;
+        font-size: 24px;
+        font-weight: 600;
+        display: block;
+        color: #7A8392;
+    }
+
+    &_content {
+        color: #fff;
+        padding: 0 30px 0px 110px;
+        overflow: hidden;
+        will-change: max-height;
+        transition: all 1s ease;
+
+        @include xs {
+            padding: 0 30px 0px 0px;
+        }
+    }
+
+    .box-title {
+        font-size: 30px;
+        font-weight: 600;
+        line-height: 40px;
+        color: $white-color;
+        margin-top: -0.2rem;
+        margin-bottom: 20px;
+        display: block;
+
+        @include sm {
+            font-size: 24px;
+            line-height: 34px;
+        }
+
+        @include xs {
+            font-size: 24px;
+            line-height: 34px;
+            margin-top: 20px;
+        }
+    }
+
+    .icon {
+        min-width: 50px;
+        height: 50px;
+        line-height: 50px;
+        text-align: center;
+        border-radius: 50%;
+        border: 1px solid #7A8392;
+
+        @include md {
+            margin-bottom: 30px; 
+        }
+    }
+
+    i {
+        color: #7A8392;
+        font-size: 20px;
+        font-weight: 400;
+        transform: rotate(-45deg);
+        transition: all 1s ease;
+
+    }
+
+    .accordion-button {
+        font-size: 30px;
+        font-weight: 600;
+        font-family: $title-font;
+        border: 0;
+        color: $title-color;
+        background: transparent;
+        padding: 40px 0 35px 0;
+        gap: 10px;
+        margin-bottom: 0;
+        text-align: left;
+        display: block;
+        transition: 0.3s;
+        position: relative;
+        border-radius: 0 !important;
+
+        @include xs {
+            padding: 25px 0 20px 0;
+        }
+
+        &:after {
+            display: none;
+        }
+
+        &:focus {
+            outline: none;
+            box-shadow: none;
+        }
+
+        &:not(.collapsed) {
+            box-shadow: none;
+            border-bottom: none;
+            background-color: transparent;
+            padding: 40px 0 5px 0;
+
+            .accordion-item {
+                &_number {
+                    border-color: $theme-color;
+                    color: $theme-color;
+                }
+
+            }
+
+            .box-title {
+                color: $theme-color;
+            }
+
+            .icon {
+                border-color: $theme-color;
+            }
+
+            i {
+                color: $theme-color;
+            }
+
+            &:after {
+                content: '\f068';
+                transform: rotate(0);
+            }
+        }
+
+        &.collapsed {
+            border-bottom: 1px solid $title-color;
+        }
+    }
+
+    .accordion-collapse {
+        border: none;
+    }
+
+    .accordion-body {
+        background-color: transparent;
+        border: none;
+        padding: 0px 30px 30px 110px;
+        border-bottom: 1px solid $title-color;
+
+        @include xs {
+            padding: 0 20px 30px 0;
+        }
+    }
+
+    .faq-text {
+        font-size: 16px;
+        font-weight: 400;
+        line-height: 26px;
+        margin: -0.4rem 0 0rem 90px;
+        color: #7A8392;
+        max-width: 572px;
+
+        @include xs {
+            margin-left: 0;
+        }
+    }
+
+    .faq-img {
+        height: 100%;
+
+        img {
+            height: 100%;
+            object-fit: cover;
+        }
+    }
+
+    &:hover {
+        border-color: $theme-color;
+
+        .accordion-item {
+            &_number {
+                border-color: $theme-color;
+                color: $theme-color;
+            }
+
+        }
+
+        .box-title {
+            color: $theme-color;
+        }
+
+        .icon {
+            border-color: $theme-color;
+
+            i {
+                color: $theme-color;
+            }
+        }
+    }
+
+}
+
+#tabs-content {
+    overflow: hidden;
+}
+
+.according-img-tab {
+    border-radius: 30px;
+
+    @include lg {
+        height: 450px;
+    }
+
+    img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 30px;
+    }
+}
+
+.th-btn.ser-btn {
+    width: 133px;
+    height: 133px;
+    color: $white-color;
+    padding: 18px 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-flow: column;
+
+    span {
+        margin-top: 5px;
+        display: block;
+    }
+
+    &:hover:before {
+        top: -55px;
+    }
+}
+
+/* service-featured start ----------------------*/
+
+.service-featured {
+    position: relative;
+    text-align: center;
+
+    &.style2 {
+        background: $white-color;
+        box-shadow: 0px 4px 50px #EFEFEF;
+        border-radius: 30px;
+        padding: 30px 25px;
+        margin-top: 50px;
+
+        @include vxs {
+            padding: 30px 20px;
+        }
+
+        .box-icon {
+            position: absolute;
+            top: -50px;
+            left: calc(50% - 50px);
+            background-color: $white-color;
+            box-shadow: 0px 10px 30px 6px rgba(20, 18, 46, 0.1);
+            margin: auto;
+        }
+
+        .box-title {
+            margin: 45px 0 15px 0;
+        }
+
+        .box-text {
+            margin-bottom: 15px;
+        }
+
+        .th-btn {
+            &:after {
+                background-color: #EBEEFF;
+            }
+        }
+
+        &:hover {
+            .th-btn {
+                color: $white-color;
+
+                &:after {
+                    background-color: $theme-color;
+                }
+            }
+        }
+    }
+
+    &.style3 {
+        background-color: $white-color;
+        box-shadow: 0px 4px 50px #EFEFEF;
+        border-radius: 30px;
+        padding: 40px 40px 30px 40px;
+
+        @include ml {
+            padding: 30px;
+        }
+
+        .box-img {
+            margin-bottom: 40px;
+        }
+
+        .box-text {
+            margin-bottom: 20px;
+        }
+
+        .th-btn {
+            &:after {
+                background-color: #EBEEFF;
+            }
+        }
+
+        &:hover {
+            .th-btn {
+                color: $white-color;
+
+                &:after {
+                    background-color: $theme-color;
+                }
+            }
+        }
+
+    }
+
+    &_wrapp {
+        &:not(:last-child) {
+            .box-shape {
+                position: absolute;
+                top: 50%;
+                left: 100%;
+                z-index: 2;
+                width: 228px;
+                height: 2px;
+                display: block;
+
+                @include lg {
+                    display: none;
+                }
+
+
+                &:before {
+                    content: "";
+                    position: absolute;
+                    left: 0%;
+                    top: 30%;
+                    width: 228px;
+                    border: 2px solid;
+                    border-image-slice: 1;
+                    border-width: 2px;
+                    border-left: 0;
+                    border-right: 0;
+                    border-bottom: 0;
+                    border-image-source: linear-gradient(to right, $theme-color, rgba(70, 98, 255, 0));
+                    z-index: 1;
+
+                }
+
+                &:after {
+                    content: "";
+                    position: absolute;
+                    top: 50%;
+                    left: 4%;
+                    width: 228px;
+                    height: 2px;
+                    background-color: $smoke-color;
+                    z-index: -1;
+                }
+            }
+        }
+    }
+
+    .box-icon {
+        position: relative;
+        width: 100px;
+        height: 100px;
+        line-height: 100px;
+        text-align: center;
+        display: block;
+        border-radius: 50%;
+        background: $theme-color;
+        margin: auto auto 40px auto;
+        z-index: 2;
+
+
+
+        img {
+            transition: all 0.4s ease;
+        }
+    }
+
+    .box-text {
+        margin-bottom: 12px;
+    }
+
+    .th-btn {
+        position: relative;
+        background-color: transparent;
+        color: $title-color;
+        padding: 13px 21.5px;
+        z-index: 2;
+        font-weight: 500;
+        font-size: 14px;
+
+
+        &:before {
+            display: none;
+        }
+
+        &:after {
+            content: "";
+            position: absolute;
+            left: 34%;
+            top: 0%;
+            width: 40px;
+            height: 40px;
+            background-color: $theme-color;
+            border-radius: 20px;
+            z-index: -1;
+            transition: all 0.4s ease-in-out;
+        }
+
+        i {
+            font-size: 14px;
+            margin-left: 5px;
+        }
+    }
+
+    &:hover {
+        .box-icon {
+            img {
+                transform: scale(-1) rotate(180deg);
+            }
+        }
+
+        .th-btn {
+            &:after {
+                width: 100%;
+                left: 0;
+            }
+        }
+    }
+}
+
+/* service-featured end ----------------------*/
+
+/* service details start ---------------------------*/
+.page-img {
+    border-radius: 30px;
+    overflow: hidden;
+
+    img {
+        border-radius: 30px;
+    }
+}
