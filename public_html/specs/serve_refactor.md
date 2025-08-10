@@ -145,6 +145,7 @@ class RouteHelper {
                 exit();
             } else {
                 // URL found but no redirect configured - show 404
+                PathHelper::requireOnce('LibraryFunctions.php');
                 LibraryFunctions::display_404_page();
                 exit();
             }
@@ -372,11 +373,10 @@ class RouteHelper {
      * default view fallbacks.
      * 
      * @param array $route Route configuration
-     * @param array $params URL parameters
      * @param string $template_directory Theme directory
      * @return bool True if handled successfully
      */
-    public static function handleSimpleRoute($route, $params, $template_directory) {
+    public static function handleSimpleRoute($route, $template_directory) {
         $pattern = $route['pattern'];
         $path = $route['path'];
         
@@ -398,7 +398,8 @@ class RouteHelper {
         // Handle dynamic placeholders in view path
         if (strpos($view_path, '{path}') !== false) {
             // Replace {path} with the remaining path after route prefix
-            $remaining_path = substr($path, strlen(rtrim(str_replace('*', '', $pattern), '/')));
+            $pattern_prefix = rtrim(str_replace('*', '', $pattern), '/');
+            $remaining_path = substr($path, strlen($pattern_prefix));
             $remaining_path = ltrim($remaining_path, '/');
             $view_path = str_replace('{path}', $remaining_path, $view_path);
         }
@@ -423,6 +424,7 @@ class RouteHelper {
             $activePlugins = PluginHelper::getActivePlugins();
             foreach ($activePlugins as $pluginName => $pluginHelper) {
                 // Use ComponentBase method with built-in file checking and inclusion
+                // Plugin files are expected to have .php extension (e.g., plugins/name/ajax/endpoint.php)
                 if ($pluginHelper->includeFile($type . '/' . $file)) {
                     return true;
                 }
@@ -622,6 +624,7 @@ class RouteHelper {
         $theme_template = $settings->get_setting('theme_template');
         $template_directory = null;
         if (ThemeHelper::themeExists($theme_template)) {
+            // $template_directory will be absolute path like /var/www/html/theme/falcon
             $template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
         }
 		
@@ -634,6 +637,11 @@ class RouteHelper {
         if ($route = self::matchRoute($full_path, $routes['static'] ?? [])) {
             if (self::handleStaticRoute($route, $params, $template_directory)) {
                 exit();
+            } else {
+                // Route matched but handler failed - 404
+                PathHelper::requireOnce('LibraryFunctions.php');
+                LibraryFunctions::display_404_page();
+                exit();
             }
         }
         
@@ -642,6 +650,11 @@ class RouteHelper {
             foreach ($routes['custom'] as $pattern => $handler) {
                 if (self::matchesPattern($pattern, $full_path)) {
                     if ($handler($params, $settings, $session, $template_directory)) {
+                        exit();
+                    } else {
+                        // Route matched but handler failed - 404
+                        PathHelper::requireOnce('LibraryFunctions.php');
+                        LibraryFunctions::display_404_page();
                         exit();
                     }
                 }
@@ -654,13 +667,23 @@ class RouteHelper {
             if (empty($route['check_setting']) || $settings->get_setting($route['check_setting'])) {
                 if (self::handleContentRoute($route, $params, $template_directory)) {
                     exit();
+                } else {
+                    // Route matched but handler failed - 404
+                    PathHelper::requireOnce('LibraryFunctions.php');
+                    LibraryFunctions::display_404_page();
+                    exit();
                 }
             }
         }
         
         // 5. Check simple routes (direct file serving)
         if ($route = self::matchRoute($full_path, $routes['simple'] ?? [])) {
-            if (self::handleSimpleRoute($route, $params, $template_directory)) {
+            if (self::handleSimpleRoute($route, $template_directory)) {
+                exit();
+            } else {
+                // Route matched but handler failed - 404
+                PathHelper::requireOnce('LibraryFunctions.php');
+                LibraryFunctions::display_404_page();
                 exit();
             }
         }
@@ -672,6 +695,7 @@ class RouteHelper {
         }
         
         // 7. Final fallback - 404
+        PathHelper::requireOnce('LibraryFunctions.php');
         LibraryFunctions::display_404_page();
     }
 }
@@ -689,6 +713,10 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
 
 /*
  * ROUTING SYSTEM DOCUMENTATION
+ * 
+ * IMPORTANT: Routes should be unique across all categories (static, content, custom, simple).
+ * The system processes routes in order: static → custom → content → simple → plugins → 404.
+ * If the same pattern exists in multiple categories, only the first match will be processed.
  * 
  * Route types and their options:
  * 
@@ -723,7 +751,8 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * }
  * 
  * PATH RESOLUTION RULES:
- * - {path} placeholder: /admin/settings with 'adm/{path}.php' -> adm/settings.php
+ * - {path} placeholder: /admin/users/edit with 'adm/{path}.php' -> adm/users/edit.php
+ * - {path} placeholder: /admin/ with 'adm/{path}.php' -> adm/.php (empty path)
  * - {file} placeholder: /ajax/endpoint with 'ajax/{file}.php' -> ajax/endpoint.php  
  * - /page/{slug} with model 'Page' -> data/pages_class.php + views/page.php
  * - Static files -> serve directly with proper MIME types and caching
@@ -843,6 +872,7 @@ $routes = [
                     RouteHelper::serveStaticFile($file, 43200);
                     return true;
                 } else {
+                    PathHelper::requireOnce('LibraryFunctions.php');
                     LibraryFunctions::display_404_page();
                     return true;
                 }
