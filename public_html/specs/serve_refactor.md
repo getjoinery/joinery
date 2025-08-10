@@ -1020,7 +1020,7 @@ Here are the actual refactored versions of the two plugin serve.php files:
 ### 1. plugins/controld/serve.php (Refactored)
 ```php
 <?php
-// plugins/controld/serve.php - Refactored with hybrid routing
+// plugins/controld/serve.php - Uses RouteHelper for consistent routing
 
 /*
  * PLUGIN ROUTING SYSTEM DOCUMENTATION
@@ -1055,6 +1055,8 @@ Here are the actual refactored versions of the two plugin serve.php files:
  * - /create_account -> plugins/controld/views/create_account.php
  * 
  * AUTOMATIC FEATURES:
+ * - Database URL redirect checking (before route processing)
+ * - Path validation with helpful error messages
  * - $is_valid_page = true (unless 'valid_page' => false)
  * - Theme override checking (theme files before plugin files)
  * - Parameter extraction from {slug}, {id}, etc.
@@ -1074,24 +1076,18 @@ $controld_routes = [
         '/profile/ctld_activation' => [],
         '/create_account' => [],
         '/pricing' => [],
-        '/plugins/controld/admin/*' => [],  // RouteHelper knows: /admin/* -> admin/{file}.php
+        '/plugins/controld/admin/*' => [],
     ],
 ];
 
-// Process routes using RouteHelper - all routes are now simple!
-if ($route = RouteHelper::matchRoute($full_path, $controld_routes['simple'])) {
-    // RouteHelper automatically infers all paths from URL patterns:
-    // /profile/device_edit -> plugins/controld/views/profile/ctlddevice_edit.php
-    // /plugins/controld/admin/settings -> plugins/controld/admin/settings.php
-    RouteHelper::handlePluginRoute($route, 'controld');
-    exit();
-}
+// Use the same RouteHelper as main serve.php - gets all the same features!
+RouteHelper::processRoutes($controld_routes, $full_path, $static_routes_path, $params, $settings, $session, $template_directory);
 ```
 
 ### 2. plugins/items/serve.php (Refactored)
 ```php
 <?php
-// plugins/items/serve.php - Refactored with hybrid routing
+// plugins/items/serve.php - Uses RouteHelper for consistent routing
 
 /*
  * PLUGIN ROUTING SYSTEM DOCUMENTATION
@@ -1118,6 +1114,8 @@ if ($route = RouteHelper::matchRoute($full_path, $controld_routes['simple'])) {
  * - /items/custom -> plugins/items/views/itemscustom.php
  * 
  * AUTOMATIC FEATURES:
+ * - Database URL redirect checking (before route processing)
+ * - Path validation with helpful error messages
  * - $is_valid_page = true (unless 'valid_page' => false)
  * - Theme override checking (theme files before plugin files, then base files)
  * - Parameter extraction from {slug}, {id}, etc.
@@ -1131,7 +1129,7 @@ $items_routes = [
     'content' => [
         '/item/{slug}' => [
             'model' => 'Item',
-            'view' => 'item.php',  // RouteHelper knows to look in views/
+            'view' => 'item.php',
         ],
     ],
     
@@ -1142,52 +1140,54 @@ $items_routes = [
             // Check if it's main items page or tag page
             if($params[1] && $params[1] != 'tag') return false;
             
-            // Check theme override first
-            $template_file = $template_directory.'/plugins/views/items.php';
-            $base_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/items/views/items.php';
-            
-            // RouteHelper::setValidPage() called automatically when route matches
-            
-            if(file_exists($template_file)){
-                require_once($template_file);
-                return true;
-            } else if(file_exists($base_file)){
-                require_once($base_file);
-                return true;
-            }
-            return false;
+            // Use ThemeHelper for consistent theme override support
+            return ThemeHelper::includeThemeFile('plugins/views/items.php');
         },
     ],
 ];
 
-// Process routes using RouteHelper
-// 1. Check custom routes first (for /items which might conflict)
-foreach ($items_routes['custom'] as $pattern => $handler) {
-    if (RouteHelper::matchesPattern($pattern, $full_path)) {
-        if ($handler($params, $settings, $session, $template_directory)) {
-            exit();
-        }
-    }
-}
-
-// 2. Check content routes
-if ($route = RouteHelper::matchRoute($full_path, $items_routes['content'])) {
-    // RouteHelper handles model loading and view rendering with theme overrides
-    RouteHelper::handlePluginContentRoute($route, 'items', $params);
-    exit();
-}
+// Use the same RouteHelper as main serve.php - gets all the same features!
+RouteHelper::processRoutes($items_routes, $full_path, $static_routes_path, $params, $settings, $session, $template_directory);
 ```
 
 ### Summary of Plugin Refactoring
 
-Both plugin serve.php files have been fully refactored with maximum simplification:
+Both plugin serve.php files have been **dramatically simplified** using the new RouteHelper approach:
 
-1. **ControlD Plugin**: 
-   - **All 8 routes are now simple** - no custom routes needed!
-   - Added `require_plugin` and `base_path` options to handle special cases
-   - Reduced from 85 lines to ~10 lines of route definitions
+## Key Improvements:
 
-2. **Items Plugin**:
-   - 1 content route for individual items with model loading
-   - 1 custom route for items listing (complex tag logic)
-   - Could potentially be simplified further with more RouteHelper options
+### **1. Unified API**
+- **Same `RouteHelper::processRoutes()` method** as main serve.php
+- **Same route configuration format** - no plugin-specific syntax
+- **Same automatic features** - theme overrides, parameter extraction, validation, etc.
+
+### **2. Massive Code Reduction**
+- **ControlD Plugin**: Reduced from ~85 lines of complex route processing to **~15 lines** of simple route definitions + 1 method call
+- **Items Plugin**: Reduced from ~45 lines of manual processing to **~20 lines** of route definitions + 1 method call
+
+### **3. All Features Included**
+Plugin serve.php files now automatically get:
+- Database URL redirect checking (before route processing)
+- Path validation with helpful error messages  
+- Automatic `$is_valid_page = true` setting
+- Theme override checking (theme files before plugin files)
+- Parameter extraction from `{slug}`, `{id}`, etc.
+- Feature flag checking via `'check_setting'`
+- Model loading and instantiation for content routes
+- 404 fallback handling
+
+### **4. No Manual Route Processing**
+- **No more** manual `if/else` chains
+- **No more** manual file existence checking
+- **No more** manual theme override logic
+- **No more** manual parameter parsing
+- **No more** duplicate route processing code
+
+### **5. Consistent with Main serve.php**
+Plugins now use the exact same routing system as the main application, making them:
+- Easier to develop and maintain
+- More predictable in behavior
+- Automatically compatible with system updates
+- Able to leverage all centralized routing improvements
+
+The plugin routing system is now as simple as: **define routes + call processRoutes()** - just like the main serve.php file.
