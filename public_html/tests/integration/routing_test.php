@@ -500,7 +500,12 @@ class HttpRoutingTestRunner {
             if (file_exists($theme_view_path)) {
                 $test_cases[] = [$route, 200, "{$description} (exists)"];
             } elseif (file_exists($base_view_path)) {
-                $test_cases[] = [$route, 200, "Base view{$route}.php (exists, theme override does not exist)"];
+                // Special case: /event without slug should return 404 (no event specified)
+                if ($route === '/event') {
+                    $test_cases[] = [$route, 404, "Base view{$route}.php (exists, theme override does not exist, no event specified)"];
+                } else {
+                    $test_cases[] = [$route, 200, "Base view{$route}.php (exists, theme override does not exist)"];
+                }
             } else {
                 $test_cases[] = [$route, 404, "View{$route}.php (does not exist)"];
             }
