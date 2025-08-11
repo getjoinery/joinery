@@ -727,7 +727,7 @@ class Product extends SystemBase {
 
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
-			$product_script_file = PathHelper::getRootDir().'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
+			$product_script_file = PathHelper::getRootDir().'/plugins/'.$plugin.'/hooks/product_purchase.php';
 			if(file_exists($product_script_file)){
 				require_once($product_script_file);
 			}
