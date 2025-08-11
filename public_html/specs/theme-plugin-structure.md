@@ -436,6 +436,330 @@ There are only two plugin logic files in the current system:
 - [ ] No static files in /includes/
 - [ ] Migrations use new format
 
+## Component Migration Analysis
+
+### Compliance Summary
+
+After analyzing all themes and plugins in the system:
+
+#### ✅ Fully Compliant (1/9 themes):
+- **sassa** - Perfect compliance with new structure
+
+#### ❌ Non-Compliant (8/9 themes):
+- **falcon** - Major restructuring needed
+- **jeremytunnell** - Complex legacy content migration needed
+- **tailwind** - Major restructuring needed  
+- **default** - Major restructuring needed
+- **devonandjerry** - Major restructuring needed
+- **galactictribune** - Major restructuring needed
+- **zoukphilly** - Major restructuring needed
+- **zoukroom** - Major restructuring needed
+
+#### ❌ Non-Compliant (3/3 plugins):
+- **controld** - Logic file migration needed
+- **items** - Logic and view file migration needed
+- **bookings** - Minor admin directory rename needed
+
+### Detailed Migration Strategies
+
+#### **FALCON THEME** Migration Strategy
+
+**Current Structure Issues:**
+- No `/assets/` directory
+- CSS/JS mixed in `/includes/css/` and `/includes/js/`
+- Vendors in `/includes/vendors/`  
+- Profile directory at root level instead of `/views/profile/`
+- Missing `/views/` directory
+
+**Migration Commands:**
+```bash
+# 1. Create new directory structure
+mkdir -p theme/falcon/assets/{css,js,images,fonts,vendors}
+mkdir -p theme/falcon/views/profile
+
+# 2. Move CSS files
+mv theme/falcon/includes/css/* theme/falcon/assets/css/
+
+# 3. Move JS files  
+mv theme/falcon/includes/js/* theme/falcon/assets/js/
+
+# 4. Move vendor assets
+mv theme/falcon/includes/vendors/* theme/falcon/assets/vendors/
+
+# 5. Move images
+mv theme/falcon/images/* theme/falcon/assets/images/
+
+# 6. Move profile directory
+mv theme/falcon/profile/* theme/falcon/views/profile/
+rmdir theme/falcon/profile
+```
+
+**Asset Reference Updates:**
+After moving files, update all asset references in PHP files:
+```bash
+# Update asset paths in all PHP files
+find theme/falcon -name "*.php" -exec sed -i 's|/includes/css/|/assets/css/|g' {} \;
+find theme/falcon -name "*.php" -exec sed -i 's|/includes/js/|/assets/js/|g' {} \;
+find theme/falcon -name "*.php" -exec sed -i 's|/includes/vendors/|/assets/vendors/|g' {} \;
+find theme/falcon -name "*.php" -exec sed -i 's|/images/|/assets/images/|g' {} \;
+```
+
+#### **JEREMYTUNNELL THEME** Migration Strategy
+
+**Current Structure Issues:**
+- Multiple asset directories: `/emailtemplates/`, `/scripts/`, `/styles/`, `/images/`
+- WordPress legacy content in `/wp-content/`
+- GDPR scripts in `/scripts/GDPR/`
+- Root-level files: `favicon.ico`, `TODO_fix_css_items.md`
+
+**Migration Commands:**
+```bash
+# 1. Create new directory structure
+mkdir -p theme/jeremytunnell/assets/{css,js,images,fonts,vendors}
+mkdir -p theme/jeremytunnell/docs
+
+# 2. Move and organize assets
+mv theme/jeremytunnell/styles/* theme/jeremytunnell/assets/css/
+mv theme/jeremytunnell/scripts/js/* theme/jeremytunnell/assets/js/
+mv theme/jeremytunnell/scripts/GDPR/jquery.ihavecookies.js theme/jeremytunnell/assets/js/
+mv theme/jeremytunnell/scripts/GDPR/jquery.ihavecookies.min.js theme/jeremytunnell/assets/js/
+mv theme/jeremytunnell/scripts/df983.js theme/jeremytunnell/assets/js/
+mv theme/jeremytunnell/images/* theme/jeremytunnell/assets/images/
+mv theme/jeremytunnell/favicon.ico theme/jeremytunnell/assets/images/
+
+# 3. Move WordPress assets to vendors
+mkdir -p theme/jeremytunnell/assets/vendors/wordpress
+cp -r theme/jeremytunnell/includes/wp-content/* theme/jeremytunnell/assets/vendors/wordpress/
+rm -rf theme/jeremytunnell/includes/wp-content
+
+# 4. Move miscellaneous assets
+mv theme/jeremytunnell/emailtemplates theme/jeremytunnell/assets/
+
+# 5. Move documentation
+mv theme/jeremytunnell/TODO_fix_css_items.md theme/jeremytunnell/docs/
+mv theme/jeremytunnell/scripts/GDPR/LICENSE theme/jeremytunnell/docs/
+mv theme/jeremytunnell/scripts/GDPR/README.md theme/jeremytunnell/docs/
+
+# 6. Clean up empty directories
+rmdir theme/jeremytunnell/{scripts,styles,emailtemplates} 2>/dev/null
+```
+
+**Asset Reference Updates:**
+```bash
+# Update asset paths in all PHP files
+find theme/jeremytunnell -name "*.php" -exec sed -i 's|/styles/|/assets/css/|g' {} \;
+find theme/jeremytunnell -name "*.php" -exec sed -i 's|/scripts/|/assets/js/|g' {} \;
+find theme/jeremytunnell -name "*.php" -exec sed -i 's|/images/|/assets/images/|g' {} \;
+find theme/jeremytunnell -name "*.php" -exec sed -i 's|/includes/wp-content/|/assets/vendors/wordpress/|g' {} \;
+find theme/jeremytunnell -name "*.php" -exec sed -i 's|/emailtemplates/|/assets/emailtemplates/|g' {} \;
+```
+
+#### **TAILWIND THEME** Migration Strategy
+
+**Migration Commands:**
+```bash
+# 1. Create assets directory
+mkdir -p theme/tailwind/assets/{css,js,images,fonts,vendors}
+
+# 2. Move assets from includes
+mv theme/tailwind/includes/*.css theme/tailwind/assets/css/
+mv theme/tailwind/includes/*.js theme/tailwind/assets/js/
+mv theme/tailwind/includes/tailwind.config.js theme/tailwind/assets/js/
+
+# 3. Move images
+mv theme/tailwind/images/* theme/tailwind/assets/images/
+
+# 4. Create views/profile and move profile files
+mkdir -p theme/tailwind/views/profile
+mv theme/tailwind/profile/* theme/tailwind/views/profile/ 2>/dev/null || true
+rmdir theme/tailwind/profile 2>/dev/null || true
+```
+
+**Asset Reference Updates:**
+```bash
+# Update asset paths in all PHP files
+find theme/tailwind -name "*.php" -exec sed -i 's|/includes/input\.css|/assets/css/input.css|g' {} \;
+find theme/tailwind -name "*.php" -exec sed -i 's|/includes/output\.css|/assets/css/output.css|g' {} \;
+find theme/tailwind -name "*.php" -exec sed -i 's|/includes/.*\.js|/assets/js/|g' {} \;
+find theme/tailwind -name "*.php" -exec sed -i 's|/images/|/assets/images/|g' {} \;
+```
+
+#### **DEFAULT THEME** Migration Strategy
+
+**Migration Commands:**
+```bash
+# 1. Create assets directory
+mkdir -p theme/default/assets/{css,js,images,fonts,vendors}
+
+# 2. Move assets
+mv theme/default/includes/*.css theme/default/assets/css/
+mv theme/default/includes/*.js theme/default/assets/js/
+mv theme/default/includes/tailwind.config.js theme/default/assets/js/
+mv theme/default/images/* theme/default/assets/images/
+
+# 3. Create views/profile
+mkdir -p theme/default/views/profile
+mv theme/default/profile/* theme/default/views/profile/ 2>/dev/null || true
+rmdir theme/default/profile 2>/dev/null || true
+```
+
+**Asset Reference Updates:**
+```bash
+# Update asset paths in all PHP files
+find theme/default -name "*.php" -exec sed -i 's|/includes/input\.css|/assets/css/input.css|g' {} \;
+find theme/default -name "*.php" -exec sed -i 's|/includes/output\.css|/assets/css/output.css|g' {} \;
+find theme/default -name "*.php" -exec sed -i 's|/includes/.*\.js|/assets/js/|g' {} \;
+find theme/default -name "*.php" -exec sed -i 's|/images/|/assets/images/|g' {} \;
+```
+
+#### **CONTROLD PLUGIN** Migration Strategy
+
+**Current Issues:**
+- Has `/logic/product_scripts_logic.php` (should be in `/hooks/`)
+- Has `/admin/` directory (should be `/admin/` per spec)
+- Missing `/assets/` directory
+
+**Migration Commands:**
+```bash
+# 1. Create hooks directory and migrate logic file
+mkdir -p plugins/controld/hooks
+mv plugins/controld/logic/product_scripts_logic.php plugins/controld/hooks/product_purchase.php
+rmdir plugins/controld/logic
+
+# 2. Create assets directory for future use
+mkdir -p plugins/controld/assets/{css,js,images}
+
+# 3. Rename admin to admin (already correct)
+# No change needed - already uses /admin/
+```
+
+**System Update Needed:**
+Update `Product->run_product_scripts()` in `/data/products_class.php` line 730:
+```php
+// Change from:
+$product_script_file = PathHelper::getRootDir().'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
+// To:
+$product_script_file = PathHelper::getRootDir().'/plugins/'.$plugin.'/hooks/product_purchase.php';
+```
+
+#### **ITEMS PLUGIN** Migration Strategy
+
+**Current Issues:**
+- Has `/logic/items_logic.php` (presentation logic - should move to theme)
+- Has `/views/items.php` (should move to theme)
+- Uses `/adm/` directory (should be `/admin/`)
+
+**Migration Commands:**
+```bash
+# 1. Rename adm to admin
+mv plugins/items/adm plugins/items/admin
+
+# 2. Create assets directory
+mkdir -p plugins/items/assets/{css,js,images}
+
+# 3. Logic and views will be moved to active themes during theme migration
+# The items_logic.php and views/items.php files will be copied to each theme that needs them
+```
+
+**Theme Integration:**
+For themes that use items plugin, add:
+```bash
+# Copy to each theme that needs items functionality
+cp plugins/items/logic/items_logic.php theme/[theme-name]/logic/
+cp plugins/items/views/items.php theme/[theme-name]/views/
+```
+
+**Update items plugin serve.php** (line 10, 18):
+```php
+// Change from:
+$template_file = $template_directory.'/plugins/views/items.php';
+$base_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/items/views/items.php';
+// To:
+$template_file = $template_directory.'/views/items.php';
+$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/items.php';
+```
+
+#### **BOOKINGS PLUGIN** Migration Strategy
+
+**Current Issues:**
+- Uses `/adm/` directory (should be `/admin/`)
+
+**Migration Commands:**
+```bash
+# 1. Rename adm to admin  
+mv plugins/bookings/adm plugins/bookings/admin
+
+# 2. Create assets directory for future use
+mkdir -p plugins/bookings/assets/{css,js,images}
+```
+
+### Migration Process
+
+#### **Recommended Migration Approach:**
+
+```bash
+#!/bin/bash
+# migrate_component.sh
+
+migrate_component() {
+    local component_type=$1  # "theme" or "plugins"
+    local component_name=$2
+    
+    echo "Migrating $component_type: $component_name"
+    
+    # 1. Create backup
+    cp -r "$component_type/$component_name" "$component_type/$component_name.backup"
+    echo "✓ Backup created"
+    
+    # 2. Execute migration commands (specific to each component)
+    set -e  # Exit on any error
+    
+    # 3. Run asset reference updates with sed
+    
+    # 4. Validate syntax
+    find "$component_type/$component_name" -name "*.php" -exec php -l {} \;
+    
+    echo "✓ $component_type $component_name migrated successfully"
+}
+
+# Rollback function if needed
+rollback_component() {
+    local component_type=$1
+    local component_name=$2
+    echo "Rolling back $component_type: $component_name"
+    rm -rf "$component_type/$component_name"
+    mv "$component_type/$component_name.backup" "$component_type/$component_name"
+    echo "✓ Rolled back $component_type $component_name"
+}
+```
+
+#### **Migration Validation Commands:**
+
+After each migration, verify success:
+```bash
+# 1. Check structure exists
+ls -la theme/[theme-name]/assets/ || ls -la plugins/[plugin-name]/
+
+# 2. Check PHP syntax (should show no errors)
+find theme/[theme-name] -name "*.php" -exec php -l {} \; | grep -v "No syntax errors"
+
+# 3. Check for remaining old asset references
+grep -r "/includes/css\|/includes/js\|/images/" theme/[theme-name]/ --include="*.php" || echo "No old references found"
+
+# 4. Verify assets were moved successfully
+find theme/[theme-name]/assets -type f | wc -l  # Should show file count > 0
+```
+
+### Priority Migration Order
+
+1. **System Update First**: Update `Product->run_product_scripts()` to look in `/hooks/`
+2. **Simple Plugins**: bookings, controld (minimal changes)
+3. **Complex Plugin**: items (requires theme coordination)  
+4. **Simple Themes**: default, tailwind (basic restructure)
+5. **Complex Theme**: jeremytunnell (WordPress legacy content)
+6. **Main Theme**: falcon (most used theme)
+
+
 ## Conclusion
 
 This structure provides a clean, secure, and maintainable organization for themes and plugins. By clearly separating static assets from executable code and following consistent naming conventions, the system becomes more secure, performant, and easier to maintain. The migration path allows for gradual adoption while maintaining backward compatibility during the transition period.
