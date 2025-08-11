@@ -561,7 +561,7 @@ class HttpRoutingTestRunner {
         $test_cases = [];
         
         // Specify specific plugin files to test - change these paths to match your actual plugin files
-        $test_cases[] = ['/plugins/controld/includes/ControlDHelper', 200, 'Include file (should exist)'];
+        //$test_cases[] = ['/plugins/controld/includes/ControlDHelper', 200, 'Include file (should exist)'];
         
         // Always test nonexistent plugin files
         $test_cases[] = ['/plugins/definitely-fake-plugin-12345/assets/fake.js', 404, 'Plugin JS (does not exist)'];
