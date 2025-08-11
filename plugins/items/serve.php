@@ -7,8 +7,8 @@
 //if($settings->get_setting('blog_active')){
 	if($params[0] == 'items'){
 		if(!$params[1] || $params[1] == 'tag'){
-			$template_file = $template_directory.'/plugins/views/items.php';
-			$base_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/items/views/items.php';
+			$template_file = $template_directory.'/views/items.php';
+			$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/items.php';
 
 			if(file_exists($template_file)){
 				$is_valid_page = true;

@@ -132,7 +132,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 							<span class="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
 							<div class="relative flex items-start space-x-3">
 							  <div class="relative">
-								<img class="h-10 w-10 rounded-full bg-gray-400 flex items-center justify-center ring-8 ring-white" src="/includes/images/blank-avatar.png" alt="">
+								<img class="h-10 w-10 rounded-full bg-gray-400 flex items-center justify-center ring-8 ring-white" src="/assets/images/blank-avatar.png" alt="">
 
 								<span class="absolute -bottom-0.5 -right-1 bg-white rounded-tl px-0.5 py-px">
 								  <!-- Heroicon name: solid/chat-alt -->
@@ -212,7 +212,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 													<span class="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
 													<div class="relative flex items-start space-x-3">
 													  <div class="relative">
-														<img class="h-10 w-10 rounded-full bg-gray-400 flex items-center justify-center ring-8 ring-white" src="/includes/images/blank-avatar.png" alt="">
+														<img class="h-10 w-10 rounded-full bg-gray-400 flex items-center justify-center ring-8 ring-white" src="/assets/images/blank-avatar.png" alt="">
 
 														<span class="absolute -bottom-0.5 -right-1 bg-white rounded-tl px-0.5 py-px">
 														  <!-- Heroicon name: solid/chat-alt -->
