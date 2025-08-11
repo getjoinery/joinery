@@ -29,11 +29,12 @@ Themes reside in the `/theme/[theme-name]/` directory and provide presentation l
 │   │   ├── theme.js              # Main theme script
 │   │   └── *.js                  # Additional scripts
 │   ├── images/                    # Theme images
-│   │   └── *.{jpg,png,svg,webp}  # Image files
+│   │   ├── favicon.ico           # Site favicon
+│   │   └── *.{jpg,png,svg,webp}  # Other image files
 │   ├── fonts/                     # Theme fonts
 │   │   └── *.{woff,woff2,ttf}    # Font files
 │   └── vendors/                   # Third-party assets
-│       └── [vendor-name]/         # Vendor subdirectories
+│       └── [vendor-name]/         # Vendor subdirectories (flexible structure)
 ├── includes/                      # PHP includes (executed, not served)
 │   ├── FormWriter.php            # Theme-specific FormWriter
 │   ├── PublicPage.php            # Theme-specific PublicPage
@@ -49,6 +50,10 @@ Themes reside in the `/theme/[theme-name]/` directory and provide presentation l
 │   └── *.php                     # Additional templates
 ├── logic/                         # Theme-specific logic (if needed)
 │   └── *_logic.php               # Logic files
+├── docs/                          # Documentation (optional)
+│   ├── README.md                 # Theme documentation
+│   ├── CHANGELOG.md              # Version history
+│   └── *.md                      # Additional documentation
 └── serve.php                      # Theme routing overrides (optional)
 ```
 
@@ -77,6 +82,39 @@ Static assets are accessed via:
 - `/theme/[theme-name]/assets/*` - Served directly with caching headers
 - Theme views are included via ThemeHelper, not served directly
 
+### Vendor Asset Organization
+
+The `/assets/vendors/` directory is for third-party libraries and frameworks. Vendor subdirectories have **flexible internal structure** but must contain **only static assets**.
+
+**Suggested structure:**
+```
+/assets/vendors/bootstrap/
+├── css/
+│   └── bootstrap.min.css
+├── js/
+│   └── bootstrap.min.js
+└── fonts/
+    └── bootstrap-icons.woff
+```
+
+**Alternative structures are allowed:**
+```
+/assets/vendors/jquery/
+└── jquery.min.js
+
+/assets/vendors/fontawesome/
+├── all.min.css
+├── webfonts/
+│   ├── fa-solid-900.woff2
+│   └── fa-regular-400.woff2
+└── LICENSE.txt
+```
+
+**Not allowed in vendor directories:**
+- PHP files (`.php`)
+- Server-side scripts  
+- Files requiring special routing
+
 ## Plugin Structure
 
 Plugins reside in the `/plugins/[plugin-name]/` directory and provide functionality extensions.
@@ -94,7 +132,7 @@ Plugins reside in the `/plugins/[plugin-name]/` directory and provide functional
 │   ├── images/                    # Plugin images
 │   │   └── *.{jpg,png,svg}       # Image files
 │   └── vendors/                   # Third-party assets
-│       └── [vendor-name]/         # Vendor subdirectories
+│       └── [vendor-name]/         # Vendor subdirectories (flexible structure)
 ├── admin/                         # Admin interface (executed)
 │   ├── admin_[entity].php        # List pages
 │   ├── admin_[entity]_edit.php   # Edit forms
@@ -102,10 +140,8 @@ Plugins reside in the `/plugins/[plugin-name]/` directory and provide functional
 │       └── *.php                  # Helper files
 ├── data/                          # Data models
 │   └── [entity]_class.php        # Model classes
-├── logic/                         # Business logic
-│   └── [page]_logic.php          # Logic files
-├── views/                         # Frontend views (if needed)
-│   └── *.php                     # View templates
+├── hooks/                         # Event-driven hooks (optional)
+│   └── product_purchase.php      # Product purchase scripts
 ├── ajax/                          # AJAX endpoints
 │   └── *.php                     # AJAX handlers
 ├── api/                           # API endpoints
@@ -114,6 +150,13 @@ Plugins reside in the `/plugins/[plugin-name]/` directory and provide functional
 │   └── migrations.php            # Migration definitions
 ├── includes/                      # Plugin includes
 │   └── *.php                     # Helper classes
+├── utils/                         # Utility scripts (optional)
+│   └── *.php                     # Command-line tools, maintenance scripts
+├── docs/                          # Documentation (optional)
+│   ├── README.md                 # Plugin documentation
+│   ├── CHANGELOG.md              # Version history
+│   ├── LICENSE                   # License file
+│   └── *.md                      # Additional documentation
 ├── serve.php                      # Plugin routing (optional)
 ├── uninstall.php                  # Uninstall script (recommended)
 ├── activate.php                   # Activation hook (optional)
@@ -170,10 +213,13 @@ These directories contain PHP files that are executed:
 ### Never Directly Accessible
 These directories should never be directly accessible via URL:
 - `/theme/*/logic/*` - Theme logic files
+- `/theme/*/docs/*` - Theme documentation
 - `/plugins/*/data/*` - Plugin data models
-- `/plugins/*/logic/*` - Plugin business logic
 - `/plugins/*/includes/*` - Plugin include files
+- `/plugins/*/hooks/*` - Plugin hook handlers
 - `/plugins/*/migrations/*` - Plugin migrations
+- `/plugins/*/utils/*` - Plugin utility scripts
+- `/plugins/*/docs/*` - Plugin documentation
 
 ## Migration Requirements
 
@@ -185,6 +231,11 @@ Many existing themes and plugins don't follow this structure. Common issues:
 2. **Direct includes access**: JavaScript/CSS in `/includes/` directories
 3. **Missing manifests**: No theme.json or plugin.json files
 4. **Inconsistent paths**: Various naming conventions for directories
+5. **Plugin logic files**: Plugins have `/logic/` directories that should not exist
+6. **Plugin view files**: Some plugins may have `/views/` directories that are not allowed
+7. **WordPress legacy content**: `/wp-content/` directories contain assets that need redistribution
+8. **Profile directory placement**: Some themes have `/profile/` at root instead of `/views/profile/`
+9. **Legacy asset directories**: Multiple asset directories (`/images/`, `/scripts/`, `/styles/`) need consolidation
 
 ### Migration Steps
 
@@ -195,6 +246,24 @@ Many existing themes and plugins don't follow this structure. Common issues:
 3. **Create theme.json**: Add manifest with required fields
 4. **Update references**: Update all asset URLs to use new `/assets/` paths
 5. **Move vendors**: Consolidate third-party assets under `/assets/vendors/`
+6. **Move miscellaneous assets**: Move directories like `emailtemplates/`, `scripts/`, `styles/`, and root files like `favicon.ico` to `/assets/`
+   - GDPR/legal scripts follow the same rules: JS files → `/assets/js/`, CSS files → `/assets/css/`
+7. **Migrate WordPress legacy content**: Break down `/wp-content/` directories and redistribute assets to proper locations:
+   - CSS files → `/assets/css/vendors/[plugin-name]/`
+   - JS files → `/assets/js/vendors/[plugin-name]/`  
+   - Images/fonts → `/assets/images/vendors/[plugin-name]/` or `/assets/fonts/vendors/[plugin-name]/`
+   - Update all view file references to use new asset paths
+8. **Move profile directories**: Themes with `/profile/` at root level must move to `/views/profile/`
+9. **Consolidate legacy asset directories**: Migrate all asset directories to standard structure:
+   - `/images/` → `/assets/images/`
+   - `/scripts/`, `/js/` → `/assets/js/`
+   - `/styles/`, `/css/` → `/assets/css/`
+   - `/fonts/` → `/assets/fonts/`
+   - Mixed CSS/JS in `/includes/` → Move to appropriate `/assets/` subdirectory
+   - Update all file references in view templates and PHP files
+10. **Organize documentation files**: Move scattered documentation to `/docs/` directory:
+    - `README.md`, `TODO*.md`, `CHANGELOG.md` → `/docs/`
+    - `LICENSE` files → `/docs/`
 
 #### For Plugins
 
@@ -203,6 +272,10 @@ Many existing themes and plugins don't follow this structure. Common issues:
 3. **Create plugin.json**: Add manifest with required fields
 4. **Update references**: Update all asset URLs to use new `/assets/` paths
 5. **Add uninstall.php**: Create uninstall script for clean removal
+6. **Migrate logic files**: 
+   - Product scripts → `/hooks/product_purchase.php`
+   - Other logic → Move to theme logic or convert to data model methods
+7. **Remove view files**: Plugin views must be moved to theme `/views/` directory
 
 ### Asset URL Updates
 
@@ -219,6 +292,49 @@ Many existing themes and plugins don't follow this structure. Common issues:
 <script src="/plugins/controld/assets/js/script.js"></script>
 <img src="/theme/falcon/assets/images/logo.png">
 ```
+
+## Plugin Hooks System
+
+Plugins can respond to system events through the `/hooks/` directory. This replaces the old `/logic/` directory pattern.
+
+### Currently Supported Hooks
+
+#### Product Purchase Hook
+Located at `/plugins/[plugin-name]/hooks/product_purchase.php`
+
+This file should contain functions that are called when products are purchased. Functions must:
+- End with `_product_script` suffix
+- Accept two parameters: `($user, $order_item)`
+- Return boolean
+
+Example:
+```php
+// /plugins/controld/hooks/product_purchase.php
+function controld_subscription_product_script($user, $order_item) {
+    // Handle ControlD subscription activation
+    $ctld_account = CtldAccount::GetByColumn('cda_usr_user_id', $user->key);
+    // ... activation logic ...
+    return true;
+}
+```
+
+Products reference these functions in their `pro_product_scripts` field.
+
+### Migration Path for Existing Plugin Logic Files
+
+There are only two plugin logic files in the current system:
+
+1. **`/plugins/controld/logic/product_scripts_logic.php`**
+   - **Migrate to:** `/plugins/controld/hooks/product_purchase.php`
+   - **Reason:** Event-driven hook for product purchases
+   - **No code changes needed:** Just move the file to the new location
+   - **System update needed:** Update `Product->run_product_scripts()` to look in `/hooks/` instead of `/logic/`
+
+2. **`/plugins/items/logic/items_logic.php`**
+   - **Migrate to:** `/theme/[active-theme]/logic/items_logic.php`  
+   - **Reason:** This is presentation logic that prepares data for a view
+   - **Also migrate:** `/plugins/items/views/items.php` → `/theme/[active-theme]/views/items.php`
+   - **Update serve.php:** The items plugin's serve.php should look for the view in the theme directory
 
 ## Benefits of This Structure
 
