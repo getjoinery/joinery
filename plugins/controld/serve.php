@@ -6,9 +6,9 @@
 
 
 
-//PROFILE CTLD DEVICE ROUTES
+//PROFILE CTLD DEVICE ROUTES - Now handled by sassa theme
 if($params[0] == 'profile' && $params[1] == 'device_edit'){	
-	$base_file = PathHelper::getIncludePath('plugins/controld/views/profile/ctlddevice_edit.php');
+	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/ctlddevice_edit.php');
 	if(file_exists($base_file)){
 		$is_valid_page = true;
 		require_once($base_file); 
@@ -17,7 +17,7 @@ if($params[0] == 'profile' && $params[1] == 'device_edit'){
 }
 
 if($params[0] == 'profile' && $params[1] == 'filters_edit'){	
-	$base_file = PathHelper::getIncludePath('plugins/controld/views/profile/ctldfilters_edit.php');
+	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/ctldfilters_edit.php');
 	if(file_exists($base_file)){
 		$is_valid_page = true;
 		require_once($base_file); 
@@ -25,9 +25,9 @@ if($params[0] == 'profile' && $params[1] == 'filters_edit'){
 	}
 }
 
-// Add other profile routes for ControlD
+// Add other profile routes for ControlD - Now handled by sassa theme
 if($params[0] == 'profile' && $params[1] == 'devices'){	
-	$base_file = PathHelper::getIncludePath('plugins/controld/views/profile/devices.php');
+	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/devices.php');
 	if(file_exists($base_file)){
 		$is_valid_page = true;
 		require_once($base_file); 
@@ -36,7 +36,7 @@ if($params[0] == 'profile' && $params[1] == 'devices'){
 }
 
 if($params[0] == 'profile' && $params[1] == 'rules'){	
-	$base_file = PathHelper::getIncludePath('plugins/controld/views/profile/rules.php');
+	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/rules.php');
 	if(file_exists($base_file)){
 		$is_valid_page = true;
 		require_once($base_file); 
@@ -45,7 +45,7 @@ if($params[0] == 'profile' && $params[1] == 'rules'){
 }
 
 if($params[0] == 'profile' && $params[1] == 'ctld_activation'){	
-	$base_file = PathHelper::getIncludePath('plugins/controld/views/profile/ctld_activation.php');
+	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/ctld_activation.php');
 	if(file_exists($base_file)){
 		$is_valid_page = true;
 		require_once($base_file); 
@@ -53,9 +53,9 @@ if($params[0] == 'profile' && $params[1] == 'ctld_activation'){
 	}
 }
 
-// ROOT VIEWS (if needed for ControlD-specific pages)
+// ROOT VIEWS (if needed for ControlD-specific pages) - Now handled by sassa theme
 if($params[0] == 'pricing' && Plugin::is_plugin_active('controld')){	
-	$base_file = PathHelper::getIncludePath('plugins/controld/views/pricing.php');
+	$base_file = PathHelper::getIncludePath('theme/sassa/views/pricing.php');
 	if(file_exists($base_file)){
 		$is_valid_page = true;
 		require_once($base_file); 
