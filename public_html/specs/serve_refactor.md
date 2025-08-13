@@ -50,12 +50,10 @@ class RouteHelper {
         
         $file_extension = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
         
-        // BACKWARD COMPATIBILITY: Execute PHP files as scripts, not static assets
+        // SECURITY: Only serve actual static assets - never execute PHP files
         if ($file_extension === 'php') {
-            error_log("RouteHelper: WARNING - serving PHP file as script instead of static asset: {$file_path}");
-            // Execute the PHP file instead of serving it as static content
-            require_once($file_path);
-            return true;
+            error_log("RouteHelper: SECURITY - Rejecting PHP file in static route: {$file_path}");
+            return false; // Hard rejection - no execution
         }
         
         $actual_cache_seconds = $cache_seconds;
@@ -314,6 +312,7 @@ class RouteHelper {
     public static function handleContentRoute($route, $params, $template_directory) {
         $model_name = $route['model'] ?? null;
         if (!$model_name) {
+            error_log("RouteHelper: ERROR - 'model' is required for content routes");
             return false;
         }
         
@@ -325,9 +324,10 @@ class RouteHelper {
             }
         }
         
-        // Load model class - only if needed for content routes
+        // NEW: Strict requirement - no fallbacks
         if (empty($route['model_file'])) {
-            return false; // model_file is required for content routes
+            error_log("RouteHelper: ERROR - 'model_file' is required for content routes. Specify explicit path to model class.");
+            return false; // Hard requirement - no fallbacks
         }
         
         try {
@@ -353,13 +353,13 @@ class RouteHelper {
         $original_view_file = $view_file;
         
         if (strpos($view_file, '/') === 0) {
-            $view_file = ltrim($view_file, '/');
-            error_log("RouteHelper: WARNING - view file '{$original_view_file}' has leading slash, stripped to '{$view_file}'");
+            error_log("RouteHelper: ERROR - Invalid view file path with leading slash: '{$original_view_file}' - Use relative path");
+            return false; // Hard rejection
         }
         
         if (strpos($view_file, 'views/') === 0) {
-            $view_file = substr($view_file, 6); // Remove 'views/' prefix
-            error_log("RouteHelper: WARNING - view file '{$original_view_file}' has views/ prefix, stripped to '{$view_file}'");
+            error_log("RouteHelper: ERROR - Invalid view file path with views/ prefix: '{$original_view_file}' - Path should be relative to views/");
+            return false; // Hard rejection
         }
         
         $view_path = 'views/' . $view_file;
@@ -402,6 +402,7 @@ class RouteHelper {
         
         // Get explicit view path - required for simple routes
         if (empty($route['view'])) {
+            error_log("RouteHelper: ERROR - 'view' is required for simple routes");
             return false; // view is required for simple routes
         }
         
@@ -800,13 +801,15 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
 $routes = [
     // Static file routes - ONLY for actual assets (CSS, JS, images, fonts, etc.)
     'static' => [
+        // ONLY serve actual asset directories - no legacy paths
+        '/plugins/*/assets/*' => ['cache' => 43200],
+        '/theme/*/assets/*' => ['cache' => 43200],
+        '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']],
         'favicon.ico' => ['cache' => 43200],
-        '/theme/*' => ['cache' => 43200],
-        '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']],  // Don't cache upgrade files
-        '/plugins/*/includes/*' => ['cache' => 43200],  // Plugin activation always checked automatically
-        '/plugins/*/assets/*' => ['cache' => 43200],     // Plugin activation always checked automatically
-        '/adm/includes/*' => ['cache' => 43200],
-        '/includes/*' => ['cache' => 43200],
+        // REMOVED: '/plugins/*/includes/*' - All plugins now use /assets/
+        // REMOVED: '/includes/*' - No static files should be in /includes/ anymore
+        // REMOVED: '/adm/includes/*' - Admin should use proper asset organization
+        // REMOVED: '/theme/*' - Too broad, use specific /theme/*/assets/* instead
     ],
     
     // Simple content routes (RouteHelper auto-builds paths from route patterns)
