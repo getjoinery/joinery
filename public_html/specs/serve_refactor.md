@@ -143,7 +143,7 @@ class RouteHelper {
                 exit();
             } else {
                 // URL found but no redirect configured - show 404
-                PathHelper::requireOnce('LibraryFunctions.php');
+                PathHelper::requireOnce('includes/LibraryFunctions.php');
                 LibraryFunctions::display_404_page();
                 exit();
             }
@@ -248,7 +248,7 @@ class RouteHelper {
      * Processes ONLY static asset files (CSS, JS, images, fonts, etc.) with proper
      * caching headers and MIME type detection. This method should NEVER handle PHP
      * files or dynamic content - it only serves actual static assets using readfile().
-     * Used for routes like '/theme/*' and '/plugins/*/assets/*'.
+     * Used for routes like '/theme/*' and '/plugins/ * /assets/*'.
      * 
      * @param array $route Route configuration
      * @param array $params URL parameters  
@@ -271,17 +271,18 @@ class RouteHelper {
         // Static routes should NEVER handle view files - that's dynamic content
         // View files should be handled by simple or content routes
         
-        // Handle wildcard static routes
-        if (strpos($pattern, '*') !== false) {
-            // /theme/* -> /theme/falcon/css/style.css becomes full path
-            $prefix = str_replace('*', '', $pattern);
-            if (strpos($path, $prefix) === 0) {
-                $file_path = PathHelper::getAbsolutePath($path);
-                if (file_exists($file_path)) {
-                    $cache_seconds = $route['cache'] ?? 43200;
-                    $exclude_from_cache = $route['exclude_from_cache'] ?? [];
-                    return self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache);
-                }
+        // Handle wildcard and semantic placeholder static routes
+        if (strpos($pattern, '*') !== false || strpos($pattern, '{') !== false) {
+            // Handle semantic placeholders like /plugins/{plugin}/assets/* or /theme/{theme}/assets/*
+            // Extract parameters and build file path
+            $route_params = self::extractRouteParams($pattern, $path);
+            
+            // Build actual file path from request path
+            $file_path = PathHelper::getAbsolutePath($path);
+            if (file_exists($file_path)) {
+                $cache_seconds = $route['cache'] ?? 43200;
+                $exclude_from_cache = $route['exclude_from_cache'] ?? [];
+                return self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache);
             }
         } else {
             // Handle specific file routes
@@ -431,7 +432,7 @@ class RouteHelper {
             
             // Only load PluginHelper if we actually need plugin overrides and it's not already loaded
             if (!class_exists('PluginHelper')) {
-                PathHelper::requireOnce('PluginHelper.php');
+                PathHelper::requireOnce('includes/PluginHelper.php');
             }
             
             $activePlugins = PluginHelper::getActivePlugins();
@@ -520,12 +521,16 @@ class RouteHelper {
     /**
      * Extract parameters from route pattern and actual request path
      * 
-     * Converts route patterns like '/page/{slug}' or '/product/{id}' into regex patterns
-     * and extracts the parameter values from the actual request path. For example,
-     * pattern '/page/{slug}' with path '/page/about-us' returns ['slug' => 'about-us'].
-     * Essential for content routes that need URL parameters.
+     * Converts route patterns like '/page/{slug}', '/plugins/{plugin}/assets/*' or '/product/{id}' 
+     * into regex patterns and extracts the parameter values from the actual request path. 
+     * Handles both semantic placeholders (single segments) and wildcards (multi-segment).
+     * For example:
+     * - pattern '/page/{slug}' with path '/page/about-us' returns ['slug' => 'about-us']
+     * - pattern '/plugins/{plugin}/assets/*' with path '/plugins/controld/assets/css/style.css' 
+     *   returns ['plugin' => 'controld', 'path' => 'css/style.css']
+     * Essential for content routes and static routes that need URL parameters.
      * 
-     * @param string $pattern Route pattern with {param} placeholders
+     * @param string $pattern Route pattern with {param} placeholders and/or wildcards
      * @param string $path Actual request path
      * @return array Extracted parameters
      */
@@ -534,19 +539,35 @@ class RouteHelper {
         
         // Convert pattern to regex
         $regex_pattern = preg_quote($pattern, '#');
-        $regex_pattern = str_replace('\\*', '([^/]+)', $regex_pattern);
+        
+        // Replace semantic placeholders with single-segment captures
         $regex_pattern = preg_replace('/\\\\{([^}]+)\\\\}/', '([^/]+)', $regex_pattern);
+        
+        // Replace wildcards with multi-segment captures
+        $regex_pattern = str_replace('\\\\*', '(.*)', $regex_pattern);
+        
         $regex_pattern = '#^' . $regex_pattern . '$#';
         
-        // Extract parameter names
-        preg_match_all('/\\{([^}]+)\\}/', $pattern, $param_names);
+        // Extract parameter names and wildcard positions
+        preg_match_all('/\\\\{([^}]+)\\\\}|\\\\*/', $pattern, $param_matches, PREG_OFFSET_CAPTURE);
+        $param_names = [];
+        
+        foreach ($param_matches[0] as $index => $match) {
+            if (strpos($match[0], '{') === 0) {
+                // Named parameter
+                $param_names[] = trim($match[0], '{}\\\\');
+            } else {
+                // Wildcard - use 'path' as default name
+                $param_names[] = 'path';
+            }
+        }
         
         // Match against path
         if (preg_match($regex_pattern, $path, $matches)) {
             array_shift($matches); // Remove full match
             
             // Map parameter names to values
-            foreach ($param_names[1] as $index => $param_name) {
+            foreach ($param_names as $index => $param_name) {
                 if (isset($matches[$index])) {
                     $params[$param_name] = $matches[$index];
                 }
@@ -559,10 +580,11 @@ class RouteHelper {
     /**
      * Check if route pattern matches the request path
      * 
-     * This method handles three types of pattern matching:
+     * This method handles pattern matching with semantic placeholders:
      * 1. Exact matches: '/admin' matches '/admin' 
-     * 2. Wildcard patterns: '/includes/*' matches '/includes/style.css'
+     * 2. Semantic placeholders: '/plugins/{plugin}/assets/*' - {plugin} = single segment, * = multi-segment
      * 3. Parameter patterns: '/page/{slug}' matches '/page/about-us'
+     * 4. Wildcard patterns: '/admin/*' matches '/admin/settings/users' (multi-segment)
      * Core pattern matching logic used by matchRoute().
      * 
      * @param string $pattern Route pattern
@@ -575,17 +597,16 @@ class RouteHelper {
             return true;
         }
         
-        // Handle wildcard patterns
-        if (strpos($pattern, '*') !== false) {
+        // Handle patterns with wildcards or parameters
+        if (strpos($pattern, '*') !== false || strpos($pattern, '{') !== false) {
             $regex_pattern = preg_quote($pattern, '#');
-            $regex_pattern = str_replace('\\*', '[^/]*', $regex_pattern);
-            return preg_match('#^' . $regex_pattern . '$#', $path);
-        }
-        
-        // Handle parameter patterns
-        if (strpos($pattern, '{') !== false) {
-            $regex_pattern = preg_quote($pattern, '#');
-            $regex_pattern = preg_replace('/\\\\{[^}]+\\\\}/', '[^/]+', $regex_pattern);
+            
+            // Replace semantic placeholders (single segments)
+            $regex_pattern = preg_replace('/\\\\{(plugin|theme|file|slug|id|path)\\\\}/', '([^/]+)', $regex_pattern);
+            
+            // Replace wildcard with multi-segment match (everything from this point)
+            $regex_pattern = str_replace('\\\\*', '(.*)', $regex_pattern);
+            
             return preg_match('#^' . $regex_pattern . '$#', $path);
         }
         
@@ -609,6 +630,12 @@ class RouteHelper {
      * @return void Exits on successful route match
      */
     public static function processRoutes($routes, $request_path) {
+        // Initialize global variables
+        global $is_valid_page;
+        if (!isset($is_valid_page)) {
+            $is_valid_page = false;
+        }
+        
         // Parse request parameters internally
         $params = explode("/", $request_path);
         $full_path = $request_path;
@@ -616,10 +643,10 @@ class RouteHelper {
         $static_routes_path = ltrim($static_routes_path, '/');
         
         // Load core dependencies - these are almost always needed for routing
-        PathHelper::requireOnce('Globalvars.php');
-        PathHelper::requireOnce('SessionControl.php');
-        PathHelper::requireOnce('ThemeHelper.php');
-        PathHelper::requireOnce('PluginHelper.php');
+        PathHelper::requireOnce('includes/Globalvars.php');
+        PathHelper::requireOnce('includes/SessionControl.php');
+        PathHelper::requireOnce('includes/ThemeHelper.php');
+        PathHelper::requireOnce('includes/PluginHelper.php');
         
         $settings = Globalvars::get_instance();
         $session = SessionControl::get_instance();
@@ -640,6 +667,17 @@ class RouteHelper {
             // $template_directory will be absolute path like /var/www/html/theme/falcon
             $template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
         }
+
+        // Merge plugin routes with main routes (plugins register routes, don't process them)
+        global $plugin_routes;
+        if (isset($plugin_routes) && is_array($plugin_routes)) {
+            foreach ($plugin_routes as $type => $plugin_type_routes) {
+                if (!isset($routes[$type])) {
+                    $routes[$type] = [];
+                }
+                $routes[$type] = array_merge($routes[$type], $plugin_type_routes);
+            }
+        }
 		
         // 1. Check for database-stored URL redirects
         if (self::checkUrlRedirects($static_routes_path, $settings)) {
@@ -652,7 +690,7 @@ class RouteHelper {
                 exit();
             } else {
                 // Route matched but handler failed - 404
-                PathHelper::requireOnce('LibraryFunctions.php');
+                PathHelper::requireOnce('includes/LibraryFunctions.php');
                 LibraryFunctions::display_404_page();
                 exit();
             }
@@ -666,7 +704,7 @@ class RouteHelper {
                         exit();
                     } else {
                         // Route matched but handler failed - 404
-                        PathHelper::requireOnce('LibraryFunctions.php');
+                        PathHelper::requireOnce('includes/LibraryFunctions.php');
                         LibraryFunctions::display_404_page();
                         exit();
                     }
@@ -682,7 +720,7 @@ class RouteHelper {
                     exit();
                 } else {
                     // Route matched but handler failed - 404
-                    PathHelper::requireOnce('LibraryFunctions.php');
+                    PathHelper::requireOnce('includes/LibraryFunctions.php');
                     LibraryFunctions::display_404_page();
                     exit();
                 }
@@ -695,7 +733,7 @@ class RouteHelper {
                 exit();
             } else {
                 // Route matched but handler failed - 404
-                PathHelper::requireOnce('LibraryFunctions.php');
+                PathHelper::requireOnce('includes/LibraryFunctions.php');
                 LibraryFunctions::display_404_page();
                 exit();
             }
@@ -737,7 +775,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * 'favicon.ico' => ['cache' => 43200]         // Static asset file
  * '/theme/*' => ['cache' => 43200]            // Theme assets with caching
  * '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']]  // Don't cache upgrade files
- * '/plugins/*/assets/*' => ['cache' => 43200]  // Plugin activation always automatic (non-overridable)
+ * '/plugins/ * /assets/*' => ['cache' => 43200]  // Plugin activation always automatic (non-overridable)
  * NOTE: Static routes should NEVER serve PHP files or dynamic content
  * 
  * CONTENT ROUTES - Model-view pattern with theme overrides
@@ -801,15 +839,15 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
 $routes = [
     // Static file routes - ONLY for actual assets (CSS, JS, images, fonts, etc.)
     'static' => [
-        // ONLY serve actual asset directories - no legacy paths
-        '/plugins/*/assets/*' => ['cache' => 43200],
-        '/theme/*/assets/*' => ['cache' => 43200],
+        // Semantic placeholders for clear segment control
+        '/plugins/{plugin}/assets/*' => ['cache' => 43200],
+        '/theme/{theme}/assets/*' => ['cache' => 43200],
         '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']],
         'favicon.ico' => ['cache' => 43200],
-        // REMOVED: '/plugins/*/includes/*' - All plugins now use /assets/
+        // REMOVED: '/plugins/ * /includes/*' - All plugins now use /assets/
         // REMOVED: '/includes/*' - No static files should be in /includes/ anymore
         // REMOVED: '/adm/includes/*' - Admin should use proper asset organization
-        // REMOVED: '/theme/*' - Too broad, use specific /theme/*/assets/* instead
+        // REMOVED: '/theme/*' - Too broad, use specific /theme/{theme}/assets/* instead
     ],
     
     // Simple content routes (RouteHelper auto-builds paths from route patterns)
@@ -890,7 +928,7 @@ $routes = [
                     RouteHelper::serveStaticFile($file, 43200);
                     return true;
                 } else {
-                    PathHelper::requireOnce('LibraryFunctions.php');
+                    PathHelper::requireOnce('includes/LibraryFunctions.php');
                     LibraryFunctions::display_404_page();
                     return true;
                 }
@@ -910,14 +948,38 @@ $routes = [
     
     // Simple routes (explicit view files for all routes)
     'simple' => [
+        // Top-level routes that need explicit handling
         'robots.txt' => ['view' => 'views/robots.php'],
+        '/sitemap.xml' => ['view' => 'views/sitemap.php'],
+        '/index' => ['view' => 'views/index.php'],
+        
+        // System routes
         '/api/v1/*' => ['view' => 'api/apiv1.php'],
         '/admin/*' => ['view' => 'adm/{path}.php'],
         '/ajax/*' => ['view' => 'ajax/{file}.php'],
         '/utils/*' => ['view' => 'utils/{file}.php'],
         '/tests/*' => ['view' => 'tests/{path}.php'],  // Test routes probably shouldn't be in production
+        
+        // Single catch-all route for all views (automatic coverage for any file in /views/ or subdirectories)
+        '/views/*' => ['view' => 'views/{path}.php'],
+        
+        // Convenience routes that map to views (keeping these for clean URLs)
         '/profile/*' => ['view' => 'views/profile/{path}.php', 'default_view' => 'views/profile/profile.php'],
         '/events' => ['view' => 'views/events.php', 'check_setting' => 'events_active'],
+        '/login' => ['view' => 'views/login.php'],
+        '/register' => ['view' => 'views/register.php'],
+        '/logout' => ['view' => 'views/logout.php'],
+        '/products' => ['view' => 'views/products.php'],
+        '/pricing' => ['view' => 'views/pricing.php'],
+        '/lists' => ['view' => 'views/lists.php'],
+        '/booking' => ['view' => 'views/booking.php'],
+        '/cart' => ['view' => 'views/cart.php'],
+        '/survey' => ['view' => 'views/survey.php'],
+        '/password-reset-1' => ['view' => 'views/password-reset-1.php'],
+        '/password-reset-2' => ['view' => 'views/password-reset-2.php'],
+        '/password-set' => ['view' => 'views/password-set.php'],
+        '/site-directory' => ['view' => 'views/site-directory.php'],
+        '/rss20_feed' => ['view' => 'views/rss20_feed.php'],
     ],
 ];
 
@@ -1184,8 +1246,19 @@ $controld_routes = [
     ],
 ];
 
-// Use the same RouteHelper as main serve.php - gets all the same features!
-RouteHelper::processRoutes($controld_routes, $_REQUEST['path']);
+// Register routes with global system (DO NOT call processRoutes directly)
+// This allows main serve.php to process all routes in the correct order
+global $plugin_routes;
+if (!isset($plugin_routes)) {
+    $plugin_routes = ['static' => [], 'content' => [], 'custom' => [], 'simple' => []];
+}
+
+foreach ($controld_routes as $type => $routes) {
+    if (!isset($plugin_routes[$type])) {
+        $plugin_routes[$type] = [];
+    }
+    $plugin_routes[$type] = array_merge($plugin_routes[$type], $routes);
+}
 ```
 
 ### 2. plugins/items/serve.php (Refactored)
@@ -1251,8 +1324,19 @@ $items_routes = [
     ],
 ];
 
-// Use the same RouteHelper as main serve.php - gets all the same features!
-RouteHelper::processRoutes($items_routes, $_REQUEST['path']);
+// Register routes with global system (DO NOT call processRoutes directly)
+// This allows main serve.php to process all routes in the correct order
+global $plugin_routes;
+if (!isset($plugin_routes)) {
+    $plugin_routes = ['static' => [], 'content' => [], 'custom' => [], 'simple' => []];
+}
+
+foreach ($items_routes as $type => $routes) {
+    if (!isset($plugin_routes[$type])) {
+        $plugin_routes[$type] = [];
+    }
+    $plugin_routes[$type] = array_merge($plugin_routes[$type], $routes);
+}
 ```
 
 ### Summary of Plugin Refactoring
@@ -1261,14 +1345,14 @@ Both plugin serve.php files have been **dramatically simplified** using the new 
 
 ## Key Improvements:
 
-### **1. Unified API**
-- **Same `RouteHelper::processRoutes()` method** as main serve.php
+### **1. Unified Route Registration System**
+- **Plugin routes register with global system** instead of processing independently
 - **Same route configuration format** - no plugin-specific syntax
-- **Same automatic features** - theme overrides, parameter extraction, validation, etc.
+- **Routes processed in correct order** - main serve.php processes all routes together
 
 ### **2. Massive Code Reduction**
-- **ControlD Plugin**: Reduced from ~85 lines of complex route processing to **~15 lines** of simple route definitions + 1 method call
-- **Items Plugin**: Reduced from ~45 lines of manual processing to **~20 lines** of route definitions + 1 method call
+- **ControlD Plugin**: Reduced from ~85 lines of complex route processing to **~15 lines** of simple route definitions + route registration
+- **Items Plugin**: Reduced from ~45 lines of manual processing to **~20 lines** of route definitions + route registration
 
 ### **3. All Features Included**
 Plugin serve.php files now automatically get:
@@ -1281,18 +1365,24 @@ Plugin serve.php files now automatically get:
 - Model loading and instantiation for content routes
 - 404 fallback handling
 
-### **4. No Manual Route Processing**
+### **4. Route Registration Architecture (Critical Fix)**
+- **Plugins register routes** instead of processing them independently
+- **Main serve.php processes all routes** in the correct order after merging
+- **No route conflicts** - admin routes no longer blocked by plugin routes
+- **Proper route priority** - system routes and plugin routes integrated seamlessly
+
+### **5. No Manual Route Processing**
 - **No more** manual `if/else` chains
 - **No more** manual file existence checking
 - **No more** manual theme override logic
 - **No more** manual parameter parsing
 - **No more** duplicate route processing code
 
-### **5. Consistent with Main serve.php**
+### **6. Consistent with Main serve.php**
 Plugins now use the exact same routing system as the main application, making them:
 - Easier to develop and maintain
 - More predictable in behavior
 - Automatically compatible with system updates
 - Able to leverage all centralized routing improvements
 
-The plugin routing system is now as simple as: **define routes + call processRoutes()** - just like the main serve.php file.
+The plugin routing system is now as simple as: **define routes + register with global system** - main serve.php handles all processing.
