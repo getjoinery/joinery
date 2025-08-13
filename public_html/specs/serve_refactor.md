@@ -261,13 +261,12 @@ class RouteHelper {
         $pattern = $route['pattern'];
         $path = $route['path'];
         
-        // Check plugin activation requirement (for plugin assets only, not themes)
-        if (!empty($route['require_plugin_active'])) {
-            if (preg_match('#^/plugins/([^/]+)/#', $path, $matches)) {
-                $plugin_name = $matches[1];
-                if (!PluginHelper::isPluginActive($plugin_name)) {
-                    return false;
-                }
+        // ALWAYS check plugin activation for ANY plugin path - non-overridable security
+        if (preg_match('#^/plugins/([^/]+)/#', $path, $matches)) {
+            $plugin_name = $matches[1];
+            if (!PluginHelper::isPluginActive($plugin_name)) {
+                error_log("RouteHelper: BLOCKED inactive plugin access: {$path}");
+                return false; // Always block inactive plugins - no exceptions
             }
         }
         
@@ -737,7 +736,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * 'favicon.ico' => ['cache' => 43200]         // Static asset file
  * '/theme/*' => ['cache' => 43200]            // Theme assets with caching
  * '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']]  // Don't cache upgrade files
- * '/plugins/*/assets/*' => ['require_plugin_active' => true, 'cache' => 43200]  // Plugin assets with activation check
+ * '/plugins/*/assets/*' => ['cache' => 43200]  // Plugin activation always automatic (non-overridable)
  * NOTE: Static routes should NEVER serve PHP files or dynamic content
  * 
  * CONTENT ROUTES - Model-view pattern with theme overrides
@@ -775,6 +774,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - Plugin overrides: ajax/utils routes automatically check plugins first, then main files
  * 
  * AUTOMATIC FEATURES:
+ * - Plugin activation checking (automatic for ALL /plugins/* paths - non-overridable)
  * - Database URL redirect checking (before route processing)
  * - Path validation with helpful error messages (prevents common path mistakes)
  * - $is_valid_page = true (unless 'valid_page' => false)
@@ -792,7 +792,6 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - 'valid_page' => false - Don't count this route for statistics (default: true)
  * - 'cache' => 43200 - Cache time in seconds for static files
  * - 'exclude_from_cache' => ['.ext'] - File extensions to not cache (short cache instead)
- * - 'require_plugin_active' => true - Only serve if plugin is active
  * - 'default_view' => 'path/file.php' - Fallback view when no specific file matches  
  * - 'view' => 'path/file.php' - Explicit view file to serve (required for simple routes)
  */
@@ -804,8 +803,8 @@ $routes = [
         'favicon.ico' => ['cache' => 43200],
         '/theme/*' => ['cache' => 43200],
         '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']],  // Don't cache upgrade files
-        '/plugins/*/includes/*' => ['require_plugin_active' => true, 'cache' => 43200],
-        '/plugins/*/assets/*' => ['require_plugin_active' => true, 'cache' => 43200],
+        '/plugins/*/includes/*' => ['cache' => 43200],  // Plugin activation always checked automatically
+        '/plugins/*/assets/*' => ['cache' => 43200],     // Plugin activation always checked automatically
         '/adm/includes/*' => ['cache' => 43200],
         '/includes/*' => ['cache' => 43200],
     ],
@@ -913,7 +912,7 @@ $routes = [
         '/admin/*' => ['view' => 'adm/{path}.php'],
         '/ajax/*' => ['view' => 'ajax/{file}.php'],
         '/utils/*' => ['view' => 'utils/{file}.php'],
-        '/tests/*' => ['view' => 'tests/{path}.php'],
+        '/tests/*' => ['view' => 'tests/{path}.php'],  // Test routes probably shouldn't be in production
         '/profile/*' => ['view' => 'views/profile/{path}.php', 'default_view' => 'views/profile/profile.php'],
         '/events' => ['view' => 'views/events.php', 'check_setting' => 'events_active'],
     ],
