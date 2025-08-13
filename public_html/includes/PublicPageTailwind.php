@@ -1,5 +1,7 @@
 <?php
-require_once('PublicPageBase.php');
+require_once(__DIR__ . '/PathHelper.php');
+
+PathHelper::requireOnce('includes/PublicPageBase.php');
 
 class PublicPageTailwind extends PublicPageBase {
 
@@ -216,7 +218,7 @@ class PublicPageTailwind extends PublicPageBase {
 		<?php
 		if (!$this->debug_css) {
 			?>
-			<link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'includes', 'web'); ?>">
+			<link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>">
 			<?php
 		}
 		?>

@@ -1,10 +1,11 @@
 <?php
-require_once('PathHelper.php');
-require_once('Globalvars.php');
-require_once('SessionControl.php');
-require_once('ShoppingCart.php');
-require_once('ThemeHelper.php');
-require_once('PluginHelper.php');
+require_once(__DIR__ . '/PathHelper.php');
+
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/ShoppingCart.php');
+PathHelper::requireOnce('includes/ThemeHelper.php');
+PathHelper::requireOnce('includes/PluginHelper.php');
 
 PathHelper::requireOnce('data/users_class.php');
 PathHelper::requireOnce('data/public_menus_class.php');

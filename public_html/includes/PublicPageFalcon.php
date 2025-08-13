@@ -1,6 +1,8 @@
 <?php
-require_once('PublicPageBase.php');
-require_once('Pager.php');
+require_once(__DIR__ . '/PathHelper.php');
+
+PathHelper::requireOnce('includes/PublicPageBase.php');
+PathHelper::requireOnce('includes/Pager.php');
 
 class PublicPageFalcon extends PublicPageBase {
 
@@ -237,7 +239,7 @@ class PublicPageFalcon extends PublicPageBase {
 			<?php if($session->is_logged_in()){ ?>
 			<li class="nav-item dropdown"><a class="nav-link pe-0 ps-2" id="navbarDropdownUser" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                 <div class="avatar avatar-xl">
-                  <img class="rounded-circle" src="<?php echo PathHelper::getThemeFilePath('avatar.png', 'includes/img', 'web', 'falcon'); ?>" alt="" />
+                  <img class="rounded-circle" src="<?php echo PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web', 'falcon'); ?>" alt="" />
 
                 </div>
               </a>
@@ -456,7 +458,7 @@ class PublicPageFalcon extends PublicPageBase {
     <meta name="msapplication-TileImage" content="../assets/img/favicons/mstile-150x150.png">-->
     <meta name="theme-color" content="#ffffff">
     <!--<script src="../assets/js/config.js"></script>-->
-	<script src="/theme/sassa/includes/vendors/simplebar/simplebar.min.js<?php echo PathHelper::getThemeFilePath('simplebar.min.js', 'includes/vendors/simplebar', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('simplebar.min.js', 'assets/vendors/simplebar', 'web', 'falcon'); ?>"></script>
 
 
     <!-- ===============================================-->
@@ -472,9 +474,9 @@ class PublicPageFalcon extends PublicPageBase {
     <!-- Jquery -->
 	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>	
 	
-	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo PathHelper::getThemeFilePath('simplebar.min.css', 'includes/vendors/simplebar', 'web', 'falcon'); ?>">
-	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo PathHelper::getThemeFilePath('theme.css', 'includes/css', 'web', 'falcon'); ?>">
-	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo PathHelper::getThemeFilePath('user_exceptions.css', 'includes/css', 'web', 'falcon'); ?>">
+	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo PathHelper::getThemeFilePath('simplebar.min.css', 'assets/vendors/simplebar', 'web', 'falcon'); ?>">
+	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo PathHelper::getThemeFilePath('theme.css', 'assets/css', 'web', 'falcon'); ?>">
+	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo PathHelper::getThemeFilePath('user_exceptions.css', 'assets/css', 'web', 'falcon'); ?>">
 	
 	
 
@@ -644,14 +646,14 @@ class PublicPageFalcon extends PublicPageBase {
     <!-- ===============================================-->
 	
 	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('popper.min.js', 'includes/vendors/popper', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('bootstrap.min.js', 'includes/vendors/bootstrap', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('anchor.min.js', 'includes/vendors/anchorjs', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('is.min.js', 'includes/vendors/is', 'web', 'falcon'); ?>"></script>
-    <script src="<?php echo PathHelper::getThemeFilePath('all.min.js', 'includes/vendors/fontawesome', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('lodash.min.js', 'includes/vendors/lodash', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('list.min.js', 'includes/vendors/list.js', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('theme.js', 'includes/js', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('popper.min.js', 'assets/vendors/popper', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('bootstrap.min.js', 'assets/vendors/bootstrap', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('anchor.min.js', 'assets/vendors/anchorjs', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('is.min.js', 'assets/vendors/is', 'web', 'falcon'); ?>"></script>
+    <script src="<?php echo PathHelper::getThemeFilePath('all.min.js', 'assets/vendors/fontawesome', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('lodash.min.js', 'assets/vendors/lodash', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('list.min.js', 'assets/vendors/list.js', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('theme.js', 'assets/js', 'web', 'falcon'); ?>"></script>
 	
 
 
