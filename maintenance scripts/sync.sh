@@ -73,7 +73,7 @@ setup_ssh_multiplexing() {
     local ssh_key_path="$4"
     
     # Create unique control path
-    SSH_CONTROL_PATH="/tmp/sync_ssh_${ssh_host}_${ssh_port}_${ssh_user}_$"
+    SSH_CONTROL_PATH="/tmp/sync_ssh_${ssh_host}_${ssh_port}_${ssh_user}_$$"
     
     # SSH multiplexing options
     local ssh_multiplex_opts="-o ControlMaster=auto -o ControlPath=$SSH_CONTROL_PATH -o ControlPersist=300"
@@ -748,6 +748,30 @@ perform_sync() {
     set +e
     DRY_RUN_OUTPUT=$(rsync "${DRY_RUN_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1)
     DRY_RUN_EXIT_CODE=$?
+    
+    # Check for directory deletion errors and handle them automatically
+    if echo "$DRY_RUN_OUTPUT" | grep -q "cannot delete non-empty directory:"; then
+        if [ "$suppress_no_changes" != "true" ]; then
+            print_warning "Found directories that cannot be deleted - cleaning them automatically..."
+        fi
+        
+        # Extract the problematic directories and remove them
+        echo "$DRY_RUN_OUTPUT" | grep "cannot delete non-empty directory:" | while read -r line; do
+            if [[ $line =~ "cannot delete non-empty directory: "(.*) ]]; then
+                local problem_dir="${BASH_REMATCH[1]}"
+                # Remove the directory on the remote server
+                $SSH_CMD "$SSH_USER@$REMOTE_HOST" "cd '$REMOTE_DIR' 2>/dev/null && rm -rf './$problem_dir' 2>/dev/null" 2>/dev/null || true
+            fi
+        done
+        
+        # Re-run the dry run after cleaning
+        if [ "$suppress_no_changes" != "true" ]; then
+            print_status "Re-analyzing after directory cleanup..."
+        fi
+        DRY_RUN_OUTPUT=$(rsync "${DRY_RUN_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1)
+        DRY_RUN_EXIT_CODE=$?
+    fi
+    
     set -e  # Re-enable exit on error
     
     # Handle rsync exit codes
@@ -1003,10 +1027,32 @@ perform_sync() {
     fi
     echo ""
     
-    # Perform the sync with better error handling
+    # Perform the sync with better error handling, including directory deletion handling
     set +e
-    rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH"
+    rsync_output=$(rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH" 2>&1)
     SYNC_EXIT_CODE=$?
+    
+    # Check if we got directory deletion errors during actual sync
+    if echo "$rsync_output" | grep -q "cannot delete non-empty directory:"; then
+        print_warning "Handling directory deletion issues during sync..."
+        
+        # Extract and remove problematic directories
+        echo "$rsync_output" | grep "cannot delete non-empty directory:" | while read -r line; do
+            if [[ $line =~ "cannot delete non-empty directory: "(.*) ]]; then
+                local problem_dir="${BASH_REMATCH[1]}"
+                $SSH_CMD "$SSH_USER@$REMOTE_HOST" "cd '$REMOTE_DIR' 2>/dev/null && rm -rf './$problem_dir' 2>/dev/null" 2>/dev/null || true
+            fi
+        done
+        
+        # Retry the sync
+        print_status "Retrying sync after directory cleanup..."
+        rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_PATH"
+        SYNC_EXIT_CODE=$?
+    else
+        # Output the rsync result if no directory issues
+        echo "$rsync_output"
+    fi
+    
     set -e
     
     if [ $SYNC_EXIT_CODE -eq 0 ]; then
