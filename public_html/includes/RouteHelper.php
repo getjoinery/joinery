@@ -34,7 +34,7 @@ class RouteHelper {
         
         // SECURITY: Only serve actual static assets - never execute PHP files
         if ($file_extension === 'php') {
-            echo "<!-- RouteHelper: SECURITY - Rejecting PHP file in static route: {$file_path} -->\n";
+            error_log("RouteHelper: SECURITY - Rejecting PHP file in static route: {$file_path}");
             return false; // Hard rejection - no execution
         }
         
