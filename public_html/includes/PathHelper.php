@@ -35,6 +35,58 @@ class PathHelper {
     }
     
     /**
+     * Include a file once with proper path resolution (non-fatal)
+     * 
+     * @param string $path Relative path from document root
+     * @return bool True if file was included, false if not found
+     */
+    public static function includeOnce($path) {
+        $absolute_path = self::getAbsolutePath($path);
+        
+        if (file_exists($absolute_path)) {
+            include_once($absolute_path);
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if file exists at given path
+     * 
+     * @param string $path Relative path from document root
+     * @return bool True if file exists
+     */
+    public static function fileExists($path) {
+        return file_exists(self::getAbsolutePath($path));
+    }
+    
+    /**
+     * Get URL path from filesystem path (reverse of getAbsolutePath)
+     * 
+     * @param string $absolute_path Absolute filesystem path
+     * @return string URL path (with leading slash)
+     */
+    public static function getUrlPath($absolute_path) {
+        $root = self::getRootDir();
+        if (strpos($absolute_path, $root) === 0) {
+            $url_path = substr($absolute_path, strlen($root));
+            return '/' . ltrim($url_path, '/');
+        }
+        return $absolute_path;
+    }
+    
+    /**
+     * Get file extension from path
+     * 
+     * @param string $path File path
+     * @return string File extension (without dot)
+     */
+    public static function getExtension($path) {
+        return strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    }
+    
+    /**
      * Get theme file path with fallback to base
      * Moved from LibraryFunctions for proper architectural separation
      */
