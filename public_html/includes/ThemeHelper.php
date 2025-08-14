@@ -173,7 +173,21 @@ class ThemeHelper extends ComponentBase {
     public static function includeThemeFile($path, $themeName = null) {
         try {
             $instance = self::getInstance($themeName);
-            return $instance->includeFile($path);
+            
+            // Try theme-specific file first
+            if ($instance->includeFile($path)) {
+                return true;
+            }
+            
+            // Theme exists but file not found in theme - try base path as fallback
+            $basePath = PathHelper::getIncludePath($path);
+            if (file_exists($basePath)) {
+                require_once($basePath);
+                return true;
+            }
+            
+            return false;
+            
         } catch (Exception $e) {
             // If theme doesn't exist, try base path
             $basePath = PathHelper::getIncludePath($path);
