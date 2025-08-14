@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a custom PHP membership and event management platform with a modular MVC-like architecture. The system uses PostgreSQL and follows a front-controller pattern with theme-based UI customization and plugin extensibility.
 
-**Key Entry Point:** `serve.php` - All requests are routed through this front controller
+**Key Entry Point:** `serve.php` - All requests are routed through this front controller using RouteHelper.php
 
 ## Architecture Patterns
 
@@ -29,6 +29,32 @@ The system checks for theme-specific files first, then falls back to base files:
 2. `/views/page.php` (base fallback)
 
 Theme is selected via `theme_template` setting and can be changed at runtime.
+
+### Routing System (serve.php + RouteHelper.php)
+
+The system uses a hybrid routing approach with pattern matching:
+
+**Route Pattern Rules:**
+- **Route patterns** in serve.php always start with `/` (e.g., `/tests/*`, `/page/{slug}`)
+- **File paths** in route configurations are always relative (e.g., `'view' => 'tests/{path}'`, `'model_file' => 'data/posts_class'`)
+- **Request paths** are automatically normalized by RouteHelper (leading slashes added if missing)
+
+**Path Processing Flow:**
+1. Incoming request: `tests/integration/routing_test` (from Apache rewrite)
+2. RouteHelper normalizes to: `/tests/integration/routing_test` (adds leading slash)
+3. Pattern matching: `/tests/*` matches `/tests/integration/routing_test` 
+4. Path validation: Returns `tests/integration/routing_test` (strips leading slash for file operations)
+5. File inclusion: Uses relative path `tests/integration/routing_test.php`
+
+**Route Types:**
+- **Static routes**: Asset files with caching (`/theme/{theme}/assets/*`)
+- **Dynamic routes**: Views and models (`/tests/*`, `/page/{slug}`)
+- **Custom routes**: PHP closures for complex logic (`'/' => function() {...}`)
+
+**Key Files:**
+- `/serve.php`: Route definitions and front controller
+- `/includes/RouteHelper.php`: Pattern matching and file serving utilities
+- Plugin serve.php files: `/plugins/[name]/serve.php` for plugin-specific routes
 
 ### Plugin Architecture
 Plugins in `/plugins/[name]/` have full MVC structure and can:
@@ -338,8 +364,23 @@ echo $formwriter->set_validate($validation_rules);
 2. Add business logic: `/logic/[feature]_logic.php`
 3. Create view template: `/views/[feature].php`
 4. Add admin interface: `/adm/admin_[feature].php` and `/adm/admin_[feature]_edit.php`
-5. Update routing in `serve.php` if needed
+5. Add route to `serve.php` if needed (e.g., `'/feature/*' => ['view' => 'views/feature/{path}']`)
 6. Add database migration in `/migrations/`
+
+**Route Configuration Examples:**
+```php
+// Simple view route
+'/feature' => ['view' => 'views/feature'],
+
+// Model-based route  
+'/item/{slug}' => ['model' => 'Item', 'model_file' => 'data/items_class'],
+
+// Wildcard route
+'/feature/*' => ['view' => 'views/feature/{path}'],
+
+// Static asset route
+'/feature/assets/*' => ['cache' => 43200],
+```
 
 ### Database Migrations
 
@@ -583,6 +624,23 @@ This script provides access to the Apache error.log from the joinerytest site. U
 4. **Execute the changed files** (visit URLs like `https://joinerytest.site/path/to/file`)
 5. Run log fetcher script to check for new errors
 6. Fix any issues found in the logs
+
+### Routing Troubleshooting
+
+**Debug Mode**: To troubleshoot routing issues, RouteHelper and serve.php can echo debug output to HTML comments (visible in View Source):
+
+```php
+// Enable debugging in RouteHelper.php and serve.php by changing:
+error_log("Debug message");
+// to:
+echo "<!-- Debug message -->\n";
+```
+
+**Common Routing Issues:**
+1. **Pattern not matching**: Check that route patterns start with `/` and paths are normalized
+2. **File not found**: Verify view files exist at the relative path specified in route config
+3. **Path normalization**: RouteHelper strips leading slashes from paths for file operations
+4. **Route order**: Routes are processed in order - more specific patterns should come before general ones
 
 **Important Notes:** 
 - **File Upload**: Claude Code does not upload files to the server. An automated script handles file synchronization to the test server (allow ~6 seconds for sync).
