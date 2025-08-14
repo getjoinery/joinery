@@ -695,8 +695,9 @@ class RouteHelper {
      * 3. Custom routes with complex logic
      * 4. Content routes (model-view pattern)
      * 5. Simple routes (direct file serving)
-     * 6. Plugin routes (backward compatibility)
-     * 7. 404 fallback
+     * 6. View directory fallback (automatic theme-aware view lookup)
+     * 7. Plugin routes (backward compatibility)
+     * 8. 404 fallback
      * 
      * @param array $routes Route configuration array
      * @param string $request_path The request path from $_REQUEST['path']
@@ -819,13 +820,21 @@ class RouteHelper {
             }
         }
         
-        // 6. Allow plugins to add custom routes (backward compatibility)
+        // 6. View directory fallback (automatic theme-aware view lookup)
+        // Try to find view file for any remaining paths
+        $view_file = 'views/' . trim($request_path, '/') . '.php';
+        if (ThemeHelper::includeThemeFile($view_file)) {
+            $is_valid_page = true;
+            exit();
+        }
+        
+        // 7. Allow plugins to add custom routes (backward compatibility)
         // Check if global plugin route handler exists
         if (function_exists('handlePluginRoutes')) {
             handlePluginRoutes($params);
         }
         
-        // 7. Final fallback - 404
+        // 8. Final fallback - 404
         PathHelper::requireOnce('LibraryFunctions.php');
         LibraryFunctions::display_404_page();
     }
@@ -891,6 +900,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - /page/{slug} with model 'Page' -> data/pages_class.php + views/page.php (RouteHelper adds .php to both)
  * - Static files -> serve directly with proper MIME types and caching
  * - Plugin overrides: ajax/utils routes automatically check plugins first, then main files
+ * - View directory fallback: /login -> theme/falcon/views/login.php (theme) OR views/login.php (base)
  * 
  * AUTOMATIC FEATURES:
  * - Plugin activation checking (automatic for ALL /plugins/* paths - non-overridable)
@@ -903,6 +913,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - Feature flag checking via 'check_setting'
  * - Model loading and instantiation
  * - MIME type detection and HTTP caching headers
+ * - View directory fallback (automatic theme-aware lookup for any path)
  * 
  * ROUTE OPTIONS:
  * - 'model' => 'ClassName' - Load model class and instantiate object (content routes)
@@ -1026,40 +1037,32 @@ $routes = [
         },
     ],
     
-    // Simple routes (explicit view files for all routes)
+    // Simple routes (only for paths that need explicit handling or aren't in /views/)
     'simple' => [
-        // Top-level routes that need explicit handling
+        // Top-level routes that need explicit handling (not in views directory)
         '/robots.txt' => ['view' => 'views/robots'],
         '/sitemap.xml' => ['view' => 'views/sitemap'],
         '/index' => ['view' => 'views/index'],
         
-        // System routes
+        // System routes (not views)
         '/api/v1/*' => ['view' => 'api/apiv1'],
         '/admin/*' => ['view' => 'adm/{path}'],
         '/ajax/*' => ['view' => 'ajax/{file}'],
         '/utils/*' => ['view' => 'utils/{file}'],
         '/tests/*' => ['view' => 'tests/{path}'],  // Test routes probably shouldn't be in production
         
-        // Single catch-all route for all views (automatic coverage for any file in /views/ or subdirectories)
+        // Optional: Explicit route for views directory access (if needed)
         '/views/*' => ['view' => 'views/{path}'],
         
-        // Convenience routes that map to views (keeping these for clean URLs)
+        // Routes with special logic or settings checks
         '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile'],
         '/events' => ['view' => 'views/events', 'check_setting' => 'events_active'],
-        '/login' => ['view' => 'views/login'],
-        '/register' => ['view' => 'views/register'],
-        '/logout' => ['view' => 'views/logout'],
-        '/products' => ['view' => 'views/products'],
-        '/pricing' => ['view' => 'views/pricing'],
-        '/lists' => ['view' => 'views/lists'],
-        '/booking' => ['view' => 'views/booking'],
-        '/cart' => ['view' => 'views/cart'],
-        '/survey' => ['view' => 'views/survey'],
-        '/password-reset-1' => ['view' => 'views/password-reset-1'],
-        '/password-reset-2' => ['view' => 'views/password-reset-2'],
-        '/password-set' => ['view' => 'views/password-set'],
-        '/site-directory' => ['view' => 'views/site-directory'],
-        '/rss20_feed' => ['view' => 'views/rss20_feed'],
+        
+        // NOTE: All these routes are now UNNECESSARY - handled by view directory fallback:
+        // '/login', '/register', '/logout', '/products', '/pricing', '/lists', 
+        // '/booking', '/cart', '/survey', '/password-reset-1', '/password-reset-2', 
+        // '/password-set', '/site-directory', '/rss20_feed'
+        // They will automatically resolve to views/login.php, views/products.php, etc.
     ],
 ];
 
