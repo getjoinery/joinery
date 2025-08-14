@@ -1,15 +1,15 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
-	PathHelper::requireOnce('/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/SessionControl.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-	PathHelper::requireOnce('/data/users_class.php');
-	PathHelper::requireOnce('/data/pages_class.php');
-	PathHelper::requireOnce('/data/posts_class.php');
-	PathHelper::requireOnce('/data/events_class.php');
-	PathHelper::requireOnce('/data/locations_class.php');
-	PathHelper::requireOnce('/data/videos_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/pages_class.php');
+	PathHelper::requireOnce('data/posts_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/locations_class.php');
+	PathHelper::requireOnce('data/videos_class.php');
 
 	header("Content-Type: application/xml; charset=UTF-8");
 
@@ -22,18 +22,21 @@
 	
 	if($settings->get_setting('page_contents_active')){
 
-		$search_criteria = array('published' => TRUE, 'deleted' => false, 'has_link' => TRUE);
+		$search_criteria = array('published' => TRUE, 'deleted' => false);
 		$pages = new MultiPage(
 			$search_criteria);	
 		$pages->load();
 		
 		foreach ($pages as $page){
-			echo "    <url>\n";
-			echo "        <loc>" . LibraryFunctions::get_absolute_url(htmlspecialchars($page->get_url(), ENT_XML1, 'UTF-8')) . "</loc>\n";
-			//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
-			echo "        <changefreq>monthly</changefreq>\n";
-			echo "        <priority>0.8</priority>\n";
-			echo "    </url>\n";
+			// Only include pages that have links
+			if ($page->get('pag_link') && strlen(trim($page->get('pag_link'))) > 0) {
+				echo "    <url>\n";
+				echo "        <loc>" . LibraryFunctions::get_absolute_url(htmlspecialchars($page->get_url(), ENT_XML1, 'UTF-8')) . "</loc>\n";
+				//echo "        <lastmod>" . date('Y-m-d') . "</lastmod>\n"; // Modify if the lastmod is dynamically available
+				echo "        <changefreq>monthly</changefreq>\n";
+				echo "        <priority>0.8</priority>\n";
+				echo "    </url>\n";
+			}
 		}
 	}
 
