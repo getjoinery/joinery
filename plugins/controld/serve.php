@@ -1,85 +1,61 @@
 <?php
+// plugins/controld/serve.php - Uses RouteHelper for consistent routing
 
-//ITEMS.  DEFAULT IS TO USE THE /ITEMS/ SUBDIRECTORY
-//TODO: USER CHOOSES URL NAMESPACE
+/*
+ * PLUGIN UNIFIED ROUTING SYSTEM DOCUMENTATION
+ * 
+ * Route types and their options (same as main serve.php):
+ * 
+ * STATIC ROUTES - Serve ONLY static assets (CSS, JS, images, fonts) with caching
+ * '/favicon.ico' => ['cache' => 43200]         // Static asset file
+ * '/plugins/{plugin}/assets/*' => ['cache' => 43200]            // Plugin assets with caching
+ * 
+ * DYNAMIC ROUTES - Unified system for all dynamic content (views + models)
+ * Simple view routes:
+ * '/profile/device_edit' => ['view' => 'views/profile/ctlddevice_edit']  // Standard theme-overridden view
+ * '/pricing' => ['view' => 'views/pricing']  // Standard theme-overridden view
+ * '/plugins/controld/admin/*' => ['view' => 'plugins/controld/admin/{path}']  // Plugin admin files only
+ * 
+ * Model-based routes:
+ * '/item/{slug}' => ['model' => 'Item', 'model_file' => 'plugins/controld/data/items_class']  // Plugin model + theme view
+ * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/controld/data/customs_class', 'check_setting' => 'custom_active']
+ * 
+ * Mixed routes:
+ * '/user/{action}' => ['model' => 'User', 'model_file' => 'data/users_class', 'view' => 'views/user/{action}', 'default_view' => 'views/user/profile']
+ * 
+ * CUSTOM ROUTES - Complex logic with PHP closures
+ * '/complex' => function($params, $settings, $session, $template_directory) {
+ *     // Custom logic here
+ *     // Return true if handled, false if not
+ * }
+ * 
+ * PLUGIN PATH RESOLUTION RULES:
+ * - View routes: Use standard views/ files (theme overrides apply automatically)
+ * - Admin routes: '/plugins/plugin/admin/*' -> plugins/plugin/admin/{path}.php (plugin admin files only)
+ * - Model routes: Plugin models + standard theme-overridden views 
+ * - Theme overrides: Standard theme override system applies to all plugin routes
+ * 
+ * AUTOMATIC FEATURES:
+ * - Database URL redirect checking (before route processing)
+ * - Path validation with helpful error messages
+ * - $is_valid_page = true (unless 'valid_page' => false)
+ * - Theme override checking (theme files before plugin files)
+ * - Parameter extraction from {slug}, {id}, etc.
+ * - Feature flag checking via 'check_setting'
+ * - Model loading and instantiation
+ * - No plugin activation checks needed (already active if this file runs)
+ */
 
-
-
-
-//PROFILE CTLD DEVICE ROUTES - Now handled by sassa theme
-if($params[0] == 'profile' && $params[1] == 'device_edit'){	
-	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/ctlddevice_edit.php');
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-if($params[0] == 'profile' && $params[1] == 'filters_edit'){	
-	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/ctldfilters_edit.php');
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-// Add other profile routes for ControlD - Now handled by sassa theme
-if($params[0] == 'profile' && $params[1] == 'devices'){	
-	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/devices.php');
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-if($params[0] == 'profile' && $params[1] == 'rules'){	
-	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/rules.php');
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-if($params[0] == 'profile' && $params[1] == 'ctld_activation'){	
-	$base_file = PathHelper::getIncludePath('theme/sassa/views/profile/ctld_activation.php');
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-// ROOT VIEWS (if needed for ControlD-specific pages) - Now handled by sassa theme
-if($params[0] == 'pricing' && Plugin::is_plugin_active('controld')){	
-	$base_file = PathHelper::getIncludePath('theme/sassa/views/pricing.php');
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-// EXISTING CREATE ACCOUNT ROUTE
-if($params[0] == 'create_account'){
-	$base_file = PathHelper::getIncludePath('plugins/controld/views/create_account.php');
-	require_once($base_file); 
-	exit();	
-}
-
-// ADMIN ROUTES (keep existing)
-if($params[0] == 'plugins' && $params[1] == 'controld' && $params[2] == 'admin'){	
-	$base_file = ensure_extension(PathHelper::getIncludePath('plugins/controld/admin/'.$params[3]),'php');
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-
-
-?>
+// Define plugin routes - RouteHelper will automatically load these
+$routes = [
+    'dynamic' => [
+        '/profile/device_edit' => ['view' => 'views/profile/ctlddevice_edit'],
+        '/profile/filters_edit' => ['view' => 'views/profile/ctldfilters_edit'],
+        '/profile/devices' => ['view' => 'views/profile/ctlddevices'],
+        '/profile/rules' => ['view' => 'views/profile/ctldrules'],
+        '/profile/ctld_activation' => ['view' => 'views/profile/ctld_activation'],
+        '/create_account' => ['view' => 'views/create_account'],
+        '/pricing' => ['view' => 'views/pricing'],
+        '/plugins/controld/admin/*' => ['view' => 'plugins/controld/admin/{path}'],
+    ],
+];
