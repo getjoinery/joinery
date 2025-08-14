@@ -7,6 +7,32 @@ The current `serve.php` file suffers from several maintainability issues:
 1. **Monolithic Structure**: 891 lines of procedural code with deeply nested conditions
 2. **Code Duplication**: Repeated patterns for file serving, caching headers, and file existence checks
 3. **Complex Logic Flow**: Multiple early exits and nested conditionals make the flow hard to follow
+4. **Apache Configuration Conflicts**: Complex mod_rewrite rules cause double processing and .php extension issues
+
+## Apache Configuration Requirement
+
+This refactoring requires a simplified Apache configuration that routes all requests to serve.php:
+
+```apache
+<VirtualHost *:80>
+    DocumentRoot /var/www/html
+    ServerName joinerytest.site
+    
+    <Directory /var/www/html>
+        Options -Indexes -FollowSymLinks -MultiViews
+        AllowOverride All
+        Require all granted
+        
+        RewriteEngine On
+        RewriteBase /
+        
+        # Ultra-simple: Route everything to serve.php (only 3 lines needed!)
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteCond %{REQUEST_FILENAME} !-d
+        RewriteRule ^(.*)$ serve.php?path=$1 [QSA,L]
+    </Directory>
+</VirtualHost>
+```
 
 ## Simplified Refactoring Approach
 
@@ -660,6 +686,7 @@ class RouteHelper {
      * Process all routes and handle the request
      * 
      * This is the main routing method that processes routes in the correct order:
+     * 0. .php extension handling - Redirects /file.php to /file with monitoring
      * 1. Database URL redirects (if enabled)
      * 2. Static asset routes
      * 3. Custom routes with complex logic
@@ -671,7 +698,7 @@ class RouteHelper {
      * 
      * @param array $routes Route configuration array
      * @param string $request_path The request path from $_REQUEST['path']
-     * @return void Exits on successful route match
+     * @return void Exits on successful route match or redirect
      */
     public static function processRoutes($routes, $request_path) {
         // Initialize global variables
@@ -680,7 +707,20 @@ class RouteHelper {
             $is_valid_page = false;
         }
         
-        // Normalize request path to always have leading slash for consistent pattern matching
+        // Handle .php extension hiding and monitoring
+        if (substr($request_path, -4) === '.php') {
+            // Log warning for monitoring missed links
+            error_log("PURE PHP ROUTING WARNING: Request for .php URL detected: " . $request_path . " - This link should be updated to clean URL format");
+            
+            $clean_path = substr($request_path, 0, -4);
+            header("Location: /$clean_path", true, 301);
+            exit();
+        }
+        
+        // CRITICAL PATH NORMALIZATION FIX:
+        // Apache rewrites send paths like 'tests/integration/routing_test' (no leading slash)
+        // But all route patterns start with '/' (e.g., '/tests/*')
+        // This normalization ensures consistent pattern matching
         if (empty($request_path)) {
             $request_path = '/';
         } elseif ($request_path[0] !== '/') {
@@ -704,12 +744,6 @@ class RouteHelper {
         
         // Load THE theme's serve.php (only one theme active at a time)
         ThemeHelper::includeThemeFile('serve.php');
-        
-        // Load ALL active plugins' serve.php files (multiple plugins can be active)
-        $activePlugins = PluginHelper::getActivePlugins();
-        foreach ($activePlugins as $pluginName => $plugin) {
-            $plugin->includeFile('serve.php');
-        }
         
         // Get theme directory for theme overrides (themes only, never plugins)
         $theme_template = $settings->get_setting('theme_template');
@@ -736,9 +770,9 @@ class RouteHelper {
             }
         }
         
-        // 3. Merge plugin routes with main routes (plugins can override system routes)
-        global $plugin_routes;
-        if (isset($plugin_routes) && is_array($plugin_routes)) {
+        // 3. Load and merge plugin routes (pull approach)
+        $plugin_routes = self::loadPluginRoutes();
+        if (!empty($plugin_routes)) {
             foreach ($plugin_routes as $type => $plugin_type_routes) {
                 if (!isset($routes[$type])) {
                     $routes[$type] = [];
@@ -791,8 +825,70 @@ class RouteHelper {
         }
         
         // 8. Final fallback - 404
-        PathHelper::requireOnce('LibraryFunctions.php');
+        PathHelper::requireOnce('includes/LibraryFunctions.php');
         LibraryFunctions::display_404_page();
+    }
+    
+    /**
+     * Load routes from all active plugin serve.php files (pull approach)
+     * 
+     * This method discovers active plugins, includes their serve.php files,
+     * and extracts route definitions without requiring plugins to register
+     * themselves. Each plugin serve.php should simply define a $routes variable.
+     * 
+     * @return array Combined routes from all active plugins
+     */
+    public static function loadPluginRoutes() {
+        $all_plugin_routes = ['static' => [], 'dynamic' => [], 'custom' => []];
+        
+        // Get active plugins
+        if (!class_exists('PluginHelper')) {
+            PathHelper::requireOnce('includes/PluginHelper.php');
+        }
+        
+        try {
+            $activePlugins = PluginHelper::getActivePlugins();
+        } catch (Exception $e) {
+            error_log("RouteHelper: Failed to get active plugins: " . $e->getMessage());
+            return $all_plugin_routes;
+        }
+        
+        foreach ($activePlugins as $pluginName => $pluginHelper) {
+            $serve_file = $pluginHelper->getIncludePath('serve.php');
+            
+            if (file_exists($serve_file)) {
+                try {
+                    // Use output buffering to prevent any output from plugin files
+                    ob_start();
+                    
+                    // Initialize routes variable
+                    $routes = [];
+                    
+                    // Include the plugin serve.php file
+                    include $serve_file;
+                    
+                    // Clean up any output
+                    ob_end_clean();
+                    
+                    // Merge plugin routes
+                    if (is_array($routes)) {
+                        foreach ($routes as $type => $type_routes) {
+                            if (isset($all_plugin_routes[$type]) && is_array($type_routes)) {
+                                $all_plugin_routes[$type] = array_merge($all_plugin_routes[$type], $type_routes);
+                            }
+                        }
+                    } else {
+                        error_log("RouteHelper: Plugin '{$pluginName}' serve.php did not define routes array");
+                    }
+                    
+                } catch (Exception $e) {
+                    ob_end_clean();
+                    error_log("RouteHelper: Failed to load routes from plugin '{$pluginName}': " . $e->getMessage());
+                }
+            }
+        }
+        
+        return $all_plugin_routes;
     }
 }
 ```
@@ -810,9 +906,11 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
 /*
  * UNIFIED ROUTING SYSTEM DOCUMENTATION
  * 
- * IMPORTANT: Routes should be unique across all categories (static, dynamic, custom).
- * The system processes routes in order: static → plugins → custom → dynamic → view fallback → 404.
- * If the same pattern exists in multiple categories, only the first match will be processed.
+ * IMPORTANT: 
+ * - Routes should be unique across all categories (static, dynamic, custom)
+ * - The system processes routes in order: static → plugins → custom → dynamic → view fallback → 404
+ * - If the same pattern exists in multiple categories, only the first match will be processed
+ * - NEVER include .php extensions in route configurations - RouteHelper adds them automatically
  * 
  * Route types and their options:
  * 
@@ -825,19 +923,19 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * 
  * DYNAMIC ROUTES - Unified system for all dynamic content (views + models)
  * Simple view routes:
- * '/login' => ['view' => 'views/login']        // Simple view file (RouteHelper adds .php)
- * '/robots.txt' => ['view' => 'views/robots']  // Dynamic content (PHP-generated, RouteHelper adds .php)
- * '/api/v1/*' => ['view' => 'api/apiv1']       // Explicit view file (RouteHelper adds .php)
- * '/admin/*' => ['view' => 'adm/{path}']       // {path} placeholder for dynamic part (RouteHelper adds .php)
- * '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile']  // With fallback (RouteHelper adds .php)
- * '/ajax/*' => ['view' => 'ajax/{file}']       // Plugin override automatic (RouteHelper adds .php)
- * '/utils/*' => ['view' => 'utils/{file}']     // Plugin override automatic (RouteHelper adds .php)
+ * '/login' => ['view' => 'views/login']        // Simple view file
+ * '/robots.txt' => ['view' => 'views/robots']  // Dynamic content (PHP-generated)
+ * '/api/v1/*' => ['view' => 'api/apiv1']       // Explicit view file
+ * '/admin/*' => ['view' => 'adm/{path}']       // {path} placeholder for dynamic part
+ * '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile']  // With fallback
+ * '/ajax/*' => ['view' => 'ajax/{file}']       // Plugin override automatic
+ * '/utils/*' => ['view' => 'utils/{file}']     // Plugin override automatic
  *
  * Model-based routes (optional model loading):
- * '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class']  // -> data/pages_class.php + views/page.php (auto-determined)
+ * '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class']  // Auto-determined view: views/page
  * '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class', 'check_setting' => 'blog_active']  // With feature flag check
  * '/item/{id}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'valid_page' => false]  // Don't count for stats
- * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class']  // Plugin-specific model (no .php)
+ * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class']  // Plugin-specific model
  * '/item/{slug}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'view' => 'views/profile/item']  // Custom view path
  *
  * Mixed routes (model + path placeholders + fallbacks):
@@ -853,13 +951,12 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * }
  * 
  * PATH RESOLUTION RULES:
- * - {path} placeholder: /admin/users/edit with 'adm/{path}' -> adm/users/edit.php (RouteHelper adds .php)
- * - {path} placeholder: /admin/ with 'adm/{path}' -> adm/.php (empty path, RouteHelper adds .php)
- * - {file} placeholder: /ajax/endpoint with 'ajax/{file}' -> ajax/endpoint.php (RouteHelper strips .php from input, adds .php to output)
- * - /page/{slug} with model 'Page' -> data/pages_class.php + views/page.php (RouteHelper adds .php to both)
+ * - {path} placeholder: /admin/users/edit with 'adm/{path}' -> adm/users/edit
+ * - {file} placeholder: /ajax/endpoint with 'ajax/{file}' -> ajax/endpoint
+ * - Model routes: /page/{slug} with model 'Page' -> data/pages_class + views/page
  * - Static files -> serve directly with proper MIME types and caching
  * - Plugin overrides: ajax/utils routes automatically check plugins first, then main files
- * - View directory fallback: /login -> theme/falcon/views/login.php (theme) OR views/login.php (base)
+ * - View directory fallback: /login -> theme/falcon/views/login (theme) OR views/login (base)
  * 
  * AUTOMATIC FEATURES:
  * - Plugin activation checking (automatic for ALL /plugins/* paths - non-overridable)
@@ -880,12 +977,12 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - 'exclude_from_cache' => ['.ext'] - File extensions to not cache (short cache instead)
  *
  * Dynamic routes:
- * - 'view' => 'path/file' - Explicit view file to serve, no .php extension (required unless model specified)
+ * - 'view' => 'path/file' - Explicit view file to serve (required unless model specified)
  * - 'model' => 'ClassName' - Load model class and instantiate object (optional)
- * - 'model_file' => 'path/to/model_class' - Explicit model file path, no .php extension (required when model specified)
+ * - 'model_file' => 'path/to/model_class' - Explicit model file path (required when model specified)
  * - 'check_setting' => 'setting_name' - Only serve if setting is active
  * - 'valid_page' => false - Don't count this route for statistics (default: true)
- * - 'default_view' => 'path/file' - Fallback view when no specific file matches, no .php extension  
+ * - 'default_view' => 'path/file' - Fallback view when no specific file matches  
  *
  * Custom routes:
  * - PHP closure that returns true if handled, false otherwise
@@ -1118,6 +1215,9 @@ if(RouteHelper::serveStaticFile($base_file)) return true;
 - **Easy to add new routes** in appropriate section
 - **Easier debugging** - know exactly which function handles each route type
 - **Minimal risk** - same logic, just organized better
+- **Clean URL support** - Automatic .php extension hiding with monitoring
+- **Simplified Apache config** - Only 3 rewrite rules needed
+- **Backwards compatible** - Old .php URLs redirect gracefully
 
 ### Example Route Additions:
 ```php
@@ -1277,9 +1377,8 @@ Here are the actual refactored versions of the two plugin serve.php files:
  * - No plugin activation checks needed (already active if this file runs)
  */
 
-// Define ControlD plugin routes
-$controld_routes = [
-    // Dynamic routes (unified views + models)
+// Define plugin routes - RouteHelper will automatically load these
+$routes = [
     'dynamic' => [
         '/profile/device_edit' => ['view' => 'views/profile/ctlddevice_edit'],
         '/profile/filters_edit' => ['view' => 'views/profile/ctldfilters_edit'],
@@ -1291,20 +1390,6 @@ $controld_routes = [
         '/plugins/controld/admin/*' => ['view' => 'plugins/controld/admin/{path}'],
     ],
 ];
-
-// Register routes with global system (DO NOT call processRoutes directly)
-// This allows main serve.php to process all routes in the correct order
-global $plugin_routes;
-if (!isset($plugin_routes)) {
-    $plugin_routes = ['static' => [], 'dynamic' => [], 'custom' => []];
-}
-
-foreach ($controld_routes as $type => $routes) {
-    if (!isset($plugin_routes[$type])) {
-        $plugin_routes[$type] = [];
-    }
-    $plugin_routes[$type] = array_merge($plugin_routes[$type], $routes);
-}
 ```
 
 ### 2. plugins/items/serve.php (Refactored)
@@ -1348,8 +1433,8 @@ foreach ($controld_routes as $type => $routes) {
  * - No plugin activation checks needed (already active if this file runs)
  */
 
-// Define Items plugin routes
-$items_routes = [
+// Define plugin routes - RouteHelper will automatically load these
+$routes = [
     // Dynamic routes (unified views + models)
     'dynamic' => [
         '/item/{slug}' => [
@@ -1370,20 +1455,6 @@ $items_routes = [
         },
     ],
 ];
-
-// Register routes with global system (DO NOT call processRoutes directly)
-// This allows main serve.php to process all routes in the correct order
-global $plugin_routes;
-if (!isset($plugin_routes)) {
-    $plugin_routes = ['static' => [], 'dynamic' => [], 'custom' => []];
-}
-
-foreach ($items_routes as $type => $routes) {
-    if (!isset($plugin_routes[$type])) {
-        $plugin_routes[$type] = [];
-    }
-    $plugin_routes[$type] = array_merge($plugin_routes[$type], $routes);
-}
 ```
 
 ### Summary of Plugin Refactoring
@@ -1433,3 +1504,63 @@ Plugins now use the exact same routing system as the main application, making th
 - Able to leverage all centralized routing improvements
 
 The plugin routing system is now as simple as: **define routes + register with global system** - main serve.php handles all processing.
+
+## Critical Implementation Notes
+
+### Path Normalization Fix
+
+**Issue Discovered During Implementation:**
+The most critical issue discovered during testing was path normalization inconsistency:
+
+- **Apache RewriteRule** sends: `tests/integration/routing_test` (no leading slash)
+- **Route patterns** expect: `/tests/integration/routing_test` (with leading slash)
+- **validatePath()** strips slashes: `tests/integration/routing_test` (for file operations)
+
+**Root Cause:**
+The `validatePath()` method strips leading/trailing slashes for security (preventing path traversal), but route patterns in the configuration array all start with `/`. This caused a mismatch where no patterns would ever match incoming requests.
+
+**Solution Implemented:**
+1. **Path normalization** in `processRoutes()` adds leading slash to incoming requests
+2. **Pattern matching** uses normalized path with leading slash
+3. **File operations** use sanitized path without leading slash (from validatePath)
+
+```php
+// In processRoutes() - CRITICAL FIX
+if (empty($request_path)) {
+    $request_path = '/';
+} elseif ($request_path[0] !== '/') {
+    $request_path = '/' . $request_path;  // Add leading slash for pattern matching
+}
+
+// In matchRoute() - paths are used correctly
+$sanitized_path = self::validatePath($path);  // For file operations (no leading slash)
+// But $path is used for pattern matching (has leading slash)
+```
+
+**Debugging Process:**
+The issue was identified by adding debug output that revealed:
+- Patterns like `/tests/*` were being tested against paths like `tests/integration/routing_test`
+- The regex `#^/tests/(.*)$#` never matched because of the missing leading slash
+- Path normalization was happening but not being used consistently
+
+**Prevention:**
+This fix ensures that all route patterns work consistently regardless of how Apache rewrites format the incoming path parameter.
+
+### Debug Output for Troubleshooting
+
+For troubleshooting routing issues, the implementation includes optional debug mode:
+
+```php
+// Change error_log to echo for visible HTML comment debugging:
+error_log("Debug message");  // Logs to Apache error.log
+echo "<!-- Debug message -->\n";  // Visible in View Source
+```
+
+**Debug Output Shows:**
+- Path normalization steps
+- Route pattern testing with regex details  
+- Match results for each pattern
+- File existence checks
+- Theme override attempts
+
+This debug system was essential for identifying the path normalization issue and can be used for future routing problems.
