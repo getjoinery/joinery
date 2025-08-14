@@ -1,891 +1,232 @@
 <?php
-require_once(__DIR__ . '/includes/PathHelper.php');
-
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-PathHelper::requireOnce('includes/PluginHelper.php');
-$params = explode("/", $_REQUEST['path']);
-
-$full_path = $_REQUEST['path'];
-$static_routes_path = rtrim($_REQUEST['path'], '/');
-$static_routes_path = ltrim($static_routes_path, '/');
-
-$settings = Globalvars::get_instance();
-$session = SessionControl::get_instance();
-$theme_template = $settings->get_setting('theme_template');
-
-// Try directory theme first, then plugin
-if (ThemeHelper::themeExists($theme_template)) {
-	// Existing directory-based theme logic
-	$template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
-	$is_plugin_theme = false;
-} elseif (PluginHelper::isPluginActive($theme_template)) {
-	// This is a plugin acting as theme
-	$plugin = PluginHelper::getInstance($theme_template);
-	$template_directory = PathHelper::getIncludePath('plugins/'.$theme_template);
-	$is_plugin_theme = true;
-} else {
-	// No valid theme found - let individual file lookups handle fallbacks to base files
-	$template_directory = null;
-	$theme_template = null;
-	$is_plugin_theme = false;
-}
+// serve.php - Hybrid routing system with RouteHelper
+// RouteHelper loads PathHelper and manages all other dependencies
 
 
-
-
-//FOR STATS.  WE WILL ONLY RECORD HITS TO ACTUAL PAGES.
-$is_valid_page = false;
-
-//ALLOW CURRENT SITE TO OVERRIDE OR ADD ROUTES
-$template_file = $template_directory.'/serve.php';
-if(file_exists($template_file)){
-	require_once($template_file);
-}
+require_once(__DIR__ . '/includes/RouteHelper.php');
 
 /*
-if($_GET['act_code']){
-	PathHelper::requireOnce('includes/Activation.php');
-	$activated = Activation::ActivateUser($act_code);
-}
-*/
-
-//ROBOTS.TXT
-if($params[0] == 'robots.txt'){
-	$template_file = $template_directory.'/views/robots.php';
-	$base_file = PathHelper::getIncludePath('views/robots.php');
-	if(file_exists($template_file)){
-		require_once($template_file);
-		exit();
-	}
-	else{
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-//FAVICON.  TEMPORARY UNTIL WE FIGURE OUT HOW TO HANDLE
-if($params[0] == 'favicon.ico'){
-	$base_file = $_REQUEST['path'];
-	if(file_exists($base_file)){
-		$seconds_to_cache = 43200;
-		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-		header("Expires: $ts");
-		header("Pragma: cache");
-		header("Cache-Control: max-age=$seconds_to_cache");
-		$the_content_type = 'Content-type: '.mime_type($base_file);
-		header($the_content_type);
-		readfile($base_file);
-		exit();
-	}
-}
-
-//MAIN INCLUDE FILES.  LOAD ANYTHING UNDER /includes
-if($params[0] == 'includes'){
-	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
-	if(file_exists($base_file)){
-		$seconds_to_cache = 43200;
-		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-		header("Expires: $ts");
-		header("Pragma: cache");
-		header("Cache-Control: max-age=$seconds_to_cache");
-		$the_content_type = 'Content-type: '.mime_type($base_file);
-		header($the_content_type);
-		readfile($base_file);
-		exit();
-	}
-	else{
-		LibraryFunctions::display_404_page();
-	}
-}
-
-//PLUGIN INCLUDE FILES.  LOAD ANYTHING UNDER /plugins/PLUGIN/includes
-if($params[0] == 'plugins' && $params[2] == 'includes'){
-	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
-
-	if(file_exists($base_file)){
-		// Check if plugin is active before serving include files
-		$plugin_name = $params[1]; // Extract plugin name from URL
-		PathHelper::requireOnce('data/plugins_class.php');
-		
-		if(Plugin::is_plugin_active($plugin_name)){
-			check_plugin_version_if_needed($plugin_name);
-			$seconds_to_cache = 43200;
-			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-			header("Expires: $ts");
-			header("Pragma: cache");
-			header("Cache-Control: max-age=$seconds_to_cache");
-			$the_content_type = 'Content-type: '.mime_type($base_file);
-			header($the_content_type);
-			readfile($base_file);
-			exit();
-		}
-		else{
-			// Plugin not active - return 404
-			LibraryFunctions::display_404_page();
-		}
-	}
-	else{
-		LibraryFunctions::display_404_page();
-	}
-}
-
-//PLUGIN ASSET FILES
-if($params[0] == 'plugins' && $params[2] == 'assets'){
-	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
-	if(file_exists($base_file)){
-		// Check if plugin is active
-		$plugin_name = $params[1];
-		PathHelper::requireOnce('data/plugins_class.php');
-		
-		if(Plugin::is_plugin_active($plugin_name)){
-			$seconds_to_cache = 43200;
-			$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-			header("Expires: $ts");
-			header("Pragma: cache");
-			header("Cache-Control: max-age=$seconds_to_cache");
-			$the_content_type = 'Content-type: '.mime_type($base_file);
-			header($the_content_type);
-			readfile($base_file);
-			exit();
-		}
-		else{
-			LibraryFunctions::display_404_page();
-		}
-	}
-	else{
-		LibraryFunctions::display_404_page();
-	}
-}
-
-//THEME INCLUDE FILES.  LOAD ANYTHING UNDER /theme/
-if($params[0] == 'theme'){
-
-	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
-	if(file_exists($base_file)){
-		$seconds_to_cache = 43200;
-		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-		header("Expires: $ts");
-		header("Pragma: cache");
-		header("Cache-Control: max-age=$seconds_to_cache");
-		$the_content_type = 'Content-type: '.mime_type($base_file);
-		header($the_content_type);
-		readfile($base_file);
-		exit();
-	}
-	else{
-		LibraryFunctions::display_404_page();
-	}
-}
-
-
-//REDIRECT URLS
-if($settings->get_setting('urls_active')){
-
-	//CHECK REDIRECTS
-	PathHelper::requireOnce('data/urls_class.php');
-	$urls = new MultiUrl(
-		array('deleted'=>false, 'incoming'=> mb_convert_encoding($static_routes_path, 'UTF-8', 'UTF-8')),
-		NULL,
-		1,
-		0,
-		'AND');	
-	$urls->load();
-
-	if($urls->count()){
-		$url = $urls->get(0);
-
-		if($url->get('url_redirect_url')){		
-
-			if($url->get('url_type') == 301){
-				header("HTTP/1.1 301 Moved Permanently");
-				header("Location: ".$url->get('url_redirect_url'));
-				exit();
-			}
-			else{
-				header("HTTP/1.1 302 Found");
-				header("Location: ".$url->get('url_redirect_url'));
-				exit();			
-			}
-		}
-		else{
-			require_once(LibraryFunctions::display_404_page());				
-			//THIS IS TURNED OFF
-			//include($url->get('url_redirect_file'));
-			exit();	
-		}
-	}
-}
-
-//CHECK API
-if($params[0] == 'api' && $params[1] == 'v1'){
-	$theme_file = $template_directory.'/api/apiv1.php';
-	$base_file = PathHelper::getIncludePath('api/apiv1.php');
-
-	if(file_exists($theme_file)){
-		require_once($theme_file);
-		exit();
-	}
-	else if(file_exists($base_file)){
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-//AJAX DIRECTORY
-if($params[0] == 'ajax'){
-	if($params[1]){
-		
-		//LOAD THE AJAX FILES FROM THE PLUGINS
-		$plugins = LibraryFunctions::list_plugins();
-		foreach($plugins as $plugin){
-			$plugin_file = ensure_extension(PathHelper::getIncludePath('plugins/'.$plugin.'/ajax/'.$params[1]), 'php');
-			if(file_exists($plugin_file)){
-				// Check if plugin is active before loading AJAX file
-				PathHelper::requireOnce('data/plugins_class.php');
-				
-				if(Plugin::is_plugin_active($plugin)){
-					check_plugin_version_if_needed($plugin);
-					$is_valid_page = true;
-					require_once($plugin_file);
-					exit();
-				}
-				// If plugin is not active, skip this AJAX file
-			}
-		}	
-		
-		$base_file = ensure_extension(PathHelper::getIncludePath('ajax/'.$params[1]),'php');
-		if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}
-	}
-	else{
-		LibraryFunctions::display_404_page();	
-	}  
-}
-
-//CHECK STATIC FILES DIRECTORY (/VAR/WWW/HTML/$SITE/STATIC_FILES)
-if($params[0] == 'static_files'){
-	$static_files_dir = $settings->get_setting('static_files_dir');
-	if(!$static_files_dir){
-		throw new SystemDisplayableError('static_files_dir is missing.');
-		exit();
-	}
-	if($params[4]){
-		$file = $static_files_dir.'/'.$params[1].'/'.$params[2].'/'.$params[3].'/'.$params[4];
-	}
-	else if($params[3]){
-		$file = $static_files_dir.'/'.$params[1].'/'.$params[2].'/'.$params[3];
-	}
-	else if($params[2]){
-		$file = $static_files_dir.'/'.$params[1].'/'.$params[2];
-	}
-	else{
-		$file = $static_files_dir.'/'.$params[1]; 
-	}
-
-	//ORIGINAL FILE
-	if(file_exists($file)){
-		
-		//DO NOT CACHE UPGRADES
-		if(str_contains($file, '.upg.zip')){
-			$seconds_to_cache = 10;
-		}
-		else{
-			$seconds_to_cache = 43200;
-		}
-		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-		header("Expires: $ts");
-		header("Pragma: cache");
-		header("Cache-Control: max-age=$seconds_to_cache");
-		$the_content_type = 'Content-type: '.mime_type($file);
-		header($the_content_type);
-		readfile($file);
-		exit();
-	}
-}
-
-//FILES
-if($settings->get_setting('files_active')){
-	if($params[0] == 'uploads'){
-		$upload_dir = $settings->get_setting('upload_dir');
-		if($params[2]){
-			//RESIZED FILE
-			$file = $upload_dir.'/'.$params[1].'/'.$params[2];
-		}
-		else{
-			$file = $upload_dir.'/'.$params[1];
-		}
-		//ORIGINAL FILE
-		if(file_exists($file)){
-			PathHelper::requireOnce('data/files_class.php');
-			$file_obj = File::get_by_name(basename($file));
-
-			PathHelper::requireOnce('includes/SessionControl.php');
-					
-			if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){	
-				
-				$seconds_to_cache = 43200;
-				$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-				header("Expires: $ts");
-				header("Pragma: cache");
-				header("Cache-Control: max-age=$seconds_to_cache");
-				$the_content_type = 'Content-type: '.mime_type($file);
-				header($the_content_type);
-				readfile($file);
-				exit();
-
-			}
-			else{
-				LibraryFunctions::display_404_page();		
-			}	
-		}
-	}
-}
-
-//VIDEOS
-if($settings->get_setting('videos_active')){
-	if($params[0] == 'video'){
-		PathHelper::requireOnce('data/videos_class.php');
-		$video = Video::get_by_link($params[1], true);
-		
-		PathHelper::requireOnce('includes/SessionControl.php');
-		$session = SessionControl::get_instance();
-		if($video && $video->authenticate_read(array('session'=>$session))){		
-				$template_file = $template_directory.'/views/video.php';
-				$base_file = PathHelper::getIncludePath('views/video.php');
-				
-				$is_valid_page = true;
-				
-				if(file_exists($template_file)){
-					require_once($template_file);
-					exit();
-				}
-				else if(file_exists($base_file)){
-					require_once($base_file); 
-					exit();		
-				}
-				exit();
-		}
-		else{
-			LibraryFunctions::display_404_page();		
-		}	
-	}
-}
-
-//HOMEPAGE
-if(!$params[0]){
-	$alternate_page = $settings->get_setting('alternate_loggedin_homepage');
-	if($alternate_page && $session->is_logged_in()){
-		
-		$page_pieces = explode('/', $alternate_page);
-
-		//IF IT IS THE BLOG
-		if($page_pieces[1] == 'blog'){
-			$template_file = $template_directory.'/views/blog.php';
-			$base_file = PathHelper::getIncludePath('views/blog.php');
-
-		}
-		else if($page_pieces[1] == 'page'){
-			//IF IT IS A PAGE
-			if($settings->get_setting('page_contents_active')){
-				PathHelper::requireOnce('data/pages_class.php');
-
-				$page = Page::get_by_link($page_pieces[2], true);		
-
-				$template_file = $template_directory.'/views/page.php';
-				$base_file = PathHelper::getIncludePath('views/page.php');
-						
-			}	
-		}
-		else{
-			$template_file = $template_directory.$alternate_page;
-			$base_file = PathHelper::getRootDir().$alternate_page;			
-			
-		}
-		
-	}
-	else if($alternate_page = $settings->get_setting('alternate_homepage')){
-		$page_pieces = explode('/', $alternate_page);
-
-		//IF IT IS THE BLOG
-		if($page_pieces[1] == 'blog'){
-			$template_file = $template_directory.'/views/blog.php';
-			$base_file = PathHelper::getIncludePath('views/blog.php');
-
-		}
-		else if($page_pieces[1] == 'page'){
-			//IF IT IS A PAGE
-			if($settings->get_setting('page_contents_active')){
-				PathHelper::requireOnce('data/pages_class.php');
-
-				$page = Page::get_by_link($page_pieces[2], true);		
-
-				$template_file = $template_directory.'/views/page.php';
-				$base_file = PathHelper::getIncludePath('views/page.php');
-						
-			}	
-		}
-		else{
-			$template_file = $template_directory.$alternate_page;
-			$base_file = PathHelper::getRootDir().$alternate_page;			
-		}		
-		
-	}
-	else{
-		$template_file = $template_directory.'/views/index.php';
-		$base_file = PathHelper::getIncludePath('views/index.php');		
-	}
-	$is_valid_page = true;
-
-	if(file_exists($template_file)){
-		require_once($template_file);
-		exit();
-	}
-	else if(file_exists($base_file)){
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-//PROFILE SECTION
-if($params[0] == 'profile'){
-	if($params[1]){
-		$template_file = ensure_extension($template_directory.'/views/profile/'.$params[1],'php');
-		$base_file = ensure_extension(PathHelper::getIncludePath('views/profile/'.$params[1]),'php');
-	}
-	else{
-		$template_file = $template_directory.'/views/profile/profile.php';
-		$base_file = PathHelper::getIncludePath('views/profile/profile.php');
-	}
-	
-	if(file_exists($template_file)){
-		$is_valid_page = true;
-		require_once($template_file);
-		exit();
-	}
-	else if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}		
-}
-
-//BLOG.  DEFAULT IS TO USE THE /POST/ SUBDIRECTORY
-if($settings->get_setting('blog_active')){
-	if($params[0] == 'posts'){
-		if(!$params[1] || $params[1] == 'tag'){
-			$template_file = $template_directory.'/views/blog.php';
-			$base_file = PathHelper::getIncludePath('views/blog.php');
-			
-			if(file_exists($template_file)){
-				$is_valid_page = true;
-				require_once($template_file);
-				exit();
-			}
-			else if(file_exists($base_file)){
-				$is_valid_page = true;
-				require_once($base_file); 
-				exit();		
-			}				
-		}
-	}
-	else if($params[0] == 'post'){
-	
-		PathHelper::requireOnce('data/posts_class.php');
-		
-		$post = Post::get_by_link($params[1], true);	
-
-		$template_file = $template_directory.'/views/post.php';
-		$base_file = PathHelper::getIncludePath('views/post.php');
-		
-		if(file_exists($template_file)){
-			$is_valid_page = true;
-			require_once($template_file);
-			exit();
-		}
-		else if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}		
-	}
-}
-
-//PAGE CONTENTS.  DEFAULT IS TO USE THE /PAGE/ SUBDIRECTORY
-if($params[0] == 'page'){
-	if($settings->get_setting('page_contents_active')){
-		PathHelper::requireOnce('data/pages_class.php');
-
-		$page = Page::get_by_link($params[1], true);		
-
-		$template_file = $template_directory.'/views/page.php';
-		$base_file = PathHelper::getIncludePath('views/page.php');
-		
-		if(file_exists($template_file)){
-			$is_valid_page = true;
-			require_once($template_file);
-			exit();
-		}
-		else if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}			
-	}	
-}
-
-//LOCATIONS.  DEFAULT IS TO USE THE /LOCATION/ SUBDIRECTORY
-if($params[0] == 'location'){
-	if($settings->get_setting('events_active')){
-		PathHelper::requireOnce('data/locations_class.php');
-
-		$location = Location::get_by_link($params[1], true);		
-
-		$template_file = $template_directory.'/views/location.php';
-		$base_file = PathHelper::getIncludePath('views/location.php');
-		
-		if(file_exists($template_file)){
-			$is_valid_page = true;
-			require_once($template_file);
-			exit();
-		}
-		else if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}			
-	}	
-}
-
-//EVENTS.  DEFAULT IS TO USE THE /EVENT/ SUBDIRECTORY
-if($params[0] == 'event'){
-	if($settings->get_setting('events_active')){
-		PathHelper::requireOnce('data/events_class.php');
-
-		$event = Event::get_by_link($params[1], true);		
-
-		$template_file = $template_directory.'/views/event.php';
-		$base_file = PathHelper::getIncludePath('views/event.php');
-
-		if(file_exists($template_file)){
-			$is_valid_page = true;
-			require_once($template_file);
-			exit();
-		}
-		else if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}		
-	}	
-}
-
-//MAILING LISTS.  DEFAULT IS TO USE THE /LIST/ SUBDIRECTORY
-if($params[0] == 'list'){
-	//if($settings->get_setting('mailing_lists_active')){
-		PathHelper::requireOnce('data/mailing_lists_class.php');
-
-		$mailing_list = MailingList::get_by_link($params[1], true);		
-
-		$template_file = $template_directory.'/views/list.php';
-		$base_file = PathHelper::getIncludePath('views/list.php');
-		
-		if(file_exists($template_file)){
-			$is_valid_page = true;
-			require_once($template_file);
-			exit();
-		}
-		else if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}		
-	//}	
-}
-
-//PRODUCTS.  DEFAULT IS TO USE THE /PRODUCT/ SUBDIRECTORY
-if($params[0] == 'product'){
-	if($settings->get_setting('products_active')){
-	PathHelper::requireOnce('data/products_class.php');
-
-		$product = Product::get_by_link($params[1], true);	
-		$product_id = $product->key;
-		
-		$template_file = $template_directory.'/views/product.php';
-		$base_file = PathHelper::getIncludePath('views/product.php');
-		
-		
-		if(file_exists($template_file)){
-			$is_valid_page = true;
-			require_once($template_file);
-			exit();
-		}
-		else if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}		
-	}	
-}
-
-//ADMIN AREA
-
-//ADMIN STYLING FILES.  TEMPORARY UNTIL WE FIGURE OUT HOW TO HANDLE.  LOAD ANY URL UNDER /adm/includes/
-if($params[0] == 'adm' && $params[1] == 'includes'){
-	$base_file = PathHelper::getRootDir().$_SERVER['REQUEST_URI'];
-	if(file_exists($base_file)){
-		$seconds_to_cache = 43200;
-		$ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
-		header("Expires: $ts");
-		header("Pragma: cache");
-		header("Cache-Control: max-age=$seconds_to_cache");
-		$the_content_type = 'Content-type: '.mime_type($base_file);
-		header($the_content_type);
-		readfile($base_file);
-		exit();
-	}
-	else{
-		LibraryFunctions::display_404_page();
-	}
-}
-		
-if($params[0] == 'admin'){
-
-	if($params[1]){	
-		
-		$base_file = ensure_extension(PathHelper::getIncludePath('adm/'.$params[1]),'php');
-		if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}
-	}
-	else{
-		$base_file = ensure_extension(PathHelper::getIncludePath('adm/'.$params[1]),'php');
-		if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}
-	}
-}
-
-//PLUGIN URLS
-$plugins = LibraryFunctions::list_plugins();
-foreach($plugins as $plugin){
-	$plugin_dir = PathHelper::getIncludePath('plugins');
-	$site_file = PathHelper::getIncludePath('plugins/'.$plugin.'/serve.php');
-	
-	if(file_exists($site_file)){
-		// Check if plugin is active before including serve.php
-		PathHelper::requireOnce('data/plugins_class.php');
-		
-		if(Plugin::is_plugin_active($plugin)){
-			check_plugin_version_if_needed($plugin);
-			include_once($site_file);
-		}
-		// If plugin is not active, skip including its serve.php
-	}
-}	
-
-//UTILS DIRECTORY
-if($params[0] == 'utils'){
-	if($params[1]){
-		
-		//LOAD THE UTILS FILES FROM THE PLUGINS
-		$plugins = LibraryFunctions::list_plugins();
-		foreach($plugins as $plugin){
-			$plugin_file = ensure_extension(PathHelper::getIncludePath('plugins/'.$plugin.'/utils/'.$params[1]), 'php');
-			if(file_exists($plugin_file)){
-				// Check if plugin is active before loading utils file
-				PathHelper::requireOnce('data/plugins_class.php');
-				
-				if(Plugin::is_plugin_active($plugin)){
-					check_plugin_version_if_needed($plugin);
-					$is_valid_page = true;
-					require_once($plugin_file);
-					exit();
-				}
-				// If plugin is not active, skip this utils file
-			}
-		}	
-		
-		$base_file = ensure_extension(PathHelper::getIncludePath('utils/'.$params[1]), 'php');
-		if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}
-	}
-	else{
-		LibraryFunctions::display_404_page();	
-	}  
-}
-
-//TESTS DIRECTORY
-if($params[0] == 'tests'){
-	if($params[1]){
-		// Build the path to the test file
-		$test_path = 'tests/';
-		for($i = 1; $i < count($params); $i++){
-			if($params[$i] != ''){
-				$test_path .= $params[$i] . '/';
-			}
-		}
-		$test_path = rtrim($test_path, '/');
-		
-		$base_file = ensure_extension(PathHelper::getIncludePath($test_path), 'php');
-		if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}
-		else{
-			LibraryFunctions::display_404_page();	
-		}
-	}
-	else{
-		LibraryFunctions::display_404_page();	
-	}  
-}
-
-//ROOT PAGES
-if($params[0]){
-	$template_file = ensure_extension($template_directory.'/views/'.$params[0],'php');
-	$base_file = ensure_extension(PathHelper::getIncludePath('views/'.$params[0]),'php');
-
-	if(file_exists($template_file)){
-		$is_valid_page = true;
-		require_once($template_file);
-		exit();
-	}
-	else if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-	
-LibraryFunctions::display_404_page();		
-
-function ensure_extension($path, $extension){
-	if(str_ends_with($path, '.'.$extension)){
-		return $path;
-	}
-	else{
-		return $path.'.php';
-	}
-}
-
-
-// Plugin version check cache to avoid repeated checks per request
-$plugin_version_check_cache = array();
-
-/**
- * Check plugin version if needed (with caching and sampling)
- * @param string $plugin_name Plugin name
+ * UNIFIED ROUTING SYSTEM DOCUMENTATION
+ * 
+ * IMPORTANT: 
+ * - Routes should be unique across all categories (static, dynamic, custom)
+ * - The system processes routes in order: static → plugins → custom → dynamic → view fallback → 404
+ * - If the same pattern exists in multiple categories, only the first match will be processed
+ * - NEVER include .php extensions in route configurations - RouteHelper adds them automatically
+ * 
+ * Route types and their options:
+ * 
+ * STATIC ROUTES - Serve ONLY static assets (CSS, JS, images, fonts) with caching
+ * '/favicon.ico' => ['cache' => 43200]         // Static asset file
+ * '/theme/{theme}/assets/*' => ['cache' => 43200]            // Theme assets with caching
+ * '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']]  // Don't cache upgrade files
+ * '/plugins/{plugin}/assets/*' => ['cache' => 43200]  // Plugin activation always automatic (non-overridable)
+ * NOTE: Static routes should NEVER serve PHP files or dynamic content
+ * 
+ * DYNAMIC ROUTES - Unified system for all dynamic content (views + models)
+ * Simple view routes:
+ * '/login' => ['view' => 'views/login']        // Simple view file
+ * '/robots.txt' => ['view' => 'views/robots']  // Dynamic content (PHP-generated)
+ * '/api/v1/*' => ['view' => 'api/apiv1']       // Explicit view file
+ * '/admin/*' => ['view' => 'adm/{path}']       // {path} placeholder for dynamic part
+ * '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile']  // With fallback
+ * '/ajax/*' => ['view' => 'ajax/{file}']       // Plugin override automatic
+ * '/utils/*' => ['view' => 'utils/{file}']     // Plugin override automatic
+ *
+ * Model-based routes (optional model loading):
+ * '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class']  // Auto-determined view: views/page
+ * '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class', 'check_setting' => 'blog_active']  // With feature flag check
+ * '/item/{id}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'valid_page' => false]  // Don't count for stats
+ * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class']  // Plugin-specific model
+ * '/item/{slug}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'view' => 'views/profile/item']  // Custom view path
+ *
+ * Mixed routes (model + path placeholders + fallbacks):
+ * '/user/{action}' => ['model' => 'User', 'model_file' => 'data/users_class', 'view' => 'views/user/{action}', 'default_view' => 'views/user/profile']
+ * 
+ * NOTE: All routes set $is_valid_page = true by default
+ * Use ['valid_page' => false] to override for non-tracked pages
+ * 
+ * CUSTOM ROUTES - Complex logic with PHP closures
+ * '/complex' => function($params, $settings, $session, $template_directory) {
+ *     // Custom logic here
+ *     // Return true if handled, false if not
+ * }
+ * 
+ * PATH RESOLUTION RULES:
+ * - {path} placeholder: /admin/users/edit with 'adm/{path}' -> adm/users/edit
+ * - {file} placeholder: /ajax/endpoint with 'ajax/{file}' -> ajax/endpoint
+ * - Model routes: /page/{slug} with model 'Page' -> data/pages_class + views/page
+ * - Static files -> serve directly with proper MIME types and caching
+ * - Plugin overrides: ajax/utils routes automatically check plugins first, then main files
+ * - View directory fallback: /login -> theme/falcon/views/login (theme) OR views/login (base)
+ * 
+ * AUTOMATIC FEATURES:
+ * - Plugin activation checking (automatic for ALL /plugins/* paths - non-overridable)
+ * - Database URL redirect checking (before route processing)
+ * - Path validation with helpful error messages (prevents common path mistakes)
+ * - $is_valid_page = true (unless 'valid_page' => false)
+ * - Theme override checking (theme files before base files)
+ * - Plugin override checking (plugins checked first for all routes)
+ * - Parameter extraction from {slug}, {id}, etc.
+ * - Feature flag checking via 'check_setting'
+ * - Model loading and instantiation
+ * - MIME type detection and HTTP caching headers
+ * - View directory fallback (automatic theme-aware lookup for any path)
+ * 
+ * ROUTE OPTIONS:
+ * Static routes:
+ * - 'cache' => 43200 - Cache time in seconds for static files
+ * - 'exclude_from_cache' => ['.ext'] - File extensions to not cache (short cache instead)
+ *
+ * Dynamic routes:
+ * - 'view' => 'path/file' - Explicit view file to serve (required unless model specified)
+ * - 'model' => 'ClassName' - Load model class and instantiate object (optional)
+ * - 'model_file' => 'path/to/model_class' - Explicit model file path (required when model specified)
+ * - 'check_setting' => 'setting_name' - Only serve if setting is active
+ * - 'valid_page' => false - Don't count this route for statistics (default: true)
+ * - 'default_view' => 'path/file' - Fallback view when no specific file matches  
+ *
+ * Custom routes:
+ * - PHP closure that returns true if handled, false otherwise
  */
-function check_plugin_version_if_needed($plugin_name) {
-	global $plugin_version_check_cache;
-	
-	// Only check once per request
-	if (isset($plugin_version_check_cache[$plugin_name])) {
-		return;
-	}
-	$plugin_version_check_cache[$plugin_name] = true;
-	
-	// Random sampling - only check 20% of requests to reduce overhead
-	if (mt_rand(1, 100) > 20) {
-		return;
-	}
-	
-	try {
-		PathHelper::requireOnce('includes/PluginManager.php');
-		$detector = new PluginVersionDetector();
-		$detector->checkForUpdate($plugin_name);
-	} catch (Exception $e) {
-		// Silently ignore version check errors
-		error_log("Plugin version check failed for {$plugin_name}: " . $e->getMessage());
-	}
-}
 
-function mime_type($filename) {
+// ROUTE DEFINITIONS - Hybrid approach with proper asset/dynamic separation
+$routes = [
+    // Static file routes - ONLY for actual assets (CSS, JS, images, fonts, etc.)
+    'static' => [
+        // Semantic placeholders for clear segment control
+        '/plugins/{plugin}/assets/*' => ['cache' => 43200],
+        '/theme/{theme}/assets/*' => ['cache' => 43200],
+        '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']],
+        '/favicon.ico' => ['cache' => 43200],
+        // REMOVED: '/plugins/ * /includes/*' - All plugins now use /assets/
+        // REMOVED: '/includes/*' - No static files should be in /includes/ anymore
+        // REMOVED: '/adm/includes/*' - Admin should use proper asset organization
+        // REMOVED: '/theme/*' - Too broad, use specific /theme/{theme}/assets/* instead
+    ],
+    
+    // Dynamic routes (unified content + simple routes)
+    'dynamic' => [
+        // Model-based content routes
+        '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class', 'check_setting' => 'blog_active'],
+        '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class', 'check_setting' => 'page_contents_active'],
+        '/event/{slug}' => ['model' => 'Event', 'model_file' => 'data/events_class', 'check_setting' => 'events_active'],
+        '/location/{slug}' => ['model' => 'Location', 'model_file' => 'data/locations_class', 'check_setting' => 'events_active'],
+        '/product/{slug}' => ['model' => 'Product', 'model_file' => 'data/products_class', 'check_setting' => 'products_active'],
+        '/list/{slug}' => ['model' => 'MailingList', 'model_file' => 'data/mailinglists_class'],
+		'/video/{slug}' => ['model' => 'Video', 'model_file' => 'data/videos_class', 'check_setting' => 'videos_active'],
+        
+        // Simple view routes (explicit view files)
+        '/robots.txt' => ['view' => 'views/robots'],
+        '/sitemap.xml' => ['view' => 'views/sitemap'],
+        '/index' => ['view' => 'views/index'],
+        '/register' => ['view' => 'views/register'],
+        
+        // System routes with placeholders
+        '/api/v1/*' => ['view' => 'api/apiv1'],
+        '/admin/*' => ['view' => 'adm/{path}'],
+        '/ajax/*' => ['view' => 'ajax/{file}'],
+        '/utils/*' => ['view' => 'utils/{file}'],
+        '/tests/*' => ['view' => 'tests/{path}'],  // Test routes probably shouldn't be in production
+        
+        // Optional: Explicit route for views directory access (if needed)
+        '/views/*' => ['view' => 'views/{path}'],
+        
+        // Routes with special features
+        '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile'],
+        '/events' => ['view' => 'views/events', 'check_setting' => 'events_active'],
+        
+        // NOTE: Simple routes like '/login', '/register', '/logout', '/products', '/pricing', 
+        // '/lists', '/booking', '/cart', '/survey', '/password-reset-1', '/password-reset-2', 
+        // '/password-set', '/site-directory', '/rss20_feed' are now UNNECESSARY - handled by view directory fallback.
+        // They will automatically resolve to views/login.php, views/products.php, etc.
+    ],
+    
+    // Routes with custom handling (complex logic preserved)
+    'custom' => [
+        // Homepage with complex alternate logic
+        '/' => function($params, $settings, $session, $template_directory) {
+            $alternate_page = $settings->get_setting('alternate_loggedin_homepage');
+            if($alternate_page && $session->is_logged_in()){
+                // Complex homepage logic for logged-in users
+                $page_pieces = explode('/', $alternate_page);
+                if($page_pieces[1] == 'blog'){
+                    $template_file = $template_directory.'/views/blog.php';
+                    $base_file = PathHelper::getIncludePath('views/blog.php');
+                } else if($page_pieces[1] == 'page'){
+                    PathHelper::requireOnce('data/pages_class.php');
+                    $page = Page::get_by_link($page_pieces[2], true);
+                    $template_file = $template_directory.'/views/page.php';
+                    $base_file = PathHelper::getIncludePath('views/page.php');
+                } else {
+                    $template_file = $template_directory.$alternate_page;
+                    $base_file = PathHelper::getRootDir().$alternate_page;
+                }
+            } else if($alternate_page = $settings->get_setting('alternate_homepage')) {
+                // Complex homepage logic for non-logged-in users
+                $page_pieces = explode('/', $alternate_page);
+                if($page_pieces[1] == 'blog'){
+                    $template_file = $template_directory.'/views/blog.php';
+                    $base_file = PathHelper::getIncludePath('views/blog.php');
+                } else if($page_pieces[1] == 'page'){
+                    if($settings->get_setting('page_contents_active')){
+                        PathHelper::requireOnce('data/pages_class.php');
+                        $page = Page::get_by_link($page_pieces[2], true);
+                        $template_file = $template_directory.'/views/page.php';
+                        $base_file = PathHelper::getIncludePath('views/page.php');
+                    }
+                } else {
+                    $template_file = $template_directory.$alternate_page;
+                    $base_file = PathHelper::getRootDir().$alternate_page;
+                }
+            } else {
+                $template_file = $template_directory.'/views/index.php';
+                $base_file = PathHelper::getIncludePath('views/index.php');
+            }
+            
+            // RouteHelper automatically sets $is_valid_page = true when a route matches
+            
+            if(file_exists($template_file)){
+                require_once($template_file);
+            } else if(file_exists($base_file)){
+                require_once($base_file);
+            }
+            return true; // Handled
+        },
+        
+        // Uploads with authentication
+        '/uploads/*' => function($params, $settings, $session) {
+            if(!$settings->get_setting('files_active')) return false;
+            
+            $upload_dir = $settings->get_setting('upload_dir');
+            $file = $params[2] ? $upload_dir.'/'.$params[1].'/'.$params[2] : $upload_dir.'/'.$params[1];
+            
+            if(file_exists($file)){
+                PathHelper::requireOnce('data/files_class.php');
+                $file_obj = File::get_by_name(basename($file));
+                
+                if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){
+                    RouteHelper::serveStaticFile($file, 43200);
+                    return true;
+                } else {
+                    PathHelper::requireOnce('includes/LibraryFunctions.php');
+                    LibraryFunctions::display_404_page();
+                    return true;
+                }
+            }
+            return false;
+        },
+        
+        
+        // Posts with special condition
+        '/posts/*' => function($params, $settings, $session, $template_directory) {
+            if(!$settings->get_setting('blog_active')) return false;
+            if($params[1] && $params[1] != 'tag') return false;
+            
+            return ThemeHelper::includeThemeFile('views/blog.php');
+        },
+    ],
+];
 
-	$mime_types = array(
-
-		'txt' => 'text/plain',
-		'htm' => 'text/html',
-		'html' => 'text/html',
-		'php' => 'text/html',
-		'css' => 'text/css',
-		'js' => 'application/javascript',
-		'json' => 'application/json',
-		'xml' => 'application/xml',
-		'swf' => 'application/x-shockwave-flash',
-		'flv' => 'video/x-flv',
-
-		// images
-		'png' => 'image/png',
-		'jpe' => 'image/jpeg',
-		'jpeg' => 'image/jpeg',
-		'jpg' => 'image/jpeg',
-		'gif' => 'image/gif',
-		'bmp' => 'image/bmp',
-		'ico' => 'image/vnd.microsoft.icon',
-		'tiff' => 'image/tiff',
-		'tif' => 'image/tiff',
-		'svg' => 'image/svg+xml',
-		'svgz' => 'image/svg+xml',
-
-		// archives
-		'zip' => 'application/zip',
-		'rar' => 'application/x-rar-compressed',
-		'exe' => 'application/x-msdownload',
-		'msi' => 'application/x-msdownload',
-		'cab' => 'application/vnd.ms-cab-compressed',
-
-		// audio/video
-		'mp3' => 'audio/mpeg',
-		'qt' => 'video/quicktime',
-		'mov' => 'video/quicktime',
-
-		// adobe
-		'pdf' => 'application/pdf',
-		'psd' => 'image/vnd.adobe.photoshop',
-		'ai' => 'application/postscript',
-		'eps' => 'application/postscript',
-		'ps' => 'application/postscript',
-
-		// ms office
-		'doc' => 'application/msword',
-		'rtf' => 'application/rtf',
-		'xls' => 'application/vnd.ms-excel',
-		'ppt' => 'application/vnd.ms-powerpoint',
-
-		// open office
-		'odt' => 'application/vnd.oasis.opendocument.text',
-		'ods' => 'application/vnd.oasis.opendocument.spreadsheet',
-	);
-	$parts = explode('.',$filename);
-	$ext = strtolower(array_pop($parts));
-	if (array_key_exists($ext, $mime_types)) {
-		return $mime_types[$ext];
-	}
-	elseif (function_exists('finfo_open')) {
-		$finfo = finfo_open(FILEINFO_MIME);
-		$mimetype = finfo_file($finfo, $filename);
-		finfo_close($finfo);
-		return $mimetype;
-	}
-	else {
-		throw new SystemDisplayableError('Unknown file type.');
-		exit;
-		//return 'application/octet-stream';
-	}
-}
-?>
+// ROUTE PROCESSING - All logic moved to RouteHelper::processRoutes()
+RouteHelper::processRoutes($routes, $_REQUEST['path'] ?? '');
