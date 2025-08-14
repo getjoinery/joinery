@@ -297,99 +297,20 @@ class RouteHelper {
     }
     
     /**
-     * Handle content routes using model-view pattern with theme override support
+     * Handle dynamic routes with optional model loading and theme override support
      * 
-     * This method handles routes that load data models and render views, such as
-     * 'page/{slug}' or 'product/{id}'. It checks feature flag settings if specified,
-     * loads the specified model class, creates an instance using URL parameters (slug or id), 
-     * extracts the parameters into the view scope, and renders the view with automatic 
-     * theme override support. Essential for content-driven routes.
+     * This unified method handles all dynamic content routes:
+     * 1. Simple view routes ('/login' => ['view' => 'views/login'])
+     * 2. System routes with placeholders ('/admin/*' => ['view' => 'adm/{path}'])
+     * 3. Model-based content routes ('/page/{slug}' => ['model' => 'Page', ...])
+     * 4. Mixed routes (models + path placeholders + fallbacks)
      * 
      * @param array $route Route configuration
-     * @param array $params URL parameters
+     * @param array $params URL parameters  
      * @param string $template_directory Theme directory
      * @return bool True if handled successfully
      */
-    public static function handleContentRoute($route, $params, $template_directory) {
-        $model_name = $route['model'] ?? null;
-        if (!$model_name) {
-            error_log("RouteHelper: ERROR - 'model' is required for content routes");
-            return false;
-        }
-        
-        // Check setting requirement if specified
-        if (!empty($route['check_setting'])) {
-            $settings = Globalvars::get_instance();
-            if (!$settings->get_setting($route['check_setting'])) {
-                return false;
-            }
-        }
-        
-        // NEW: Strict requirement - no fallbacks
-        if (empty($route['model_file'])) {
-            error_log("RouteHelper: ERROR - 'model_file' is required for content routes. Specify explicit path to model class.");
-            return false; // Hard requirement - no fallbacks
-        }
-        
-        try {
-            PathHelper::requireOnce($route['model_file'] . '.php');
-        } catch (Exception $e) {
-            return false;
-        }
-        
-        // Extract parameters from route pattern
-        $route_params = self::extractRouteParams($route['pattern'], $route['path']);
-        
-        // Create model instance
-        $model_instance = null;
-        if (isset($route_params['slug'])) {
-            $model_instance = call_user_func([$model_name, 'get_by_link'], $route_params['slug']);
-        } elseif (isset($route_params['id'])) {
-            $model_instance = new $model_name($route_params['id'], true);
-        }
-        
-        // Determine view file (no .php extension in configuration)
-        $view_file = $route['view'] ?? strtolower($model_name);
-        // Views are always in /views - strip any leading views/ or / to avoid duplication
-        $original_view_file = $view_file;
-        
-        if (strpos($view_file, '/') === 0) {
-            error_log("RouteHelper: ERROR - Invalid view file path with leading slash: '{$original_view_file}' - Use relative path");
-            return false; // Hard rejection
-        }
-        
-        if (strpos($view_file, 'views/') === 0) {
-            error_log("RouteHelper: ERROR - Invalid view file path with views/ prefix: '{$original_view_file}' - Path should be relative to views/");
-            return false; // Hard rejection
-        }
-        
-        $view_path = 'views/' . $view_file;
-        
-        // Load view with theme override and extract data into scope
-        if (!empty($view_path)) {
-            extract([
-                strtolower($model_name) => $model_instance,
-                'params' => $route_params
-            ], EXTR_SKIP);
-            return ThemeHelper::includeThemeFile($view_path . '.php');
-        }
-        return false;
-    }
-    
-    /**
-     * Handle simple routes with plugin override support and theme fallbacks
-     * 
-     * This method handles direct file serving routes like 'admin/settings' or 'ajax/endpoint'.
-     * It checks feature flag settings if specified, then checks if any active plugins provide 
-     * an override for ajax/utils requests, derives the appropriate view path from the route 
-     * pattern, and finally attempts to load the file with theme override support and 
-     * default view fallbacks.
-     * 
-     * @param array $route Route configuration
-     * @param string $template_directory Theme directory
-     * @return bool True if handled successfully
-     */
-    public static function handleSimpleRoute($route, $template_directory) {
+    public static function handleDynamicRoute($route, $params, $template_directory) {
         $pattern = $route['pattern'];
         $path = $route['path'];
         
@@ -401,129 +322,178 @@ class RouteHelper {
             }
         }
         
-        // Get explicit view path - required for simple routes
-        if (empty($route['view'])) {
-            error_log("RouteHelper: ERROR - 'view' is required for simple routes");
-            return false; // view is required for simple routes
-        }
+        // Initialize variables that might be extracted to view scope
+        $model_instance = null;
+        $route_params = [];
         
-        $view_path = $route['view'];
-        
-        // Handle dynamic placeholders in view path
-        if (strpos($view_path, '{path}') !== false) {
-            // Replace {path} with the remaining path after route prefix
-            $pattern_prefix = rtrim(str_replace('*', '', $pattern), '/');
-            $remaining_path = substr($path, strlen($pattern_prefix));
-            $remaining_path = ltrim($remaining_path, '/');
-            $view_path = str_replace('{path}', $remaining_path, $view_path);
-        }
-        
-        if (strpos($view_path, '{file}') !== false) {
-            // Replace {file} with the file portion of the path
-            $path_parts = explode('/', ltrim($path, '/'));
-            $file = end($path_parts);
+        // MODEL LOADING LOGIC (optional)
+        if (!empty($route['model'])) {
+            $model_name = $route['model'];
             
-            // Strip .php extension if present for consistent handling
-            // Policy: Route configurations never include .php extensions
-            if (substr($file, -4) === '.php') {
-                $file = substr($file, 0, -4);
+            // Require model file
+            if (empty($route['model_file'])) {
+                error_log("RouteHelper: ERROR - 'model_file' is required when 'model' is specified");
+                return false;
             }
             
-            $view_path = str_replace('{file}', $file, $view_path);
+            try {
+                PathHelper::requireOnce($route['model_file'] . '.php');
+            } catch (Exception $e) {
+                error_log("RouteHelper: ERROR - Failed to load model file: " . $route['model_file']);
+                return false;
+            }
+            
+            // Extract parameters from route pattern
+            $route_params = self::extractRouteParams($pattern, $path);
+            
+            // Create model instance based on available parameters
+            if (isset($route_params['slug'])) {
+                $model_instance = call_user_func([$model_name, 'get_by_link'], $route_params['slug']);
+            } elseif (isset($route_params['id'])) {
+                $model_instance = new $model_name($route_params['id'], true);
+            } else {
+                // No specific parameter - might be a collection route or current user
+                // This could be extended to support other patterns
+            }
+        } else {
+            // No model - just extract route parameters for view use
+            $route_params = self::extractRouteParams($pattern, $path);
         }
         
-        // For admin routes, use direct file inclusion (no theme overrides)
+        // DETERMINE VIEW PATH
+        $view_path = null;
+        
+        if (!empty($route['view'])) {
+            // Explicit view path specified
+            $view_path = $route['view'];
+            
+            // Handle dynamic placeholders in view path
+            if (strpos($view_path, '{path}') !== false) {
+                $pattern_prefix = rtrim(str_replace('*', '', $pattern), '/');
+                $remaining_path = substr($path, strlen($pattern_prefix));
+                $remaining_path = ltrim($remaining_path, '/');
+                $view_path = str_replace('{path}', $remaining_path, $view_path);
+            }
+            
+            if (strpos($view_path, '{file}') !== false) {
+                $path_parts = explode('/', ltrim($path, '/'));
+                $file = end($path_parts);
+                
+                // Strip .php extension if present
+                if (substr($file, -4) === '.php') {
+                    $file = substr($file, 0, -4);
+                }
+                
+                $view_path = str_replace('{file}', $file, $view_path);
+            }
+            
+            // Replace other route parameters in view path
+            foreach ($route_params as $key => $value) {
+                $view_path = str_replace('{' . $key . '}', $value, $view_path);
+            }
+            
+        } elseif (!empty($route['model'])) {
+            // Auto-determine view from model name
+            $view_path = 'views/' . strtolower($route['model']);
+        } else {
+            error_log("RouteHelper: ERROR - Either 'view' or 'model' must be specified for dynamic routes");
+            return false;
+        }
+        
+        // HANDLE SPECIAL ROUTE TYPES
+        
+        // Admin routes - direct inclusion, no theme overrides
         if (strpos($view_path, 'adm/') === 0) {
             $admin_file = PathHelper::getAbsolutePath($view_path . '.php');
             if (file_exists($admin_file)) {
+                // Extract model and params to scope if available
+                if ($model_instance) {
+                    extract([
+                        strtolower($route['model']) => $model_instance,
+                        'params' => $route_params
+                    ], EXTR_SKIP);
+                } else {
+                    extract(['params' => $route_params], EXTR_SKIP);
+                }
                 require_once($admin_file);
                 return true;
             }
             return false;
         }
         
-        // For test routes, allow plugin overrides but bypass theme overrides
-        if (strpos($view_path, 'tests/') === 0) {
-            // Check for plugin override first
-            if (preg_match('#^/tests/(.+)$#', $path, $matches)) {
+        // Test/Utils routes - allow plugin overrides, no theme overrides
+        if (strpos($view_path, 'tests/') === 0 || strpos($view_path, 'utils/') === 0) {
+            $route_type = strpos($view_path, 'tests/') === 0 ? 'tests' : 'utils';
+            
+            // Check for plugin override
+            if (preg_match('#^/' . $route_type . '/(.+)$#', $path, $matches)) {
                 $file = $matches[1];
                 
-                // Only load PluginHelper if we actually need plugin overrides and it's not already loaded
                 if (!class_exists('PluginHelper')) {
                     PathHelper::requireOnce('includes/PluginHelper.php');
                 }
                 
                 $activePlugins = PluginHelper::getActivePlugins();
                 foreach ($activePlugins as $pluginName => $pluginHelper) {
-                    if ($pluginHelper->includeFile('tests/' . $file)) {
+                    if ($pluginHelper->includeFile($route_type . '/' . $file)) {
                         return true;
                     }
                 }
             }
             
-            // Fall back to base test file (no theme override)
-            $test_file = PathHelper::getAbsolutePath($view_path . '.php');
-            if (file_exists($test_file)) {
-                require_once($test_file);
+            // Fall back to base file
+            $base_file = PathHelper::getAbsolutePath($view_path . '.php');
+            if (file_exists($base_file)) {
+                if ($model_instance) {
+                    extract([
+                        strtolower($route['model']) => $model_instance,
+                        'params' => $route_params
+                    ], EXTR_SKIP);
+                } else {
+                    extract(['params' => $route_params], EXTR_SKIP);
+                }
+                require_once($base_file);
                 return true;
             }
             return false;
         }
         
-        // For utils routes, allow plugin overrides but bypass theme overrides
-        if (strpos($view_path, 'utils/') === 0) {
-            // Check for plugin override first
-            if (preg_match('#^/utils/(.+)$#', $path, $matches)) {
+        // Ajax routes - check plugin overrides first
+        if (strpos($view_path, 'ajax/') === 0) {
+            if (preg_match('#^/ajax/(.+)$#', $path, $matches)) {
                 $file = $matches[1];
                 
-                // Only load PluginHelper if we actually need plugin overrides and it's not already loaded
                 if (!class_exists('PluginHelper')) {
                     PathHelper::requireOnce('includes/PluginHelper.php');
                 }
                 
                 $activePlugins = PluginHelper::getActivePlugins();
                 foreach ($activePlugins as $pluginName => $pluginHelper) {
-                    if ($pluginHelper->includeFile('utils/' . $file)) {
+                    if ($pluginHelper->includeFile('ajax/' . $file)) {
                         return true;
                     }
                 }
             }
-            
-            // Fall back to base utils file (no theme override)
-            $utils_file = PathHelper::getAbsolutePath($view_path . '.php');
-            if (file_exists($utils_file)) {
-                require_once($utils_file);
-                return true;
-            }
-            return false;
         }
         
-        // Check for plugin override (automatic for ajax routes)
-        if (preg_match('#^/ajax/(.+)$#', $path, $matches)) {
-            $type = 'ajax';
-            $file = $matches[1];
-            
-            // Only load PluginHelper if we actually need plugin overrides and it's not already loaded
-            if (!class_exists('PluginHelper')) {
-                PathHelper::requireOnce('includes/PluginHelper.php');
-            }
-            
-            $activePlugins = PluginHelper::getActivePlugins();
-            foreach ($activePlugins as $pluginName => $pluginHelper) {
-                // Use ComponentBase method with built-in file checking and inclusion
-                // Plugin files are expected to have .php extension (e.g., plugins/name/ajax/endpoint.php)
-                if ($pluginHelper->includeFile('ajax/' . $file)) {
-                    return true;
-                }
-            }
+        // STANDARD VIEW LOADING with theme overrides
+        
+        // Extract model and parameters to view scope
+        if ($model_instance) {
+            extract([
+                strtolower($route['model']) => $model_instance,
+                'params' => $route_params
+            ], EXTR_SKIP);
+        } else {
+            extract(['params' => $route_params], EXTR_SKIP);
         }
         
-        // Check theme override for the explicit view path
+        // Try to load the view file with theme override support
         if (ThemeHelper::includeThemeFile($view_path . '.php')) {
             return true;
         }
         
-        // Check default view if specified
+        // Try default view if specified
         if (!empty($route['default_view'])) {
             return ThemeHelper::includeThemeFile($route['default_view'] . '.php');
         }
@@ -749,17 +719,6 @@ class RouteHelper {
             $template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
         }
 
-        // Merge plugin routes with main routes (plugins register routes, don't process them)
-        global $plugin_routes;
-        if (isset($plugin_routes) && is_array($plugin_routes)) {
-            foreach ($plugin_routes as $type => $plugin_type_routes) {
-                if (!isset($routes[$type])) {
-                    $routes[$type] = [];
-                }
-                $routes[$type] = array_merge($routes[$type], $plugin_type_routes);
-            }
-        }
-		
         // 1. Check for database-stored URL redirects
         if (self::checkUrlRedirects($static_routes_path, $settings)) {
             exit(); // Redirect handled
@@ -777,7 +736,19 @@ class RouteHelper {
             }
         }
         
-        // 3. Check custom routes (complex logic)
+        // 3. Merge plugin routes with main routes (plugins can override system routes)
+        global $plugin_routes;
+        if (isset($plugin_routes) && is_array($plugin_routes)) {
+            foreach ($plugin_routes as $type => $plugin_type_routes) {
+                if (!isset($routes[$type])) {
+                    $routes[$type] = [];
+                }
+                // Plugin routes go FIRST in each category - prepend instead of append
+                $routes[$type] = array_merge($plugin_type_routes, $routes[$type]);
+            }
+        }
+        
+        // 4. Check custom routes (complex logic)
         if (!empty($routes['custom'])) {
             foreach ($routes['custom'] as $pattern => $handler) {
                 if (self::matchesPattern($pattern, $full_path)) {
@@ -793,24 +764,9 @@ class RouteHelper {
             }
         }
         
-        // 4. Check content routes (model-view pattern)
-        if ($route = self::matchRoute($full_path, $routes['content'] ?? [])) {
-            // Check setting requirement if specified
-            if (empty($route['check_setting']) || $settings->get_setting($route['check_setting'])) {
-                if (self::handleContentRoute($route, $params, $template_directory)) {
-                    exit();
-                } else {
-                    // Route matched but handler failed - 404
-                    PathHelper::requireOnce('includes/LibraryFunctions.php');
-                    LibraryFunctions::display_404_page();
-                    exit();
-                }
-            }
-        }
-        
-        // 5. Check simple routes (direct file serving)
-        if ($route = self::matchRoute($full_path, $routes['simple'] ?? [])) {
-            if (self::handleSimpleRoute($route, $template_directory)) {
+        // 5. Check dynamic routes (unified content + simple)
+        if ($route = self::matchRoute($full_path, $routes['dynamic'] ?? [])) {
+            if (self::handleDynamicRoute($route, $params, $template_directory)) {
                 exit();
             } else {
                 // Route matched but handler failed - 404
@@ -852,40 +808,43 @@ Use a hybrid approach - simple configuration for standard routes, custom PHP clo
 require_once(__DIR__ . '/includes/RouteHelper.php');
 
 /*
- * ROUTING SYSTEM DOCUMENTATION
+ * UNIFIED ROUTING SYSTEM DOCUMENTATION
  * 
- * IMPORTANT: Routes should be unique across all categories (static, content, custom, simple).
- * The system processes routes in order: static → custom → content → simple → plugins → 404.
+ * IMPORTANT: Routes should be unique across all categories (static, dynamic, custom).
+ * The system processes routes in order: static → plugins → custom → dynamic → view fallback → 404.
  * If the same pattern exists in multiple categories, only the first match will be processed.
  * 
  * Route types and their options:
  * 
  * STATIC ROUTES - Serve ONLY static assets (CSS, JS, images, fonts) with caching
  * '/favicon.ico' => ['cache' => 43200]         // Static asset file
- * '/theme/*' => ['cache' => 43200]            // Theme assets with caching
+ * '/theme/{theme}/assets/*' => ['cache' => 43200]            // Theme assets with caching
  * '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']]  // Don't cache upgrade files
- * '/plugins/ * /assets/*' => ['cache' => 43200]  // Plugin activation always automatic (non-overridable)
+ * '/plugins/{plugin}/assets/*' => ['cache' => 43200]  // Plugin activation always automatic (non-overridable)
  * NOTE: Static routes should NEVER serve PHP files or dynamic content
  * 
- * CONTENT ROUTES - Model-view pattern with theme overrides
- * '/page/{slug}' => ['model' => 'Page']                           // -> data/pages_class, views/page (RouteHelper adds .php)
- * '/post/{slug}' => ['model' => 'Post', 'check_setting' => 'blog_active']  // With feature flag check
- * '/item/{id}' => ['model' => 'Item', 'valid_page' => false]      // Don't count for stats
+ * DYNAMIC ROUTES - Unified system for all dynamic content (views + models)
+ * Simple view routes:
+ * '/login' => ['view' => 'views/login']        // Simple view file (RouteHelper adds .php)
+ * '/robots.txt' => ['view' => 'views/robots']  // Dynamic content (PHP-generated, RouteHelper adds .php)
+ * '/api/v1/*' => ['view' => 'api/apiv1']       // Explicit view file (RouteHelper adds .php)
+ * '/admin/*' => ['view' => 'adm/{path}']       // {path} placeholder for dynamic part (RouteHelper adds .php)
+ * '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile']  // With fallback (RouteHelper adds .php)
+ * '/ajax/*' => ['view' => 'ajax/{file}']       // Plugin override automatic (RouteHelper adds .php)
+ * '/utils/*' => ['view' => 'utils/{file}']     // Plugin override automatic (RouteHelper adds .php)
+ *
+ * Model-based routes (optional model loading):
+ * '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class']  // -> data/pages_class.php + views/page.php (auto-determined)
+ * '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class', 'check_setting' => 'blog_active']  // With feature flag check
+ * '/item/{id}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'valid_page' => false]  // Don't count for stats
  * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class']  // Plugin-specific model (no .php)
- * '/item/{slug}' => ['model' => 'Item', 'view' => 'profile/item']  // Custom view: views/profile/item  
- * '/item/{slug}' => ['model' => 'Item', 'view' => '/profile/item']  // Same result: views/profile/item (warning logged)
- * '/item/{slug}' => ['model' => 'Item', 'view' => 'views/profile/item']  // Same result: views/profile/item (warning logged)
+ * '/item/{slug}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'view' => 'views/profile/item']  // Custom view path
+ *
+ * Mixed routes (model + path placeholders + fallbacks):
+ * '/user/{action}' => ['model' => 'User', 'model_file' => 'data/users_class', 'view' => 'views/user/{action}', 'default_view' => 'views/user/profile']
  * 
  * NOTE: All routes set $is_valid_page = true by default
  * Use ['valid_page' => false] to override for non-tracked pages
- * 
- * SIMPLE ROUTES - Direct file serving with explicit view paths (for dynamic content)
- * '/robots.txt' => ['view' => 'views/robots']  // Dynamic content (PHP-generated, RouteHelper adds .php)
- * '/api/v1/*' => ['view' => 'api/apiv1']     // Explicit view file (RouteHelper adds .php)
- * '/admin/*' => ['view' => 'adm/{path}']     // {path} placeholder for dynamic part (RouteHelper adds .php)
- * '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile']  // With fallback (RouteHelper adds .php)
- * '/ajax/*' => ['view' => 'ajax/{file}']     // Plugin override automatic (RouteHelper adds .php)
- * '/utils/*' => ['view' => 'utils/{file}']    // Plugin override automatic (RouteHelper adds .php)
  * 
  * CUSTOM ROUTES - Complex logic with PHP closures
  * '/complex' => function($params, $settings, $session, $template_directory) {
@@ -916,14 +875,20 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - View directory fallback (automatic theme-aware lookup for any path)
  * 
  * ROUTE OPTIONS:
- * - 'model' => 'ClassName' - Load model class and instantiate object (content routes)
- * - 'model_file' => 'path/to/model_class' - Explicit model file path, no .php extension (required for content routes)
- * - 'check_setting' => 'setting_name' - Only serve if setting is active
- * - 'valid_page' => false - Don't count this route for statistics (default: true)
+ * Static routes:
  * - 'cache' => 43200 - Cache time in seconds for static files
  * - 'exclude_from_cache' => ['.ext'] - File extensions to not cache (short cache instead)
+ *
+ * Dynamic routes:
+ * - 'view' => 'path/file' - Explicit view file to serve, no .php extension (required unless model specified)
+ * - 'model' => 'ClassName' - Load model class and instantiate object (optional)
+ * - 'model_file' => 'path/to/model_class' - Explicit model file path, no .php extension (required when model specified)
+ * - 'check_setting' => 'setting_name' - Only serve if setting is active
+ * - 'valid_page' => false - Don't count this route for statistics (default: true)
  * - 'default_view' => 'path/file' - Fallback view when no specific file matches, no .php extension  
- * - 'view' => 'path/file' - Explicit view file to serve, no .php extension (required for simple routes)
+ *
+ * Custom routes:
+ * - PHP closure that returns true if handled, false otherwise
  */
 
 // ROUTE DEFINITIONS - Hybrid approach with proper asset/dynamic separation
@@ -941,8 +906,9 @@ $routes = [
         // REMOVED: '/theme/*' - Too broad, use specific /theme/{theme}/assets/* instead
     ],
     
-    // Simple content routes (RouteHelper auto-builds paths from route patterns)
-    'content' => [
+    // Dynamic routes (unified content + simple routes)
+    'dynamic' => [
+        // Model-based content routes
         '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class', 'check_setting' => 'blog_active'],
         '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class', 'check_setting' => 'page_contents_active'],
         '/event/{slug}' => ['model' => 'Event', 'model_file' => 'data/events_class', 'check_setting' => 'events_active'],
@@ -950,6 +916,30 @@ $routes = [
         '/product/{slug}' => ['model' => 'Product', 'model_file' => 'data/products_class', 'check_setting' => 'products_active'],
         '/list/{slug}' => ['model' => 'MailingList', 'model_file' => 'data/mailinglists_class'],
 		'/video/{slug}' => ['model' => 'Video', 'model_file' => 'data/videos_class', 'check_setting' => 'videos_active'],
+        
+        // Simple view routes (explicit view files)
+        '/robots.txt' => ['view' => 'views/robots'],
+        '/sitemap.xml' => ['view' => 'views/sitemap'],
+        '/index' => ['view' => 'views/index'],
+        
+        // System routes with placeholders
+        '/api/v1/*' => ['view' => 'api/apiv1'],
+        '/admin/*' => ['view' => 'adm/{path}'],
+        '/ajax/*' => ['view' => 'ajax/{file}'],
+        '/utils/*' => ['view' => 'utils/{file}'],
+        '/tests/*' => ['view' => 'tests/{path}'],  // Test routes probably shouldn't be in production
+        
+        // Optional: Explicit route for views directory access (if needed)
+        '/views/*' => ['view' => 'views/{path}'],
+        
+        // Routes with special features
+        '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile'],
+        '/events' => ['view' => 'views/events', 'check_setting' => 'events_active'],
+        
+        // NOTE: Simple routes like '/login', '/register', '/logout', '/products', '/pricing', 
+        // '/lists', '/booking', '/cart', '/survey', '/password-reset-1', '/password-reset-2', 
+        // '/password-set', '/site-directory', '/rss20_feed' are now UNNECESSARY - handled by view directory fallback.
+        // They will automatically resolve to views/login.php, views/products.php, etc.
     ],
     
     // Routes with custom handling (complex logic preserved)
@@ -1035,34 +1025,6 @@ $routes = [
             
             return ThemeHelper::includeThemeFile('views/blog.php');
         },
-    ],
-    
-    // Simple routes (only for paths that need explicit handling or aren't in /views/)
-    'simple' => [
-        // Top-level routes that need explicit handling (not in views directory)
-        '/robots.txt' => ['view' => 'views/robots'],
-        '/sitemap.xml' => ['view' => 'views/sitemap'],
-        '/index' => ['view' => 'views/index'],
-        
-        // System routes (not views)
-        '/api/v1/*' => ['view' => 'api/apiv1'],
-        '/admin/*' => ['view' => 'adm/{path}'],
-        '/ajax/*' => ['view' => 'ajax/{file}'],
-        '/utils/*' => ['view' => 'utils/{file}'],
-        '/tests/*' => ['view' => 'tests/{path}'],  // Test routes probably shouldn't be in production
-        
-        // Optional: Explicit route for views directory access (if needed)
-        '/views/*' => ['view' => 'views/{path}'],
-        
-        // Routes with special logic or settings checks
-        '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile'],
-        '/events' => ['view' => 'views/events', 'check_setting' => 'events_active'],
-        
-        // NOTE: All these routes are now UNNECESSARY - handled by view directory fallback:
-        // '/login', '/register', '/logout', '/products', '/pricing', '/lists', 
-        // '/booking', '/cart', '/survey', '/password-reset-1', '/password-reset-2', 
-        // '/password-set', '/site-directory', '/rss20_feed'
-        // They will automatically resolve to views/login.php, views/products.php, etc.
     ],
 ];
 
@@ -1271,25 +1233,26 @@ Here are the actual refactored versions of the two plugin serve.php files:
 // plugins/controld/serve.php - Uses RouteHelper for consistent routing
 
 /*
- * PLUGIN ROUTING SYSTEM DOCUMENTATION
+ * PLUGIN UNIFIED ROUTING SYSTEM DOCUMENTATION
  * 
  * Route types and their options (same as main serve.php):
  * 
  * STATIC ROUTES - Serve ONLY static assets (CSS, JS, images, fonts) with caching
  * '/favicon.ico' => ['cache' => 43200]         // Static asset file
- * '/theme/*' => ['cache' => 43200]            // Theme assets with caching
+ * '/plugins/{plugin}/assets/*' => ['cache' => 43200]            // Plugin assets with caching
  * 
- * CONTENT ROUTES - Model-view pattern with theme overrides  
- * '/item/{slug}' => ['model' => 'Item']                           // -> data/items_class.php, views/item.php
- * '/post/{slug}' => ['model' => 'Post', 'check_setting' => 'blog_active']  // With feature flag check
- * '/item/{id}' => ['model' => 'Item', 'valid_page' => false]      // Don't count for stats
- * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class.php']  // Plugin-specific model
+ * DYNAMIC ROUTES - Unified system for all dynamic content (views + models)
+ * Simple view routes:
+ * '/profile/device_edit' => ['view' => 'views/profile/ctlddevice_edit']  // Standard theme-overridden view
+ * '/pricing' => ['view' => 'views/pricing']  // Standard theme-overridden view
+ * '/plugins/controld/admin/*' => ['view' => 'plugins/controld/admin/{path}']  // Plugin admin files only
  * 
- * SIMPLE ROUTES - Direct file serving with explicit view paths
- * '/profile/device_edit' => ['view' => 'plugins/controld/views/profile/ctlddevice_edit.php']
- * '/pricing' => ['view' => 'plugins/controld/views/pricing.php']
- * '/plugins/controld/admin/*' => ['view' => 'plugins/controld/admin/{path}.php']  // {path} placeholder
- * '/custom/path' => ['view' => 'plugins/controld/views/custom_path.php', 'default_view' => 'plugins/controld/views/default.php']  // With fallback
+ * Model-based routes:
+ * '/item/{slug}' => ['model' => 'Item', 'model_file' => 'plugins/controld/data/items_class']  // Plugin model + theme view
+ * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/controld/data/customs_class', 'check_setting' => 'custom_active']
+ * 
+ * Mixed routes:
+ * '/user/{action}' => ['model' => 'User', 'model_file' => 'data/users_class', 'view' => 'views/user/{action}', 'default_view' => 'views/user/profile']
  * 
  * CUSTOM ROUTES - Complex logic with PHP closures
  * '/complex' => function($params, $settings, $session, $template_directory) {
@@ -1298,9 +1261,9 @@ Here are the actual refactored versions of the two plugin serve.php files:
  * }
  * 
  * PLUGIN PATH RESOLUTION RULES:
- * - Simple routes: Use standard views/ files (e.g., 'views/pricing.php'), not plugin-specific view files
- * - Admin routes: '/plugins/plugin/admin/*' with 'plugins/plugin/admin/{path}.php' -> plugin admin files only
- * - Content routes: Plugin models + standard theme-overridden views (no plugin views)
+ * - View routes: Use standard views/ files (theme overrides apply automatically)
+ * - Admin routes: '/plugins/plugin/admin/*' -> plugins/plugin/admin/{path}.php (plugin admin files only)
+ * - Model routes: Plugin models + standard theme-overridden views 
  * - Theme overrides: Standard theme override system applies to all plugin routes
  * 
  * AUTOMATIC FEATURES:
@@ -1316,8 +1279,8 @@ Here are the actual refactored versions of the two plugin serve.php files:
 
 // Define ControlD plugin routes
 $controld_routes = [
-    // Simple routes (explicit view files for all routes)
-    'simple' => [
+    // Dynamic routes (unified views + models)
+    'dynamic' => [
         '/profile/device_edit' => ['view' => 'views/profile/ctlddevice_edit'],
         '/profile/filters_edit' => ['view' => 'views/profile/ctldfilters_edit'],
         '/profile/devices' => ['view' => 'views/profile/ctlddevices'],
@@ -1333,7 +1296,7 @@ $controld_routes = [
 // This allows main serve.php to process all routes in the correct order
 global $plugin_routes;
 if (!isset($plugin_routes)) {
-    $plugin_routes = ['static' => [], 'content' => [], 'custom' => [], 'simple' => []];
+    $plugin_routes = ['static' => [], 'dynamic' => [], 'custom' => []];
 }
 
 foreach ($controld_routes as $type => $routes) {
@@ -1350,18 +1313,19 @@ foreach ($controld_routes as $type => $routes) {
 // plugins/items/serve.php - Uses RouteHelper for consistent routing
 
 /*
- * PLUGIN ROUTING SYSTEM DOCUMENTATION
+ * PLUGIN UNIFIED ROUTING SYSTEM DOCUMENTATION
  * 
  * Route types and their options (same as main serve.php):
  * 
- * CONTENT ROUTES - Model-view pattern with theme overrides  
- * '/item/{slug}' => ['model' => 'Item']                           // -> data/items_class.php, views/item.php
- * '/post/{slug}' => ['model' => 'Post', 'check_setting' => 'blog_active']  // With feature flag check
- * '/item/{id}' => ['model' => 'Item', 'valid_page' => false]      // Don't count for stats
+ * DYNAMIC ROUTES - Unified system for all dynamic content (views + models)
+ * Model-based routes:
+ * '/item/{slug}' => ['model' => 'Item', 'model_file' => 'plugins/items/data/items_class']  // Plugin model + theme view
+ * '/item/{id}' => ['model' => 'Item', 'model_file' => 'plugins/items/data/items_class', 'valid_page' => false]  // Don't count for stats
+ * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/items/data/customs_class', 'check_setting' => 'custom_active']
  * 
- * SIMPLE ROUTES - Direct file serving with explicit view paths
- * '/items/list' => ['view' => 'plugins/items/views/itemslist.php']
- * '/items/custom' => ['view' => 'plugins/items/views/itemscustom.php', 'default_view' => 'plugins/items/views/default.php']  // With fallback
+ * Simple view routes:
+ * '/items/list' => ['view' => 'views/itemslist']  // Standard theme-overridden view
+ * '/items/custom' => ['view' => 'views/itemscustom', 'default_view' => 'views/itemsdefault']  // With fallback
  * 
  * CUSTOM ROUTES - Complex logic with PHP closures
  * '/items' => function($params, $settings, $session, $template_directory) {
@@ -1370,8 +1334,8 @@ foreach ($controld_routes as $type => $routes) {
  * }
  * 
  * PLUGIN PATH RESOLUTION RULES:
- * - Content routes: '/item/{slug}' with model 'Item' + model_file 'plugins/items/data/items_class.php' -> load plugin model + standard theme-overridden view
- * - Simple routes: Use standard views/ files, not plugin-specific view files
+ * - Model routes: Plugin models + standard theme-overridden views (automatic view path from model name)
+ * - View routes: Use standard views/ files (theme overrides apply automatically)
  * - Admin routes: '/plugins/plugin/admin/*' -> plugins/plugin/admin/{path}.php (plugin admin files only)
  * 
  * AUTOMATIC FEATURES:
@@ -1386,8 +1350,8 @@ foreach ($controld_routes as $type => $routes) {
 
 // Define Items plugin routes
 $items_routes = [
-    // Content routes (model-view pattern)
-    'content' => [
+    // Dynamic routes (unified views + models)
+    'dynamic' => [
         '/item/{slug}' => [
             'model' => 'Item',
             'model_file' => 'plugins/items/data/items_class',
@@ -1411,7 +1375,7 @@ $items_routes = [
 // This allows main serve.php to process all routes in the correct order
 global $plugin_routes;
 if (!isset($plugin_routes)) {
-    $plugin_routes = ['static' => [], 'content' => [], 'custom' => [], 'simple' => []];
+    $plugin_routes = ['static' => [], 'dynamic' => [], 'custom' => []];
 }
 
 foreach ($items_routes as $type => $routes) {
