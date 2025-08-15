@@ -42,6 +42,38 @@ The system checks for theme-specific files first, then falls back to base files:
 
 Theme is selected via `theme_template` setting and can be changed at runtime.
 
+### Theme Routing System
+Each theme can define its own routes via `/theme/[name]/serve.php` using RouteHelper format:
+
+```php
+<?php
+// theme/mytheme/serve.php - RouteHelper format routes for mytheme theme
+
+$routes = [
+    'dynamic' => [
+        // Theme-specific view routes
+        '/special-page' => ['view' => 'views/special-page'],
+        
+        // Model-based routes with theme-specific models
+        '/event/{slug}' => ['model' => 'Event', 'model_file' => 'data/events_class'],
+    ],
+    
+    'custom' => [
+        // Custom logic routes
+        '/complex-feature' => function($params, $settings, $session, $template_directory) {
+            // Custom logic here
+            return ThemeHelper::includeThemeFile('views/complex-feature.php');
+        },
+    ],
+];
+```
+
+**Theme Routing Benefits:**
+- Each theme controls its own user-facing functionality
+- Themes can add plugin support independently
+- Clean separation between backend (plugins) and frontend (themes)
+- Easy theme switching without breaking functionality
+
 ### Routing System (serve.php + RouteHelper.php)
 
 The system uses a hybrid routing approach with pattern matching:
@@ -66,14 +98,23 @@ The system uses a hybrid routing approach with pattern matching:
 **Key Files:**
 - `/serve.php`: Route definitions and front controller
 - `/includes/RouteHelper.php`: Pattern matching and file serving utilities
-- Plugin serve.php files: `/plugins/[name]/serve.php` for plugin-specific routes
+- Theme serve.php files: `/theme/[name]/serve.php` for theme-specific routes
 
-### Plugin Architecture
-Plugins in `/plugins/[name]/` have full MVC structure and can:
-- Add admin interface pages
-- Override routing through `serve.php`
+**Route Processing Order:**
+1. Static routes (main serve.php)
+2. Theme serve.php routes (if exists)
+3. Custom routes (main serve.php)
+4. Dynamic routes (main serve.php)
+5. View directory fallback
+6. 404 page
+
+### Plugin Architecture (Backend Only)
+Plugins in `/plugins/[name]/` provide backend functionality only:
+- Add admin interface pages (served via `/plugins/{plugin}/admin/*` automatic discovery)
 - Include database migrations
-- Extend themes
+- Provide data models and business logic
+- Hook into system events
+- **NO routing control** - all user-facing routes are controlled by themes
 
 ## Database & Configuration
 
@@ -691,16 +732,74 @@ The log shows timestamps, client IPs, and full error details including file path
 **File Management:** Secure upload handling in `/includes/UploadHandler.php`
 
 ## Plugin Development
-Create new plugin directory structure:
+
+### Plugin Directory Structure (Backend Only)
 ```
 /plugins/[name]/
-├── adm/          # Admin interface
-├── data/         # Data models
-├── logic/        # Business logic  
-├── views/        # Templates
-├── serve.php     # Custom routing
-└── migrations/   # Database changes
+├── admin/        # Admin interface files ✅
+├── data/         # Data model classes ✅
+├── includes/     # Helper classes ✅
+├── hooks/        # Event hooks ✅
+├── migrations/   # Database changes ✅
+├── plugin.json   # Plugin metadata ✅
+└── ❌ NO: serve.php, views/, assets/, ajax/, logic/
 ```
+
+### Plugin Admin Access
+Plugin admin pages are automatically discovered using the pattern:
+- **URL Pattern:** `/plugins/{plugin}/admin/{page}`
+- **Example:** `/plugins/controld/admin/admin_ctld_account`
+- **File Location:** `plugins/controld/admin/admin_ctld_account.php`
+
+**Benefits:**
+- No need to register each plugin's admin pages
+- Works automatically for all current and future plugins
+- Maintains clean separation - plugins don't define routes
+- Predictable URL structure for admin interfaces
+
+### Plugin Views and Frontend
+**IMPORTANT:** Plugins do NOT control their own frontend presentation.
+
+**For Plugin Views:**
+- Plugin view files should be placed in themes: `/theme/[theme]/views/`
+- Themes control whether and how to display plugin functionality
+- Only themes that want plugin support include the necessary routes
+
+**Current Plugin Support by Theme:**
+- **sassa**: Full ControlD and Items plugin support
+- **All other themes**: No plugin support (admin access only)
+
+**Adding Plugin Support to Themes:**
+To add plugin support to a theme, update the theme's `serve.php` file:
+
+```php
+// In /theme/mytheme/serve.php
+$routes = [
+    'dynamic' => [
+        // ControlD plugin routes
+        '/profile/device_edit' => ['view' => 'views/profile/ctlddevice_edit'],
+        '/create_account' => ['view' => 'views/create_account'],
+        
+        // Items plugin model route
+        '/item/{slug}' => [
+            'model' => 'Item',
+            'model_file' => 'plugins/items/data/items_class',
+        ],
+    ],
+    'custom' => [
+        // Items plugin listing route
+        '/items' => function($params, $settings, $session, $template_directory) {
+            if($params[1] && $params[1] != 'tag') return false;
+            return ThemeHelper::includeThemeFile('views/items.php');
+        },
+    ],
+];
+```
+
+**Theme Independence:**
+- Switching themes won't break plugin functionality
+- Each theme can implement plugin features differently
+- No hardcoded dependencies between plugins and themes
 
 ## Admin Interface Patterns
 - List pages: `admin_[entity].php`
