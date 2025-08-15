@@ -1,78 +1,31 @@
 <?php
+// theme/sassa/serve.php - RouteHelper format routes for sassa theme
 
-//ITEMS.  DEFAULT IS TO USE THE /ITEMS/ SUBDIRECTORY
-//TODO: USER CHOOSES URL NAMESPACE
-
-
-
-
-if($params[0] == 'profile' && $params[1] == 'device_edit'){	
-
-	$base_file = $_SERVER['DOCUMENT_ROOT'].'/theme/sassa/views/profile/ctlddevice_edit.php';
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-if($params[0] == 'profile' && $params[1] == 'filters_edit'){	
-	$base_file = $_SERVER['DOCUMENT_ROOT'].'/theme/sassa/views/profile/ctldfilters_edit.php';
-	if(file_exists($base_file)){
-		$is_valid_page = true;
-		require_once($base_file); 
-		exit();		
-	}
-}
-
-
-if($params[0] == 'create_account'){
-	$base_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/controld/views/create_account.php';
-	require_once($base_file); 
-	exit();	
-}
-
-
-//if($settings->get_setting('blog_active')){
-	/*
-	if($params[0] == 'items'){
-		if(!$params[1] || $params[1] == 'tag'){
-			$template_file = $template_directory.'/plugins/views/items.php';
-			$base_file = $_SERVER['DOCUMENT_ROOT'].'/plugins/items/views/items.php';
-
-			if(file_exists($template_file)){
-				$is_valid_page = true;
-				require_once($template_file);
-				exit();
-			}
-			else if(file_exists($base_file)){
-				$is_valid_page = true;
-				require_once($base_file); 
-				exit();		
-			}				
-		}
-	}
-	else if($params[0] == 'item'){
-	
-		require_once(LibraryFunctions::get_plugin_file_path('items_class.php', 'items', '/data', 'system'));
-		
-		$item = Item::get_by_link($params[1], true);	
-
-		$template_file = $template_directory.'/item.php';
-		$base_file = $_SERVER['DOCUMENT_ROOT'].'/views/item.php';
-		
-		if(file_exists($template_file)){
-			$is_valid_page = true;
-			require_once($template_file);
-			exit();
-		}
-		else if(file_exists($base_file)){
-			$is_valid_page = true;
-			require_once($base_file); 
-			exit();		
-		}		
-	}
-	*/
-//}
-
-?>
+$routes = [
+    'dynamic' => [
+        // ControlD plugin routes (moved from plugin)
+        '/profile/device_edit' => ['view' => 'views/profile/ctlddevice_edit'],
+        '/profile/filters_edit' => ['view' => 'views/profile/ctldfilters_edit'],
+        '/profile/devices' => ['view' => 'views/profile/ctlddevices'],
+        '/profile/rules' => ['view' => 'views/profile/ctldrules'],
+        '/profile/ctld_activation' => ['view' => 'views/profile/ctld_activation'],
+        '/pricing' => ['view' => 'views/pricing'],
+        
+        // Items plugin model-based route (moved from plugin)
+        '/item/{slug}' => [
+            'model' => 'Item',
+            'model_file' => 'plugins/items/data/items_class',
+        ],
+        
+        // Additional sassa-specific routes
+        '/forms_example' => ['view' => 'views/forms_example'],
+    ],
+    
+    'custom' => [
+        // Items plugin routes (moved from plugin)
+        '/items' => function($params, $settings, $session, $template_directory) {
+            if($params[1] && $params[1] != 'tag') return false;
+            return ThemeHelper::includeThemeFile('views/items.php');
+        },
+    ],
+];
