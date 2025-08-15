@@ -97,194 +97,11 @@ This works because `require_once()` executes in RouteHelper's scope where the va
 - Other parts use the direct approach (model-based routes)
 - Creates confusion about the "right" way to include theme files
 
-## Solution Options Analysis
+## Solution: Option 3 - Path Resolution Pattern
 
-### Option 1: Pass Variables as Parameters to ThemeHelper
+**Concept:** Restructure ThemeHelper to support execution in the caller's scope by providing a path resolution method that returns file paths instead of including them.
 
-**Concept:** Modify ThemeHelper to accept variables that should be extracted in the view scope.
-
-```php
-// Modified ThemeHelper method
-public static function includeThemeFileWithVariables($path, $variables = [], $themeName = null) {
-    // Extract variables in this scope
-    if (!empty($variables)) {
-        extract($variables, EXTR_SKIP);
-    }
-    
-    // Then include file (variables now available)
-    $instance = self::getInstance($themeName);
-    return $instance->includeFile($path, $path);
-}
-
-// Usage in RouteHelper
-$variables = [];
-if ($model_instance) {
-    $variables[strtolower($route['model'])] = $model_instance;
-    $variables['params'] = $route_params;
-    $variables['is_valid_page'] = $is_valid_page;
-}
-return ThemeHelper::includeThemeFileWithVariables($view_path . '.php', $variables);
-```
-
-**Pros:**
-- Maintains ThemeHelper abstraction
-- Relatively simple to implement
-- Backward compatible (existing `includeThemeFile()` still works)
-
-**Cons:**
-- Still requires `extract()` in ThemeHelper scope, not the actual view file scope
-- Doesn't fully solve the scope issue - variables are in ThemeHelper method, not the included file
-- API becomes more complex
-
-### Option 2: View Context Object Pattern
-
-**Concept:** Create a view context object that holds all variables and pass it to views.
-
-```php
-// New ViewContext class
-class ViewContext {
-    private $variables = [];
-    
-    public function set($key, $value) {
-        $this->variables[$key] = $value;
-    }
-    
-    public function get($key, $default = null) {
-        return $this->variables[$key] ?? $default;
-    }
-    
-    public function extractTo($scope) {
-        extract($this->variables, EXTR_SKIP);
-    }
-}
-
-// Usage in RouteHelper
-$context = new ViewContext();
-if ($model_instance) {
-    $context->set(strtolower($route['model']), $model_instance);
-    $context->set('params', $route_params);
-    $context->set('is_valid_page', $is_valid_page);
-}
-return ThemeHelper::includeThemeFileWithContext($view_path . '.php', $context);
-
-// In views
-$event = $context->get('event');
-// OR
-$context->extractTo($this);  // If we can make this work
-```
-
-**Pros:**
-- Clean API design
-- Explicit about what variables are available
-- Could provide additional view helper methods
-
-**Cons:**
-- Major change to view file patterns
-- All existing view files would need updates
-- Still doesn't solve the fundamental scope issue
-- More complex than current approach
-
-### Option 3: Modify ThemeHelper Architecture
-
-**Concept:** Restructure ThemeHelper to support execution in the caller's scope.
-
-```php
-// New method that returns file paths instead of including
-public static function resolveThemeFilePath($path, $themeName = null) {
-    $instance = self::getInstance($themeName);
-    
-    // Try theme file first
-    $themeFile = $instance->getIncludePath($path);
-    if (file_exists($themeFile)) {
-        return $themeFile;
-    }
-    
-    // Try base file
-    $baseFile = PathHelper::getIncludePath($path);
-    if (file_exists($baseFile)) {
-        return $baseFile;
-    }
-    
-    return null;
-}
-
-// Usage in RouteHelper (preserves scope)
-$file = ThemeHelper::resolveThemeFilePath($view_path . '.php');
-if ($file) {
-    require_once($file);  // Variables ARE in scope here
-    return true;
-}
-```
-
-**Pros:**
-- Maintains ThemeHelper abstraction for path resolution
-- Allows caller to control inclusion and scope
-- Backward compatible
-- Clean separation of concerns
-
-**Cons:**
-- Changes the ThemeHelper API paradigm
-- Callers now need to handle the actual file inclusion
-- More verbose usage pattern
-
-### Option 4: Specialized RouteViewLoader Class
-
-**Concept:** Create a specialized class just for loading views from routes with variable scope preservation.
-
-```php
-class RouteViewLoader {
-    private $themeHelper;
-    private $variables = [];
-    
-    public function __construct($themeName = null) {
-        $this->themeHelper = ThemeHelper::getInstance($themeName);
-    }
-    
-    public function setVariables(array $variables) {
-        $this->variables = $variables;
-        return $this;
-    }
-    
-    public function loadView($viewPath) {
-        // Extract variables in this method scope
-        extract($this->variables, EXTR_SKIP);
-        
-        // Use ThemeHelper to resolve path, but include here to preserve scope
-        $file = $this->themeHelper->resolveFilePath($viewPath);
-        if ($file && file_exists($file)) {
-            require_once($file);
-            return true;
-        }
-        return false;
-    }
-}
-
-// Usage in RouteHelper
-$loader = new RouteViewLoader();
-if ($model_instance) {
-    $loader->setVariables([
-        strtolower($route['model']) => $model_instance,
-        'params' => $route_params,
-        'is_valid_page' => $is_valid_page
-    ]);
-}
-return $loader->loadView($view_path . '.php');
-```
-
-**Pros:**
-- Specialized for this exact use case
-- Maintains ThemeHelper for path resolution
-- Clean API for route-specific view loading
-- Could be extended with route-specific features
-
-**Cons:**
-- Introduces a new class
-- Still has the scope issue (variables in loader method, not view)
-- May be overkill for the problem
-
-## Recommended Solution: Option 3 - Path Resolution Pattern
-
-After analyzing all options, **Option 3** is the most appropriate solution because:
+**Option 3** is the most appropriate solution because:
 
 ### Why Option 3 is Best
 
@@ -315,38 +132,123 @@ After analyzing all options, **Option 3** is the most appropriate solution becau
 
 ### Implementation Plan
 
-#### Phase 1: Add Path Resolution Method
+#### Phase 1: Add Path Resolution Method to ThemeHelper
+
+Add the following method to `/includes/ThemeHelper.php` after the existing static methods:
+
 ```php
-// Add to ThemeHelper class
+/**
+ * Resolve file path with theme override support
+ * 
+ * Unlike includeThemeFile(), this method returns the resolved file path
+ * instead of including it, allowing the caller to control inclusion
+ * and preserve variable scope.
+ * 
+ * This method is specifically designed for cases where variables need to
+ * be available in the included file (e.g., model objects extracted in
+ * RouteHelper that must be accessible in view templates).
+ * 
+ * @param string $path Relative path to file (e.g., 'views/login.php')
+ * @param string $themeName Optional theme name (uses current theme if not specified)
+ * @return string|null Full file path if found, null if not found
+ * 
+ * @example
+ * // In RouteHelper after extracting variables
+ * extract(['event' => $event_instance], EXTR_SKIP);
+ * $file = ThemeHelper::resolveThemeFilePath('views/event.php');
+ * if ($file) {
+ *     require_once($file); // $event is available in view
+ * }
+ */
 public static function resolveThemeFilePath($path, $themeName = null) {
     try {
         $instance = self::getInstance($themeName);
         
-        // Try theme file first  
+        // Try theme-specific file first
         $themeFile = $instance->getIncludePath($path);
         if (file_exists($themeFile)) {
             return $themeFile;
         }
         
-        // Try base file as fallback
-        $baseFile = PathHelper::getIncludePath($path);
-        if (file_exists($baseFile)) {
-            return $baseFile;  
+        // Theme exists but file not found - try base path as fallback
+        $basePath = PathHelper::getIncludePath($path);
+        if (file_exists($basePath)) {
+            return $basePath;
         }
         
         return null;
+        
     } catch (Exception $e) {
-        // If theme doesn't exist, try base path only
-        $baseFile = PathHelper::getIncludePath($path);
-        return file_exists($baseFile) ? $baseFile : null;
+        // If theme doesn't exist or has configuration issues, try base path only
+        $basePath = PathHelper::getIncludePath($path);
+        return file_exists($basePath) ? $basePath : null;
     }
 }
 ```
 
-#### Phase 2: Update RouteHelper
+#### Phase 2: Update RouteHelper Implementation
+
+**Location:** Replace lines 480-521 in `/includes/RouteHelper.php` (the current hack code section)
+
+**Remove this entire block:**
 ```php
-// Replace the current hack in RouteHelper::handleDynamicRoute()
+// Try to load the view file with theme override support
+// BUT preserve variable scope by including directly instead of using ThemeHelper::includeThemeFile()
+
+// Get theme name
+$settings = Globalvars::get_instance();
+$theme_name = $settings->get_setting('theme_template', true, true);
+
+// Try theme-specific view first
+if ($theme_name) {
+    $theme_file = PathHelper::getIncludePath("theme/{$theme_name}/{$view_path}.php");
+    if (file_exists($theme_file)) {
+        require_once($theme_file);
+        return true;
+    }
+}
+
+// Try base view
+$base_file = PathHelper::getIncludePath($view_path . '.php');
+if (file_exists($base_file)) {
+    require_once($base_file);
+    return true;
+}
+
+// Try default view if specified
+if (!empty($route['default_view'])) {
+    // Try theme-specific default view first
+    if ($theme_name) {
+        $theme_default_file = PathHelper::getIncludePath("theme/{$theme_name}/{$route['default_view']}.php");
+        if (file_exists($theme_default_file)) {
+            require_once($theme_default_file);
+            return true;
+        }
+    }
+    
+    // Try base default view
+    $base_default_file = PathHelper::getIncludePath($route['default_view'] . '.php');
+    if (file_exists($base_default_file)) {
+        require_once($base_default_file);
+        return true;
+    }
+}
+
+return false;
+```
+
+**Replace with this clean implementation:**
+```php
 // STANDARD VIEW LOADING with theme overrides and preserved variable scope
+// 
+// IMPORTANT: We use ThemeHelper::resolveThemeFilePath() instead of 
+// ThemeHelper::includeThemeFile() to preserve variable scope. Variables
+// extracted above (model instances, route params, etc.) must remain
+// available in the view file. By resolving the path and including it here,
+// we maintain scope while leveraging ThemeHelper's theme override logic.
+//
+// This eliminates code duplication while solving the variable scope issue.
+
 $viewFile = ThemeHelper::resolveThemeFilePath($view_path . '.php');
 if ($viewFile) {
     require_once($viewFile);
@@ -365,11 +267,67 @@ if (!empty($route['default_view'])) {
 return false;
 ```
 
-#### Phase 3: Clean Up and Document
-- Remove the current duplicated theme logic from RouteHelper
-- Update code comments to explain the pattern
-- Document the new `resolveThemeFilePath()` method
-- Consider adding similar patterns elsewhere if needed
+#### Phase 3: Verification and Testing
+
+After implementation, verify the following functionality:
+
+1. **Model-based routes with theme overrides:**
+   - Test `/page/{slug}` routes with theme-specific templates
+   - Verify model variables (e.g., `$page`) are available in views
+   - Test fallback to base templates when theme files don't exist
+
+2. **Default view fallbacks:**
+   - Test routes with `default_view` configuration
+   - Verify theme overrides work for default views too
+
+3. **Error handling:**
+   - Test with invalid theme configurations
+   - Verify graceful fallback to base files
+
+4. **Backward compatibility:**
+   - Ensure existing `ThemeHelper::includeThemeFile()` still works
+   - Test other parts of system that use ThemeHelper
+
+#### Phase 4: Documentation Updates
+
+Update the following documentation:
+
+1. **Code Comments:** Add detailed comments explaining the pattern
+2. **Architecture Notes:** Update system documentation about theme override patterns
+3. **Developer Guidelines:** Document when to use `resolveThemeFilePath()` vs `includeThemeFile()`
+
+## Verification: Complete Hack Code Removal
+
+This implementation **completely removes all hack code** from RouteHelper:
+
+### Current Hack Code (Lines 480-521 in RouteHelper.php) - REMOVED:
+- ❌ Manual theme name retrieval: `$settings->get_setting('theme_template', true, true)`
+- ❌ Manual theme path construction: `"theme/{$theme_name}/{$view_path}.php"`
+- ❌ Manual file existence checks: `if (file_exists($theme_file))`
+- ❌ Duplicated theme override logic
+- ❌ Duplicated default view handling
+- ❌ Direct knowledge of theme directory structure
+- ❌ Violation of separation of concerns
+
+### New Clean Implementation - REPLACES ALL OF ABOVE:
+- ✅ Single method call: `ThemeHelper::resolveThemeFilePath($view_path . '.php')`
+- ✅ All theme logic encapsulated in ThemeHelper
+- ✅ Proper separation of concerns maintained
+- ✅ Variable scope preserved (the original problem is solved)
+- ✅ No code duplication
+- ✅ Future theme changes benefit entire system
+
+### Code Reduction:
+- **Removed:** ~42 lines of duplicated theme resolution logic
+- **Added:** ~12 lines of clean implementation
+- **Net reduction:** ~30 lines in RouteHelper
+- **New method in ThemeHelper:** ~25 lines (but this replaces duplicated logic)
+
+### What This Eliminates:
+1. **Architecture Violation:** RouteHelper no longer has direct knowledge of theme structure
+2. **Code Duplication:** Theme override logic exists only in ThemeHelper
+3. **Maintenance Risk:** Changes to theme logic only need to happen in one place
+4. **Inconsistency:** All parts of the system can use the same pattern
 
 ## Benefits of This Approach
 
@@ -392,3 +350,21 @@ The current "hack" was a pragmatic solution to fix broken model-based routes, bu
 This approach transforms ThemeHelper from "include files with theme override" to "resolve file paths with theme override" for cases where variable scope matters, while preserving the simpler `includeThemeFile()` method for cases where it doesn't.
 
 The implementation is straightforward, maintains backward compatibility, and creates a clear pattern that other parts of the system can adopt if they encounter similar variable scope requirements.
+
+## Implementation Status
+
+**STATUS: READY FOR IMPLEMENTATION**
+
+This specification provides:
+- ✅ Complete code examples for both files to be modified
+- ✅ Detailed verification that all hack code will be removed
+- ✅ Comprehensive testing plan
+- ✅ Clear benefits and architectural justification
+- ✅ Backward compatibility assurance
+
+The implementation involves:
+1. Adding 1 new method to ThemeHelper.php (~25 lines)
+2. Replacing hack code in RouteHelper.php (net reduction of ~30 lines)
+3. No breaking changes to existing functionality
+
+This solution completely eliminates the architectural violations and code duplication while preserving the variable scope functionality that was the original requirement.
