@@ -8,6 +8,18 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **Key Entry Point:** `serve.php` - All requests are routed through this front controller using RouteHelper.php
 
+## Custom Slash Commands
+
+**Location:** `/home/user1/.claude/commands/`
+
+When the user types a slash command (e.g., `/implement`, `/refactor`), always check if a custom command exists before proceeding:
+
+1. **Check for custom command:** Look for `/home/user1/.claude/commands/{command}.md`
+2. **If found:** Read the command file and follow its instructions exactly
+3. **If not found:** Proceed with built-in slash command or ask for clarification
+
+Custom commands override built-in behavior and provide specific workflows tailored to this project.
+
 ## Architecture Patterns
 
 ### Directory Structure & Responsibilities
