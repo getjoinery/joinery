@@ -169,17 +169,27 @@ class ThemeHelper extends ComponentBase {
     
     /**
      * Include file from theme with fallback to base (static helper)
+     * 
+     * @param string $path Path to file to include
+     * @param string|null $themeName Optional theme name override
+     * @param array $variables Variables to make available in the included file
+     * @return bool Success
      */
-    public static function includeThemeFile($path, $themeName = null) {
+    public static function includeThemeFile($path, $themeName = null, array $variables = []) {
+        // Extract variables into local scope
+        extract($variables, EXTR_SKIP);
+        
         try {
             $instance = self::getInstance($themeName);
             
             // Try theme-specific file first
-            if ($instance->includeFile($path)) {
+            $themeFile = $instance->getIncludePath($path);
+            if (file_exists($themeFile)) {
+                require_once($themeFile);
                 return true;
             }
             
-            // Theme exists but file not found in theme - try base path as fallback
+            // Try base path fallback
             $basePath = PathHelper::getIncludePath($path);
             if (file_exists($basePath)) {
                 require_once($basePath);

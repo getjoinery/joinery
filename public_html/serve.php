@@ -223,7 +223,10 @@ $routes = [
             if(!$settings->get_setting('blog_active')) return false;
             if($params[1] && $params[1] != 'tag') return false;
             
-            return ThemeHelper::includeThemeFile('views/blog.php');
+            return ThemeHelper::includeThemeFile('views/blog.php', null, [
+                'params' => $params,
+                'is_valid_page' => true
+            ]);
         },
     ],
 ];
