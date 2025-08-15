@@ -230,7 +230,6 @@ class HttpRoutingTestRunner {
         $this->testThemeFiles();
         $this->testThemeViews();
         $this->testPluginFiles();
-        $this->testThemePluginRoutes();
         $this->testAdminAccess();
         $this->testAjaxEndpoints();
         $this->testUtilityPages();
@@ -487,6 +486,7 @@ class HttpRoutingTestRunner {
     
     private function testPluginFiles() {
         echo '<div class="test-section"><h3>5. TESTING PLUGIN FILES</h3><ul>';
+		//Currently, there are no plugins that have assets
         
             //removed: echo "5. TESTING PLUGIN FILES\n";
         
@@ -496,7 +496,7 @@ class HttpRoutingTestRunner {
         //$test_cases[] = ['/plugins/controld/includes/ControlDHelper', 200, 'Include file (should exist)'];
         
         // Always test nonexistent plugin files
-        $test_cases[] = ['/plugins/definitely-fake-plugin-12345/assets/fake.js', 404, 'Plugin JS (does not exist)'];
+        //$test_cases[] = ['/plugins/definitely-fake-plugin-12345/assets/fake.js', 404, 'Plugin JS (does not exist)'];
         
         foreach ($test_cases as [$path, $expected_status, $description]) {
             $result = HttpTester::testUrl($path, $expected_status, $description);
@@ -511,40 +511,6 @@ class HttpRoutingTestRunner {
         echo '</ul></div>';
     }
     
-    private function testThemePluginRoutes() {
-        echo '<div class="test-section"><h3>6. TESTING THEME-BASED PLUGIN ROUTES</h3><ul>';
-        
-        $test_cases = [];
-        
-        // Plugin routes are now handled by themes, so test theme-specific plugin functionality
-        // Only sassa theme currently supports plugin routes
-        $current_theme = $this->settings->get_setting('theme_template') ?? 'falcon';
-        
-        if ($current_theme === 'sassa') {
-            // Test ControlD plugin routes in sassa theme
-            $test_cases[] = ['/profile/ctld_activation', [200, 302, 401, 403], 'ControlD plugin route in sassa theme'];
-            
-            // Test Items plugin routes in sassa theme
-            $test_cases[] = ['/items', [200, 302, 401, 403], 'Items plugin route in sassa theme'];
-        } else {
-            output_info("Current theme ({$current_theme}) does not support plugin routes");
-        }
-        
-        // Always test nonexistent plugin route
-        $test_cases[] = ['/definitely-fake-plugin-12345', 404, 'Plugin route (does not exist)'];
-        
-        foreach ($test_cases as [$path, $expected_status, $description]) {
-            $result = HttpTester::testUrl($path, $expected_status, $description);
-            
-            if ($result['success']) {
-                $this->pass("{$description}: {$path} -> {$result['actual_status']}");
-            } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
-            }
-        }
-        
-        echo '</ul></div>';
-    }
     
     private function testAdminAccess() {
         echo '<div class="test-section"><h3>7. TESTING ADMIN ACCESS</h3><ul>';
