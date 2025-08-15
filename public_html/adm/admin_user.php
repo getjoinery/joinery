@@ -387,11 +387,11 @@
 						<?php
 						if($numphonerecords){
 							foreach($phone_numbers as $phone_number)	 {
-								echo 'Phone: '.$phone_number->get_phone_string() . ' [<a class="sortlink" href="/admin/admin_phone_edit.php?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]<br />';
+								echo 'Phone: '.$phone_number->get_phone_string() . ' [<a class="sortlink" href="/admin/admin_phone_edit?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]<br />';
 							}
 						}
 						else{
-							echo ' [<a class="sortlink" href="/admin/admin_phone_edit.php?usr_user_id='. $user->key . '">Add Phone Number</a>]<br />';
+							echo ' [<a class="sortlink" href="/admin/admin_phone_edit?usr_user_id='. $user->key . '">Add Phone Number</a>]<br />';
 						}
 						?>
 						</p> 
@@ -401,14 +401,14 @@
 						if($numaddressrecords){
 							foreach($addresses as $address) {
 
-								echo 'Address: '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit.php?usa_address_id='. $address->key .'">edit</a>]<br />' ;
+								echo 'Address: '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit?usa_address_id='. $address->key .'">edit</a>]<br />' ;
 
 
 								$page->disprow($rowvalues);
 							}
 						}
 						else{
-							echo ' [<a class="sortlink" href="/admin/admin_address_edit.php?usr_user_id='. $user->key . '">Add address</a>]<br />';
+							echo ' [<a class="sortlink" href="/admin/admin_address_edit?usr_user_id='. $user->key . '">Add address</a>]<br />';
 						}
 						
 						echo '<br />Timezone: '.$user->get('usr_timezone'). ' [<a href="/admin/admin_users_edit?usr_user_id='.$user->key.'">edit</a>]';
@@ -697,7 +697,7 @@
 	foreach($phone_numbers as $phone_number)	 {
 		$rowvalues=array();
 		
-		array_push($rowvalues, $phone_number->get_phone_string() . '[<a class="sortlink" href="phone_numbers_edit.php?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]');
+		array_push($rowvalues, $phone_number->get_phone_string() . '[<a class="sortlink" href="phone_numbers_edit?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]');
 		
         $page->disprow($rowvalues);
 	}

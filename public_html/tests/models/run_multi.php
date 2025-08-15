@@ -139,7 +139,7 @@ echo "<h4>Usage Examples:</h4>\n";
 echo "<ul>\n";
 echo "<li><strong>Run Multi tests:</strong> <a href='?'>run_multi.php</a></li>\n";
 echo "<li><strong>Verbose output:</strong> <a href='?verbose=1'>run_multi.php?verbose=1</a></li>\n";
-echo "<li><strong>Regular tests + Multi tests:</strong> <a href='run_all.php?test_multi=1'>run_all.php?test_multi=1</a></li>\n";
+echo "<li><strong>Regular tests + Multi tests:</strong> <a href='run_all?test_multi=1'>run_all?test_multi=1</a></li>\n";
 echo "</ul>\n";
 
 echo "<h4>How Multi Testing Works:</h4>\n";

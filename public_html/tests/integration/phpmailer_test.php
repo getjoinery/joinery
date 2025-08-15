@@ -559,7 +559,7 @@ function get($sName) {
 <h3>phpmailer Unit Test</h3>
 By entering a SMTP hostname it will automatically perform tests with SMTP.
 
-<form name="phpmailer_unit" action="phpmailer_test.php" method="get">
+<form name="phpmailer_unit" action="phpmailer_test" method="get">
 <input type="hidden" name="submitted" value="1"/>
 To Address: <input type="text" size="50" name="mail_to" value="<?php echo get("mail_to"); ?>"/>
 <br/>
