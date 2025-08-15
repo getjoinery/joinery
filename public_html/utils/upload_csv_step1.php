@@ -82,7 +82,7 @@ if($_POST) {
 		$currentline = fgetcsv($handle, 1000, ",");
 		fclose($handle);
 
-		printf ('<form method="post" class="form" action="upload_csv_step2.php%s" accept-charset="ISO-8859-1">', $getvars);
+		printf ('<form method="post" class="form" action="upload_csv_step2%s" accept-charset="ISO-8859-1">', $getvars);
 			echo "<fieldset><h4>Please match the fields in the uploaded file with the database fields.</h4>";
 				echo '<div class="fields full">';
 

@@ -73,8 +73,8 @@ PathHelper::requireOnce('includes/SessionControl.php');
         <p>Run CRUD operations, field validation, and constraint tests on individual model classes.</p>
         <p><strong>Tests:</strong> Create, Read, Update, Delete, Required fields, Type constraints, Unique constraints</p>
         <p>
-            <a href="run_all.php">Run All Single Tests</a>
-            <a href="run_all.php?verbose=1" class="secondary">Run with Verbose Output</a>
+            <a href="run_all">Run All Single Tests</a>
+            <a href="run_all?verbose=1" class="secondary">Run with Verbose Output</a>
         </p>
     </div>
     
@@ -83,8 +83,8 @@ PathHelper::requireOnce('includes/SessionControl.php');
         <p>Test collection classes (Multi*) that handle querying multiple records.</p>
         <p><strong>Tests:</strong> Basic loading, Filtering, Ordering, Pagination, Combined queries</p>
         <p>
-            <a href="run_multi.php">Run All Multi Tests</a>
-            <a href="run_multi.php?verbose=1" class="secondary">Run with Verbose Output</a>
+            <a href="run_multi">Run All Multi Tests</a>
+            <a href="run_multi?verbose=1" class="secondary">Run with Verbose Output</a>
         </p>
     </div>
     
@@ -92,7 +92,7 @@ PathHelper::requireOnce('includes/SessionControl.php');
         <h3>Combined Testing (Advanced)</h3>
         <p>Run both single and multi tests in one session. Use these options with caution as they may take longer.</p>
         <p>
-            <a href="run_all.php?test_multi=1">Single + Multi Tests</a>
+            <a href="run_all?test_multi=1">Single + Multi Tests</a>
         </p>
         <p><small><strong>Note:</strong> This runs single tests with Multi tests enabled via GET parameter. The recommended approach is to run tests separately using the options above.</small></p>
     </div>

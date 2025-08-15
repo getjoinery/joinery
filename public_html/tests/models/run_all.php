@@ -19,7 +19,7 @@
 	$classes = LibraryFunctions::discover_model_classes();
 	echo '<h2>Single Model Testing</h2>';
 	echo 'Found ' . count($classes) . ' model classes<br>';
-	echo '<p><em>Running single model tests (CRUD, validation, constraints). For Multi class tests, use <a href="run_multi.php">run_multi.php</a></em></p><br>';
+	echo '<p><em>Running single model tests (CRUD, validation, constraints). For Multi class tests, use <a href="run_multi">run_multi</a></em></p><br>';
 	
 	$verbose = false;
 	if(isset($_GET['verbose']) && $_GET['verbose']){

@@ -324,7 +324,7 @@ exit();
  placeholder: "Search country here...",
  width: '175px',
  ajax: {
- url: "ajax.php",
+ url: "ajax",
  dataType: 'json',
  delay: 250,
  data: function (params) {
