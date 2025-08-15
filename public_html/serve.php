@@ -144,6 +144,24 @@ $routes = [
     
     // Routes with custom handling (complex logic preserved)
     'custom' => [
+        // Plugin admin discovery
+        '/plugins/{plugin}/admin/*' => function($params, $settings, $session, $template_directory) {
+            // $params is URL segments: [0]="", [1]="plugins", [2]="controld", [3]="admin", [4]="admin_ctld_account"
+            $plugin = $params[2] ?? '';
+            $admin_page = $params[4] ?? 'index';
+            $admin_file = "plugins/{$plugin}/admin/{$admin_page}.php";
+            
+            // Debug: will show in route debug logs when enabled
+            error_log("Plugin admin route: plugin={$plugin}, admin_page={$admin_page}, file={$admin_file}, exists=" . (file_exists($admin_file) ? 'yes' : 'no'));
+            
+            if (file_exists($admin_file)) {
+                $is_valid_page = true;
+                require_once($admin_file);
+                return true;
+            }
+            return false;
+        },
+        
         // Homepage with complex alternate logic
         '/' => function($params, $settings, $session, $template_directory) {
             $alternate_page = $settings->get_setting('alternate_loggedin_homepage');

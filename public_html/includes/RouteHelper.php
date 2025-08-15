@@ -13,6 +13,88 @@ require_once('PathHelper.php');
 
 class RouteHelper {
     
+    // ========================================
+    // ROUTE DEBUGGING CONFIGURATION
+    // ========================================
+    
+    /**
+     * Enable/disable route debugging
+     * Set to true to enable comprehensive route debugging logs
+     * Set to false for production (default)
+     */
+    private static $debug_enabled = false;
+    
+    /**
+     * Debug levels for granular control
+     */
+    private static $debug_levels = [
+        'request_parsing' => true,    // Log incoming request parsing
+        'route_matching' => true,     // Log route pattern matching attempts
+        'parameter_extraction' => true, // Log parameter extraction details
+        'file_operations' => true,    // Log file existence checks and includes
+        'plugin_loading' => true,     // Log plugin route loading
+        'theme_loading' => true,      // Log theme route loading
+        'handler_execution' => true,  // Log route handler execution
+        'fallback_logic' => true,     // Log fallback attempts
+    ];
+    
+    /**
+     * Enable route debugging
+     * Call this method to turn on debugging for the current request
+     */
+    public static function enableDebug($levels = null) {
+        self::$debug_enabled = true;
+        if ($levels !== null) {
+            self::$debug_levels = array_merge(self::$debug_levels, $levels);
+        }
+    }
+    
+    /**
+     * Quick enable debug - enables debugging if specific conditions are met
+     * Call this to enable debugging based on query parameters or other conditions
+     */
+    public static function autoEnableDebug() {
+        // Enable debugging if ?debug_routes=1 is in URL
+        if (isset($_GET['debug_routes']) && $_GET['debug_routes'] == '1') {
+            self::enableDebug();
+            return true;
+        }
+        
+        // Enable debugging if X-Debug-Routes header is present
+        if (isset($_SERVER['HTTP_X_DEBUG_ROUTES'])) {
+            self::enableDebug();
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Disable route debugging
+     */
+    public static function disableDebug() {
+        self::$debug_enabled = false;
+    }
+    
+    /**
+     * Debug logging method with level control
+     * @param string $level Debug level (e.g., 'route_matching', 'parameter_extraction')
+     * @param string $message Debug message
+     * @param mixed $data Optional data to log (will be var_exported)
+     */
+    private static function debugLog($level, $message, $data = null) {
+        if (!self::$debug_enabled || !isset(self::$debug_levels[$level]) || !self::$debug_levels[$level]) {
+            return;
+        }
+        
+        $log_message = "[ROUTE_DEBUG:{$level}] {$message}";
+        if ($data !== null) {
+            $log_message .= " | Data: " . var_export($data, true);
+        }
+        
+        error_log($log_message);
+    }
+    
     /**
      * Serve static file with proper HTTP caching headers and MIME type detection
      * 
@@ -669,6 +751,12 @@ class RouteHelper {
      * @return void Exits on successful route match or redirect
      */
     public static function processRoutes($routes, $request_path) {
+        // Auto-enable debugging if requested via URL parameter or header
+        $debug_enabled = self::autoEnableDebug();
+        if ($debug_enabled) {
+            error_log("[ROUTE_DEBUG] Debugging enabled for this request");
+        }
+        
         // EXTENSIVE DEBUGGING - Log everything that comes in
         error_log("Type of request_path: " . gettype($request_path));
         error_log("Length of request_path: " . strlen($request_path ?? ''));
@@ -731,6 +819,14 @@ class RouteHelper {
         error_log("  full_path: " . var_export($full_path, true));
         error_log("  static_routes_path: " . var_export($static_routes_path, true));
         error_log("  params: " . var_export($params, true));
+        
+        self::debugLog('request_parsing', "Request parsing completed", [
+            'original_request_path' => $request_path,
+            'normalized_full_path' => $full_path,
+            'static_routes_path' => $static_routes_path,
+            'params_array' => $params,
+            'params_count' => count($params)
+        ]);
         
         // Load core dependencies - these are almost always needed for routing
         error_log("Loading core dependencies...");
@@ -828,22 +924,43 @@ class RouteHelper {
         
         // 4. Check custom routes (complex logic)
         error_log("=== STEP 4: Checking custom routes ===");
+        self::debugLog('route_matching', "Starting custom route processing", [
+            'available_routes' => array_keys($routes['custom'] ?? []),
+            'request_path' => $full_path
+        ]);
+        
         if (!empty($routes['custom'])) {
             error_log("Custom routes available: " . var_export(array_keys($routes['custom']), true));
             foreach ($routes['custom'] as $pattern => $handler) {
                 error_log("Testing custom route pattern: " . var_export($pattern, true) . " against path: " . var_export($full_path, true));
+                self::debugLog('route_matching', "Testing pattern: {$pattern}", [
+                    'pattern' => $pattern,
+                    'path' => $full_path,
+                    'params_before_handler' => $params
+                ]);
+                
                 if (self::matchesPattern($pattern, $full_path)) {
                     error_log("Custom route matched - calling handler");
+                    self::debugLog('handler_execution', "Custom route matched, calling handler", [
+                        'matched_pattern' => $pattern,
+                        'params_passed_to_handler' => $params,
+                        'handler_type' => gettype($handler)
+                    ]);
+                    
                     if ($handler($params, $settings, $session, $template_directory)) {
                         error_log("Custom route handler succeeded - exiting");
+                        self::debugLog('handler_execution', "Handler succeeded, exiting");
                         exit();
                     } else {
                         error_log("Custom route handler failed - showing 404");
+                        self::debugLog('handler_execution', "Handler failed, showing 404");
                         // Route matched but handler failed - 404
                         PathHelper::requireOnce('includes/LibraryFunctions.php');
                         LibraryFunctions::display_404_page();
                         exit();
                     }
+                } else {
+                    self::debugLog('route_matching', "Pattern did not match");
                 }
             }
             error_log("No custom routes matched");
