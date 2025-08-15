@@ -29,57 +29,45 @@
  * - Error handling for missing pages
  */
 
-// Detect if running from browser vs command line
-$is_browser = isset($_SERVER['HTTP_HOST']) && !empty($_SERVER['HTTP_HOST']);
+// Browser-only HTTP routing test - designed for web access only
 
-// Output functions for both CLI and HTML
-function output_pass($text, $is_browser = false) {
-    if ($is_browser) {
-        echo '<div style="color: #16a34a; font-family: monospace;">✅ PASS: ' . htmlspecialchars($text) . '</div>';
-    } else {
-        echo "✅ PASS: {$text}\n";
-    }
+// HTML output functions
+function output_pass($text) {
+    echo '<li style="color: #16a34a; font-family: monospace; margin: 8px 0; padding: 8px; background: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 4px;">✅ PASS: ' . htmlspecialchars($text) . '</li>';
 }
 
-function output_fail($text, $is_browser = false) {
-    if ($is_browser) {
-        echo '<div style="color: #dc2626; font-family: monospace;">❌ FAIL: ' . htmlspecialchars($text) . '</div>';
-    } else {
-        echo "❌ FAIL: {$text}\n";
-    }
+function output_fail($text) {
+    echo '<li style="color: #dc2626; font-family: monospace; margin: 8px 0; padding: 8px; background: #fef2f2; border-left: 4px solid #dc2626; border-radius: 4px;">❌ FAIL: ' . htmlspecialchars($text) . '</li>';
 }
 
-function output_info($text, $is_browser = false) {
-    if ($is_browser) {
-        echo '<div style="color: #7c3aed; font-family: monospace;">📝 ' . htmlspecialchars($text) . '</div>';
-    } else {
-        echo "📝 {$text}\n";
-    }
+function output_info($text) {
+    echo '<li style="color: #7c3aed; font-family: monospace; margin: 8px 0; padding: 8px; background: #faf5ff; border-left: 4px solid #7c3aed; border-radius: 4px;">📝 ' . htmlspecialchars($text) . '</li>';
 }
 
-// Start HTML output if running in browser
-if ($is_browser) {
-    echo '<!DOCTYPE html><html><head>';
-    echo '<title>HTTP Routing Test Results</title>';
-    echo '<meta charset="UTF-8">';
-    echo '<style>';
-    echo 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; background: #fff; }';
-    echo 'h1 { color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }';
-    echo 'h2 { color: #475569; margin-top: 30px; }';
-    echo 'h3 { color: #2563eb; margin: 20px 0 10px 0; }';
-    echo '.test-section { background: #f8fafc; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #3b82f6; }';
-    echo 'div { line-height: 1.6; }';
-    echo '.results-section { background: #fefce8; border: 1px solid #facc15; padding: 15px; margin: 20px 0; border-radius: 6px; }';
-    echo '</style>';
-    echo '</head><body>';
-    
-    echo '<h1>🚀 HTTP Routing System Test</h1>';
-    echo '<div style="background: #eff6ff; padding: 15px; border-radius: 6px; margin-bottom: 20px;">';
-    echo '<strong>Environment:</strong> Browser Mode<br>';
-    echo '<strong>Server:</strong> ' . htmlspecialchars($_SERVER['HTTP_HOST']) . '<br>';
-    echo '<strong>Timestamp:</strong> ' . date('Y-m-d H:i:s T');
-    echo '</div>';
-}
+// Start HTML output
+echo '<!DOCTYPE html><html><head>';
+echo '<title>HTTP Routing Test Results</title>';
+echo '<meta charset="UTF-8">';
+echo '<style>';
+echo 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; background: #fff; }';
+echo 'h1 { color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }';
+echo 'h2 { color: #475569; margin-top: 30px; }';
+echo 'h3 { color: #2563eb; margin: 20px 0 10px 0; }';
+echo '.test-section { background: #f8fafc; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #3b82f6; }';
+echo 'ul { list-style: none; padding: 0; margin: 0; }';
+echo 'li { margin: 8px 0; padding: 8px; border-radius: 4px; font-family: monospace; }';
+echo 'div { line-height: 1.6; }';
+echo '.results-section { background: #fefce8; border: 1px solid #facc15; padding: 15px; margin: 20px 0; border-radius: 6px; }';
+echo '.detail-item { margin: 4px 0 4px 20px; padding: 4px 8px; background: #fef2f2; border-left: 2px solid #dc2626; font-size: 12px; }';
+echo '</style>';
+echo '</head><body>';
+
+echo '<h1>🚀 HTTP Routing System Test</h1>';
+echo '<div style="background: #eff6ff; padding: 15px; border-radius: 6px; margin-bottom: 20px;">';
+echo '<strong>Environment:</strong> Browser-Only Mode<br>';
+echo '<strong>Server:</strong> ' . htmlspecialchars($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'Unknown') . '<br>';
+echo '<strong>Timestamp:</strong> ' . date('Y-m-d H:i:s T');
+echo '</div>';
 
 // Include system dependencies
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -227,18 +215,14 @@ class HttpRoutingTestRunner {
     }
     
     public function runAllTests() {
-        global $is_browser;
-        
-        if ($is_browser) {
-            echo '<h2>🌐 HTTP Response Testing</h2>';
-        } else {
-            echo "=== HTTP RESPONSE TESTING ===\n\n";
-        }
-        
-        // Initialize HTTP tester
+        // Initialize HTTP tester first
         HttpTester::init($this->settings);
-        output_info("Base URL: " . HttpTester::getBaseUrl(), $is_browser);
-        if ($is_browser) echo '<br>';
+        
+        echo '<h2>🌐 HTTP Response Testing</h2>';
+        echo '<div style="background: #f1f5f9; padding: 10px; border-radius: 6px; margin: 15px 0;">';
+        echo '<strong>Testing Mode:</strong> Browser Display with Enhanced Troubleshooting<br>';
+        echo '<strong>Base URL:</strong> ' . htmlspecialchars(HttpTester::getBaseUrl()) . '<br>';
+        echo '</div>';
         
         // Test Categories
         $this->testPublicPages();
@@ -259,14 +243,7 @@ class HttpRoutingTestRunner {
     }
     
     private function testPublicPages() {
-        global $is_browser;
-        
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>1. TESTING PUBLIC PAGES</h3>';
-        } else {
-            echo "1. TESTING PUBLIC PAGES\n";
-            echo "----------------------\n";
-        }
+        echo '<div class="test-section"><h3>1. TESTING PUBLIC PAGES</h3><ul>';
         
         $test_cases = [
             // Homepage - always test this
@@ -299,26 +276,15 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testStaticFiles() {
-        global $is_browser;
-        
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>2. TESTING STATIC FILES</h3>';
-        } else {
-            echo "2. TESTING STATIC FILES\n";
-            echo "----------------------\n";
-        }
+        echo '<div class="test-section"><h3>2. TESTING STATIC FILES</h3><ul>';
         
         $test_cases = [];
         
@@ -367,26 +333,15 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testThemeFiles() {
-        global $is_browser;
-        
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>3. TESTING THEME FILES</h3>';
-        } else {
-            echo "3. TESTING THEME FILES\n";
-            echo "---------------------\n";
-        }
+        echo '<div class="test-section"><h3>3. TESTING THEME FILES</h3><ul>';
         
         // Get current theme using ThemeHelper
         $current_theme = 'falcon'; // Default fallback
@@ -419,16 +374,13 @@ class HttpRoutingTestRunner {
             // Default theme - has actual files
             "/theme/default/includes/output.css" => "Default theme CSS",
             "/theme/default/includes/jquery-3.4.1.min.js" => "Default jQuery",
-            
+ 
+            // Default theme - has actual files
+            "/theme/sassa/assets/img/logo.svg" => "Sassa theme image",
+			
             // Current theme specific files (if different from above)
         ];
         
-        // Add current theme files if not already covered AND theme directory exists
-        if (!in_array($current_theme, ['falcon', 'tailwind', 'zoukroom', 'default']) && 
-            is_dir($_SERVER['DOCUMENT_ROOT'] . '/theme/' . $current_theme)) {
-            $theme_files_to_check["/theme/{$current_theme}/includes/FormWriterPublic.php"] = "Current theme FormWriter ({$current_theme})";
-            $theme_files_to_check["/theme/{$current_theme}/theme.json"] = "Current theme config ({$current_theme})";
-        }
         
         foreach ($theme_files_to_check as $path => $description) {
             $full_path = $_SERVER['DOCUMENT_ROOT'] . $path;
@@ -449,26 +401,15 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testThemeViews() {
-        global $is_browser;
-        
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>4. TESTING THEME VIEW FILES</h3>';
-        } else {
-            echo "4. TESTING THEME VIEW FILES\n";
-            echo "---------------------------\n";
-        }
+        echo '<div class="test-section"><h3>4. TESTING THEME VIEW FILES</h3><ul>';
         
         // Get current theme using ThemeHelper
         $current_theme = 'falcon';
@@ -515,7 +456,7 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
@@ -533,7 +474,7 @@ class HttpRoutingTestRunner {
                     if ($result['success']) {
                         $this->pass("Actual event from database: {$event_url} -> {$result['actual_status']}");
                     } else {
-                        $this->fail("Actual event from database: {$event_url} -> {$result['message']}");
+                        $this->fail("Actual event from database: {$event_url} -> {$result['message']}", $result);
                     }
                 }
             }
@@ -541,22 +482,13 @@ class HttpRoutingTestRunner {
             // Silently skip if events can't be loaded
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testPluginFiles() {
-        global $is_browser;
+        echo '<div class="test-section"><h3>5. TESTING PLUGIN FILES</h3><ul>';
         
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>5. TESTING PLUGIN FILES</h3>';
-        } else {
-            echo "5. TESTING PLUGIN FILES\n";
-            echo "----------------------\n";
-        }
+            //removed: echo "5. TESTING PLUGIN FILES\n";
         
         $test_cases = [];
         
@@ -572,26 +504,17 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testPluginRoutes() {
-        global $is_browser;
+        echo '<div class="test-section"><h3>6. TESTING PLUGIN ROUTES</h3><ul>';
         
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>6. TESTING PLUGIN ROUTES</h3>';
-        } else {
-            echo "6. TESTING PLUGIN ROUTES\n";
-            echo "-----------------------\n";
-        }
+            //removed: echo "6. TESTING PLUGIN ROUTES\n";
         
         $test_cases = [];
         
@@ -607,26 +530,17 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testAdminAccess() {
-        global $is_browser;
+        echo '<div class="test-section"><h3>7. TESTING ADMIN ACCESS</h3><ul>';
         
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>7. TESTING ADMIN ACCESS</h3>';
-        } else {
-            echo "7. TESTING ADMIN ACCESS\n";
-            echo "----------------------\n";
-        }
+            //removed: echo "7. TESTING ADMIN ACCESS\n";
         
         $test_cases = [
             // Existing admin page (should require auth)
@@ -643,26 +557,17 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testAjaxEndpoints() {
-        global $is_browser;
+        echo '<div class="test-section"><h3>8. TESTING AJAX ENDPOINTS</h3><ul>';
         
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>8. TESTING AJAX ENDPOINTS</h3>';
-        } else {
-            echo "8. TESTING AJAX ENDPOINTS\n";
-            echo "------------------------\n";
-        }
+            //removed: echo "8. TESTING AJAX ENDPOINTS\n";
         
         $test_cases = [
             // Existing AJAX endpoint
@@ -678,26 +583,17 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testUtilityPages() {
-        global $is_browser;
+        echo '<div class="test-section"><h3>9. TESTING UTILITY PAGES</h3><ul>';
         
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>9. TESTING UTILITY PAGES</h3>';
-        } else {
-            echo "9. TESTING UTILITY PAGES\n";
-            echo "------------------------\n";
-        }
+            //removed: echo "9. TESTING UTILITY PAGES\n";
         
         $test_cases = [
             // Existing utility (avoid sync scripts)
@@ -713,26 +609,17 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testContentRoutes() {
-        global $is_browser;
+        echo '<div class="test-section"><h3>10. TESTING CONTENT ROUTES</h3><ul>';
         
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>10. TESTING CONTENT ROUTES</h3>';
-        } else {
-            echo "10. TESTING CONTENT ROUTES\n";
-            echo "--------------------------\n";
-        }
+            //removed: echo "10. TESTING CONTENT ROUTES\n";
         
         $test_cases = [];
         
@@ -792,7 +679,12 @@ class HttpRoutingTestRunner {
         
         // If no real content found in database, note it
         if (empty($test_cases)) {
-            output_info("No content found in database to test", $is_browser);
+            output_info("No content found in database to test");
+        } else {
+            // Close the list before adding info, then reopen
+            echo '</ul>';
+            output_info("Testing " . count($test_cases) . " content items from database");
+            echo '<ul>';
         }
         
         // Always test nonexistent content
@@ -804,26 +696,17 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testErrorPages() {
-        global $is_browser;
+        echo '<div class="test-section"><h3>11. TESTING ERROR PAGES</h3><ul>';
         
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>11. TESTING ERROR PAGES</h3>';
-        } else {
-            echo "11. TESTING ERROR PAGES\n";
-            echo "----------------------\n";
-        }
+            //removed: echo "11. TESTING ERROR PAGES\n";
         
         $test_cases = [
             // URL that doesn't exist
@@ -836,26 +719,17 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function testRedirects() {
-        global $is_browser;
+        echo '<div class="test-section"><h3>12. TESTING URL REDIRECTS</h3><ul>';
         
-        if ($is_browser) {
-            echo '<div class="test-section"><h3>12. TESTING URL REDIRECTS</h3>';
-        } else {
-            echo "12. TESTING URL REDIRECTS\n";
-            echo "------------------------\n";
-        }
+            //removed: echo "12. TESTING URL REDIRECTS\n";
         
         $test_cases = [];
         
@@ -890,13 +764,19 @@ class HttpRoutingTestRunner {
                 }
                 
                 if (!$found_redirect) {
-                    output_info("Found " . $count . " URLs but none have redirect_url set", $is_browser);
+                    echo '</ul>';
+                    output_info("Found " . $count . " URLs but none have redirect_url set");
+                    echo '<ul>';
                 }
             } else {
-                output_info("No URLs found in database", $is_browser);
+                echo '</ul>';
+                output_info("No URLs found in database");
+                echo '<ul>';
             }
         } catch (Exception $e) {
-            output_info("Could not load URLs: " . $e->getMessage(), $is_browser);
+            echo '</ul>';
+            output_info("Could not load URLs: " . $e->getMessage());
+            echo '<ul>';
         }
         
         // Always test a URL that should not redirect
@@ -908,77 +788,110 @@ class HttpRoutingTestRunner {
             if ($result['success']) {
                 $this->pass("{$description}: {$path} -> {$result['actual_status']}");
             } else {
-                $this->fail("{$description}: {$path} -> {$result['message']}");
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
             }
         }
         
-        if ($is_browser) {
-            echo '</div>';
-        } else {
-            echo "\n";
-        }
+        echo '</ul></div>';
     }
     
     private function pass($message) {
-        global $is_browser;
-        output_pass($message, $is_browser);
+        output_pass($message);
         $this->passed++;
     }
     
-    private function fail($message) {
-        global $is_browser;
-        output_fail($message, $is_browser);
-        $this->failed++;
-    }
-    
-    private function displaySummary() {
-        global $is_browser;
+    private function fail($message, $result = null) {
         
-        if ($is_browser) {
-            $total = $this->passed + $this->failed;
-            $color = ($this->failed == 0) ? '#16a34a' : '#dc2626';
-            $icon = ($this->failed == 0) ? '✅' : '❌';
-            echo '<div style="background: #f8fafc; border: 2px solid ' . $color . '; padding: 20px; margin: 20px 0; border-radius: 8px;">';
-            echo '<h3 style="color: ' . $color . '; margin: 0 0 10px 0;">' . $icon . ' TEST SUMMARY</h3>';
-            echo '<div style="font-family: monospace; font-size: 14px;">';
-            echo "<div>PASSED: <strong style='color: #16a34a;'>{$this->passed}</strong></div>";
-            echo "<div>FAILED: <strong style='color: #dc2626;'>{$this->failed}</strong></div>";
-            echo "<div>TOTAL: <strong>{$total}</strong></div>";
-            echo '</div>';
-            if ($this->failed == 0) {
-                echo '<p style="margin: 10px 0 0 0; color: ' . $color . ';">🎉 All HTTP responses are working correctly!</p>';
-            } else {
-                echo '<p style="margin: 10px 0 0 0; color: ' . $color . ';">⚠️ Some URLs returned unexpected responses. Review failures above.</p>';
+        // Enhanced failure output with additional details
+        $enhanced_message = $message;
+        $troubleshooting_details = [];
+        
+        if ($result && is_array($result)) {
+            // Add redirect information if present
+            if (isset($result['redirect_url']) && !empty($result['redirect_url'])) {
+                $troubleshooting_details[] = "→ REDIRECTS TO: " . $result['redirect_url'];
             }
-            echo '</div>';
-        } else {
-            echo "\n=== TEST SUMMARY ===\n";
-            echo "PASSED: {$this->passed}\n";
-            echo "FAILED: {$this->failed}\n";
-            echo "TOTAL:  " . ($this->passed + $this->failed) . "\n\n";
             
-            if ($this->failed == 0) {
-                echo "✅ ALL TESTS PASSED! All HTTP responses are working correctly.\n";
-            } else {
-                echo "❌ {$this->failed} TESTS FAILED! Some URLs returned unexpected responses.\n";
+            // Add HTTP status code analysis
+            if (isset($result['actual_status'])) {
+                $status_explanation = $this->explainHttpStatus($result['actual_status']);
+                if ($status_explanation) {
+                    $troubleshooting_details[] = "→ STATUS: " . $result['actual_status'] . " (" . $status_explanation . ")";
+                }
+            }
+            
+            // Add content type information
+            if (isset($result['content_type']) && !empty($result['content_type'])) {
+                $troubleshooting_details[] = "→ CONTENT-TYPE: " . $result['content_type'];
+            }
+            
+            // Add curl error if present
+            if (isset($result['curl_error']) && !empty($result['curl_error'])) {
+                $troubleshooting_details[] = "→ CURL ERROR: " . $result['curl_error'];
+            }
+            
+            // Add request URL for context
+            if (isset($result['url'])) {
+                $troubleshooting_details[] = "→ FULL URL: " . $result['url'];
             }
         }
         
+        // Output the main failure message
+        output_fail($enhanced_message);
+        
+        // Output troubleshooting details on separate lines for better readability
+        if (!empty($troubleshooting_details)) {
+            foreach ($troubleshooting_details as $detail) {
+                echo '<li class="detail-item">' . htmlspecialchars($detail) . '</li>';
+            }
+        }
+        
+        $this->failed++;
+    }
+    
+    private function explainHttpStatus($status) {
+        $explanations = [
+            301 => "Permanent Redirect - URL moved permanently",
+            302 => "Temporary Redirect - URL temporarily moved", 
+            401 => "Unauthorized - Authentication required",
+            403 => "Forbidden - Access denied",
+            404 => "Not Found - Resource does not exist",
+            500 => "Internal Server Error - Server-side problem",
+            502 => "Bad Gateway - Upstream server error",
+            503 => "Service Unavailable - Server temporarily unavailable"
+        ];
+        
+        return $explanations[$status] ?? null;
+    }
+    
+    private function displaySummary() {
+        $total = $this->passed + $this->failed;
+        $color = ($this->failed == 0) ? '#16a34a' : '#dc2626';
+        $icon = ($this->failed == 0) ? '✅' : '❌';
+        
+        echo '<div style="background: #f8fafc; border: 2px solid ' . $color . '; padding: 20px; margin: 20px 0; border-radius: 8px;">';
+        echo '<h3 style="color: ' . $color . '; margin: 0 0 10px 0;">' . $icon . ' TEST SUMMARY</h3>';
+        echo '<div style="font-family: monospace; font-size: 14px;">';
+        echo "<div>PASSED: <strong style='color: #16a34a;'>{$this->passed}</strong></div>";
+        echo "<div>FAILED: <strong style='color: #dc2626;'>{$this->failed}</strong></div>";
+        echo "<div>TOTAL: <strong>{$total}</strong></div>";
+        echo '</div>';
+        
+        if ($this->failed == 0) {
+            echo '<p style="margin: 10px 0 0 0; color: ' . $color . ';">🎉 All HTTP responses are working correctly!</p>';
+        } else {
+            echo '<p style="margin: 10px 0 0 0; color: ' . $color . ';">⚠️ Some URLs returned unexpected responses. Review failures above.</p>';
+        }
+        echo '</div>';
+        
         // Display HTTP test results
         if (!empty(HttpTester::$test_results)) {
-            if ($is_browser) {
-                echo '<div class="results-section">';
-                echo '<h3>📋 HTTP TEST DETAILS</h3>';
-                foreach (HttpTester::$test_results as $result) {
-                    echo '<div style="font-family: monospace; font-size: 14px; margin: 5px 0;">' . htmlspecialchars($result) . '</div>';
-                }
-                echo '</div>';
-            } else {
-                echo "\n=== HTTP TEST DETAILS ===\n";
-                foreach (HttpTester::$test_results as $result) {
-                    echo $result . "\n";
-                }
+            echo '<div class="results-section">';
+            echo '<h3>📋 HTTP TEST DETAILS</h3>';
+            foreach (HttpTester::$test_results as $result) {
+                echo '<div style="font-family: monospace; font-size: 14px; margin: 5px 0;">' . htmlspecialchars($result) . '</div>';
             }
+            echo '</div>';
         }
     }
 }
@@ -987,11 +900,9 @@ class HttpRoutingTestRunner {
 $runner = new HttpRoutingTestRunner($settings, $dblink);
 $runner->runAllTests();
 
-// Close HTML if running in browser
-if ($is_browser) {
-    echo '<div style="margin-top: 40px; padding: 20px; background: #f8fafc; border-radius: 8px; color: #64748b; text-align: center;">';
-    echo 'HTTP test completed at ' . date('Y-m-d H:i:s T') . ' on ' . htmlspecialchars($_SERVER['HTTP_HOST']);
-    echo '</div>';
-    echo '</body></html>';
-}
+// Close HTML output
+echo '<div style="margin-top: 40px; padding: 20px; background: #f8fafc; border-radius: 8px; color: #64748b; text-align: center;">';
+echo 'HTTP test completed at ' . date('Y-m-d H:i:s T') . ' on ' . htmlspecialchars($_SERVER['HTTP_HOST'] ?? 'Unknown');
+echo '</div>';
+echo '</body></html>';
 ?>
