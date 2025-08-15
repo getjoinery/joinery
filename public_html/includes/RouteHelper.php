@@ -284,24 +284,18 @@ class RouteHelper {
      * 'valid_page' option) and returns the route configuration merged with the pattern 
      * and path for further processing.
      * 
-     * @param string $path Request path
+     * @param string $path Request path (already normalized by caller)
      * @param array $routes Routes configuration
      * @return array|false Route configuration if matched, false otherwise
      */
-    public static function matchRoute($path, $routes) {
-        // Validate and sanitize the path first
-        $sanitized_path = self::validatePath($path);
-        if ($sanitized_path === false) {
-            return false;
-        }
-        
+    private static function matchRoute($path, $routes) {
+        // No validation needed - callers provide normalized paths
         foreach ($routes as $pattern => $config) {
             if (self::matchesPattern($pattern, $path)) {
                 // Auto-set valid page when route matches (unless explicitly disabled)
                 global $is_valid_page;
                 $is_valid_page = ($config['valid_page'] ?? true) ? true : false;
-                $result = array_merge($config, ['pattern' => $pattern, 'path' => $sanitized_path]);
-                return $result;
+                return array_merge($config, ['pattern' => $pattern, 'path' => $path]);
             }
         }
         return false;
@@ -321,7 +315,6 @@ class RouteHelper {
      * @return bool True if handled successfully
      */
     public static function handleStaticRoute($route, $params, $template_directory) {
-        $pattern = $route['pattern'];
         $path = $route['path'];
         
         // ALWAYS check plugin activation for ANY plugin path - non-overridable security
@@ -336,26 +329,12 @@ class RouteHelper {
         // Static routes should NEVER handle view files - that's dynamic content
         // View files should be handled by simple or content routes
         
-        // Handle wildcard and semantic placeholder static routes
-        if (strpos($pattern, '*') !== false || strpos($pattern, '{') !== false) {
-            // Handle semantic placeholders like /plugins/{plugin}/assets/* or /theme/{theme}/assets/*
-            // Extract parameters and build file path
-            $route_params = self::extractRouteParams($pattern, $path);
-            
-            // Build actual file path from request path
-            $file_path = PathHelper::getAbsolutePath($path);
-            if (file_exists($file_path)) {
-                $cache_seconds = $route['cache'] ?? 43200;
-                $exclude_from_cache = $route['exclude_from_cache'] ?? [];
-                return self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache);
-            }
-        } else {
-            // Handle specific file routes
-            $file_path = PathHelper::getAbsolutePath($path);
-            if (file_exists($file_path)) {
-                $cache_seconds = $route['cache'] ?? 43200;
-                return self::serveStaticFile($file_path, $cache_seconds);
-            }
+        // Unified path - all static routes work the same way
+        $file_path = PathHelper::getAbsolutePath($path);
+        if (file_exists($file_path)) {
+            $cache_seconds = $route['cache'] ?? 43200;
+            $exclude_from_cache = $route['exclude_from_cache'] ?? [];
+            return self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache);
         }
         
         return false;
@@ -668,16 +647,8 @@ class RouteHelper {
         if ($pattern[0] !== '/') $pattern = '/' . $pattern;
         if ($path[0] !== '/') $path = '/' . $path;
         
-        // Use preg_match with named capture groups
-        $regex_pattern = preg_quote($pattern, '#');
-        
-        // Replace semantic placeholders with named capture groups
-        $regex_pattern = preg_replace('/\\\\{([^}]+)\\\\}/', '(?P<$1>[^/]+)', $regex_pattern);
-        
-        // Replace wildcards with multi-segment captures  
-        $regex_pattern = str_replace('\\\\*', '(.*)', $regex_pattern);
-        
-        $final_pattern = '#^' . $regex_pattern . '$#';
+        // Build regex pattern with named capture groups
+        $final_pattern = self::buildRouteRegex($pattern, true);
         
         // Match against the path and extract named groups
         if (preg_match($final_pattern, $path, $matches)) {
@@ -692,6 +663,70 @@ class RouteHelper {
         return $params;
     }
     
+    /**
+     * Display a 404 error page and exit
+     * 
+     * Centralizes the 404 error handling logic used throughout route processing.
+     * Ensures consistent error handling and reduces code duplication.
+     * 
+     * @param string $reason Optional reason for the 404 (for logging)
+     * @param array $debug_context Optional debug context for logging
+     * @return never This method always exits
+     */
+    private static function show404($reason = 'Route not found', $debug_context = []) {
+        // Log the 404 with reason
+        error_log("RouteHelper 404: " . $reason);
+        
+        // Add debug logging if enabled
+        self::debugLog('fallback_logic', "Showing 404: {$reason}", $debug_context);
+        
+        // Load LibraryFunctions if not already loaded
+        PathHelper::requireOnce('includes/LibraryFunctions.php');
+        
+        // Display the 404 page
+        LibraryFunctions::display_404_page();
+        
+        // Exit to prevent further processing
+        exit();
+    }
+
+    /**
+     * Build a regex pattern from a route pattern
+     * 
+     * Converts route patterns with placeholders and wildcards into regex patterns.
+     * Centralizes the pattern conversion logic used by both matchesPattern() and extractRouteParams().
+     * 
+     * Examples:
+     * - '/page/{slug}' becomes '#^/page/([^/]+)$#' (unnamed) or '#^/page/(?P<slug>[^/]+)$#' (named)
+     * - '/admin/*' becomes '#^/admin/(.*)$#'
+     * - '/user/{id}/posts/{postId}' works with ANY placeholder names
+     * 
+     * @param string $pattern Route pattern (e.g., '/page/{slug}', '/admin/*')
+     * @param bool $named_groups Whether to use named capture groups (for parameter extraction)
+     * @return string Regex pattern ready for preg_match
+     */
+    private static function buildRouteRegex($pattern, $named_groups = false) {
+        // Quote the pattern for regex safety
+        $regex_pattern = preg_quote($pattern, '#');
+        
+        if ($named_groups) {
+            // Replace semantic placeholders with named capture groups for extraction
+            // This captures ANY placeholder name, not just predefined ones
+            $regex_pattern = preg_replace('/\\\\{([^}]+)\\\\}/', '(?P<$1>[^/]+)', $regex_pattern);
+        } else {
+            // Replace semantic placeholders with simple capture groups for matching
+            // Support ANY placeholder name, not just predefined ones
+            // This fixes the bug where matchesPattern() only worked with hardcoded names
+            $regex_pattern = preg_replace('/\\\\{[^}]+\\\\}/', '([^/]+)', $regex_pattern);
+        }
+        
+        // Replace wildcards with multi-segment captures
+        $regex_pattern = str_replace('\\*', '(.*)', $regex_pattern);
+        
+        // Return complete regex pattern with delimiters
+        return '#^' . $regex_pattern . '$#';
+    }
+
     /**
      * Check if route pattern matches the request path
      * 
@@ -714,19 +749,10 @@ class RouteHelper {
         
         // Handle patterns with wildcards or parameters
         if (strpos($pattern, '*') !== false || strpos($pattern, '{') !== false) {
-            $regex_pattern = preg_quote($pattern, '#');
+            // Build regex pattern without named groups (just for matching)
+            $final_pattern = self::buildRouteRegex($pattern, false);
             
-            // Replace semantic placeholders (single segments)
-            $regex_pattern = preg_replace('/\\\\{(plugin|theme|file|slug|id|path)\\\\}/', '([^/]+)', $regex_pattern);
-            
-            // Replace wildcard with multi-segment match (everything from this point)
-            $regex_pattern = str_replace('\\*', '(.*)', $regex_pattern);
-            
-            $final_pattern = '#^' . $regex_pattern . '$#';
-            
-            $result = preg_match($final_pattern, $path);
-            
-            return $result;
+            return (bool) preg_match($final_pattern, $path);
         }
         
         return false;
@@ -894,11 +920,10 @@ class RouteHelper {
                 error_log("Static route handled successfully - exiting");
                 exit();
             } else {
-                error_log("Static route matched but handler failed - showing 404");
-                // Route matched but handler failed - 404
-                PathHelper::requireOnce('includes/LibraryFunctions.php');
-                LibraryFunctions::display_404_page();
-                exit();
+                self::show404('Static route matched but handler failed', [
+                    'route' => $route,
+                    'path' => $full_path
+                ]);
             }
         }
         error_log("No static routes matched");
@@ -915,7 +940,9 @@ class RouteHelper {
                     $routes[$type] = [];
                 }
                 error_log("Merging {$type} routes: " . count($plugin_type_routes) . " routes");
-                // Plugin routes go FIRST in each category - prepend instead of append
+                // MERGE #2: PREPEND all plugin routes before main routes
+                // This ensures plugins can override core functionality
+                // Order: [all plugin routes] then [main routes]
                 $routes[$type] = array_merge($plugin_type_routes, $routes[$type]);
             }
         } else {
@@ -952,12 +979,10 @@ class RouteHelper {
                         self::debugLog('handler_execution', "Handler succeeded, exiting");
                         exit();
                     } else {
-                        error_log("Custom route handler failed - showing 404");
-                        self::debugLog('handler_execution', "Handler failed, showing 404");
-                        // Route matched but handler failed - 404
-                        PathHelper::requireOnce('includes/LibraryFunctions.php');
-                        LibraryFunctions::display_404_page();
-                        exit();
+                        self::show404('Custom route handler failed', [
+                            'pattern' => $pattern,
+                            'path' => $full_path
+                        ]);
                     }
                 } else {
                     self::debugLog('route_matching', "Pattern did not match");
@@ -973,10 +998,10 @@ class RouteHelper {
             if (self::handleDynamicRoute($route, $params, $template_directory)) {
                 exit();
             } else {
-                // Route matched but handler failed - 404
-                PathHelper::requireOnce('includes/LibraryFunctions.php');
-                LibraryFunctions::display_404_page();
-                exit();
+                self::show404('Dynamic route matched but handler failed', [
+                    'route' => $route,
+                    'path' => $full_path
+                ]);
             }
         }
         
@@ -1003,8 +1028,7 @@ class RouteHelper {
         }
         
         // 8. Final fallback - 404
-        PathHelper::requireOnce('includes/LibraryFunctions.php');
-        LibraryFunctions::display_404_page();
+        self::show404('No matching route found', ['path' => $request_path]);
     }
     
     /**
@@ -1052,6 +1076,8 @@ class RouteHelper {
                     if (is_array($routes)) {
                         foreach ($routes as $type => $type_routes) {
                             if (isset($all_plugin_routes[$type]) && is_array($type_routes)) {
+                                // MERGE #1: Combine routes from multiple plugins
+                                // Later plugins can override earlier ones (last wins)
                                 $all_plugin_routes[$type] = array_merge($all_plugin_routes[$type], $type_routes);
                             }
                         }
