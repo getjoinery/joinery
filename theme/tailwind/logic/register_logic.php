@@ -117,7 +117,7 @@ function register_logic($get_vars, $post_vars){
 		if (User::GetByEmail($fixed_fields['usr_email'])) {
 			throw new SystemDisplayableError(
 				'An account has already been registered with this email address.  Please go back and double
-				check the email you entered or <a href="/password-reset-1.php">click here</a> if you forgot
+				check the email you entered or <a href="/password-reset-1">click here</a> if you forgot
 				your password.');
 		}
 		else{

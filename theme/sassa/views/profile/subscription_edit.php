@@ -205,7 +205,7 @@ About Area
         <div class="container ">
             <div class="row gy-5 align-items-center">
                     <div class="consultation-area">
-                        <form action="mail.php" method="POST" class="consultation-form">
+                        <form action="mail" method="POST" class="consultation-form">
                             <h4 class="title mb-30 mt-n2 text-center">Cancel Subscription</h4>
 							<p class="text-center">Your account will remain active until the last day of your subscription.</p>
                             <div class="row">
