@@ -477,48 +477,29 @@ class RouteHelper {
             ], EXTR_SKIP);
         }
         
-        // Try to load the view file with theme override support
-        // BUT preserve variable scope by including directly instead of using ThemeHelper::includeThemeFile()
-        
-        // Get theme name
-        $settings = Globalvars::get_instance();
-        $theme_name = $settings->get_setting('theme_template', true, true);
-        
-        // Try theme-specific view first
-        if ($theme_name) {
-            $theme_file = PathHelper::getIncludePath("theme/{$theme_name}/{$view_path}.php");
-            if (file_exists($theme_file)) {
-                require_once($theme_file);
-                return true;
-            }
+        // Prepare view variables
+        $viewVariables = ['params' => $route_params, 'is_valid_page' => $is_valid_page];
+
+        if ($model_instance) {
+            // Add model instance with its class name as key (lowercase)
+            // Views expect the variable name to match the lowercase model name
+            // e.g., Page model -> $page, Product model -> $product
+            $modelKey = strtolower($route['model']);
+            $viewVariables[$modelKey] = $model_instance;
         }
-        
-        // Try base view
-        $base_file = PathHelper::getIncludePath($view_path . '.php');
-        if (file_exists($base_file)) {
-            require_once($base_file);
+
+        // Include view with explicit variables
+        if (ThemeHelper::includeThemeFile($view_path . '.php', null, $viewVariables)) {
             return true;
         }
-        
+
         // Try default view if specified
         if (!empty($route['default_view'])) {
-            // Try theme-specific default view first
-            if ($theme_name) {
-                $theme_default_file = PathHelper::getIncludePath("theme/{$theme_name}/{$route['default_view']}.php");
-                if (file_exists($theme_default_file)) {
-                    require_once($theme_default_file);
-                    return true;
-                }
-            }
-            
-            // Try base default view
-            $base_default_file = PathHelper::getIncludePath($route['default_view'] . '.php');
-            if (file_exists($base_default_file)) {
-                require_once($base_default_file);
+            if (ThemeHelper::includeThemeFile($route['default_view'] . '.php', null, $viewVariables)) {
                 return true;
             }
         }
-        
+
         return false;
     }
     
@@ -887,7 +868,7 @@ class RouteHelper {
         // Try to find view file for any remaining paths
         $view_file = 'views/' . trim($request_path, '/') . '.php';
         error_log("Trying view fallback file: " . var_export($view_file, true));
-        if (ThemeHelper::includeThemeFile($view_file)) {
+        if (ThemeHelper::includeThemeFile($view_file, null, ['is_valid_page' => true])) {
             error_log("View fallback succeeded - exiting");
             $is_valid_page = true;
             exit();
