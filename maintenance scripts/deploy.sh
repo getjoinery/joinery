@@ -33,7 +33,20 @@ perform_rollback() {
     
     # Move the entire failed public_html to preserve it for debugging
     if [[ -d "$public_html_dir" ]]; then
-        mv "$public_html_dir" "$failed_dir" || {
+        mv "$public_html_dir" "$failed_dir" && {
+            # Create .htaccess to block web access to failed deployment directory
+            echo "Creating .htaccess to block web access to failed deployment directory..."
+            cat > "$failed_dir/.htaccess" << 'EOF'
+# Block all web access to failed deployment directory
+Order Deny,Allow
+Deny from all
+
+# Alternative syntax for Apache 2.4+
+<RequireAll>
+    Require all denied
+</RequireAll>
+EOF
+        } || {
             echo "ERROR: Could not move failed deployment. Attempting alternative cleanup..."
             
             # Alternative: Thorough directory-by-directory cleanup
@@ -566,6 +579,19 @@ mkdir /var/www/html/$TARGET_SITE/public_html_last
 if [[ -d /var/www/html/$TARGET_SITE/public_html ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html)" ]]; then
     mv /var/www/html/$TARGET_SITE/public_html/* /var/www/html/$TARGET_SITE/public_html_last/ 2>/dev/null || true
 fi
+
+# Create .htaccess to block web access to backup directory
+echo "Creating .htaccess to block web access to backup directory..."
+cat > /var/www/html/$TARGET_SITE/public_html_last/.htaccess << 'EOF'
+# Block all web access to backup directory
+Order Deny,Allow
+Deny from all
+
+# Alternative syntax for Apache 2.4+
+<RequireAll>
+    Require all denied
+</RequireAll>
+EOF
 
 # DO THE MAIN CODE DEPLOY (with smart theme/plugin merging)
 echo "Deploying main application code..."
