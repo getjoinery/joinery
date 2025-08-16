@@ -30,7 +30,7 @@ class MultiModelTester extends ModelTester {
      * Main test execution for Multi classes
      * Override parent method with compatible signature
      */
-    public function test($model_instance = null, $debug = false) {
+    public function test($model_instance = null, $debug = false, $read_only = false) {
         // Set maximum execution time for the entire test
         set_time_limit(15);
         
