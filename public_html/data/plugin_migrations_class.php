@@ -47,10 +47,11 @@ class PluginMigration extends SystemBase {
     public static $required_fields = array('plm_plugin_name', 'plm_migration_id', 'plm_version');
 
     public static $field_constraints = array(
-        'plm_plugin_name_migration_id_unique' => array(
-            'type' => 'unique',
-            'fields' => array('plm_plugin_name', 'plm_migration_id')
-        )
+        // Note: Unique constraints should be defined in field_specifications, not field_constraints
+        // 'plm_plugin_name_migration_id_unique' => array(
+        //     'type' => 'unique',
+        //     'fields' => array('plm_plugin_name', 'plm_migration_id')
+        // )
     );
 
     public static $zero_variables = array();
