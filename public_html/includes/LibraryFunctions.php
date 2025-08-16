@@ -493,33 +493,56 @@ class LibraryFunctions {
 		return $protocol . '://' . $host . $path;
 	}
 	
-	static function get_tables_and_columns(){
+	static function get_tables_and_columns($table_name = null){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-
-		$sql = '		select
-			t.table_name,
-			array_agg(c.column_name::text) as columns
-		from
-			information_schema.tables t
-		inner join information_schema.columns c on
-			t.table_name = c.table_name
-		where
-			t.table_schema = \'public\'
-			--and t.table_type= \'BASE TABLE\'
-			and c.table_schema = \'public\'
-		group by t.table_name;	';
-		try{
-			$q = $dblink->prepare($sql);
-			//$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
+		if ($table_name !== null) {
+			// Optimized query for single table
+			$sql = "SELECT 
+				t.table_name,
+				array_agg(c.column_name::text) as columns
+			FROM
+				information_schema.tables t
+			INNER JOIN information_schema.columns c ON
+				t.table_name = c.table_name
+			WHERE
+				t.table_schema = 'public'
+				AND c.table_schema = 'public'
+				AND t.table_name = :table_name
+			GROUP BY t.table_name";
+			
+			try {
+				$q = $dblink->prepare($sql);
+				$q->bindParam(':table_name', $table_name, PDO::PARAM_STR);
+				$q->execute();
+				$q->setFetchMode(PDO::FETCH_OBJ);
+			} catch(PDOException $e) {
+				$dbhelper->handle_query_error($e);
+			}
+		} else {
+			// Existing query for all tables (unchanged)
+			$sql = '		select
+				t.table_name,
+				array_agg(c.column_name::text) as columns
+			from
+				information_schema.tables t
+			inner join information_schema.columns c on
+				t.table_name = c.table_name
+			where
+				t.table_schema = \'public\'
+				--and t.table_type= \'BASE TABLE\'
+				and c.table_schema = \'public\'
+			group by t.table_name;	';
+			
+			try {
+				$q = $dblink->prepare($sql);
+				$q->execute();
+				$q->setFetchMode(PDO::FETCH_OBJ);
+			} catch(PDOException $e) {
+				$dbhelper->handle_query_error($e);
+			}
 		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-		
 		
 		$tables_and_columns = array();
 		while ($row = $q->fetch()) {

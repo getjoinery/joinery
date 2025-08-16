@@ -2,6 +2,7 @@
 require_once('PathHelper.php');
 require_once('SqlBuilder.php');
 require_once('FieldConstraints.php');
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 
 interface CustomErrorPage {
@@ -670,39 +671,17 @@ abstract class SystemBase {
 			}	
 		}
 
-		$sql = '		select
-			t.table_name,
-			array_agg(c.column_name::text) as columns
-		from
-			information_schema.tables t
-		inner join information_schema.columns c on
-			t.table_name = c.table_name
-		where
-			t.table_schema = \'public\'
-			--and t.table_type= \'BASE TABLE\'
-			and c.table_schema = \'public\'
-		group by t.table_name;	';
-		try{
-			$q = $dblink->prepare($sql);
-			//$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}	
-		
-		//MAKE A LIST OF FOUND FOREIGN KEYS
+		// Use LibraryFunctions method instead of duplicate query
+		$tables_and_columns = LibraryFunctions::get_tables_and_columns();
+
+		// Convert to the format expected by the existing foreign key detection logic
+		// MAKE A LIST OF FOUND FOREIGN KEYS (preserving original comment)
 		$found_foreign_keys = array();
-		while ($row = $q->fetch()) {
-			$table_name = $row->table_name;
-			$columns = $row->columns;
-			$columns_array = explode(',', trim($columns, '{}'));
-			
-			foreach($columns_array as $column){
-				if(str_contains($column, static::$pkey_column)){
-					if($debug){
-						echo static::$pkey_column . ' is in ' .$column. "\n<br>";
+		foreach ($tables_and_columns as $table_name => $columns) {
+			foreach ($columns as $column) {
+				if (str_contains($column, static::$pkey_column)) {
+					if ($debug) {
+						echo static::$pkey_column . ' is in ' . $column . "\n<br>";
 					}
 					$found_foreign_keys[$column] = $table_name;
 				}

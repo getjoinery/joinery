@@ -136,6 +136,27 @@
 			}
 		}
 		
+		// Step 2.5: Fix primary key constraints if needed
+		if ($upgrade || $cleanup) {
+			echo "-----PRIMARY KEY FIXES-----<br>\n";
+			$primary_key_result = $database_updater->fixPrimaryKeys($classes);
+			
+			if (!$primary_key_result['success']) {
+				echo 'Primary key fixes failed:<br>' . implode('<br>', $primary_key_result['errors']) . "<br>\n";
+			}
+			
+			// Display results
+			if (!empty($primary_key_result['messages'])) {
+				echo implode('<br>', $primary_key_result['messages']) . "<br>\n";
+			}
+			
+			if (!empty($primary_key_result['warnings'])) {
+				foreach ($primary_key_result['warnings'] as $warning) {
+					echo 'WARNING: ' . $warning . "<br>\n";
+				}
+			}
+		}
+		
 		// Step 3: Manage unique constraints
 		echo "-----UNIQUE CONSTRAINTS-----<br>\n";
 		$constraint_result = $database_updater->manageUniqueConstraints($classes);

@@ -1,4 +1,6 @@
 <?php
+require_once('PathHelper.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 /**
  * PluginManager - Combined plugin management system
@@ -1257,14 +1259,12 @@ class PluginSystemRepair {
                 $missing_columns = [];
                 $field_specifications = Plugin::$field_specifications;
                 
+                // Get columns for plg_plugins table once (much more efficient than N queries)
+                $tables_and_columns = LibraryFunctions::get_tables_and_columns('plg_plugins');
+                $plugin_columns = isset($tables_and_columns['plg_plugins']) ? $tables_and_columns['plg_plugins'] : array();
+
                 foreach ($field_specifications as $field_name => $field_specs) {
-                    $check_sql = "SELECT column_name FROM information_schema.columns 
-                                 WHERE table_name = 'plg_plugins' AND column_name = ?";
-                    $q = $dblink->prepare($check_sql);
-                    $q->execute([$field_name]);
-                    $result = $q->fetch(PDO::FETCH_ASSOC);
-                    
-                    if (!$result) {
+                    if (!isset($plugin_columns[$field_name])) {
                         $missing_columns[] = $field_name;
                         $this->results['issues_found'][] = "Missing column: plg_plugins.{$field_name}";
                     }
@@ -1291,14 +1291,12 @@ class PluginSystemRepair {
                 // Dry run - manually check columns
                 $field_specifications = Plugin::$field_specifications;
                 
+                // Get columns for plg_plugins table once (much more efficient than N queries)
+                $tables_and_columns = LibraryFunctions::get_tables_and_columns('plg_plugins');
+                $plugin_columns = isset($tables_and_columns['plg_plugins']) ? $tables_and_columns['plg_plugins'] : array();
+
                 foreach ($field_specifications as $field_name => $field_specs) {
-                    $check_sql = "SELECT column_name FROM information_schema.columns 
-                                 WHERE table_name = 'plg_plugins' AND column_name = ?";
-                    $q = $dblink->prepare($check_sql);
-                    $q->execute([$field_name]);
-                    $result = $q->fetch(PDO::FETCH_ASSOC);
-                    
-                    if (!$result) {
+                    if (!isset($plugin_columns[$field_name])) {
                         $this->results['issues_found'][] = "Missing column: plg_plugins.{$field_name}";
                     }
                 }
