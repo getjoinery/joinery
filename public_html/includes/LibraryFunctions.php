@@ -1598,7 +1598,7 @@ class LibraryFunctions {
 				$context .= " for record: " . json_encode($p_keys);
 			}
 			
-			throw new PDOException($context . " - " . $e->getMessage(), $e->getCode(), $e);
+			throw new PDOException($context . " - " . $e->getMessage(), (int)$e->getCode(), $e);
 		}
 
 			

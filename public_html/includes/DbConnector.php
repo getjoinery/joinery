@@ -113,7 +113,7 @@ class DbConnector {
 	}				
 
 	function handle_query_error($e) {
-		require_once(__DIR__ . '/Exceptions/DatabaseException.php');
+		require_once(__DIR__ . '/ErrorClasses.php');
 		
 		$error_context = "DATABASE ERROR CONTEXT:\n";
 		
@@ -126,7 +126,7 @@ class DbConnector {
 		}
 		
 		// Create DatabaseException with context
-		$dbException = new DatabaseException($e->getMessage(), $e->getCode(), $e);
+		$dbException = new DatabaseException($e->getMessage(), (int)$e->getCode(), $e);
 		$dbException->setContext(['query_params' => $this->last_query_params]);
 		
 		throw $dbException;
