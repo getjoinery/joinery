@@ -98,7 +98,7 @@ Career Area
 						echo $formwriter->new_form_button('Add to Cart' , 'th-btn', 'full');
 					}	
 					echo $formwriter->end_form(true);
-					$product->output_javascript(array(), $formwriter);
+					$product->output_javascript($formwriter, array());
 				}
 				?>
 							
