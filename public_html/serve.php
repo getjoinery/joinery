@@ -84,7 +84,8 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - 'model_file' => 'path/to/model_class' - Explicit model file path (required when model specified)
  * - 'check_setting' => 'setting_name' - Only serve if setting is active
  * - 'valid_page' => false - Don't count this route for statistics (default: true)
- * - 'default_view' => 'path/file' - Fallback view when no specific file matches  
+ * - 'default_view' => 'path/file' - Fallback view when no specific file matches
+ * - 'min_permission' => 10 - Minimum permission level required to access route (uses SessionControl)
  *
  * Custom routes:
  * - PHP closure that returns true if handled, false otherwise
@@ -127,7 +128,7 @@ $routes = [
         '/admin/*' => ['view' => 'adm/{path}'],
         '/ajax/*' => ['view' => 'ajax/{file}'],
         '/utils/*' => ['view' => 'utils/{file}'],
-        '/tests/*' => ['view' => 'tests/{path}'],  // Test routes probably shouldn't be in production
+        '/tests/*' => ['view' => 'tests/{path}', 'min_permission' => 10],  // Test routes probably shouldn't be in production
         
         // Optional: Explicit route for views directory access (if needed)
         '/views/*' => ['view' => 'views/{path}'],
