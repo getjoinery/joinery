@@ -292,6 +292,12 @@ class RouteHelper {
         // No validation needed - callers provide normalized paths
         foreach ($routes as $pattern => $config) {
             if (self::matchesPattern($pattern, $path)) {
+                // Check permissions before processing route
+                if (is_array($config) && isset($config['min_permission'])) {
+                    $session = SessionControl::get_instance();
+                    $session->check_permission($config['min_permission']);
+                }
+                
                 // Auto-set valid page when route matches (unless explicitly disabled)
                 global $is_valid_page;
                 $is_valid_page = ($config['valid_page'] ?? true) ? true : false;
