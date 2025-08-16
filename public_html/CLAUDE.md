@@ -8,6 +8,25 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **Key Entry Point:** `serve.php` - All requests are routed through this front controller using RouteHelper.php
 
+## CRITICAL: File Include Rules
+
+**NEVER use `$_SERVER['DOCUMENT_ROOT']` for include paths!**
+
+### Include Path Rules:
+- **Files in `/includes/`**: Use `PathHelper::requireOnce('includes/filename.php')` (or direct `require_once('filename.php')` only if always called from within `/includes/`)
+- **PathHelper itself**: Use `require_once(__DIR__ . '/relative/path/to/PathHelper.php')` - adjust the relative path based on where you're including from
+- **All other files**: Use `PathHelper::requireOnce('path/to/file.php')`
+
+```php
+// ✅ CORRECT
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');  // from /data/ directory
+require_once(__DIR__ . '/PathHelper.php');              // from /includes/ directory
+
+// ❌ WRONG - NEVER do this
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/filename.php');
+```
+
 ## Custom Slash Commands
 
 **Location:** `/home/user1/.claude/commands/`
