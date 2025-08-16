@@ -1426,7 +1426,7 @@ class PluginSystemRepair {
      */
     private function checkPluginDirectories($dblink, $dry_run) {
         try {
-            $plugins_dir = $_SERVER['DOCUMENT_ROOT'] . '/plugins';
+            $plugins_dir = PathHelper::getBasePath() . '/plugins';
             
             if (!is_dir($plugins_dir)) {
                 $this->results['warnings'][] = "Plugins directory does not exist: {$plugins_dir}";
