@@ -2,7 +2,7 @@
 require_once('PathHelper.php');
 require_once('SqlBuilder.php');
 require_once('FieldConstraints.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 
 interface CustomErrorPage {
