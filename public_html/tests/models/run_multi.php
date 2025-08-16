@@ -22,6 +22,9 @@ PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 
+// SAFETY: Set hard time limit for test execution (15 seconds)
+set_time_limit(15);
+
 // Enable Multi testing and disable single tests
 define('TEST_MULTI', true);
 define('MULTI_TESTS_ONLY', true);
@@ -41,9 +44,44 @@ foreach($classes as $class) {
 }
 
 echo '<h2>Multi Class Testing</h2>';
+
+// Show which database is being used
+try {
+	$dbconnector = DbConnector::get_instance();
+	$dblink = $dbconnector->get_db_link();
+	$sql = "SELECT current_database() as db_name";
+	$q = $dblink->prepare($sql);
+	$q->execute();
+	$db_info = $q->fetch(PDO::FETCH_ASSOC);
+	
+	$test_mode = false;
+	if (method_exists($dbconnector, 'is_test_mode')) {
+		$test_mode = $dbconnector->is_test_mode();
+	}
+	
+	echo '<div style="background: #f0f8ff; border: 1px solid #007bff; padding: 10px; margin: 10px 0; border-radius: 5px;">';
+	echo '<strong>🗄️ Database:</strong> ' . htmlspecialchars($db_info['db_name']);
+	if ($test_mode) {
+		echo ' <span style="color: #007bff; font-weight: bold;">(TEST MODE)</span>';
+	} else {
+		echo ' <span style="color: #28a745; font-weight: bold;">(LIVE MODE)</span>';
+	}
+	echo '</div>';
+	
+} catch (Exception $e) {
+	echo '<div style="background: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin: 10px 0; border-radius: 5px;">';
+	echo '<strong>⚠️ Warning:</strong> Could not determine database: ' . htmlspecialchars($e->getMessage());
+	echo '</div>';
+}
+
 echo '<div style="background: #d1ecf1; padding: 10px; border: 1px solid #bee5eb; margin: 10px 0; border-radius: 4px;">';
 echo '<strong>ℹ️ INFO:</strong> Testing with <strong>dynamically calculated records per model</strong> (capped at 20) for faster execution<br>';
 echo '<small>Record count is calculated based on field complexity to ensure adequate test coverage.</small>';
+echo '</div>';
+
+// Display time limit safety notice
+echo '<div style="background: #fff3cd; border: 1px solid #ffc107; padding: 5px 10px; margin: 5px 0; border-radius: 3px; font-size: 0.9em;">';
+echo '⏱️ <strong>Safety Time Limit:</strong> Test execution will automatically stop after 15 seconds';
 echo '</div>';
 echo 'Found ' . count($classes) . ' model classes<br>';
 echo '<p><em>Multi class testing validates collection classes (MultiUser, MultiProduct, etc.) by testing their query generation, filtering, ordering, and pagination against direct SQL queries.</em></p>';
