@@ -1718,15 +1718,16 @@ class ModelTester {
         $dblink = $dbconnector->get_db_link();
         
         try {
-            // Check if table exists
-            $tables_and_columns = $this->get_table_columns($table_name, $dblink);
+            // Check if table exists - use enhanced LibraryFunctions method with table parameter
+            $tables_and_columns = LibraryFunctions::get_tables_and_columns($table_name);
+            $table_columns = isset($tables_and_columns[$table_name]) ? $tables_and_columns[$table_name] : array();
             
-            if (empty($tables_and_columns)) {
+            if (empty($table_columns)) {
                 $this->test_fail("Table '{$table_name}' does not exist in database for model {$model_class}");
                 return;
             }
             
-            $live_columns = array_keys($tables_and_columns);
+            $live_columns = array_values($table_columns);
             
             // Check if expected primary key column exists
             if (!in_array($expected_pkey, $live_columns)) {
@@ -1747,36 +1748,6 @@ class ModelTester {
             
         } catch (Exception $e) {
             $this->test_warn("Could not validate primary key configuration for {$model_class}: " . $e->getMessage());
-        }
-    }
-    
-    /**
-     * Get columns for a specific table
-     * Returns array with column_name => column_name mapping
-     */
-    private function get_table_columns($table_name, $dblink) {
-        $columns = array();
-        
-        try {
-            $sql = "SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_schema = 'public' 
-                      AND table_name = ?
-                    ORDER BY ordinal_position";
-            
-            $q = $dblink->prepare($sql);
-            $q->execute([$table_name]);
-            $results = $q->fetchAll(PDO::FETCH_ASSOC);
-            
-            foreach ($results as $row) {
-                $column_name = $row['column_name'];
-                $columns[$column_name] = $column_name;
-            }
-            
-            return $columns;
-            
-        } catch (PDOException $e) {
-            throw new Exception("Failed to get column information for table {$table_name}: " . $e->getMessage());
         }
     }
     

@@ -197,10 +197,11 @@ class DatabaseUpdater {
             $q = $dblink->prepare($sql);
             $q->execute();
             
-            // Add primary key constraint
-            $sql = 'ALTER TABLE "public"."' . $table_name . '" ADD CONSTRAINT "' . $table_name . '_pkey" PRIMARY KEY ("' . $pkey_column . '");';
-            $q = $dblink->prepare($sql);
-            $q->execute();
+            // Add primary key constraint using shared method
+            // Critical failure for new tables - throw exception if constraint can't be added
+            if (!$this->addPrimaryKeyConstraint($table_name, $pkey_column, $dblink)) {
+                throw new Exception("Failed to add primary key constraint to new table {$table_name}");
+            }
             
             $results['tables_created'][] = $table_name;
             $results['messages'][] = "Created table: {$table_name}";
@@ -902,6 +903,148 @@ class DatabaseUpdater {
         }
         
         return $results;
+    }
+    
+    /**
+     * Fix primary key constraints for all model classes
+     * 
+     * Error handling: Batch operation that logs errors and continues processing
+     * - Does not throw exceptions (non-critical operation)
+     * - Returns success=false if any fixes failed
+     * - Attempts to fix all tables even if some fail
+     * 
+     * @param array $classes Array of model classes to check
+     * @return array Results with success status and messages
+     */
+    public function fixPrimaryKeys($classes) {
+        $results = [
+            'success' => true,
+            'fixed' => [],
+            'warnings' => [],
+            'errors' => [],
+            'messages' => []
+        ];
+        
+        $dblink = $this->dbconnector->get_db_link();
+        
+        // Get all tables and columns info (using improved LibraryFunctions method)
+        $tables_and_columns = LibraryFunctions::get_tables_and_columns();
+        
+        foreach ($classes as $class) {
+            try {
+                $table_name = $class::$tablename;
+                $expected_pkey = $class::$pkey_column;
+                
+                if ($this->verbose) {
+                    $results['messages'][] = "Checking primary key for {$class} ({$table_name}.{$expected_pkey})";
+                }
+                
+                // Check if table exists (using existing pattern)
+                if (!isset($tables_and_columns[$table_name])) {
+                    $results['warnings'][] = "Table '{$table_name}' does not exist for model {$class}";
+                    continue;
+                }
+                
+                // Get detailed column info (using existing method)
+                $column_info = $this->getDetailedColumnInfo($table_name, $dblink);
+                
+                // Check if primary key column exists
+                if (!isset($column_info[$expected_pkey])) {
+                    $results['warnings'][] = "Primary key column '{$expected_pkey}' missing from table '{$table_name}'";
+                    continue;
+                }
+                
+                // Check if column is actually set as primary key (using existing method)
+                if (!$this->isPrimaryKeyColumn($table_name, $expected_pkey, $dblink)) {
+                    // Use shared method to add/fix the primary key
+                    // Non-critical failure in batch operation - log and continue
+                    if ($this->addPrimaryKeyConstraint($table_name, $expected_pkey, $dblink)) {
+                        $results['fixed'][] = "{$table_name}.{$expected_pkey}";
+                        $results['messages'][] = "FIXED: Added primary key constraint to {$table_name}.{$expected_pkey}";
+                    } else {
+                        $results['errors'][] = "Failed to add primary key constraint to {$table_name}.{$expected_pkey}";
+                        $results['success'] = false;
+                        // Continue processing other tables
+                    }
+                } else {
+                    if ($this->verbose) {
+                        $results['messages'][] = "OK: {$table_name}.{$expected_pkey} already has primary key constraint";
+                    }
+                }
+                
+            } catch (Exception $e) {
+                $results['errors'][] = "Error processing {$class}: " . $e->getMessage();
+                $results['success'] = false;
+            }
+        }
+        
+        return $results;
+    }
+    
+    /**
+     * Add primary key constraint to a table
+     * Used by both table creation and primary key fixing
+     * 
+     * Error handling: Returns true/false to let callers decide how to handle failures
+     * - Table creation will throw exception on false (critical failure)
+     * - Batch fixing will log error and continue (non-critical)
+     * 
+     * @param string $table_name Table name
+     * @param string $pkey_column Primary key column name
+     * @param PDO $dblink Database connection
+     * @return bool Success status
+     */
+    private function addPrimaryKeyConstraint($table_name, $pkey_column, $dblink) {
+        try {
+            // Check if any primary key already exists
+            $check_sql = "SELECT constraint_name FROM information_schema.table_constraints 
+                          WHERE table_name = ? 
+                            AND table_schema = 'public' 
+                            AND constraint_type = 'PRIMARY KEY'";
+            
+            $q = $dblink->prepare($check_sql);
+            $q->execute([$table_name]);
+            $existing_pk = $q->fetch(PDO::FETCH_ASSOC);
+            
+            if ($existing_pk) {
+                // Drop existing primary key first (for fix scenarios)
+                // Note: Can't parameterize constraint name in DROP CONSTRAINT
+                $constraint_name = $existing_pk['constraint_name'];
+                // Validate constraint name to prevent injection (block obviously malicious characters)
+                // PostgreSQL allows many characters in quoted identifiers, but block dangerous ones
+                // Block: semicolon, quotes, comment markers, null bytes
+                if (preg_match('/[;\'"\\\\-]{2}|\/\*|\*\/|\\x00/', $constraint_name)) {
+                    throw new PDOException("Invalid constraint name - contains potentially malicious characters");
+                }
+                $drop_sql = "ALTER TABLE {$table_name} DROP CONSTRAINT {$constraint_name}";
+                $q = $dblink->prepare($drop_sql);
+                $q->execute();
+            }
+            
+            // Add primary key constraint using consistent naming pattern
+            $constraint_name = $table_name . '_pkey';
+            // Note: PostgreSQL doesn't allow parameterized identifiers in DDL statements
+            // Validate table/column names (block obviously malicious characters)
+            // These come from model class definitions (not user input) but validate anyway
+            // Block: semicolon, quotes, comment markers, null bytes
+            if (preg_match('/[;\'"\\\\-]{2}|\/\*|\*\/|\\x00/', $table_name) || 
+                preg_match('/[;\'"\\\\-]{2}|\/\*|\*\/|\\x00/', $pkey_column)) {
+                throw new PDOException("Invalid table or column name - contains potentially malicious characters");
+            }
+            
+            $sql = 'ALTER TABLE "public"."' . $table_name . '" ADD CONSTRAINT "' . $constraint_name . '" PRIMARY KEY ("' . $pkey_column . '");';
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            
+            return true;
+            
+        } catch (PDOException $e) {
+            // Log error details if verbose mode is enabled
+            if ($this->verbose) {
+                echo "Error adding primary key constraint to {$table_name}.{$pkey_column}: " . $e->getMessage() . "<br>\n";
+            }
+            return false;
+        }
     }
 }
 

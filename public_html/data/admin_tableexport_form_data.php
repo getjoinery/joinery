@@ -1,14 +1,14 @@
 <?php
+require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
 
-	//GET COLUMN METADATA
-	$columnsql = "SELECT * FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema='public'";
-	$results = $dblink->query($columnsql);
+	// Use consolidated method
+	$tables_and_columns = LibraryFunctions::get_tables_and_columns();
 	$tables = array();
-	while ($row = $results->fetch(PDO::FETCH_OBJ)){
-		$tables[$row->table_name] = $row->table_name;
+	foreach(array_keys($tables_and_columns) as $table_name) {
+		$tables[$table_name] = $table_name;
 	}
 
 ?>
