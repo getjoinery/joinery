@@ -1044,7 +1044,7 @@ abstract class SystemBase {
 	}
 	
 	//TESTS FOR THIS CLASS
-	static function test($debug=false){
+	static function test($debug=false, $verbose=false, $read_only=false){
 		$current_class = get_called_class();
 		$result = true;
 		
@@ -1072,7 +1072,7 @@ abstract class SystemBase {
 			}
 			
 			$tester = new ModelTester($current_class);
-			$result = $tester->test(null, $debug);
+			$result = $tester->test(null, $debug, $read_only);
 		}
 		
 		// Multi tests only when explicitly requested AND not disabled
