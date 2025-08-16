@@ -24,17 +24,17 @@
 
 		$fp = fopen($filen, 'w');
 
-		//GET COLUMN METADATA
-		$columnsql = "SELECT column_name FROM information_schema.columns WHERE table_name ='$tablename'";
-		$results = $dblink->query($columnsql);
-		$chead = array();
-			while($row = $results->fetch(PDO::FETCH_NUM)){
-			array_push($chead,$row[0]);
-			}
+		// Use consolidated method with single table parameter (also fixes SQL injection)
+		$tables_and_columns = LibraryFunctions::get_tables_and_columns($tablename);
+		$chead = isset($tables_and_columns[$tablename]) ? array_keys($tables_and_columns[$tablename]) : array();
+		if (empty($chead)) {
+			die("Invalid table name or table has no columns");
+		}
 		fputcsv($fp, $chead);
 
-		//GET COLUMN METADATA
-		$columnsql = "SELECT * FROM $tablename";
+		// GET TABLE DATA - Use validated table name (already sanitized on line 4)
+		// Note: Table names cannot be parameterized in FROM clause, but $tablename is pre-validated
+		$columnsql = "SELECT * FROM " . $tablename;
 		$results = $dblink->query($columnsql);
 
 		while($row = $results->fetch(PDO::FETCH_NUM)){
