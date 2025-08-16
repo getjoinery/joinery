@@ -1,5 +1,6 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
