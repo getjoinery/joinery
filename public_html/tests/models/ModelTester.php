@@ -47,7 +47,7 @@ class ModelTester {
     /**
      * Main test execution method
      */
-    public function test($model_instance = null, $debug = false) {
+    public function test($model_instance = null, $debug = false, $read_only = false) {
         $this->model_instance = $model_instance ?: new $this->model_class(null);
         $verbose = $this->is_verbose();
         
@@ -56,25 +56,37 @@ class ModelTester {
         // Remember the initial fail count for this model test
         $initial_fail_count = self::$test_fail_count;
         
-        // Set up test database mode if available
+        // Set up test database mode if available (skip if read-only mode)
         $dbhelper = DbConnector::get_instance();
-        if (method_exists($dbhelper, 'set_test_mode')) {
+        if (!$read_only && method_exists($dbhelper, 'set_test_mode')) {
             $dbhelper->set_test_mode();
         }
         
         // Validate permanent_delete_actions configuration
         $this->validate_permanent_delete_actions();
         
+        // Validate primary key configuration
+        $this->validate_primary_key_configuration();
+        
         try {
-            if ($verbose) echo "Starting CRUD tests...<br>\n"; flush();
-            $this->test_automated_crud($debug);
-            if ($verbose) echo "CRUD tests completed, starting validation tests...<br>\n"; flush();
-            $this->test_automated_validation($debug);
-            if ($verbose) echo "Validation tests completed, starting constraint tests...<br>\n"; flush();
-            $this->test_automated_constraints($debug);
-            if ($verbose) echo "Constraint tests completed, starting edge case tests...<br>\n"; flush();
-            $this->test_automated_edge_cases($debug);
-            if ($verbose) echo "All tests completed successfully<br>\n"; flush();
+            if ($read_only) {
+                // Read-only mode: Only run safe validation tests (no insert/update/delete)
+                if ($verbose) echo "Read-only mode: Skipping CRUD operations, running validation only...<br>\n"; flush();
+                // Note: Primary key validation already ran above
+                // Note: permanent_delete_actions validation already ran above
+                if ($verbose) echo "Read-only validation completed successfully<br>\n"; flush();
+            } else {
+                // Full test mode: Run all tests including CRUD operations
+                if ($verbose) echo "Starting CRUD tests...<br>\n"; flush();
+                $this->test_automated_crud($debug);
+                if ($verbose) echo "CRUD tests completed, starting validation tests...<br>\n"; flush();
+                $this->test_automated_validation($debug);
+                if ($verbose) echo "Validation tests completed, starting constraint tests...<br>\n"; flush();
+                $this->test_automated_constraints($debug);
+                if ($verbose) echo "Constraint tests completed, starting edge case tests...<br>\n"; flush();
+                $this->test_automated_edge_cases($debug);
+                if ($verbose) echo "All tests completed successfully<br>\n"; flush();
+            }
             
             echo "<span style='color: green;'>[PASS] {$this->model_class} - All automated tests passed</span><br>\n";
             
@@ -419,7 +431,13 @@ class ModelTester {
             }
             
         } catch (Exception $e) {
-            $this->test_fail("Error testing unique constraint on $field: " . $e->getMessage());
+            // Check if this is a missing table error
+            if (strpos($e->getMessage(), 'Undefined table') !== false ||
+                strpos($e->getMessage(), 'relation') !== false && strpos($e->getMessage(), 'does not exist') !== false) {
+                $this->test_warn("Cannot test unique constraint on $field - database table does not exist: " . $e->getMessage());
+            } else {
+                $this->test_fail("Error testing unique constraint on $field: " . $e->getMessage());
+            }
         }
     }
     
@@ -502,7 +520,13 @@ class ModelTester {
             }
             
         } catch (Exception $e) {
-            $this->test_fail("Error testing composite unique constraint on ($field_list): " . $e->getMessage());
+            // Check if this is a missing table error
+            if (strpos($e->getMessage(), 'Undefined table') !== false ||
+                strpos($e->getMessage(), 'relation') !== false && strpos($e->getMessage(), 'does not exist') !== false) {
+                $this->test_warn("Cannot test composite unique constraint on ($field_list) - database table does not exist: " . $e->getMessage());
+            } else {
+                $this->test_fail("Error testing composite unique constraint on ($field_list): " . $e->getMessage());
+            }
         }
     }
     
@@ -1675,5 +1699,106 @@ class ModelTester {
         }
         
         return $found_foreign_keys;
+    }
+    
+    /**
+     * Validate primary key configuration and database consistency
+     * Checks that the model's expected primary key exists in the database table
+     * and is actually configured as a primary key
+     */
+    private function validate_primary_key_configuration() {
+        $model_class = $this->model_class;
+        $table_name = $model_class::$tablename;
+        $expected_pkey = $model_class::$pkey_column;
+        $verbose = $this->is_verbose();
+        
+        if ($verbose) echo "Validating primary key configuration for {$model_class}...<br>\n";
+        
+        $dbconnector = DbConnector::get_instance();
+        $dblink = $dbconnector->get_db_link();
+        
+        try {
+            // Check if table exists
+            $tables_and_columns = $this->get_table_columns($table_name, $dblink);
+            
+            if (empty($tables_and_columns)) {
+                $this->test_fail("Table '{$table_name}' does not exist in database for model {$model_class}");
+                return;
+            }
+            
+            $live_columns = array_keys($tables_and_columns);
+            
+            // Check if expected primary key column exists
+            if (!in_array($expected_pkey, $live_columns)) {
+                $this->test_fail("Primary key column '{$expected_pkey}' missing from table '{$table_name}'. Available columns: " . implode(', ', $live_columns));
+                return;
+            }
+            
+            // Check if the column is actually set as primary key in database
+            $is_primary_key = $this->check_if_column_is_primary_key($table_name, $expected_pkey, $dblink);
+            
+            if (!$is_primary_key) {
+                $this->test_fail("Column '{$expected_pkey}' exists but is not set as primary key in table '{$table_name}'");
+                return;
+            }
+            
+            // All checks passed
+            $this->test_pass("Primary key configuration valid: {$table_name}.{$expected_pkey} exists and is properly configured");
+            
+        } catch (Exception $e) {
+            $this->test_warn("Could not validate primary key configuration for {$model_class}: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Get columns for a specific table
+     * Returns array with column_name => column_name mapping
+     */
+    private function get_table_columns($table_name, $dblink) {
+        $columns = array();
+        
+        try {
+            $sql = "SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_schema = 'public' 
+                      AND table_name = ?
+                    ORDER BY ordinal_position";
+            
+            $q = $dblink->prepare($sql);
+            $q->execute([$table_name]);
+            $results = $q->fetchAll(PDO::FETCH_ASSOC);
+            
+            foreach ($results as $row) {
+                $column_name = $row['column_name'];
+                $columns[$column_name] = $column_name;
+            }
+            
+            return $columns;
+            
+        } catch (PDOException $e) {
+            throw new Exception("Failed to get column information for table {$table_name}: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Check if a column is actually set as a primary key in the database
+     */
+    private function check_if_column_is_primary_key($table_name, $column_name, $dblink) {
+        $sql = "SELECT 1 FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu 
+                  ON tc.constraint_name = kcu.constraint_name
+                WHERE tc.table_name = ? 
+                  AND tc.table_schema = 'public'
+                  AND tc.constraint_type = 'PRIMARY KEY' 
+                  AND kcu.column_name = ?";
+        
+        try {
+            $q = $dblink->prepare($sql);
+            $q->execute([$table_name, $column_name]);
+            return $q->rowCount() > 0;
+        } catch (PDOException $e) {
+            // Return false on error - this will be reported as a warning
+            return false;
+        }
     }
 }
