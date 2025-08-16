@@ -37,10 +37,11 @@ class PluginDependency extends SystemBase {
     public static $required_fields = array('pld_plugin_name', 'pld_depends_on');
 
     public static $field_constraints = array(
-        'pld_plugin_name_depends_on_unique' => array(
-            'type' => 'unique',
-            'fields' => array('pld_plugin_name', 'pld_depends_on')
-        )
+        // Note: Unique constraints should be defined in field_specifications, not field_constraints
+        // 'pld_plugin_name_depends_on_unique' => array(
+        //     'type' => 'unique',
+        //     'fields' => array('pld_plugin_name', 'pld_depends_on')
+        // )
     );
 
     public static $zero_variables = array();
