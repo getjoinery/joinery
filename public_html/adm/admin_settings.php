@@ -289,7 +289,34 @@
 			});	
 		});
 		
-	
+		// Wait for document ready to ensure jQuery and validator are loaded
+		$(document).ready(function() {
+			// Custom validation method for Stripe publishable keys
+			if (typeof jQuery.validator !== 'undefined') {
+				jQuery.validator.addMethod("stripePublishableKey", function(value, element) {
+					if (!value) return true; // Allow empty (handled by required rule)
+					return /^pk_(live|test)_[a-zA-Z0-9]{24,}$/.test(value);
+				}, "Must be a valid publishable key starting with pk_live_ or pk_test_ (not a secret key starting with sk_)");
+				
+				// Custom validation method for Stripe secret keys
+				jQuery.validator.addMethod("stripeSecretKey", function(value, element) {
+					if (!value) return true; // Allow empty (handled by required rule)
+					return /^sk_(live|test)_[a-zA-Z0-9]{24,}$/.test(value);
+				}, "Must be a valid secret key starting with sk_live_ or sk_test_ (not a publishable key starting with pk_)");
+				
+				// Custom validation method for Stripe test publishable keys
+				jQuery.validator.addMethod("stripeTestPublishableKey", function(value, element) {
+					if (!value) return true; // Allow empty (handled by required rule)
+					return /^pk_test_[a-zA-Z0-9]{24,}$/.test(value);
+				}, "Must be a valid test publishable key starting with pk_test_ (not a secret key starting with sk_)");
+				
+				// Custom validation method for Stripe test secret keys
+				jQuery.validator.addMethod("stripeTestSecretKey", function(value, element) {
+					if (!value) return true; // Allow empty (handled by required rule)
+					return /^sk_test_[a-zA-Z0-9]{24,}$/.test(value);
+				}, "Must be a valid test secret key starting with sk_test_ (not a publishable key starting with pk_)");
+			}
+		});
 		
 		</script>
 		<?php
@@ -314,6 +341,15 @@
 	// Add validation for logo link using remote validation
 	$validation_rules['logo_link']['remote']['value'] = "'/ajax/validate_file_ajax'";
 	$validation_rules['logo_link']['remote']['message'] = "'Must start with / and file must exist'";
+	
+	// Add Stripe key validation rules using custom validation methods
+	$validation_rules['stripe_api_key']['stripePublishableKey']['value'] = 'true';
+	
+	$validation_rules['stripe_api_pkey']['stripeSecretKey']['value'] = 'true';
+	
+	$validation_rules['stripe_api_key_test']['stripeTestPublishableKey']['value'] = 'true';
+	
+	$validation_rules['stripe_api_pkey_test']['stripeTestSecretKey']['value'] = 'true';
 	
 	echo $formwriter->set_validate($validation_rules);	
 
@@ -831,8 +867,8 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Live API Settings</h5>';
-		echo $formwriter->textinput("Stripe API Key (Example: sk_live_xxxx)", 'stripe_api_key', '', 20, $settings->get_setting('stripe_api_key'), "" , 255, "");
-		echo $formwriter->textinput("Stripe API Private Key (Example: pk_live_xxxx)", 'stripe_api_pkey', '', 20, $settings->get_setting('stripe_api_pkey'), "" , 255, "");
+		echo $formwriter->textinput("Stripe Publishable Key (Example: pk_live_xxxx)", 'stripe_api_key', '', 20, $settings->get_setting('stripe_api_key'), "" , 255, "");
+		echo $formwriter->textinput("Stripe Secret/Private Key (Example: sk_live_xxxx)", 'stripe_api_pkey', '', 20, $settings->get_setting('stripe_api_pkey'), "" , 255, "");
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live API Status</h5>';
@@ -856,47 +892,18 @@
 					$stripe_helper = new StripeHelper();
 					
 					if ($stripe_helper->is_initialized()) {
-						// Use account retrieve as minimal API call
-						$stripe_client = new \Stripe\StripeClient([
-							'api_key' => $stripe_api_key,
-							'stripe_version' => '2022-11-15'
-						]);
-						
-						$account = $stripe_client->accounts->retrieve();
-						
-						if ($account && isset($account->id)) {
-							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Live API Key Valid</strong></div>';
-							echo '<strong>Account ID:</strong> ' . htmlspecialchars($account->id) . '<br>';
-							
-							if (isset($account->business_profile->name)) {
-								echo '<strong>Business:</strong> ' . htmlspecialchars($account->business_profile->name) . '<br>';
-							}
-							if (isset($account->country)) {
-								echo '<strong>Country:</strong> ' . htmlspecialchars($account->country) . '<br>';
-							}
-							if (isset($account->default_currency)) {
-								echo '<strong>Currency:</strong> ' . htmlspecialchars(strtoupper($account->default_currency)) . '<br>';
-							}
-							if (isset($account->charges_enabled)) {
-								echo '<strong>Charges Enabled:</strong> ' . ($account->charges_enabled ? 'Yes' : 'No') . '<br>';
-							}
-							if (isset($account->payouts_enabled)) {
-								echo '<strong>Payouts Enabled:</strong> ' . ($account->payouts_enabled ? 'Yes' : 'No') . '<br>';
-							}
-							
-							if (!empty($stripe_api_pkey)) {
-								echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Public key also configured</div>';
-							} else {
-								echo '<div style="color: #ffc107; font-size: 11px; margin-top: 10px;">⚠ Public key not configured</div>';
-							}
-							
-						} else {
-							echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Invalid API Response</strong></div>';
-							echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">API key may be invalid or expired</div>';
+						try {
+							// Use StripeHelper's validated client - no direct initialization needed
+							$account = $stripe_helper->get_stripe_client()->accounts->retrieve();
+							echo '<p style="color: green;"><strong>✓ Live API Connection:</strong> Successfully connected to Stripe</p>';
+							echo '<p><strong>Account ID:</strong> ' . htmlspecialchars($account->id) . '</p>';
+							echo '<p><strong>Account Type:</strong> ' . htmlspecialchars($account->type) . '</p>';
+							echo '<p><strong>Country:</strong> ' . htmlspecialchars($account->country) . '</p>';
+						} catch (Exception $e) {
+							echo '<p style="color: red;"><strong>✗ Live API Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
 						}
 					} else {
-						echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Key Invalid</strong></div>';
-						echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">StripeHelper could not initialize with this key</div>';
+						echo '<p style="color: orange;"><strong>⚠ Configuration:</strong> Stripe keys not configured</p>';
 					}
 					
 					// Restore original test mode
@@ -936,8 +943,8 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Test API Settings</h5>';
-		echo $formwriter->textinput("Test Stripe API Key (Example: sk_test_xxxx)", 'stripe_api_key_test', '', 20, $settings->get_setting('stripe_api_key_test'), "" , 255, "");
-		echo $formwriter->textinput("Test Stripe Private Key (Example: pk_test_xxxx)", 'stripe_api_pkey_test', '', 20, $settings->get_setting('stripe_api_pkey_test'), "" , 255, "");
+		echo $formwriter->textinput("Test Stripe Publishable Key (Example: pk_test_xxxx)", 'stripe_api_key_test', '', 20, $settings->get_setting('stripe_api_key_test'), "" , 255, "");
+		echo $formwriter->textinput("Test Stripe Secret/Private Key (Example: sk_test_xxxx)", 'stripe_api_pkey_test', '', 20, $settings->get_setting('stripe_api_pkey_test'), "" , 255, "");
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Test API Status</h5>';
@@ -961,45 +968,18 @@
 					$stripe_helper_test = new StripeHelper();
 					
 					if ($stripe_helper_test->is_initialized()) {
-						// Use account retrieve as minimal API call
-						$stripe_client_test = new \Stripe\StripeClient([
-							'api_key' => $stripe_api_key_test,
-							'stripe_version' => '2022-11-15'
-						]);
-						
-						$account_test = $stripe_client_test->accounts->retrieve();
-						
-						if ($account_test && isset($account_test->id)) {
-							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Test API Key Valid</strong></div>';
-							echo '<div style="background: #fff3cd; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 11px; color: #856404;">🧪 Test Mode Account</div>';
-							echo '<strong>Account ID:</strong> ' . htmlspecialchars($account_test->id) . '<br>';
-							
-							if (isset($account_test->business_profile->name)) {
-								echo '<strong>Business:</strong> ' . htmlspecialchars($account_test->business_profile->name) . '<br>';
-							}
-							if (isset($account_test->country)) {
-								echo '<strong>Country:</strong> ' . htmlspecialchars($account_test->country) . '<br>';
-							}
-							if (isset($account_test->default_currency)) {
-								echo '<strong>Currency:</strong> ' . htmlspecialchars(strtoupper($account_test->default_currency)) . '<br>';
-							}
-							if (isset($account_test->charges_enabled)) {
-								echo '<strong>Charges Enabled:</strong> ' . ($account_test->charges_enabled ? 'Yes' : 'No') . '<br>';
-							}
-							
-							if (!empty($stripe_api_pkey_test)) {
-								echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Public key also configured</div>';
-							} else {
-								echo '<div style="color: #ffc107; font-size: 11px; margin-top: 10px;">⚠ Public key not configured</div>';
-							}
-							
-						} else {
-							echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Invalid API Response</strong></div>';
-							echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">API key may be invalid or expired</div>';
+						try {
+							// Use StripeHelper's validated client - no direct initialization needed
+							$account = $stripe_helper_test->get_stripe_client()->accounts->retrieve();
+							echo '<p style="color: green;"><strong>✓ Live API Connection:</strong> Successfully connected to Stripe</p>';
+							echo '<p><strong>Account ID:</strong> ' . htmlspecialchars($account->id) . '</p>';
+							echo '<p><strong>Account Type:</strong> ' . htmlspecialchars($account->type) . '</p>';
+							echo '<p><strong>Country:</strong> ' . htmlspecialchars($account->country) . '</p>';
+						} catch (Exception $e) {
+							echo '<p style="color: red;"><strong>✗ Live API Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
 						}
 					} else {
-						echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Key Invalid</strong></div>';
-						echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">StripeHelper could not initialize with this key</div>';
+						echo '<p style="color: orange;"><strong>⚠ Configuration:</strong> Stripe keys not configured</p>';
 					}
 					
 					// Restore original test mode

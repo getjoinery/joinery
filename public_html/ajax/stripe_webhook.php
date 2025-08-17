@@ -1,47 +1,37 @@
 <?php
-	require_once( __DIR__ . '/../includes/PathHelper.php');
-	
-	PathHelper::requireOnce('includes/Globalvars.php');
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/orders_class.php');
-
-
-$settings = Globalvars::get_instance();
-\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
-
-
-// You can find your endpoints secret in your webhook settings
-$endpoint_secret = $settings->get_setting('stripe_endpoint_secret');
-if(!$endpoint_secret){
-	throw new SystemDisplayablePermanentError("Stripe endpoint secret is not present.");
-	exit();			
-}
-
-$payload = @file_get_contents('php://input');
-$sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'];
-$event = null;
+require_once(__DIR__ . '/../includes/PathHelper.php');
+PathHelper::requireOnce('includes/StripeHelper.php');
+PathHelper::requireOnce('data/events_class.php');
+PathHelper::requireOnce('data/orders_class.php');
 
 try {
-  $event = \Stripe\Webhook::constructEvent(
-    $payload, $sig_header, $endpoint_secret
-  );
-} 
-catch(\UnexpectedValueException $e) {
-  // Invalid payload
-  http_response_code(400);
-  echo 'Invalid payload';
-  exit();
-} 
-catch(\Stripe\Error\SignatureVerification $e) {
-  // Invalid signature
-  http_response_code(400);
-  echo 'Invalid signature';
-  exit();
+    // StripeHelper handles ALL Stripe setup internally
+    $stripe_helper = new StripeHelper();
+    $event = $stripe_helper->process_webhook();
+    
+} catch(StripeHelperException $e) {
+    // Stripe configuration errors
+    error_log("Stripe webhook configuration error: " . $e->getMessage());
+    http_response_code(500);
+    echo 'Stripe configuration error';
+    exit();
+} catch(\UnexpectedValueException $e) {
+    // Invalid payload
+    http_response_code(400);
+    echo 'Invalid payload';
+    exit();
+} catch(\Stripe\Exception\SignatureVerificationException $e) {
+    // Invalid signature
+    http_response_code(400);
+    echo 'Invalid signature';
+    exit();
+} catch(\Exception $e) {
+    // Any other unexpected errors
+    error_log("Stripe webhook unexpected error: " . $e->getMessage());
+    http_response_code(500);
+    echo 'Webhook processing error';
+    exit();
 }
-
 
 // Handle the checkout.session.completed event
 if ($event->type == 'checkout.session.completed') {
