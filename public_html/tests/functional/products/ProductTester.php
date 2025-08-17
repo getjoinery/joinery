@@ -67,12 +67,92 @@ class ProductTester {
     }
     
     /**
+     * Display database and payment configuration with safety checks
+     */
+    private function displayDatabaseAndPaymentInfo() {
+        // Get database name from connection
+        $dblink = $this->dbconnector->get_db_link();
+        try {
+            $stmt = $dblink->query("SELECT current_database()");
+            $database_name = $stmt->fetchColumn();
+        } catch (Exception $e) {
+            $database_name = "Unknown";
+        }
+        
+        // Check test mode settings
+        $session_test_mode = isset($_SESSION['test_mode']) && $_SESSION['test_mode'];
+        $debug_setting = $this->settings->get_setting('debug');
+        
+        // Determine which Stripe keys will be loaded
+        $will_use_test_keys = $session_test_mode || $debug_setting;
+        $api_key_setting = $will_use_test_keys ? 'stripe_api_key_test' : 'stripe_api_key';
+        $secret_key_setting = $will_use_test_keys ? 'stripe_api_pkey_test' : 'stripe_api_pkey';
+        
+        $api_key = $this->settings->get_setting($api_key_setting);
+        $secret_key = $this->settings->get_setting($secret_key_setting);
+        
+        // Display highlighted status
+        echo '<div class="alert alert-warning">';
+        echo '<h4 class="alert-heading">🔍 TEST ENVIRONMENT STATUS</h4>';
+        echo '<strong>Database:</strong> <span class="text-primary font-weight-bold">' . htmlspecialchars($database_name) . '</span><br>';
+        echo '<strong>Payment Test Mode:</strong> <span class="' . ($will_use_test_keys ? 'text-success' : 'text-danger') . ' font-weight-bold">' . ($will_use_test_keys ? 'ACTIVE' : 'INACTIVE') . '</span>';
+        echo '</div>';
+        
+        // Safety check: Detect live keys and exit if found
+        $has_live_keys = false;
+        $error_messages = [];
+        
+        // Check for ANY live keys regardless of which setting they're in
+        if ($api_key && (strpos($api_key, 'pk_live_') === 0 || strpos($api_key, 'sk_live_') === 0)) {
+            $has_live_keys = true;
+            $key_type = strpos($api_key, 'pk_live_') === 0 ? 'publishable' : 'secret';
+            $error_messages[] = "DANGER: Live $key_type key detected in " . $api_key_setting;
+        }
+        
+        if ($secret_key && (strpos($secret_key, 'pk_live_') === 0 || strpos($secret_key, 'sk_live_') === 0)) {
+            $has_live_keys = true;
+            $key_type = strpos($secret_key, 'pk_live_') === 0 ? 'publishable' : 'secret';
+            $error_messages[] = "DANGER: Live $key_type key detected in " . $secret_key_setting;
+        }
+        
+        if ($has_live_keys) {
+            echo '<div class="alert alert-danger">';
+            echo '<h4 class="alert-heading">🚨 CRITICAL ERROR: LIVE KEYS DETECTED</h4>';
+            foreach ($error_messages as $message) {
+                echo '<p class="mb-1 font-weight-bold">' . htmlspecialchars($message) . '</p>';
+            }
+            echo '<hr>';
+            echo '<p class="mb-1"><strong>This test cannot run with live Stripe keys for safety reasons.</strong></p>';
+            echo '<p class="mb-1">Please configure test keys (pk_test_* and sk_test_*) before running this test.</p>';
+            echo '<p class="mb-0 font-weight-bold h5">TEST TERMINATING NOW FOR SAFETY</p>';
+            echo '</div>';
+            
+            // Log the safety termination
+            error_log("ProductTester: Live Stripe keys detected - terminating test for safety");
+            
+            // Throw a specific exception for live key detection
+            throw new Exception("LIVE KEYS DETECTED - TEST TERMINATED FOR SAFETY");
+        }
+        
+        // Warning if no test mode
+        if (!$will_use_test_keys) {
+            echo '<div class="alert alert-warning">';
+            echo '<h4 class="alert-heading">⚠️ WARNING: Test mode not active</h4>';
+            echo '<p class="mb-0">The test will use live keys. Ensure this is a test environment.</p>';
+            echo '</div>';
+        }
+    }
+    
+    /**
      * Main execution method
      */
     public function run() {
         echo "<h2>Product Testing Script</h2>\n";
-        echo "Starting product creation and verification tests...<br><br>\n";
         
+        // Permanent safety check: Display database and payment configuration
+        $this->displayDatabaseAndPaymentInfo();
+        
+        echo "Starting product creation and verification tests...<br><br>\n";
         echo "Starting tests (using hardcoded admin user for testing)...<br><br>\n";
         
         try {
@@ -1075,6 +1155,12 @@ class ProductTester {
             if (!$product->get('pro_stripe_product_id_test')) {
                 // Create StripeHelper instance
                 $stripe_helper = new StripeHelper();
+                
+                // Debug: Show which Stripe keys are being used
+                echo "<strong>STRIPE DEBUG:</strong><br>\n";
+                echo "Test mode: " . ($stripe_helper->test_mode ? 'TRUE' : 'FALSE') . "<br>\n";
+                echo "API Key (should be publishable): " . substr($this->settings->get_setting($stripe_helper->test_mode ? 'stripe_api_key_test' : 'stripe_api_key'), 0, 15) . "...<br>\n";
+                echo "Secret Key (should be secret): " . substr($this->settings->get_setting($stripe_helper->test_mode ? 'stripe_api_pkey_test' : 'stripe_api_pkey'), 0, 15) . "...<br><br>\n";
                 
                 // Prepare product info for Stripe
                 $product_info = [

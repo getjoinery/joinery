@@ -43,7 +43,7 @@ class StripeHelper {
 		
 
 		$this->stripe = new \Stripe\StripeClient([
-			'api_key' => $this->api_key,
+			'api_key' => $this->get_stripe_private_key(),
 			'stripe_version' => '2022-11-15'
 		]);	
 		
@@ -60,8 +60,102 @@ class StripeHelper {
 		}
 	}
 
-	public function get_stripe_private_key() {
+	/**
+	 * Get the validated Stripe client for direct API calls
+	 * @return \Stripe\StripeClient Validated Stripe client using secret key
+	 * @throws StripeHelperException if not initialized
+	 */
+	public function get_stripe_client() {
+		if (!$this->stripe) {
+			throw new StripeHelperException("StripeHelper not initialized - check API keys configuration");
+		}
+		return $this->stripe;
+	}
+
+	/**
+	 * PRIVATE: Get validated publishable key for client-side use
+	 * @return string Validated publishable key (pk_)
+	 * @throws StripeHelperException if key is invalid or wrong type
+	 */
+	private function get_stripe_public_key() {
+		if (empty($this->api_key)) {
+			throw new StripeHelperException("Stripe publishable key is not configured");
+		}
+		
+		$prefix = $this->test_mode ? 'test' : 'live';
+		
+		// Validate it's a publishable key
+		if (strpos($this->api_key, "pk_{$prefix}_") !== 0) {
+			throw new StripeHelperException(
+				"Invalid Stripe publishable key. Expected key starting with pk_{$prefix}_ but got: " . 
+				substr($this->api_key, 0, 10) . "..."
+			);
+		}
+		
+		// Extra safety: ensure it's not a secret key
+		if (strpos($this->api_key, 'sk_') === 0) {
+			throw new StripeHelperException(
+				"CRITICAL: Secret key detected in publishable key field! Keys are swapped. " .
+				"The stripe_api_key field contains an sk_ key but should contain a pk_ key."
+			);
+		}
+		
+		return $this->api_key;
+	}
+
+	/**
+	 * PRIVATE: Get validated secret key for server-side use
+	 * @return string Validated secret key (sk_)
+	 * @throws StripeHelperException if key is invalid or wrong type
+	 */
+	private function get_stripe_private_key() {
+		if (empty($this->api_secret_key)) {
+			throw new StripeHelperException("Stripe secret key is not configured");
+		}
+		
+		$prefix = $this->test_mode ? 'test' : 'live';
+		
+		// Validate it's a secret key
+		if (strpos($this->api_secret_key, "sk_{$prefix}_") !== 0) {
+			throw new StripeHelperException(
+				"Invalid Stripe secret key. Expected key starting with sk_{$prefix}_ but got: " . 
+				substr($this->api_secret_key, 0, 10) . "..."
+			);
+		}
+		
+		// Extra safety: ensure it's not a publishable key
+		if (strpos($this->api_secret_key, 'pk_') === 0) {
+			throw new StripeHelperException(
+				"CRITICAL: Publishable key detected in secret key field! Keys are swapped. " .
+				"The stripe_api_pkey field contains a pk_ key but should contain an sk_ key."
+			);
+		}
+		
 		return $this->api_secret_key;
+	}
+
+	/**
+	 * PRIVATE: Get validated webhook endpoint secret
+	 * @return string Validated webhook endpoint secret (whsec_)
+	 * @throws StripeHelperException if secret is invalid or not configured
+	 */
+	private function get_webhook_endpoint_secret() {
+		$settings = Globalvars::get_instance();
+		$endpoint_secret = $settings->get_setting('stripe_endpoint_secret');
+		
+		if (empty($endpoint_secret)) {
+			throw new StripeHelperException("Stripe webhook endpoint secret is not configured");
+		}
+		
+		// Validate endpoint secret format (should start with whsec_)
+		if (strpos($endpoint_secret, 'whsec_') !== 0) {
+			throw new StripeHelperException(
+				"Invalid Stripe webhook endpoint secret format. Expected key starting with whsec_ but got: " .
+				substr($endpoint_secret, 0, 10) . "..."
+			);
+		}
+		
+		return $endpoint_secret;
 	}
 
 
@@ -89,23 +183,8 @@ class StripeHelper {
 
 
 	
-				$session = SessionControl::get_instance();
-				$settings = Globalvars::get_instance();
-				if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-					$api_key = $settings->get_setting('stripe_api_key_test');
-					$api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-				}
-				else{
-					$api_key = $settings->get_setting('stripe_api_key');
-					$api_secret_key = $settings->get_setting('stripe_api_pkey');		
-				}
-				
-				if(!$api_key || !$api_secret_key){
-					throw new SystemDisplayablePermanentError("Stripe api keys are not present.");
-					exit();			
-				}
 
-				$output .= '<script language="javascript"> var stripe = Stripe(\''.$api_secret_key.'\');';
+				$output .= '<script language="javascript"> var stripe = Stripe(\''.$this->get_stripe_public_key().'\');';
 				
 				$output .= "				
 							var elements = stripe.elements();
@@ -191,7 +270,7 @@ class StripeHelper {
 				$output = '
 				<script src="https://js.stripe.com/v3/"></script>
 				<script language="javascript">
-				var stripe = Stripe(\''. $this->get_stripe_private_key().'\');
+				var stripe = Stripe(\''. $this->get_stripe_public_key() .'\');
 
 				function ToCheckout() {
 					stripe.redirectToCheckout({
@@ -1106,6 +1185,31 @@ class StripeHelper {
 			$payload, $sig_header, $endpoint_secret
 		  );
 		  return $event;
+	}
+
+	/**
+	 * Process webhook - handles ALL Stripe setup and validation internally
+	 * @return object Stripe event object
+	 * @throws StripeHelperException for configuration errors
+	 * @throws \UnexpectedValueException for invalid payload
+	 * @throws \Stripe\Exception\SignatureVerificationException for invalid signature
+	 */
+	public function process_webhook() {
+		// Get payload and signature from HTTP request
+		$payload = @file_get_contents('php://input');
+		$sig_header = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
+		
+		if (empty($payload)) {
+			throw new \UnexpectedValueException("Empty webhook payload");
+		}
+		
+		if (empty($sig_header)) {
+			throw new \Stripe\Exception\SignatureVerificationException("Missing Stripe signature header");
+		}
+		
+		// Get validated endpoint secret and process webhook
+		$endpoint_secret = $this->get_webhook_endpoint_secret();
+		return $this->stripe->webhooks->constructEvent($payload, $sig_header, $endpoint_secret);
 	}
 
 }

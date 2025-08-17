@@ -240,7 +240,6 @@ exit();
 
 
 	$settings = Globalvars::get_instance();
-	\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
 
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
@@ -548,7 +547,6 @@ exit();
 	exit();
 
 
-	\Stripe\Stripe::setApiKey($settings->get_setting('stripe_api_key'));
 
 	$search_criteria['disabled'] = FALSE;
 	$users = new MultiUser($search_criteria, NULL, 400,2400);

@@ -28,6 +28,13 @@ try {
     
     
 } catch (Exception $e) {
+    // Check if this is a safety termination
+    if (strpos($e->getMessage(), 'LIVE KEYS DETECTED') !== false) {
+        echo "<strong>SAFETY TERMINATION:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
+        exit(1); // Exit with error code when live keys detected
+    }
+    
     echo "<strong>ERROR:</strong> " . htmlspecialchars($e->getMessage()) . "<br>\n";
+    exit(1); // Exit with error code for any exception
 }
 ?>
