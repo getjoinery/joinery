@@ -48,7 +48,7 @@ function cart_logic($get_vars, $post_vars){
 	if($settings->get_setting('coupons_active')){
 		
 		//FOR DEBUG
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		if(StripeHelper::isTestMode()){
 			$searches = array();	
 			$coupon_codes = new MultiCouponCode($searches);
 			$coupon_codes->load();

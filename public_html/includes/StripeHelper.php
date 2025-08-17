@@ -19,21 +19,32 @@ class StripeHelper {
 	public $test_mode;
 	private $stripe_checkout_session;
 
+	/**
+	 * Centralized test mode detection
+	 * @return bool True if test mode should be used
+	 */
+	public static function isTestMode() {
+		return (isset($_SESSION['test_mode']) && $_SESSION['test_mode']) || 
+		       Globalvars::get_instance()->get_setting('debug');
+	}
+
+	/**
+	 * Get the appropriate Stripe setting key name based on test mode
+	 * @param string $baseKey The base setting key (e.g., 'stripe_api_key')
+	 * @return string The setting key with _test suffix if in test mode
+	 */
+	public static function getStripeSettingKey($baseKey) {
+		return self::isTestMode() ? $baseKey . '_test' : $baseKey;
+	}
+
 	public function __construct() {
 		
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
 
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
-			$this->api_key = $settings->get_setting('stripe_api_key_test');
-			$this->api_secret_key = $settings->get_setting('stripe_api_pkey_test');
-			$this->test_mode = true;
-		}
-		else{
-			$this->api_key = $settings->get_setting('stripe_api_key');
-			$this->api_secret_key = $settings->get_setting('stripe_api_pkey');
-			$this->test_mode = false;			
-		}
+		$this->test_mode = self::isTestMode();
+		$this->api_key = $settings->get_setting(self::getStripeSettingKey('stripe_api_key'));
+		$this->api_secret_key = $settings->get_setting(self::getStripeSettingKey('stripe_api_pkey'));
 
 		if(!$this->api_key || !$this->api_secret_key){
 			return false;
@@ -156,6 +167,153 @@ class StripeHelper {
 		}
 		
 		return $endpoint_secret;
+	}
+
+	/**
+	 * Validate and sanitize a Stripe Checkout session ID with replay protection
+	 * @param string $session_id The session ID from $_GET or other source
+	 * @return string The validated and sanitized session ID
+	 * @throws StripeHelperException if validation fails
+	 */
+	public function validate_session_id($session_id) {
+		// Basic validation
+		if (empty($session_id)) {
+			throw new StripeHelperException("Session ID is required");
+		}
+		
+		$session_id = trim($session_id);
+		
+		if (strlen($session_id) < 10 || strlen($session_id) > 200) {
+			error_log("Invalid Stripe session ID length: " . strlen($session_id));
+			throw new StripeHelperException("Invalid session ID length");
+		}
+		
+		// Format validation: Stripe session IDs start with cs_test_ or cs_live_
+		if (!preg_match('/^cs_(test|live)_[a-zA-Z0-9]+$/', $session_id)) {
+			error_log("Invalid Stripe session ID format: " . substr($session_id, 0, 20) . "...");
+			throw new StripeHelperException("Invalid session ID format");
+		}
+		
+		// Environment validation: ensure test/live matches current mode
+		$is_test_session = strpos($session_id, 'cs_test_') === 0;
+		
+		if ($this->test_mode && !$is_test_session) {
+			error_log("Live session ID in test mode: " . substr($session_id, 0, 20) . "...");
+			throw new StripeHelperException("Live session ID received in test mode");
+		}
+		
+		if (!$this->test_mode && $is_test_session) {
+			error_log("Test session ID in live mode: " . substr($session_id, 0, 20) . "...");
+			throw new StripeHelperException("Test session ID received in live mode");
+		}
+		
+		// Session content validation and replay protection
+		try {
+			$session = $this->stripe->checkout->sessions->retrieve($session_id);
+			
+			// Verify payment status
+			if ($session->payment_status !== 'paid') {
+				error_log("Unpaid session attempted: " . substr($session_id, 0, 15) . "... status: " . $session->payment_status);
+				throw new StripeHelperException("Session payment not completed");
+			}
+			
+			// Replay protection: Check if we already processed this session
+			if (Order::GetByStripeSession($session_id)) {
+				error_log("Session replay attempt detected: " . substr($session_id, 0, 15) . "...");
+				throw new StripeHelperException("Session already processed");
+			}
+			
+		} catch (\Stripe\Exception\InvalidRequestException $e) {
+			error_log("Stripe session retrieval failed: " . substr($session_id, 0, 15) . "... " . $e->getMessage());
+			throw new StripeHelperException("Invalid session ID: " . $e->getMessage());
+		} catch (\Stripe\Exception\ApiErrorException $e) {
+			error_log("Stripe API error during session validation: " . $e->getMessage());
+			throw new StripeHelperException("Unable to validate session with Stripe");
+		}
+		
+		// Log successful validation
+		error_log("Stripe session validated: " . substr($session_id, 0, 15) . "... (test_mode: " . ($this->test_mode ? 'yes' : 'no') . ", status: paid)");
+		
+		return $session_id;
+	}
+
+	/**
+	 * Handle Stripe exceptions for payment operations with user-friendly error messages
+	 * @param callable $stripePaymentCall The Stripe payment API call to execute
+	 * @param string $operation Description of the payment operation for logging
+	 * @return mixed The result of the Stripe payment API call
+	 * @throws SystemDisplayableError with user-friendly message
+	 * @throws StripeHelperException for configuration issues
+	 */
+	public function executePaymentWithErrorHandling($stripePaymentCall, $operation = 'Stripe payment') {
+		try {
+			return $stripePaymentCall();
+			
+		} catch (\Stripe\Exception\CardException $e) {
+			// Card was declined - most common payment error
+			$decline_code = $e->getError()->decline_code ?? 'unknown';
+			error_log("Stripe CardException in {$operation}: " . $e->getMessage() . " (decline_code: {$decline_code})");
+			
+			// Provide specific messages based on decline code
+			switch ($decline_code) {
+				case 'insufficient_funds':
+					throw new SystemDisplayableError("Your card has insufficient funds. Please try a different payment method.");
+				case 'expired_card':
+					throw new SystemDisplayableError("Your card has expired. Please update your payment information.");
+				case 'incorrect_cvc':
+					throw new SystemDisplayableError("Your card's security code (CVC) is incorrect. Please check and try again.");
+				case 'card_not_supported':
+					throw new SystemDisplayableError("This card type is not supported. Please try a different card.");
+				case 'processing_error':
+					throw new SystemDisplayableError("There was an error processing your payment. Please try again.");
+				default:
+					throw new SystemDisplayableError("Your card was declined. Please try a different payment method or contact your bank.");
+			}
+			
+		} catch (\Stripe\Exception\RateLimitException $e) {
+			// Too many requests - retry after delay
+			error_log("Stripe RateLimitException in {$operation}: " . $e->getMessage());
+			throw new SystemDisplayableError("Too many payment requests. Please wait a moment and try again.");
+			
+		} catch (\Stripe\Exception\InvalidRequestException $e) {
+			// Invalid parameters - usually a configuration issue
+			$param = $e->getError()->param ?? 'unknown';
+			error_log("Stripe InvalidRequestException in {$operation}: " . $e->getMessage() . " (param: {$param})");
+			
+			if (strpos($e->getMessage(), 'api_key') !== false) {
+				throw new StripeHelperException("Invalid Stripe API key configuration");
+			}
+			
+			throw new SystemDisplayableError("Payment configuration error. Please contact support if this persists.");
+			
+		} catch (\Stripe\Exception\AuthenticationException $e) {
+			// Authentication failed - API key issues
+			error_log("Stripe AuthenticationException in {$operation}: " . $e->getMessage());
+			throw new StripeHelperException("Stripe authentication failed - check API key configuration");
+			
+		} catch (\Stripe\Exception\ApiConnectionException $e) {
+			// Network connection failed
+			error_log("Stripe ApiConnectionException in {$operation}: " . $e->getMessage());
+			throw new SystemDisplayableError("Unable to connect to payment processor. Please check your internet connection and try again.");
+			
+		} catch (\Stripe\Exception\ApiErrorException $e) {
+			// Generic Stripe API error
+			$error_type = $e->getError()->type ?? 'api_error';
+			error_log("Stripe ApiErrorException in {$operation}: " . $e->getMessage() . " (type: {$error_type})");
+			switch ($error_type) {
+				case 'idempotency_error':
+					throw new SystemDisplayableError("Duplicate payment detected. Please refresh the page and try again.");
+				case 'rate_limit_error':
+					throw new SystemDisplayableError("Too many requests. Please wait a moment and try again.");
+				default:
+					throw new SystemDisplayableError("Payment processing error. Please try again or contact support.");
+			}
+			
+		} catch (\Exception $e) {
+			// Non-Stripe exception
+			error_log("Non-Stripe exception in {$operation}: " . $e->getMessage());
+			throw new SystemDisplayableError("An unexpected error occurred. Please try again.");
+		}
 	}
 
 

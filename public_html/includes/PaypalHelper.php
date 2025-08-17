@@ -17,7 +17,7 @@ class PaypalHelper{
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
 
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		if(StripeHelper::isTestMode()){
 			$this->api_key = $settings->get_setting('paypal_api_key_test');
 			$this->api_secret_key = $settings->get_setting('paypal_api_secret_test');
 			$this->endpoint = 'https://api-m.sandbox.paypal.com';

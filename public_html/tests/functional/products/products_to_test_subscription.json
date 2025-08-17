@@ -39,7 +39,46 @@
     }
   ],
   "products": [
-
+    {
+      "pro_name": "Test Subscription 1",
+      "pro_description": "This is a test product for automated testing",
+      "pro_short_description": "Test product 1",
+      "pro_is_active": "1",
+      "pro_max_purchase_count": "100",
+      "pro_max_cart_count": "5",
+      "pro_expires": "30",
+      "pro_link": "test-product-1",
+      "pro_digital_link": "https://example.com/download1",
+      "pro_evt_event_id": "",
+      "pro_grp_group_id": "",
+      "pro_prg_product_group_id": "",
+      "pro_requirements": {
+        "1": "1",
+        "64": "64"
+      },
+      "additional_pro_requirements": {},
+      "product_scripts": [],
+      "pro_after_purchase_message": "Thank you for your purchase!",
+      "form_data": {
+        "full_name_first": "Jeremy",
+        "full_name_last": "Tunnell",
+        "email": "jeremy.tunnell@gmail.com"
+      },
+      "versions": [
+        {
+          "version_name": "Basic Monthly",
+          "version_price": "9.99",
+          "prv_price_type": "month",
+          "prv_trial_period_days": "7"
+        },
+        {
+          "version_name": "Pro Monthly",
+          "version_price": "19.99",
+          "prv_price_type": "month",
+          "prv_trial_period_days": "14"
+        }
+      ]
+    },
     {
       "pro_name": "Test Product 2", 
       "pro_description": "Another test product with different settings",

@@ -52,7 +52,7 @@
 					  <div class="flex-auto text-sm font-medium space-y-1">
 						<h3 class="text-gray-900">
 							<?php
-						  echo '<a href="#">'.$product->get('pro_name').' '. $product_version->get('prv_version_name') . ' ('. $data['full_name_first']. ' ' .$data['full_name_last']. ') '.'</a>';
+						  echo '<a href="#">'.htmlspecialchars($product->get('pro_name'), ENT_QUOTES, 'UTF-8').' '. htmlspecialchars($product_version->get('prv_version_name'), ENT_QUOTES, 'UTF-8') . ' ('. htmlspecialchars($data['full_name_first'], ENT_QUOTES, 'UTF-8'). ' ' .htmlspecialchars($data['full_name_last'], ENT_QUOTES, 'UTF-8'). ') '.'</a>';
 							?>
 						</h3>
 						<?php echo '<p class="text-gray-900">'.$currency_symbol . number_format($price, 2, '.', ','). $coupon_discount_words.'</p>'; ?>
@@ -109,7 +109,7 @@
 		<?php									
 		if($cart->billing_user){	
 			echo '<h2 class="text-lg font-medium text-gray-900">Billing User</h2>';
-			echo '<p>'.$cart->billing_user['billing_first_name'] . ' ' . $cart->billing_user['billing_last_name'] . ' ('. $cart->billing_user['billing_email'].')</p>';
+			echo '<p>'.htmlspecialchars($cart->billing_user['billing_first_name'], ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars($cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8') . ' ('. htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8').')</p>';
 			$formwriter = LibraryFunctions::get_formwriter_object('form_billing_user', $settings->get_setting('form_style'));
 			
 			//echo $formwriter->start_buttons();
@@ -160,9 +160,9 @@
 			echo $formwriter->dropinput("Choose one", "existing_billing_email", NULL, $optionvals, $selected, '', FALSE);
 			*/
 			echo '<div id="new_billing">';
-			echo $formwriter->textinput("Billing First Name", "billing_first_name", NULL, 30, $cart->billing_user['first_name'], "", 255, "");
-			echo $formwriter->textinput("Billing Last Name", "billing_last_name", NULL, 30, $cart->billing_user['last_name'], "", 255, "");
-			echo $formwriter->textinput("Billing Email", "billing_email", NULL, 30, $cart->billing_user['email'], "", 255, ""); 
+			echo $formwriter->textinput("Billing First Name", "billing_first_name", NULL, 30, htmlspecialchars($cart->billing_user['first_name'], ENT_QUOTES, 'UTF-8'), "", 255, "");
+			echo $formwriter->textinput("Billing Last Name", "billing_last_name", NULL, 30, htmlspecialchars($cart->billing_user['last_name'], ENT_QUOTES, 'UTF-8'), "", 255, "");
+			echo $formwriter->textinput("Billing Email", "billing_email", NULL, 30, htmlspecialchars($cart->billing_user['email'], ENT_QUOTES, 'UTF-8'), "", 255, ""); 
 			echo $formwriter->passwordinput("Create Password", "password", 'sm:col-span-2', 20, "" , "", 255,"");
 			
 			echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "sm:col-span-6", "left", NULL, 1, "");
@@ -197,7 +197,7 @@
 
 
 			//DEBUG LIST ALL COUPONS
-			if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+			if(StripeHelper::isTestMode()){
 				echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
 				foreach($page_vars['all_coupons'] as $coupon){
 
@@ -219,7 +219,7 @@
 
 			echo $formwriter->textinput('Add Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
 			if($page_vars['coupon_error']){
-				echo '<p>'.$page_vars['coupon_error'].'</p>';
+				echo '<p>'.htmlspecialchars($page_vars['coupon_error'], ENT_QUOTES, 'UTF-8').'</p>';
 			}
 			//echo $formwriter->start_buttons();
 			echo $formwriter->new_form_button('Add Coupon', 'secondary');
@@ -229,13 +229,13 @@
 			
 		}
 		
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		if(StripeHelper::isTestMode()){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
 		}
 		
 		if($require_login){
 				echo '<div class="alert alert-warning" role="alert">
-				  The email ('.strip_tags($cart->billing_user['billing_email']).') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
+				  The email ('.htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8').') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
 				</div>';
 		}
 		else{
@@ -302,6 +302,37 @@
 </div>
 
 					
+	<script>
+	$(document).ready(function() {
+		// Disable all submit buttons after first click to prevent duplicate submissions
+		$('form').on('submit', function() {
+			var $form = $(this);
+			var $submitButtons = $form.find('button[type="submit"], input[type="submit"]');
+			
+			// Disable buttons and show loading state
+			$submitButtons.prop('disabled', true);
+			$submitButtons.each(function() {
+				var $btn = $(this);
+				$btn.data('original-text', $btn.text());
+				$btn.text('Processing...');
+			});
+			
+			// Re-enable after 10 seconds as failsafe (in case of network issues)
+			setTimeout(function() {
+				$submitButtons.prop('disabled', false);
+				$submitButtons.each(function() {
+					var $btn = $(this);
+					if ($btn.data('original-text')) {
+						$btn.text($btn.data('original-text'));
+					}
+				});
+			}, 10000);
+			
+			return true; // Allow form submission to proceed
+		});
+	});
+	</script>
+
 	<?php
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));

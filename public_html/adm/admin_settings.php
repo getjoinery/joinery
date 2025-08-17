@@ -360,7 +360,7 @@
 	if($_SESSION['permission'] == 10){
 		
 		echo '<b>NOTE: These settings will not override the settings if they are located in the Globalvars_site.php file in the /config directory</b><br>';
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		if(StripeHelper::isTestMode()){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
 		}		
 		
