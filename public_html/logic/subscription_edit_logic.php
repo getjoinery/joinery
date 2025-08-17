@@ -71,7 +71,7 @@ function subscription_edit_logic($get_vars, $post_vars){
 		
 		//CREATE A NEW ORDER
 		$order = new Order(NULL);
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		if(StripeHelper::isTestMode()){
 			$order->set('ord_test_mode', true);
 		}
 		$order->set('ord_usr_user_id', $user->key);
