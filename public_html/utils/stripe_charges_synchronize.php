@@ -205,7 +205,7 @@
 
 				if(!$found_order){
 					$order = new Order(NULL);
-					if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+					if(StripeHelper::isTestMode()){
 						$order->set('ord_test_mode', true);
 					}
 					echo '<b>NEW ORDER</b><br>';

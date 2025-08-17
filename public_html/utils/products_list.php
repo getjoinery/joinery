@@ -31,7 +31,7 @@
 	</script>
 	<?php
 	
-	if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+	if(StripeHelper::isTestMode()){
 		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'.</div>';
 	}
 	

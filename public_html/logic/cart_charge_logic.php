@@ -97,17 +97,26 @@ function cart_charge_logic($get_vars, $post_vars){
 
 	
 	//GET THE ORDER IF IT WAS CREATED EARLIER
-	if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
-		if(!$order = Order::GetByStripeSession($session_id)){	
-			$error = 'Stripe returned bad or missing session id';
-			throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no stripe session ID returned.");
-			exit();				  
+	if($settings->get_setting('checkout_type') == 'stripe_checkout' && !empty($_GET['session_id'])){
+		
+		try {
+			$session_id = $stripe_helper->validate_session_id($_GET['session_id']);
+			
+			if(!$order = Order::GetByStripeSession($session_id)){	
+				$error = 'Stripe returned bad or missing session id';
+				throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no stripe session ID returned.");
+				exit();				  
+			}
+			
+		} catch (StripeHelperException $e) {
+			error_log("Stripe session validation failed: " . $e->getMessage());
+			throw new SystemDisplayableError("Invalid payment session");
 		}
 	}
 	else{
 		//CREATE THE ORDER 
 		$order = new Order(NULL);
-		if($_SESSION['test_mode'] || $settings->get_setting('debug')){
+		if(StripeHelper::isTestMode()){
 			$order->set('ord_test_mode', true);
 		}
 		$order->set('ord_usr_user_id', $billing_user->key);
@@ -223,17 +232,28 @@ function cart_charge_logic($get_vars, $post_vars){
 			}	
 
 			try{
-				$charge_result = $stripe_helper->process_charge($source_result, $cart->get_non_recurring_total(), $stripe_customer_id, $stripe_item_list, $billing_user, $order);
+				$charge_result = $stripe_helper->executePaymentWithErrorHandling(
+					function() use ($stripe_helper, $source_result, $cart, $stripe_customer_id, $stripe_item_list, $billing_user, $order) {
+						return $stripe_helper->process_charge($source_result, $cart->get_non_recurring_total(), $stripe_customer_id, $stripe_item_list, $billing_user, $order);
+					},
+					'Credit card charge processing'
+				);
 			}
-			catch (Exception $e) {		  
-				$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
-
-				$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
+			catch (SystemDisplayableError $e) {
+				// User-friendly error from comprehensive error handling
 				$order->set('ord_status', Order::STATUS_ERROR);
-				$order->set('ord_error', substr($stored_error, 0, 250));
+				$order->set('ord_error', substr($e->getMessage(), 0, 250));
 				$order->save();	
-				PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
-
+				PublicPage::OutputGenericPublicPage("Payment Error", "Payment Error", $e->getMessage());
+				exit;
+			}
+			catch (StripeHelperException $e) {
+				// Configuration error - should not happen in production
+				error_log("Stripe configuration error during payment: " . $e->getMessage());
+				$order->set('ord_status', Order::STATUS_ERROR);
+				$order->set('ord_error', 'Stripe configuration error');
+				$order->save();	
+				PublicPage::OutputGenericPublicPage("System Error", "System Error", "Payment system configuration error. Please contact support at " . $settings->get_setting('defaultemail'));
 				exit;
 			}
 
