@@ -1,6 +1,7 @@
 {
   "payment_testing": {
     "enabled": true,
+    "modes_to_test": ["stripe_regular", "stripe_checkout"],
     "test_tokens": {
       "success": "tok_visa",
       "declined": "tok_chargeDeclined",
