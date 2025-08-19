@@ -201,6 +201,63 @@ class ComposerValidator {
     }
     
     /**
+     * Install dependencies if validation fails due to missing or mismatched composer files
+     * @return bool True if install succeeded or wasn't needed, false if install failed
+     */
+    public function installIfNeeded() {
+        // Run validation first
+        if ($this->validate()) {
+            return true; // Already valid, no install needed
+        }
+        
+        // Check if the errors are composer-install-fixable
+        $installFixableErrors = ['composer.lock not found', 'Missing required packages'];
+        $canFix = false;
+        
+        foreach ($this->errors as $error) {
+            foreach ($installFixableErrors as $fixableError) {
+                if (strpos($error, $fixableError) !== false) {
+                    $canFix = true;
+                    break 2;
+                }
+            }
+        }
+        
+        if (!$canFix) {
+            return false; // Validation failed for reasons composer install won't fix
+        }
+        
+        // Try to run composer install
+        $basePath = PathHelper::getBasePath();
+        $composerJsonPath = $basePath . '/composer.json';
+        
+        if (!file_exists($composerJsonPath)) {
+            return false; // No composer.json to install from
+        }
+        
+        // Change to project directory and run composer install
+        $originalDir = getcwd();
+        chdir($basePath);
+        
+        $output = [];
+        $returnCode = 0;
+        exec('composer install --no-dev --optimize-autoloader --no-interaction 2>&1', $output, $returnCode);
+        
+        chdir($originalDir);
+        
+        if ($returnCode !== 0) {
+            $this->errors[] = "Composer install failed: " . implode("\n", $output);
+            return false;
+        }
+        
+        // Clear previous validation results and re-validate
+        $this->errors = [];
+        $this->warnings = [];
+        
+        return $this->validate();
+    }
+    
+    /**
      * Get formatted output for command line
      * @return string
      */
