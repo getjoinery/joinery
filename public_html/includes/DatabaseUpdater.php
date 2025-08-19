@@ -685,14 +685,26 @@ class DatabaseUpdater {
         foreach ($class::$field_specifications as $field => $spec) {
             // Single field unique constraints
             if (isset($spec['unique']) && $spec['unique']) {
-                $constraint_name = $table . '_' . $field . '_unique';
+                $constraint_name = $this->generateOptimalConstraintName($table, [$field], 'unique');
+                
+                // Check if constraint exists by name first
                 if (!$this->constraintExists($constraint_name, $dblink)) {
-                    $sql = "ALTER TABLE $table ADD CONSTRAINT $constraint_name UNIQUE ($field)";
-                    if ($this->executeConstraintSql($sql, $dblink)) {
-                        $results['constraints_added'][] = $constraint_name;
-                        $results['messages'][] = "Added unique constraint: $constraint_name";
+                    // Also check for existing constraint by column structure (handles truncated names)
+                    $existing_constraint = $this->findExistingConstraintByColumns($table, [$field], $dblink, 'UNIQUE');
+                    if ($existing_constraint) {
+                        if ($this->verbose) {
+                            $results['messages'][] = "Unique constraint already exists with different name: $existing_constraint";
+                        }
+                        // Don't add - constraint already exists with different name
                     } else {
-                        $results['errors'][] = "Failed to add constraint: $constraint_name";
+                        // No existing constraint found - safe to add
+                        $sql = "ALTER TABLE $table ADD CONSTRAINT $constraint_name UNIQUE ($field)";
+                        if ($this->executeConstraintSql($sql, $dblink)) {
+                            $results['constraints_added'][] = $constraint_name;
+                            $results['messages'][] = "Added unique constraint: $constraint_name";
+                        } else {
+                            $results['errors'][] = "Failed to add constraint: $constraint_name";
+                        }
                     }
                 } elseif ($this->verbose) {
                     $results['messages'][] = "Unique constraint already exists: $constraint_name";
@@ -702,15 +714,27 @@ class DatabaseUpdater {
             // Composite unique constraints
             if (isset($spec['unique_with'])) {
                 $fields = array_merge(array($field), $spec['unique_with']);
-                $constraint_name = $table . '_' . implode('_', $fields) . '_unique';
+                $constraint_name = $this->generateOptimalConstraintName($table, $fields, 'unique');
+                
+                // Check if constraint exists by name first
                 if (!$this->constraintExists($constraint_name, $dblink)) {
-                    $columns = implode(', ', $fields);
-                    $sql = "ALTER TABLE $table ADD CONSTRAINT $constraint_name UNIQUE ($columns)";
-                    if ($this->executeConstraintSql($sql, $dblink)) {
-                        $results['constraints_added'][] = $constraint_name;
-                        $results['messages'][] = "Added composite unique constraint: $constraint_name";
+                    // Also check for existing constraint by column structure (handles truncated names)
+                    $existing_constraint = $this->findExistingConstraintByColumns($table, $fields, $dblink, 'UNIQUE');
+                    if ($existing_constraint) {
+                        if ($this->verbose) {
+                            $results['messages'][] = "Composite unique constraint already exists with different name: $existing_constraint";
+                        }
+                        // Don't add - constraint already exists with different name
                     } else {
-                        $results['errors'][] = "Failed to add constraint: $constraint_name";
+                        // No existing constraint found - safe to add
+                        $columns = implode(', ', $fields);
+                        $sql = "ALTER TABLE $table ADD CONSTRAINT $constraint_name UNIQUE ($columns)";
+                        if ($this->executeConstraintSql($sql, $dblink)) {
+                            $results['constraints_added'][] = $constraint_name;
+                            $results['messages'][] = "Added composite unique constraint: $constraint_name";
+                        } else {
+                            $results['errors'][] = "Failed to add constraint: $constraint_name";
+                        }
                     }
                 } elseif ($this->verbose) {
                     $results['messages'][] = "Composite unique constraint already exists: $constraint_name";
@@ -841,12 +865,12 @@ class DatabaseUpdater {
         if (isset($class::$field_specifications)) {
             foreach ($class::$field_specifications as $field => $spec) {
                 if (isset($spec['unique']) && $spec['unique']) {
-                    $constraints[] = $table . '_' . $field . '_unique';
+                    $constraints[] = $this->generateOptimalConstraintName($table, [$field], 'unique');
                 }
                 
                 if (isset($spec['unique_with'])) {
                     $fields = array_merge(array($field), $spec['unique_with']);
-                    $constraints[] = $table . '_' . implode('_', $fields) . '_unique';
+                    $constraints[] = $this->generateOptimalConstraintName($table, $fields, 'unique');
                 }
             }
         }
@@ -1033,17 +1057,224 @@ class DatabaseUpdater {
             }
             
             $sql = 'ALTER TABLE "public"."' . $table_name . '" ADD CONSTRAINT "' . $constraint_name . '" PRIMARY KEY ("' . $pkey_column . '");';
+            
+            if ($this->verbose) {
+                echo "Executing: {$sql}<br>\n";
+            }
+            
             $q = $dblink->prepare($sql);
             $q->execute();
             
             return true;
             
         } catch (PDOException $e) {
-            // Log error details if verbose mode is enabled
+            // Always log error details for primary key failures (critical for debugging)
+            echo "ERROR: Failed to add primary key constraint to {$table_name}.{$pkey_column}<br>\n";
+            echo "Database error: " . $e->getMessage() . "<br>\n";
+            
+            // Show SQL in verbose mode
             if ($this->verbose) {
-                echo "Error adding primary key constraint to {$table_name}.{$pkey_column}: " . $e->getMessage() . "<br>\n";
+                echo "SQL attempted: {$sql}<br>\n";
+                echo "Error code: " . $e->getCode() . "<br>\n";
             }
             return false;
+        }
+    }
+    
+    /**
+     * Generate optimal constraint name using hybrid approach
+     * Handles PostgreSQL's 63-character identifier limit
+     * 
+     * @param string $table_name Table name
+     * @param array $columns Array of column names
+     * @param string $type Constraint type ('unique', 'pk', etc.)
+     * @return string Optimized constraint name
+     */
+    private function generateOptimalConstraintName($table_name, $columns, $type = 'unique') {
+        // Original name for comparison
+        $original_name = $table_name . '_' . implode('_', $columns) . '_' . $type;
+        
+        // Try abbreviated names first
+        $abbreviated = $this->abbreviateConstraintName($table_name, $columns, $type);
+        if (strlen($abbreviated) <= 63) {
+            if ($this->verbose && $abbreviated !== $original_name) {
+                echo "Constraint name abbreviated: $original_name -> $abbreviated<br>\n";
+            }
+            return $abbreviated;
+        }
+        
+        // Try positional naming for multi-column constraints
+        if (count($columns) > 2) {
+            $positional = $this->generateCompositeConstraintName($table_name, $columns, $type);
+            if (strlen($positional) <= 63) {
+                if ($this->verbose) {
+                    echo "Constraint name using positional: $original_name -> $positional<br>\n";
+                }
+                return $positional;
+            }
+        }
+        
+        // Final fallback: hash-based naming
+        $hashed = $this->generateHashBasedConstraintName($table_name, $columns, $type);
+        if ($this->verbose) {
+            echo "Constraint name using hash: $original_name -> $hashed<br>\n";
+        }
+        return $hashed;
+    }
+    
+    /**
+     * Create abbreviated constraint name by shortening common column prefixes
+     */
+    private function abbreviateConstraintName($table_name, $columns, $type = 'unique') {
+        $abbreviations = [
+            // Common patterns in the codebase
+            'sva_svy_survey_id' => 'svy_id',
+            'sva_qst_question_id' => 'qst_id',
+            'sva_usr_user_id' => 'usr_id',
+            'ewl_evt_event_id' => 'evt_id',
+            'grm_grp_group_id' => 'grp_id',
+            'grm_foreign_key_id' => 'fk_id',
+            // Add more mappings as needed based on actual column names
+            '_id' => '_id',  // Keep _id suffix as is
+        ];
+        
+        $short_columns = array_map(function($col) use ($abbreviations) {
+            foreach ($abbreviations as $long => $short) {
+                if ($col === $long) {
+                    return $short;
+                }
+            }
+            // Try to shorten by removing table prefix if it matches
+            if (strpos($col, '_') !== false) {
+                $parts = explode('_', $col);
+                if (count($parts) >= 3) {
+                    // Remove first part if it's likely a table prefix
+                    return implode('_', array_slice($parts, 1));
+                }
+            }
+            return $col;
+        }, $columns);
+        
+        return $table_name . '_' . implode('_', $short_columns) . '_' . $type;
+    }
+    
+    /**
+     * Generate positional constraint name for multi-column constraints
+     */
+    private function generateCompositeConstraintName($table_name, $columns, $type = 'unique') {
+        if (count($columns) > 2) {
+            // Use positional naming: table_col1_col2_3col_unique
+            $first_two = array_slice($columns, 0, 2);
+            $remaining_count = count($columns) - 2;
+            $short_name = $table_name . '_' . implode('_', $first_two) . '_' . $remaining_count . 'col_' . $type;
+            
+            if (strlen($short_name) <= 63) {
+                return $short_name;
+            }
+        }
+        
+        // If still too long, continue to hash-based naming
+        return $this->generateHashBasedConstraintName($table_name, $columns, $type);
+    }
+    
+    /**
+     * Generate hash-based constraint name for very long constraints
+     * Always starts with readable table name
+     */
+    private function generateHashBasedConstraintName($table_name, $columns, $type = 'unique') {
+        $full_name = $table_name . '_' . implode('_', $columns) . '_' . $type;
+        $hash = substr(md5($full_name), 0, 8);
+        
+        // Calculate space available for hash after table name and type
+        $base_length = strlen($table_name) + 1 + strlen($type) + 1; // table + _ + type + _
+        $available_space = 63 - $base_length;
+        
+        if ($available_space >= 8) {
+            // Standard format: table_hash_type
+            return $table_name . '_' . $hash . '_' . $type;
+        } else {
+            // Very long table name - use shorter hash
+            $short_hash = substr($hash, 0, max(4, $available_space));
+            return $table_name . '_' . $short_hash . '_' . $type;
+        }
+    }
+    
+    /**
+     * Find existing constraint by column structure rather than name
+     * This helps identify constraints even when names were truncated
+     */
+    private function findExistingConstraintByColumns($table_name, $columns, $dblink, $type = 'UNIQUE') {
+        $sql = "SELECT c.conname, 
+                       array_agg(a.attname ORDER BY a.attnum) as column_names
+                FROM pg_constraint c
+                JOIN pg_class t ON c.conrelid = t.oid
+                JOIN pg_namespace n ON t.relnamespace = n.oid
+                JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+                WHERE t.relname = ? 
+                  AND n.nspname = 'public'
+                  AND c.contype = ?
+                  AND array_length(c.conkey, 1) = ?
+                GROUP BY c.conname, c.conkey";
+        
+        try {
+            $constraint_type = ($type === 'UNIQUE') ? 'u' : 'p';
+            $q = $dblink->prepare($sql);
+            $q->execute([$table_name, $constraint_type, count($columns)]);
+            
+            // Sort the expected columns for comparison
+            $expected_columns = $columns;
+            sort($expected_columns);
+            
+            while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
+                // Parse PostgreSQL array format: {col1,col2,col3}
+                $constraint_columns = trim($row['column_names'], '{}');
+                $constraint_columns = explode(',', $constraint_columns);
+                
+                // Clean up column names (remove quotes if any)
+                $constraint_columns = array_map(function($col) {
+                    return trim($col, '"');
+                }, $constraint_columns);
+                
+                sort($constraint_columns);
+                
+                // Check if columns match exactly
+                if ($constraint_columns === $expected_columns) {
+                    if ($this->verbose) {
+                        echo "Found existing constraint by columns: " . $row['conname'] . " (columns: " . implode(', ', $constraint_columns) . ")<br>\n";
+                    }
+                    return $row['conname'];
+                }
+            }
+            
+            if ($this->verbose) {
+                echo "No existing constraint found for columns: " . implode(', ', $expected_columns) . "<br>\n";
+                // Debug: show what constraints DO exist for this table
+                echo "DEBUG: Existing constraints for {$table_name}:<br>\n";
+                $debug_sql = "SELECT c.conname, c.contype, array_agg(a.attname ORDER BY a.attnum) as column_names
+                             FROM pg_constraint c
+                             JOIN pg_class t ON c.conrelid = t.oid
+                             JOIN pg_namespace n ON t.relnamespace = n.oid
+                             LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+                             WHERE t.relname = ? AND n.nspname = 'public'
+                             GROUP BY c.conname, c.contype, c.conkey";
+                try {
+                    $debug_q = $dblink->prepare($debug_sql);
+                    $debug_q->execute([$table_name]);
+                    while ($debug_row = $debug_q->fetch(PDO::FETCH_ASSOC)) {
+                        $debug_columns = trim($debug_row['column_names'], '{}');
+                        echo "  - {$debug_row['conname']} ({$debug_row['contype']}): {$debug_columns}<br>\n";
+                    }
+                } catch (PDOException $e) {
+                    echo "  Error getting debug info: " . $e->getMessage() . "<br>\n";
+                }
+            }
+            return null;
+            
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error finding constraint by columns: " . $e->getMessage() . "<br>\n";
+            }
+            return null;
         }
     }
 }
