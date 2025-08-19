@@ -15,6 +15,8 @@
 
 	$settings = Globalvars::get_instance();
 
+	// Check if validation should run (performance optimization)
+	$run_validation = isset($_GET['run_validation']) && $_GET['run_validation'] == '1';
 
 	if($_POST){
 		
@@ -535,14 +537,15 @@
 		echo '<h5>Installed Packages</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
-		$composer_path = $settings->get_setting('composerAutoLoad');
-		if ($composer_path && !empty(trim($composer_path))) {
-			$autoload_path = rtrim($composer_path, '/') . '/autoload.php';
-			$composer_lock = rtrim($composer_path, '/') . '/../composer.lock';
-			$composer_json = rtrim($composer_path, '/') . '/../composer.json';
-			
-			if (file_exists($autoload_path)) {
-				echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Valid Composer installation</strong></div>';
+		if ($run_validation) {
+			$composer_path = $settings->get_setting('composerAutoLoad');
+			if ($composer_path && !empty(trim($composer_path))) {
+				$autoload_path = rtrim($composer_path, '/') . '/autoload.php';
+				$composer_lock = rtrim($composer_path, '/') . '/../composer.lock';
+				$composer_json = rtrim($composer_path, '/') . '/../composer.json';
+				
+				if (file_exists($autoload_path)) {
+					echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Valid Composer installation</strong></div>';
 				
 				// Get direct dependencies from composer.json
 				$direct_dependencies = [];
@@ -668,8 +671,15 @@
 				echo '<div style="color: #666; font-size: 12px; margin-top: 5px;">Could not find: <code>' . htmlspecialchars($autoload_path) . '</code></div>';
 				echo '<div style="color: #666; font-size: 11px; margin-top: 8px;">Make sure the path points to the vendor directory containing autoload.php</div>';
 			}
+			} else {
+				echo '<div style="color: #666; text-align: center; padding: 30px 10px;">Enter Composer path to see installed packages</div>';
+			}
 		} else {
-			echo '<div style="color: #666; text-align: center; padding: 30px 10px;">Enter Composer path to see installed packages</div>';
+			// Show placeholder with "Run Validation" button
+			echo '<div style="text-align: center; padding: 40px;">';
+			echo '<p style="color: #666; margin-bottom: 15px;">Package validation not run yet</p>';
+			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+			echo '</div>';
 		}
 		
 		echo '</div>';
@@ -751,8 +761,9 @@
 		echo '<h5>API Status</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
-		$mailchimp_api_key = $settings->get_setting('mailchimp_api_key');
-		if ($mailchimp_api_key && !empty(trim($mailchimp_api_key))) {
+		if ($run_validation) {
+			$mailchimp_api_key = $settings->get_setting('mailchimp_api_key');
+			if ($mailchimp_api_key && !empty(trim($mailchimp_api_key))) {
 			// Test Mailchimp API connection
 			$composer_path = $settings->get_setting('composerAutoLoad');
 			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
@@ -797,8 +808,15 @@
 				echo '<div style="color: #ffc107;"><strong>⚠ Composer Not Configured</strong></div>';
 				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
 			}
+			} else {
+				echo '<div style="color: #666; text-align: center; padding: 40px 10px;">Enter API key to validate connection</div>';
+			}
 		} else {
-			echo '<div style="color: #666; text-align: center; padding: 40px 10px;">Enter API key to validate connection</div>';
+			// Show placeholder with "Run Validation" button
+			echo '<div style="text-align: center; padding: 40px;">';
+			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
+			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+			echo '</div>';
 		}
 		
 		echo '</div>';
@@ -815,10 +833,11 @@
 		echo '<div class="col-md-6">';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px;">';
 		
-		$acuity_api_key = $settings->get_setting('acuity_api_key');
-		$acuity_user_id = $settings->get_setting('acuity_user_id');
-		
-		if (!empty($acuity_api_key) && !empty($acuity_user_id)) {
+		if ($run_validation) {
+			$acuity_api_key = $settings->get_setting('acuity_api_key');
+			$acuity_user_id = $settings->get_setting('acuity_user_id');
+			
+			if (!empty($acuity_api_key) && !empty($acuity_user_id)) {
 			echo '<h5>API Status</h5>';
 			try {
 				PathHelper::requireOnce('/includes/AcuityScheduling.php');
@@ -851,8 +870,15 @@
 				echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Connection failed</strong></div>';
 				echo 'Error: ' . htmlspecialchars($e->getMessage());
 			}
+			} else {
+				echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both API Key and User ID to validate connection</div>';
+			}
 		} else {
-			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both API Key and User ID to validate connection</div>';
+			// Show placeholder with "Run Validation" button
+			echo '<div style="text-align: center; padding: 40px;">';
+			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
+			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+			echo '</div>';
 		}
 		
 		echo '</div>';
@@ -874,10 +900,11 @@
 		echo '<h5>Live API Status</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
-		$stripe_api_key = $settings->get_setting('stripe_api_key');
-		$stripe_api_pkey = $settings->get_setting('stripe_api_pkey');
-		
-		if (!empty($stripe_api_key)) {
+		if ($run_validation) {
+			$stripe_api_key = $settings->get_setting('stripe_api_key');
+			$stripe_api_pkey = $settings->get_setting('stripe_api_pkey');
+			
+			if (!empty($stripe_api_key)) {
 			// Test Stripe Live API connection
 			$composer_path = $settings->get_setting('composerAutoLoad');
 			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
@@ -930,8 +957,15 @@
 				echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ Composer Not Configured</strong></div>';
 				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
 			}
+			} else {
+				echo '<div style="color: #666; text-align: center; padding: 20px;">Enter API key to validate connection</div>';
+			}
 		} else {
-			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter API key to validate connection</div>';
+			// Show placeholder with "Run Validation" button
+			echo '<div style="text-align: center; padding: 40px;">';
+			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
+			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+			echo '</div>';
 		}
 		
 		echo '</div>';
@@ -950,10 +984,11 @@
 		echo '<h5>Test API Status</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
-		$stripe_api_key_test = $settings->get_setting('stripe_api_key_test');
-		$stripe_api_pkey_test = $settings->get_setting('stripe_api_pkey_test');
-		
-		if (!empty($stripe_api_key_test)) {
+		if ($run_validation) {
+			$stripe_api_key_test = $settings->get_setting('stripe_api_key_test');
+			$stripe_api_pkey_test = $settings->get_setting('stripe_api_pkey_test');
+			
+			if (!empty($stripe_api_key_test)) {
 			// Test Stripe Test API connection
 			$composer_path = $settings->get_setting('composerAutoLoad');
 			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
@@ -1006,8 +1041,15 @@
 				echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ Composer Not Configured</strong></div>';
 				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
 			}
+			} else {
+				echo '<div style="color: #666; text-align: center; padding: 20px;">Enter test API key to validate connection</div>';
+			}
 		} else {
-			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter test API key to validate connection</div>';
+			// Show placeholder with "Run Validation" button
+			echo '<div style="text-align: center; padding: 40px;">';
+			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
+			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+			echo '</div>';
 		}
 		
 		echo '</div>';
@@ -1090,10 +1132,11 @@
 		echo '<h5>Live API Status</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
-		$paypal_api_key = $settings->get_setting('paypal_api_key');
-		$paypal_api_secret = $settings->get_setting('paypal_api_secret');
-		
-		if (!empty($paypal_api_key) && !empty($paypal_api_secret)) {
+		if ($run_validation) {
+			$paypal_api_key = $settings->get_setting('paypal_api_key');
+			$paypal_api_secret = $settings->get_setting('paypal_api_secret');
+			
+			if (!empty($paypal_api_key) && !empty($paypal_api_secret)) {
 			try {
 				// Test PayPal Live API connection using a simple account info call
 				$original_test_mode = $_SESSION['test_mode'] ?? null;
@@ -1204,8 +1247,15 @@
 					}
 				}
 			}
+			} else {
+				echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both Client ID and Secret to validate connection</div>';
+			}
 		} else {
-			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both Client ID and Secret to validate connection</div>';
+			// Show placeholder with "Run Validation" button
+			echo '<div style="text-align: center; padding: 40px;">';
+			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
+			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+			echo '</div>';
 		}
 		
 		echo '</div>';
@@ -1224,10 +1274,11 @@
 		echo '<h5>Test API Status</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
-		$paypal_api_key_test = $settings->get_setting('paypal_api_key_test');
-		$paypal_api_secret_test = $settings->get_setting('paypal_api_secret_test');
-		
-		if (!empty($paypal_api_key_test) && !empty($paypal_api_secret_test)) {
+		if ($run_validation) {
+			$paypal_api_key_test = $settings->get_setting('paypal_api_key_test');
+			$paypal_api_secret_test = $settings->get_setting('paypal_api_secret_test');
+			
+			if (!empty($paypal_api_key_test) && !empty($paypal_api_secret_test)) {
 			try {
 				// Test PayPal Test API connection using a simple account info call
 				$original_test_mode = $_SESSION['test_mode'] ?? null;
@@ -1348,8 +1399,15 @@
 					}
 				}
 			}
+			} else {
+				echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both Client ID and Secret to validate connection</div>';
+			}
 		} else {
-			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter both Client ID and Secret to validate connection</div>';
+			// Show placeholder with "Run Validation" button
+			echo '<div style="text-align: center; padding: 40px;">';
+			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
+			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+			echo '</div>';
 		}
 		
 		echo '</div>';
@@ -1373,12 +1431,13 @@
 		echo '<h5>API Status</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
-		$mailgun_api_key = $settings->get_setting('mailgun_api_key');
-		$mailgun_domain = $settings->get_setting('mailgun_domain');
-		$mailgun_version = $settings->get_setting('mailgun_version');
-		$mailgun_eu_api_link = $settings->get_setting('mailgun_eu_api_link');
-		
-		if (!empty($mailgun_api_key) && !empty($mailgun_domain)) {
+		if ($run_validation) {
+			$mailgun_api_key = $settings->get_setting('mailgun_api_key');
+			$mailgun_domain = $settings->get_setting('mailgun_domain');
+			$mailgun_version = $settings->get_setting('mailgun_version');
+			$mailgun_eu_api_link = $settings->get_setting('mailgun_eu_api_link');
+			
+			if (!empty($mailgun_api_key) && !empty($mailgun_domain)) {
 			// Test Mailgun API connection
 			$composer_path = $settings->get_setting('composerAutoLoad');
 			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
@@ -1463,8 +1522,15 @@
 				echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ Composer Not Configured</strong></div>';
 				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
 			}
+			} else {
+				echo '<div style="color: #666; text-align: center; padding: 20px;">Enter API key and domain to validate connection</div>';
+			}
 		} else {
-			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter API key and domain to validate connection</div>';
+			// Show placeholder with "Run Validation" button
+			echo '<div style="text-align: center; padding: 40px;">';
+			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
+			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+			echo '</div>';
 		}
 		
 		echo '</div>';
