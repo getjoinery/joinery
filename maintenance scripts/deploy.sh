@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 2.3 - Fixed deployment order and theme/plugin deployment
+#version 2.4 - Added automatic composer dependency installation
 # MODIFIED: Preserve staging directory on deployment failures for debugging
 # MODIFIED: Added --norollback flag to disable rollback functionality
 # MODIFIED: Improved rollback functionality to handle directory conflicts
@@ -691,6 +691,35 @@ echo "Critical directories validation passed."
 # FIX PERMISSIONS AFTER DEPLOYMENT
 echo "Fixing permissions after deployment..."
 fix_permissions "$TARGET_SITE"
+
+# CHECK AND INSTALL COMPOSER DEPENDENCIES IF NEEDED
+/usr/bin/php /var/www/html/$TARGET_SITE/public_html/utils/composer_install_if_needed.php
+returnvalue=$?
+
+if [[ "$returnvalue" != 0 ]]; then
+    echo "ERROR: Composer dependency setup failed."
+    
+    # Check if rollback is disabled
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
+        echo "Manual intervention required to fix composer dependencies."
+        exit 1
+    fi
+    
+    # Attempt rollback
+    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
+        if ! perform_rollback "$TARGET_SITE"; then
+            echo "ERROR: Composer setup failed and rollback failed. Manual intervention required."
+            exit 1
+        fi
+    else
+        echo "This appears to be an initial deployment - no previous version to rollback to."
+        echo "Keeping current deployment in place for debugging."
+    fi
+    exit 1
+else
+    echo "Composer dependencies validated/installed successfully."
+fi
 
 # Check if update_database.php exists
 if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; then
