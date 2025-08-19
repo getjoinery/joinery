@@ -12,14 +12,16 @@
 	//https://github.com/leadthread/php-calendly
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require $composer_dir.'autoload.php'; 	
-	use Zenapply\Calendly\Calendly;
+	require $composer_dir.'autoload.php';
 
+	/*
 	$settings = Globalvars::get_instance();
-	$c = new Calendly($settings->get_setting('calendly_api_key'));
-	$response = $c->registerInviteeCreated("https://empoweredhealthtn.com/ajax/calendly_webhook");
-	print_r($response);
-	$response = $c->registerInviteeCanceled("https://empoweredhealthtn.com/ajax/calendly_webhook_cancel");
-	print_r($response);	
+	// Calendly integration code removed - package not installed
+	// $c = new Calendly($settings->get_setting('calendly_api_key'));
+	// $response = $c->registerInviteeCreated("https://empoweredhealthtn.com/ajax/calendly_webhook");
+	// print_r($response);
+	// $response = $c->registerInviteeCanceled("https://empoweredhealthtn.com/ajax/calendly_webhook_cancel");
+	// print_r($response);
+	*/	
 	
 ?>

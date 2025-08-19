@@ -23,10 +23,14 @@
 	echo PublicPage::BeginPanel();
 
 					
+	/*
 	echo '<!-- Calendly inline widget begin -->
 	<div class="calendly-inline-widget" data-url="'.$booking_type->get('bkt_schedule_link').'?primary_color=69be00&name='.str_replace(' ', '%20', $client_user->display_name()).'&email='.$client_user->get('usr_email').'&salesforce_uuid='.$booking_type->key.'" style="min-width:320px;height:630px;"></div>
 	<script type="text/javascript" src="https://assets.calendly.com/assets/external/widget.js" async></script>
 	<!-- Calendly inline widget end -->';
+	*/
+	
+	echo '<div class="alert alert-info">Booking functionality is temporarily disabled while we review our calendar integration.</div>';
 
 	echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();	

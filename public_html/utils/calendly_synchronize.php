@@ -12,6 +12,10 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 
+	// TEMPORARILY DISABLED - Calendly integration under review
+	echo 'Calendly synchronization temporarily disabled';
+	exit;
+
 	$event_uri = LibraryFunctions::fetch_variable('event_uri', NULL,0,'');
 	$min_start_time = LibraryFunctions::fetch_variable('min_start_time', NULL,0,'');
 
