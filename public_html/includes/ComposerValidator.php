@@ -108,7 +108,6 @@ class ComposerValidator {
             $composerJsonPath = $composerDir . '/composer.json';
             $composerLockPath = $composerDir . '/composer.lock';
         }
-        
         // If no composer.json, we can't check
         if (!file_exists($composerJsonPath)) {
             return true; // Already warned about this
@@ -123,7 +122,8 @@ class ComposerValidator {
         
         // Check if composer.lock exists
         if (!file_exists($composerLockPath)) {
-            $this->errors[] = "composer.lock not found - run 'composer install'";
+            $this->errors[] = "composer.lock not found at: $composerLockPath";
+            $this->errors[] = "Run 'composer install' in the project directory";
             return false;
         }
         
@@ -155,6 +155,8 @@ class ComposerValidator {
         
         if (!empty($missingPackages)) {
             $this->errors[] = "Missing required packages: " . implode(', ', $missingPackages);
+            $this->errors[] = "Checked composer.json: $composerJsonPath";
+            $this->errors[] = "Checked composer.lock: $composerLockPath";
             $this->errors[] = "Run 'composer install' to install missing packages";
             return false;
         }
