@@ -16,6 +16,10 @@ require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
+	// TEMPORARILY DISABLED - Calendly integration under review
+	echo 'Calendly test temporarily disabled';
+	exit;
+
 	$ch = curl_init();
 
     curl_setopt($ch, CURLOPT_URL, 'https://api.calendly.com/users/me');

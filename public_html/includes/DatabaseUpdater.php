@@ -334,12 +334,34 @@ class DatabaseUpdater {
         $spec_nullable = !isset($field_specs['is_nullable']) || $field_specs['is_nullable'];
         $live_nullable = ($live_column_info['is_nullable'] == 'YES');
         
-        if ($spec_nullable != $live_nullable) {
+        // Skip nullable constraint changes for primary key columns
+        // Primary keys must always be NOT NULL and cannot be modified
+        if ($this->isPrimaryKeyColumn($table_name, $field_name, $dblink)) {
+            if ($this->verbose) {
+                $results['messages'][] = "Skipping nullable constraint change for primary key column: {$table_name}.{$field_name}";
+            }
+        } elseif ($spec_nullable != $live_nullable) {
             if ($spec_nullable) {
                 // Remove NOT NULL constraint
                 $sql = "ALTER TABLE {$table_name} ALTER COLUMN {$field_name} DROP NOT NULL";
             } else {
-                // Add NOT NULL constraint
+                // Add NOT NULL constraint - but first check for NULL values
+                $null_check_sql = "SELECT COUNT(*) as null_count FROM {$table_name} WHERE {$field_name} IS NULL";
+                try {
+                    $null_q = $dblink->prepare($null_check_sql);
+                    $null_q->execute();
+                    $null_result = $null_q->fetch(PDO::FETCH_ASSOC);
+                    $null_count = $null_result['null_count'];
+                    
+                    if ($null_count > 0) {
+                        $results['warnings'][] = "Cannot add NOT NULL constraint to {$table_name}.{$field_name}: column contains {$null_count} NULL values";
+                        return; // Skip this constraint modification
+                    }
+                } catch (PDOException $e) {
+                    $results['warnings'][] = "Could not check for NULL values in {$table_name}.{$field_name}: " . $e->getMessage();
+                    return; // Skip this constraint modification  
+                }
+                
                 $sql = "ALTER TABLE {$table_name} ALTER COLUMN {$field_name} SET NOT NULL";
             }
             
