@@ -102,11 +102,18 @@ class ComposerValidator {
         $composerJsonPath = $basePath . '/composer.json';
         $composerLockPath = $basePath . '/composer.lock';
         
-        // If not in project root, try relative to vendor directory
-        if (!file_exists($composerLockPath) && $this->composerPath) {
+        // If project composer.json doesn't exist, try relative to vendor directory
+        if (!file_exists($composerJsonPath) && $this->composerPath) {
             $composerDir = dirname(rtrim($this->composerPath, '/'));
             $composerJsonPath = $composerDir . '/composer.json';
             $composerLockPath = $composerDir . '/composer.lock';
+        }
+        
+        // Always prefer project composer.json if it exists, even if composer.lock is missing
+        $projectComposerJson = $basePath . '/composer.json';
+        if (file_exists($projectComposerJson)) {
+            $composerJsonPath = $projectComposerJson;
+            $composerLockPath = $basePath . '/composer.lock';
         }
         // If no composer.json, we can't check
         if (!file_exists($composerJsonPath)) {
