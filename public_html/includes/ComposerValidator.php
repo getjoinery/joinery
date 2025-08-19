@@ -97,23 +97,23 @@ class ComposerValidator {
      * Check if required packages are installed
      */
     private function validateRequiredPackages() {
-        // First try project root
+        // Always prioritize project-specific composer files
         $basePath = PathHelper::getBasePath();
-        $composerJsonPath = $basePath . '/composer.json';
-        $composerLockPath = $basePath . '/composer.lock';
+        $projectComposerJson = $basePath . '/composer.json';
+        $projectComposerLock = $basePath . '/composer.lock';
         
-        // If project composer.json doesn't exist, try relative to vendor directory
-        if (!file_exists($composerJsonPath) && $this->composerPath) {
+        // Use project files if composer.json exists, otherwise fall back to shared vendor location
+        if (file_exists($projectComposerJson)) {
+            $composerJsonPath = $projectComposerJson;
+            $composerLockPath = $projectComposerLock;
+        } else if ($this->composerPath) {
+            // Fall back to shared vendor directory
             $composerDir = dirname(rtrim($this->composerPath, '/'));
             $composerJsonPath = $composerDir . '/composer.json';
             $composerLockPath = $composerDir . '/composer.lock';
-        }
-        
-        // Always prefer project composer.json if it exists, even if composer.lock is missing
-        $projectComposerJson = $basePath . '/composer.json';
-        if (file_exists($projectComposerJson)) {
+        } else {
             $composerJsonPath = $projectComposerJson;
-            $composerLockPath = $basePath . '/composer.lock';
+            $composerLockPath = $projectComposerLock;
         }
         // If no composer.json, we can't check
         if (!file_exists($composerJsonPath)) {
