@@ -980,15 +980,21 @@ class DatabaseUpdater {
                 
                 // Check if column is actually set as primary key (using existing method)
                 if (!$this->isPrimaryKeyColumn($table_name, $expected_pkey, $dblink)) {
-                    // Use shared method to add/fix the primary key
-                    // Non-critical failure in batch operation - log and continue
-                    if ($this->addPrimaryKeyConstraint($table_name, $expected_pkey, $dblink)) {
-                        $results['fixed'][] = "{$table_name}.{$expected_pkey}";
-                        $results['messages'][] = "FIXED: Added primary key constraint to {$table_name}.{$expected_pkey}";
+                    // First, clean up NULL values in the primary key column if needed
+                    if ($this->cleanupNullPrimaryKeyValues($class, $table_name, $expected_pkey, $dblink, $results)) {
+                        // Use shared method to add/fix the primary key
+                        // Non-critical failure in batch operation - log and continue
+                        if ($this->addPrimaryKeyConstraint($table_name, $expected_pkey, $dblink)) {
+                            $results['fixed'][] = "{$table_name}.{$expected_pkey}";
+                            $results['messages'][] = "FIXED: Added primary key constraint to {$table_name}.{$expected_pkey}";
+                        } else {
+                            $results['errors'][] = "Failed to add primary key constraint to {$table_name}.{$expected_pkey}";
+                            $results['success'] = false;
+                            // Continue processing other tables
+                        }
                     } else {
-                        $results['errors'][] = "Failed to add primary key constraint to {$table_name}.{$expected_pkey}";
+                        $results['errors'][] = "Failed to cleanup NULL values in {$table_name}.{$expected_pkey} - cannot add primary key";
                         $results['success'] = false;
-                        // Continue processing other tables
                     }
                 } else {
                     if ($this->verbose) {
@@ -1076,6 +1082,106 @@ class DatabaseUpdater {
             if ($this->verbose) {
                 echo "SQL attempted: {$sql}<br>\n";
                 echo "Error code: " . $e->getCode() . "<br>\n";
+            }
+            return false;
+        }
+    }
+    
+    /**
+     * Clean up NULL values in primary key columns before adding constraints
+     * 
+     * @param string $class Model class name
+     * @param string $table_name Table name
+     * @param string $pkey_column Primary key column name
+     * @param PDO $dblink Database connection
+     * @param array $results Results array to update with messages
+     * @return bool True if cleanup successful or not needed, false if failed
+     */
+    private function cleanupNullPrimaryKeyValues($class, $table_name, $pkey_column, $dblink, &$results) {
+        try {
+            // First, check if there are any NULL values
+            $check_sql = "SELECT COUNT(*) as null_count FROM {$table_name} WHERE {$pkey_column} IS NULL";
+            $q = $dblink->prepare($check_sql);
+            $q->execute();
+            $result = $q->fetch(PDO::FETCH_ASSOC);
+            $null_count = $result['null_count'];
+            
+            if ($null_count == 0) {
+                // No NULL values, nothing to clean up
+                return true;
+            }
+            
+            if ($this->verbose) {
+                echo "Found {$null_count} NULL values in {$table_name}.{$pkey_column}<br>\n";
+            }
+            
+            // Check if this is a serial column that should auto-increment
+            $field_specs = $class::$field_specifications ?? [];
+            $is_serial = isset($field_specs[$pkey_column]['serial']) && $field_specs[$pkey_column]['serial'];
+            
+            if ($is_serial) {
+                // For serial columns, update NULLs to use the next sequence value
+                if ($this->fixSerialColumnNulls($table_name, $pkey_column, $dblink, $null_count)) {
+                    $results['messages'][] = "CLEANED: Fixed {$null_count} NULL values in serial column {$table_name}.{$pkey_column}";
+                    return true;
+                } else {
+                    return false;
+                }
+            } else {
+                // For non-serial columns, we can't safely fix NULL values automatically
+                // This would require manual intervention to determine appropriate values
+                $results['warnings'][] = "Cannot automatically fix {$null_count} NULL values in non-serial column {$table_name}.{$pkey_column}";
+                return false;
+            }
+            
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error checking for NULL values in {$table_name}.{$pkey_column}: " . $e->getMessage() . "<br>\n";
+            }
+            return false;
+        }
+    }
+    
+    /**
+     * Fix NULL values in serial/auto-increment columns
+     */
+    private function fixSerialColumnNulls($table_name, $pkey_column, $dblink, $null_count) {
+        try {
+            // Get the sequence name (PostgreSQL naming convention)
+            $sequence_name = $table_name . '_' . $pkey_column . '_seq';
+            
+            // First, check if sequence exists
+            $seq_check_sql = "SELECT 1 FROM information_schema.sequences WHERE sequence_name = ? AND sequence_schema = 'public'";
+            $q = $dblink->prepare($seq_check_sql);
+            $q->execute([$sequence_name]);
+            
+            if ($q->rowCount() == 0) {
+                if ($this->verbose) {
+                    echo "Sequence {$sequence_name} not found - cannot fix NULL values<br>\n";
+                }
+                return false;
+            }
+            
+            // Update NULL values to use nextval from the sequence
+            $update_sql = "UPDATE {$table_name} SET {$pkey_column} = nextval('{$sequence_name}') WHERE {$pkey_column} IS NULL";
+            
+            if ($this->verbose) {
+                echo "Executing: {$update_sql}<br>\n";
+            }
+            
+            $q = $dblink->prepare($update_sql);
+            $q->execute();
+            
+            $updated_rows = $q->rowCount();
+            if ($this->verbose) {
+                echo "Updated {$updated_rows} NULL values with sequence values<br>\n";
+            }
+            
+            return $updated_rows == $null_count;
+            
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error fixing serial column NULLs: " . $e->getMessage() . "<br>\n";
             }
             return false;
         }
