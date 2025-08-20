@@ -23,11 +23,11 @@ class Pager{
 	function __construct($options=array(), $prefix=''){
 		
 		$url = $_SERVER['REQUEST_URI'];
-		if($options['getvars']){
+		if(isset($options['getvars']) && $options['getvars']){
 			$url = $options['getvars'];
 		}
 
-		if($options['numperpage']){
+		if(isset($options['numperpage']) && $options['numperpage']){
 			$this->numperpage = $options['numperpage'];
 		}
 		else{
@@ -35,7 +35,7 @@ class Pager{
 		}
 		
 
-		$this->numrecords = $options['numrecords'];
+		$this->numrecords = $options['numrecords'] ?? 0;
 		$this->prefix = $prefix;
 
 		$url_pieces = parse_url($url);
@@ -43,7 +43,7 @@ class Pager{
 		$this->url_vars = $url_vars;
 		$this->base_url = $url_pieces['path'];
 
-		if($options['offset']){
+		if(isset($options['offset']) && $options['offset']){
 			$this->offset = $options['offset'];
 			$this->url_vars['offset'] = $options['offset'];
 			unset($url_vars[$prefix . 'offset']);
@@ -55,7 +55,7 @@ class Pager{
 			}
 		}
 
-		if($options['sort']){
+		if(isset($options['sort']) && $options['sort']){
 			$this->sort = $options['sort'];
 			$this->url_vars['sort'] = $options['sort'];
 			unset($url_vars[$prefix . 'sort']);
@@ -67,7 +67,7 @@ class Pager{
 			}
 		}
 		
-		if($options['filter']){
+		if(isset($options['filter']) && $options['filter']){
 			$this->filter = $options['filter'];
 			$this->url_vars['filter'] = $options['filter'];	
 			unset($url_vars[$prefix . 'filter']);			
@@ -79,7 +79,7 @@ class Pager{
 			}
 		}
 
-		if($options['sdirection']){
+		if(isset($options['sdirection']) && $options['sdirection']){
 			$this->sdirection = $options['sdirection'];
 			$this->url_vars['sdirection'] = $options['sdirection'];
 			unset($url_vars[$prefix . 'sdirection']);	
@@ -91,7 +91,7 @@ class Pager{
 			}
 		}
 		
-		if($options['searchterm']){
+		if(isset($options['searchterm']) && $options['searchterm']){
 			$this->searchterm = $options['searchterm'];
 			$this->url_vars['searchterm'] = $options['searchterm'];
 			unset($url_vars[$prefix . 'searchterm']);	
@@ -179,12 +179,13 @@ class Pager{
 			throw new SystemDisplayablePermanentError("Numpagestotal is not set for paging.");
 		}
 		
-		if($page_string[0] == '+'){
-			$page_add = substr($page_string, 1);
+		$page_string_str = (string)$page_string;
+		if($page_string_str[0] == '+'){
+			$page_add = substr($page_string_str, 1);
 			$page_number = $this->currentpage + $page_add;
 		}
-		else if($page_string[0] == '-'){
-			$page_sub = substr($page_string, 1);
+		else if($page_string_str[0] == '-'){
+			$page_sub = substr($page_string_str, 1);
 			$page_number = $this->currentpage - $page_sub;
 		}
 		else{
