@@ -438,7 +438,7 @@ class PublicPageFalcon extends PublicPageBase {
   		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<meta http-equiv="X-UA-Compatible" content="IE=edge">
-		<meta name="description" content="<?php echo $options['description']; ?>">
+		<meta name="description" content="<?php echo $options['description'] ?? ''; ?>">
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
@@ -614,7 +614,7 @@ class PublicPageFalcon extends PublicPageBase {
 	
 	
 	
-	if(!$options['header_only']){
+	if(!isset($options['header_only']) || !$options['header_only']){
 	?>	
 
          
@@ -677,7 +677,7 @@ class PublicPageFalcon extends PublicPageBase {
 	
 
 	
-		if(is_array($options['altlinks'])){
+		if(isset($options['altlinks']) && is_array($options['altlinks'])){
 			echo '<div class="row justify-content-end justify-content-end gx-3 gy-0 px-3"><div class="col-sm-auto">';
 			if(count($options['altlinks']) > 2){
 				echo '<div class="dropdown font-sans-serif d-inline-block mb-2"><button class="btn btn-falcon-default dropdown-toggle" id="dropdownMenuButton" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">'.$options['options_label'].'</button><div class="dropdown-menu dropdown-menu-end py-0" aria-labelledby="dropdownMenuButton">';
