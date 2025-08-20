@@ -71,7 +71,7 @@ class SessionControl{
 	}
 	
 	public function get_uniqid(){
-		if(!$_SESSION['uniqid']){
+		if(!isset($_SESSION['uniqid']) || !$_SESSION['uniqid']){
 			$_SESSION['uniqid'] = uniqid();
 		}	
 		return $_SESSION['uniqid'];
@@ -641,7 +641,7 @@ class SessionControl{
 
 	function get_permission() {
 		
-		return $_SESSION['permission'];	
+		return $_SESSION['permission'] ?? 0;	
 		
 		// If there is no logged in user or the user's IP doesn't match the one they logged in with
 		// they have a permission level of 0
