@@ -320,60 +320,19 @@ if ($products->count_all() > 0) {
 
 **Method Verification Best Practice:** Always check the actual class definition in `/data/[class]_class.php` to confirm method names, signatures, and parameters before using any method.
 
-## Admin Page Structure and Conventions
+## Admin Page Development
 
-### Required Setup
-```php
-<?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+For complete guidance on creating admin interface pages, including required setup, table patterns, form handling, and best practices, see:
 
-$session = SessionControl::get_instance();
-$session->check_permission(5); // Adjust permission level as needed
+**📖 [Admin Pages Documentation](/docs/claude/CLAUDE_admin_pages.md)**
 
-$page = new AdminPage();
-$settings = Globalvars::get_instance();
-```
-
-### Page Structure
-```php
-$page->admin_header([
-    'title' => 'Page Title',
-    'menu-id' => 'menu-identifier',
-    'readable_title' => 'Human Readable Title'
-]);
-?>
-
-<div class="row">
-    <div class="col-12">
-        <h5 class="mb-3">Section Title</h5>
-        
-        <?php
-        $formwriter = LibraryFunctions::get_formwriter_object('form_name', 'admin');
-        
-        $validation_rules = array();
-        $validation_rules['field_name']['required']['value'] = 'true';
-        echo $formwriter->set_validate($validation_rules);
-        
-        echo $formwriter->begin_form('form_name', 'POST', $_SERVER['PHP_SELF']);
-        echo $formwriter->textinput('Label', 'field_name', 'form-control', 100, $default_value, 'placeholder', 255, 'help text');
-        echo $formwriter->start_buttons();
-        echo $formwriter->new_form_button('Submit Text', 'btn btn-primary');
-        echo $formwriter->end_buttons();
-        echo $formwriter->end_form();
-        ?>
-    </div>
-</div>
-
-<?php $page->admin_footer(); ?>
-```
-
-### Layout Rules
-1. **No Nested Panels**: Avoid cards inside cards unless there's a specific reason
-2. **Use Bootstrap Classes**: `form-control`, `btn btn-primary`, `alert-info`, etc.
-3. **Always use FormWriter**: Never create forms manually
-4. **Prefer built-in FormWriter validation** over custom JavaScript
+This comprehensive guide covers:
+- Required setup and security patterns
+- Table-based admin pages with pagination and sorting
+- Form handling with FormWriter integration
+- CRUD patterns and bulk operations
+- Bootstrap styling guidelines
+- Performance optimization and testing approaches
 
 ## Development Workflow
 
