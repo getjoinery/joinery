@@ -130,46 +130,79 @@ class FileErrorLogger implements ErrorLoggerInterface {
     
     public function log(\Throwable $exception, ErrorContext $context): void {
         try {
-            $timestamp = date('Y-m-d H:i:s', $context->getTimestamp());
-            $exceptionType = get_class($exception);
-            $message = $exception->getMessage();
-            $file = $exception->getFile();
-            $line = $exception->getLine();
-            $userId = $context->getUserId() ?? 'guest';
-            $requestUri = $context->getRequestUri();
-            $ipAddress = $context->getIpAddress();
-            
-            $logEntry = sprintf(
-                "[%s] %s: %s in %s:%d (User: %s, IP: %s, URI: %s)\n",
-                $timestamp,
-                $exceptionType,
-                $message,
-                $file,
-                $line,
-                $userId,
-                $ipAddress,
-                $requestUri
-            );
+            // Create structured log entry
+            $logEntry = [
+                'timestamp' => date('c'),
+                'unix_time' => time(),
+                'level' => $this->getErrorLevel($exception),
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'user_id' => $context->getUserId() ?? null,
+                'request_uri' => $context->getRequestUri(),
+                'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN',
+                'ip_address' => $context->getIpAddress(),
+                'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+                'hash' => $this->generateErrorHash($exception)
+            ];
             
             // Add context if available
             if ($exception instanceof BaseException) {
                 $exceptionContext = $exception->getContext();
                 if (!empty($exceptionContext)) {
-                    $logEntry .= "Context: " . json_encode($exceptionContext) . "\n";
+                    $logEntry['context'] = $exceptionContext;
                 }
             }
             
-            // Add stack trace for detailed debugging
-            $logEntry .= "Stack trace:\n" . $exception->getTraceAsString() . "\n\n";
+            // Add condensed stack trace (first 5 frames)
+            $trace = array_slice($exception->getTrace(), 0, 5);
+            $logEntry['trace'] = array_map(function($frame) {
+                return [
+                    'file' => $frame['file'] ?? 'unknown',
+                    'line' => $frame['line'] ?? 0,
+                    'function' => $frame['function'] ?? 'unknown',
+                    'class' => $frame['class'] ?? null
+                ];
+            }, $trace);
             
-            // Log to PHP error log
-            error_log($logEntry);
+            // Log as single-line JSON
+            $jsonLog = json_encode($logEntry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            error_log($jsonLog);
             
         } catch (\Throwable $e) {
-            // Fallback to basic error logging if our logging fails
+            // Fallback to basic error logging if JSON encoding fails
             error_log("File error logging failed: " . $e->getMessage());
             error_log("Original error: " . $exception->getMessage());
         }
+    }
+    
+    private function getErrorLevel(\Throwable $exception): string {
+        if ($exception instanceof ValidationException) {
+            return 'WARNING';
+        }
+        if ($exception instanceof AuthenticationException || $exception instanceof AuthorizationException) {
+            return 'SECURITY';
+        }
+        if ($exception instanceof DatabaseException) {
+            return 'CRITICAL';
+        }
+        if ($exception instanceof BusinessLogicException) {
+            return 'ERROR';
+        }
+        return 'ERROR';
+    }
+    
+    private function generateErrorHash(\Throwable $exception): string {
+        // Create a hash to identify similar errors
+        // Based on type + message + file + line (excluding dynamic parts)
+        $message = preg_replace('/\d+/', 'N', $exception->getMessage()); // Replace numbers with N
+        $identifier = $exception->getCode() . '::' . 
+                     get_class($exception) . '::' . 
+                     $message . '::' . 
+                     $exception->getFile() . '::' . 
+                     $exception->getLine();
+        return md5($identifier);
     }
 }
 
