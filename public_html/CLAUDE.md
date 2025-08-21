@@ -326,13 +326,6 @@ For complete guidance on creating admin interface pages, including required setu
 
 **📖 [Admin Pages Documentation](/docs/claude/CLAUDE_admin_pages.md)**
 
-This comprehensive guide covers:
-- Required setup and security patterns
-- Table-based admin pages with pagination and sorting
-- Form handling with FormWriter integration
-- CRUD patterns and bulk operations
-- Bootstrap styling guidelines
-- Performance optimization and testing approaches
 
 ## Development Workflow
 
@@ -382,6 +375,7 @@ $migrations[] = $migration;
 **NOT Available Locally:**
 - Database connections
 - Web server or external services
+- Globalvars and settings values
 
 **CRITICAL REQUIREMENT:** Always check PHP files for syntax errors using `php -l filename.php` before declaring any PHP development task complete.
 
@@ -392,9 +386,6 @@ php -l filename.php
 
 # Test server error logs
 "/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/maintenance scripts/log_fetcher.sh"
-
-# Database migrations
-php utils/update_database.php
 ```
 
 ### Test Server Monitoring

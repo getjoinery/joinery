@@ -4,6 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page = new PublicPage();
+	$is_valid_page = false; // This is a 404 page, so page is not valid
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Page not found', 
