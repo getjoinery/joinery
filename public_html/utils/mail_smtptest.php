@@ -2,7 +2,7 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
-PathHelper::requireOnce('includes/systemmailer.php');
+PathHelper::requireOnce('includes/SmtpMailer.php');
 
 echo 'feature turned off';
 exit;

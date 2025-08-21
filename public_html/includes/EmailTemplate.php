@@ -2,10 +2,10 @@
 require_once('PathHelper.php');
 require_once('Globalvars.php');
 $settings = Globalvars::get_instance();
-require_once('systemmailer.php');
+require_once('SmtpMailer.php');
 require_once('LibraryFunctions.php');
 
-// Composer autoload is already loaded by systemmailer.php
+// Composer autoload is already loaded by SmtpMailer.php
 use Mailgun\Mailgun;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
@@ -643,6 +643,12 @@ class EmailTemplate {
 			$this->email_from_name = $set_values['from_name'];
 		}
 
+		$settings = Globalvars::get_instance();
+		if ($settings->get_setting('email_debug_mode')) {
+			// Log after template is filled
+			$this->logToDebugTable('template_filled');
+		}
+
 		return $set_values;
 	}
 	
@@ -654,6 +660,12 @@ class EmailTemplate {
 	//RETURNS TRUE ON SUCCESS
 	function send($check_session=TRUE, $other_host=NULL) {
 		$settings = Globalvars::get_instance();
+		
+		// Log to debug table if debug mode is on
+		if ($settings->get_setting('email_debug_mode')) {
+			$service = $this->getServiceType(); // Uses getter from Refactor 2
+			$this->logToDebugTable('pre_send_' . $service);
+		}
 
 		// If the email has no content, don't send it
 		if (!$this->email_has_content) {
@@ -807,6 +819,116 @@ class EmailTemplate {
 
 		$queued_email->save();
 		return $queued_email->key;
+	}
+
+	/**
+	 * Get the processed email HTML (for testing)
+	 * @return string|null
+	 */
+	public function getEmailHtml() {
+		return $this->email_html;
+	}
+
+	/**
+	 * Get the processed email text (for testing)
+	 * @return string|null
+	 */
+	public function getEmailText() {
+		return $this->email_text;
+	}
+
+	/**
+	 * Get the email subject (for testing)
+	 * @return string|null
+	 */
+	public function getEmailSubject() {
+		return $this->email_subject;
+	}
+
+	/**
+	 * Get the email recipients array (for testing)
+	 * @return array
+	 */
+	public function getEmailRecipients() {
+		return $this->email_recipients;
+	}
+
+	/**
+	 * Get the from address (for testing)
+	 * @return string|null
+	 */
+	public function getEmailFrom() {
+		return $this->email_from;
+	}
+
+	/**
+	 * Get the from name (for testing)
+	 * @return string|null
+	 */
+	public function getEmailFromName() {
+		return $this->email_from_name;
+	}
+
+	/**
+	 * Check if email has content (for testing)
+	 * @return bool
+	 */
+	public function hasContent() {
+		return $this->email_has_content;
+	}
+
+	/**
+	 * Get which service would be used to send (for testing)
+	 * Without actually sending anything
+	 * @return string 'smtp', 'mailgun', or 'none'
+	 * 
+	 * NOTE: The SMTP branch in EmailTemplate's send() method appears to be dead code
+	 * as $this->mailer is never set to a truthy value. Currently EmailTemplate only
+	 * uses Mailgun. SMTP is used elsewhere (QueuedEmail, Activation) but not here.
+	 * This method reflects the current reality.
+	 */
+	public function getServiceType() {
+		$settings = Globalvars::get_instance();
+		
+		// Check what service would be used (read-only, no side effects)
+		// NOTE: $this->mailer is always NULL/false in current implementation
+		// so this will never return 'smtp' unless you fix the dead code
+		if($this->mailer) {
+			return 'smtp';  // This branch is currently unreachable
+		}
+		else if($settings->get_setting('mailgun_api_key') && $settings->get_setting('mailgun_domain')) {
+			return 'mailgun';
+		}
+		else {
+			return 'none';
+		}
+	}
+
+	/**
+	 * Log email to debug log table if debug mode is enabled
+	 * Uses existing DebugEmailLog infrastructure
+	 * @param string $context Additional context about why this was logged
+	 */
+	protected function logToDebugTable($context = 'debug_mode') {
+		$settings = Globalvars::get_instance();
+		
+		// Only log if debug mode is enabled
+		if (!$settings->get_setting('email_debug_mode')) {
+			return;
+		}
+		
+		// Use existing DebugEmailLog class
+		$debug_log = new DebugEmailLog(NULL);
+		$debug_log->set('del_subject', '[' . $context . '] ' . $this->email_subject);
+		$debug_log->set('del_body', $this->email_html);
+		
+		// Set recipient email (field exists but wasn't being used)
+		$recipient_emails = array_map(function($r) { 
+			return $r['email']; 
+		}, $this->email_recipients);
+		$debug_log->set('del_recipient_email', implode(', ', $recipient_emails));
+		
+		$debug_log->save();
 	}
 }
 
