@@ -27,6 +27,17 @@ require_once(__DIR__ . '/PathHelper.php');              // from /includes/ direc
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/filename.php');
 ```
 
+### Variable Scope with PathHelper
+**CRITICAL:** `PathHelper::requireOnce()` includes files in method scope, isolating variables. When you need global scope access to variables defined in the included file (like `$migrations`), use:
+
+```php
+// ✅ For shared variables - maintains global scope
+require_once(PathHelper::getIncludePath('migrations/migrations.php'));
+
+// ❌ Variables not accessible - method scope isolation  
+PathHelper::requireOnce('migrations/migrations.php');
+```
+
 ## Custom Slash Commands
 
 **Location:** `/home/user1/.claude/commands/`
