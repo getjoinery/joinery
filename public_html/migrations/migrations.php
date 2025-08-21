@@ -1,9 +1,7 @@
 <?php
 
-	require_once( __DIR__ . '/../includes/PathHelper.php');
-	
-	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	// Migrations file - only defines the $migrations array
+	// No dependencies needed since this is just data
 
 
 		//DATABASE MIGRATIONS
@@ -13,7 +11,10 @@
 		//IF THERE IS NO TEST SQL, IT IS ASSUMED THAT WE ALWAYS RUN THE MIGRATION
 		//IF $migration['migration_file'] = 'SOME_FILE', THEN WE LOOK IN THE MIGRATIONS FOLDER AND RUN THAT MIGRATION
 		//ALSO UPDATES LAST SYSTEM VERSION
-		$migrations = array();
+		// Initialize migrations array only if it doesn't exist
+		if (!isset($migrations)) {
+			$migrations = array();
+		}
 
 	
 		$migration['database_version'] = '0.12';
@@ -98,17 +99,7 @@
 		$migrations[] = $migration;
 
 
-		$migration['database_version'] = '0.14';
-		$migration['test'] = NULL;
-		$migration['migration_sql'] = NULL;
-		$migration['migration_file'] = NULL;
-		$migrations[] = $migration;
-
-		$migration['database_version'] = '0.15';
-		$migration['test'] = NULL;
-		$migration['migration_sql'] = NULL;
-		$migration['migration_file'] = NULL;
-		$migrations[] = $migration;
+		// Migrations 0.14 and 0.15 removed - were empty placeholders
 
 		$migration['database_version'] = '0.16';
 		$migration['test'] = NULL;
@@ -641,6 +632,93 @@
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'protocol_mode'";
 		$migration['migration_file'] = 'protocol_mode_migration.php';
 		$migration['migration_sql'] = NULL;
+		$migrations[] = $migration;
+
+		// Add SMTP configuration settings - individual migrations to match existing pattern
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'smtp_host'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'smtp_host\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'smtp_port'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'smtp_port\', \'25\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'smtp_helo'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'smtp_helo\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'smtp_hostname'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'smtp_hostname\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'smtp_sender'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'smtp_sender\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'smtp_auth'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'smtp_auth\', \'0\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'smtp_username'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'smtp_username\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'smtp_password'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'smtp_password\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add test mode settings
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'email_test_mode'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'email_test_mode\', \'0\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'email_test_recipient'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'email_test_recipient\', \'\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'email_dry_run'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'email_dry_run\', \'0\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add debug setting
+		$migration = array();
+		$migration['database_version'] = '0.52';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'email_debug_mode'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'email_debug_mode\', \'0\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
  

@@ -7,7 +7,7 @@ PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
-PathHelper::requireOnce('includes/systemmailer.php');
+PathHelper::requireOnce('includes/SmtpMailer.php');
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
 
