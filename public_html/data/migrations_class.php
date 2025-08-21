@@ -41,7 +41,7 @@ class Migration extends SystemBase {
 	 */
 	public static $field_specifications = array(
 		'mig_migration_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'mig_version' => array('type'=>'int4'),
+		'mig_version' => array('type'=>'numeric(6,2)'),
 		'mig_name' => array('type'=>'varchar(64)'),
 		'mig_release_notes' => array('type'=>'text'),
 		'mig_sql' => array('type'=>'text'),
@@ -106,8 +106,8 @@ class Migration extends SystemBase {
 				$normalized_sql = $this->normalize_sql($migration['migration_sql']);
 				$migration_hash = md5($normalized_sql);
 				
-				echo "Processing SQL migration: " . $migration['database_version'] . "\n";
 				if (isset($_REQUEST['verbose']) || (isset($GLOBALS['argv']) && in_array('--verbose', $GLOBALS['argv']))) {
+					echo "Processing SQL migration: " . $migration['database_version'] . "\n";
 					echo "Migration hash: " . $migration_hash . "\n";
 					echo "Normalized SQL: " . substr($normalized_sql, 0, 100) . "...\n";
 				}
@@ -122,8 +122,8 @@ class Migration extends SystemBase {
 				
 				$migration_hash = md5_file($migration_file_path);
 				
-				echo "Processing file migration: " . $migration['database_version'] . " (file: " . $migration['migration_file'] . ")\n";
 				if (isset($_REQUEST['verbose']) || (isset($GLOBALS['argv']) && in_array('--verbose', $GLOBALS['argv']))) {
+					echo "Processing file migration: " . $migration['database_version'] . " (file: " . $migration['migration_file'] . ")\n";
 					echo "Migration hash: " . $migration_hash . "\n";
 					echo "File path: " . $migration_file_path . "\n";
 				}
@@ -140,7 +140,9 @@ class Migration extends SystemBase {
 			$existing_migrations->load();
 			
 			if ($existing_migrations->count() > 0) {
-				echo "Skipping migration " . $migration['database_version'] . " (already applied)\n";
+				if (isset($_REQUEST['verbose']) || (isset($GLOBALS['argv']) && in_array('--verbose', $GLOBALS['argv']))) {
+					echo "Skipping migration " . $migration['database_version'] . " (already applied)\n";
+				}
 				return false;
 			}
 			
@@ -154,7 +156,9 @@ class Migration extends SystemBase {
 				$result = $q->fetch(PDO::FETCH_ASSOC);
 				
 				if ($result && isset($result['count']) && $result['count'] > 0) {
-					echo "Skipping migration " . $migration['database_version'] . " (test condition failed: count = " . $result['count'] . ")\n";
+					if (isset($_REQUEST['verbose']) || (isset($GLOBALS['argv']) && in_array('--verbose', $GLOBALS['argv']))) {
+						echo "Skipping migration " . $migration['database_version'] . " (test condition failed: count = " . $result['count'] . ")\n";
+					}
 					return false;
 				}
 			}
@@ -294,7 +298,7 @@ class MultiMigration extends SystemMultiBase {
 		$filters = [];
 
 		if (isset($this->options['version'])) {
-			$filters['mig_version'] = [$this->options['version'], PDO::PARAM_INT];
+			$filters['mig_version'] = [floatval($this->options['version']), PDO::PARAM_STR];
 		}
 
 		if (isset($this->options['hash'])) {

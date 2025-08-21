@@ -264,6 +264,29 @@
 				$("#tracking_code_container").hide();
 			}		
 		}
+
+		function set_smtp_auth_choices(){
+			var value = $("#smtp_auth").val();
+			if(value == 0 || value == ''){  
+				$("#smtp_auth_fields").hide();
+			} else { 
+				$("#smtp_auth_fields").show();
+			}		
+		}
+
+		function set_email_test_choices(){
+			var value = $("#email_test_mode").val();
+			if(value == 0 || value == ''){  
+				$("#email_test_fields").hide();
+			} else { 
+				$("#email_test_fields").show();
+			}		
+		}
+
+		function isValidEmail(email) {
+			var re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+			return re.test(email);
+		}
 		
 		
 	
@@ -289,6 +312,46 @@
 			$("#tracking").change(function() {	
 				set_tracking_choices();
 			});	
+
+			// SMTP Authentication toggle
+			$("#smtp_auth").on('change', function(){
+				set_smtp_auth_choices();
+			});
+			set_smtp_auth_choices();
+			
+			// Email test mode toggle
+			$("#email_test_mode").on('change', function(){
+				set_email_test_choices();
+			});
+			set_email_test_choices();
+			
+			// SMTP port validation
+			$("#smtp_port").on('blur', function(){
+				var port = $(this).val();
+				if(port && ![25, 465, 587, 2525].includes(parseInt(port))){
+					$(this).addClass('is-invalid');
+					if(!$(this).next('.invalid-feedback').length){
+						$(this).after('<div class="invalid-feedback">Common ports: 25, 465, 587, 2525</div>');
+					}
+				} else {
+					$(this).removeClass('is-invalid');
+					$(this).next('.invalid-feedback').remove();
+				}
+			});
+			
+			// Email validation for test recipient
+			$("#email_test_recipient").on('blur', function(){
+				var email = $(this).val();
+				if(email && !isValidEmail(email)){
+					$(this).addClass('is-invalid');
+					if(!$(this).next('.invalid-feedback').length){
+						$(this).after('<div class="invalid-feedback">Please enter a valid email address</div>');
+					}
+				} else {
+					$(this).removeClass('is-invalid');
+					$(this).next('.invalid-feedback').remove();
+				}
+			});
 		});
 		
 		// Wait for document ready to ensure jQuery and validator are loaded
@@ -352,6 +415,27 @@
 	$validation_rules['stripe_api_key_test']['stripeTestPublishableKey']['value'] = 'true';
 	
 	$validation_rules['stripe_api_pkey_test']['stripeTestSecretKey']['value'] = 'true';
+
+	// Add email SMTP validation rules
+	$validation_rules['smtp_host']['maxlength']['value'] = '255';
+	$validation_rules['smtp_host']['maxlength']['message'] = "'SMTP host too long (max 255 characters)'";
+
+	$validation_rules['smtp_port']['number']['value'] = 'true';
+	$validation_rules['smtp_port']['number']['message'] = "'Port must be a number'";
+	$validation_rules['smtp_port']['range']['value'] = '[1, 65535]';
+	$validation_rules['smtp_port']['range']['message'] = "'Port must be between 1 and 65535'";
+
+	$validation_rules['smtp_sender']['email']['value'] = 'true';
+	$validation_rules['smtp_sender']['email']['message'] = "'Must be a valid email address'";
+
+	$validation_rules['email_test_recipient']['email']['value'] = 'true';
+	$validation_rules['email_test_recipient']['email']['message'] = "'Must be a valid email address'";
+
+	// Add these rules only if fields are not empty
+	$validation_rules['smtp_helo']['maxlength']['value'] = '255';
+	$validation_rules['smtp_hostname']['maxlength']['value'] = '255';
+	$validation_rules['smtp_username']['maxlength']['value'] = '255';
+	$validation_rules['smtp_password']['maxlength']['value'] = '255';
 	
 	echo $formwriter->set_validate($validation_rules);	
 
@@ -1807,6 +1891,121 @@
 	echo $formwriter->dropinput("Event email footer template", "event_email_footer_template", '', $footer_optionvals, $settings->get_setting('event_email_footer_template'), '', FALSE);
 	echo $formwriter->dropinput("Event email outer template", "event_email_outer_template", '', $outer_optionvals, $settings->get_setting('event_email_outer_template'), '', FALSE);
 	echo $formwriter->dropinput("Event email inner template", "event_email_inner_template", '', $inner_optionvals, $settings->get_setting('event_email_inner_template'), '', FALSE);
+
+	echo '<div style="margin: 50px 0;"></div>';
+
+	// SMTP Configuration Section
+	echo '<h4>SMTP Configuration</h4>';
+
+	// SMTP settings with two-column layout and connection validation
+	echo '<div class="row">';
+	echo '<div class="col-md-6">';
+	echo '<h5>SMTP Server Settings</h5>';
+	echo $formwriter->textinput("SMTP Host", 'smtp_host', '', 20, $settings->get_setting('smtp_host'), "" , 255, "");
+	echo $formwriter->textinput("SMTP Port (25, 465, 587, 2525)", 'smtp_port', '', 20, $settings->get_setting('smtp_port'), "" , 10, "");
+	echo $formwriter->textinput("SMTP HELO/EHLO Hostname", 'smtp_helo', '', 20, $settings->get_setting('smtp_helo'), "" , 255, "");
+	echo $formwriter->textinput("SMTP Hostname (for headers)", 'smtp_hostname', '', 20, $settings->get_setting('smtp_hostname'), "" , 255, "");
+	echo $formwriter->textinput("SMTP Bounce Address", 'smtp_sender', '', 20, $settings->get_setting('smtp_sender'), "" , 255, "");
+
+	$auth_optionvals = array(0 => 'No', 1 => 'Yes');
+	echo $formwriter->dropinput("SMTP Authentication Required", "smtp_auth", '', $auth_optionvals, $settings->get_setting('smtp_auth'), '', FALSE);
+
+	echo '<div id="smtp_auth_fields" style="' . ($settings->get_setting('smtp_auth') ? '' : 'display:none;') . '">';
+	echo $formwriter->textinput("SMTP Username", 'smtp_username', '', 20, $settings->get_setting('smtp_username'), "" , 255, "");
+	echo $formwriter->passwordinput("SMTP Password", 'smtp_password', '', 20, $settings->get_setting('smtp_password'), "" , 255, "");
+	echo '</div>';
+
+	echo '</div>';
+	echo '<div class="col-md-6">';
+	echo '<h5>SMTP Connection Status</h5>';
+	echo '<div style="min-height: 250px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
+
+	if ($run_validation) {
+		$smtp_host = $settings->get_setting('smtp_host');
+		$smtp_port = $settings->get_setting('smtp_port');
+		
+		if (!empty($smtp_host)) {
+			// Test SMTP connection
+			try {
+				PathHelper::requireOnce('includes/SmtpMailer.php');
+				
+				// Create test instance
+				$mailer = new SmtpMailer();
+				
+				echo '<p><strong>Configuration:</strong></p>';
+				echo '<ul style="list-style: none; padding-left: 0;">';
+				echo '<li><strong>Host:</strong> ' . htmlspecialchars($smtp_host ?: 'Not set') . '</li>';
+				echo '<li><strong>Port:</strong> ' . htmlspecialchars($smtp_port ?: '25') . '</li>';
+				
+				// Determine encryption based on port
+				$encryption = 'None';
+				switch(intval($smtp_port)) {
+					case 465:
+						$encryption = 'SSL/TLS';
+						break;
+					case 587:
+					case 2525:
+						$encryption = 'STARTTLS';
+						break;
+				}
+				echo '<li><strong>Encryption:</strong> ' . $encryption . ' (auto-detected)</li>';
+				echo '<li><strong>Authentication:</strong> ' . ($settings->get_setting('smtp_auth') ? 'Yes' : 'No') . '</li>';
+				echo '</ul>';
+				
+				// Try to connect
+				try {
+					// Test connection without sending
+					$mailer->smtpConnect();
+					echo '<p style="color: green;"><strong>✓ Connection Test:</strong> Successfully connected to SMTP server</p>';
+					$mailer->smtpClose();
+				} catch (Exception $e) {
+					echo '<p style="color: red;"><strong>✗ Connection Failed:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
+				}
+				
+			} catch (Exception $e) {
+				echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Configuration Error</strong></div>';
+				echo '<div style="color: #666; font-size: 12px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+			}
+		} else {
+			echo '<div style="color: #666; text-align: center; padding: 20px;">Enter SMTP host to validate connection</div>';
+		}
+	} else {
+		// Show placeholder with "Run Validation" button
+		echo '<div style="text-align: center; padding: 40px;">';
+		echo '<p style="color: #666; margin-bottom: 15px;">SMTP validation not run yet</p>';
+		echo '<a href="?run_validation=1#email-settings" class="btn btn-primary btn-sm">Run All Validations</a>';
+		echo '</div>';
+	}
+
+	echo '</div>';
+	echo '</div>';
+	echo '</div>';
+
+	echo '<div style="margin: 30px 0;"></div>';
+
+	// Email Testing Settings
+	echo '<h4>Email Testing &amp; Debug Settings</h4>';
+	echo '<div class="row">';
+	echo '<div class="col-md-12">';
+
+	// Add note about existing session-based suppression
+	echo '<div class="alert alert-info" style="margin-bottom: 20px;">';
+	echo '<strong>Note:</strong> These are global settings. There is also a session-based email suppression ';
+	echo '(<code>$_SESSION[\'send_emails\']</code>) used for programmatic testing that logs to debug_email_logs.';
+	echo '</div>';
+
+	$test_optionvals = array(0 => 'No', 1 => 'Yes');
+	echo $formwriter->dropinput("Global Test Mode (redirect all emails to test recipient)", "email_test_mode", '', $test_optionvals, $settings->get_setting('email_test_mode'), '', FALSE);
+
+	echo '<div id="email_test_fields" style="' . ($settings->get_setting('email_test_mode') ? '' : 'display:none;') . '">';
+	echo $formwriter->textinput("Test Recipient Email (receives all redirected emails)", 'email_test_recipient', '', 20, $settings->get_setting('email_test_recipient'), "" , 255, "");
+	echo '</div>';
+
+	echo $formwriter->dropinput("Dry Run Mode (prevent all sending, just log)", "email_dry_run", '', $test_optionvals, $settings->get_setting('email_dry_run'), '', FALSE);
+	echo $formwriter->dropinput("Debug Mode (log all emails to debug_email_logs)", "email_debug_mode", '', $test_optionvals, $settings->get_setting('email_debug_mode'), '', FALSE);
+
+	echo '</div>';
+	echo '</div>';
 	
 	//$optionvals = array("General"=>'general', 'Emails' => 'emails');
 	//echo $formwriter->dropinput("Setting group", "stg_group_name", '', $optionvals, $setting->get('stg_group_name'), '', FALSE);

@@ -5,7 +5,7 @@ PathHelper::requireOnce('includes/SystemClass.php');
 
 // ErrorHandler.php no longer needed - using new ErrorManager system
 PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/systemmailer.php');
+PathHelper::requireOnce('includes/SmtpMailer.php');
 PathHelper::requireOnce('includes/EmailTemplate.php');
 PathHelper::requireOnce('includes/Activation.php');
 
