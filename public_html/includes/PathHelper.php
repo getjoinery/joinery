@@ -35,23 +35,6 @@ class PathHelper {
     }
     
     /**
-     * Include a file once with proper path resolution (non-fatal)
-     * 
-     * @param string $path Relative path from document root
-     * @return bool True if file was included, false if not found
-     */
-    public static function includeOnce($path) {
-        $absolute_path = self::getAbsolutePath($path);
-        
-        if (file_exists($absolute_path)) {
-            include_once($absolute_path);
-            return true;
-        }
-        
-        return false;
-    }
-    
-    /**
      * Check if file exists at given path
      * 
      * @param string $path Relative path from document root
