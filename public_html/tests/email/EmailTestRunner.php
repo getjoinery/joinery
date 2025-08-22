@@ -31,6 +31,60 @@ class EmailTestRunner {
         return $this->results;
     }
     
+    public function runMailgunTests(): array {
+        $this->enableTestMode();
+        
+        $testSuites = [
+            'service' => new ServiceTests($this->config, $this),
+            'template' => new TemplateTests($this->config, $this),
+            'delivery' => new DeliveryTests($this->config, $this),
+            'authentication' => new AuthenticationTests($this->config, $this),
+        ];
+        
+        // Run all suites but only include Mailgun-related tests
+        foreach ($testSuites as $name => $suite) {
+            $allResults = $suite->run();
+            
+            if ($name === 'service') {
+                // For service tests, exclude SMTP sending test
+                unset($allResults['smtp_sending']);
+            }
+            
+            $this->results[$name] = $allResults;
+        }
+        
+        $this->restoreSettings();
+        return $this->results;
+    }
+    
+    public function runSmtpTests(): array {
+        $this->enableTestMode();
+        
+        $testSuites = [
+            'service' => new ServiceTests($this->config, $this),
+            'template' => new TemplateTests($this->config, $this),
+        ];
+        
+        // Run limited test suites focused on SMTP functionality
+        foreach ($testSuites as $name => $suite) {
+            $allResults = $suite->run();
+            
+            if ($name === 'service') {
+                // For service tests, only include SMTP-related tests
+                $smtpResults = [];
+                if (isset($allResults['smtp_config'])) $smtpResults['smtp_config'] = $allResults['smtp_config'];
+                if (isset($allResults['smtp_connection'])) $smtpResults['smtp_connection'] = $allResults['smtp_connection'];
+                if (isset($allResults['smtp_sending'])) $smtpResults['smtp_sending'] = $allResults['smtp_sending'];
+                $allResults = $smtpResults;
+            }
+            
+            $this->results[$name] = $allResults;
+        }
+        
+        $this->restoreSettings();
+        return $this->results;
+    }
+    
     private function enableTestMode() {
         // Test mode is handled by overriding recipients in individual test methods
         // No global settings changes needed
