@@ -46,16 +46,16 @@ class AuthenticationTests {
     
     private function testSPFRecord(): array {
         $settings = Globalvars::get_instance();
-        $defaultEmail = $settings->get_setting('defaultemail');
+        $mailgunDomain = $settings->get_setting('mailgun_domain');
         
-        if (!$defaultEmail || strpos($defaultEmail, '@') === false) {
+        if (!$mailgunDomain) {
             return [
                 'passed' => false,
-                'message' => 'Cannot test SPF without valid default email',
+                'message' => 'Cannot test SPF without Mailgun domain setting',
             ];
         }
         
-        $domain = substr($defaultEmail, strpos($defaultEmail, '@') + 1);
+        $domain = $mailgunDomain;
         
         // Simple DNS TXT record check for SPF
         $txtRecords = @dns_get_record($domain, DNS_TXT);
@@ -85,19 +85,19 @@ class AuthenticationTests {
     
     private function testDKIMConfiguration(): array {
         $settings = Globalvars::get_instance();
-        $defaultEmail = $settings->get_setting('defaultemail');
+        $mailgunDomain = $settings->get_setting('mailgun_domain');
         
-        if (!$defaultEmail || strpos($defaultEmail, '@') === false) {
+        if (!$mailgunDomain) {
             return [
                 'passed' => false,
-                'message' => 'Cannot test DKIM without valid default email',
+                'message' => 'Cannot test DKIM without Mailgun domain setting',
             ];
         }
         
-        $domain = substr($defaultEmail, strpos($defaultEmail, '@') + 1);
+        $domain = $mailgunDomain;
         
-        // Check common DKIM selectors
-        $commonSelectors = ['default', 'mail', 'dkim', 'key1', 'selector1'];
+        // Check common DKIM selectors, including Mailgun's 'mx' selector
+        $commonSelectors = ['mx', 'default', 'mail', 'dkim', 'key1', 'selector1'];
         $dkimFound = false;
         $foundSelector = '';
         
@@ -129,16 +129,16 @@ class AuthenticationTests {
     
     private function testDMARCPolicy(): array {
         $settings = Globalvars::get_instance();
-        $defaultEmail = $settings->get_setting('defaultemail');
+        $mailgunDomain = $settings->get_setting('mailgun_domain');
         
-        if (!$defaultEmail || strpos($defaultEmail, '@') === false) {
+        if (!$mailgunDomain) {
             return [
                 'passed' => false,
-                'message' => 'Cannot test DMARC without valid default email',
+                'message' => 'Cannot test DMARC without Mailgun domain setting',
             ];
         }
         
-        $domain = substr($defaultEmail, strpos($defaultEmail, '@') + 1);
+        $domain = $mailgunDomain;
         $dmarcDomain = "_dmarc.$domain";
         
         $txtRecords = @dns_get_record($dmarcDomain, DNS_TXT);
@@ -163,7 +163,7 @@ class AuthenticationTests {
         
         return [
             'passed' => $dmarcFound,
-            'message' => $dmarcFound ? "DMARC policy found: $policy" : 'No DMARC policy found',
+            'message' => $dmarcFound ? "DMARC policy found: $policy" . ($policy === 'none' ? ' (monitoring mode, no enforcement)' : '') : 'No DMARC policy found',
             'details' => [
                 'domain' => $domain,
                 'dmarc_domain' => $dmarcDomain,
