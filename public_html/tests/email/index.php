@@ -20,6 +20,9 @@ if ($action === 'run_tests') {
 } elseif ($action === 'test_smtp_only') {
     $runner = new EmailTestRunner();
     $results = $runner->runSmtpTests();
+} elseif ($action === 'test_domain_only') {
+    $runner = new EmailTestRunner();
+    $results = $runner->runDomainTests();
 }
 ?>
 <!DOCTYPE html>
@@ -80,8 +83,11 @@ if ($action === 'run_tests') {
                         <button type="submit" name="action" value="test_mailgun_only" class="btn btn-outline-primary w-100 mb-2">
                             Test Mailgun Only
                         </button>
-                        <button type="submit" name="action" value="test_smtp_only" class="btn btn-outline-primary w-100 mb-3">
+                        <button type="submit" name="action" value="test_smtp_only" class="btn btn-outline-primary w-100 mb-2">
                             Test SMTP Only
+                        </button>
+                        <button type="submit" name="action" value="test_domain_only" class="btn btn-outline-secondary w-100 mb-3">
+                            Test DNS/Domain
                         </button>
                     </form>
                     
