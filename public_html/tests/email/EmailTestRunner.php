@@ -38,10 +38,9 @@ class EmailTestRunner {
             'service' => new ServiceTests($this->config, $this),
             'template' => new TemplateTests($this->config, $this),
             'delivery' => new DeliveryTests($this->config, $this),
-            'authentication' => new AuthenticationTests($this->config, $this),
         ];
         
-        // Run all suites but only include Mailgun-related tests
+        // Run service, template, and delivery tests - exclude authentication/DNS tests
         foreach ($testSuites as $name => $suite) {
             $allResults = $suite->run();
             
@@ -79,6 +78,22 @@ class EmailTestRunner {
             }
             
             $this->results[$name] = $allResults;
+        }
+        
+        $this->restoreSettings();
+        return $this->results;
+    }
+    
+    public function runDomainTests(): array {
+        $this->enableTestMode();
+        
+        $testSuites = [
+            'authentication' => new AuthenticationTests($this->config, $this),
+        ];
+        
+        // Run only authentication/DNS tests
+        foreach ($testSuites as $name => $suite) {
+            $this->results[$name] = $suite->run();
         }
         
         $this->restoreSettings();
