@@ -22,7 +22,7 @@
  * @see /tests/email/index.php Main email testing system
  */
 
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
+require_once(__DIR__ . '/../../includes/PathHelper.php');
 PathHelper::requireOnce('includes/AdminPage.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -33,7 +33,7 @@ $session->check_permission(5);
 // Determine the base path based on how the script is being run
 if (!defined('GLOBALVARS_INCLUDED')) {
     // Running standalone - need to include files
-    $base_path = dirname(dirname(dirname(__DIR__)));
+    $base_path = dirname(dirname(__DIR__));
     require_once($base_path . '/includes/Globalvars.php');
     require_once($base_path . '/includes/EmailTemplate.php');
     
@@ -120,7 +120,7 @@ if (!$run_test) {
             $formwriter = LibraryFunctions::get_formwriter_object('email_test_form', 'admin');
             
             // No validation rules - just plain form
-            $form_html = $formwriter->begin_form('email_test_form', 'POST', '/utils/email_send_test');
+            $form_html = $formwriter->begin_form('email_test_form', 'POST', '/tests/email/auth_analysis.php');
             echo '<!-- DEBUG FORM HTML: ' . htmlspecialchars($form_html) . ' -->';
             echo $form_html;
             
