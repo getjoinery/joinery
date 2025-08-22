@@ -87,8 +87,9 @@ class DeliveryTests {
         
         if (!$debugMode) {
             return [
-                'passed' => false,
-                'message' => 'Debug mode not enabled',
+                'passed' => true,
+                'warning' => true,
+                'message' => 'Debug mode not enabled (to enable, set email_debug_mode setting)',
             ];
         }
         

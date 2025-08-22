@@ -38,7 +38,10 @@ if ($action === 'run_tests') {
                         <?php foreach ($results as $suite => $tests): ?>
                             <h6><?= ucfirst($suite) ?> Tests</h6>
                             <?php foreach ($tests as $test => $result): ?>
-                                <div class="alert alert-<?= $result['passed'] ? 'success' : 'danger' ?> alert-sm">
+                                <div class="alert alert-<?= 
+                                    isset($result['warning']) && $result['warning'] ? 'warning' : 
+                                    ($result['passed'] ? 'success' : 'danger') 
+                                ?> alert-sm">
                                     <strong><?= ucfirst(str_replace('_', ' ', $test)) ?>:</strong>
                                     <?= htmlspecialchars($result['message']) ?>
                                     <?php if (isset($result['details'])): ?>
