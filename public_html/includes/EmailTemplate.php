@@ -660,12 +660,6 @@ class EmailTemplate {
 	//RETURNS TRUE ON SUCCESS
 	function send($check_session=TRUE, $other_host=NULL) {
 		$settings = Globalvars::get_instance();
-		
-		// Log to debug table if debug mode is on
-		if ($settings->get_setting('email_debug_mode')) {
-			$service = $this->getServiceType(); // Uses getter from Refactor 2
-			$this->logToDebugTable('pre_send_' . $service);
-		}
 
 		// If the email has no content, don't send it
 		if (!$this->email_has_content) {
@@ -687,97 +681,27 @@ class EmailTemplate {
 				return true;
 			}
 		}
-
 		
-		if($this->mailer){
-			$this->mailer = new systemmailer();
-			if ($other_host) {
-				$this->mailer->Host = $other_host;
-			}
-			$this->mailer->setFrom($this->email_from, $this->email_from_name);
+		// NEW: Use service selection with fallback (see methods in 1.3 and 1.4)
+		$service = $settings->get_setting('email_service') ?: 'mailgun';
+		$fallback = $settings->get_setting('email_fallback_service') ?: 'smtp';
+		
+		$primary_result = $this->sendWithService($service);
+		
+		if (!$primary_result && $fallback && $fallback !== $service) {
+			$this->logEmailDebug("Primary service $service failed, trying fallback $fallback");
+			$fallback_result = $this->sendWithService($fallback);
 			
-			foreach($this->email_recipients as $recipient){
-				$this->mailer->addAddress($recipient['email'], $recipient['name']);
+			if ($fallback_result) {
+				$this->logEmailDebug("Fallback service $fallback succeeded");
+				return true;
 			}
 			
-			$this->mailer->isHTML(true);
-			$this->mailer->Body = $this->email_html;
-			$this->mailer->AltBody = $this->email_text;
-			
-
-			if (!$this->mailer->send()) {
-				// Oops, email didn't send.  Save it and move on.
-				$this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR);
-			}	
-			return true;
-		}
-		else if($settings->get_setting('mailgun_api_key') && $settings->get_setting('mailgun_domain')) {
-
-			if($settings->get_setting('mailgun_version') == 1){
-				if($settings->get_setting('mailgun_eu_api_link')){
-					$mg = new Mailgun($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
-				}
-				else{
-					$mg = new Mailgun($settings->get_setting('mailgun_api_key'));
-				}
-			}
-			else{
-				if($settings->get_setting('mailgun_eu_api_link')){
-					$mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
-				}
-				else{
-					$mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
-				}
-								
-			}
-			$domain = $settings->get_setting('mailgun_domain');	
-			
-			$email_to_send = array(
-				'from'=>$this->email_from_name .'<'. $this->email_from . '>',
-				'subject' => $this->email_subject,
-				);
-				
-			if($this->email_html){
-				$email_to_send['html'] = $this->email_html;
-				$email_to_send['text'] = $this->email_text;
-			}
-			else{
-				$email_to_send['text'] = $this->email_text;
-			}
-
-			$sending_groups = array_chunk($this->email_recipients,500,true);
-
-			foreach ($sending_groups as $sending_group){
-				//RECIPIENT VARIABLES ARE NOT FULLY IMPLEMENTED
-				$mailgun_recipients = array();	
-				$recipient_variables = array();
-				
-				foreach($sending_group as $recipient){
-					$mailgun_recipients[] = $recipient['name'] . '<' . $recipient['email'] . '>';		
-					$recipient_variables[$recipient['email']] = array('name'=>$recipient['name']);
-				}
-				$email_to_send['to'] = implode(',', $mailgun_recipients);							
-				$email_to_send['recipient-variables'] = json_encode($recipient_variables);			
-				
-
-				try{
-					if($settings->get_setting('mailgun_version') == 1){
-						$result = $mg->sendMessage($domain, $email_to_send);
-					}
-					else{
-						$result = $mg->messages()->send($domain, $email_to_send);
-					}
-				}
-				catch (Exception $e) {
-					// Oops, email didn't send.  Save it and move on.
-					$this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR);
-				}
-				
-			}
-			//TODO: ERROR CHECKING ON RETURN RESULT
-			return true;			
+			// Both services failed - already queued by sendViaSmtp/sendViaMailgun
+			$this->logEmailDebug("Both primary and fallback services failed, email queued for retry");
 		}
 		
+		return $primary_result;
 	}
 
 	function send_test() {
@@ -875,6 +799,245 @@ class EmailTemplate {
 	 */
 	public function hasContent() {
 		return $this->email_has_content;
+	}
+
+	// NEW PHASE 1 METHODS - Service Selection and Sending
+	
+	private function sendWithService($service) {
+		$settings = Globalvars::get_instance();
+		
+		switch($service) {
+			case 'smtp':
+				if (!$this->initializeSmtp($settings)) {
+					return false;
+				}
+				// Use existing SMTP sending code (around line 680)
+				return $this->sendViaSmtp();
+				
+			case 'mailgun':
+				if (!$this->initializeMailgun($settings)) {
+					return false;
+				}
+				// Use existing Mailgun sending code
+				return $this->sendViaMailgun();
+				
+			default:
+				$this->logEmailDebug("Unknown email service: $service");
+				return false;
+		}
+	}
+
+	private function initializeSmtp($settings) {
+		PathHelper::requireOnce('includes/SmtpMailer.php');
+		$this->mailer = new SmtpMailer();
+		
+		// Configure SMTP settings
+		$this->mailer->isSMTP();
+		$this->mailer->Host = $settings->get_setting('smtp_host');
+		$port = intval($settings->get_setting('smtp_port') ?: 25);
+		$this->mailer->Port = $port;
+		
+		// Set SMTP authentication if credentials provided
+		if ($settings->get_setting('smtp_username') && $settings->get_setting('smtp_password')) {
+			$this->mailer->SMTPAuth = true;
+			$this->mailer->Username = $settings->get_setting('smtp_username');
+			$this->mailer->Password = $settings->get_setting('smtp_password');
+		} else {
+			$this->mailer->SMTPAuth = false;
+		}
+		
+		// Determine encryption based on port (matching SmtpMailer.php logic)
+		if ($port == 465) {
+			$this->mailer->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS; // SSL
+		} else if ($port == 587 || $port == 2525) {
+			$this->mailer->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // TLS
+		} else {
+			$this->mailer->SMTPSecure = ''; // No encryption
+		}
+		
+		// Set HELO/EHLO hostname if configured
+		if ($settings->get_setting('smtp_hostname')) {
+			$this->mailer->Hostname = $settings->get_setting('smtp_hostname');
+		}
+		
+		// Set email properties
+		$this->mailer->From = $this->email_from;
+		$this->mailer->FromName = $this->email_from_name;
+		
+		// Add recipients
+		foreach ($this->email_recipients as $recipient) {
+			$this->mailer->addAddress($recipient['email'], $recipient['name']);
+		}
+		
+		return true;
+	}
+
+	private function initializeMailgun($settings) {
+		// Check if Mailgun is configured
+		if (empty($settings->get_setting('mailgun_domain')) || 
+			empty($settings->get_setting('mailgun_api_key'))) {
+			return false;
+		}
+		// Mailgun will be used via existing code path
+		$this->mailer = null; // Ensure Mailgun path is taken
+		return true;
+	}
+
+	private function sendViaSmtp() {
+		// Set email body content
+		$this->mailer->isHTML(true);
+		$this->mailer->Body = $this->email_html;
+		$this->mailer->AltBody = $this->email_text;
+		
+		// Set subject (same as Mailgun path)
+		$this->mailer->Subject = $this->email_subject;
+		
+		// Send the email
+		if (!$this->mailer->send()) {
+			$this->logEmailDebug("SMTP send failed: " . $this->mailer->ErrorInfo, 'smtp');
+			// Save to queue for retry
+			$this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR);
+			return false;
+		}
+		
+		$this->logEmailDebug("Email sent successfully via SMTP", 'smtp');
+		return true;
+	}
+
+	private function sendViaMailgun() {
+		$settings = Globalvars::get_instance();
+		
+		// Initialize Mailgun client
+		if($settings->get_setting('mailgun_version') == 1){
+			if($settings->get_setting('mailgun_eu_api_link')){
+				$mg = new Mailgun($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
+			}
+			else{
+				$mg = new Mailgun($settings->get_setting('mailgun_api_key'));
+			}
+		}
+		else{
+			if($settings->get_setting('mailgun_eu_api_link')){
+				$mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
+			}
+			else{
+				$mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
+			}
+		}
+		
+		$domain = $settings->get_setting('mailgun_domain');	
+		
+		// Build email array
+		$email_to_send = array(
+			'from'=>$this->email_from_name .'<'. $this->email_from . '>',
+			'subject' => $this->email_subject,
+		);
+			
+		if($this->email_html){
+			$email_to_send['html'] = $this->email_html;
+			$email_to_send['text'] = $this->email_text;
+		}
+		else{
+			$email_to_send['text'] = $this->email_text;
+		}
+
+		// Send in batches of 500 recipients
+		$sending_groups = array_chunk($this->email_recipients, 500, true);
+		$all_sent = true;
+
+		foreach ($sending_groups as $sending_group){
+			$mailgun_recipients = array();	
+			$recipient_variables = array();
+			
+			foreach($sending_group as $recipient){
+				$mailgun_recipients[] = $recipient['name'] . '<' . $recipient['email'] . '>';		
+				$recipient_variables[$recipient['email']] = array('name'=>$recipient['name']);
+			}
+			$email_to_send['to'] = implode(',', $mailgun_recipients);							
+			$email_to_send['recipient-variables'] = json_encode($recipient_variables);			
+			
+			try{
+				if($settings->get_setting('mailgun_version') == 1){
+					$result = $mg->sendMessage($domain, $email_to_send);
+				}
+				else{
+					$result = $mg->messages()->send($domain, $email_to_send);
+				}
+				$this->logEmailDebug("Email batch sent successfully via Mailgun", 'mailgun');
+			}
+			catch (Exception $e) {
+				$this->logEmailDebug("Mailgun send failed: " . $e->getMessage(), 'mailgun');
+				// Save to queue for retry
+				$this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR);
+				$all_sent = false;
+			}
+		}
+		
+		return $all_sent;
+	}
+
+	private function logEmailDebug($message, $service = null) {
+		$settings = Globalvars::get_instance();
+		if (!$settings->get_setting('email_debug_mode')) {
+			return;
+		}
+		
+		$service = $service ?: $settings->get_setting('email_service') ?: 'unknown';
+		
+		// Build recipient list
+		$recipients = [];
+		foreach ($this->email_recipients as $recipient) {
+			$recipients[] = $recipient['email'];
+		}
+		
+		// Create log entry
+		$debug_log = new DebugEmailLog(NULL);
+		$debug_log->set('del_timestamp', date('Y-m-d H:i:s'));
+		$debug_log->set('del_subject', $this->email_subject);
+		$debug_log->set('del_recipient', implode(', ', $recipients));
+		$debug_log->set('del_service', $service);  // NEW: Track which service
+		$debug_log->set('del_message', $message);
+		$debug_log->set('del_status', strpos($message, 'failed') !== false ? 'failed' : 'success');
+		$debug_log->save();
+	}
+
+	public function validateServiceConfiguration($service = null) {
+		$settings = Globalvars::get_instance();
+		$service = $service ?: $settings->get_setting('email_service') ?: 'mailgun';
+		
+		$errors = [];
+		
+		switch($service) {
+			case 'mailgun':
+				if (empty($settings->get_setting('mailgun_domain'))) {
+					$errors[] = 'Mailgun domain not configured';
+				}
+				if (empty($settings->get_setting('mailgun_api_key'))) {
+					$errors[] = 'Mailgun API key not configured';
+				}
+				break;
+				
+			case 'smtp':
+				if (empty($settings->get_setting('smtp_host'))) {
+					$errors[] = 'SMTP host not configured';
+				}
+				if (empty($settings->get_setting('smtp_username'))) {
+					$errors[] = 'SMTP username not configured';
+				}
+				if (empty($settings->get_setting('smtp_password'))) {
+					$errors[] = 'SMTP password not configured';
+				}
+				break;
+				
+			default:
+				$errors[] = "Unknown email service: $service";
+		}
+		
+		return [
+			'valid' => empty($errors),
+			'service' => $service,
+			'errors' => $errors
+		];
 	}
 
 	/**

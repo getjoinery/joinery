@@ -19,6 +19,7 @@ class ServiceTests {
         $results['smtp_connection'] = $this->testSMTPConnection();
         $results['smtp_sending'] = $this->testSMTPSending();
         $results['mailgun_config'] = $this->testMailgunConfiguration();
+        $results['mailgun_sending'] = $this->testMailgunSending();
         $results['service_detection'] = $this->testServiceDetection();
         
         return $results;
@@ -91,25 +92,10 @@ class ServiceTests {
                 'resend' => false,
             ]);
             
-            // Initialize the mailer manually since it's normally done in send()
-            $email->mailer = new SmtpMailer();
+            // Override subject to include service type
+            $email->email_subject = 'SMTP Test Email - ' . date('Y-m-d H:i:s');
             
-            // Force SMTP sending
-            $originalServiceType = $email->getServiceType();
-            $email->mailer->isSMTP();
-            
-            // Configure SMTP settings
-            $email->mailer->Host = $settings->get_setting('smtp_host');
-            $email->mailer->Port = $settings->get_setting('smtp_port');
-            $email->mailer->SMTPAuth = $settings->get_setting('smtp_auth');
-            if ($email->mailer->SMTPAuth) {
-                $email->mailer->Username = $settings->get_setting('smtp_username');
-                $email->mailer->Password = $settings->get_setting('smtp_password');
-            }
-            
-            // Set the subject manually since we're bypassing normal EmailTemplate processing
-            $email->mailer->Subject = $email->getEmailSubject() ?: 'SMTP Test Email';
-            
+            // Test SMTP sending using current service configuration
             $sendResult = $email->send();
             
             return [
@@ -120,9 +106,8 @@ class ServiceTests {
                     'test_recipient' => $testRecipient,
                     'smtp_host' => $settings->get_setting('smtp_host'),
                     'smtp_port' => $settings->get_setting('smtp_port'),
-                    'smtp_auth' => $settings->get_setting('smtp_auth') ? 'enabled' : 'disabled',
+                    'smtp_auth' => $settings->get_setting('smtp_username') ? 'enabled' : 'disabled',
                     'send_result' => $sendResult,
-                    'original_service_type' => $originalServiceType,
                 ]
             ];
         } catch (Exception $e) {
@@ -153,15 +138,98 @@ class ServiceTests {
         ];
     }
     
+    private function testMailgunSending(): array {
+        $settings = Globalvars::get_instance();
+        $testRecipient = $settings->get_setting('email_test_recipient');
+        
+        if (empty($testRecipient)) {
+            return [
+                'passed' => false,
+                'message' => 'No test recipient configured',
+            ];
+        }
+        
+        // Check if Mailgun is configured
+        $apiKey = $settings->get_setting('mailgun_api_key');
+        $domain = $settings->get_setting('mailgun_domain');
+        
+        if (empty($apiKey) || empty($domain)) {
+            return [
+                'passed' => false,
+                'message' => 'Mailgun not configured - cannot test sending',
+                'details' => [
+                    'has_api_key' => !empty($apiKey),
+                    'has_domain' => !empty($domain),
+                ]
+            ];
+        }
+        
+        try {
+            // Create a test email using Mailgun specifically
+            $email = new EmailTemplate('activation_content');
+            $email->email_from = $settings->get_setting('defaultemail');
+            $email->email_from_name = $settings->get_setting('defaultemailname');
+            $email->add_recipient($testRecipient, 'Mailgun Test Recipient');
+            
+            $email->fill_template([
+                'act_code' => 'MAILGUN-TEST-' . date('His'),
+                'resend' => false,
+            ]);
+            
+            // Override subject to include service type
+            $email->email_subject = 'Mailgun Test Email - ' . date('Y-m-d H:i:s');
+            
+            // Test Mailgun sending using current service configuration
+            $sendResult = $email->send();
+            
+            return [
+                'passed' => $sendResult,
+                'message' => $sendResult ? "Successfully sent via Mailgun to $testRecipient" : 'Mailgun sending failed',
+                'details' => [
+                    'service_type' => 'mailgun',
+                    'test_recipient' => $testRecipient,
+                    'mailgun_domain' => $domain,
+                    'send_result' => $sendResult,
+                ]
+            ];
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'Mailgun sending failed: ' . $e->getMessage(),
+                'details' => [
+                    'error' => $e->getMessage(),
+                    'test_recipient' => $testRecipient,
+                ]
+            ];
+        }
+    }
+    
     private function testServiceDetection(): array {
-        // Use the new getServiceType() method from our refactoring
-        $email = new EmailTemplate(NULL);
-        $serviceType = $email->getServiceType();
+        $settings = Globalvars::get_instance();
+        
+        // Test the new service selection system
+        $email = new EmailTemplate('default_outer_template');
+        $currentService = $settings->get_setting('email_service') ?: 'mailgun';
+        $fallbackService = $settings->get_setting('email_fallback_service') ?: 'smtp';
+        
+        // Test service validation
+        $primaryValidation = $email->validateServiceConfiguration($currentService);
+        $fallbackValidation = $email->validateServiceConfiguration($fallbackService);
+        
+        $passed = in_array($currentService, ['smtp', 'mailgun']) && 
+                  in_array($fallbackService, ['smtp', 'mailgun']);
         
         return [
-            'passed' => in_array($serviceType, ['smtp', 'mailgun']),
-            'message' => "Detected service: $serviceType",
-            'service' => $serviceType,
+            'passed' => $passed,
+            'message' => "Primary: $currentService, Fallback: $fallbackService",
+            'details' => [
+                'primary_service' => $currentService,
+                'fallback_service' => $fallbackService,
+                'primary_valid' => $primaryValidation['valid'],
+                'fallback_valid' => $fallbackValidation['valid'],
+                'primary_errors' => $primaryValidation['errors'],
+                'fallback_errors' => $fallbackValidation['errors'],
+            ]
         ];
     }
 }

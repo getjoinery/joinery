@@ -29,10 +29,12 @@ class DeliveryTests {
             $email->add_recipient($this->config['test_email'], 'Test Recipient');
             
             $email->fill_template([
-                'subject' => 'Test Mode Redirect Test',
                 'act_code' => 'TEST123',
                 'resend' => false,
             ]);
+            
+            // Override subject to identify this test
+            $email->email_subject = 'Test Mode Redirect Test - ' . date('Y-m-d H:i:s');
             
             // Debug info before sending
             $debugInfo = [
@@ -110,9 +112,11 @@ class DeliveryTests {
         }
         
         $email->fill_template([
-            'subject' => 'Debug Logging Test',
             'mail_body' => '<p>Testing debug logging</p>',
         ]);
+        
+        // Override subject to identify this test
+        $email->email_subject = 'Debug Logging Test - ' . date('Y-m-d H:i:s');
         
         $email->send(false);
         
@@ -136,10 +140,12 @@ class DeliveryTests {
             $email->add_recipient($this->config['test_email'], 'Service Test Recipient');
             
             $email->fill_template([
-                'subject' => 'Service Sending Test',
                 'act_code' => 'TEST456',
                 'resend' => false,
             ]);
+            
+            // Override subject to identify this test
+            $email->email_subject = 'Service Sending Test - ' . date('Y-m-d H:i:s');
             
             // Debug info before sending
             $serviceType = $email->getServiceType();

@@ -721,4 +721,19 @@
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
+		// Add email service selection settings
+		$migration = array();
+		$migration['database_version'] = '0.53';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'email_service'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'email_service\', \'mailgun\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		$migration = array();
+		$migration['database_version'] = '0.53';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'email_fallback_service'";
+		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'email_fallback_service\', \'smtp\', 1, \'now()\', \'now()\', \'general\');';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
  
