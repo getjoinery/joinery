@@ -105,12 +105,17 @@ class TemplateTests {
     }
     
     private function testContentGeneration(): array {
-        $email = new EmailTemplate('default_outer_template');
+        // Use the working template pattern
+        $email = new EmailTemplate('activation_content');
+        $settings = Globalvars::get_instance();
+        $email->email_from = $settings->get_setting('defaultemail');
+        $email->email_from_name = $settings->get_setting('defaultemailname');
         $email->add_recipient('test@example.com', 'Test User');
         
         $email->fill_template([
-            'subject' => 'Content Test',
-            'mail_body' => '<h1>Test Email</h1><p>This is a test email.</p>',
+            'subject' => 'Content Generation Test',
+            'act_code' => 'TEST999',
+            'resend' => false,
         ]);
         
         // Use getter methods to verify content
