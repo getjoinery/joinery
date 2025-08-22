@@ -74,6 +74,7 @@ class EmailTestRunner {
                 if (isset($allResults['smtp_config'])) $smtpResults['smtp_config'] = $allResults['smtp_config'];
                 if (isset($allResults['smtp_connection'])) $smtpResults['smtp_connection'] = $allResults['smtp_connection'];
                 if (isset($allResults['smtp_sending'])) $smtpResults['smtp_sending'] = $allResults['smtp_sending'];
+                if (isset($allResults['service_detection'])) $smtpResults['service_detection'] = $allResults['service_detection'];
                 $allResults = $smtpResults;
             }
             

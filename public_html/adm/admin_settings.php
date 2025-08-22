@@ -1501,6 +1501,38 @@
 
 
 
+		// Email Service Status Section
+		echo '<div class="row">';
+		echo '<div class="col-md-12">';
+		echo '<h5>Email Service Status</h5>';
+
+		$current_service = $settings->get_setting('email_service') ?: 'mailgun';
+		$fallback_service = $settings->get_setting('email_fallback_service') ?: 'smtp';
+
+		// Quick validation check
+		PathHelper::requireOnce('includes/EmailTemplate.php');
+		$email = new EmailTemplate('default_outer_template');
+		$primary_validation = $email->validateServiceConfiguration($current_service);
+		$fallback_validation = $email->validateServiceConfiguration($fallback_service);
+
+		echo '<div class="alert alert-info">';
+		echo '<strong>Primary Service:</strong> ';
+		if ($primary_validation['valid']) {
+			echo '<span class="text-success">✓ ' . ucfirst($current_service) . ' configured</span>';
+		} else {
+			echo '<span class="text-danger">✗ ' . ucfirst($current_service) . ' - ' . implode(', ', $primary_validation['errors']) . '</span>';
+		}
+		echo '<br/>';
+		echo '<strong>Fallback Service:</strong> ';
+		if ($fallback_validation['valid']) {
+			echo '<span class="text-success">✓ ' . ucfirst($fallback_service) . ' configured</span>';
+		} else {
+			echo '<span class="text-warning">⚠ ' . ucfirst($fallback_service) . ' - ' . implode(', ', $fallback_validation['errors']) . '</span>';
+		}
+		echo '</div>';
+		echo '</div>';
+		echo '</div>';
+
 		// Mailgun section with two-column layout and API validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
