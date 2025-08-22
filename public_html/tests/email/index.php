@@ -14,6 +14,12 @@ $results = null;
 if ($action === 'run_tests') {
     $runner = new EmailTestRunner();
     $results = $runner->runAllTests();
+} elseif ($action === 'test_mailgun_only') {
+    $runner = new EmailTestRunner();
+    $results = $runner->runMailgunTests();
+} elseif ($action === 'test_smtp_only') {
+    $runner = new EmailTestRunner();
+    $results = $runner->runSmtpTests();
 }
 ?>
 <!DOCTYPE html>
@@ -70,6 +76,12 @@ if ($action === 'run_tests') {
                     <form method="post">
                         <button type="submit" name="action" value="run_tests" class="btn btn-primary w-100 mb-3">
                             Run All Tests
+                        </button>
+                        <button type="submit" name="action" value="test_mailgun_only" class="btn btn-outline-primary w-100 mb-2">
+                            Test Mailgun Only
+                        </button>
+                        <button type="submit" name="action" value="test_smtp_only" class="btn btn-outline-primary w-100 mb-3">
+                            Test SMTP Only
                         </button>
                     </form>
                     

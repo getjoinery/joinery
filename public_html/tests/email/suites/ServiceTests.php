@@ -1,5 +1,8 @@
 <?php
 // tests/email/suites/ServiceTests.php
+
+require_once(__DIR__ . '/../../../includes/SmtpMailer.php');
+
 class ServiceTests {
     private array $config;
     private $runner;
@@ -14,6 +17,7 @@ class ServiceTests {
         
         $results['smtp_config'] = $this->testSMTPConfiguration();
         $results['smtp_connection'] = $this->testSMTPConnection();
+        $results['smtp_sending'] = $this->testSMTPSending();
         $results['mailgun_config'] = $this->testMailgunConfiguration();
         $results['service_detection'] = $this->testServiceDetection();
         
@@ -62,6 +66,75 @@ class ServiceTests {
             'passed' => true,
             'message' => "Successfully connected to $host:$port",
         ];
+    }
+    
+    private function testSMTPSending(): array {
+        $settings = Globalvars::get_instance();
+        $testRecipient = $this->config['test_email'] ?? $settings->get_setting('email_test_recipient');
+        
+        if (!$testRecipient) {
+            return [
+                'passed' => false,
+                'message' => 'No test recipient configured',
+            ];
+        }
+        
+        try {
+            // Create a test email using SMTP specifically
+            $email = new EmailTemplate('activation_content');
+            $email->email_from = $settings->get_setting('defaultemail');
+            $email->email_from_name = $settings->get_setting('defaultemailname');
+            $email->add_recipient($testRecipient, 'SMTP Test Recipient');
+            
+            $email->fill_template([
+                'act_code' => 'SMTP-TEST-' . date('His'),
+                'resend' => false,
+            ]);
+            
+            // Initialize the mailer manually since it's normally done in send()
+            $email->mailer = new SmtpMailer();
+            
+            // Force SMTP sending
+            $originalServiceType = $email->getServiceType();
+            $email->mailer->isSMTP();
+            
+            // Configure SMTP settings
+            $email->mailer->Host = $settings->get_setting('smtp_host');
+            $email->mailer->Port = $settings->get_setting('smtp_port');
+            $email->mailer->SMTPAuth = $settings->get_setting('smtp_auth');
+            if ($email->mailer->SMTPAuth) {
+                $email->mailer->Username = $settings->get_setting('smtp_username');
+                $email->mailer->Password = $settings->get_setting('smtp_password');
+            }
+            
+            // Set the subject manually since we're bypassing normal EmailTemplate processing
+            $email->mailer->Subject = $email->getEmailSubject() ?: 'SMTP Test Email';
+            
+            $sendResult = $email->send();
+            
+            return [
+                'passed' => $sendResult,
+                'message' => $sendResult ? "Successfully sent via SMTP to $testRecipient" : 'SMTP sending failed',
+                'details' => [
+                    'service_type' => 'smtp',
+                    'test_recipient' => $testRecipient,
+                    'smtp_host' => $settings->get_setting('smtp_host'),
+                    'smtp_port' => $settings->get_setting('smtp_port'),
+                    'smtp_auth' => $settings->get_setting('smtp_auth') ? 'enabled' : 'disabled',
+                    'send_result' => $sendResult,
+                    'original_service_type' => $originalServiceType,
+                ]
+            ];
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'SMTP sending failed: ' . $e->getMessage(),
+                'details' => [
+                    'error' => $e->getMessage(),
+                    'smtp_host' => $settings->get_setting('smtp_host'),
+                ]
+            ];
+        }
     }
     
     private function testMailgunConfiguration(): array {
