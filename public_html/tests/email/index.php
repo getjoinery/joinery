@@ -110,10 +110,10 @@ if ($action === 'run_tests') {
                         <a href="/utils/email_setup_check.php" class="btn btn-outline-primary btn-sm">
                             <i class="fas fa-dns"></i> Domain Authentication Checker
                         </a>
-                        <a href="/tests/email/legacy/email_send_test.php" class="btn btn-outline-secondary btn-sm">
-                            <i class="fas fa-exclamation-triangle text-warning"></i> Legacy Auth Test
+                        <a href="/tests/email/auth_analysis.php" class="btn btn-outline-info btn-sm">
+                            <i class="fas fa-microscope"></i> Advanced Auth Analysis
                         </a>
-                        <small class="text-muted">Domain checker is independent. Legacy auth test will be removed.</small>
+                        <small class="text-muted">Domain checker tests DNS records. Advanced analysis tests real-world authentication results.</small>
                     </div>
                 </div>
             </div>

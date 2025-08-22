@@ -1,21 +1,25 @@
 <?php
 /**
- * DEPRECATED EMAIL TESTING FILE
+ * ADVANCED EMAIL AUTHENTICATION TESTING
  * 
- * ⚠️  WARNING: This file has been DEPRECATED and moved from /utils/
+ * 🔬 This tool provides END-TO-END email authentication testing that complements
+ * the main email testing system at /tests/email/
  * 
- * This legacy email testing functionality has been replaced by the new 
- * comprehensive email testing system located at /tests/email/
+ * UNIQUE CAPABILITIES:
+ * - Sends real emails and retrieves them via IMAP
+ * - Analyzes actual authentication headers from receiving mail servers
+ * - Shows real-world SPF/DKIM/DMARC results (not just DNS record existence)
+ * - Tests complete email delivery chain authentication
  * 
- * Please use the new testing system instead:
- * - Web Interface: /tests/email/index.php
- * - Admin Link: Admin Panel → Email Tools → Email System Testing
+ * USE CASES:
+ * - DNS tests pass but emails still have authentication issues
+ * - Verify that authentication is working in practice, not just in theory
+ * - Detailed analysis of how receiving servers interpret your email authentication
  * 
- * This file will be REMOVED in a future update. Please migrate to the new system.
+ * COMPLEMENTARY TO: /tests/email/index.php (DNS/Domain tests check record existence, this tests real-world results)
  * 
- * @deprecated Will be removed after new email testing system is complete
- * @see /tests/email/index.php New email testing system
- * @legacy Moved from /utils/ on 2025-01-21
+ * @since 2025-01-21 Enhanced for advanced authentication analysis
+ * @see /tests/email/index.php Main email testing system
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -64,9 +68,9 @@ $config = [
 
 // Admin header
 $page->admin_header([
-    'title' => 'Email Authentication Test',
+    'title' => 'Advanced Email Authentication Analysis',
     'menu-id' => 'email-tools',
-    'readable_title' => 'Email Authentication Test'
+    'readable_title' => 'Advanced Email Authentication Analysis'
 ]);
 
 // Debug output
@@ -84,14 +88,18 @@ if (!$run_test) {
             
             <!-- Information Section -->
             <div class="alert alert-info">
-                <h6 class="alert-heading mb-2">📧 Email Authentication Test Tool</h6>
-                <p class="mb-2"><strong>What this tool does:</strong></p>
+                <h6 class="alert-heading mb-2">🔬 Advanced Email Authentication Analysis</h6>
+                <p class="mb-2"><strong>This tool provides END-TO-END authentication testing:</strong></p>
                 <ul class="mb-2">
                     <li>Sends a test email using your EmailTemplate system</li>
                     <li>Connects to Gmail via IMAP to retrieve the sent email</li>
-                    <li>Analyzes SPF, DKIM, and DMARC authentication headers</li>
-                    <li>Provides detailed interpretation of authentication results</li>
+                    <li>Analyzes actual SPF, DKIM, and DMARC headers from receiving mail servers</li>
+                    <li>Shows real-world authentication results (not just DNS record existence)</li>
                 </ul>
+                <div class="alert alert-light mt-3 mb-0">
+                    <strong>🔗 Complementary to:</strong> <a href="/tests/email/" class="text-decoration-none">Main Email Testing System</a><br>
+                    <small class="text-muted">DNS/Domain tests verify records exist • This tool verifies they work in practice</small>
+                </div>
             </div>
             
             <!-- Requirements Alert -->
@@ -106,7 +114,7 @@ if (!$run_test) {
             </div>
             
             <!-- Test Form -->
-            <h5 class="mb-3">Run Authentication Test</h5>
+            <h5 class="mb-3">Run End-to-End Authentication Analysis</h5>
             
             <?php
             $formwriter = LibraryFunctions::get_formwriter_object('email_test_form', 'admin');
@@ -131,7 +139,7 @@ if (!$run_test) {
             
             echo '<div class="col-12">';
             echo $formwriter->start_buttons();
-            echo $formwriter->new_form_button('<i class="fas fa-paper-plane"></i> Run Authentication Test', 'btn btn-primary');
+            echo $formwriter->new_form_button('<i class="fas fa-microscope"></i> Run Advanced Analysis', 'btn btn-primary');
             echo $formwriter->end_buttons();
             echo '</div>';
             echo '</div>';
@@ -203,7 +211,7 @@ if (!$run_test) {
 
 // If we get here, $run_test is true - process the form submission
 echo '<div class="row"><div class="col-12">';
-echo '<h4>Running Email Authentication Test...</h4>';
+echo '<h4>Running Advanced Email Authentication Analysis...</h4>';
 
 try {
     // Step 1: Send test email
