@@ -598,6 +598,11 @@
 		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', '', 20, $settings->get_setting('webmaster_email'), "" , 255, "");
 		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");
 		echo $formwriter->textinput("Default Email Name", 'defaultemailname', '', 20, $settings->get_setting('defaultemailname'), "" , 255, "");
+		
+		// Email service selection settings
+		$service_optionvals = array('mailgun' => 'Mailgun', 'smtp' => 'SMTP');
+		echo $formwriter->dropinput("Primary Email Service", "email_service", '', $service_optionvals, $settings->get_setting('email_service') ?: 'mailgun', 'Service used for sending emails', FALSE);
+		echo $formwriter->dropinput("Fallback Email Service", "email_fallback_service", '', $service_optionvals, $settings->get_setting('email_fallback_service') ?: 'smtp', 'Service used if primary fails', FALSE);
 
 		
 		
