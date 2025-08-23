@@ -116,7 +116,7 @@
 			$email_record->save();
 			
 			foreach ($event_registrants as $event_registrant){
-				$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);
+				$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);
 				
 				
 				if($_REQUEST['waiting_list']){
@@ -181,7 +181,7 @@
 			if(!$_REQUEST['waiting_list']){
 				if($event->get('evt_usr_user_id_leader')){
 					$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
-					$email = new EmailTemplate($email_inner_template, $leader, $email_outer_template, $email_footer_template);
+					$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $leader, $email_outer_template, $email_footer_template);
 					$email->fill_template(array(
 						'subject' => 'COPY: '.$_POST['eml_subject'],
 						'body' => $_POST['eml_message'],
@@ -227,7 +227,7 @@
 			$email_record->set('eml_message_template_html', $email_inner_template);
 			$email_record->save();
 
-			$email = new EmailTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);			
+			$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);			
 			$email->fill_template(array(
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
@@ -277,7 +277,7 @@
 			
 			$settings = Globalvars::get_instance();
 			$email_inner_template = $settings->get_setting('individual_email_inner_template');
-			$email = new EmailTemplate($email_inner_template, $recipient);
+			$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $recipient);
 			$email->fill_template(array(
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
@@ -323,7 +323,7 @@
 		
 		$settings = Globalvars::get_instance();
 		$email_inner_template = $settings->get_setting('individual_email_inner_template');
-		$email = new EmailTemplate($email_inner_template, $sender);
+		$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $sender);
 		$email->fill_template(array(
 			'subject' => 'COPY: '.$_POST['eml_subject'],
 			'body' => $_POST['eml_message'],

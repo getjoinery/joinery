@@ -43,17 +43,17 @@ class EmailTestHarness {
      * Test template processing without sending
      */
     public static function testTemplateProcessing($template_id, $values = []) {
-        $email = new EmailTemplate($template_id);
+        $email = EmailTemplate::CreateLegacyTemplate($template_id, null);
         $email->fill_template($values);
         
         return [
             'success' => true,
             'has_content' => $email->hasContent(),
-            'subject' => $email->getEmailSubject(),
-            'html_length' => strlen($email->getEmailHtml()),
-            'text_length' => strlen($email->getEmailText()),
-            'from' => $email->getEmailFrom(),
-            'service_type' => $email->getServiceType()
+            'subject' => $email->email_subject,
+            'html_length' => strlen($email->email_html),
+            'text_length' => strlen($email->email_text),
+            'from' => $email->email_from,
+            'service_type' => EmailSender::detectServiceType()
         ];
     }
     
@@ -76,7 +76,7 @@ class EmailTestHarness {
      */
     public static function checkServiceSelection() {
         $settings = Globalvars::get_instance();
-        $email = new EmailTemplate(NULL);
+        $email = EmailTemplate::CreateLegacyTemplate('default_outer_template', null);
         
         return [
             'mailgun_configured' => (
@@ -84,7 +84,7 @@ class EmailTestHarness {
                 $settings->get_setting('mailgun_domain')
             ),
             'smtp_configured' => !empty($settings->get_setting('smtp_host')),
-            'would_use' => $email->getServiceType()
+            'would_use' => EmailSender::detectServiceType()
         ];
     }
 }

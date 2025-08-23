@@ -231,7 +231,7 @@ class RecurringMailer {
 
 	private function _load_templates($templates_dir) {
 		$this->email_template_contents['main_template'] = file_get_contents($templates_dir . '/' . 'main_template.html');
-		$this->email_templates['main_template'] = new EmailTemplate('recurring_emails/main_template.html');
+		$this->email_templates['main_template'] = EmailTemplate::CreateLegacyTemplate('recurring_emails/main_template.html', null);
 		return;
 	}
 	

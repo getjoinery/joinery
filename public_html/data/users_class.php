@@ -418,7 +418,7 @@ class User extends SystemBase {
 				PathHelper::requireOnce('includes/Activation.php');
 				
 				//SEND NEW USER WELCOME EMAIL
-				$welcome_email = new EmailTemplate('new_account_content', $user);
+				$welcome_email = EmailTemplate::CreateLegacyTemplate('new_account_content', $user);
 				$welcome_email->fill_template($email_fill);
 				$welcome_email->send();	
 				

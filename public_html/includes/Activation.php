@@ -221,7 +221,7 @@ class Activation {
 	static function email_activate_send($user, $resend=FALSE) {
 		//GENERATE SIGNUP CODE
 		$act_code = self::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));
-		$activation_email = new EmailTemplate('activation_content', $user);
+		$activation_email = EmailTemplate::CreateLegacyTemplate('activation_content', $user);
 		$settings = Globalvars::get_instance();
 		$activation_email->fill_template(array(
 			'resend' => $resend,
@@ -242,7 +242,7 @@ class Activation {
 		//GENERATE SIGNUP CODE
 		$act_code = self::getTempCode($user->key, '30 day', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));
 
-		$activation_email = new EmailTemplate('forgotpw_content', $user);
+		$activation_email = EmailTemplate::CreateLegacyTemplate('forgotpw_content', $user);
 		$settings = Globalvars::get_instance();
 		$activation_email->fill_template(array(
 			'act_code' => $act_code,
@@ -263,7 +263,7 @@ class Activation {
 		$user = new User($usr_user_id, TRUE);
 		$act_code = self::getTempCode($user->key, '30 days', Activation::EMAIL_CHANGE, NULL, $new_email);
 
-		$activation_email = new EmailTemplate('email_change_content', $user);
+		$activation_email = EmailTemplate::CreateLegacyTemplate('email_change_content', $user);
 		$settings = Globalvars::get_instance();
 		$activation_email->fill_template(array(
 			'act_code' => $act_code,

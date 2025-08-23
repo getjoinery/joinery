@@ -1515,10 +1515,9 @@
 		$fallback_service = $settings->get_setting('email_fallback_service') ?: 'smtp';
 
 		// Quick validation check
-		PathHelper::requireOnce('includes/EmailTemplate.php');
-		$email = new EmailTemplate('default_outer_template');
-		$primary_validation = $email->validateServiceConfiguration($current_service);
-		$fallback_validation = $email->validateServiceConfiguration($fallback_service);
+		PathHelper::requireOnce('includes/EmailSender.php');
+		$primary_validation = EmailSender::validateService($current_service);
+		$fallback_validation = EmailSender::validateService($fallback_service);
 
 		echo '<div class="alert alert-info">';
 		echo '<strong>Primary Service:</strong> ';
