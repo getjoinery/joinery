@@ -529,7 +529,7 @@ exit();
 	$domain = $settings->get_setting('mailgun_domain');
  
  
- 				$email = new EmailTemplate('blank_template');
+ 				$email = EmailTemplate::CreateLegacyTemplate('blank_template', null);
 				$email->add_recipient('jeremy.tunnell+3@gmail.com', 'Jeremy 3');
 				$email->add_recipient('jeremy@jeremytunnell.com', 'Jeremy');
 				$email->fill_template(array(

@@ -60,7 +60,7 @@ function post_logic($get_vars, $post_vars, $post){
 					$body = '<p>Comment '.$new_comment->key.' was added by "'.htmlspecialchars($new_comment->get('cmt_author_name')).'".</p>';
 					$body .= '<p>Link: <a href="'. LibraryFunctions::get_absolute_url($post->get_url()).'">' . LibraryFunctions::get_absolute_url($post->get_url()).'</a>';
 					$email_inner_template = $settings->get_setting('individual_email_inner_template');
-					$email = new EmailTemplate($email_inner_template, $notify_user);
+					$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $notify_user);
 					$email->fill_template(array(
 						'subject' => 'New Comment',
 						'body' => $body,
