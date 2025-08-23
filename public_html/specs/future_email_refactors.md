@@ -284,3 +284,760 @@ This consolidation should be considered **AFTER** the main email refactoring is 
 - Separate email configurations per tenant
 - Isolated email logs and analytics
 - Per-tenant sending limits and quotas
+
+## Phase 2: Automatic Email Retry Mechanism
+
+### Overview
+Implement automatic retry for failed emails that are currently being saved to `equ_queued_emails` table but never retried.
+
+### 2.1 Implement Automatic Retry from Queued Emails
+
+**Current State**: Emails that fail are saved to `equ_queued_emails` table but there's no automatic retry mechanism.
+
+#### Implementation: QueueProcessor Class
+```php
+// NEW FILE: /includes/Email/QueueProcessor.php
+<?php
+namespace Joinery\Email;
+
+class QueueProcessor {
+    private $settings;
+    private $max_retries;
+    private $retry_delay;
+    
+    public function __construct() {
+        $this->settings = Globalvars::get_instance();
+        $this->max_retries = intval($this->settings->get_setting('email_max_retries') ?: 3);
+        $this->retry_delay = intval($this->settings->get_setting('email_retry_delay') ?: 300);
+    }
+    
+    /**
+     * Process all queued emails that are ready for retry
+     * @return array Results of processing
+     */
+    public function processQueue(): array {
+        $results = [
+            'processed' => 0,
+            'sent' => 0,
+            'failed' => 0,
+            'permanently_failed' => 0
+        ];
+        
+        // Load queued emails that are ready for retry
+        $queued = new MultiQueuedEmail([
+            'equ_status' => QueuedEmail::NORMAL_MAILER_ERROR,
+            'equ_retry_count' => '< ' . $this->max_retries,
+            'equ_next_retry_time' => '<= NOW()'
+        ], ['equ_id' => 'ASC'], 100);
+        
+        if ($queued->count_all() === 0) {
+            return $results;
+        }
+        
+        $queued->load();
+        
+        foreach ($queued as $queuedEmail) {
+            $results['processed']++;
+            
+            // Recreate the email from queued data
+            $email = $this->recreateEmailFromQueued($queuedEmail);
+            
+            if (!$email) {
+                $results['failed']++;
+                continue;
+            }
+            
+            // Attempt to send
+            $sent = $email->send(false); // false = don't check session
+            
+            if ($sent) {
+                // Mark as sent
+                $queuedEmail->set('equ_status', QueuedEmail::SENT);
+                $queuedEmail->set('equ_sent_time', date('Y-m-d H:i:s'));
+                $queuedEmail->save();
+                $results['sent']++;
+            } else {
+                // Increment retry count
+                $retry_count = intval($queuedEmail->get('equ_retry_count')) + 1;
+                $queuedEmail->set('equ_retry_count', $retry_count);
+                
+                if ($retry_count >= $this->max_retries) {
+                    // Mark as permanently failed
+                    $queuedEmail->set('equ_status', QueuedEmail::PERMANENT_FAILURE);
+                    $results['permanently_failed']++;
+                } else {
+                    // Schedule next retry
+                    $next_retry = date('Y-m-d H:i:s', time() + $this->retry_delay);
+                    $queuedEmail->set('equ_next_retry_time', $next_retry);
+                    $results['failed']++;
+                }
+                
+                $queuedEmail->save();
+            }
+        }
+        
+        return $results;
+    }
+    
+    /**
+     * Recreate EmailTemplate from queued email data
+     */
+    private function recreateEmailFromQueued($queuedEmail): ?EmailTemplate {
+        try {
+            // Create new email instance
+            $email = new EmailTemplate('blank_template');
+            
+            // Restore email properties from JSON data
+            $email_data = json_decode($queuedEmail->get('equ_email_data'), true);
+            
+            if (!$email_data) {
+                return null;
+            }
+            
+            // Set basic properties
+            $email->email_from = $email_data['from'] ?? '';
+            $email->email_from_name = $email_data['from_name'] ?? '';
+            $email->email_subject = $email_data['subject'] ?? '';
+            $email->email_html = $email_data['html'] ?? '';
+            $email->email_text = $email_data['text'] ?? '';
+            
+            // Add recipients
+            if (isset($email_data['recipients']) && is_array($email_data['recipients'])) {
+                foreach ($email_data['recipients'] as $recipient) {
+                    $email->add_recipient($recipient['email'], $recipient['name'] ?? '');
+                }
+            }
+            
+            return $email;
+            
+        } catch (Exception $e) {
+            $this->logError("Failed to recreate email from queue: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    private function logError($message) {
+        error_log("[QueueProcessor] " . $message);
+    }
+}
+```
+
+#### Cron Job for Processing
+```php
+// NEW FILE: /cron/process_email_queue.php
+<?php
+/**
+ * Cron job to process queued emails
+ * Run every 5 minutes: */5 * * * * php /path/to/cron/process_email_queue.php
+ */
+
+require_once('../includes/PathHelper.php');
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/Email/QueueProcessor.php');
+
+use Joinery\Email\QueueProcessor;
+
+$processor = new QueueProcessor();
+$results = $processor->processQueue();
+
+// Log results
+$message = sprintf(
+    "Email Queue Processed: %d processed, %d sent, %d failed, %d permanently failed",
+    $results['processed'],
+    $results['sent'],
+    $results['failed'],
+    $results['permanently_failed']
+);
+
+error_log($message);
+echo $message . "\n";
+```
+
+### 2.2 Database Migration for Retry Support
+```php
+// In migrations/migrations.php
+$migration = array();
+$migration['database_version'] = '0.55';
+$migration['test'] = "SELECT COUNT(*) as count FROM information_schema.columns 
+                      WHERE table_name = 'equ_queued_emails' 
+                      AND column_name = 'equ_retry_count'";
+$migration['migration_sql'] = "
+    -- Add retry tracking columns to queued emails
+    ALTER TABLE equ_queued_emails 
+    ADD COLUMN IF NOT EXISTS equ_retry_count INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS equ_next_retry_time TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS equ_last_error TEXT,
+    ADD COLUMN IF NOT EXISTS equ_sent_time TIMESTAMP;
+    
+    -- Add status constants if not exists
+    ALTER TABLE equ_queued_emails 
+    ALTER COLUMN equ_status TYPE VARCHAR(50);
+    
+    -- Create index for efficient queue processing
+    CREATE INDEX IF NOT EXISTS idx_equ_retry_status 
+    ON equ_queued_emails(equ_status, equ_next_retry_time) 
+    WHERE equ_status IN ('error', 'pending');
+    
+    -- Add retry settings
+    INSERT INTO stg_settings (stg_setting, stg_value, stg_description) VALUES
+    ('email_max_retries', '3', 'Maximum retry attempts for failed emails'),
+    ('email_retry_delay', '300', 'Seconds between retry attempts')
+    ON CONFLICT (stg_setting) DO NOTHING;
+";
+$migration['migration_file'] = NULL;
+$migrations[] = $migration;
+```
+
+### 2.3 Enhanced Queue Management
+
+#### Enhanced save_email_as_queued Method
+```php
+// Enhanced EmailTemplate.php method
+function save_email_as_queued($user_id, $status = QueuedEmail::NOT_SENT, $error = null) {
+    $settings = Globalvars::get_instance();
+    $retry_delay = intval($settings->get_setting('email_retry_delay') ?: 300);
+    
+    // Enhanced email data with metadata
+    $email_data = array(
+        'from' => $this->email_from,
+        'from_name' => $this->email_from_name,
+        'subject' => $this->email_subject,
+        'html' => $this->email_html,
+        'text' => $this->email_text,
+        'recipients' => $this->email_recipients,
+        'metadata' => [
+            'template_name' => $this->template_name,
+            'created_time' => date('Y-m-d H:i:s'),
+            'service_attempted' => $this->getServiceType(),
+            'original_error' => $error
+        ]
+    );
+    
+    $queued = new QueuedEmail(NULL);
+    $queued->set('equ_usr_user_id', $user_id);
+    $queued->set('equ_email_data', json_encode($email_data));
+    $queued->set('equ_status', $status);
+    $queued->set('equ_retry_count', 0);
+    $queued->set('equ_next_retry_time', date('Y-m-d H:i:s', time() + $retry_delay));
+    
+    if ($error) {
+        $queued->set('equ_last_error', $error);
+    }
+    
+    $queued->save();
+    
+    // Log to debug if enabled
+    $this->logEmailDebug(
+        "Email queued for retry: " . ($error ?: 'No specific error'),
+        $this->getServiceType()
+    );
+}
+
+// Update sendViaSmtp to pass error message
+private function sendViaSmtp() {
+    $this->mailer->isHTML(true);
+    $this->mailer->Body = $this->email_html;
+    $this->mailer->AltBody = $this->email_text;
+    
+    if (!$this->mailer->send()) {
+        $error = $this->mailer->ErrorInfo;
+        $this->logEmailDebug("SMTP send failed: " . $error, 'smtp');
+        // Pass error message to queued email
+        $this->save_email_as_queued(NULL, QueuedEmail::NORMAL_MAILER_ERROR, $error);
+        return false;
+    }
+    
+    $this->logEmailDebug("Email sent successfully via SMTP", 'smtp');
+    return true;
+}
+```
+
+### Success Metrics for Phase 2
+- [ ] Automatic retry mechanism processes queued emails every 5 minutes
+- [ ] Failed emails retry up to 3 times with exponential backoff
+- [ ] Queue processor handles 1000+ emails without memory issues
+- [ ] Retry success rate > 80% for temporary failures
+
+### Implementation Checklist for Phase 2
+- [ ] Create QueueProcessor class
+- [ ] Add retry columns to database
+- [ ] Create cron job for queue processing
+- [ ] Enhance save_email_as_queued with retry metadata
+- [ ] Test retry mechanism with forced failures
+- [ ] Monitor retry success rates
+
+### Testing Strategy for Phase 2
+```php
+// /tests/email/suites/QueueProcessorTests.php
+class QueueProcessorTests {
+    public function testQueueProcessor() {
+        $processor = new QueueProcessor();
+        
+        // Add a test email to queue
+        $this->addTestEmailToQueue();
+        
+        // Process queue
+        $results = $processor->processQueue();
+        
+        assert($results['processed'] > 0);
+        // Further assertions based on results
+    }
+    
+    private function addTestEmailToQueue() {
+        $email_data = [
+            'from' => 'test@example.com',
+            'from_name' => 'Test Sender',
+            'subject' => 'Test Queued Email',
+            'html' => '<p>Test content</p>',
+            'text' => 'Test content',
+            'recipients' => [
+                ['email' => 'recipient@example.com', 'name' => 'Test Recipient']
+            ]
+        ];
+        
+        $queued = new QueuedEmail(NULL);
+        $queued->set('equ_email_data', json_encode($email_data));
+        $queued->set('equ_status', QueuedEmail::NORMAL_MAILER_ERROR);
+        $queued->set('equ_retry_count', 0);
+        $queued->set('equ_next_retry_time', date('Y-m-d H:i:s'));
+        $queued->save();
+    }
+}
+```
+
+### Notes on Phase 2
+- Focuses on reliability through automatic retry
+- Maintains backward compatibility with existing queue system
+- Can be implemented independently of Phase 3 architecture changes
+- Provides immediate value for handling transient email failures
+
+## Template Engine Separation
+
+### Overview
+
+The EmailTemplate class currently handles both template processing (loading, merging, variable substitution, conditionals) and email sending. Separating these concerns would create a reusable template engine that could be used for other purposes (PDFs, SMS, print views) while making the email system cleaner and more testable.
+
+### Current State Analysis
+
+The EmailTemplate class (811 lines) contains approximately:
+- ~400 lines of template processing logic
+- ~300 lines of email sending logic  
+- ~100 lines of utility/setup code
+
+Template operations currently embedded in EmailTemplate:
+- Loading templates from database
+- Merging inner/outer/footer templates
+- Variable substitution (`*variable*` → value)
+- Conditional processing (`*if:condition*` blocks)
+- Subject line extraction from template
+- UTM tracking injection
+- Link tracking for campaigns
+
+### Proposed Separation
+
+#### New Class: EmailTemplateProcessor
+
+```php
+// NEW FILE: /includes/EmailTemplateProcessor.php
+class EmailTemplateProcessor {
+    private $settings;
+    private $template_name;
+    private $inner_template;
+    private $outer_template;
+    private $footer_template;
+    private $processed_html;
+    private $processed_text;
+    private $extracted_subject;
+    private $template_values = [];
+    
+    public function __construct($template_name = null) {
+        $this->settings = Globalvars::get_instance();
+        if ($template_name) {
+            $this->loadTemplate($template_name);
+        }
+    }
+    
+    /**
+     * Load a template from the database
+     */
+    public function loadTemplate($template_name) {
+        $this->template_name = $template_name;
+        
+        // Load inner template
+        $templates = new MultiEmailTemplateStore(['email_template_name' => $template_name]);
+        $templates->load();
+        
+        if ($templates->count_all() > 0) {
+            $template = $templates->get(0);
+            $this->inner_template = $template->get('emt_body');
+            
+            // Check for outer template reference
+            if ($outer_id = $template->get('emt_outer_template_id')) {
+                $this->loadOuterTemplate($outer_id);
+            }
+            
+            // Check for footer template
+            if ($footer_name = $template->get('emt_footer_template')) {
+                $this->loadFooterTemplate($footer_name);
+            }
+        }
+        
+        return $this;
+    }
+    
+    /**
+     * Process the template with given values
+     */
+    public function process($values = []) {
+        $this->template_values = array_merge($this->template_values, $values);
+        
+        // Start with inner template
+        $content = $this->inner_template;
+        
+        // Process conditionals first
+        $content = $this->processConditionals($content, $this->template_values);
+        
+        // Extract subject if present
+        $this->extracted_subject = $this->extractSubject($content);
+        if ($this->extracted_subject !== null) {
+            // Remove subject line from content
+            $content = preg_replace('/^subject:\s*.*?\n/i', '', $content, 1);
+        }
+        
+        // Substitute variables
+        $content = $this->substituteVariables($content, $this->template_values);
+        
+        // Merge with outer template if exists
+        if ($this->outer_template) {
+            $outer = $this->substituteVariables($this->outer_template, $this->template_values);
+            $content = str_replace('*inner_template*', $content, $outer);
+        }
+        
+        // Add footer if exists
+        if ($this->footer_template) {
+            $footer = $this->substituteVariables($this->footer_template, $this->template_values);
+            $content = str_replace('*footer*', $footer, $content);
+        }
+        
+        $this->processed_html = $content;
+        $this->processed_text = $this->generateTextVersion($content);
+        
+        return $this;
+    }
+    
+    /**
+     * Extract subject line from template
+     */
+    private function extractSubject($content) {
+        if (preg_match('/^subject:\s*(.*?)$/im', $content, $matches)) {
+            return trim($matches[1]);
+        }
+        return null;
+    }
+    
+    /**
+     * Process conditional blocks
+     */
+    private function processConditionals($content, $values) {
+        // Process *if:variable* blocks
+        $pattern = '/\*if:(\w+)\*(.*?)\*endif:\1\*/s';
+        
+        $content = preg_replace_callback($pattern, function($matches) use ($values) {
+            $variable = $matches[1];
+            $block_content = $matches[2];
+            
+            // Check if variable exists and is truthy
+            if (isset($values[$variable]) && $values[$variable]) {
+                return $block_content;
+            }
+            
+            return '';
+        }, $content);
+        
+        // Process *ifnot:variable* blocks
+        $pattern = '/\*ifnot:(\w+)\*(.*?)\*endifnot:\1\*/s';
+        
+        $content = preg_replace_callback($pattern, function($matches) use ($values) {
+            $variable = $matches[1];
+            $block_content = $matches[2];
+            
+            // Check if variable doesn't exist or is falsy
+            if (!isset($values[$variable]) || !$values[$variable]) {
+                return $block_content;
+            }
+            
+            return '';
+        }, $content);
+        
+        return $content;
+    }
+    
+    /**
+     * Substitute variables in template
+     */
+    private function substituteVariables($content, $values) {
+        foreach ($values as $key => $value) {
+            // Handle array values (like for loops)
+            if (is_array($value)) {
+                $content = $this->processArrayVariable($content, $key, $value);
+            } else {
+                // Simple substitution
+                $content = str_replace('*' . $key . '*', $value, $content);
+            }
+        }
+        
+        // Remove any remaining undefined variables
+        $content = preg_replace('/\*\w+\*/', '', $content);
+        
+        return $content;
+    }
+    
+    /**
+     * Process array variables for loops
+     */
+    private function processArrayVariable($content, $key, $array) {
+        // Look for *foreach:key* blocks
+        $pattern = '/\*foreach:' . preg_quote($key, '/') . '\*(.*?)\*endforeach:' . preg_quote($key, '/') . '\*/s';
+        
+        $content = preg_replace_callback($pattern, function($matches) use ($array) {
+            $loop_content = $matches[1];
+            $output = '';
+            
+            foreach ($array as $item) {
+                $item_content = $loop_content;
+                
+                if (is_array($item)) {
+                    // Substitute item properties
+                    foreach ($item as $prop => $value) {
+                        $item_content = str_replace('*item.' . $prop . '*', $value, $item_content);
+                    }
+                } else {
+                    // Simple item substitution
+                    $item_content = str_replace('*item*', $item, $item_content);
+                }
+                
+                $output .= $item_content;
+            }
+            
+            return $output;
+        }, $content);
+        
+        return $content;
+    }
+    
+    /**
+     * Generate text version from HTML
+     */
+    private function generateTextVersion($html) {
+        // Remove HTML tags
+        $text = strip_tags($html);
+        
+        // Convert entities
+        $text = html_entity_decode($text);
+        
+        // Clean up whitespace
+        $text = preg_replace('/\s+/', ' ', $text);
+        $text = trim($text);
+        
+        return $text;
+    }
+    
+    /**
+     * Add UTM tracking to links
+     */
+    public function addUTMTracking($source, $medium = 'email', $campaign = null) {
+        if (!$this->processed_html) {
+            return $this;
+        }
+        
+        $utm_params = http_build_query([
+            'utm_source' => $source,
+            'utm_medium' => $medium,
+            'utm_campaign' => $campaign ?: $this->template_name
+        ]);
+        
+        // Add UTM to all links
+        $this->processed_html = preg_replace_callback(
+            '/<a\s+([^>]*href=["\']?)([^"\'\s>]+)([^>]*)>/i',
+            function($matches) use ($utm_params) {
+                $url = $matches[2];
+                
+                // Skip mailto and tel links
+                if (strpos($url, 'mailto:') === 0 || strpos($url, 'tel:') === 0) {
+                    return $matches[0];
+                }
+                
+                // Add UTM parameters
+                $separator = (strpos($url, '?') !== false) ? '&' : '?';
+                $new_url = $url . $separator . $utm_params;
+                
+                return '<a ' . $matches[1] . $new_url . $matches[3] . '>';
+            },
+            $this->processed_html
+        );
+        
+        return $this;
+    }
+    
+    /**
+     * Get processed HTML
+     */
+    public function getHtml() {
+        return $this->processed_html;
+    }
+    
+    /**
+     * Get processed text
+     */
+    public function getText() {
+        return $this->processed_text;
+    }
+    
+    /**
+     * Get extracted subject
+     */
+    public function getSubject() {
+        return $this->extracted_subject;
+    }
+    
+    /**
+     * Set a template variable
+     */
+    public function setVariable($key, $value) {
+        $this->template_values[$key] = $value;
+        return $this;
+    }
+    
+    /**
+     * Set multiple template variables
+     */
+    public function setVariables($values) {
+        $this->template_values = array_merge($this->template_values, $values);
+        return $this;
+    }
+}
+```
+
+#### Updated EmailTemplate Class
+
+```php
+// EmailTemplate.php - After separation
+class EmailTemplate {
+    private $processor;
+    private $email_from;
+    private $email_from_name;
+    private $email_recipients = [];
+    private $email_subject;
+    private $email_html;
+    private $email_text;
+    
+    public function __construct($template_name = null) {
+        $this->settings = Globalvars::get_instance();
+        
+        if ($template_name) {
+            $this->processor = new EmailTemplateProcessor($template_name);
+        }
+        
+        // Set default from
+        $this->email_from = $this->settings->get_setting('defaultemail');
+        $this->email_from_name = $this->settings->get_setting('defaultemailname');
+    }
+    
+    /**
+     * Fill template with values
+     */
+    public function fill_template($values) {
+        if (!$this->processor) {
+            throw new Exception('No template loaded');
+        }
+        
+        // Process template
+        $this->processor->process($values);
+        
+        // Get results
+        $this->email_html = $this->processor->getHtml();
+        $this->email_text = $this->processor->getText();
+        
+        // Get subject if not already set
+        if (!$this->email_subject) {
+            $this->email_subject = $this->processor->getSubject();
+        }
+        
+        return $this;
+    }
+    
+    // All the sending methods remain here
+    // sendWithService(), sendViaSmtp(), sendViaMailgun(), etc.
+}
+```
+
+### Benefits of Separation
+
+1. **Reusability**: Template processor can be used for:
+   - PDF generation (invoices, reports)
+   - SMS messages
+   - Print views
+   - In-app notifications
+   - Export formats
+
+2. **Testability**: Can test template processing without email infrastructure:
+   ```php
+   $processor = new EmailTemplateProcessor('welcome_email');
+   $processor->process(['username' => 'John']);
+   assert($processor->getSubject() == 'Welcome John!');
+   ```
+
+3. **Maintainability**: 
+   - Template logic in one place
+   - Email sending logic in another
+   - Easier to debug template issues
+   - Cleaner class responsibilities
+
+4. **Performance**: Template processing can be cached independently of sending
+
+5. **Future Flexibility**: Could swap template engines (Twig, Blade) without changing email code
+
+### Implementation Steps
+
+1. **Create EmailTemplateProcessor class** (~2 days)
+   - Extract all template methods from EmailTemplate
+   - Ensure backward compatibility
+   - Add unit tests for template processing
+
+2. **Refactor EmailTemplate** (~1 day)
+   - Remove template processing methods
+   - Use EmailTemplateProcessor internally
+   - Maintain existing public API
+
+3. **Testing** (~1 day)
+   - Verify all existing email templates work
+   - Test conditional processing
+   - Test variable substitution
+   - Test UTM tracking
+
+4. **Documentation** (~2 hours)
+   - Document new template processor API
+   - Add examples for non-email usage
+   - Update developer guides
+
+**Total estimated time: 4-5 days**
+
+### Comparison with Full Service Architecture
+
+| Aspect | Template Separation | Full Service Architecture |
+|--------|-------------------|-------------------------|
+| Value Added | High - Enables template reuse | Medium - Cleaner architecture |
+| Implementation Time | 4-5 days | 2-3 weeks |
+| Risk | Low - Internal refactor | Medium - Changes sending logic |
+| Testing Required | Template tests only | Full integration testing |
+| Business Impact | New capabilities (PDFs, etc.) | Technical improvement only |
+
+### Recommendation Priority
+
+If you're going to do any refactoring beyond the test mode (Option 2):
+
+1. **First**: Add test mode (4 hours) - Solves immediate need
+2. **Second**: Separate template engine (4-5 days) - Adds business value
+3. **Third**: Full service architecture (2-3 weeks) - Nice to have
+
+The template separation provides more tangible benefits than the service architecture for most applications.

@@ -152,35 +152,68 @@ Content here
 
 ## Subject Processing
 
-### Subject Extraction
+### CRITICAL: How Subject Lines Actually Work
 
-**How subjects work:**
-1. Template is processed (conditionals + variables)
-2. First line is checked with: `stripos(trim($html_lines[0]), 'subject:') === 0`
-3. If found, subject is extracted: `substr(trim($html_lines[0]), 8)`
-4. Subject line is removed from email body
-5. `$this->email_has_content` is set to TRUE
+The EmailTemplate system supports **THREE methods** for setting email subjects, with important nuances:
 
-**Example Template with Subject:**
+#### Method 1: Template-Based Subject (System Default)
+If the first line of the **processed template output** starts with `subject:`, it's extracted:
+
+**In Template:**
 ```
 Subject: Welcome to *company_name*, *recipient->usr_first_name*!
 
 <h1>Welcome!</h1>
 <p>Hello *recipient->usr_first_name*,</p>
-<p>Thanks for joining us...</p>
 ```
+
+**Processing:**
+1. Template is fully processed (conditionals + variables)
+2. First line checked: `stripos(trim($html_lines[0]), 'subject:') === 0`
+3. Subject extracted: `substr(trim($html_lines[0]), 8)`
+4. Subject line removed from email body
+5. Sets `$this->email_has_content = TRUE`
+
+#### Method 2: Direct Assignment (Override)
+Subject can be set directly, overriding any template subject:
+
+```php
+$email = new EmailTemplate('some_template');
+$email->fill_template(['body' => 'content']);
+$email->email_subject = 'Override Subject';  // This wins!
+```
+
+#### Method 3: Template Variable (Common Misconception)
+**WARNING:** Passing 'subject' to fill_template does NOT directly set the subject!
+
+```php
+// MISCONCEPTION - This does NOT set email_subject!
+$email->fill_template(['subject' => 'Test Subject']);
+// 'subject' is only available as template variable *subject*
+```
+
+For this to work, the template must use it:
+```
+subject: *subject*
+<p>Email body...</p>
+```
+
+### Subject Priority Order
+
+1. **Direct assignment** (`$email->email_subject = '...'`) - Always wins
+2. **Template extraction** (first line with "subject:") - Used if no direct assignment
+3. **No subject** - Email may still send but without subject line
 
 ### Why getEmailSubject() Returns Null
 
 `getEmailSubject()` returns null when:
 1. No subject line in template (doesn't start with "Subject:")
-2. Template processing failed
+2. Template processing failed or returned empty
 3. `fill_template()` hasn't been called yet
-4. Template has no content (empty body)
+4. Subject wasn't directly assigned
 
-**The `email_has_content` flag is set to TRUE only when:**
-- A subject line is found and extracted, OR
-- Content exists after processing
+**Common Issue in Tests:**
+Tests often pass 'subject' to fill_template expecting it to set the subject, but it doesn't work unless the template uses `*subject*` variable.
 
 ## Template Processing Flow
 
