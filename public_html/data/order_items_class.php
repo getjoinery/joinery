@@ -249,7 +249,7 @@ class OrderItem extends SystemBase {
 						$notify_user = User::GetByEmail($notify_email);
 						$body = 'Subscription '.$this->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
 						$email_inner_template = $settings->get_setting('individual_email_inner_template');
-						$email = new EmailTemplate($email_inner_template, $notify_user);
+						$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $notify_user);
 						$email->fill_template(array(
 							'subject' => 'Cancelled Subscription',
 							'body' => $body,

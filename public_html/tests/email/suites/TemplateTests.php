@@ -24,38 +24,34 @@ class TemplateTests {
     
     private function testBasicProcessing(): array {
         try {
-            // Use a working template name from the codebase
-            $email = new EmailTemplate('activation_content');
+            // Use the new EmailMessage architecture
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'TEST123',
+                'resend' => false,
+            ]);
             
             // Follow the working pattern from Activation::email_activate_send
             $settings = Globalvars::get_instance();
-            $email->email_from = $settings->get_setting('defaultemail');
-            $email->email_from_name = $settings->get_setting('defaultemailname');
-            $email->add_recipient('test@example.com', 'Test User');
-            
-            // Don't pass 'subject' unless the template uses *subject*
-            $values = [
-                'act_code' => 'TEST123',
-                'resend' => false,
-            ];
-            
-            $email->fill_template($values);
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'));
+            $message->to('test@example.com', 'Test User');
             
             // Check if the template extracted a subject
-            $subject = $email->getEmailSubject();
+            $subject = $message->getSubject();
             $hasSubject = !empty($subject);
+            $hasContent = !empty($message->getHtmlBody()) || !empty($message->getTextBody());
             
             // Get debug info
             $debugInfo = [
-                'hasContent_result' => $email->hasContent(),
+                'hasContent_result' => $hasContent,
                 'subject_extracted' => $subject,
                 'subject_exists' => $hasSubject,
-                'email_html_length' => strlen($email->getEmailHtml()),
+                'html_body_length' => strlen($message->getHtmlBody()),
+                'text_body_length' => strlen($message->getTextBody()),
                 'template_first_line' => $this->getFirstLineOfTemplate('activation_content'),
             ];
             
             return [
-                'passed' => $email->hasContent() && $hasSubject,
+                'passed' => $hasContent && $hasSubject,
                 'message' => $hasSubject ? 
                     "Template processing successful with subject: $subject" : 
                     "Template processing completed but no subject found",
@@ -65,236 +61,279 @@ class TemplateTests {
             return [
                 'passed' => false,
                 'message' => 'Template processing failed: ' . $e->getMessage(),
+                'details' => [
+                    'exception_class' => get_class($e),
+                    'exception_message' => $e->getMessage(),
+                    'exception_file' => $e->getFile(),
+                    'exception_line' => $e->getLine()
+                ]
             ];
         }
     }
     
     private function testVariableReplacement(): array {
-        // Use the working template pattern without User object to avoid complications
-        $email = new EmailTemplate('activation_content');
-        $settings = Globalvars::get_instance();
-        $email->email_from = $settings->get_setting('defaultemail');
-        $email->email_from_name = $settings->get_setting('defaultemailname');
-        $email->add_recipient('test@example.com', 'Test User');
-        
-        $email->fill_template([
-            'act_code' => 'VARIABLE_TEST_123',
-            'resend' => false,
-        ]);
-        
-        // Use new getter methods to inspect content
-        $subject = $email->getEmailSubject();
-        $html = $email->getEmailHtml();
-        
-        // Look for evidence that our test variable was replaced
-        $htmlHasActCode = $html && strpos($html, 'VARIABLE_TEST_123') !== false;
-        $subjectExists = !empty($subject);
-        $htmlExists = !empty($html);
-        
-        return [
-            'passed' => $htmlHasActCode && $subjectExists && $htmlExists,
-            'message' => 'Variable replacement test',
-            'details' => [
-                'html_has_act_code' => $htmlHasActCode,
-                'subject_exists' => $subjectExists,
-                'html_exists' => $htmlExists,
-                'final_subject' => $subject,
-                'html_length' => $html ? strlen($html) : 0
-            ]
-        ];
+        try {
+            // Use the new EmailMessage architecture
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'VARIABLE_TEST_123',
+                'resend' => false,
+            ]);
+            
+            $settings = Globalvars::get_instance();
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'));
+            $message->to('test@example.com', 'Test User');
+            
+            // Use EmailMessage methods to inspect content
+            $subject = $message->getSubject();
+            $html = $message->getHtmlBody();
+            
+            // Look for evidence that our test variable was replaced
+            $htmlHasActCode = $html && strpos($html, 'VARIABLE_TEST_123') !== false;
+            $subjectExists = !empty($subject);
+            $htmlExists = !empty($html);
+            
+            return [
+                'passed' => $htmlHasActCode && $subjectExists && $htmlExists,
+                'message' => 'Variable replacement test',
+                'details' => [
+                    'html_has_act_code' => $htmlHasActCode,
+                    'subject_exists' => $subjectExists,
+                    'html_exists' => $htmlExists,
+                    'final_subject' => $subject,
+                    'html_length' => $html ? strlen($html) : 0
+                ]
+            ];
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'Variable replacement test failed with exception: ' . $e->getMessage(),
+                'details' => [
+                    'exception_class' => get_class($e),
+                    'exception_message' => $e->getMessage(),
+                    'exception_file' => $e->getFile(),
+                    'exception_line' => $e->getLine()
+                ]
+            ];
+        }
     }
     
     private function testContentGeneration(): array {
-        // Use the working template pattern
-        $email = new EmailTemplate('activation_content');
-        $settings = Globalvars::get_instance();
-        $email->email_from = $settings->get_setting('defaultemail');
-        $email->email_from_name = $settings->get_setting('defaultemailname');
-        $email->add_recipient('test@example.com', 'Test User');
-        
-        $email->fill_template([
-            'act_code' => 'TEST999',
-            'resend' => false,
-        ]);
-        
-        // Use getter methods to verify content
-        $html = $email->getEmailHtml();
-        $text = $email->getEmailText();
-        $recipients = $email->getEmailRecipients();
-        
-        return [
-            'passed' => !empty($html) && !empty($text) && count($recipients) > 0,
-            'message' => 'Content generation successful',
-            'details' => [
-                'html_length' => strlen($html),
-                'text_length' => strlen($text),
-                'recipient_count' => count($recipients),
-            ]
-        ];
+        try {
+            // Use the new EmailMessage architecture
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'TEST999', 
+                'resend' => false,
+            ]);
+            
+            $settings = Globalvars::get_instance();
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'));
+            $message->to('test@example.com', 'Test User');
+            
+            // Verify content generation
+            $html = $message->getHtmlBody();
+            $text = $message->getTextBody();
+            $recipients = $message->getRecipients();
+            
+            return [
+                'passed' => !empty($html) && !empty($text) && count($recipients) > 0,
+                'message' => 'Content generation successful',
+                'details' => [
+                    'html_length' => strlen($html),
+                    'text_length' => strlen($text),
+                    'recipient_count' => count($recipients),
+                ]
+            ];
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'Content generation failed: ' . $e->getMessage(),
+                'details' => []
+            ];
+        }
     }
     
     private function testGetterMethods(): array {
-        // Use the same working template and pattern as Basic Processing
-        $email = new EmailTemplate('activation_content');
-        $settings = Globalvars::get_instance();
-        $email->email_from = $settings->get_setting('defaultemail');
-        $email->email_from_name = $settings->get_setting('defaultemailname');
-        $email->add_recipient('test@example.com', 'Test User');
-        
-        $email->fill_template([
-            'act_code' => 'TEST123',
-            'resend' => false,
-        ]);
-        
-        // Test all new getter methods
-        $getters = [
-            'getEmailHtml' => $email->getEmailHtml(),
-            'getEmailText' => $email->getEmailText(),
-            'getEmailSubject' => $email->getEmailSubject(),
-            'getEmailRecipients' => $email->getEmailRecipients(),
-            'hasContent' => $email->hasContent(),
-            'getServiceType' => $email->getServiceType(),
-        ];
-        
-        $allWorking = true;
-        $failingMethods = [];
-        
-        foreach ($getters as $method => $result) {
-            // Different validation rules for different methods
-            $methodFailed = false;
+        try {
+            // Test both template processing and message composition
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'TEST123',
+                'resend' => false,
+            ]);
             
-            if ($method === 'hasContent') {
-                // hasContent should return a boolean, not null
-                $methodFailed = !is_bool($result);
-            } elseif ($method === 'getEmailRecipients') {
-                // getEmailRecipients should return an array
-                $methodFailed = !is_array($result);
-            } else {
-                // Other methods should not be null (but empty strings are OK)
-                $methodFailed = ($result === null);
+            $settings = Globalvars::get_instance();
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'));
+            $message->to('test@example.com', 'Test User');
+            
+            // Test new getter methods on EmailMessage
+            $getters = [
+                'getHtmlBody' => $message->getHtmlBody(),
+                'getTextBody' => $message->getTextBody(), 
+                'getSubject' => $message->getSubject(),
+                'getRecipients' => $message->getRecipients(),
+                'getFrom' => $message->getFrom(),
+                'getFromName' => $message->getFromName(),
+            ];
+        
+            $allWorking = true;
+            $failingMethods = [];
+            
+            foreach ($getters as $method => $result) {
+                // Different validation rules for different methods
+                $methodFailed = false;
+                
+                if ($method === 'getRecipients') {
+                    // getRecipients should return an array
+                    $methodFailed = !is_array($result);
+                } else {
+                    // Other methods should not be null (but empty strings are OK)
+                    $methodFailed = ($result === null);
+                }
+                
+                if ($methodFailed) {
+                    $allWorking = false;
+                    $failingMethods[] = $method . ' (' . gettype($result) . ')';
+                }
             }
             
-            if ($methodFailed) {
-                $allWorking = false;
-                $failingMethods[] = $method . ' (' . gettype($result) . ')';
-            }
+            return [
+                'passed' => $allWorking,
+                'message' => $allWorking ? 'All getter methods working' : 'Some getter methods failing: ' . implode(', ', $failingMethods),
+                'details' => [
+                    'getters' => array_map(function($v) { 
+                        return is_array($v) ? count($v) . ' items' : (is_bool($v) ? ($v ? 'true' : 'false') : (strlen($v) > 50 ? substr($v, 0, 50) . '...' : $v)); 
+                    }, $getters),
+                    'failing_methods' => $failingMethods
+                ]
+            ];
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'Getter methods test failed: ' . $e->getMessage(),
+                'details' => []
+            ];
         }
-        
-        return [
-            'passed' => $allWorking,
-            'message' => $allWorking ? 'All getter methods working' : 'Some getter methods failing: ' . implode(', ', $failingMethods),
-            'details' => [
-                'getters' => array_map(function($v) { 
-                    return is_array($v) ? count($v) . ' items' : (is_bool($v) ? ($v ? 'true' : 'false') : (strlen($v) > 50 ? substr($v, 0, 50) . '...' : $v)); 
-                }, $getters),
-                'failing_methods' => $failingMethods
-            ]
-        ];
     }
     
     private function testSubjectExtraction(): array {
-        $results = [];
-        
-        // Test 1: Direct subject assignment
-        $email1 = new EmailTemplate('activation_content');
-        $email1->email_from = 'test@example.com';
-        $email1->add_recipient('test@example.com', 'Test');
-        $email1->fill_template(['act_code' => 'TEST123', 'resend' => false]);
-        
-        $results['template_subject'] = [
-            'subject' => $email1->getEmailSubject(),
-            'has_subject' => !empty($email1->getEmailSubject()),
-        ];
-        
-        // Test 2: Direct subject assignment
-        $email2 = new EmailTemplate('activation_content');
-        $email2->email_from = 'test@example.com';
-        $email2->add_recipient('test@example.com', 'Test');
-        $email2->fill_template(['act_code' => 'TEST123', 'resend' => false]);
-        $email2->email_subject = 'Direct Subject';
-        
-        $results['direct_subject'] = [
-            'subject' => $email2->getEmailSubject(),
-            'has_subject' => !empty($email2->getEmailSubject()),
-        ];
-        
-        // Test 3: Template variable method (if we had a template that uses *subject*)
-        // This test may not work unless we have a template that uses *subject*
-        $email3 = new EmailTemplate('activation_content');
-        $email3->email_from = 'test@example.com';
-        $email3->add_recipient('test@example.com', 'Test');
-        
-        $email3->fill_template([
-            'subject' => 'Variable Subject',
-            'act_code' => 'TEST123',
-            'resend' => false,
-        ]);
-        
-        $results['variable_subject'] = [
-            'subject' => $email3->getEmailSubject(),
-            'has_subject' => !empty($email3->getEmailSubject()),
-            'note' => 'This only works if template contains *subject*'
-        ];
-        
-        $allPassed = $results['direct_subject']['has_subject'] && 
-                     ($results['template_subject']['has_subject'] || 
-                      $results['variable_subject']['has_subject']);
-        
-        return [
-            'passed' => $allPassed,
-            'message' => 'Subject extraction methods tested',
-            'details' => $results
-        ];
+        try {
+            $results = [];
+            
+            // Test 1: Template-generated subject
+            $message1 = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'TEST123', 
+                'resend' => false
+            ]);
+            $message1->from('test@example.com');
+            $message1->to('test@example.com', 'Test');
+            
+            $results['template_subject'] = [
+                'subject' => $message1->getSubject(),
+                'has_subject' => !empty($message1->getSubject()),
+            ];
+            
+            // Test 2: Direct subject override after creation
+            $message2 = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'TEST123', 
+                'resend' => false
+            ]);
+            $message2->from('test@example.com');
+            $message2->to('test@example.com', 'Test');
+            $message2->subject('Direct Subject Override');
+            
+            $results['direct_subject'] = [
+                'subject' => $message2->getSubject(),
+                'has_subject' => !empty($message2->getSubject()),
+            ];
+            
+            // Test 3: Template variable method (if we had a template that uses *subject*)
+            // This test may not work unless we have a template that uses *subject*
+            $message3 = EmailMessage::fromTemplate('activation_content', [
+                'subject' => 'Variable Subject',
+                'act_code' => 'TEST123',
+                'resend' => false,
+            ]);
+            $message3->from('test@example.com');
+            $message3->to('test@example.com', 'Test');
+            
+            $results['variable_subject'] = [
+                'subject' => $message3->getSubject(),
+                'has_subject' => !empty($message3->getSubject()),
+                'note' => 'This only works if template contains *subject*'
+            ];
+            
+            $allPassed = $results['direct_subject']['has_subject'] && 
+                         ($results['template_subject']['has_subject'] || 
+                          $results['variable_subject']['has_subject']);
+            
+            return [
+                'passed' => $allPassed,
+                'message' => 'Subject extraction methods tested',
+                'details' => $results
+            ];
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'Subject extraction test failed: ' . $e->getMessage(),
+                'details' => []
+            ];
+        }
     }
     
     private function testSubjectPriority(): array {
-        // Test that direct assignment overrides template subject
-        // Try to use test template, fall back to activation_content if not available
-        $templateName = 'test_template_with_subject';
-        
-        // Check if test template exists, if not use activation_content
         try {
-            $testTemplates = new MultiEmailTemplateStore(['email_template_name' => $templateName]);
-            $testTemplates->load();
-            if ($testTemplates->count_all() == 0) {
+            // Test that direct subject() call overrides template subject
+            // Try to use test template, fall back to activation_content if not available
+            $templateName = 'test_template_with_subject';
+            
+            // Check if test template exists, if not use activation_content
+            try {
+                $testTemplates = new MultiEmailTemplateStore(['email_template_name' => $templateName]);
+                $testTemplates->load();
+                if ($testTemplates->count_all() == 0) {
+                    $templateName = 'activation_content';
+                }
+            } catch (Exception $e) {
                 $templateName = 'activation_content';
             }
-        } catch (Exception $e) {
-            $templateName = 'activation_content';
-        }
-        
-        $email = new EmailTemplate($templateName);
-        $settings = Globalvars::get_instance();
-        $email->email_from = $settings->get_setting('defaultemail');
-        $email->add_recipient('test@example.com', 'Test');
-        
-        $fillValues = ($templateName === 'test_template_with_subject') ? 
-            ['test_id' => 'ABC123', 'timestamp' => date('Y-m-d H:i:s')] :
-            ['act_code' => 'ABC123', 'resend' => false];
             
-        $email->fill_template($fillValues);
-        
-        // Get the template-extracted subject
-        $templateSubject = $email->getEmailSubject();
-        
-        // Now override it
-        $overrideSubject = 'Override Subject - ' . uniqid();
-        $email->email_subject = $overrideSubject;
-        
-        // Verify override worked
-        $finalSubject = $email->getEmailSubject();
-        
-        return [
-            'passed' => $finalSubject === $overrideSubject,
-            'message' => 'Subject priority test',
-            'details' => [
-                'template_used' => $templateName,
-                'template_subject' => $templateSubject,
-                'override_subject' => $overrideSubject,
-                'final_subject' => $finalSubject,
-                'override_worked' => $finalSubject === $overrideSubject,
-            ]
-        ];
+            $fillValues = ($templateName === 'test_template_with_subject') ? 
+                ['test_id' => 'ABC123', 'timestamp' => date('Y-m-d H:i:s')] :
+                ['act_code' => 'ABC123', 'resend' => false];
+            
+            // Create message from template
+            $message = EmailMessage::fromTemplate($templateName, $fillValues);
+            $settings = Globalvars::get_instance();
+            $message->from($settings->get_setting('defaultemail'));
+            $message->to('test@example.com', 'Test');
+            
+            // Get the template-extracted subject
+            $templateSubject = $message->getSubject();
+            
+            // Now override it using the fluent API
+            $overrideSubject = 'Override Subject - ' . uniqid();
+            $message->subject($overrideSubject);
+            
+            // Verify override worked
+            $finalSubject = $message->getSubject();
+            
+            return [
+                'passed' => $finalSubject === $overrideSubject,
+                'message' => 'Subject priority test',
+                'details' => [
+                    'template_used' => $templateName,
+                    'template_subject' => $templateSubject,
+                    'override_subject' => $overrideSubject,
+                    'final_subject' => $finalSubject,
+                    'override_worked' => $finalSubject === $overrideSubject,
+                ]
+            ];
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'Subject priority test failed: ' . $e->getMessage(),
+                'details' => []
+            ];
+        }
     }
     
     // New helper method to check template content

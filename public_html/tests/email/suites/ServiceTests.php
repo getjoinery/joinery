@@ -82,7 +82,7 @@ class ServiceTests {
         
         try {
             // Create a test email using SMTP specifically
-            $email = new EmailTemplate('activation_content');
+            $email = EmailTemplate::CreateLegacyTemplate('activation_content', null);
             $email->email_from = $settings->get_setting('defaultemail');
             $email->email_from_name = $settings->get_setting('defaultemailname');
             $email->add_recipient($testRecipient, 'SMTP Test Recipient');
@@ -166,7 +166,7 @@ class ServiceTests {
         
         try {
             // Create a test email using Mailgun specifically
-            $email = new EmailTemplate('activation_content');
+            $email = EmailTemplate::CreateLegacyTemplate('activation_content', null);
             $email->email_from = $settings->get_setting('defaultemail');
             $email->email_from_name = $settings->get_setting('defaultemailname');
             $email->add_recipient($testRecipient, 'Mailgun Test Recipient');
@@ -208,13 +208,12 @@ class ServiceTests {
         $settings = Globalvars::get_instance();
         
         // Test the new service selection system
-        $email = new EmailTemplate('default_outer_template');
         $currentService = $settings->get_setting('email_service') ?: 'mailgun';
         $fallbackService = $settings->get_setting('email_fallback_service') ?: 'smtp';
         
-        // Test service validation
-        $primaryValidation = $email->validateServiceConfiguration($currentService);
-        $fallbackValidation = $email->validateServiceConfiguration($fallbackService);
+        // Test service validation using EmailSender (moved from EmailTemplate)
+        $primaryValidation = EmailSender::validateService($currentService);
+        $fallbackValidation = EmailSender::validateService($fallbackService);
         
         $passed = in_array($currentService, ['smtp', 'mailgun']) && 
                   in_array($fallbackService, ['smtp', 'mailgun']);

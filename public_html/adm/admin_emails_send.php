@@ -85,7 +85,7 @@
 				
 						
 				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-				$email_template = new EmailTemplate($email->get('eml_message_template_html'), $user);	
+				$email_template = EmailTemplate::CreateLegacyTemplate($email->get('eml_message_template_html'), $user);	
 				$email_template->fill_template(array(
 					'subject' => $email->get('eml_subject'),
 					'preview_text' => $email->get('eml_preview_text'),
@@ -131,7 +131,7 @@
 
 		$sender = new User($email->get('eml_usr_user_id'), TRUE);		
 		//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-		$email_template = new EmailTemplate($email->get('eml_message_template_html'), $sender, $email_outer_template, $email_footer_template);	
+		$email_template = EmailTemplate::CreateLegacyTemplate($email->get('eml_message_template_html'), $sender, $email_outer_template, $email_footer_template);	
 		$email_template->fill_template(array(
 				'subject' => 'COPY: '.$email->get('eml_subject'),
 				'preview_text' => $email->get('eml_preview_text'),

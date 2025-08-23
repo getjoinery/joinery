@@ -21,36 +21,32 @@ class DeliveryTests {
     
     private function testTestModeRedirect(): array {
         try {
-            // Use the working template pattern from TemplateTests
-            $email = new EmailTemplate('activation_content');
-            $settings = Globalvars::get_instance();
-            $email->email_from = $settings->get_setting('defaultemail');
-            $email->email_from_name = $settings->get_setting('defaultemailname');
-            $email->add_recipient($this->config['test_email'], 'Test Recipient');
-            
-            $email->fill_template([
+            // Use the new EmailMessage architecture
+            $message = EmailMessage::fromTemplate('activation_content', [
                 'act_code' => 'TEST123',
                 'resend' => false,
             ]);
             
-            // DON'T override subject - test what the system actually does
-            // If we need to identify the test, use a different approach
+            $settings = Globalvars::get_instance();
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'));
+            $message->to($this->config['test_email'], 'Test Recipient');
             
             // Get the actual subject from the template
-            $actualSubject = $email->getEmailSubject();
+            $actualSubject = $message->getSubject();
+            $hasContent = !empty($message->getHtmlBody()) || !empty($message->getTextBody());
             
             // Debug info before sending
             $debugInfo = [
                 'test_recipient' => $this->config['test_email'],
-                'hasContent' => $email->hasContent(),
+                'hasContent' => $hasContent,
                 'actual_subject' => $actualSubject,  // What the system generated
                 'subject_exists' => !empty($actualSubject),
-                'email_from' => $email->email_from,
-                'service_type' => $email->getServiceType(),
+                'email_from' => $message->getFrom(),
+                'service_type' => EmailSender::detectServiceType(),
             ];
             
             // Test that email is ready to send (without actually sending)
-            $readyToSend = $email->hasContent() && !empty($actualSubject);
+            $readyToSend = $hasContent && !empty($actualSubject);
             $debugInfo['ready_to_send'] = $readyToSend;
             $debugInfo['test_logic'] = 'Tests email preparation without sending';
             
@@ -95,25 +91,23 @@ class DeliveryTests {
         $countQuery = "SELECT COUNT(*) as count FROM debug_email_logs";
         $beforeCount = $dblink->query($countQuery)->fetch()['count'];
         
-        // Send an email to trigger debug logging
+        // Create a test email using new EmailMessage architecture
         if ($this->runner) {
-            $email = $this->runner->createTestEmail();
+            $message = $this->runner->createTestEmail();
         } else {
-            $email = new EmailTemplate('default_outer_template');
-            $email->clear_recipients();
-            $email->add_recipient($this->config['test_email'], 'Test Recipient');
+            $message = EmailMessage::fromTemplate('default_outer_template', [
+                'mail_body' => '<p>Testing debug logging</p>',
+            ]);
+            $message->to($this->config['test_email'], 'Test Recipient');
         }
         
-        $email->fill_template([
-            'mail_body' => '<p>Testing debug logging</p>',
-        ]);
-        
-        // DON'T override subject - test what the system actually does
-        $actualSubject = $email->getEmailSubject();
+        // Get the actual subject from the message
+        $actualSubject = $message->getSubject();
+        $hasContent = !empty($message->getHtmlBody()) || !empty($message->getTextBody());
         
         // Test debug logging capability without actually sending
         $debugCapable = !empty($settings->get_setting('email_debug_mode'));
-        $emailReady = $email->hasContent() && !empty($actualSubject);
+        $emailReady = $hasContent && !empty($actualSubject);
         
         return [
             'passed' => $debugCapable && $emailReady,
@@ -131,24 +125,20 @@ class DeliveryTests {
     
     private function testServiceSending(): array {
         try {
-            // Use the working template pattern
-            $email = new EmailTemplate('activation_content');
-            $settings = Globalvars::get_instance();
-            $email->email_from = $settings->get_setting('defaultemail');
-            $email->email_from_name = $settings->get_setting('defaultemailname');
-            $email->add_recipient($this->config['test_email'], 'Service Test Recipient');
-            
-            $email->fill_template([
+            // Use the new EmailMessage architecture
+            $message = EmailMessage::fromTemplate('activation_content', [
                 'act_code' => 'TEST456',
                 'resend' => false,
             ]);
             
-            // DON'T override subject - test what the system actually does
+            $settings = Globalvars::get_instance();
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'));
+            $message->to($this->config['test_email'], 'Service Test Recipient');
             
             // Debug info before sending
-            $serviceType = $email->getServiceType();
-            $hasContent = $email->hasContent();
-            $actualSubject = $email->getEmailSubject();
+            $serviceType = EmailSender::detectServiceType();
+            $hasContent = !empty($message->getHtmlBody()) || !empty($message->getTextBody());
+            $actualSubject = $message->getSubject();
             
             $debugInfo = [
                 'service_type' => $serviceType,
@@ -156,13 +146,13 @@ class DeliveryTests {
                 'test_recipient' => $this->config['test_email'],
                 'actual_subject' => $actualSubject,
                 'subject_exists' => !empty($actualSubject),
-                'email_from' => $email->email_from,
-                'recipients_count' => count($email->getEmailRecipients())
+                'email_from' => $message->getFrom(),
+                'recipients_count' => count($message->getRecipients())
             ];
             
             // Test service configuration without actually sending
             $serviceConfigured = ($serviceType !== 'none');
-            $emailReady = $hasContent && !empty($actualSubject) && !empty($email->email_from);
+            $emailReady = $hasContent && !empty($actualSubject) && !empty($message->getFrom());
             $testPassed = $serviceConfigured && $emailReady;
             
             $debugInfo['service_configured'] = $serviceConfigured;
@@ -172,7 +162,7 @@ class DeliveryTests {
             // Check potential issues without sending
             if (!$hasContent) {
                 $debugInfo['issue'] = 'Email has no content';
-            } elseif (empty($email->email_from)) {
+            } elseif (empty($message->getFrom())) {
                 $debugInfo['issue'] = 'No from address set';
             } elseif ($serviceType === 'none') {
                 $debugInfo['issue'] = 'No email service configured';

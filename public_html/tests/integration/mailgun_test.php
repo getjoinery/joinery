@@ -61,7 +61,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 
 	$user = new User(1, true);
 
-	$email_template = new EmailTemplate('blank_template', $user);		
+	$email_template = EmailTemplate::CreateLegacyTemplate('blank_template', $user);		
 	$email_template->fill_template(array(
 			'subject' => 'Test email with emailTemplate',
 			'body' => 'emailTemplate sending is working.',

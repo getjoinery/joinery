@@ -186,7 +186,7 @@ class MailingList extends SystemBase {
 			if($this->get('mlt_send_welcome_email')){
 				//SEND WELCOME EMAIL
 				$user = new User($usr_user_id, TRUE);
-				$welcome_email = new EmailTemplate('mailing_list_subscribe', $user);
+				$welcome_email = EmailTemplate::CreateLegacyTemplate('mailing_list_subscribe', $user);
 				
 				
 				$email_fill = array(

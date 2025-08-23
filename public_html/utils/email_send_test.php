@@ -222,7 +222,7 @@ try {
     </div>';
 
     // Try to use EmailTemplate system
-    $emailTemplate = new EmailTemplate('default_outer_template');
+    $emailTemplate = EmailTemplate::CreateLegacyTemplate('default_outer_template', null);
     $emailTemplate->clear_recipients();
     $emailTemplate->add_recipient($config['test_email'], 'Test Recipient');
     
