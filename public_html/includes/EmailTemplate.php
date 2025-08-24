@@ -99,6 +99,7 @@ class EmailTemplate {
             if ($count) {
                 $this_template = $templates->get(0);
                 $this->inner_template = $this_template->get('emt_body');
+                $this->email_subject = $this_template->get('emt_subject');
             } else {
                 throw new EmailTemplateError('We could not find the template ' . $inner_template);
             }
@@ -258,14 +259,6 @@ class EmailTemplate {
         }
         
         $html = trim(implode('', $split_template));
-        $html_lines = preg_split('/[\r\n]/', $html, null, PREG_SPLIT_NO_EMPTY);
-        
-        // Extract subject if present
-        if ($html_lines && stripos(trim($html_lines[0]), 'subject:') === 0) {
-            $this->email_subject = substr(trim($html_lines[0]), 8);
-            $html = implode("\n", array_slice($html_lines, 1));
-            $this->email_has_content = true;
-        }
         
         // Merge with outer template
         $html = str_replace('*!**mail_body**!*', $html, $this->outer_template);

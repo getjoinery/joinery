@@ -18,6 +18,8 @@ class TemplateTests {
         $results['getter_methods'] = $this->testGetterMethods();
         $results['subject_extraction'] = $this->testSubjectExtraction();
         $results['subject_priority'] = $this->testSubjectPriority();
+        $results['subject_validation'] = $this->testSubjectValidation();
+        $results['missing_subject_exception'] = $this->testMissingSubjectException();
         
         return $results;
     }
@@ -351,5 +353,71 @@ class TemplateTests {
             return 'Error loading template: ' . $e->getMessage();
         }
         return null;
+    }
+    
+    private function testSubjectValidation(): array {
+        try {
+            // Test template with subject loaded from database
+            $template = EmailTemplate::CreateLegacyTemplate('subject_validation_test', null);
+            $template->fill_template(['test_id' => '12345']);
+            
+            // Should have subject from database
+            $subject = $template->getSubject();
+            $expectedSubject = 'Test Subject - ID 12345';
+            $subjectMatches = ($subject === $expectedSubject);
+            
+            return [
+                'passed' => $subjectMatches,
+                'message' => 'Subject validation test',
+                'details' => [
+                    'expected_subject' => $expectedSubject,
+                    'actual_subject' => $subject,
+                    'subject_matches' => $subjectMatches
+                ]
+            ];
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'Subject validation test failed: ' . $e->getMessage(),
+                'details' => []
+            ];
+        }
+    }
+    
+    private function testMissingSubjectException(): array {
+        try {
+            // Create template without subject (should fail validation)
+            $template = new EmailTemplateStore(NULL);
+            $template->set('emt_name', 'no_subject_test');
+            $template->set('emt_type', 2);
+            $template->set('emt_body', '<p>No subject template</p>');
+            // Deliberately not setting emt_subject
+            
+            try {
+                $template->save(); // This should fail due to required field validation
+                
+                // If we get here, the validation failed
+                return [
+                    'passed' => false,
+                    'message' => 'Missing subject validation failed - template without subject was allowed',
+                    'details' => []
+                ];
+            } catch (Exception $saveException) {
+                // This is expected - save should fail for missing required field
+                return [
+                    'passed' => true,
+                    'message' => 'Missing subject properly rejected',
+                    'details' => [
+                        'validation_error' => $saveException->getMessage()
+                    ]
+                ];
+            }
+        } catch (Exception $e) {
+            return [
+                'passed' => false,
+                'message' => 'Missing subject exception test failed: ' . $e->getMessage(),
+                'details' => []
+            ];
+        }
     }
 }

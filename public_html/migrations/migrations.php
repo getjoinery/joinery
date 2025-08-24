@@ -744,4 +744,12 @@
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
+		// Extract subject lines from existing email template bodies
+		$migration = array();
+		$migration['database_version'] = '0.55';
+		$migration['test'] = "SELECT count(1) as count FROM emt_email_templates WHERE emt_subject IS NOT NULL AND emt_subject != ''";
+		$migration['migration_sql'] = NULL;
+		$migration['migration_file'] = 'extract_email_subjects.php';
+		$migrations[] = $migration;
+
  

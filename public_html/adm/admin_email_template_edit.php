@@ -69,6 +69,8 @@
 	
 	$validation_rules = array();
 	$validation_rules['emt_body']['required']['value'] = 'true';
+	$validation_rules['emt_subject']['required']['value'] = 'true';
+	$validation_rules['emt_subject']['maxlength']['value'] = 255;
 	if($_SESSION['permission'] == 10){
 		$validation_rules['emt_name']['required']['value'] = 'true';
 	}
@@ -85,6 +87,8 @@
 	}
 	
 	echo $formwriter->textinput('Template Name', 'emt_name', NULL, 100, $email_template->get('emt_name'), '', 255, '');	
+
+	echo $formwriter->textinput('Subject Line', 'emt_subject', NULL, 100, $email_template->get('emt_subject'), 'Email subject line (required)', 255, '');
 
 
 	$optionvals = array("Outer"=>EmailTemplateStore::TEMPLATE_TYPE_OUTER, "Inner"=>EmailTemplateStore::TEMPLATE_TYPE_INNER, "Footer"=>EmailTemplateStore::TEMPLATE_TYPE_FOOTER);
@@ -130,7 +134,35 @@
 	</div>
 </div>	';
 
-	
+?>
+<script>
+$(document).ready(function() {
+    // Add character counter for subject field
+    var subjectField = $('#emt_subject');
+    if (subjectField.length) {
+        // Add counter display after the subject field
+        subjectField.after('<div class="field-help"><span id="subject-char-count">0/255</span> characters</div>');
+        
+        // Update counter on input
+        subjectField.on('input', function() {
+            var length = $(this).val().length;
+            $('#subject-char-count').text(length + '/255');
+            
+            if (length > 255) {
+                $(this).addClass('error');
+                $('#subject-char-count').addClass('error');
+            } else {
+                $(this).removeClass('error');
+                $('#subject-char-count').removeClass('error');
+            }
+        });
+        
+        // Initialize counter
+        subjectField.trigger('input');
+    }
+});
+</script>
+<?php
 
 	$page->admin_footer();
 
