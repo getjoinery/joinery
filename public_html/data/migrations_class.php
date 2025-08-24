@@ -89,14 +89,75 @@ class Migration extends SystemBase {
 		return $sql;
 	}
 	
+	
 	/**
-	 * Check if migration should be run
-	 * Uses hash comparison to prevent duplicate execution
+	 * Load migrations from migrations.php file
+	 * 
+	 * @return array Array of migration definitions
+	 */
+	public static function loadMigrations() {
+		$migrations = array();
+		
+		// Load migrations file - use direct require_once to preserve variable scope
+		require_once(PathHelper::getIncludePath('migrations/migrations.php'));
+		
+		return $migrations;
+	}
+	
+	/**
+	 * Validate migrations array and return validation results
+	 * 
+	 * @param array $migrations Array of migration definitions
+	 * @return array Validation result with 'valid' boolean, 'errors' array, 'valid_migrations' array
+	 */
+	public static function validateMigrations($migrations) {
+		$migration_errors = [];
+		$valid_migrations = [];
+		
+		foreach($migrations as $i => $migration) {
+			$version = $migration['database_version'] ?? 'UNKNOWN';
+			$has_sql = isset($migration['migration_sql']) && !empty($migration['migration_sql']);
+			$has_file = isset($migration['migration_file']) && !empty($migration['migration_file']);
+			
+			// Check for required fields
+			if (!isset($migration['database_version'])) {
+				$migration_errors[] = "Migration #$i: Missing database_version";
+				continue;
+			}
+			
+			// Check for empty migrations (both SQL and file are NULL/empty)
+			if (!$has_sql && !$has_file) {
+				$migration_errors[] = "Migration #$i (version $version): Empty migration - both migration_sql and migration_file are empty. This migration should be removed or completed.";
+				continue;
+			}
+			
+			// Check for conflicting definitions
+			if ($has_sql && $has_file) {
+				$migration_errors[] = "Migration #$i (version $version): Conflicting migration - both migration_sql and migration_file are defined. Only one should be used.";
+				continue;
+			}
+			
+			// Migration passed validation
+			$valid_migrations[] = $migration;
+		}
+		
+		return [
+			'valid' => empty($migration_errors),
+			'errors' => $migration_errors,
+			'valid_migrations' => $valid_migrations,
+			'total_count' => count($migrations),
+			'valid_count' => count($valid_migrations),
+			'error_count' => count($migration_errors)
+		];
+	}
+	
+	/**
+	 * Check if migration should be run (without verbose output)
 	 * 
 	 * @param array $migration Migration definition
-	 * @return bool True if migration should run
+	 * @return array Result with 'should_run' boolean and 'reason' string
 	 */
-	public function check_migration($migration) {
+	public function shouldRunMigration($migration) {
 		try {
 			$migration_hash = null;
 			
@@ -106,30 +167,26 @@ class Migration extends SystemBase {
 				$normalized_sql = $this->normalize_sql($migration['migration_sql']);
 				$migration_hash = md5($normalized_sql);
 				
-				if (isset($_REQUEST['verbose']) || (isset($GLOBALS['argv']) && in_array('--verbose', $GLOBALS['argv']))) {
-					echo "Processing SQL migration: " . $migration['database_version'] . "\n";
-					echo "Migration hash: " . $migration_hash . "\n";
-					echo "Normalized SQL: " . substr($normalized_sql, 0, 100) . "...\n";
-				}
-				
 			} elseif (isset($migration['migration_file']) && $migration['migration_file']) {
 				// File-based migration - check file exists first
 				$migration_file_path = __DIR__ . '/../migrations/' . $migration['migration_file'];
 				
 				if (!file_exists($migration_file_path)) {
-					throw new MigrationException("Migration file not found: " . $migration['migration_file']);
+					return [
+						'should_run' => false,
+						'reason' => 'Migration file not found: ' . $migration['migration_file'],
+						'error' => true
+					];
 				}
 				
 				$migration_hash = md5_file($migration_file_path);
 				
-				if (isset($_REQUEST['verbose']) || (isset($GLOBALS['argv']) && in_array('--verbose', $GLOBALS['argv']))) {
-					echo "Processing file migration: " . $migration['database_version'] . " (file: " . $migration['migration_file'] . ")\n";
-					echo "Migration hash: " . $migration_hash . "\n";
-					echo "File path: " . $migration_file_path . "\n";
-				}
-				
 			} else {
-				throw new MigrationException("Migration must have either migration_sql or migration_file defined");
+				return [
+					'should_run' => false,
+					'reason' => 'Migration must have either migration_sql or migration_file defined',
+					'error' => true
+				];
 			}
 			
 			// Check if migration already exists and was successful
@@ -140,10 +197,11 @@ class Migration extends SystemBase {
 			$existing_migrations->load();
 			
 			if ($existing_migrations->count() > 0) {
-				if (isset($_REQUEST['verbose']) || (isset($GLOBALS['argv']) && in_array('--verbose', $GLOBALS['argv']))) {
-					echo "Skipping migration " . $migration['database_version'] . " (already applied)\n";
-				}
-				return false;
+				return [
+					'should_run' => false,
+					'reason' => 'already applied',
+					'hash' => $migration_hash
+				];
 			}
 			
 			// Check the test condition if provided
@@ -156,29 +214,36 @@ class Migration extends SystemBase {
 				$result = $q->fetch(PDO::FETCH_ASSOC);
 				
 				if ($result && isset($result['count']) && $result['count'] > 0) {
-					if (isset($_REQUEST['verbose']) || (isset($GLOBALS['argv']) && in_array('--verbose', $GLOBALS['argv']))) {
-						echo "Skipping migration " . $migration['database_version'] . " (test condition failed: count = " . $result['count'] . ")\n";
-					}
-					return false;
+					return [
+						'should_run' => false,
+						'reason' => 'test condition failed: count = ' . $result['count'],
+						'hash' => $migration_hash
+					];
 				}
 			}
 			
-			return true;
+			return [
+				'should_run' => true,
+				'reason' => 'ready to run',
+				'hash' => $migration_hash
+			];
 			
 		} catch (Exception $e) {
-			echo "ERROR: Failed to check migration " . $migration['database_version'] . ": " . $e->getMessage() . "\n";
-			throw $e;
+			return [
+				'should_run' => false,
+				'reason' => 'error checking migration: ' . $e->getMessage(),
+				'error' => true
+			];
 		}
 	}
 	
 	/**
-	 * Run a migration
-	 * Executes the migration and records the result
+	 * Execute a migration and return results (no output)
 	 * 
 	 * @param array $migration Migration definition
-	 * @return bool True if successful
+	 * @return array Result with 'success' boolean, 'error' string, 'sql' string, 'output' string
 	 */
-	public function run_migration($migration) {
+	public function executeMigration($migration) {
 		$migration_record = new Migration(null);
 		$migration_record->set('mig_version', floatval($migration['database_version']));
 		$migration_record->set('mig_name', 'Migration ' . $migration['database_version']);
@@ -193,16 +258,16 @@ class Migration extends SystemBase {
 			
 			$migration_hash = null;
 			$output = '';
+			$sql_executed = '';
 			
 			if (isset($migration['migration_sql']) && $migration['migration_sql']) {
 				// SQL-based migration
 				$normalized_sql = $this->normalize_sql($migration['migration_sql']);
 				$migration_hash = md5($normalized_sql);
+				$sql_executed = $migration['migration_sql'];
 				
 				$migration_record->set('mig_sql', $migration['migration_sql']);
 				$migration_record->set('mig_hash', $migration_hash);
-				
-				echo "Executing SQL migration: " . $migration['database_version'] . "\n";
 				
 				// Execute the SQL
 				$q = $dblink->prepare($migration['migration_sql']);
@@ -226,8 +291,6 @@ class Migration extends SystemBase {
 				
 				$migration_record->set('mig_file', $migration['migration_file']);
 				$migration_record->set('mig_hash', $migration_hash);
-				
-				echo "Executing file migration: " . $migration['database_version'] . " (file: " . $migration['migration_file'] . ")\n";
 				
 				// Include and execute the migration file
 				ob_start();
@@ -262,8 +325,12 @@ class Migration extends SystemBase {
 			// Commit transaction
 			$dblink->commit();
 			
-			echo "Successfully applied migration: " . $migration['database_version'] . "\n";
-			return true;
+			return [
+				'success' => true,
+				'sql' => $sql_executed,
+				'output' => $output,
+				'version' => $migration['database_version']
+			];
 			
 		} catch (Exception $e) {
 			// Rollback transaction
@@ -273,7 +340,6 @@ class Migration extends SystemBase {
 			
 			// Record failed migration
 			$error_message = "Migration failed: " . $e->getMessage();
-			echo "ERROR: " . $error_message . "\n";
 			
 			try {
 				$migration_record->set('mig_output', $error_message);
@@ -283,10 +349,15 @@ class Migration extends SystemBase {
 				}
 				$migration_record->save();
 			} catch (Exception $save_error) {
-				echo "ERROR: Could not save migration record: " . $save_error->getMessage() . "\n";
+				$error_message .= " (Could not save migration record: " . $save_error->getMessage() . ")";
 			}
 			
-			return false;
+			return [
+				'success' => false,
+				'error' => $error_message,
+				'sql' => $sql_executed ?? '',
+				'version' => $migration['database_version']
+			];
 		}
 	}
 	
