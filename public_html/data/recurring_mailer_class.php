@@ -5,6 +5,7 @@ PathHelper::requireOnce('data/videos_class.php');
 PathHelper::requireOnce('data/friend_reviews_class.php');
 PathHelper::requireOnce('data/users_class.php');
 PathHelper::requireOnce('data/queued_email_class.php');
+PathHelper::requireOnce('includes/EmailMessage.php');
 
 class RecurringMailerException extends SystemClassException {}
 
@@ -190,13 +191,29 @@ class RecurringMailer {
 					}
 
 					if ($template->is_sendable()) {
-						// If the email is sendable, first write the stats, then link the email to the stats
-						// so we can update the stats with the sent time when the email is sent (and we free up
-						// the memory when this email is deleted/archived).
+						// If the email is sendable, first write the stats, then directly create queued email
 						$template_name = isset($returned_values['template_name']) ? $returned_values['template_name'] : $template->template_name;
 						$log_entry = self::SaveRecurringEmailLog(
 							$user->get('usr_email'), $user->key, $template_name, $trackers);
-						$template->save_email_as_queued($log_entry, QueuedEmail::READY_TO_SEND);
+						
+						// Create EmailMessage from template and queue directly
+						$message = EmailMessage::fromTemplate($template_name, array_merge($user_data, [
+							'recipient' => $user->export_as_array()
+						]));
+						$message->to($user->get('usr_email'), $user->display_name());
+						
+						// Create queued email directly
+						$queued_email = new QueuedEmail(NULL);
+						$queued_email->set('equ_from_name', $message->getFromName());
+						$queued_email->set('equ_from', $message->getFromAddress());
+						$queued_email->set('equ_to', $user->get('usr_email'));
+						$queued_email->set('equ_to_name', $user->display_name());
+						$queued_email->set('equ_subject', $message->getSubject());
+						$queued_email->set('equ_html', $message->getHtmlBody());
+						$queued_email->set('equ_text', $message->getTextBody());
+						$queued_email->set('equ_status', QueuedEmail::READY_TO_SEND);
+						$queued_email->set('equ_ers_log_entry_id', $log_entry);
+						$queued_email->save();
 
 						if (!array_key_exists($template_name, $template_send)) {
 							$template_send[$template_name] = 1;
@@ -231,7 +248,6 @@ class RecurringMailer {
 
 	private function _load_templates($templates_dir) {
 		$this->email_template_contents['main_template'] = file_get_contents($templates_dir . '/' . 'main_template.html');
-		$this->email_templates['main_template'] = EmailTemplate::CreateLegacyTemplate('recurring_emails/main_template.html', null);
 		return;
 	}
 	

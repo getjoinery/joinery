@@ -40,8 +40,8 @@ class EmailMessage {
      */
     public static function fromTemplate($templateName, $values = []) {
         try {
-            // Use legacy template creation (no user parameter for pure template processing)
-            $template = EmailTemplate::CreateLegacyTemplate($templateName, null);
+            // Create template directly with constructor
+            $template = new EmailTemplate($templateName);
             $template->fill_template($values);
         } catch (EmailTemplateError $e) {
             throw new Exception('Template \'' . $templateName . '\' error: ' . $e->getMessage());

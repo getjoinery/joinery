@@ -81,22 +81,18 @@ class ServiceTests {
         }
         
         try {
-            // Create a test email using SMTP specifically
-            $email = EmailTemplate::CreateLegacyTemplate('activation_content', null);
-            $email->email_from = $settings->get_setting('defaultemail');
-            $email->email_from_name = $settings->get_setting('defaultemailname');
-            $email->add_recipient($testRecipient, 'SMTP Test Recipient');
-            
-            $email->fill_template([
+            // Create a test email using new EmailMessage + EmailSender system
+            $message = EmailMessage::fromTemplate('activation_content', [
                 'act_code' => 'SMTP-TEST-' . date('His'),
                 'resend' => false,
             ]);
             
-            // Override subject to include service type
-            $email->email_subject = 'SMTP Test Email - ' . date('Y-m-d H:i:s');
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
+                   ->to($testRecipient, 'SMTP Test Recipient')
+                   ->subject('SMTP Test Email - ' . date('Y-m-d H:i:s'));
             
-            // Test SMTP sending using current service configuration
-            $sendResult = $email->send();
+            $sender = new EmailSender();
+            $sendResult = $sender->send($message);
             
             return [
                 'passed' => $sendResult,
@@ -165,22 +161,18 @@ class ServiceTests {
         }
         
         try {
-            // Create a test email using Mailgun specifically
-            $email = EmailTemplate::CreateLegacyTemplate('activation_content', null);
-            $email->email_from = $settings->get_setting('defaultemail');
-            $email->email_from_name = $settings->get_setting('defaultemailname');
-            $email->add_recipient($testRecipient, 'Mailgun Test Recipient');
-            
-            $email->fill_template([
+            // Create a test email using new EmailMessage + EmailSender system  
+            $message = EmailMessage::fromTemplate('activation_content', [
                 'act_code' => 'MAILGUN-TEST-' . date('His'),
                 'resend' => false,
             ]);
             
-            // Override subject to include service type
-            $email->email_subject = 'Mailgun Test Email - ' . date('Y-m-d H:i:s');
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
+                   ->to($testRecipient, 'Mailgun Test Recipient')
+                   ->subject('Mailgun Test Email - ' . date('Y-m-d H:i:s'));
             
-            // Test Mailgun sending using current service configuration
-            $sendResult = $email->send();
+            $sender = new EmailSender();
+            $sendResult = $sender->send($message);
             
             return [
                 'passed' => $sendResult,

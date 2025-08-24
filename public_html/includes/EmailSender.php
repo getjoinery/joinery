@@ -305,7 +305,7 @@ class EmailSender {
     }
     
     /**
-     * Internal method to queue failed emails for retry (replaces save_email_as_queued calls)
+     * Internal method to queue failed emails for retry
      */
     private function queueFailedEmail(EmailMessage $message, $error = null) {
         try {

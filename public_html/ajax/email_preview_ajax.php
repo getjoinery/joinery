@@ -4,6 +4,7 @@
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/DbConnector.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/EmailMessage.php');
 	PathHelper::requireOnce('data/emails_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
 
@@ -33,24 +34,19 @@
 			$mailing_list_string = NULL;			
 		}
 		
-		$email_template = EmailTemplate::CreateLegacyTemplate($email->get('eml_message_template_html'), $recipient);	
-		$email_template->fill_template(array(
+		$message = EmailMessage::fromTemplate($email->get('eml_message_template_html'), array(
 			'subject' => 'COPY: '.$email->get('eml_subject'),
 			'preview_text' => $email->get('eml_preview_text'),
 			'body' => $email->get('eml_message_html'),
-			//'utm_source' => 'email', //use defaults
-			'utm_medium' => 'email', //use defaults
+			'utm_medium' => 'email',
 			'utm_campaign' => $mailing_list_string, 
 			'utm_content' => urlencode($email->get('eml_subject')), 
 			'mailing_list_id' => $mailing_list_id,
 			'mailing_list_string' => $mailing_list_string,
+			'recipient' => $recipient->export_as_array()
 		));
-		$email_template->email_subject = $email->get('eml_subject');
-		$email_template->email_from = $email->get('eml_from_address');
-		$email_template->email_from_name = $email->get('eml_from_name');
-		
 
-		echo $email_template->email_html;
+		echo $message->getHtmlBody();
 	}
 			
 

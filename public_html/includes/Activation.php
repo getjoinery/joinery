@@ -7,6 +7,8 @@ PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/SmtpMailer.php');
 PathHelper::requireOnce('includes/EmailTemplate.php');
+PathHelper::requireOnce('includes/EmailSender.php');
+PathHelper::requireOnce('includes/EmailMessage.php');
 PathHelper::requireOnce('includes/Activation.php');
 
 PathHelper::requireOnce('data/users_class.php');
@@ -221,13 +223,15 @@ class Activation {
 	static function email_activate_send($user, $resend=FALSE) {
 		//GENERATE SIGNUP CODE
 		$act_code = self::getTempCode($user->key, '30 days', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));
-		$activation_email = EmailTemplate::CreateLegacyTemplate('activation_content', $user);
-		$settings = Globalvars::get_instance();
-		$activation_email->fill_template(array(
-			'resend' => $resend,
-			'act_code' => $act_code,
-		));
-		return $activation_email->send();
+		$success = EmailSender::sendTemplate('activation_content',
+			$user->get('usr_email'),
+			[
+				'resend' => $resend,
+				'act_code' => $act_code,
+				'recipient' => $user->export_as_array()
+			]
+		);
+		return $success;
 	}
 
 
@@ -242,20 +246,15 @@ class Activation {
 		//GENERATE SIGNUP CODE
 		$act_code = self::getTempCode($user->key, '30 day', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));
 
-		$activation_email = EmailTemplate::CreateLegacyTemplate('forgotpw_content', $user);
-		$settings = Globalvars::get_instance();
-		$activation_email->fill_template(array(
-			'act_code' => $act_code,
-			'usr_email' => $user->get('usr_email'),
-			'usr_first_name' => $user->get('usr_first_name'),
-			'web_dir' => LibraryFunctions::get_absolute_url(''),
-		));
-		$activation_email->email_from = $settings->get_setting('defaultemail');
-		$activation_email->email_from_name = $settings->get_setting('defaultemailname'); 
-		$activation_email->add_recipient($user->get('usr_email'));
-		$activation_email->send();
-
-		return TRUE;
+		$success = EmailSender::sendTemplate('forgotpw_content',
+			$user->get('usr_email'),
+			[
+				'act_code' => $act_code,
+				'web_dir' => LibraryFunctions::get_absolute_url(''),
+				'recipient' => $user->export_as_array()
+			]
+		);
+		return $success;
 	}
 
 	// Email change	
@@ -263,19 +262,16 @@ class Activation {
 		$user = new User($usr_user_id, TRUE);
 		$act_code = self::getTempCode($user->key, '30 days', Activation::EMAIL_CHANGE, NULL, $new_email);
 
-		$activation_email = EmailTemplate::CreateLegacyTemplate('email_change_content', $user);
-		$settings = Globalvars::get_instance();
-		$activation_email->fill_template(array(
+		$message = EmailMessage::fromTemplate('email_change_content', [
 			'act_code' => $act_code,
 			'new_email' => $new_email,
-			'usr_first_name' => $user->get('usr_first_name'),
 			'web_dir' => LibraryFunctions::get_absolute_url(''),
-		));
-		// Clear the addresses because we don't want to automatically send this to the user's
-		// current email (as would happen since we pass in the recipient user to the email template)
-		$activation_email->mailer->clearAllRecipients();
-		$activation_email->mailer->addAddress($new_email);
-		$activation_email->send();
+			'recipient' => $user->export_as_array()
+		]);
+		$message->to($new_email); // Send to new email, not user's current email
+
+		$sender = new EmailSender();
+		$sender->send($message);
 	}	
 
 	// Phone verification

@@ -25,32 +25,25 @@ class EmailTemplate {
     protected $utm_content = 'email';
     protected $utm_campaign = '';
     
-    // Processed content (public for backward compatibility - DEPRECATED for direct access)
-    public $email_subject;
-    public $email_html; 
-    public $email_text;
-    protected $email_has_content = false;
+    // Processed content (access via getter methods)
+    private $email_subject;
+    private $email_html; 
+    private $email_text;
+    private $email_has_content = false;
     
     // Template values
-    protected $template_values = [];
+    private $template_values = [];
     
     // Settings
     private $settings;
     
-    // Backward compatibility properties (public for legacy access)
-    public $email_from;
-    public $email_from_name;
-    public $email_recipients = [];
+    // Legacy properties (no longer used)
+    private $email_from;
+    private $email_from_name;
+    private $email_recipients = [];
     
     /**
-     * NEW: Clean constructor for template processing only
-     * Used internally by new EmailMessage and EmailSender classes
-     * 
-     * BREAKING CHANGE: Old signature was ($inner_template, $recipient_user, $outer_template, $footer)
-     * New signature is ($inner_template, $outer_template, $footer) - NO recipient_user parameter
-     * 
-     * Old usage new EmailTemplate('template', $user) will cause errors!
-     * Use EmailTemplate::CreateLegacyTemplate() for backward compatibility
+     * Constructor for template processing
      * 
      * @param string $inner_template Template name
      * @param string $outer_template Outer template name (null for default)
@@ -61,7 +54,7 @@ class EmailTemplate {
         if ($outer_template instanceof User || is_object($outer_template)) {
             throw new EmailTemplateError(
                 'EmailTemplate constructor no longer accepts User objects as second parameter. ' .
-                'Use EmailTemplate::CreateLegacyTemplate($inner_template, $user) instead for backward compatibility.'
+                'Use EmailMessage::fromTemplate() for proper template processing.'
             );
         }
         $this->settings = Globalvars::get_instance();
@@ -160,32 +153,6 @@ class EmailTemplate {
         
         $this->inner_html = null;
         $this->email_has_content = false;
-    }
-    
-    /**
-     * ⚠️ DEPRECATED FACTORY METHOD - Use for backward compatibility only
-     * 
-     * @deprecated - Use EmailMessage and EmailSender instead
-     */
-    public static function CreateLegacyTemplate($inner_template, $recipient_user = null, $outer_template = null, $footer = null) {
-        // Create instance with new clean constructor
-        $instance = new self($inner_template, $outer_template, $footer);
-        
-        // Handle recipient for backward compatibility
-        if ($recipient_user) {
-            $instance->template_values['recipient'] = $recipient_user->export_as_array();
-            $instance->add_recipient(
-                $recipient_user->get('usr_email'), 
-                $recipient_user->get('usr_first_name') . ' ' . $recipient_user->get('usr_last_name')
-            );
-        }
-        
-        // Set default from for backward compatibility
-        $settings = Globalvars::get_instance();
-        $instance->email_from = $settings->get_setting('defaultemail');
-        $instance->email_from_name = $settings->get_setting('defaultemailname');
-        
-        return $instance;
     }
     
     /**
@@ -667,128 +634,4 @@ class EmailTemplate {
         return array(implode('', $valid_values), $set_values);
     }
     
-    /**
-     * ⚠️⚠️⚠️ IMPORTANT DEPRECATION NOTICE ⚠️⚠️⚠️
-     * 
-     * ALL SENDING AND RECIPIENT METHODS BELOW ARE DEPRECATED!
-     * 
-     * The following methods should NOT be used in new code:
-     * - send() → Use EmailSender::send() or EmailSender::quickSend()
-     * - add_recipient() → Use EmailMessage->to()
-     * - clear_recipients() → Create a new EmailMessage
-     * - save_email_as_queued() → See migration guide for specific replacements
-     * 
-     * These deprecated methods will be REMOVED
-     * 
-     * See the migration guide for detailed examples of how to update your code.
-     */
-    
-    /**
-     * ⚠️ DEPRECATED - DO NOT USE IN NEW CODE
-     * 
-     * @deprecated - Use EmailMessage->to() instead
-     */
-    public function add_recipient($recipient_email, $recipient_name = null) {
-        // Check for duplicates
-        foreach ($this->email_recipients as $recipient) {
-            if ($recipient['email'] == $recipient_email) {
-                return false;
-            }
-        }
-        
-        $recipient = array();
-        $recipient['name'] = $recipient_name;
-        $recipient['email'] = $recipient_email;
-        $this->email_recipients[] = $recipient;
-        return true;
-    }
-    
-    /**
-     * ⚠️ DEPRECATED - DO NOT USE IN NEW CODE
-     * 
-     * @deprecated - Create a new EmailMessage instead
-     */
-    public function clear_recipients() {
-        $this->email_recipients = array();
-    }
-    
-    /**
-     * ⚠️⚠️⚠️ STRONGLY DEPRECATED - DO NOT USE IN NEW CODE ⚠️⚠️⚠️
-     * 
-     * @deprecated - Use EmailSender->send() or static methods instead
-     */
-    public function send($check_session = true, $other_host = null) {
-        // Handle session check (legacy behavior)
-        if ($check_session) {
-            PathHelper::requireOnce('includes/SessionControl.php');
-            $session = SessionControl::get_instance();
-            if (!$session->send_emails()) {
-                // Use EmailSender's logging system instead of removed logToDebugTable
-                $sender = new EmailSender();
-                $sender->logEmailDebug('Email not sent: session_disabled');
-                return true;
-            }
-        }
-        
-        // Convert current EmailTemplate state to EmailMessage (inlined)
-        $message = new EmailMessage();
-        
-        if ($this->email_from) {
-            $message->from($this->email_from, $this->email_from_name);
-        }
-        
-        if ($this->email_subject) {
-            $message->subject($this->email_subject);
-        }
-        
-        if ($this->email_html) {
-            $message->html($this->email_html);
-        }
-        
-        if ($this->email_text) {
-            $message->text($this->email_text);
-        }
-        
-        foreach ($this->email_recipients as $recipient) {
-            $message->to($recipient['email'], $recipient['name']);
-        }
-        
-        // Delegate to EmailSender (contains moved sending logic)
-        $sender = new EmailSender();
-        return $sender->send($message);
-    }
-    
-    /**
-     * ⚠️ DEPRECATED - DO NOT USE IN NEW CODE
-     * 
-     * @deprecated - Use EmailSender internal queueing or create QueuedEmail directly
-     */
-    public function save_email_as_queued($recurring_email_log_id = null, $status = null) {
-        // Convert to EmailMessage and use EmailSender's queueing
-        $message = new EmailMessage();
-        
-        if ($this->email_from) {
-            $message->from($this->email_from, $this->email_from_name);
-        }
-        
-        if ($this->email_subject) {
-            $message->subject($this->email_subject);
-        }
-        
-        if ($this->email_html) {
-            $message->html($this->email_html);
-        }
-        
-        foreach ($this->email_recipients as $recipient) {
-            $message->to($recipient['email'], $recipient['name']);
-        }
-        
-        // Use EmailSender's internal queueing method
-        $sender = new EmailSender();
-        $reflection = new ReflectionClass($sender);
-        $method = $reflection->getMethod('queueFailedEmail');
-        $method->setAccessible(true);
-        
-        return $method->invoke($sender, $message, 'Legacy save_email_as_queued call');
-    }
 }
