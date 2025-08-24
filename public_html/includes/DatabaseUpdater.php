@@ -525,20 +525,24 @@ class DatabaseUpdater {
     
     /**
      * Add a missing column to a table
+     * Adds columns as nullable initially - NOT NULL constraints handled by processAdvancedColumnOperations()
      */
     private function addMissingColumn($table_name, $field_name, $field_specs, $dblink, &$results) {
         try {
+            // Add column as nullable to avoid constraint violations on existing tables
+            // NOT NULL constraints will be handled by processAdvancedColumnOperations() when --upgrade flag is used
             $sql = 'ALTER TABLE "public"."' . $table_name . '" ADD COLUMN "' . $field_name . '" ' . $field_specs['type'];
-            
-            if (isset($field_specs['is_nullable']) && !$field_specs['is_nullable']) {
-                $sql .= ' NOT NULL ';
-            }
             
             $q = $dblink->prepare($sql);
             $q->execute();
             
             $results['columns_added'][] = "{$table_name}.{$field_name}";
             $results['messages'][] = "Added column: {$table_name}.{$field_name}";
+            
+            // Note about NOT NULL constraints
+            if (isset($field_specs['is_nullable']) && !$field_specs['is_nullable']) {
+                $results['messages'][] = "Note: {$table_name}.{$field_name} will be set to NOT NULL during advanced operations (use --upgrade flag)";
+            }
             
         } catch (PDOException $e) {
             $results['errors'][] = "Error adding column {$table_name}.{$field_name}: " . $e->getMessage();

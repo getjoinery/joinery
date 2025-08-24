@@ -42,7 +42,7 @@
 	$email_templates->load();	
 
 		
-	$headers = array('Email Template', 'Type');
+	$headers = array('Email Template', 'Subject', 'Type');
 	$altlinks = array('New Email Template'=>'/admin/admin_email_template_edit');
 	$title = 'Email Content Templates'; 
 
@@ -59,6 +59,7 @@
 		
 		$rowvalues = array();
 		array_push($rowvalues, '<a href="/admin/admin_email_template?emt_email_template_id='.$email_template->key.'">'.$email_template->get('emt_name').'</a>');
+		array_push($rowvalues, htmlspecialchars($email_template->get('emt_subject')));
 
 
 		if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
