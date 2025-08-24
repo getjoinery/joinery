@@ -599,10 +599,6 @@
 		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");
 		echo $formwriter->textinput("Default Email Name", 'defaultemailname', '', 20, $settings->get_setting('defaultemailname'), "" , 255, "");
 		
-		// Email service selection settings
-		$service_optionvals = array('mailgun' => 'Mailgun', 'smtp' => 'SMTP');
-		echo $formwriter->dropinput("Primary Email Service", "email_service", '', $service_optionvals, $settings->get_setting('email_service') ?: 'mailgun', 'Service used for sending emails', FALSE);
-		echo $formwriter->dropinput("Fallback Email Service", "email_fallback_service", '', $service_optionvals, $settings->get_setting('email_fallback_service') ?: 'smtp', 'Service used if primary fails', FALSE);
 
 		
 		
@@ -1506,32 +1502,59 @@
 
 
 
-		// Email Service Status Section
+		// Email Settings Section
 		echo '<div class="row">';
-		echo '<div class="col-md-12">';
-		echo '<h5>Email Service Status</h5>';
-
-		$current_service = $settings->get_setting('email_service') ?: 'mailgun';
-		$fallback_service = $settings->get_setting('email_fallback_service') ?: 'smtp';
-
-		// Quick validation check
-		PathHelper::requireOnce('includes/EmailSender.php');
-		$primary_validation = EmailSender::validateService($current_service);
-		$fallback_validation = EmailSender::validateService($fallback_service);
+		echo '<div class="col-md-6">';
+		echo '<h3>Email Settings</h3>';
+		
+		// Email service selection settings
+		$service_optionvals = array('Mailgun' => 'mailgun', 'SMTP' => 'smtp');
+		
+		//dropinput($label, $id, $class, &$optionvals, $input, $hint, $showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE, $imagedropdown=FALSE, $layout='default') {
+		echo $formwriter->dropinput("Primary Email Service", "email_service", '', $service_optionvals, $settings->get_setting('email_service'), 'Service used for sending emails', TRUE, FALSE, FALSE, FALSE, 'default');
+		echo $formwriter->dropinput("Fallback Email Service", "email_fallback_service", '', $service_optionvals, $settings->get_setting('email_fallback_service'), 'Service used if primary fails', FALSE);
+		
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		echo '<h5>Service Status</h5>';
+		
+		// Get actual database values (no fallback defaults)
+		$current_service = $settings->get_setting('email_service');
+		$fallback_service = $settings->get_setting('email_fallback_service');
 
 		echo '<div class="alert alert-info">';
+		
+		// Primary Service Status
 		echo '<strong>Primary Service:</strong> ';
-		if ($primary_validation['valid']) {
-			echo '<span class="text-success">✓ ' . ucfirst($current_service) . ' configured</span>';
+		if (empty($current_service) || $current_service === 'none') {
+			echo '<span class="text-muted">• None selected</span>';
 		} else {
-			echo '<span class="text-danger">✗ ' . ucfirst($current_service) . ' - ' . implode(', ', $primary_validation['errors']) . '</span>';
+			// Quick validation check
+			PathHelper::requireOnce('includes/EmailSender.php');
+			$primary_validation = EmailSender::validateService($current_service);
+			if ($primary_validation['valid']) {
+				echo '<span class="text-success">✓ ' . ucfirst($current_service) . ' configured</span>';
+			} else {
+				echo '<span class="text-danger">✗ ' . ucfirst($current_service) . ' - ' . implode(', ', $primary_validation['errors']) . '</span>';
+			}
 		}
 		echo '<br/>';
+		
+		// Fallback Service Status
 		echo '<strong>Fallback Service:</strong> ';
-		if ($fallback_validation['valid']) {
-			echo '<span class="text-success">✓ ' . ucfirst($fallback_service) . ' configured</span>';
+		if (empty($fallback_service) || $fallback_service === 'none') {
+			echo '<span class="text-muted">• None selected</span>';
 		} else {
-			echo '<span class="text-warning">⚠ ' . ucfirst($fallback_service) . ' - ' . implode(', ', $fallback_validation['errors']) . '</span>';
+			// Quick validation check
+			if (!isset($fallback_validation)) {
+				PathHelper::requireOnce('includes/EmailSender.php');
+			}
+			$fallback_validation = EmailSender::validateService($fallback_service);
+			if ($fallback_validation['valid']) {
+				echo '<span class="text-success">✓ ' . ucfirst($fallback_service) . ' configured</span>';
+			} else {
+				echo '<span class="text-warning">⚠ ' . ucfirst($fallback_service) . ' - ' . implode(', ', $fallback_validation['errors']) . '</span>';
+			}
 		}
 		echo '</div>';
 		echo '</div>';
