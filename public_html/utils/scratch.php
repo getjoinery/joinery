@@ -12,6 +12,8 @@
 	PathHelper::requireOnce('data/product_details_class.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/EmailMessage.php');
+	PathHelper::requireOnce('includes/EmailSender.php');
 	PathHelper::requireOnce('data/email_templates_class.php');
 	PathHelper::requireOnce('includes/calendar-links/Link.php');
 	PathHelper::requireOnce('includes/calendar-links/Generator.php');
@@ -529,17 +531,16 @@ exit();
 	$domain = $settings->get_setting('mailgun_domain');
  
  
- 				$email = EmailTemplate::CreateLegacyTemplate('blank_template', null);
-				$email->add_recipient('jeremy.tunnell+3@gmail.com', 'Jeremy 3');
-				$email->add_recipient('jeremy@jeremytunnell.com', 'Jeremy');
-				$email->fill_template(array(
-					'subject' => 'test',
-					'body' => 'test email',
-				));
-				
-				$email->email_from = 'info@integralzen.org';
-				$email->email_from_name = 'IZ';
-				$result = $email->send();
+				$message = EmailMessage::fromTemplate('blank_template', [
+					'subject' => 'scratch.php test',
+					'body' => 'This is a test from scratch.php '.date('Y-m-d H:i:s'),
+				]);
+
+				$message->to('jeremy.tunnell+3@gmail.com', 'Jeremy 3')
+						->to('jeremy@jeremytunnell.com', 'Jeremy');
+
+				$sender = new EmailSender();
+				$result = $sender->send($message);
 				
 				print_r($result);
  */

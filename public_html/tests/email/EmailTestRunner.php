@@ -112,12 +112,10 @@ class EmailTestRunner {
         $this->testModeEnabled = false;
     }
     
-    public function createTestEmail($template = 'default_outer_template') {
-        $email = EmailTemplate::CreateLegacyTemplate($template, null);
-        // Always use our test recipient instead of any other recipients
-        $email->clear_recipients();
-        $email->add_recipient($this->config['test_email'], 'Test Recipient');
-        return $email;
+    public function createTestMessage($template = 'default_outer_template', $values = []) {
+        $message = EmailMessage::fromTemplate($template, $values);
+        $message->to($this->config['test_email'], 'Test Recipient');
+        return $message;
     }
     
     private function getDefaultConfig(): array {

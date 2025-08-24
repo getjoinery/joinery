@@ -13,6 +13,7 @@ if (!defined('GLOBALVARS_INCLUDED')) {
     $base_path = dirname(__DIR__);
     require_once($base_path . '/includes/Globalvars.php');
     require_once($base_path . '/includes/EmailTemplate.php');
+    require_once($base_path . '/includes/EmailSender.php');
     
     // Try to load Mailgun dependencies if they exist
     $settings = Globalvars::get_instance();
@@ -221,23 +222,21 @@ try {
         </div>
     </div>';
 
-    // Try to use EmailTemplate system
-    $emailTemplate = EmailTemplate::CreateLegacyTemplate('default_outer_template', null);
-    $emailTemplate->clear_recipients();
-    $emailTemplate->add_recipient($config['test_email'], 'Test Recipient');
-    
-    // Set email properties directly
-    $emailTemplate->email_subject = $config['email_subject'];
-    $emailTemplate->email_html = $email_html;
-    $emailTemplate->email_has_content = true;
-    
-    // Send the email
-    $send_result = $emailTemplate->send(false); // false = don\'t check session
-    
-    if ($send_result) {
-        echo '<div class="alert alert-success"><strong>✓ Email sent successfully!</strong></div>';
-    } else {
-        echo '<div class="alert alert-warning"><strong>⚠ Email sending completed</strong> (check logs for details)</div>';
+    // Try to use new EmailSender system
+    try {
+        $success = EmailSender::quickSend(
+            $config['test_email'],
+            'Email Service Test - ' . date('Y-m-d H:i:s'),
+            '<p>This is a test email sent at ' . date('Y-m-d H:i:s') . '</p>'
+        );
+        
+        if ($success) {
+            echo '<div class="alert alert-success"><strong>✅ EmailSender send succeeded</strong></div>';
+        } else {
+            echo '<div class="alert alert-warning"><strong>❌ EmailSender send failed (queued for retry)</strong></div>';
+        }
+    } catch (Exception $e) {
+        echo '<div class="alert alert-danger"><strong>❌ EmailSender error:</strong> ' . $e->getMessage() . '</div>';
     }
     
     // Step 2: Wait before checking

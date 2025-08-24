@@ -12,6 +12,7 @@ PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('data/mailing_list_registrants_class.php');
 PathHelper::requireOnce('data/users_class.php');
 PathHelper::requireOnce('data/files_class.php');
+PathHelper::requireOnce('includes/EmailSender.php');
 
 $settings = Globalvars::get_instance();
 
@@ -186,27 +187,14 @@ class MailingList extends SystemBase {
 			if($this->get('mlt_send_welcome_email')){
 				//SEND WELCOME EMAIL
 				$user = new User($usr_user_id, TRUE);
-				$welcome_email = EmailTemplate::CreateLegacyTemplate('mailing_list_subscribe', $user);
-				
-				
-				$email_fill = array(
-					'subject' => 'Welcome to our mailing list',
-					//'utm_source' => 'email', //use defaults
-					'utm_medium' => 'email', //use defaults
-					'utm_campaign' => $mailing_list_string, 
-					'utm_content' => urlencode($email->get('eml_subject')), 
-					'mailing_list_id' => $mailing_list_id,
-					'mailing_list_string' => $mailing_list_string,
-				);
-				//CHECK TO SEE IF THE USER GETS A FREE GIFT
-				if($this->get('mlt_fil_file_id')){
-					$file = new File($this->get('mlt_fil_file_id'), TRUE);
-					$email_fill['file_link'] = LibraryFunctions::get_absolute_url('/uploads/'.$file->get('fil_name'));
-					$email_fill['file_name'] = $file->get('fil_name');
-				}
-
-				$welcome_email->fill_template($email_fill);
-				$welcome_email->send();	
+				EmailSender::sendTemplate('mailing_list_subscribe',
+					$user->get('usr_email'),
+					[
+						'subject' => 'Welcome to our mailing list',
+						'mailing_list' => $this,
+						'recipient' => $user->export_as_array()
+					]
+				);	
 			}
 			
 			$status = true;

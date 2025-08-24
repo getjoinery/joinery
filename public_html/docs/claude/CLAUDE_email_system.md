@@ -2,15 +2,15 @@
 
 ## Overview
 
-The email system has been refactored into three focused classes that provide clear separation of concerns:
+The email system consists of three focused classes that provide clear separation of concerns:
 
 - **EmailMessage**: Fluent API for composing email messages
-- **EmailTemplate**: Template processing only (conditionals, variables)  
+- **EmailTemplate**: Template processing (conditionals, variables)  
 - **EmailSender**: All sending logic with service selection and fallback
 
 ## Architecture
 
-### EmailMessage Class (NEW)
+### EmailMessage Class
 
 A clean, fluent API for email composition:
 
@@ -18,7 +18,8 @@ A clean, fluent API for email composition:
 // Create from template
 $message = EmailMessage::fromTemplate('activation_content', [
     'act_code' => 'ABC123',
-    'resend' => false
+    'resend' => false,
+    'recipient' => $user->export_as_array()
 ]);
 $message->from('admin@example.com', 'Admin')
         ->to('user@example.com', 'John Doe')
@@ -42,7 +43,7 @@ $message = EmailMessage::create('user@example.com', 'Subject', 'Body content')
 - `attachment($path, $name)` - Add attachment
 - `header($name, $value)` - Add custom header
 
-### EmailSender Class (NEW)
+### EmailSender Class
 
 Handles all sending operations with service selection:
 
@@ -62,7 +63,7 @@ $result = EmailSender::quickSend(
 $result = EmailSender::sendTemplate(
     'welcome_email', 
     'user@example.com',
-    ['name' => 'John']
+    ['name' => 'John', 'recipient' => $user->export_as_array()]
 );
 
 // Batch send
@@ -76,17 +77,17 @@ $results = $sender->sendBatch($message, $recipients);
 - Automatic fallback if primary fails
 - Queue failed emails for retry
 
-### EmailTemplate Class (REFACTORED)
+### EmailTemplate Class
 
-Now focused solely on template processing:
+Focused on template processing:
 
 ```php
-// DEPRECATED - Don't use constructor directly
-// Use EmailTemplate::CreateLegacyTemplate() instead
-$template = EmailTemplate::CreateLegacyTemplate('activation_content', $user);
+// Direct template processing (rarely needed - use EmailMessage instead)
+$template = new EmailTemplate('activation_content');
 $template->fill_template([
     'act_code' => 'ABC123',
-    'resend' => false
+    'resend' => false,
+    'recipient' => $user->export_as_array()
 ]);
 
 // Get processed content
@@ -95,15 +96,16 @@ $html = $template->getHtml();
 $text = $template->getText();
 ```
 
-## New Development Patterns
+## Development Patterns
 
-### Modern Approach (Recommended)
+### Recommended Approach
 
 ```php
 // For new code - use EmailMessage + EmailSender
 $message = EmailMessage::fromTemplate('welcome_email', [
     'user_name' => $user->get('usr_name'),
-    'activation_code' => $code
+    'activation_code' => $code,
+    'recipient' => $user->export_as_array()
 ]);
 
 $message->from('noreply@example.com', 'Example Site')
@@ -133,16 +135,17 @@ $success = EmailSender::sendTemplate(
     $user->get('usr_email'),
     [
         'reset_link' => $reset_url,
-        'user_name' => $user->get('usr_name')
+        'user_name' => $user->get('usr_name'),
+        'recipient' => $user->export_as_array()
     ]
 );
 ```
 
 ## Template System
 
-### Template Processing (Unchanged)
+### Template Processing
 
-Templates still work exactly as before with full conditional and variable support:
+Templates support full conditional and variable processing:
 
 **Template Structure:**
 ```
@@ -160,14 +163,14 @@ subject:Welcome to *company_name*, *recipient->usr_first_name*!
 <p><a href="*web_dir*/activate?code=*act_code*">Activate Account</a></p>
 ```
 
-### Variable Syntax (Unchanged)
+### Variable Syntax
 
 - **Variables**: `*variable_name*`
 - **Object access**: `*recipient->usr_first_name*`  
 - **Pipe qualifiers**: `*date|Y-m-d*`
 - **UTM tracking**: `*email_vars*`
 
-### Conditional Syntax (Unchanged)
+### Conditional Syntax
 
 **Basic conditionals:**
 ```
@@ -200,7 +203,7 @@ Content here
 {end}
 ```
 
-### Subject Processing (Unchanged)
+### Subject Processing
 
 Three ways to set subject (priority order):
 
@@ -269,117 +272,6 @@ email_test_mode = "1"         // Redirect all emails to test address
 email_test_redirect = "test@example.com"
 ```
 
-## Backwards Compatibility
-
-### Existing Code Support
-
-**All existing EmailTemplate usage continues to work:**
-
-```php
-// OLD CODE - Still works fine
-$email = new EmailTemplate('activation_content', $user);
-$email->fill_template(['act_code' => $code]);
-$email->send();  // Still works - uses EmailSender internally
-
-// OLD STATIC METHOD - Still works  
-EmailTemplate::send_email(
-    'template_name',
-    $user->get('usr_email'),
-    ['variable' => 'value']
-);
-```
-
-**Migration is optional** - the old API is fully maintained.
-
-### Constructor Changes
-
-**BREAKING CHANGE**: Direct constructor usage is deprecated:
-
-```php
-// DEPRECATED - Will show error
-$email = new EmailTemplate('template_name', $user);
-
-// CORRECT - Use factory method
-$email = EmailTemplate::CreateLegacyTemplate('template_name', $user);
-```
-
-This prevents accidental direct usage while maintaining all functionality.
-
-## Migration Guide
-
-### When to Migrate
-
-**Migrate to new system when:**
-- Building new email functionality
-- Code needs batch sending
-- Complex sending logic required
-- Better error handling needed
-
-**Keep old system when:**
-- Existing code works fine
-- Simple template-based emails
-- No time for refactoring
-
-### Migration Examples
-
-**OLD: Simple template send**
-```php
-$email = new EmailTemplate('welcome', $user);
-$email->fill_template(['code' => $activation_code]);
-$success = $email->send();
-```
-
-**NEW: Using EmailMessage**
-```php
-$message = EmailMessage::fromTemplate('welcome', [
-    'code' => $activation_code,
-    'recipient' => $user->export_as_array()
-]);
-$message->to($user->get('usr_email'), $user->get('usr_name'));
-
-$sender = new EmailSender();
-$success = $sender->send($message);
-```
-
-**NEW: Using convenience method**
-```php
-$success = EmailSender::sendTemplate('welcome', 
-    $user->get('usr_email'),
-    ['code' => $activation_code, 'recipient' => $user->export_as_array()]
-);
-```
-
-### Batch Operations
-
-**OLD: Manual loop**
-```php
-$users = new MultiUser(['usr_active' => 1]);
-$users->load();
-
-foreach ($users as $user) {
-    $email = new EmailTemplate('newsletter', $user);
-    $email->fill_template(['content' => $newsletter_content]);
-    $email->send();
-}
-```
-
-**NEW: Batch sending**
-```php
-$message = EmailMessage::fromTemplate('newsletter', [
-    'content' => $newsletter_content
-]);
-
-$recipients = [];
-$users = new MultiUser(['usr_active' => 1]);
-$users->load();
-foreach ($users as $user) {
-    $recipients[] = $user->get('usr_email');
-}
-
-$sender = new EmailSender();
-$results = $sender->sendBatch($message, $recipients);
-```
-
 ## Testing and Debugging
 
 ### Email Testing System
@@ -419,7 +311,8 @@ if (!$validation['valid']) {
 ```php
 // Test template without sending
 $message = EmailMessage::fromTemplate('test_template', [
-    'variable' => 'value'
+    'variable' => 'value',
+    'recipient' => $user->export_as_array()
 ]);
 
 echo "Subject: " . $message->getSubject() . "\n";
@@ -466,10 +359,10 @@ $message = EmailMessage::create('user@example.com', 'Subject', 'Body')
 
 ### Template Variable Integration
 
-Full access to existing template variables:
+Full access to template variables:
 
 ```php
-// All existing variables still work
+// All template variables work
 $message = EmailMessage::fromTemplate('template', [
     'recipient' => $user->export_as_array(),  // User data
     'act_code' => $activation_code,           // Custom variables
@@ -481,6 +374,24 @@ $message = EmailMessage::fromTemplate('template', [
 // *act_code*
 // *web_dir*
 // *email_vars* (includes UTM tracking)
+```
+
+### Batch Operations
+
+```php
+$message = EmailMessage::fromTemplate('newsletter', [
+    'content' => $newsletter_content
+]);
+
+$recipients = [];
+$users = new MultiUser(['usr_active' => 1]);
+$users->load();
+foreach ($users as $user) {
+    $recipients[] = $user->get('usr_email');
+}
+
+$sender = new EmailSender();
+$results = $sender->sendBatch($message, $recipients);
 ```
 
 ## Error Handling
@@ -511,16 +422,54 @@ try {
 }
 ```
 
+## Important Notes
+
+### Variable Requirements
+
+**Always include recipient data** when using templates:
+```php
+// CORRECT - includes recipient data
+$success = EmailSender::sendTemplate('welcome', 
+    $user->get('usr_email'),
+    [
+        'activation_code' => $code,
+        'recipient' => $user->export_as_array()  // Required for templates
+    ]
+);
+
+// MISSING - may cause template variable errors
+$success = EmailSender::sendTemplate('welcome', 
+    $user->get('usr_email'),
+    ['activation_code' => $code]  // Missing recipient data
+);
+```
+
+### Default Variables
+
+The system automatically provides:
+- `template_name` - Derived from template filename
+- `web_dir` - Site base URL
+- `email_vars` - UTM tracking parameters
+- UTM defaults - `utm_source=email`, `utm_medium=email`, etc.
+
+**Don't pass these manually** - they're provided automatically.
+
+### Service Selection
+
+- Default from/sender addresses are used automatically
+- Only set custom `from()` when different from defaults
+- Service fallback happens automatically on failures
+- Failed emails are queued for later retry
+
 ## Summary
 
-The refactored email system provides:
+The email system provides:
 
-- **✅ Full backwards compatibility** - existing code works unchanged
-- **✅ Modern fluent API** - clean, readable new code patterns  
+- **✅ Modern fluent API** - clean, readable code patterns  
 - **✅ Separation of concerns** - template processing vs sending logic
 - **✅ Service reliability** - automatic fallback and retry
 - **✅ Better testing** - comprehensive test suite and debug tools
 - **✅ Maintained performance** - same template processing engine
-- **✅ Migration flexibility** - migrate at your own pace
+- **✅ Template compatibility** - all existing templates work unchanged
 
-The old EmailTemplate API remains fully supported, while the new EmailMessage/EmailSender classes provide modern patterns for new development.
+Use EmailMessage + EmailSender for all email development. Direct EmailTemplate usage is only for specialized template processing needs.

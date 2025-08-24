@@ -3,6 +3,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/EmailMessage.php');
+	PathHelper::requireOnce('includes/EmailSender.php');
 	PathHelper::requireOnce('data/email_templates_class.php');
 	PathHelper::requireOnce('data/users_class.php');
 
@@ -59,17 +61,27 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 	print_r($result);
 
 
-	$user = new User(1, true);
-
-	$email_template = EmailTemplate::CreateLegacyTemplate('blank_template', $user);		
-	$email_template->fill_template(array(
-			'subject' => 'Test email with emailTemplate',
-			'body' => 'emailTemplate sending is working.',
-	));
-	$email_template->email_subject = 'Test email with direct mailgun';
-	$email_template->email_from = $settings->get_setting('defaultemail');
-	$result = $email_template->send(FALSE);
-
-	echo 'Template email sent';
+	try {
+		$user = new User(1, true);
+		
+		$message = EmailMessage::fromTemplate('blank_template', [
+			'subject' => 'Test email with new system',
+			'body' => 'This is the body of the test email.',
+			'recipient' => $user->export_as_array()
+		]);
+		
+		$message->to('jeremy.tunnell+3@gmail.com', 'Test User');
+		
+		$sender = new EmailSender();
+		$result = $sender->send($message);
+		
+		if ($result) {
+			echo "Email sent successfully\n";
+		} else {
+			echo "Email sending failed (queued for retry)\n";
+		}
+	} catch (Exception $e) {
+		echo "Email error: " . $e->getMessage() . "\n";
+	}
 
 ?>

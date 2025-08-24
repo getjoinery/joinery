@@ -10,6 +10,8 @@
 	PathHelper::requireOnce('data/event_registrants_class.php');
 	PathHelper::requireOnce('data/event_waiting_lists_class.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/EmailMessage.php');
+	PathHelper::requireOnce('includes/EmailSender.php');
 
 	$session = SessionControl::get_instance();
 	//$session->set_return();
@@ -116,37 +118,22 @@
 			$email_record->save();
 			
 			foreach ($event_registrants as $event_registrant){
-				$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);
+				// Using new EmailMessage system instead
 				
 				
 				if($_REQUEST['waiting_list']){
 					$recipient = new User($event_registrant->get('ewl_usr_user_id'), TRUE);
-					$email->fill_template(array(
-						'subject' => $_POST['eml_subject'],
-						'body' => $_POST['eml_message'],
-						//'utm_source' => 'email', //use defaults
-						//'utm_medium' => 'email', //use defaults
-						//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-						'utm_content' => urlencode($_POST['eml_subject']),			
-					));
+					// Template variables handled in new system below
 				}
 				else{
 					$recipient = new User($event_registrant->get('evr_usr_user_id'), TRUE);
-					$email->fill_template(array(
-						'subject' => $_POST['eml_subject'],
-						'body' => $_POST['eml_message'],
-						//'utm_source' => 'email', //use defaults
-						//'utm_medium' => 'email', //use defaults
-						//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-						'utm_content' => urlencode($_POST['eml_subject']),
-						'evr_event_registrant_id' => $event_registrant->key,			
-					));
+					// Template variables handled in new system below
 				}
 				
 
 						
 				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-				$email->add_recipient($recipient->get('usr_email'), $recipient->display_name());
+				// Recipient added in new system above
 
 				$message = new Message(NULL);
 				$message->set('msg_usr_user_id_sender', $sender->key);
@@ -167,7 +154,18 @@
 				$recipient_email->set('erc_status', 1);
 				$recipient_email->save();							
 				$numrecipients++;
-				$result = $email->send();
+				// Create and send using new system
+			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
+				'subject' => $_POST['eml_subject'],
+				'body' => $_POST['eml_message'],
+				'utm_medium' => 'email',
+				'utm_content' => urlencode($_POST['eml_subject']),
+				'recipient' => $recipient->export_as_array()
+			]);
+			$message_obj->subject($_POST['eml_subject'])
+					   ->to($recipient->get('usr_email'), $recipient->display_name());
+			$sender_obj = new EmailSender();
+			$result = $sender_obj->send($message_obj);
 
 			}
 			
@@ -181,17 +179,20 @@
 			if(!$_REQUEST['waiting_list']){
 				if($event->get('evt_usr_user_id_leader')){
 					$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
-					$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $leader, $email_outer_template, $email_footer_template);
-					$email->fill_template(array(
-						'subject' => 'COPY: '.$_POST['eml_subject'],
-						'body' => $_POST['eml_message'],
-						//'utm_source' => 'email', //use defaults
-						//'utm_medium' => 'email', //use defaults
-						//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-						'utm_content' => urlencode($_POST['eml_subject']), 	
-
-					));
-					$result = $email->send();
+					// Using new EmailMessage system instead
+					// Template variables handled in new system below
+					// Create and send using new system
+			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
+				'subject' => 'COPY: '.$_POST['eml_subject'],
+				'body' => $_POST['eml_message'],
+				'utm_medium' => 'email',
+				'utm_content' => urlencode($_POST['eml_subject']),
+				'recipient' => $leader->export_as_array()
+			]);
+			$message_obj->subject('COPY: '.$_POST['eml_subject'])
+					   ->to($leader->get('usr_email'), $leader->display_name());
+			$sender_obj = new EmailSender();
+			$result = $sender_obj->send($message_obj);
 				}	
 			}				
 			
@@ -227,22 +228,15 @@
 			$email_record->set('eml_message_template_html', $email_inner_template);
 			$email_record->save();
 
-			$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, NULL, $email_outer_template, $email_footer_template);			
-			$email->fill_template(array(
-				'subject' => $_POST['eml_subject'],
-				'body' => $_POST['eml_message'],
-				//'utm_source' => 'email', //use defaults
-				//'utm_medium' => 'email', //use defaults
-				//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-				'utm_content' => urlencode($_POST['eml_subject']), 	
-			));
+			// Using new EmailMessage system instead			
+			// Template variables handled in new system below
 			
 			foreach ($group_members as $group_member){
 				
 				$recipient = new User($group_member->get('grm_foreign_key_id'), TRUE);
 						
 				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-				$email->add_recipient($recipient->get('usr_email'), $recipient->display_name());
+				// Recipient added in new system above
 
 				$message = new Message(NULL);
 				$message->set('msg_usr_user_id_sender', $sender->key);
@@ -265,7 +259,18 @@
 				$numrecipients++;				
 
 			}
-			$result = $email->send();
+			// Create and send using new system
+			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
+				'subject' => $_POST['eml_subject'],
+				'body' => $_POST['eml_message'],
+				'utm_medium' => 'email',
+				'utm_content' => urlencode($_POST['eml_subject']),
+				'recipient' => $recipient->export_as_array()
+			]);
+			$message_obj->subject($_POST['eml_subject'])
+					   ->to($recipient->get('usr_email'), $recipient->display_name());
+			$sender_obj = new EmailSender();
+			$result = $sender_obj->send($message_obj);
 			if($result){
 				$email_record->mark_all_recipients_sent();
 				$email_record->set('eml_status', 10);
@@ -277,16 +282,20 @@
 			
 			$settings = Globalvars::get_instance();
 			$email_inner_template = $settings->get_setting('individual_email_inner_template');
-			$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $recipient);
-			$email->fill_template(array(
+			// Using new EmailMessage system instead
+			// Template variables handled in new system below
+			// Create and send using new system
+			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
 				'subject' => $_POST['eml_subject'],
 				'body' => $_POST['eml_message'],
-				//'utm_source' => 'email', //use defaults
-				//'utm_medium' => 'email', //use defaults
-				//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-				'utm_content' => urlencode($_POST['eml_subject']), 	
-			));
-			$result = $email->send();
+				'utm_medium' => 'email',
+				'utm_content' => urlencode($_POST['eml_subject']),
+				'recipient' => $recipient->export_as_array()
+			]);
+			$message_obj->subject($_POST['eml_subject'])
+					   ->to($recipient->get('usr_email'), $recipient->display_name());
+			$sender_obj = new EmailSender();
+			$result = $sender_obj->send($message_obj);
 			if($result){
 				$email_record->set('eml_status', 10);
 				$email_record->save();	
@@ -323,16 +332,17 @@
 		
 		$settings = Globalvars::get_instance();
 		$email_inner_template = $settings->get_setting('individual_email_inner_template');
-		$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $sender);
-		$email->fill_template(array(
-			'subject' => 'COPY: '.$_POST['eml_subject'],
-			'body' => $_POST['eml_message'],
-			//'utm_source' => 'email', //use defaults
-			//'utm_medium' => 'email', //use defaults
-			//'utm_campaign' => ContactType::ToReadable(User::TRANSACTIONAL), 
-			'utm_content' => urlencode($_POST['eml_subject']), 	
-		));
-		$result = $email->send();		
+		// Using new EmailMessage system instead
+		$result = EmailSender::sendTemplate($email_inner_template,
+			$sender->get('usr_email'),
+			[
+				'subject' => 'COPY: '.$_POST['eml_subject'],
+				'body' => $_POST['eml_message'],
+				'utm_medium' => 'email',
+				'utm_content' => urlencode($_POST['eml_subject']),
+				'recipient' => $sender->export_as_array()
+			]
+		);		
 		
 		
 		
