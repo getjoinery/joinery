@@ -4,8 +4,8 @@
 	$_SERVER['DOCUMENT_ROOT'] = __DIR__ . '/..';
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
 	
-	// Load migrations first to test loading - use direct require_once to preserve variable scope
-	require_once(PathHelper::getIncludePath('migrations/migrations.php'));
+	// Load migrations using the Migration class
+	// This is now handled in the update_database function
 	
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/DbConnector.php');
@@ -72,7 +72,7 @@
 	-OTHER COLUMNS (INCLUDING THOSE WITH CONSTRAINTS) WILL BE DROPPED IF NOT IN SPECIFICATIONS
 	*/
 
-	function update_database($migrations, $verbose=false, $upgrade=false, $cleanup=false){
+	function update_database($legacy_migrations = [], $verbose=false, $upgrade=false, $cleanup=false){
 		
 		// Use DatabaseUpdater class for all table operations
 		require_once(__DIR__ . '/../includes/DatabaseUpdater.php');
@@ -175,45 +175,20 @@
 		
 		// Step 4: Run database migrations
 		echo "-----MIGRATIONS-----<br>\n";
+		
+		// Load migrations using Migration class
+		$migrations = Migration::loadMigrations();
 		echo "Migrations loaded successfully: " . count($migrations) . " migrations found<br>\n";
 		
-		// Validate migrations before processing
-		$migration_errors = [];
-		$valid_migrations = [];
-		
-		foreach($migrations as $i => $migration) {
-			$version = $migration['database_version'] ?? 'UNKNOWN';
-			$has_sql = isset($migration['migration_sql']) && !empty($migration['migration_sql']);
-			$has_file = isset($migration['migration_file']) && !empty($migration['migration_file']);
-			
-			// Check for required fields
-			if (!isset($migration['database_version'])) {
-				$migration_errors[] = "Migration #$i: Missing database_version";
-				continue;
-			}
-			
-			// Check for empty migrations (both SQL and file are NULL/empty)
-			if (!$has_sql && !$has_file) {
-				$migration_errors[] = "Migration #$i (version $version): Empty migration - both migration_sql and migration_file are empty. This migration should be removed or completed.";
-				continue;
-			}
-			
-			// Check for conflicting definitions
-			if ($has_sql && $has_file) {
-				$migration_errors[] = "Migration #$i (version $version): Conflicting migration - both migration_sql and migration_file are defined. Only one should be used.";
-				continue;
-			}
-			
-			// Migration passed validation
-			$valid_migrations[] = $migration;
-		}
+		// Validate migrations using Migration class
+		$validation_result = Migration::validateMigrations($migrations);
 		
 		// Report validation results
-		if (!empty($migration_errors)) {
+		if (!$validation_result['valid']) {
 			echo "<div style='color: red; background: #ffe6e6; padding: 10px; margin: 10px 0; border: 1px solid #ff9999;'>";
 			echo "<strong>❌ MIGRATION VALIDATION ERRORS FOUND:</strong><br>\n";
 			echo "The following migrations have configuration problems and must be fixed:<br><br>\n";
-			foreach ($migration_errors as $error) {
+			foreach ($validation_result['errors'] as $error) {
 				echo "• " . htmlspecialchars($error) . "<br>\n";
 			}
 			echo "<br><strong>How to fix:</strong><br>\n";
@@ -224,9 +199,9 @@
 			
 			// Show count of valid vs invalid
 			echo "<br><strong>Migration Summary:</strong><br>\n";
-			echo "Total migrations found: " . count($migrations) . "<br>\n";
-			echo "Valid migrations: " . count($valid_migrations) . "<br>\n";
-			echo "Invalid migrations: " . count($migration_errors) . "<br>\n";
+			echo "Total migrations found: " . $validation_result['total_count'] . "<br>\n";
+			echo "Valid migrations: " . $validation_result['valid_count'] . "<br>\n";
+			echo "Invalid migrations: " . $validation_result['error_count'] . "<br>\n";
 			
 			// Stop processing if there are validation errors
 			echo "<br><strong>❌ Migration processing stopped due to validation errors above.</strong><br>\n";
@@ -235,8 +210,8 @@
 		}
 		
 		// All migrations are valid, proceed with normal processing  
-		echo "Total migrations found: " . count($migrations) . "<br>\n";
-		echo "Valid migrations: " . count($valid_migrations) . "<br>\n";
+		echo "Total migrations found: " . $validation_result['total_count'] . "<br>\n";
+		echo "Valid migrations: " . $validation_result['valid_count'] . "<br>\n";
 		
 		error_reporting(E_ERROR | E_PARSE);
 		ini_set('display_errors', 1);
@@ -248,17 +223,39 @@
 		$migration_run_count = 0;
 		$migration_skip_count = 0;
 		
-		foreach($valid_migrations as $migration){
-			$should_run = $migclass->check_migration($migration);
+		foreach($validation_result['valid_migrations'] as $migration){
+			$should_run_result = $migclass->shouldRunMigration($migration);
+			
 			if ($verbose) {
-				echo "Checking migration " . ($migration['database_version'] ?? 'UNKNOWN') . ": " . ($should_run ? 'WILL RUN' : 'SKIPPING') . "<br>\n";
+				$status = $should_run_result['should_run'] ? 'WILL RUN' : 'SKIPPING - ' . $should_run_result['reason'];
+				echo "Checking migration " . ($migration['database_version'] ?? 'UNKNOWN') . ": " . $status . "<br>\n";
+				
+				if (isset($should_run_result['hash'])) {
+					echo "Migration hash: " . $should_run_result['hash'] . "<br>\n";
+				}
 			}
 			
-			if($should_run){
+			if($should_run_result['should_run']){
 				echo "Running migration: ".$migration['database_version']."<br>\n";
-				$migclass->run_migration($migration);
-				$migration_run_count++;
+				
+				// Show SQL if it's an SQL migration (your requested feature!)
+				if (isset($migration['migration_sql']) && $migration['migration_sql']) {
+					echo "SQL: " . $migration['migration_sql'] . "<br>\n";
+				}
+				
+				$result = $migclass->executeMigration($migration);
+				
+				if ($result['success']) {
+					echo "✓ Successfully applied migration: " . $result['version'] . "<br>\n";
+					$migration_run_count++;
+				} else {
+					echo "✗ Failed migration: " . $result['version'] . " - " . $result['error'] . "<br>\n";
+					// Continue processing other migrations even if one fails
+				}
 			} else {
+				if (isset($should_run_result['error'])) {
+					echo "⚠ Error checking migration " . $migration['database_version'] . ": " . $should_run_result['reason'] . "<br>\n";
+				}
 				$migration_skip_count++;
 			}
 		}
@@ -295,12 +292,9 @@
 
 	// Run the database update if not included from another script
 	if(!isset($noautorun)){
-		// Ensure $migrations is defined
-		if (!isset($migrations)) {
-			$migrations = array();
-		}
+		// No need to manually load migrations - Migration::loadMigrations() handles this
 		
-		if(update_database($migrations, $verbose, $upgrade, $cleanup)){
+		if(update_database([], $verbose, $upgrade, $cleanup)){
 			echo 'Database update script successful'. "<br>\n";
 			exit(1);  // RETURN 1 FOR THE DEPLOY SCRIPT
 		} else {
