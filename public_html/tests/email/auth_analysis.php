@@ -248,18 +248,11 @@ try {
         </div>
     </div>';
 
-    // Try to use EmailTemplate system
-    $emailTemplate = EmailTemplate::CreateLegacyTemplate('default_outer_template', null);
-    $emailTemplate->clear_recipients();
-    $emailTemplate->add_recipient($config['test_email'], 'Test Recipient');
+    // Use new EmailMessage + EmailSender system
+    $message = EmailMessage::create($config['test_email'], $config['email_subject'], $email_html);
     
-    // Set email properties directly
-    $emailTemplate->email_subject = $config['email_subject'];
-    $emailTemplate->email_html = $email_html;
-    $emailTemplate->email_has_content = true;
-    
-    // Send the email
-    $send_result = $emailTemplate->send(false); // false = don\'t check session
+    $sender = new EmailSender();
+    $send_result = $sender->send($message);
     
     if ($send_result) {
         echo '<div class="alert alert-success"><strong>✓ Email sent successfully!</strong></div>';

@@ -415,12 +415,14 @@ class User extends SystemBase {
 			if($send_emails){
 				$settings = Globalvars::get_instance();
 				PathHelper::requireOnce('includes/EmailTemplate.php');
+				PathHelper::requireOnce('includes/EmailSender.php');
 				PathHelper::requireOnce('includes/Activation.php');
 				
 				//SEND NEW USER WELCOME EMAIL
-				$welcome_email = EmailTemplate::CreateLegacyTemplate('new_account_content', $user);
-				$welcome_email->fill_template($email_fill);
-				$welcome_email->send();	
+				EmailSender::sendTemplate('new_account_content',
+					$user->get('usr_email'),
+					array_merge($email_fill, ['recipient' => $user->export_as_array()])
+				);	
 				
 				//SEND ACTIVATION EMAIL
 				Activation::email_activate_send($user);

@@ -5,6 +5,7 @@ function cart_charge_logic($get_vars, $post_vars){
 
 	PathHelper::requireOnce('includes/ShoppingCart.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/EmailSender.php');
 	PathHelper::requireOnce('includes/StripeHelper.php');
 	PathHelper::requireOnce('includes/PaypalHelper.php');
 	PathHelper::requireOnce('includes/Activation.php');
@@ -382,12 +383,14 @@ function cart_charge_logic($get_vars, $post_vars){
 						$notify_user = User::GetByEmail($notify_email);
 						$body = 'Subscription '.$subscription_result['id'].' (Order '. $order->key .') was started by '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
 						$email_inner_template = $settings->get_setting('individual_email_inner_template');
-						$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $notify_user);
-						$email->fill_template(array(
-							'subject' => 'New Subscription',
-							'body' => $body,	
-						));	
-						$result = $email->send();
+						EmailSender::sendTemplate($email_inner_template,
+							$notify_user->get('usr_email'),
+							[
+								'subject' => 'New Subscription',
+								'body' => $body,
+								'recipient' => $notify_user->export_as_array()
+							]
+						);
 					}					
 					catch (Exception $e) {
 						//DO NOTHING
@@ -409,12 +412,14 @@ function cart_charge_logic($get_vars, $post_vars){
 						$notify_user = User::GetByEmail($notify_email);
 						$body = 'Order '. $order->key .' was charged - user: '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
 						$email_inner_template = $settings->get_setting('individual_email_inner_template');
-						$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $notify_user);
-						$email->fill_template(array(
-							'subject' => 'New Order',
-							'body' => $body,
-						));	
-						$result = $email->send();
+						EmailSender::sendTemplate($email_inner_template,
+							$notify_user->get('usr_email'),
+							[
+								'subject' => 'Order Charged',
+								'body' => $body,
+								'recipient' => $notify_user->export_as_array()
+							]
+						);
 					}					
 					catch (Exception $e) {
 						//DO NOTHING
@@ -452,9 +457,8 @@ function cart_charge_logic($get_vars, $post_vars){
 			$template = 'event_reciept_content';
 			
 			$final_fill = array_merge($default_fill, $email_fill);
-			$activation_email = EmailTemplate::CreateLegacyTemplate($template, $user);
-			$activation_email->fill_template($final_fill);
-			$activation_email->send();
+			$final_fill['recipient'] = $user->export_as_array();
+			$success = EmailSender::sendTemplate($template, $user->get('usr_email'), $final_fill);
 			
 
 		}	
@@ -482,9 +486,8 @@ function cart_charge_logic($get_vars, $post_vars){
 			//SEND THE EMAIL
 			$email_fill['event_list'] = implode('<br>', $event_list);
 			$final_fill = array_merge($default_fill, $email_fill);
-			$activation_email = EmailTemplate::CreateLegacyTemplate('event_bundle_content', $user);
-			$activation_email->fill_template($final_fill);
-			$activation_email->send();					
+			$final_fill['recipient'] = $user->export_as_array();
+			$success = EmailSender::sendTemplate('event_bundle_content', $user->get('usr_email'), $final_fill);					
 			
 		}
 		else{
@@ -492,9 +495,8 @@ function cart_charge_logic($get_vars, $post_vars){
 			/* DONATION CODE.  NOT NEEDED ANYMORE?
 			$email_fill['purchase_amount'] = $price - $discount;
 			$final_fill = array_merge($default_fill, $email_fill);
-			$activation_email = EmailTemplate::CreateLegacyTemplate('subscription_reciept', $user);
-			$activation_email->fill_template($final_fill);
-			$activation_email->send();
+			$final_fill['recipient'] = $user->export_as_array();
+			$success = EmailSender::sendTemplate('subscription_reciept', $user->get('usr_email'), $final_fill);
 			*/
 			
 	

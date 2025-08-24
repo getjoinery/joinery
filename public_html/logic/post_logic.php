@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function post_logic($get_vars, $post_vars, $post){
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/EmailSender.php');
 	PathHelper::requireOnce('data/posts_class.php');
 	PathHelper::requireOnce('data/comments_class.php');
 
@@ -60,12 +61,14 @@ function post_logic($get_vars, $post_vars, $post){
 					$body = '<p>Comment '.$new_comment->key.' was added by "'.htmlspecialchars($new_comment->get('cmt_author_name')).'".</p>';
 					$body .= '<p>Link: <a href="'. LibraryFunctions::get_absolute_url($post->get_url()).'">' . LibraryFunctions::get_absolute_url($post->get_url()).'</a>';
 					$email_inner_template = $settings->get_setting('individual_email_inner_template');
-					$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $notify_user);
-					$email->fill_template(array(
-						'subject' => 'New Comment',
-						'body' => $body,
-					));	
-					$result = $email->send();
+					EmailSender::sendTemplate($email_inner_template,
+						$notify_user->get('usr_email'),
+						[
+							'subject' => 'New Comment',
+							'body' => $body,
+							'recipient' => $notify_user->export_as_array()
+						]
+					);
 				}					
 				catch (Exception $e) {
 					//DO NOTHING

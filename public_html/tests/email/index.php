@@ -7,6 +7,7 @@ require_once(__DIR__ . '/suites/ServiceTests.php');
 require_once(__DIR__ . '/suites/TemplateTests.php');
 require_once(__DIR__ . '/suites/DeliveryTests.php');
 require_once(__DIR__ . '/suites/AuthenticationTests.php');
+require_once(__DIR__ . '/email_pattern_test.php');
 
 $action = $_POST['action'] ?? '';
 $results = null;
@@ -23,6 +24,31 @@ if ($action === 'run_tests') {
 } elseif ($action === 'test_domain_only') {
     $runner = new EmailTestRunner();
     $results = $runner->runDomainTests();
+} elseif ($action === 'run_pattern_tests') {
+    $settings = Globalvars::get_instance();
+    $test_email = $settings->get_setting('email_test_recipient') ?: 'test@example.com';
+    
+    $config = ['test_email' => $test_email];
+    $tester = new EmailPatternTest($config, true); // Silent mode for web interface
+    $patternResults = $tester->run();
+    $summary = $tester->getSummary();
+    
+    // Format results for display
+    $results = [
+        'pattern_tests' => []
+    ];
+    
+    foreach ($patternResults as $name => $result) {
+        $results['pattern_tests'][$name] = [
+            'passed' => $result['success'],
+            'message' => $result['success'] ? 
+                "Pattern '{$result['template']}' sent successfully via {$result['method']}" : 
+                "Pattern failed: {$result['error']}",
+            'details' => array_merge($result, [
+                'summary' => $summary
+            ])
+        ];
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -45,26 +71,69 @@ if ($action === 'run_tests') {
                 <div class="card-body">
                     <?php if ($results): ?>
                         <?php foreach ($results as $suite => $tests): ?>
-                            <h6><?= ucfirst($suite) ?> Tests</h6>
-                            <?php foreach ($tests as $test => $result): ?>
-                                <div class="alert alert-<?= 
-                                    isset($result['warning']) && $result['warning'] ? 'warning' : 
-                                    ($result['passed'] ? 'success' : 'danger') 
-                                ?> alert-sm">
-                                    <strong><?= ucfirst(str_replace('_', ' ', $test)) ?>:</strong>
-                                    <?= htmlspecialchars($result['message']) ?>
-                                    <?php if (isset($result['details'])): ?>
-                                        <details class="mt-2">
-                                            <summary>Details</summary>
-                                            <pre><?= json_encode($result['details'], JSON_PRETTY_PRINT) ?></pre>
-                                        </details>
+                            <?php if ($suite === 'pattern_tests'): ?>
+                                <h6>Email Pattern Tests</h6>
+                                <p class="text-muted small">Testing all email code patterns found in the codebase</p>
+                                
+                                <?php if (isset($tests) && is_array($tests)): ?>
+                                    <?php 
+                                    $summary = null;
+                                    foreach ($tests as $result) {
+                                        if (isset($result['details']['summary'])) {
+                                            $summary = $result['details']['summary'];
+                                            break;
+                                        }
+                                    }
+                                    ?>
+                                    <?php if ($summary): ?>
+                                        <div class="alert alert-info alert-sm mb-3">
+                                            <strong>Summary:</strong> 
+                                            <?= $summary['successful'] ?>/<?= $summary['total_patterns'] ?> patterns successful 
+                                            (<?= $summary['success_rate'] ?>% success rate)
+                                        </div>
                                     <?php endif; ?>
-                                </div>
-                            <?php endforeach; ?>
+                                <?php endif; ?>
+                                
+                                <?php foreach ($tests as $test => $result): ?>
+                                    <div class="alert alert-<?= 
+                                        isset($result['warning']) && $result['warning'] ? 'warning' : 
+                                        ($result['passed'] ? 'success' : 'danger') 
+                                    ?> alert-sm">
+                                        <strong><?= ucfirst(str_replace('_', ' ', $test)) ?>:</strong>
+                                        <?= htmlspecialchars($result['message']) ?>
+                                        <?php if (isset($result['details']['source'])): ?>
+                                            <br><small class="text-muted">Source: <?= htmlspecialchars($result['details']['source']) ?></small>
+                                        <?php endif; ?>
+                                        <?php if (isset($result['details'])): ?>
+                                            <details class="mt-2">
+                                                <summary>Technical Details</summary>
+                                                <pre><?= json_encode(array_diff_key($result['details'], ['summary' => '']), JSON_PRETTY_PRINT) ?></pre>
+                                            </details>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <h6><?= ucfirst(str_replace('_', ' ', $suite)) ?> Tests</h6>
+                                <?php foreach ($tests as $test => $result): ?>
+                                    <div class="alert alert-<?= 
+                                        isset($result['warning']) && $result['warning'] ? 'warning' : 
+                                        ($result['passed'] ? 'success' : 'danger') 
+                                    ?> alert-sm">
+                                        <strong><?= ucfirst(str_replace('_', ' ', $test)) ?>:</strong>
+                                        <?= htmlspecialchars($result['message']) ?>
+                                        <?php if (isset($result['details'])): ?>
+                                            <details class="mt-2">
+                                                <summary>Details</summary>
+                                                <pre><?= json_encode($result['details'], JSON_PRETTY_PRINT) ?></pre>
+                                            </details>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
                             <hr>
                         <?php endforeach; ?>
                     <?php else: ?>
-                        <p class="text-muted">Click "Run Tests" to begin testing the email system.</p>
+                        <p class="text-muted">Click "Run Tests" or "Run Pattern Tests" to begin testing the email system.</p>
                     <?php endif; ?>
                 </div>
             </div>
@@ -79,6 +148,9 @@ if ($action === 'run_tests') {
                     <form method="post">
                         <button type="submit" name="action" value="run_tests" class="btn btn-primary w-100 mb-3">
                             Run All Tests
+                        </button>
+                        <button type="submit" name="action" value="run_pattern_tests" class="btn btn-success w-100 mb-3" title="Test all email code patterns found in the codebase">
+                            Run Pattern Tests
                         </button>
                         <button type="submit" name="action" value="test_mailgun_only" class="btn btn-outline-primary w-100 mb-2">
                             Test Mailgun Only
@@ -113,7 +185,10 @@ if ($action === 'run_tests') {
                         <a href="/tests/email/auth_analysis.php" class="btn btn-outline-info btn-sm">
                             <i class="fas fa-microscope"></i> Advanced Auth Analysis
                         </a>
-                        <small class="text-muted">Domain checker tests DNS records. Advanced analysis tests real-world authentication results.</small>
+                        <small class="text-muted">
+                            <strong>Pattern Tests</strong> send one email for each code pattern found in the codebase (11 patterns total).<br>
+                            <strong>Domain checker</strong> tests DNS records. <strong>Advanced analysis</strong> tests real-world authentication results.
+                        </small>
                     </div>
                 </div>
             </div>

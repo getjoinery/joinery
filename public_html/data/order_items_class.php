@@ -9,6 +9,7 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 PathHelper::requireOnce('includes/EmailTemplate.php');
+PathHelper::requireOnce('includes/EmailSender.php');
 PathHelper::requireOnce('includes/StripeHelper.php');
 
 PathHelper::requireOnce('data/address_class.php');
@@ -249,12 +250,14 @@ class OrderItem extends SystemBase {
 						$notify_user = User::GetByEmail($notify_email);
 						$body = 'Subscription '.$this->get('odi_stripe_subscription_id').' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
 						$email_inner_template = $settings->get_setting('individual_email_inner_template');
-						$email = EmailTemplate::CreateLegacyTemplate($email_inner_template, $notify_user);
-						$email->fill_template(array(
-							'subject' => 'Cancelled Subscription',
-							'body' => $body,
-						));	
-						$result = $email->send();
+						EmailSender::sendTemplate($email_inner_template,
+							$notify_user->get('usr_email'),
+							[
+								'subject' => 'Cancelled Subscription',
+								'body' => $body,
+								'recipient' => $notify_user->export_as_array()
+							]
+						);
 					}					
 					catch (Exception $e) {
 						//DO NOTHING
