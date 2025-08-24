@@ -2,7 +2,6 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('data/videos_class.php');
-PathHelper::requireOnce('data/friend_reviews_class.php');
 PathHelper::requireOnce('data/users_class.php');
 PathHelper::requireOnce('data/queued_email_class.php');
 PathHelper::requireOnce('includes/EmailMessage.php');
@@ -22,9 +21,6 @@ class RecurringMailer {
 			// Now add in the address info!
 			$default_address = new Address($user->get_default_address(), TRUE);
 			$user_values['default_address'] = $default_address->export_as_array();
-
-			$friend_reviews = new MultiFriendReview(array('reviewed' => $user->key));
-			$user_values['friend_reviews'] = $friend_reviews->count_all();
 
 			return array($user, $user_values);
 		} catch (TTClassException $e) {
