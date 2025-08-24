@@ -341,28 +341,50 @@ For complete guidance on creating admin interface pages, including required setu
 ## Development Workflow
 
 ### Adding New Features
-1. Create data class: `/data/[feature]_class.php`
+1. Create data class: `/data/[feature]_class.php` (defines database schema automatically)
 2. Add business logic: `/logic/[feature]_logic.php`
 3. Create view template: `/views/[feature].php`
 4. Add admin interface: `/adm/admin_[feature].php`
 5. Add route to `serve.php` if needed
-6. Add database migration in `/migrations/`
+6. Add data migrations in `/migrations/` if needed (for settings, data updates only)
 
 **Helper Class Integration:** Use RouteHelper for custom routing, ThemeHelper for asset management, and PathHelper for file operations instead of manual path handling.
 
-### Database Migrations
+### Database Schema Management
 
-Migrations are defined in `/migrations/migrations.php`:
+**IMPORTANT:** Database tables, columns, and constraints are managed automatically by the `update_database` system based on data class specifications. **DO NOT add columns or table structure changes via migrations.**
+
+#### Automatic Database Updates
+The system automatically:
+- Creates tables based on data class `$tablename` and `$field_specifications`
+- Adds missing columns from `$field_specifications` 
+- Updates column types and constraints
+- Creates indexes and foreign keys as needed
+
+Simply define fields in your data class and the database will be updated automatically:
 
 ```php
-// SQL-based migration
+// In data/example_class.php
+public static $field_specifications = array(
+    'new_column' => array('type'=>'varchar(255)', 'is_nullable'=>false),
+);
+```
+
+#### When to Use Migrations
+Migrations in `/migrations/migrations.php` are ONLY for:
+- **Data migrations** (updating existing data)
+- **Settings insertions** (adding configuration values)  
+- **Non-structural changes** (stored procedures, triggers, etc.)
+
+```php
+// Data migration example - ONLY for data changes, not structure
 $migration['database_version'] = '0.XX';
-$migration['test'] = "SELECT count(1) as count FROM table WHERE condition";
-$migration['migration_sql'] = 'SQL STATEMENT HERE';
+$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'setting_name'";
+$migration['migration_sql'] = 'INSERT INTO stg_settings (stg_name, stg_value) VALUES (\'setting_name\', \'value\');';
 $migration['migration_file'] = NULL;
 $migrations[] = $migration;
 
-// File-based migration  
+// File-based migration for complex data updates
 $migration = array(); // CRITICAL: Clear previous migration data
 $migration['database_version'] = '0.XX';
 $migration['test'] = "SELECT count(1) as count FROM table WHERE condition";
@@ -372,9 +394,11 @@ $migrations[] = $migration;
 ```
 
 **Critical Rules:**
-1. **ALWAYS clear the `$migration` array between migrations**
-2. **File-based migrations MUST define a function matching the filename**
-3. **Set unused fields to NULL explicitly**
+1. **NEVER add table/column/constraint changes to migrations** - use data class specifications
+2. **ALWAYS clear the `$migration` array between migrations**
+3. **File-based migrations MUST define a function matching the filename**
+4. **Set unused fields to NULL explicitly**
+5. **Migrations are ONLY for data changes, not schema changes**
 
 ## Development Environment
 
