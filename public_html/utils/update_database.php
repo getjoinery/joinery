@@ -4,8 +4,7 @@
 	$_SERVER['DOCUMENT_ROOT'] = __DIR__ . '/..';
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
 	
-	// Load migrations using the Migration class
-	// This is now handled in the update_database function
+	// Migrations are now loaded automatically by the Migration class
 	
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/DbConnector.php');
@@ -72,7 +71,7 @@
 	-OTHER COLUMNS (INCLUDING THOSE WITH CONSTRAINTS) WILL BE DROPPED IF NOT IN SPECIFICATIONS
 	*/
 
-	function update_database($legacy_migrations = [], $verbose=false, $upgrade=false, $cleanup=false){
+	function update_database($verbose=false, $upgrade=false, $cleanup=false){
 		
 		// Use DatabaseUpdater class for all table operations
 		require_once(__DIR__ . '/../includes/DatabaseUpdater.php');
@@ -292,9 +291,7 @@
 
 	// Run the database update if not included from another script
 	if(!isset($noautorun)){
-		// No need to manually load migrations - Migration::loadMigrations() handles this
-		
-		if(update_database([], $verbose, $upgrade, $cleanup)){
+		if(update_database($verbose, $upgrade, $cleanup)){
 			echo 'Database update script successful'. "<br>\n";
 			exit(1);  // RETURN 1 FOR THE DEPLOY SCRIPT
 		} else {
