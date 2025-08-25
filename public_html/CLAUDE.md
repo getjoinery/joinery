@@ -119,7 +119,7 @@ Plugins in `/plugins/[name]/` provide backend functionality only:
 
 **Database:** PostgreSQL with PDO prepared statements
 **Configuration:** 
-- File-based config for core settings: `Globalvars_site.php` (gitignored, not available locally)
+- File-based config for core settings: `Globalvars_site.php` (available at `/var/www/html/joinerytest/config/`)
 - Additional, database-stored settings in `stg_settings` table, accessed with settings singleton
 - `$settings = Globalvars::get_instance()` - Get settings singleton
 - `$settings->get_setting('setting_name')` - Get configuration value
@@ -406,11 +406,8 @@ $migrations[] = $migration;
 **Available Locally:**
 - PHP Runtime for syntax checking (`php -l filename.php`)
 - File system access and basic bash commands
-
-**NOT Available Locally:**
-- Database connections
-- Web server or external services
-- Globalvars and settings values
+- PostgreSQL database access via psql
+- Web server (Apache) and configuration access
 
 **CRITICAL REQUIREMENT:** Always check PHP files for syntax errors using `php -l filename.php` before declaring any PHP development task complete.
 
@@ -419,19 +416,25 @@ $migrations[] = $migration;
 # PHP Syntax Validation
 php -l filename.php
 
-# Test server error logs
-"/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/maintenance scripts/log_fetcher.sh"
+# Check error logs
+tail /var/www/html/joinerytest/logs/error.log
+
+# Database access (get credentials from /var/www/html/joinerytest/config/Globalvars_site.php)
+psql -U postgres -d joinerytest
+
+# Apache service management
+sudo systemctl status apache2
+sudo systemctl restart apache2
 ```
 
 ### Test Server Monitoring
 **Usage Pattern:**
-1. Make code changes locally
+1. Make code changes
 2. Run syntax validation (`php -l filename.php`)
-3. Wait ~6 seconds for automatic file sync to test server
-4. Execute the changed files (visit URLs)
-5. Run log fetcher script to check for new errors
+3. Test changes locally (web server is available)
+4. Check error logs for any issues
 
-**Quick Log Check:** `"/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/maintenance scripts/log_fetcher.sh"` - Shows recent Apache error.log entries from joinerytest site
+**Quick Log Check:** `tail /var/www/html/joinerytest/logs/error.log` - Shows recent Apache error.log entries
 
 ## Plugin Development
 
