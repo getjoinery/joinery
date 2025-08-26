@@ -53,7 +53,7 @@ fi
 if [ ! -d "$THEME_REPO_DIR" ]; then
     echo "Cloning theme/plugin repository..."
     mkdir -p /home/user1/joinery
-    git clone https://getjoinery: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@github.com/getjoinery/joinery.git "$THEME_REPO_DIR"
+    git clone https://getjoinery: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@github.com/getjoinery/joinery.git "$THEME_REPO_DIR"
 else
     echo "Updating theme/plugin repository..."
     cd "$THEME_REPO_DIR"
