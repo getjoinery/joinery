@@ -1,8 +1,59 @@
 #!/usr/bin/env bash
-#version 2.4 - Added automatic composer dependency installation
+#version 2.5 - Added automatic rollback via bash traps
 # MODIFIED: Preserve staging directory on deployment failures for debugging
 # MODIFIED: Added --norollback flag to disable rollback functionality
 # MODIFIED: Improved rollback functionality to handle directory conflicts
+# MODIFIED: Added trap-based automatic rollback system
+
+# Global deployment state
+DEPLOYMENT_SUCCESS=false
+DEPLOYMENT_STARTED=false
+DISABLE_ROLLBACK=false
+TARGET_SITE=""
+
+# Cleanup function that runs on script exit
+cleanup_and_rollback() {
+    local exit_code=$?
+    
+    # Don't rollback if deployment succeeded or if rollback is disabled
+    if [ "$DEPLOYMENT_SUCCESS" = true ] || [ "$DISABLE_ROLLBACK" = true ]; then
+        if [ "$DEPLOYMENT_SUCCESS" = true ]; then
+            echo "========================================="
+            echo "SUCCESS: Full deployment to live site '$TARGET_SITE' complete!"
+            echo "Permissions have been fixed automatically."
+            echo "========================================="
+        fi
+        exit $exit_code
+    fi
+    
+    # Don't rollback if deployment never started (early validation failures)
+    if [ "$DEPLOYMENT_STARTED" = false ]; then
+        echo "Deployment failed before starting. No rollback needed."
+        exit $exit_code
+    fi
+    
+    # Only rollback if we have a target site and deployment started
+    if [ -n "$TARGET_SITE" ] && [ "$DEPLOYMENT_STARTED" = true ]; then
+        echo ""
+        echo "========================================="
+        echo "DEPLOYMENT FAILED - AUTOMATIC ROLLBACK"
+        echo "========================================="
+        echo "Attempting automatic rollback for site: $TARGET_SITE"
+        
+        if perform_rollback "$TARGET_SITE"; then
+            echo "✓ Automatic rollback completed successfully."
+        else
+            echo "✗ Automatic rollback failed. Manual intervention required."
+        fi
+        
+        echo "Failed deployment preserved for debugging."
+    fi
+    
+    exit $exit_code
+}
+
+# Set up trap to run cleanup on script exit
+trap cleanup_and_rollback EXIT
 
 GITHUB_USER="jeremytunnell"
 GITHUB_TOKEN="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"
@@ -662,6 +713,13 @@ if [ "$IS_TEST_DEPLOY" = true ]; then
     fi
 fi
 
+# DEPLOYMENT OPERATIONS START HERE - Set flag for rollback system
+DEPLOYMENT_STARTED=true
+echo "========================================="
+echo "STARTING DEPLOYMENT OPERATIONS"
+echo "Target: $TARGET_SITE ($DEPLOY_TYPE)"
+echo "Automatic rollback: $([ "$DISABLE_ROLLBACK" = true ] && echo "DISABLED" || echo "ENABLED")"
+echo "========================================="
 
 # Remove old theme/plugin directories if they exist
 if [[ -d "/var/www/html/$TARGET_SITE/theme" ]]; then
@@ -742,25 +800,7 @@ fi
 # MERGE THEMES AND PLUGINS INTO PUBLIC_HTML
 echo "Merging themes and plugins into public_html..."
 if ! merge_themes_plugins_to_public_html "$TARGET_SITE"; then
-    echo "ERROR: Theme/plugin merge failed. Attempting rollback."
-    
-    # Check if rollback is disabled
-    if [ "$DISABLE_ROLLBACK" = true ]; then
-        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
-        echo "Manual intervention required to fix the theme/plugin merge issue."
-        exit 1
-    fi
-    
-    # Check if this is an initial deployment (no backup to restore)
-    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
-        if ! perform_rollback "$TARGET_SITE"; then
-            echo "ERROR: Rollback failed. Manual intervention required."
-            exit 1
-        fi
-    else
-        echo "This appears to be an initial deployment - no previous version to rollback to."
-        echo "Keeping current deployment in place for debugging."
-    fi
+    echo "ERROR: Theme/plugin merge failed."
     exit 1
 fi
 
@@ -770,24 +810,6 @@ if [[ ! -d "/var/www/html/$TARGET_SITE/public_html/theme" ]]; then
     echo "ERROR: Theme directory missing after merge: /var/www/html/$TARGET_SITE/public_html/theme"
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "DEBUGGING: Theme source directory: /var/www/html/$TARGET_SITE/theme"
-    
-    # Check if rollback is disabled
-    if [ "$DISABLE_ROLLBACK" = true ]; then
-        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
-        echo "Manual intervention required to fix the missing theme directory."
-        exit 1
-    fi
-    
-    # Check if this is an initial deployment (no backup to restore)
-    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
-        if ! perform_rollback "$TARGET_SITE"; then
-            echo "ERROR: Rollback failed. Manual intervention required."
-            exit 1
-        fi
-    else
-        echo "This appears to be an initial deployment - no previous version to rollback to."
-        echo "Keeping current deployment in place for debugging."
-    fi
     exit 1
 fi
 
@@ -795,24 +817,6 @@ if [[ ! -d "/var/www/html/$TARGET_SITE/public_html/plugins" ]]; then
     echo "ERROR: Plugins directory missing after merge: /var/www/html/$TARGET_SITE/public_html/plugins"
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "DEBUGGING: Plugins source directory: /var/www/html/$TARGET_SITE/plugins"
-    
-    # Check if rollback is disabled
-    if [ "$DISABLE_ROLLBACK" = true ]; then
-        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
-        echo "Manual intervention required to fix the missing plugins directory."
-        exit 1
-    fi
-    
-    # Check if this is an initial deployment (no backup to restore)
-    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
-        if ! perform_rollback "$TARGET_SITE"; then
-            echo "ERROR: Rollback failed. Manual intervention required."
-            exit 1
-        fi
-    else
-        echo "This appears to be an initial deployment - no previous version to rollback to."
-        echo "Keeping current deployment in place for debugging."
-    fi
     exit 1
 fi
 
@@ -887,28 +891,6 @@ if [[ "$returnvalue" != 1 ]]; then
     echo "ERROR: Database update failed."
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "DEBUGGING: You can examine the staged files to understand what was deployed."
-    
-    # Check if rollback is disabled
-    if [ "$DISABLE_ROLLBACK" = true ]; then
-        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
-        echo "Manual intervention required to fix the database update issue."
-        exit 1
-    fi
-    
-    # Check if this is an initial deployment (no backup to restore)
-    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
-        if ! perform_rollback "$TARGET_SITE"; then
-            echo "ERROR: Rollback failed. Manual intervention required."
-            exit 1
-        fi
-    else
-        echo "This appears to be an initial deployment - no previous version to rollback to."
-        echo "Keeping current deployment in place for debugging."
-        echo "You may need to manually fix the database update issue."
-        # MODIFIED: Don't clean up staging directory on initial deployment failure
-        # rm -rf /var/www/html/$TARGET_SITE/public_html_stage
-    fi
-    
     exit 1
 else
     echo "Database update successful."
@@ -918,13 +900,5 @@ fi
 echo "Cleaning up staging directory..."
 rm -rf /var/www/html/$TARGET_SITE/public_html_stage
 
-echo "========================================="
-if [ "$IS_TEST_DEPLOY" = true ]; then
-    echo "SUCCESS: Full deployment to test site '$TARGET_SITE' complete!"
-    echo "Test site should be available at:"
-    echo "  https://test.${LIVE_SITE}.com (if subdomain configured)"
-else
-    echo "SUCCESS: Full deployment to live site '$TARGET_SITE' complete!"
-fi
-echo "Permissions have been fixed automatically."
-echo "========================================"
+# DEPLOYMENT COMPLETED SUCCESSFULLY
+DEPLOYMENT_SUCCESS=true
