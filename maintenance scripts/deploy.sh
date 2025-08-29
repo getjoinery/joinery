@@ -140,13 +140,15 @@ deploy_themes_plugins_from_stage() {
         return 1
     fi
     
+    # Ensure theme directory exists
+    mkdir -p "$public_html_dir/theme" || {
+        echo "ERROR: Failed to create public_html/theme directory"
+        return 1
+    }
+    
     # Check for theme directory and deploy if present
     if [[ -d "$staging_dir/theme" ]]; then
         echo "Found themes in staging, processing..."
-        mkdir -p "$public_html_dir/theme" || {
-            echo "ERROR: Failed to create public_html/theme directory"
-            return 1
-        }
         
         for theme_dir in "$staging_dir/theme"/*; do
             if [[ -d "$theme_dir" ]]; then
@@ -206,13 +208,15 @@ EOF
         echo "No themes found in staging directory."
     fi
     
+    # Ensure plugins directory exists
+    mkdir -p "$public_html_dir/plugins" || {
+        echo "ERROR: Failed to create public_html/plugins directory"
+        return 1
+    }
+    
     # Check for plugin directory and deploy if present  
     if [[ -d "$staging_dir/plugins" ]]; then
         echo "Found plugins in staging, processing..."
-        mkdir -p "$public_html_dir/plugins" || {
-            echo "ERROR: Failed to create public_html/plugins directory"
-            return 1
-        }
         
         for plugin_dir in "$staging_dir/plugins"/*; do
             if [[ -d "$plugin_dir" ]]; then
@@ -273,6 +277,188 @@ EOF
     fi
     
     echo "Theme and plugin deployment from staging completed successfully."
+    return 0
+}
+
+# Function to deploy themes and plugins from external repository to directories outside public_html
+deploy_theme_plugin() {
+    local target_site="$1"
+    local site_root="/var/www/html/$target_site"
+    
+    echo "Downloading themes and plugins from joinery repository to $target_site..."
+    
+    # DEPLOY THEMES to /var/www/html/sitename/theme (outside public_html)
+    echo "Setting up theme deployment to $site_root/theme..."
+    local theme_stage_dir="$site_root/theme_stage"
+    rm -rf "$theme_stage_dir"
+    mkdir -p "$theme_stage_dir"
+    
+    # Clone repo for themes
+    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$theme_stage_dir"
+    cd "$theme_stage_dir" || exit 1
+    git config core.sparseCheckout true
+    git sparse-checkout init --cone
+    git sparse-checkout set theme
+    git checkout main
+    rm -rf .git
+    cd - > /dev/null
+
+    # DEPLOY PLUGINS to /var/www/html/sitename/plugins (outside public_html)
+    echo "Setting up plugin deployment to $site_root/plugins..."
+    local plugins_stage_dir="$site_root/plugins_stage"
+    rm -rf "$plugins_stage_dir"
+    mkdir -p "$plugins_stage_dir"
+    
+    # Clone repo for plugins
+    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$plugins_stage_dir"
+    cd "$plugins_stage_dir" || exit 1
+    git config core.sparseCheckout true
+    git sparse-checkout init --cone
+    git sparse-checkout set plugins
+    git checkout main
+    rm -rf .git
+    cd - > /dev/null
+
+    # Deploy themes to /var/www/html/sitename/theme (outside public_html)
+    if [[ -d "$theme_stage_dir/theme" ]]; then
+        echo "Deploying themes to $site_root/theme..."
+        rm -rf "$site_root/theme_old"
+        if [[ -d "$site_root/theme" ]]; then
+            mv "$site_root/theme" "$site_root/theme_old"
+        fi
+        mv "$theme_stage_dir/theme" "$site_root/theme"
+        chown -R www-data:user1 "$site_root/theme" 2>/dev/null || true
+        chmod -R 775 "$site_root/theme" 2>/dev/null || true
+        echo "Themes deployed successfully to $site_root/theme"
+    else
+        echo "ERROR: No theme directory found in joinery repository - deployment cannot continue"
+        return 1
+    fi
+
+    # Deploy plugins to /var/www/html/sitename/plugins (outside public_html)  
+    if [[ -d "$plugins_stage_dir/plugins" ]]; then
+        echo "Deploying plugins to $site_root/plugins..."
+        rm -rf "$site_root/plugins_old"
+        if [[ -d "$site_root/plugins" ]]; then
+            mv "$site_root/plugins" "$site_root/plugins_old"
+        fi
+        mv "$plugins_stage_dir/plugins" "$site_root/plugins"
+        chown -R www-data:user1 "$site_root/plugins" 2>/dev/null || true
+        chmod -R 775 "$site_root/plugins" 2>/dev/null || true
+        echo "Plugins deployed successfully to $site_root/plugins"
+    else
+        echo "ERROR: No plugins directory found in joinery repository - deployment cannot continue"
+        return 1
+    fi
+
+    # Validate that directories were created successfully
+    if [[ ! -d "$site_root/theme" ]]; then
+        echo "ERROR: Theme directory was not created successfully at $site_root/theme"
+        return 1
+    fi
+    
+    if [[ ! -d "$site_root/plugins" ]]; then
+        echo "ERROR: Plugins directory was not created successfully at $site_root/plugins"
+        return 1
+    fi
+
+    # Cleanup staging directories
+    echo "Cleaning up theme/plugin staging directories..."
+    rm -rf "$theme_stage_dir"
+    rm -rf "$plugins_stage_dir"
+    
+    echo "Theme and plugin download from joinery repository complete."
+    return 0
+}
+
+# Function to merge themes and plugins into public_html after main code deployment
+merge_themes_plugins_to_public_html() {
+    local target_site="$1"
+    local site_root="/var/www/html/$target_site"
+    local public_html_dir="$site_root/public_html"
+    
+    echo "Merging themes and plugins into public_html..."
+    
+    # Ensure public_html theme and plugins directories exist
+    mkdir -p "$public_html_dir/theme"
+    mkdir -p "$public_html_dir/plugins"
+    
+    # MERGE THEMES: overwrite same names, preserve different names
+    echo "Merging themes from $site_root/theme to $public_html_dir/theme..."
+    if [[ -d "$site_root/theme" ]]; then
+        # Copy all themes from joinery repo, overwriting any with same names
+        for theme_path in "$site_root/theme"/*/; do
+            if [[ -d "$theme_path" ]]; then
+                theme_name=$(basename "$theme_path")
+                target_theme_path="$public_html_dir/theme/$theme_name"
+                
+                if [[ -d "$target_theme_path" ]]; then
+                    echo "  OVERWRITING existing theme: $theme_name (from joinery repo)"
+                    rm -rf "$target_theme_path"
+                else
+                    echo "  Adding theme: $theme_name (from joinery repo)"
+                fi
+                
+                cp -r "$theme_path" "$public_html_dir/theme/" || {
+                    echo "ERROR: Failed to copy theme $theme_name"
+                    return 1
+                }
+                
+                # Fix permissions for theme
+                chown -R www-data:user1 "$target_theme_path" 2>/dev/null || true
+                chmod -R 775 "$target_theme_path" 2>/dev/null || true
+            fi
+        done
+        echo "Theme merge completed."
+    else
+        echo "ERROR: No themes directory found at $site_root/theme"
+        return 1
+    fi
+    
+    # MERGE PLUGINS: overwrite same names, preserve different names  
+    echo "Merging plugins from $site_root/plugins to $public_html_dir/plugins..."
+    if [[ -d "$site_root/plugins" ]]; then
+        # Copy all plugins from joinery repo, overwriting any with same names
+        for plugin_path in "$site_root/plugins"/*/; do
+            if [[ -d "$plugin_path" ]]; then
+                plugin_name=$(basename "$plugin_path")
+                target_plugin_path="$public_html_dir/plugins/$plugin_name"
+                
+                if [[ -d "$target_plugin_path" ]]; then
+                    echo "  OVERWRITING existing plugin: $plugin_name (from joinery repo)"
+                    rm -rf "$target_plugin_path"
+                else
+                    echo "  Adding plugin: $plugin_name (from joinery repo)"
+                fi
+                
+                cp -r "$plugin_path" "$public_html_dir/plugins/" || {
+                    echo "ERROR: Failed to copy plugin $plugin_name"
+                    return 1
+                }
+                
+                # Fix permissions for plugin
+                chown -R www-data:user1 "$target_plugin_path" 2>/dev/null || true
+                chmod -R 775 "$target_plugin_path" 2>/dev/null || true
+            fi
+        done
+        echo "Plugin merge completed."
+    else
+        echo "ERROR: No plugins directory found at $site_root/plugins"
+        return 1
+    fi
+    
+    # Final validation
+    if [[ ! -d "$public_html_dir/theme" ]]; then
+        echo "ERROR: Theme directory missing after merge: $public_html_dir/theme"
+        return 1
+    fi
+    
+    if [[ ! -d "$public_html_dir/plugins" ]]; then
+        echo "ERROR: Plugins directory missing after merge: $public_html_dir/plugins"
+        return 1
+    fi
+    
+    echo "Theme and plugin merge to public_html complete."
     return 0
 }
 
@@ -546,15 +732,22 @@ for item in *; do
 done
 cd - > /dev/null
 
-# DEPLOY THEMES AND PLUGINS FROM STAGING
-echo "Deploying themes and plugins from staging..."
-if ! deploy_themes_plugins_from_stage "$TARGET_SITE"; then
-    echo "ERROR: Theme/plugin deployment failed. Attempting rollback."
+# DOWNLOAD THEMES AND PLUGINS FROM JOINERY REPOSITORY
+echo "Downloading themes and plugins from joinery repository..."
+if ! deploy_theme_plugin "$TARGET_SITE"; then
+    echo "ERROR: Theme/plugin download failed. Aborting deployment."
+    exit 1
+fi
+
+# MERGE THEMES AND PLUGINS INTO PUBLIC_HTML
+echo "Merging themes and plugins into public_html..."
+if ! merge_themes_plugins_to_public_html "$TARGET_SITE"; then
+    echo "ERROR: Theme/plugin merge failed. Attempting rollback."
     
     # Check if rollback is disabled
     if [ "$DISABLE_ROLLBACK" = true ]; then
         echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
-        echo "Manual intervention required to fix the theme/plugin deployment issue."
+        echo "Manual intervention required to fix the theme/plugin merge issue."
         exit 1
     fi
     
