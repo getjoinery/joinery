@@ -2,7 +2,7 @@
 
 ## Directory Structure Changes
 
-**Remove:**
+**Remove (will be deleted by deploy script if present):**
 - `/var/www/html/[sitename]/theme/`
 - `/var/www/html/[sitename]/plugins/`
 - `/var/www/html/[sitename]/theme_stage/`
@@ -13,6 +13,8 @@
 - `/var/www/html/[sitename]/public_html/plugins/`
 
 ## Phase 1: Deploy Script & Manifests
+
+**Deploy Script Location:** `/home/user1/joinery/joinery/maintenance scripts/deploy.sh`
 
 ### 1.1 Manifest Files
 
@@ -30,12 +32,27 @@
 **plugins/[name]/plugin.json (add is_stock field):**
 ```json
 {
-  "existing_fields": "...",
+  "name": "plugin_name",
+  "version": "1.0.0",
+  "description": "Plugin description",
+  "author": "Author Name",
   "is_stock": true
 }
 ```
 
-### 1.2 Deploy Script Changes
+### 1.2 Prerequisites
+
+**JQ (JSON Query tool):**
+The deployment script uses `jq` for parsing JSON manifest files. JQ is already installed on the server (version 1.7) at `/usr/bin/jq`. 
+
+JQ is a lightweight command-line JSON processor that allows the script to:
+- Parse theme.json and plugin.json files
+- Extract the `is_stock` field value
+- Handle missing fields with default values
+
+No action needed - JQ is already available.
+
+### 1.3 Deploy Script Changes
 
 **Remove functions:**
 - `deploy_theme_plugin()`
@@ -45,30 +62,79 @@
 - `IS_THEME_ONLY`
 - All `--theme-only` flag handling
 
-**Replace theme/plugin deployment (after line ~600):**
+**Add directory cleanup (before main deployment, around line ~560):**
+```bash
+# Remove old theme/plugin directories if they exist
+if [[ -d "/var/www/html/$TARGET_SITE/theme" ]]; then
+    echo "Removing old theme directory: /var/www/html/$TARGET_SITE/theme"
+    rm -rf "/var/www/html/$TARGET_SITE/theme"
+fi
+if [[ -d "/var/www/html/$TARGET_SITE/plugins" ]]; then
+    echo "Removing old plugins directory: /var/www/html/$TARGET_SITE/plugins"
+    rm -rf "/var/www/html/$TARGET_SITE/plugins"
+fi
+if [[ -d "/var/www/html/$TARGET_SITE/theme_stage" ]]; then
+    echo "Removing old theme_stage directory: /var/www/html/$TARGET_SITE/theme_stage"
+    rm -rf "/var/www/html/$TARGET_SITE/theme_stage"
+fi
+if [[ -d "/var/www/html/$TARGET_SITE/plugins_stage" ]]; then
+    echo "Removing old plugins_stage directory: /var/www/html/$TARGET_SITE/plugins_stage"
+    rm -rf "/var/www/html/$TARGET_SITE/plugins_stage"
+fi
+```
+
+**Replace theme/plugin deployment (after line ~600, replacing merge_themes_plugins_to_public_html call):**
 ```bash
 # Smart theme merge: update stock items, skip custom items
 if [[ -d "public_html_stage/theme" ]]; then
-    mkdir -p public_html/theme
+    mkdir -p public_html/theme || {
+        echo "ERROR: Failed to create public_html/theme directory"
+        exit 1
+    }
+    
     for theme_dir in public_html_stage/theme/*/; do
         if [[ -d "$theme_dir" ]]; then
             theme_name=$(basename "$theme_dir")
             manifest_file="$theme_dir/theme.json"
             
-            # Check if theme is stock by reading manifest directly
+            # Auto-generate manifest if missing
+            if [[ ! -f "$manifest_file" ]]; then
+                echo "Auto-generating theme.json for $theme_name"
+                cat > "$manifest_file" << EOF
+{
+  "name": "$theme_name",
+  "version": "1.0.0",
+  "description": "Auto-generated manifest for $theme_name theme",
+  "author": "Unknown",
+  "is_stock": true
+}
+EOF
+            fi
+            
+            # Check if theme is stock by reading manifest
             if [[ -f "$manifest_file" ]]; then
-                is_stock=$(jq -r '.is_stock // false' "$manifest_file" 2>/dev/null)
+                is_stock=$(jq -r '.is_stock // true' "$manifest_file" 2>/dev/null || echo "true")
             else
-                is_stock="false"
+                # Fallback if jq fails
+                is_stock="true"
             fi
             
             if [[ ! -d "public_html/theme/$theme_name" ]]; then
                 echo "Adding new theme: $theme_name (stock: $is_stock)"
-                cp -r "$theme_dir" "public_html/theme/"
+                cp -r "$theme_dir" "public_html/theme/" || {
+                    echo "ERROR: Failed to copy theme $theme_name"
+                    exit 1
+                }
             elif [[ "$is_stock" == "true" ]]; then
                 echo "Updating stock theme: $theme_name"
-                rm -rf "public_html/theme/$theme_name"
-                cp -r "$theme_dir" "public_html/theme/"
+                rm -rf "public_html/theme/$theme_name" || {
+                    echo "ERROR: Failed to remove old theme $theme_name"
+                    exit 1
+                }
+                cp -r "$theme_dir" "public_html/theme/" || {
+                    echo "ERROR: Failed to copy theme $theme_name"
+                    exit 1
+                }
             else
                 echo "Skipping custom theme: $theme_name (use admin interface to upgrade)"
             fi
@@ -78,26 +144,54 @@ fi
 
 # Smart plugin merge: update stock items, skip custom items
 if [[ -d "public_html_stage/plugins" ]]; then
-    mkdir -p public_html/plugins  
+    mkdir -p public_html/plugins || {
+        echo "ERROR: Failed to create public_html/plugins directory"
+        exit 1
+    }
+    
     for plugin_dir in public_html_stage/plugins/*/; do
         if [[ -d "$plugin_dir" ]]; then
             plugin_name=$(basename "$plugin_dir")
             manifest_file="$plugin_dir/plugin.json"
             
-            # Check if plugin is stock by reading manifest directly
+            # Auto-generate manifest if missing
+            if [[ ! -f "$manifest_file" ]]; then
+                echo "Auto-generating plugin.json for $plugin_name"
+                cat > "$manifest_file" << EOF
+{
+  "name": "$plugin_name",
+  "version": "1.0.0",
+  "description": "Auto-generated manifest for $plugin_name plugin",
+  "author": "Unknown",
+  "is_stock": true
+}
+EOF
+            fi
+            
+            # Check if plugin is stock by reading manifest
             if [[ -f "$manifest_file" ]]; then
-                is_stock=$(jq -r '.is_stock // false' "$manifest_file" 2>/dev/null)
+                is_stock=$(jq -r '.is_stock // true' "$manifest_file" 2>/dev/null || echo "true")
             else
-                is_stock="false"
+                # Fallback if jq fails
+                is_stock="true"
             fi
             
             if [[ ! -d "public_html/plugins/$plugin_name" ]]; then
                 echo "Adding new plugin: $plugin_name (stock: $is_stock)"
-                cp -r "$plugin_dir" "public_html/plugins/"
+                cp -r "$plugin_dir" "public_html/plugins/" || {
+                    echo "ERROR: Failed to copy plugin $plugin_name"
+                    exit 1
+                }
             elif [[ "$is_stock" == "true" ]]; then
                 echo "Updating stock plugin: $plugin_name"
-                rm -rf "public_html/plugins/$plugin_name"
-                cp -r "$plugin_dir" "public_html/plugins/"
+                rm -rf "public_html/plugins/$plugin_name" || {
+                    echo "ERROR: Failed to remove old plugin $plugin_name"
+                    exit 1
+                }
+                cp -r "$plugin_dir" "public_html/plugins/" || {
+                    echo "ERROR: Failed to copy plugin $plugin_name"
+                    exit 1
+                }
             else
                 echo "Skipping custom plugin: $plugin_name (use admin interface to upgrade)"
             fi
@@ -106,12 +200,24 @@ if [[ -d "public_html_stage/plugins" ]]; then
 fi
 ```
 
-### 1.3 First Deployment Transition Logic
+### 1.4 First Deployment Transition Logic
 
 **Expected behavior on first deploy:**
-- Existing themes without theme.json → treated as stock, will be updated
-- Existing plugins without is_stock field → treated as stock, will be updated
-- After first deploy, all items have proper manifests
+- Existing themes without theme.json → Auto-generates manifest with `is_stock: true`, will be updated
+- Existing plugins without plugin.json → Auto-generates manifest with `is_stock: true`, will be updated  
+- After first deploy, all items have proper manifests with `is_stock` field
+
+**How public_html_stage is populated:**
+The deploy script creates `public_html_stage` at line ~562-569:
+1. Removes old `public_html_stage` if it exists
+2. Creates fresh `public_html_stage` directory
+3. Clones the git repository into it
+4. Pulls specific folders from the repository
+
+**Error handling:**
+- All critical operations include error checking with `|| { echo "ERROR:..."; exit 1; }`
+- Deploy script already has rollback functionality for failed deployments
+- Failed deployments preserve staging directory for debugging
 
 ## Phase 2: Admin Interface
 
