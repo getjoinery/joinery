@@ -687,7 +687,7 @@ if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; 
     exit 1
 fi
 
-/usr/bin/php /var/www/html/$TARGET_SITE/public_html/utils/update_database.php
+/usr/bin/php /var/www/html/$TARGET_SITE/public_html/utils/update_database.php --upgrade
 returnvalue=$?
 
 if [[ "$returnvalue" != 1 ]]; then
