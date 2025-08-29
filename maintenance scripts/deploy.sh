@@ -900,5 +900,31 @@ fi
 echo "Cleaning up staging directory..."
 rm -rf /var/www/html/$TARGET_SITE/public_html_stage
 
+# CLEANUP: Remove backup directory after successful deployment
+echo "Cleaning up backup directory..."
+if [[ -d "/var/www/html/$TARGET_SITE/public_html_last" ]]; then
+    rm -rf /var/www/html/$TARGET_SITE/public_html_last
+    echo "Removed backup directory: public_html_last"
+else
+    echo "No backup directory to clean up"
+fi
+
+# CLEANUP: Remove old failed deployment directories after successful deployment
+echo "Cleaning up old failed deployment directories..."
+failed_dirs_count=0
+for failed_dir in /var/www/html/$TARGET_SITE/public_html_failed_*; do
+    if [[ -d "$failed_dir" ]]; then
+        echo "Removing old failed deployment: $(basename "$failed_dir")"
+        rm -rf "$failed_dir"
+        ((failed_dirs_count++))
+    fi
+done
+
+if [[ $failed_dirs_count -eq 0 ]]; then
+    echo "No failed deployment directories to clean up"
+else
+    echo "Removed $failed_dirs_count failed deployment directories"
+fi
+
 # DEPLOYMENT COMPLETED SUCCESSFULLY
 DEPLOYMENT_SUCCESS=true
