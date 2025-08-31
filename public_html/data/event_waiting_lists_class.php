@@ -11,11 +11,9 @@ PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/users_class.php');
 
-	
 class WaitingListException extends SystemClassException {}
 
-class WaitingList extends SystemBase {
-	public static $prefix = 'ewl';
+class WaitingList extends SystemBase {	public static $prefix = 'ewl';
 	public static $tablename = 'ewl_waiting_lists';
 	public static $pkey_column = 'ewl_waiting_list_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -25,7 +23,6 @@ class WaitingList extends SystemBase {
 		'ewl_create_time' => 'Time added to waiting list',
 	);
 
-	
 /**
 	 * Field specifications define database column properties and schema constraints
 	 * Available options:
@@ -42,8 +39,6 @@ class WaitingList extends SystemBase {
 		'ewl_create_time' => array('type'=>'timestamp(6)'),
 	);	
 
-	
-
 public static $required_fields = array('ewl_evt_event_id', 'ewl_usr_user_id');
 
 	public static $field_constraints = array();	
@@ -51,8 +46,7 @@ public static $required_fields = array('ewl_evt_event_id', 'ewl_usr_user_id');
 	public static $zero_variables = array();	
 
 	public static $initial_default_values = array('ewl_create_time' => 'now()');		
-		
-	
+
 	public static function CheckIfExists($user_id, $event_id) {
 		
 		$count = new MultiWaitingList(array(
@@ -78,7 +72,6 @@ public static $required_fields = array('ewl_evt_event_id', 'ewl_usr_user_id');
 		
 		return $success;		
 	}	
-	
 
 	// Unique constraints now handled automatically by SystemBase
 	
@@ -88,12 +81,11 @@ public static $required_fields = array('ewl_evt_event_id', 'ewl_usr_user_id');
 				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
 	}
-	
 
-	
 }
 
 class MultiWaitingList extends SystemMultiBase {
+	protected static $model_class = 'WaitingList';
 	function get_user_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
@@ -132,22 +124,6 @@ class MultiWaitingList extends SystemMultiBase {
         return $this->_get_resultsv2('ewl_waiting_lists', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new WaitingList($row->ewl_waiting_list_id);
-			$child->load_from_data($row, array_keys(WaitingList::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

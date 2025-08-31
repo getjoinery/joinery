@@ -18,8 +18,7 @@ PathHelper::requireOnce('data/products_class.php');
 
 class OrderItemException extends SystemClassException {}
 
-class OrderItem extends SystemBase {
-	public static $prefix = 'odi';
+class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	public static $tablename = 'odi_order_items';
 	public static $pkey_column = 'odi_order_item_id';
 	public static $permanent_delete_actions = array(		'evr_odi_order_item_id' => 'delete',
@@ -93,7 +92,6 @@ class OrderItem extends SystemBase {
 		'odi_status_change_time' => 'now()'
 		);
 
-
 	function get_order() {
 		$order = new Order($this->get('odi_ord_order_id'), TRUE);
 		return $order;
@@ -121,7 +119,6 @@ class OrderItem extends SystemBase {
 		}
 
 		$p_keys = array('odi_order_item_id' => $this->key);
-
 
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -239,8 +236,7 @@ class OrderItem extends SystemBase {
 			exit;		
 		}		
 		$result = $stripe_helper->update_subscription_in_order_item($this);
-		
-		
+
 		//SEND NOTIFICATION
 		if($send_email){
 			if($settings->get_setting('subscription_notification_emails')){
@@ -303,8 +299,8 @@ class OrderItem extends SystemBase {
 	}
 }
 
-
 class MultiOrderItem extends SystemMultiBase {
+	protected static $model_class = 'OrderItem';
 
 	public function get_prices() {
 		$price_array = array();
@@ -388,21 +384,6 @@ class MultiOrderItem extends SystemMultiBase {
 		}
 
 		return $this->_get_resultsv2('odi_order_items', $filters, $this->order_by, $only_count, $debug);
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new OrderItem($row->odi_order_item_id);
-			$child->load_from_data($row, array_keys(OrderItem::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
 	}
 
 }

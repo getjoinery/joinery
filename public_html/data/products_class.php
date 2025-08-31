@@ -24,6 +24,7 @@ class ProductException extends SystemClassException {}
 class BasicProductRequirementException extends SystemClassException {}
 
 abstract class BasicProductRequirement {
+	protected static $model_class = 'Product';
 
 	public static $REQUIREMENT_IDS = array(
 		1 => 'FullNameRequirement',
@@ -37,7 +38,6 @@ abstract class BasicProductRequirement {
 		256 => 'NewsletterSignupRequirement',
 		512 => 'CommentRequirement'
 	);
-	
 
 	public static function GetRequirements($requirements) {
 		$req_classes = array();
@@ -136,7 +136,6 @@ class PhoneNumberRequirement extends BasicProductRequirement {
 		if (empty($data['phn_phone_number'])) {
 			throw new BasicProductRequirementException('Phone Number is not valid');
 		}
-
 
 		return array(
 			array('phn_phone_number' => $data['phn_phone_number']),
@@ -333,7 +332,6 @@ class AddressRequirement extends BasicProductRequirement {
 	}
 }
 
-
 class GDPRNoticeRequirement extends BasicProductRequirement {
 	const ID = 16;
 	const LABEL = 'GDPR Notice';
@@ -406,8 +404,6 @@ class RecordConsentRequirement extends BasicProductRequirement {
 
 		return array(array('record_terms' => $data['record_terms']), array('Record Consent' => $display));
 	}
-	
-	
 
 	public function get_validation_info() {
 		return array(
@@ -481,7 +477,6 @@ class UserPriceRequirement extends BasicProductRequirement {
 			throw new BasicProductRequirementException('Donation amount is required');
 		}*/
 
-		
 		//CLEAN IT UP
 		//REMOVE ANYTHING BUT NUMBERS AND A DOT
 		$data['user_price'] = str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price'])); 
@@ -494,7 +489,6 @@ class UserPriceRequirement extends BasicProductRequirement {
 		if ($data['user_price'] < 0) {
 			throw new BasicProductRequirementException('Donation amount must be zero or more.');
 		}
-
 
 		$return_array = array(
 			'user_price' => $data['user_price'],
@@ -572,7 +566,6 @@ class CommentRequirement extends BasicProductRequirement {
 	}
 
 	public function validate_form($data, $session=NULL) {
-			
 
 		$return_array = array(
 			'comment' => $data['comment'],
@@ -590,8 +583,6 @@ class CommentRequirement extends BasicProductRequirement {
 		return array();
 	}
 }
-
-
 
 class Product extends SystemBase {
 	public static $prefix = 'pro';
@@ -684,9 +675,7 @@ class Product extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array();	
-	
 
-	
 	public function get_requirement_info($output='text') {
 		$requirements_out = array();
 		foreach ($this->get_product_requirements() as $productr){
@@ -751,7 +740,6 @@ class Product extends SystemBase {
 		}
 		$requirements = array_filter($requirements);
 
-		
 		//FIRST GET A LIST OF THE CURRENT REQUIREMENT INSTANCES
 		
 		$pri_lists = $this->get_requirement_instances(true);
@@ -760,7 +748,6 @@ class Product extends SystemBase {
 			$to_process[] = $pri_list->get('pri_prq_product_requirement_id');
 		}
 
-		
 		foreach ($requirements as $choice => $value){
 			//THEN CYCLE THROUGH THE NEW ONES, ADD IF IT'S NOT THERE
 			if(in_array($value, $to_process)){
@@ -785,7 +772,6 @@ class Product extends SystemBase {
 				unset($to_process[$choice]);
 			}
 		}
-		
 
 		//IF ANY ARE LEFT, SET THEM TO DELETED
 		//WE ARE NOT ALLOWING FULL DELETION IN CASE THERE ARE REFERENCES IN THE DATABASE
@@ -956,8 +942,7 @@ class Product extends SystemBase {
 				}
 			}
 		}
-		
-		
+
 		//THEN GET ANY COUPONS THAT MATCH SUBSCRIPTION STATUS AND VALID 
 		if($product_version->is_subscription()){
 			$searches = array('deleted' => false, 'active' => true, 'applies_to' => 1);	
@@ -1004,14 +989,10 @@ class Product extends SystemBase {
 				}
 			}
 		}
-		
-		
+
 		return $valid_coupon_codes;
 	}
-	
 
-	
-	
 	public function get_product_versions($active=TRUE, $product_version_id=NULL) {
 		$product_versions = new MultiProductVersion(
 			array('product_id' => $this->key, 'is_active' => $active), 
@@ -1039,7 +1020,6 @@ class Product extends SystemBase {
 		return $product_versions->count_all();
 	}
 
-	
 	function get_number_purchased($status = OrderItem::STATUS_PAID){
 		//COUNT THE NUMBER OF PRODUCTS PURCHASED SO FAR
 		$orders = new MultiOrderItem(array('product_id' => $this->key, 'status' => $status));
@@ -1062,11 +1042,9 @@ class Product extends SystemBase {
 		return $sold_out;
 	}
 
-	
 	function get_product_requirements() {
 		return BasicProductRequirement::GetRequirements($this->get('pro_requirements'));
 	}
-
 
 	function validate_form($form_data, $session) {
 		$form_display_data = array();
@@ -1116,8 +1094,7 @@ class Product extends SystemBase {
 				$form_display_data = array_merge($form_display_data, $display_data);
 			}
 		}
-		
-		
+
 		//NOW VALIDATE THE ADDITIONAL PRODUCT REQUIREMENTS
 		$instances = $this->get_requirement_instances();
 
@@ -1137,7 +1114,6 @@ class Product extends SystemBase {
 			}
 		}
 
-			
 /*
 		$errors = array();
 		foreach (static::$required_fields as $field => $error_message) {
@@ -1197,15 +1173,13 @@ class Product extends SystemBase {
 					
 				}
 			}
-			
-			
+
 			//ADD IN REQUIRED PRICE OVERRIDE
 			/*
 			if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
 				$rules['user_price_override'] = array('required' => 'true');
 			}
 			*/
-
 
 			//ADD IN EXTRA DATA 
 			if(count($extra_data)){
@@ -1242,7 +1216,6 @@ class Product extends SystemBase {
 		}
 		echo '</script>';
 	}
-	
 
 	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL) {
 		$settings = Globalvars::get_instance(); 
@@ -1267,7 +1240,6 @@ class Product extends SystemBase {
 				$selected = $product_version_id;
 			}
 
-			
 			$version_dropdown = array();
 			foreach ($versions as $version) {
 				$output_string = $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price');
@@ -1291,7 +1263,6 @@ class Product extends SystemBase {
 				$product_requirement->get_form($formwriter, $user);	
 			}
 
-			
 			//GET EXTRA PRODUCT REQUIREMENTS, HERE WE OUTPUT THE FORM.  THE VALIDATION HAPPENS ELSEWHERE
 			$instances = $this->get_requirement_instances();
 
@@ -1312,9 +1283,7 @@ class Product extends SystemBase {
 		
 		return TRUE;
 	}
-	
-	
-	
+
 	function prepare(){
 		parent::prepare();
 		//DO NOT ALLOW DUPLICATE PRODUCT LINKS
@@ -1330,6 +1299,7 @@ class Product extends SystemBase {
 }
 
 class MultiProduct extends SystemMultiBase {
+	protected static $model_class = 'Product';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -1342,7 +1312,6 @@ class MultiProduct extends SystemMultiBase {
 		return $items;
 
 	}
-
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -1385,27 +1354,11 @@ class MultiProduct extends SystemMultiBase {
 
 		return $this->_get_resultsv2('pro_products', $filters, $this->order_by, $only_count, $debug);
 	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Product($row->pro_product_id);
-			$child->load_from_data($row, array_keys(Product::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
 
 // Also require all the sub-products
 foreach (glob(PathHelper::getBasePath() . '/data/products/*.php') as $sub) {
 	require_once($sub);
 }
-
 
 ?>

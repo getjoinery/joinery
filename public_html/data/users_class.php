@@ -21,8 +21,7 @@ PathHelper::requireOnce('data/mailing_lists_class.php');
 class UserException extends SystemClassException {}
 class DisplayableUserException extends UserException implements DisplayableErrorMessage {}
 
-class User extends SystemBase {
-	public static $prefix = 'usr';
+class User extends SystemBase {	public static $prefix = 'usr';
 	public static $tablename = 'usr_users';
 	public static $pkey_column = 'usr_user_id';
 
@@ -65,12 +64,10 @@ class User extends SystemBase {
 		'ewl_usr_user_id' => 'delete'
 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
-	
 
 	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;
-
 
 	public static $fields = array(
 		'usr_user_id' => 'Primary key - User ID',
@@ -149,7 +146,6 @@ class User extends SystemBase {
 		'usr_email_is_verified_time', 'usr_lastlogin_time', 'usr_admin_disabled_time',
 		'usr_signup_date');
 
-
 	public static $required_fields = array(
 		'usr_first_name', 'usr_first_name', 'usr_email', 'usr_timezone');
 
@@ -176,7 +172,6 @@ class User extends SystemBase {
 		'usr_lastlogin_time' => 'now()',
 	);
 
-
 	private static function UcName($string) {
 		$test_string = preg_replace('/[^A-Za-z]/', '', $string);
 		$string = preg_replace('/[^A-Za-z\'-]/', '', $string);
@@ -191,8 +186,7 @@ class User extends SystemBase {
 		}
 	    return $string;
 	}
-	
-	
+
 	public function add_user_to_mailing_lists($mailing_list_ids){
 		if(empty($mailing_list_ids)){
 			$mailing_list_ids = array();
@@ -203,16 +197,13 @@ class User extends SystemBase {
 		else if(!is_array($mailing_list_ids)){
 			$mailing_list_ids = array($mailing_list_ids);
 		}
-		
-		
-		
+
 		$search_criteria = array();
 		$mailing_lists = new MultiMailingList(
 			$search_criteria,
 			array('name'=>'ASC'));	
 		$mailing_lists->load();		
-		
-		
+
 		$messages = array();
 		$thismessage = array();
 		foreach ($mailing_lists as $mailing_list){
@@ -291,13 +282,9 @@ class User extends SystemBase {
 		}		
 		
 		return $messages;
-		
-		
-		
+
 	}
-	
-	
-	
+
 	//ALL CONTACT TYPE FUNCTIONS BELOW ARE UNUSED
 	
 	//RETURNS AN ARRAY OF CONTACT TYPES THE USER HAS UNSUBSCRIBED FROM
@@ -342,8 +329,6 @@ class User extends SystemBase {
 		return true;
 	}
 
-
-
 	static function CreateNew($data){   
 	
 			if(!$first_name = $data['usr_first_name']){
@@ -366,7 +351,6 @@ class User extends SystemBase {
 				$send_emails = true;
 			}
 
-			
 			//PREVENT DUPLICATES
 			if($user = User::GetByEmail($email)){
 				return $user;
@@ -435,8 +419,7 @@ class User extends SystemBase {
 				throw new SystemDisplayablePermanentError("Failed to create user.");
 			}
 	}
-	
-	
+
 	static function CreateCompleteNew($data, $send_emails, $log_in, $set_cookie){
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
@@ -468,7 +451,6 @@ class User extends SystemBase {
 				if($data['usr_timezone']){
 					$tdata['usr_timezone'] = $data['usr_timezone'];
 				}			
-				
 
 				$user = User::CreateNew($tdata);
 				
@@ -480,7 +462,6 @@ class User extends SystemBase {
 			$dblink->rollBack();
 			throw $e;
 		}
-
 
 		/*
 		$address = new Address(NULL);
@@ -503,9 +484,6 @@ class User extends SystemBase {
 				$session->save_user_to_cookie();
 			}
 		}
-		
-
-		
 
 		//ADD TO THE MAILING LIST IF CHOSEN
 		if(isset($data['newsletter']) && $data['newsletter']){
@@ -531,8 +509,6 @@ class User extends SystemBase {
 		
 	}
 
-
-
 	public function export_as_array() {
 		$user_data = parent::export_as_array();
 
@@ -547,9 +523,7 @@ class User extends SystemBase {
 
 		$user_data['user_activation_key_qs'] = 'uak=' . $user_data['user_activation_key'];
 
-		
 		$user_data['contact_preferences'] = $this->get_contact_type_unsubscribes();
-		
 
 		$phone = $this->phone();
 		$user_data['phone'] = $phone ? $phone->export_as_array() : NULL;
@@ -598,7 +572,6 @@ class User extends SystemBase {
 
 	public function prepare() {
 		if ($this->key === NULL) {
-			
 
 			//CHECK FOR DUPLICATES
 			if(User::GetByEmail($this->get('usr_email'))){
@@ -702,7 +675,6 @@ class User extends SystemBase {
 		}
 	}
 
-
 	function email_unverify_bouncing_user($use_transaction=TRUE) {
 		if ($use_transaction) {
 			DbConnector::BeginTransaction();
@@ -718,8 +690,6 @@ class User extends SystemBase {
 			DbConnector::Commit();
 		}
 	}
-
-
 
 	function display_name() {
 
@@ -751,7 +721,6 @@ class User extends SystemBase {
 		return NULL;
 	}
 	*/
-
 
 	function actions_allowed() {
 		if ($this->get('usr_is_disabled') || $this->get('usr_is_admin_disabled')) {
@@ -827,7 +796,6 @@ class User extends SystemBase {
 		}
 	}
 
-	
 	function permanent_delete($debug=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -900,12 +868,9 @@ class User extends SystemBase {
 			$dbhelper->close_test_mode(); 
 			return false;
 		}
-		
 
 		$user->permanent_delete();
-		
-		
-		
+
 		$user = User::GetByEmail($email);
 		if($user){
 			$dbhelper->close_test_mode(); 
@@ -920,8 +885,8 @@ class User extends SystemBase {
 
 }
 
-
 class MultiUser extends SystemMultiBase {
+	protected static $model_class = 'User';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -1006,21 +971,6 @@ class MultiUser extends SystemMultiBase {
 
         return $this->_get_resultsv2('usr_users', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new User($row->usr_user_id);
-			$child->load_from_data($row, array_keys(User::$fields));
-			$this->add($child);
-		}
-	}
-	
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
 

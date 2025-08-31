@@ -4,13 +4,11 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SystemClass.php');
-	
 
 class UpgradeException extends SystemClassException {}
 class UpgradeNotSentException extends UpgradeException {};
 
-class Upgrade extends SystemBase {
-	public static $prefix = 'upg';
+class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	public static $tablename = 'upg_upgrades';
 	public static $pkey_column = 'upg_upgrade_id';
 	public static $permanent_delete_actions = array(
@@ -51,8 +49,6 @@ class Upgrade extends SystemBase {
 
 	public static $initial_default_values = array('upg_create_time'=>'now()');	
 
-	
-	
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -64,10 +60,10 @@ class Upgrade extends SystemBase {
 		}
 	}
 
-	
 }
 
 class MultiUpgrade extends SystemMultiBase {
+	protected static $model_class = 'Upgrade';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -84,24 +80,7 @@ class MultiUpgrade extends SystemMultiBase {
         
         return $this->_get_resultsv2('upg_upgrades', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new Upgrade($row->upg_upgrade_id);
-            $child->load_from_data($row, array_keys(Upgrade::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
-
 
 ?>

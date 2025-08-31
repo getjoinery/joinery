@@ -10,12 +10,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
 class AdminMenuException extends SystemClassException {}
 
-class AdminMenu extends SystemBase {
-
-	public static $prefix = 'amu';
+class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	public static $tablename = 'amu_admin_menus';
 	public static $pkey_column = 'amu_admin_menu_id';
 	public static $permanent_delete_actions = array(
@@ -57,7 +54,6 @@ class AdminMenu extends SystemBase {
 		'amu_setting_activate' => array('type'=>'varchar(64)'),
 	);
 
-
 	public static $required_fields = array(
 		'amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission');
 
@@ -68,7 +64,6 @@ class AdminMenu extends SystemBase {
 	public static $initial_default_values = array(
 		'amu_disable' => 0, 
 		);		 
-	
 
 	function authenticate_write($data) {
 		// If the user's ID doesn't match, we have to make
@@ -82,6 +77,7 @@ class AdminMenu extends SystemBase {
 }
 
 class MultiAdminMenu extends SystemMultiBase {
+	protected static $model_class = 'AdminMenu';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -124,7 +120,6 @@ class MultiAdminMenu extends SystemMultiBase {
 		$entries = $q->fetchAll();
 		$entries2 = $entries;
 
-	
 		$finalmenu = array();
 		$current_parent_menu = null;
 		foreach ($entries as $entry){
@@ -149,8 +144,7 @@ class MultiAdminMenu extends SystemMultiBase {
 			}
 			
 			$finalmenu[$entry->amu_admin_menu_id] = array('parent'=>$entry->amu_parent_menu_id, 'currentmain'=>FALSE, 'currentsub'=>FALSE, 'defaultpage'=>$defaultpage_link, 'display'=>$entry->amu_menudisplay, 'icon'=>$entry->amu_icon, 'has_subs'=>$has_subs);
-		
-		
+
 			if($current_menu_slug == $entry->amu_slug){
 				$finalmenu[$entry->amu_admin_menu_id]['currentsub'] = 1;
 				if($entry->amu_parent_menu_id){
@@ -194,22 +188,6 @@ class MultiAdminMenu extends SystemMultiBase {
 
         return $this->_get_resultsv2('amu_admin_menus', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new AdminMenu($row->amu_admin_menu_id);
-			$child->load_from_data($row, array_keys(AdminMenu::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
-
 
 ?>

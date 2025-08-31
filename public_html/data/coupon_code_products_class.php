@@ -14,8 +14,7 @@ PathHelper::requireOnce('data/groups_class.php');
 
 class CouponCodeProductException extends SystemClassException {}
 
-class CouponCodeProduct extends SystemBase {
-	public static $prefix = 'ccp';
+class CouponCodeProduct extends SystemBase {	public static $prefix = 'ccp';
 	public static $tablename = 'ccp_coupon_code_products';
 	public static $pkey_column = 'ccp_coupon_code_product_id';
 	public static $permanent_delete_actions = array(
@@ -51,13 +50,10 @@ class CouponCodeProduct extends SystemBase {
 	
 	public static $initial_default_values = array();	
 
-	
-	
 	function prepare() {
 
 	}	
-	
-	
+
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -65,11 +61,10 @@ class CouponCodeProduct extends SystemBase {
 		}
 	}
 
-	
 }
 
 class MultiCouponCodeProduct extends SystemMultiBase {
-
+	protected static $model_class = 'CouponCodeProduct';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -97,22 +92,6 @@ class MultiCouponCodeProduct extends SystemMultiBase {
         return $this->_get_resultsv2('ccp_coupon_code_products', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new CouponCodeProduct($row->ccp_coupon_code_product_id);
-			$child->load_from_data($row, array_keys(CouponCodeProduct::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

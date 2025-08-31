@@ -9,11 +9,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
 class PublicMenuException extends SystemClassException {}
 
-class PublicMenu extends SystemBase {
-	public static $prefix = 'pmu';
+class PublicMenu extends SystemBase {	public static $prefix = 'pmu';
 	public static $tablename = 'pmu_public_menus';
 	public static $pkey_column = 'pmu_public_menu_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -54,8 +52,7 @@ class PublicMenu extends SystemBase {
 	public static $initial_default_values = array(
 		'pmu_is_active' => 1, 
 		);		
-	
-	
+
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 10) {
 			throw new SystemAuthenticationError(
@@ -66,6 +63,7 @@ class PublicMenu extends SystemBase {
 }
 
 class MultiPublicMenu extends SystemMultiBase {
+	protected static $model_class = 'PublicMenu';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -143,22 +141,6 @@ class MultiPublicMenu extends SystemMultiBase {
 
 		return $this->_get_resultsv2('pmu_public_menus', $filters, $this->order_by, $only_count, $debug);
 	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new PublicMenu($row->pmu_public_menu_id);
-			$child->load_from_data($row, array_keys(PublicMenu::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
-
 
 ?>

@@ -6,13 +6,11 @@ $settings = Globalvars::get_instance();
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SystemClass.php');
-	
 
 class MigrationException extends SystemClassException {}
 class MigrationNotSentException extends MigrationException {};
 
-class Migration extends SystemBase {
-	public static $prefix = 'mig';
+class Migration extends SystemBase {	public static $prefix = 'mig';
 	public static $tablename = 'mig_migrations';
 	public static $pkey_column = 'mig_migration_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -61,8 +59,6 @@ class Migration extends SystemBase {
 
 	public static $initial_default_values = array('mig_create_time'=>'now()');	
 
-	
-	
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 8) {
 			throw new SystemAuthenticationError(
@@ -70,7 +66,6 @@ class Migration extends SystemBase {
 		}
 	}
 
-	
 	/**
 	 * Normalize SQL before hashing to handle formatting variations
 	 * Prevents duplicate migrations from whitespace and formatting changes
@@ -88,8 +83,7 @@ class Migration extends SystemBase {
 		
 		return $sql;
 	}
-	
-	
+
 	/**
 	 * Load migrations from migrations.php file
 	 * 
@@ -365,6 +359,7 @@ class Migration extends SystemBase {
 }
 
 class MultiMigration extends SystemMultiBase {
+	protected static $model_class = 'Migration';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -384,23 +379,6 @@ class MultiMigration extends SystemMultiBase {
 		return $this->_get_resultsv2('mig_migrations', $filters, $this->order_by, $only_count, $debug);
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Migration($row->mig_migration_id);
-			$child->load_from_data($row, array_keys(Migration::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
-
 
 ?>

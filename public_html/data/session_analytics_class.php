@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class SessionAnalyticException extends SystemClassException {}
 
-class SessionAnalytic extends SystemBase {
-	public static $prefix = 'sev';
+class SessionAnalytic extends SystemBase {	public static $prefix = 'sev';
 	public static $tablename = 'sev_session_analytics';
 	public static $pkey_column = 'sev_session_analytic_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -51,12 +50,11 @@ class SessionAnalytic extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array('sev_time' => 'now()');
-	
 
-	
 }
 
 class MultiSessionAnalytic extends SystemMultiBase {
+	protected static $model_class = 'SessionAnalytic';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -69,23 +67,9 @@ class MultiSessionAnalytic extends SystemMultiBase {
 	}
 
 	// CHANGED: Updated load method
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new SessionAnalytic($row->sev_session_analytic_id);
-			$child->load_from_data($row, array_keys(SessionAnalytic::$fields));
-			$this->add($child);
-		}
-	}
 
 	// NEW: Added count_all method
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
-
 
 ?>

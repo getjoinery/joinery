@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class VisitorEventException extends SystemClassException {}
 
-class VisitorEvent extends SystemBase {
-	public static $prefix = 'vse';
+class VisitorEvent extends SystemBase {	public static $prefix = 'vse';
 	public static $tablename = 'vse_visitor_events';
 	public static $pkey_column = 'vse_visitor_event_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -64,12 +63,11 @@ class VisitorEvent extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array('vse_timestamp' => 'now()');
-	
 
-	
 }
 
 class MultiVisitorEvent extends SystemMultiBase {
+	protected static $model_class = 'VisitorEvent';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -78,23 +76,7 @@ class MultiVisitorEvent extends SystemMultiBase {
         
         return $this->_get_resultsv2('vse_visitor_events', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new VisitorEvent($row->vse_visitor_event_id);
-            $child->load_from_data($row, array_keys(VisitorEvent::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

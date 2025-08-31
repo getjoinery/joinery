@@ -9,9 +9,7 @@ PathHelper::requireOnce('includes/SystemClass.php');
 class CommentException extends SystemClassException {}
 class CommentNotSentException extends CommentException {};
 
-class Comment extends SystemBase {
-
-	public static $prefix = 'cmt';
+class Comment extends SystemBase {	public static $prefix = 'cmt';
 	public static $tablename = 'cmt_comments';
 	public static $pkey_column = 'cmt_comment_id';
 	public static $permanent_delete_actions = array(
@@ -51,11 +49,9 @@ class Comment extends SystemBase {
 		'cmt_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-
 	public static $timestamp_fields = array(
 		'usr_email_is_verified_time', 'usr_lastlogin_time', 'usr_admin_disabled_time',
 		'usr_signup_date');
-
 
 	public static $required_fields = array(
 		'cmt_body', 'cmt_pst_post_id');
@@ -80,8 +76,7 @@ class Comment extends SystemBase {
 			return '';
 		}
 	}
-		
-	
+
 	function get_sanitized_comment(){
 		$url = '~(?:(https?)://([^\s<]+)|(www\.[^\s<]+?\.[^\s<]+))(?<![\.,:])~i'; 
 		$body = $this->get('cmt_body');
@@ -89,9 +84,7 @@ class Comment extends SystemBase {
 		$body = preg_replace($url, '<a href="$0" rel="nofollow" title="$0">$0</a>', $body);	
 		return $body;
 	}
-	
 
-	
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -103,7 +96,6 @@ class Comment extends SystemBase {
 		}
 	}
 
-	
 	static function add_comment($post_id, $session, $data){
 		$settings = Globalvars::get_instance();
 		if(!$session->get_user_id()){
@@ -119,24 +111,19 @@ class Comment extends SystemBase {
 			if(!$formwriter->honeypot_check($data)){
 				LibraryFunctions::display_404_page();		
 			}
-			
 
 			if(!$formwriter->antispam_question_check($data, 'blog')){
 				throw new SystemDisplayableError(
 					'Please type the correct value into the anti-spam field.');			
 			}
-					
-			
-			
+
 			$captcha_success = $formwriter->captcha_check($data, 'blog');
 			if (!$captcha_success) {
 				$errormsg = 'Sorry, you must click the CAPTCHA to submit the form.';
 				throw new SystemDisplayableError($errormsg);	
 			}	
 		}
-			
-		
-		
+
 		$comment = new Comment(NULL);  
 		if($session->get_user_id()){
 			$comment->set('cmt_usr_user_id', $session->get_user_id()); 
@@ -162,11 +149,11 @@ class Comment extends SystemBase {
 
 		return $comment;
 	}
-	
 
 }
 
 class MultiComment extends SystemMultiBase {
+	protected static $model_class = 'Comment';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -203,23 +190,6 @@ class MultiComment extends SystemMultiBase {
         return $this->_get_resultsv2('cmt_comments', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Comment($row->cmt_comment_id);
-			$child->load_from_data($row, array_keys(Comment::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
-
 
 ?>

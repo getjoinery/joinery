@@ -4,13 +4,11 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SystemClass.php');
-	
 
 class PluginException extends SystemClassException {}
 class PluginNotSentException extends PluginException {};
 
-class Plugin extends SystemBase {
-	public static $prefix = 'plg';
+class Plugin extends SystemBase {	public static $prefix = 'plg';
 	public static $tablename = 'plg_plugins';
 	public static $pkey_column = 'plg_plugin_id';
 	public static $permanent_delete_actions = array(
@@ -75,8 +73,6 @@ class Plugin extends SystemBase {
 		'plg_update_time' => 'now()'
 	);	
 
-	
-	
 	function authenticate_write($data) {
 			if ($data['current_user_permission'] < 10) {
 				throw new SystemAuthenticationError(
@@ -84,7 +80,6 @@ class Plugin extends SystemBase {
 			}
 	}
 
-	
 	/**
 	 * Check if plugin is currently active
 	 * @return bool Active status
@@ -292,8 +287,7 @@ class Plugin extends SystemBase {
 			self::$activation_cache = array();
 		}
 	}
-	
-	
+
 	/**
 	 * Install plugin - runs migrations and sets up initial state
 	 * @return array Result with success status and messages
@@ -580,6 +574,7 @@ class Plugin extends SystemBase {
 }
 
 class MultiPlugin extends SystemMultiBase {
+	protected static $model_class = 'Plugin';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -592,21 +587,6 @@ class MultiPlugin extends SystemMultiBase {
         }
         
         return $this->_get_resultsv2('plg_plugins', $filters, $this->order_by, $only_count, $debug);
-    }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new Plugin($row->plg_plugin_id);
-            $child->load_from_data($row, array_keys(Plugin::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
     }
 
     /**
@@ -722,7 +702,5 @@ class MultiPlugin extends SystemMultiBase {
         return $plugins;
     }
 }
-
-
 
 ?>

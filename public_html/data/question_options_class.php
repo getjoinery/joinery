@@ -14,8 +14,7 @@ PathHelper::requireOnce('data/groups_class.php');
 
 class QuestionOptionException extends SystemClassException {}
 
-class QuestionOption extends SystemBase {
-	public static $prefix = 'qop';
+class QuestionOption extends SystemBase {	public static $prefix = 'qop';
 	public static $tablename = 'qop_question_options';
 	public static $pkey_column = 'qop_question_option_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -57,20 +56,17 @@ class QuestionOption extends SystemBase {
 	'qop_edited_time' => 'now()'
 	);	
 
-	
-	
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
 	}
-	
-	
+
 }
 
 class MultiQuestionOption extends SystemMultiBase {
-
+	protected static $model_class = 'QuestionOption';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -95,22 +91,6 @@ class MultiQuestionOption extends SystemMultiBase {
 
 		return $this->_get_resultsv2('qop_question_options', $filters, $this->order_by, $only_count, $debug);
 	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new QuestionOption($row->qop_question_option_id);
-			$child->load_from_data($row, array_keys(QuestionOption::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
-
 
 ?>

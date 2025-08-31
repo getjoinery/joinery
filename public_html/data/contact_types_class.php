@@ -9,11 +9,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
 class ContactTypeException extends SystemClassException {}
 
-class ContactType extends SystemBase {
-	public static $prefix = 'ctt';
+class ContactType extends SystemBase {	public static $prefix = 'ctt';
 	public static $tablename = 'ctt_contact_types';
 	public static $pkey_column = 'ctt_contact_type_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -69,7 +67,7 @@ class ContactType extends SystemBase {
 }
 
 class MultiContactType extends SystemMultiBase {
-
+	protected static $model_class = 'ContactType';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -93,22 +91,6 @@ class MultiContactType extends SystemMultiBase {
         return $this->_get_resultsv2('ctt_contact_types', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ContactType($row->ctt_contact_type_id);
-			$child->load_from_data($row, array_keys(ContactType::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

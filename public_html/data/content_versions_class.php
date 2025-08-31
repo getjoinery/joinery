@@ -11,9 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class ContentVersionException extends SystemClassException {}
 
-class ContentVersion extends SystemBase {
-
-	public static $prefix = 'cnv';
+class ContentVersion extends SystemBase {	public static $prefix = 'cnv';
 	public static $tablename = 'cnv_content_versions';
 	public static $pkey_column = 'cnv_content_version_id';
 	
@@ -134,8 +132,7 @@ class ContentVersion extends SystemBase {
 		}
 
 	}
-	
-	
+
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -143,7 +140,6 @@ class ContentVersion extends SystemBase {
 		}
 	}
 
-	
 	function permanent_delete($debug=false){
 		DbConnector::BeginTransaction();
 		
@@ -173,11 +169,10 @@ class ContentVersion extends SystemBase {
 		return true;		
 	}
 
-	
 }
 
 class MultiContentVersion extends SystemMultiBase {
-
+	protected static $model_class = 'ContentVersion';
 
 	function get_dropdown_array($session, $include_new=FALSE) {
 		$items = array();
@@ -214,22 +209,6 @@ class MultiContentVersion extends SystemMultiBase {
         return $this->_get_resultsv2('cnv_content_versions', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ContentVersion($row->cnv_content_version_id);
-			$child->load_from_data($row, array_keys(ContentVersion::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

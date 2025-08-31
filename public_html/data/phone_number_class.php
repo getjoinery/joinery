@@ -12,8 +12,7 @@ PathHelper::requireOnce('includes/Validator.php');
 class PhoneNumberException extends SystemDisplayableError {}
 class DisplayablePhoneNumberException extends PhoneNumberException implements DisplayableErrorMessage {}
 
-class PhoneNumber extends SystemBase {
-	public static $prefix = 'phn';
+class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	public static $tablename = 'phn_phone_numbers';
 	public static $pkey_column = 'phn_phone_number_id';
 	public static $permanent_delete_actions = array(		'act_activation_codes' => 'delete',
@@ -167,7 +166,6 @@ class PhoneNumber extends SystemBase {
 		return $phone_data;
 	}
 
-
 	function prepare() {
 
 		if (strlen($this->get('phn_phone_number')) == 11) {
@@ -224,7 +222,6 @@ class PhoneNumber extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-
 		$sql = "SELECT cco_code FROM cco_country_codes WHERE cco_country_code_id=?";
 		try {
 			$q = $dblink->prepare($sql);
@@ -250,7 +247,6 @@ class PhoneNumber extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-
 		$sql = "SELECT cco_country_code_id, cco_code, cco_country FROM cco_country_codes WHERE TRUE";
 		try {
 			$q = $dblink->prepare($sql);
@@ -267,8 +263,7 @@ class PhoneNumber extends SystemBase {
 		}
 		return $optionvals;		
 	}	
-	
-	
+
 	function set_default($use_transaction=TRUE) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -294,8 +289,7 @@ class PhoneNumber extends SystemBase {
 			}
 			$dbhelper->handle_query_error($e);
 		}
-	
-	
+
 		$sql = "UPDATE phn_phone_numbers SET phn_is_default = TRUE WHERE phn_phone_number_id = :phn_phone_number_id";
 	
 		try{
@@ -329,7 +323,6 @@ class PhoneNumber extends SystemBase {
 			$dblink->commit();
 		}
 	}	
-	
 
 	public static function PlainForm($formwriter, $phone_number=NULL, $options=NULL) {
 		if($phone_number){
@@ -339,9 +332,7 @@ class PhoneNumber extends SystemBase {
 		echo $formwriter->dropinput("Country code", "phn_cco_country_code_id", "", $optionvals, ($phone_number ? $phone_number->get('phn_cco_country_code_id') : ''), '', FALSE);
 		echo $formwriter->textinput("Phone Number", "phn_phone_number", "", 20, ($phone_number ? $phone_number->get('phn_phone_number') : ''), NULL , 20, "");
 	}
-	
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -352,12 +343,11 @@ class PhoneNumber extends SystemBase {
 			}
 		}
 	}
-	
-	
+
 }
 
-
 class MultiPhoneNumber extends SystemMultiBase {
+	protected static $model_class = 'PhoneNumber';
 
 	function get_dropdown_options($selected_key=NULL, $include_new=TRUE, $include_none=FALSE) { 
 		$dropdown_builder = array();
@@ -379,8 +369,6 @@ class MultiPhoneNumber extends SystemMultiBase {
 		}
 		return $dropdown_builder;
 	}
-
-
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -411,22 +399,6 @@ class MultiPhoneNumber extends SystemMultiBase {
 
 		return $this->_get_resultsv2('phn_phone_numbers', $filters, $this->order_by, $only_count, $debug);
 	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new PhoneNumber($row->phn_phone_number_id);
-			$child->load_from_data($row, array_keys(PhoneNumber::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 
 }
 

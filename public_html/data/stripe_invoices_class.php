@@ -9,12 +9,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
-
 class StripeInvoiceException extends SystemClassException {}
 
-class StripeInvoice extends SystemBase {
-	public static $prefix = 'siv';
+class StripeInvoice extends SystemBase {	public static $prefix = 'siv';
 	public static $tablename = 'siv_stripe_invoices';
 	public static $pkey_column = 'siv_stripe_invoice_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -60,7 +57,6 @@ class StripeInvoice extends SystemBase {
 
 	public static $initial_default_values = array('siv_timestamp' => 'now()'
 		);	
-	
 
 	public static function GetByStripeSession($session_id) {
 		$data = SingleRowFetch('siv_stripe_invoices', 'siv_stripe_session_id',
@@ -74,7 +70,6 @@ class StripeInvoice extends SystemBase {
 		$stripe_invoice->load_from_data($data, array_keys(StripeInvoice::$fields));
 		return $stripe_invoice;
 	}
-	
 
 	function authenticate_read($data) {
 		// If the user's ID doesn't match, we have to make
@@ -94,8 +89,8 @@ class StripeInvoice extends SystemBase {
 
 }
 
-
 class MultiStripeInvoice extends SystemMultiBase {
+	protected static $model_class = 'StripeInvoice';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -113,21 +108,6 @@ class MultiStripeInvoice extends SystemMultiBase {
         }
         
         return $this->_get_resultsv2('siv_stripe_invoices', $filters, $this->order_by, $only_count, $debug);
-    }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new StripeInvoice($row->siv_stripe_invoice_id);
-            $child->load_from_data($row, array_keys(StripeInvoice::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
     }
 }
 

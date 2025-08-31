@@ -11,7 +11,6 @@ PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('data/events_class.php');
 PathHelper::requireOnce('data/users_class.php');
 
-
 class EventRegistrantException extends SystemClassException {}
 class DisplayableEventRegistrantException extends EventRegistrantException implements DisplayableErrorMessage {}
 class DisplayablePermanentEventRegistrantException extends EventRegistrantException implements DisplayablePermanentErrorMessage {}
@@ -36,8 +35,7 @@ class EventRegistrantUnviewableDisplayException extends EventRegistrantException
 }
 */
 
-class EventRegistrant extends SystemBase {
-	public static $prefix = 'evr';
+class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 	public static $tablename = 'evr_event_registrants';
 	public static $pkey_column = 'evr_event_registrant_id';
 	public static $permanent_delete_actions = array(		'odi_evr_event_registrant_id' => 'prevent'
@@ -100,7 +98,6 @@ class EventRegistrant extends SystemBase {
 
 		);
 
-	
 	public static $json_vars = array(
 		'evr_event_registrant_id', 'evr_evt_event_id', 'evr_usr_user_id');
 
@@ -146,31 +143,6 @@ class EventRegistrant extends SystemBase {
 		return $success;		
 	}	
 
-	function load($debug = false) {
-		parent::load();
-
-		$sql = 'SELECT * FROM evr_event_registrants WHERE evr_event_registrant_id = ?';
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-			
-		try {
-			$q = $dblink->prepare($sql);
-			$q->bindValue(1, $this->key, PDO::PARAM_INT);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} catch (PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		if (!$q->rowCount()) {
-			return false;
-		}
-
-		$this->data = $q->fetch();
-	}
-
-
 	function export_as_array($session=NULL) { 
 		$output_array = parent::export_as_array();
 		//$output_array['travel_text'] = $this->get_travel_text();
@@ -212,10 +184,10 @@ class EventRegistrant extends SystemBase {
 		parent::save($debug);
 	}	
 
-
 }
 
 class MultiEventRegistrant extends SystemMultiBase {
+	protected static $model_class = 'EventRegistrant';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -262,20 +234,5 @@ class MultiEventRegistrant extends SystemMultiBase {
 
         return $this->_get_resultsv2('evr_event_registrants', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(FALSE, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new EventRegistrant($row->evr_event_registrant_id);
-			$child->load_from_data($row, array_keys(EventRegistrant::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }

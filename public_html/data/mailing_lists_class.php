@@ -24,9 +24,7 @@ class MailingListException extends SystemClassException {}
 class DisplayableMailingListException extends MailingListException implements DisplayableErrorMessage {}
 class DisplayablePermanentMailingListException extends MailingListException implements DisplayablePermanentErrorMessage {}
 
-
-class MailingList extends SystemBase {
-	public static $prefix = 'mlt';
+class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	public static $tablename = 'mlt_mailing_lists';
 	public static $pkey_column = 'mlt_mailing_list_id';
 	public static $url_namespace = 'list';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
@@ -92,8 +90,7 @@ class MailingList extends SystemBase {
 			'NoCaps',
 			),
 		);
-	
-	
+
 	function get_subscribed_users($return='object'){
 		$searches = array();
 		$searches['deleted'] = false;
@@ -148,7 +145,6 @@ class MailingList extends SystemBase {
 		
 	}
 
-	
 	function add_registrant($usr_user_id){
 		if(!$this->get('mlt_is_active')){
 			throw new MailingListException('You cannot subscribe to an inactive list.');
@@ -238,8 +234,7 @@ class MailingList extends SystemBase {
 			throw new SystemDisplayableError('There is no mailchimp list id for this list:'. $this->get('mlt_name'));
 			exit;
 		}
-		
-		
+
 		//NOW ADD THE USER TO MAILCHIMP
 		try {
 		$settings = Globalvars::get_instance();
@@ -270,7 +265,6 @@ class MailingList extends SystemBase {
 					->members($user_to_update)
 					->post($post_params);
 
-						
 				$status = $return->deserialize();
 				
 				$mailchimp_user_id = $status->id;
@@ -329,7 +323,6 @@ class MailingList extends SystemBase {
 	}
 	*/
 
-
 	function unsubscribe_from_mailchimp_list($user_id) {
 		
 		$user = new User($user_id, TRUE);
@@ -339,11 +332,9 @@ class MailingList extends SystemBase {
 			exit;
 		}
 
-		
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting('mailchimp_api_key')){
 			$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
-
 
 			$post_params = [
 				"status" => "unsubscribed", 
@@ -371,7 +362,6 @@ class MailingList extends SystemBase {
 		
 	}
 
-
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -382,6 +372,7 @@ class MailingList extends SystemBase {
 }
 
 class MultiMailingList extends SystemMultiBase {
+	protected static $model_class = 'MailingList';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -422,21 +413,8 @@ class MultiMailingList extends SystemMultiBase {
 	}
 
 	// CHANGED: Updated load method
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new MailingList($row->mlt_mailing_list_id);
-			$child->load_from_data($row, array_keys(MailingList::$fields));
-			$this->add($child);
-		}
-	}
 
 	// NEW: Added count_all method
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
 

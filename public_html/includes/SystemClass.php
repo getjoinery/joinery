@@ -1251,7 +1251,50 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		} else {
 			throw new SystemClassException('This MultiBase was explicitly set unloaded with $options === NULL');
 		}
+		
+		// Generic implementation for all Multi classes
+		if (!isset(static::$model_class)) {
+			throw new SystemClassException("Multi class " . get_class($this) . " must define \$model_class property");
+		}
+		
+		$childClassName = static::$model_class;
+		
+		// Verify the child class exists
+		if (!class_exists($childClassName)) {
+			throw new SystemClassException("Model class {$childClassName} not found for " . get_class($this));
+		}
+		
+		// Get the primary key column from the child class
+		$pkey_column = $childClassName::$pkey_column;
+		
+		// Get results from the concrete implementation
+		$q = $this->getMultiResults(false, $debug);
+		
+		// Load each row into a child object
+		foreach($q->fetchAll() as $row) {
+			// Create child object using the primary key value
+			$child = new $childClassName($row->$pkey_column);
+			
+			// Load data into the child object
+			$child->load_from_data($row, array_keys($childClassName::$fields));
+			
+			// Add to collection
+			$this->add($child);
+		}
 	}
+	
+	/**
+	 * Generic count_all implementation for Multi classes
+	 */
+	function count_all($debug = false) {
+		return $this->getMultiResults(TRUE, $debug);
+	}
+	
+	/**
+	 * Abstract method that must be implemented by concrete Multi classes
+	 * This method handles the specific query building for each Multi class
+	 */
+	abstract protected function getMultiResults($only_count = false, $debug = false);
 
 	// This is a very special function that takes the key of a specific timestamp column of a
 	// table, and after loading all of the elements selected in this MultiBase, will set that

@@ -4,13 +4,11 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SystemClass.php');
-	
 
 class ProductDetailException extends SystemClassException {}
 class ProductDetailNotSentException extends ProductDetailException {};
 
-class ProductDetail extends SystemBase {
-	public static $prefix = 'prd';
+class ProductDetail extends SystemBase {	public static $prefix = 'prd';
 	public static $tablename = 'prd_product_details';
 	public static $pkey_column = 'prd_product_detail_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -50,12 +48,10 @@ class ProductDetail extends SystemBase {
 	
 	public static $initial_default_values = array();
 
-
-
-
 }
 
 class MultiProductDetail extends SystemMultiBase {
+	protected static $model_class = 'ProductDetail';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -72,24 +68,9 @@ class MultiProductDetail extends SystemMultiBase {
 	}
 
 	// CHANGED: Updated load method
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ProductDetail($row->prd_product_detail_id);
-			$child->load_from_data($row, array_keys(ProductDetail::$fields));
-			$this->add($child);
-		}
-	}
 
 	// NEW: Added count_all method
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
-
-
 
 ?>

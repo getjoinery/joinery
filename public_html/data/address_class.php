@@ -13,9 +13,7 @@ class AddressException extends SystemClassException {}
 class DisplayableAddressException extends AddressException implements DisplayableErrorMessage {}
 class AddressTravelMismatchException extends DisplayableAddressException {}
 
-class Address extends SystemBase {
-	
-	public static $prefix = 'usa';
+class Address extends SystemBase {	public static $prefix = 'usa';
 	public static $tablename = 'usa_users_addrs';
 	public static $pkey_column = 'usa_users_addr_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -138,7 +136,6 @@ class Address extends SystemBase {
 		'usa_cco_country_code_id' => array('type'=>'int2'),
 	);
 
-
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
@@ -161,8 +158,6 @@ class Address extends SystemBase {
 		}
 	    return $string;
 	}
-
-
 
 	public static function PlainForm($formwriter, $address=NULL, $options=NULL) {
 
@@ -206,7 +201,6 @@ class Address extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-
 		$sql = "SELECT cco_code FROM cco_country_codes WHERE cco_iso_code_2=?";
 		try {
 			$q = $dblink->prepare($sql);
@@ -224,7 +218,6 @@ class Address extends SystemBase {
 	public static function GetCountryAbbrFromCountryCode($code){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-
 
 		$sql = "SELECT cco_iso_code_2 FROM cco_country_codes WHERE cco_code=?";
 		try {
@@ -250,8 +243,6 @@ class Address extends SystemBase {
 			$address->set('usa_usr_user_id', $user_id);
 			$address->set('usa_is_bad', FALSE);
 		}
-
-
 
 		foreach(array(
 			'usa_cco_country_code_id', 'usa_type', 'usa_address1', 'usa_address2', 'usa_city', 'usa_state',
@@ -455,7 +446,6 @@ class Address extends SystemBase {
 		return NULL;
 	}
 
-
 	function prepare() {
 
 		//TODO MORE CHECKING FOR US
@@ -470,7 +460,6 @@ class Address extends SystemBase {
 		//	throw new DisplayableAddressException('The state you have entered is invalid.  Please go back and double check you have entered a valid 2 letter state code.');
 		//}
 
-
 		// Get information about the zip code
 		/*
 		$zip_data = SingleRowFetch(
@@ -480,10 +469,8 @@ class Address extends SystemBase {
 			// Zip code is invalid
 			throw new DisplayableAddressException('Invalid zip code.');
 		}
-		
 
 		$this->set('usa_timezone', $zip_data->zip_timezone);
-		
 
 		if (!$this->get('usa_city')) {
 			$this->set('usa_city', $zip_data->zip_city);
@@ -509,7 +496,6 @@ class Address extends SystemBase {
 		$this->set('usa_address2', Address::UcAddress($this->get('usa_address2')));
 
 	}
-
 
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
@@ -606,7 +592,6 @@ class Address extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-
 		$sql = "SELECT * FROM country WHERE TRUE";
 		try {
 			$q = $dblink->prepare($sql);
@@ -627,7 +612,6 @@ class Address extends SystemBase {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-
 		$sql = "SELECT cco_country_code_id, cco_country FROM cco_country_codes WHERE TRUE";
 		try {
 			$q = $dblink->prepare($sql);
@@ -643,7 +627,6 @@ class Address extends SystemBase {
 		}
 		return $optionvals;		
 	}
-	
 
 	static function get_timezone_drop_array($country_code = NULL) {
 		$dbhelper = DbConnector::get_instance();
@@ -673,7 +656,6 @@ class Address extends SystemBase {
 		return $optionvals;
 	}
 
-
 	function update_city_state_from_zip() {
 		$zip_data = SingleRowFetch(
 			'zips.zip_codes', 'zip_code_id', $this->get('usa_zip_code_id'), PDO::PARAM_INT,
@@ -683,12 +665,8 @@ class Address extends SystemBase {
 			$this->set('usa_state', $zip_data->zip_state);
 		}
 	}
-	
-
 
 	static function getPointFromAddress($street, $city, $state){ 
-
-
 
 		//YAHOO GEOCODE.  SWITCHED TO GOOGLE FOR HIGHER LIMIT AND SIMPLER RETURN STRUCTURE
 		/*
@@ -705,7 +683,6 @@ class Address extends SystemBase {
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		$address_data = unserialize(curl_exec($ch));
 		curl_close($ch);
-
 
 		if(strlen($address_data['ResultSet']['Result']['precision'])>0){
 			$numreturned=1;
@@ -726,12 +703,9 @@ class Address extends SystemBase {
 		}
 		*/
 
-
 		if((is_null($city) || strlen($city) == 0) || (is_null($state) || strlen($state) == 0)){
 			return FALSE;
 		}
-
-
 
 		//GOOGLE API
 		$longitude = "";
@@ -756,11 +730,8 @@ class Address extends SystemBase {
 		$data = curl_exec($ch);
 		curl_close($ch);
 
-
 		if (substr($data,0,3) == "200"){
 			$data = explode(",",$data);
-
-
 
 			$point = array();
 			$point['Precision'] = $data[1];
@@ -774,11 +745,10 @@ class Address extends SystemBase {
 		}
 	}
 
-
-
 }
 
 class MultiAddress extends SystemMultiBase {
+	protected static $model_class = 'Address';
 
 	function get_address_dropdown_array($include_new=TRUE, $message='', $short_address=FALSE) {
 		$items = array();
@@ -851,24 +821,6 @@ class MultiAddress extends SystemMultiBase {
 
         return $this->_get_resultsv2('usa_users_addrs', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-
-		// So now we have all of the messages from this thread.
-		foreach($q->fetchAll() as $row) {
-			$child = new Address($row->usa_users_addr_id);
-			$child->load_from_data($row, array_keys(Address::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 
 	public static function AddressDropdown($user_id, $get_raw_options=FALSE) {
 		$address_book = new MultiAddress(array('user_id' => $user_id, 'deleted' => FALSE, 'bad' => FALSE));
