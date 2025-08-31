@@ -9,3 +9,4 @@ Globalvars_site.php
 /theme
 /plugins
 .claude/
+*.bak
