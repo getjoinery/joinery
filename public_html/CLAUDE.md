@@ -350,6 +350,14 @@ For complete guidance on creating admin interface pages, including required setu
 
 **Helper Class Integration:** Use RouteHelper for custom routing, ThemeHelper for asset management, and PathHelper for file operations instead of manual path handling.
 
+### Specifications Management
+
+**Directory Structure:**
+- **`/specs/`** - Active specifications awaiting implementation
+- **`/specs/implemented/`** - Completed specifications
+
+**Workflow:** Place new specs in `/specs/`, follow during development, move to `/specs/implemented/` when complete. This structure must be used unless explicitly specified otherwise.
+
 ### Database Schema Management
 
 **IMPORTANT:** Database tables, columns, and constraints are managed automatically by the `update_database` system based on data class specifications. **DO NOT add columns or table structure changes via migrations.**
