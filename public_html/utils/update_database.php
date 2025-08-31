@@ -90,10 +90,17 @@
 			echo implode('<br>', $table_result['messages']) . "<br>\n";
 		}
 		
-		// Display warnings from column validation (only in verbose mode)
-		if ($verbose && !empty($table_result['warnings'])) {
+		// Display warnings from column validation (always show warnings)
+		if (!empty($table_result['warnings'])) {
 			foreach ($table_result['warnings'] as $warning) {
-				echo 'NOTICE: ' . $warning . "<br>\n";
+				echo 'WARNING: ' . $warning . "<br>\n";
+			}
+		}
+		
+		// Display errors from column validation (always show errors)
+		if (!empty($table_result['errors'])) {
+			foreach ($table_result['errors'] as $error) {
+				echo 'ERROR: ' . $error . "<br>\n";
 			}
 		}
 		
@@ -136,6 +143,12 @@
 					echo 'WARNING: ' . $warning . "<br>\n";
 				}
 			}
+			
+			if (!empty($advanced_result['errors'])) {
+				foreach ($advanced_result['errors'] as $error) {
+					echo 'ERROR: ' . $error . "<br>\n";
+				}
+			}
 		}
 		
 		// Step 2.5: Fix primary key constraints if needed
@@ -157,6 +170,12 @@
 					echo 'WARNING: ' . $warning . "<br>\n";
 				}
 			}
+			
+			if (!empty($primary_key_result['errors'])) {
+				foreach ($primary_key_result['errors'] as $error) {
+					echo 'ERROR: ' . $error . "<br>\n";
+				}
+			}
 		}
 		
 		// Step 3: Manage unique constraints
@@ -170,6 +189,49 @@
 		// Display constraint results
 		if (!empty($constraint_result['messages'])) {
 			echo implode('<br>', $constraint_result['messages']) . "<br>\n";
+		}
+		
+		if (!empty($constraint_result['warnings'])) {
+			foreach ($constraint_result['warnings'] as $warning) {
+				echo 'WARNING: ' . $warning . "<br>\n";
+			}
+		}
+		
+		if (!empty($constraint_result['errors'])) {
+			foreach ($constraint_result['errors'] as $error) {
+				echo 'ERROR: ' . $error . "<br>\n";
+			}
+		}
+		
+		// Check for any database schema errors before attempting migrations
+		$schema_errors = array_merge(
+			$table_result['errors'] ?? [],
+			$advanced_result['errors'] ?? [],
+			$primary_key_result['errors'] ?? [],
+			$constraint_result['errors'] ?? []
+		);
+		
+		// Remove duplicate error messages
+		$schema_errors = array_unique($schema_errors);
+		
+		if (!empty($schema_errors)) {
+			echo "<br>❌ DATABASE SCHEMA ERRORS DETECTED - STOPPING BEFORE MIGRATIONS<br>\n";
+			echo "The following errors must be fixed before migrations can run:<br>\n";
+			foreach ($schema_errors as $error) {
+				echo "  • " . $error . "<br>\n";
+			}
+			echo "<br>Please fix these schema issues and run the script again.<br>\n";
+			
+			// Log the failed run
+			$migration_log = new Migration(null);
+			$migration_log->set('mig_hash', md5('SCHEMA_ERRORS'));
+			$migration_log->set('mig_sql', '');
+			$migration_log->set('mig_output', implode("\n", $schema_errors));
+			$migration_log->set('mig_success', 0);
+			$migration_log->prepare();
+			$migration_log->save();
+			
+			return false;
 		}
 		
 		// Step 4: Run database migrations
@@ -221,72 +283,122 @@
 		$migclass = new Migration(null);
 		$migration_run_count = 0;
 		$migration_skip_count = 0;
+		$migration_fail_count = 0;
 		
 		foreach($validation_result['valid_migrations'] as $migration){
 			$should_run_result = $migclass->shouldRunMigration($migration);
 			
-			if ($verbose) {
-				$status = $should_run_result['should_run'] ? 'WILL RUN' : 'SKIPPING - ' . $should_run_result['reason'];
-				echo "Checking migration " . ($migration['database_version'] ?? 'UNKNOWN') . ": " . $status . "<br>\n";
-				
-				if (isset($should_run_result['hash'])) {
-					echo "Migration hash: " . $should_run_result['hash'] . "<br>\n";
-				}
+			// Always show migration status, not just in verbose mode
+			if($should_run_result['should_run']){
+				echo "WILL RUN migration " . ($migration['database_version'] ?? 'UNKNOWN') . "<br>\n";
+			} else {
+				// Always show why we're skipping
+				echo "SKIPPING migration " . ($migration['database_version'] ?? 'UNKNOWN') . " - Reason: " . $should_run_result['reason'] . "<br>\n";
+			}
+			
+			// Show additional details in verbose mode
+			if ($verbose && isset($should_run_result['hash'])) {
+				echo "  Migration hash: " . $should_run_result['hash'] . "<br>\n";
 			}
 			
 			if($should_run_result['should_run']){
-				echo "Running migration: ".$migration['database_version']."<br>\n";
+				echo "  Running migration: ".$migration['database_version']."<br>\n";
 				
-				// Show SQL if it's an SQL migration (your requested feature!)
-				if (isset($migration['migration_sql']) && $migration['migration_sql']) {
-					echo "SQL: " . $migration['migration_sql'] . "<br>\n";
+				// Show SQL if it's an SQL migration
+				if ($verbose && isset($migration['migration_sql']) && $migration['migration_sql']) {
+					echo "  SQL: " . $migration['migration_sql'] . "<br>\n";
 				}
 				
 				$result = $migclass->executeMigration($migration);
 				
 				if ($result['success']) {
-					echo "✓ Successfully applied migration: " . $result['version'] . "<br>\n";
+					echo "  ✓ Successfully applied migration: " . $result['version'] . "<br>\n";
 					$migration_run_count++;
 				} else {
-					echo "✗ Failed migration: " . $result['version'] . " - " . $result['error'] . "<br>\n";
+					echo "  ✗ FAILED migration: " . $result['version'] . " - Error: " . $result['error'] . "<br>\n";
+					$migration_fail_count++;
 					// Continue processing other migrations even if one fails
 				}
 			} else {
-				if (isset($should_run_result['error'])) {
-					echo "⚠ Error checking migration " . $migration['database_version'] . ": " . $should_run_result['reason'] . "<br>\n";
+				// Check if this was an error vs a normal skip
+				if (isset($should_run_result['error']) && $should_run_result['error']) {
+					echo "  ⚠ ERROR checking migration " . $migration['database_version'] . ": " . $should_run_result['reason'] . "<br>\n";
+					$migration_fail_count++;
 				}
 				$migration_skip_count++;
 			}
 		}
 		
 		echo "Database migration complete.<br>\n";
-		echo "#Run: ".$migration_run_count.",<br>\n";
+		echo "#Run: ".$migration_run_count."<br>\n";
+		echo "#Failed: ".$migration_fail_count."<br>\n";
 		echo "#Skipped: ".$migration_skip_count."<br>\n";
 		
 		// Log the migration run
 		$sql_output = ''; // Collect any error output
 		$sql_commands = ''; // For backwards compatibility
 		
-		// Merge all operation results
+		// Merge all operation results - ONLY actual errors, not warnings
 		$all_errors = array_merge(
 			$table_result['errors'] ?? [],
 			$advanced_result['errors'] ?? [],
 			$constraint_result['errors'] ?? []
 		);
 		
+		// Remove duplicate error messages
+		$all_errors = array_unique($all_errors);
+		
+		// Also collect warnings for informational purposes (but don't count as failures)
+		$all_warnings = array_merge(
+			$table_result['warnings'] ?? [],
+			$advanced_result['warnings'] ?? [],
+			$constraint_result['warnings'] ?? []
+		);
+		
+		// Remove duplicate warning messages
+		$all_warnings = array_unique($all_warnings);
+		
 		if (!empty($all_errors)) {
 			$sql_output = implode("\n", $all_errors);
+		}
+		
+		// Determine overall success - failed ONLY if we have failures OR actual errors (NOT warnings)
+		$overall_success = ($migration_fail_count == 0 && empty($sql_output));
+		
+		// Show summary of warnings and errors
+		if (!empty($all_warnings)) {
+			echo "⚠️  " . count($all_warnings) . " warning(s) occurred (not blocking success)<br>\n";
+		}
+		if (!empty($all_errors)) {
+			echo "❗ " . count($all_errors) . " error(s) occurred<br>\n";
 		}
 		
 		$migration_log = new Migration(null);
 		$migration_log->set('mig_hash', $db_structure_hash);
 		$migration_log->set('mig_sql', $sql_commands);
 		$migration_log->set('mig_output', $sql_output);
-		$migration_log->set('mig_success', empty($sql_output) ? 1 : 0);
+		$migration_log->set('mig_success', $overall_success ? 1 : 0);
 		$migration_log->prepare();
 		$migration_log->save();
 		
-		return true;
+		// Show final result
+		if ($overall_success) {
+			echo "✅ DATABASE UPDATE SUCCESSFUL";
+			if (!empty($all_warnings)) {
+				echo " (with " . count($all_warnings) . " warnings)";
+			}
+			echo "<br>\n";
+		} else {
+			echo "❌ DATABASE UPDATE HAD ERRORS<br>\n";
+			if ($migration_fail_count > 0) {
+				echo "  - " . $migration_fail_count . " migration(s) failed<br>\n";
+			}
+			if (!empty($sql_output)) {
+				echo "  - Database operation errors occurred<br>\n";
+			}
+		}
+		
+		return $overall_success;
 	}
 
 	// Run the database update if not included from another script
