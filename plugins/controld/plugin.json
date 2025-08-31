@@ -3,6 +3,7 @@
     "version": "1.1.0",
     "description": "ControlD DNS filtering service integration with complete UI - migrated from Sassa theme",
     "author": "System Developer",
+    "is_stock": true,
     "requires": {
         "php": ">=8.0",
         "extensions": ["curl"]

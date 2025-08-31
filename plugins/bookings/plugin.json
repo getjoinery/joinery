@@ -2,5 +2,6 @@
     "name": "Bookings Management",
     "version": "1.0.0",
     "description": "Booking and booking type management system",
-    "author": "System Developer"
+    "author": "System Developer",
+    "is_stock": true
 }

@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Custom theme for Galactic Tribune",
   "author": "Joinery Team",
+  "is_stock": true,
   "requires": {
     "php": ">=7.4",
     "joinery": ">=1.0.0"
