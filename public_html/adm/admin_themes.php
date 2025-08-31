@@ -15,11 +15,12 @@ $theme_manager = ThemeManager::getInstance();
 $message = '';
 $error = '';
 
-// Handle form submissions
-if ($_POST) {
+// Handle form submissions and GET actions
+$action = $_POST['action'] ?? $_GET['action'] ?? null;
+if ($action || $_POST) {
     try {
-        if (isset($_POST['action'])) {
-            switch ($_POST['action']) {
+        if ($action) {
+            switch ($action) {
                 case 'activate':
                     $theme_name = $_POST['theme_name'];
                     $theme = Theme::get_by_theme_name($theme_name);
@@ -88,6 +89,13 @@ $themes = new MultiTheme(array(), array('thm_name' => 'ASC'));
 $themes->load();
 
 $page = new AdminPage();
+
+// Build Options dropdown links
+$altlinks = array();
+$altlinks['Add New'] = '/admin/admin_themes?show_upload=1';
+$altlinks['Sync with Filesystem'] = '/admin/admin_themes?action=sync';
+$altlinks['Check for Updates'] = '/admin/admin_themes?action=check_updates';
+
 $page->admin_header(array(
     'menu-id' => 'themes',
     'page_title' => 'Theme Management',
@@ -98,13 +106,13 @@ $page->admin_header(array(
     ),
     'session' => $session,
 ));
+
+$page->begin_box(array('altlinks' => $altlinks));
 ?>
 
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
-            <h1>Theme Management</h1>
-            
             <?php if ($message): ?>
                 <div class="alert alert-success"><?= htmlspecialchars($message) ?></div>
             <?php endif; ?>
@@ -113,6 +121,7 @@ $page->admin_header(array(
                 <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
             <?php endif; ?>
             
+            <?php if (isset($_GET['show_upload'])): ?>
             <!-- Upload Theme Form -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -134,37 +143,22 @@ $page->admin_header(array(
                     </form>
                 </div>
             </div>
-            
-            <!-- Sync Button -->
-            <div class="mb-3">
-                <form method="post" style="display: inline;">
-                    <button type="submit" name="action" value="sync" class="btn btn-info">
-                        Sync with Filesystem
-                    </button>
-                </form>
-                <small class="text-muted ms-2">
-                    Scan theme directory and update database registry
-                </small>
-            </div>
+            <?php endif; ?>
             
             <!-- Themes Table -->
-            <div class="card">
-                <div class="card-header">
-                    <h3>Installed Themes (<?= $themes->count() ?>)</h3>
-                </div>
-                <div class="card-body">
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Theme</th>
-                                <th>Version</th>
-                                <th>Author</th>
-                                <th>Status</th>
-                                <th>Type</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+            <h3>Installed Themes (<?= $themes->count() ?>)</h3>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Theme</th>
+                        <th>Version</th>
+                        <th>Author</th>
+                        <th>Status</th>
+                        <th>Type</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
                             <?php
                             foreach ($themes as $theme) {
                                 $theme_name = $theme->get('thm_name');
@@ -203,20 +197,32 @@ $page->admin_header(array(
                                 echo '<td>' . $type_badge . '</td>';
                                 echo '<td>';
                                 
-                                echo '<form method="post" style="display: inline;">';
-                                echo '<input type="hidden" name="theme_name" value="' . htmlspecialchars($theme_name) . '">';
+                                // Build actions array
+                                $actions = array();
                                 
                                 if (!$is_active && $files_exist) {
-                                    echo '<button type="submit" name="action" value="activate" class="btn btn-sm btn-success me-1">Activate</button>';
+                                    $actions['Activate'] = "javascript:submitAction('activate', '$theme_name')";
                                 }
                                 
                                 if ($is_stock) {
-                                    echo '<button type="submit" name="action" value="mark_custom" class="btn btn-sm btn-outline-warning me-1" title="Mark as Custom">→ Custom</button>';
+                                    $actions['Mark as Custom'] = "javascript:submitAction('mark_custom', '$theme_name')";
                                 } else {
-                                    echo '<button type="submit" name="action" value="mark_stock" class="btn btn-sm btn-outline-info" title="Mark as Stock">→ Stock</button>';
+                                    $actions['Mark as Stock'] = "javascript:submitAction('mark_stock', '$theme_name')";
                                 }
                                 
-                                echo '</form>';
+                                if (!empty($actions)) {
+                                    echo '<div class="dropdown">';
+                                    echo '<button class="btn btn-falcon-default dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+                                    echo '<div class="dropdown-menu dropdown-menu-end py-0">';
+                                    foreach ($actions as $label => $action) {
+                                        echo '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
+                                    }
+                                    echo '</div>';
+                                    echo '</div>';
+                                } else {
+                                    echo '<span class="text-muted">No actions</span>';
+                                }
+                                
                                 echo '</td>';
                                 echo '</tr>';
                             }
@@ -227,8 +233,6 @@ $page->admin_header(array(
                             ?>
                         </tbody>
                     </table>
-                </div>
-            </div>
         </div>
     </div>
     
@@ -240,6 +244,51 @@ $page->admin_header(array(
     </div>
 </div>
 
+<script>
+function submitAction(action, themeName) {
+    var form = document.createElement('form');
+    form.method = 'post';
+    form.style.display = 'none';
+    
+    var actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.name = 'action';
+    actionInput.value = action;
+    form.appendChild(actionInput);
+    
+    var themeInput = document.createElement('input');
+    themeInput.type = 'hidden';
+    themeInput.name = 'theme_name';
+    themeInput.value = themeName;
+    form.appendChild(themeInput);
+    
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function syncThemes() {
+    if (confirm('Sync themes with filesystem? This will update the database registry with any changes.')) {
+        var form = document.createElement('form');
+        form.method = 'post';
+        form.style.display = 'none';
+        
+        var actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'sync';
+        form.appendChild(actionInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function checkUpdates() {
+    alert('Check for updates functionality will be implemented in a future update.');
+}
+</script>
+
 <?php
+$page->end_box();
 $page->admin_footer();
 ?>

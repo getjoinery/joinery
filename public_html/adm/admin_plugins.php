@@ -39,10 +39,10 @@ try {
     ];
 }
 
-// Handle form submissions
-if ($_POST) {
-    $action = isset($_POST['action']) ? $_POST['action'] : '';
-    $plugin_name = isset($_POST['plugin_name']) ? $_POST['plugin_name'] : '';
+// Handle form submissions and GET actions
+$action = $_POST['action'] ?? $_GET['action'] ?? '';
+$plugin_name = $_POST['plugin_name'] ?? $_GET['plugin_name'] ?? '';
+if ($action || $_POST) {
     
     // Handle upload action separately as it doesn't require plugin_name
     if ($action === 'upload') {
@@ -64,13 +64,29 @@ if ($_POST) {
         // Sync doesn't require plugin name either
         try {
             $plugin_manager = new PluginManager();
-            $synced = $plugin_manager->syncWithFilesystem();
-            $message = 'Synced ' . count($synced) . ' plugins from filesystem.';
+            $sync_result = $plugin_manager->sync();
+            $parts = array();
+            if (!empty($sync_result['added'])) {
+                $parts[] = count($sync_result['added']) . " added";
+            }
+            if (!empty($sync_result['updated'])) {
+                $parts[] = count($sync_result['updated']) . " updated";
+            }
+            
+            if (empty($parts)) {
+                $message = "Filesystem sync completed. All plugins are already up to date.";
+            } else {
+                $message = "Filesystem sync completed: " . implode(", ", $parts) . ".";
+            }
             $message_type = 'success';
         } catch (Exception $e) {
             $message = 'Sync failed: ' . htmlspecialchars($e->getMessage());
             $message_type = 'danger';
         }
+    } elseif ($action === 'check_updates') {
+        // Check for updates action
+        $message = 'Check for updates functionality will be implemented in a future update.';
+        $message_type = 'info';
     } elseif (!$plugin_name || !Plugin::is_valid_plugin_name($plugin_name)) {
         // Other actions require valid plugin name
         $message = 'Invalid plugin name.';
@@ -200,6 +216,12 @@ $plugins = MultiPlugin::get_all_plugins_with_status();
 // Plugin updates will be checked by the deployment system
 // No need for version checking here anymore
 
+// Build Options dropdown links
+$altlinks = array();
+$altlinks['Add New'] = '/admin/admin_plugins?show_upload=1';
+$altlinks['Sync with Filesystem'] = '/admin/admin_plugins?action=sync';
+$altlinks['Check for Updates'] = '/admin/admin_plugins?action=check_updates';
+
 $page->admin_header(array(
     'menu-id' => 'plugins',
     'page_title' => 'Plugin Management',
@@ -210,6 +232,8 @@ $page->admin_header(array(
     ),
     'session' => $session,
 ));
+
+$page->begin_box(array('altlinks' => $altlinks));
 ?>
 
 <div class="row">
@@ -240,6 +264,7 @@ $page->admin_header(array(
             </div>
         <?php endif; ?>
         
+        <?php if (isset($_GET['show_upload'])): ?>
         <!-- Upload Plugin Form -->
         <div class="card mb-4">
             <div class="card-header">
@@ -261,20 +286,7 @@ $page->admin_header(array(
                 </form>
             </div>
         </div>
-        
-        <!-- Sync Button -->
-        <div class="mb-3">
-            <form method="post" style="display: inline;">
-                <button type="submit" name="action" value="sync" class="btn btn-info">
-                    <i class="fas fa-sync"></i> Sync with Filesystem
-                </button>
-            </form>
-            <small class="text-muted ms-2">
-                Scan plugin directory and update database registry
-            </small>
-        </div>
-        
-        <h5 class="mb-3">Available Plugins</h5>
+        <?php endif; ?>
         
         <?php if (empty($plugins)): ?>
             <div class="alert alert-warning">
@@ -286,15 +298,9 @@ $page->admin_header(array(
             // Set up table headers
             $headers = array('Plugin', 'Description', 'Version', 'Status', 'Actions');
             
-            // Set up alt links for table header buttons
-            $altlinks = array(
-                'Check for Updates' => 'javascript:void(0);',
-            );
-            
             // Set up table options
             $table_options = array(
-                'title' => 'Plugin Status Overview',
-                'altlinks' => $altlinks
+                'title' => 'Plugin Status Overview'
             );
             
             // Start the table
@@ -365,101 +371,58 @@ $page->admin_header(array(
                 
                 // Actions column
                 if ($plugin['directory_exists']) {
-                    $action_cell = '<div class="btn-group" role="group">';
-                    $formwriter = LibraryFunctions::get_formwriter_object('plugin_action_' . $plugin['name'], 'admin');
-                    
-                    // Get plugin status
+                    $plugin_name = htmlspecialchars($plugin['name']);
                     $plugin_status = $plugin['plugin'] ? $plugin['plugin']->get('plg_status') : null;
                     
+                    // Build actions array
+                    $actions = array();
+                    
                     if (!$plugin['plugin'] || !$plugin_status) {
-                        // Not installed - show Install button
-                        $action_cell .= $formwriter->begin_form('plugin_install_' . $plugin['name'], 'POST', '', true);
-                        $action_cell .= $formwriter->hiddeninput('action', 'install');
-                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                        $action_cell .= $formwriter->new_form_button('Install', 'btn btn-success btn-sm');
-                        $action_cell .= $formwriter->end_form(true);
-                        
+                        // Not installed
+                        $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
                     } elseif ($plugin_status === 'uninstalled') {
                         // Uninstalled - could be legacy plugin or failed installation
                         if ($plugin['plugin']->get('plg_install_error')) {
-                            // Has install error - show Repair button
-                            $action_cell .= $formwriter->begin_form('plugin_repair_' . $plugin['name'], 'POST', '', true);
-                            $action_cell .= $formwriter->hiddeninput('action', 'repair_plugin');
-                            $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                            $action_cell .= $formwriter->new_form_button('Repair', 'btn btn-warning btn-sm');
-                            $action_cell .= $formwriter->end_form(true);
+                            $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
                         } else {
-                            // No error - treat as fresh install
-                            $action_cell .= $formwriter->begin_form('plugin_install_' . $plugin['name'], 'POST', '', true);
-                            $action_cell .= $formwriter->hiddeninput('action', 'install');
-                            $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                            $action_cell .= $formwriter->new_form_button('Install', 'btn btn-success btn-sm');
-                            $action_cell .= $formwriter->end_form(true);
+                            $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
                         }
-                        
                     } elseif ($plugin_status === 'active') {
-                        // Active - show Deactivate button
-                        $action_cell .= $formwriter->begin_form('plugin_deactivate_' . $plugin['name'], 'POST', '', true);
-                        $action_cell .= $formwriter->hiddeninput('action', 'deactivate');
-                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                        $action_cell .= $formwriter->new_form_button('Deactivate', 'btn btn-outline-secondary btn-sm');
-                        $action_cell .= $formwriter->end_form(true);
-                        
+                        // Active
+                        $actions['Deactivate'] = "javascript:submitPluginAction('deactivate', '$plugin_name')";
                     } elseif ($plugin_status === 'inactive' || $plugin_status === 'installed') {
-                        // Inactive - show Activate and Uninstall buttons
-                        $action_cell .= $formwriter->begin_form('plugin_activate_' . $plugin['name'], 'POST', '', true);
-                        $action_cell .= $formwriter->hiddeninput('action', 'activate');
-                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                        $action_cell .= $formwriter->new_form_button('Activate', 'btn btn-primary btn-sm');
-                        $action_cell .= $formwriter->end_form(true);
-                        
-                        $action_cell .= ' ';
-                        
-                        $action_cell .= $formwriter->begin_form('plugin_uninstall_' . $plugin['name'], 'POST', '', true);
-                        $action_cell .= $formwriter->hiddeninput('action', 'uninstall');
-                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                        $action_cell .= $formwriter->new_form_button('Uninstall', 'btn btn-danger btn-sm', '', 'return confirm(\'Are you sure you want to uninstall this plugin?\');');
-                        $action_cell .= $formwriter->end_form(true);
-                        
+                        // Inactive
+                        $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
+                        $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
                     } elseif ($plugin_status === 'error') {
-                        // Error - show Repair and Uninstall buttons
-                        $action_cell .= $formwriter->begin_form('plugin_repair_' . $plugin['name'], 'POST', '', true);
-                        $action_cell .= $formwriter->hiddeninput('action', 'repair_plugin');
-                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                        $action_cell .= $formwriter->new_form_button('Repair', 'btn btn-warning btn-sm');
-                        $action_cell .= $formwriter->end_form(true);
-                        
-                        $action_cell .= ' ';
-                        
-                        $action_cell .= $formwriter->begin_form('plugin_uninstall_' . $plugin['name'], 'POST', '', true);
-                        $action_cell .= $formwriter->hiddeninput('action', 'uninstall');
-                        $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                        $action_cell .= $formwriter->new_form_button('Uninstall', 'btn btn-danger btn-sm', '', 'return confirm(\'Are you sure you want to uninstall this plugin?\');');
-                        $action_cell .= $formwriter->end_form(true);
-                        
+                        // Error
+                        $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
+                        $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
                     }
                     
-                    // Add stock/custom toggle buttons if plugin is installed
+                    // Add stock/custom toggle if plugin is installed
                     if ($plugin['plugin']) {
                         $is_stock = $plugin['plugin']->is_stock();
-                        $action_cell .= '<div class="mt-2">';
                         if ($is_stock) {
-                            $action_cell .= $formwriter->begin_form('plugin_custom_' . $plugin['name'], 'POST', '', true);
-                            $action_cell .= $formwriter->hiddeninput('action', 'mark_custom');
-                            $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                            $action_cell .= $formwriter->new_form_button('→ Custom', 'btn btn-outline-warning btn-sm', '', 'title="Mark as Custom"');
-                            $action_cell .= $formwriter->end_form(true);
+                            $actions['Mark as Custom'] = "javascript:submitPluginAction('mark_custom', '$plugin_name')";
                         } else {
-                            $action_cell .= $formwriter->begin_form('plugin_stock_' . $plugin['name'], 'POST', '', true);
-                            $action_cell .= $formwriter->hiddeninput('action', 'mark_stock');
-                            $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
-                            $action_cell .= $formwriter->new_form_button('→ Stock', 'btn btn-outline-info btn-sm', '', 'title="Mark as Stock"');
-                            $action_cell .= $formwriter->end_form(true);
+                            $actions['Mark as Stock'] = "javascript:submitPluginAction('mark_stock', '$plugin_name')";
                         }
-                        $action_cell .= '</div>';
                     }
                     
-                    $action_cell .= '</div>';
+                    if (!empty($actions)) {
+                        $action_cell = '<div class="dropdown">';
+                        $action_cell .= '<button class="btn btn-falcon-default dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+                        $action_cell .= '<div class="dropdown-menu dropdown-menu-end py-0">';
+                        foreach ($actions as $label => $action) {
+                            $action_cell .= '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
+                        }
+                        $action_cell .= '</div>';
+                        $action_cell .= '</div>';
+                    } else {
+                        $action_cell = '<span class="text-muted">No actions</span>';
+                    }
+                    
                     array_push($rowvalues, $action_cell);
                 } else {
                     array_push($rowvalues, '<em class="text-muted">N/A</em>');
@@ -610,32 +573,35 @@ $page->admin_header(array(
 </div>
 
 <script>
-// Handle "Check for Updates" button click
-document.addEventListener('DOMContentLoaded', function() {
-    // Find the Check for Updates link and make it submit the form
-    const updateLink = document.querySelector('a[href="javascript:void(0);"]');
-    if (updateLink && updateLink.textContent.includes('Check for Updates')) {
-        updateLink.addEventListener('click', function(e) {
-            e.preventDefault();
-            
-            // Create and submit a form to check for updates
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = window.location.href;
-            
-            const actionInput = document.createElement('input');
-            actionInput.type = 'hidden';
-            actionInput.name = 'action';
-            actionInput.value = 'check_updates';
-            
-            form.appendChild(actionInput);
-            document.body.appendChild(form);
-            form.submit();
-        });
+function submitPluginAction(action, pluginName) {
+    var form = document.createElement('form');
+    form.method = 'post';
+    form.style.display = 'none';
+    
+    var actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.name = 'action';
+    actionInput.value = action;
+    form.appendChild(actionInput);
+    
+    var pluginInput = document.createElement('input');
+    pluginInput.type = 'hidden';
+    pluginInput.name = 'plugin_name';
+    pluginInput.value = pluginName;
+    form.appendChild(pluginInput);
+    
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function confirmPluginAction(action, pluginName, message) {
+    if (confirm(message)) {
+        submitPluginAction(action, pluginName);
     }
-});
+}
 </script>
 
 <?php
+$page->end_box();
 $page->admin_footer();
 ?>
