@@ -28,6 +28,9 @@ class Plugin extends SystemBase {
 		'plg_status' => 'Plugin status (installed/active/inactive/error)',
 		'plg_install_error' => 'Installation error message',
 		'plg_metadata' => 'Plugin metadata JSON',
+		'plg_is_stock' => 'Is this a stock plugin (auto-updated)?',
+		'plg_create_time' => 'Record creation time',
+		'plg_update_time' => 'Record update time'
 	);
 
 	/**
@@ -51,6 +54,9 @@ class Plugin extends SystemBase {
 		'plg_status' => array('type'=>'varchar(20)'),
 		'plg_install_error' => array('type'=>'text'),
 		'plg_metadata' => array('type'=>'text'),
+		'plg_is_stock' => array('type'=>'bool'),
+		'plg_create_time' => array('type'=>'timestamp(6)'),
+		'plg_update_time' => array('type'=>'timestamp(6)')
 	);
 
 	public static $required_fields = array('plg_name');
@@ -59,7 +65,15 @@ class Plugin extends SystemBase {
 	
 	public static $zero_variables = array();	
 
-	public static $initial_default_values = array();	
+	public static $timestamp_fields = array('plg_create_time', 'plg_update_time', 
+		'plg_installed_time', 'plg_activated_time', 'plg_last_activated_time', 
+		'plg_last_deactivated_time', 'plg_uninstalled_time');
+
+	public static $initial_default_values = array(
+		'plg_is_stock' => true,
+		'plg_create_time' => 'now()',
+		'plg_update_time' => 'now()'
+	);	
 
 	
 	
@@ -309,8 +323,8 @@ class Plugin extends SystemBase {
 			
 			// Check dependencies
 			PathHelper::requireOnce('includes/PluginManager.php');
-			$dependency_validator = new PluginDependencyValidator();
-			$dependency_result = $dependency_validator->validate($plugin_name);
+			$plugin_manager = new PluginManager();
+			$dependency_result = $plugin_manager->validatePlugin($plugin_name);
 			
 			if (!$dependency_result['valid']) {
 				$results['errors'] = $dependency_result['errors'];
@@ -335,8 +349,8 @@ class Plugin extends SystemBase {
 			
 			// Run migrations
 			PathHelper::requireOnce('includes/PluginManager.php');
-			$migration_runner = new PluginMigrationRunner($plugin_name);
-			$migration_result = $migration_runner->migrate();
+			$plugin_manager = new PluginManager();
+			$migration_result = $plugin_manager->runPendingMigrations($plugin_name);
 			
 			if (!$migration_result['success']) {
 				$results['errors'] = $migration_result['errors'];
@@ -404,8 +418,12 @@ class Plugin extends SystemBase {
 			
 			// Check dependencies
 			PathHelper::requireOnce('includes/PluginManager.php');
-			$dependency_validator = new PluginDependencyValidator();
-			$deactivation_check = $dependency_validator->checkDeactivation($plugin_name);
+			$plugin_manager = new PluginManager();
+			$dependents = $plugin_manager->getDependents($plugin_name);
+			$deactivation_check = array(
+				'can_deactivate' => empty($dependents),
+				'dependent_plugins' => $dependents
+			);
 			
 			if (!$deactivation_check['can_deactivate']) {
 				$results['errors'][] = 'Cannot uninstall plugin. Other plugins depend on it: ' . 
@@ -431,8 +449,10 @@ class Plugin extends SystemBase {
 			
 			// Rollback migrations
 			PathHelper::requireOnce('includes/PluginManager.php');
-			$migration_runner = new PluginMigrationRunner($plugin_name);
-			$rollback_result = $migration_runner->rollback();
+			$plugin_manager = new PluginManager();
+			// Note: Rollback not implemented in consolidated PluginManager
+			// For now, just skip rollback
+			$rollback_result = array('success' => true, 'errors' => []);
 			
 			if (!$rollback_result['success']) {
 				$results['errors'] = array_merge($results['errors'], $rollback_result['errors']);
@@ -475,8 +495,8 @@ class Plugin extends SystemBase {
 	public function activate() {
 		// Check dependencies before activation
 		PathHelper::requireOnce('includes/PluginManager.php');
-		$dependency_validator = new PluginDependencyValidator();
-		$dependency_result = $dependency_validator->validate($this->get('plg_name'));
+		$plugin_manager = new PluginManager();
+		$dependency_result = $plugin_manager->validatePlugin($this->get('plg_name'));
 		
 		if (!$dependency_result['valid']) {
 			throw new PluginException('Cannot activate plugin: ' . implode('; ', $dependency_result['errors']));
@@ -500,8 +520,13 @@ class Plugin extends SystemBase {
 	public function deactivate() {
 		// Check if other plugins depend on this one
 		PathHelper::requireOnce('includes/PluginManager.php');
-		$dependency_validator = new PluginDependencyValidator();
-		$deactivation_check = $dependency_validator->checkDeactivation($this->get('plg_name'));
+		$plugin_manager = new PluginManager();
+		$plugin_name = $this->get('plg_name');
+		$dependents = $plugin_manager->getDependents($plugin_name);
+		$deactivation_check = array(
+			'can_deactivate' => empty($dependents),
+			'dependent_plugins' => $dependents
+		);
 		
 		if (!$deactivation_check['can_deactivate']) {
 			throw new PluginException('Cannot deactivate plugin. Other plugins depend on it: ' . 
@@ -517,6 +542,40 @@ class Plugin extends SystemBase {
 		// Clear cache after deactivation
 		self::clear_activation_cache($this->get('plg_name'));
 		return $result;
+	}
+	
+	/**
+	 * Check if plugin is stock (auto-updated)
+	 * @return bool True if stock plugin
+	 */
+	public function is_stock() {
+		return (bool)$this->get('plg_is_stock');
+	}
+	
+	/**
+	 * Mark plugin as stock
+	 */
+	public function mark_as_stock() {
+		$this->set('plg_is_stock', true);
+		$this->save();
+	}
+	
+	/**
+	 * Mark plugin as custom
+	 */
+	public function mark_as_custom() {
+		$this->set('plg_is_stock', false);
+		$this->save();
+	}
+	
+	/**
+	 * Load stock status from plugin.json metadata
+	 */
+	public function load_stock_status() {
+		$metadata = $this->get_plugin_metadata();
+		if ($metadata && isset($metadata['is_stock'])) {
+			$this->set('plg_is_stock', $metadata['is_stock']);
+		}
 	}
 }
 

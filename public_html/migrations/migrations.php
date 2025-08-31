@@ -751,5 +751,13 @@
 		$migration['migration_sql'] = NULL;
 		$migration['migration_file'] = 'extract_email_subjects.php';
 		$migrations[] = $migration;
+		
+		// Sync themes and plugins with database registry
+		$migration = array();
+		$migration['database_version'] = '0.56';
+		$migration['test'] = NULL; // Rely on hash-based protection only
+		$migration['migration_sql'] = NULL;
+		$migration['migration_file'] = 'theme_plugin_registry_sync.php';
+		$migrations[] = $migration;
 
  
