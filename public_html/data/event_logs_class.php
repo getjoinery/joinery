@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class EventLogException extends SystemClassException {}
 
-class EventLog extends SystemBase {
-	public static $prefix = 'evl';
+class EventLog extends SystemBase {	public static $prefix = 'evl';
 	public static $tablename = 'evl_event_logs';
 	public static $pkey_column = 'evl_event_log_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -52,12 +51,11 @@ class EventLog extends SystemBase {
 	
 	public static $initial_default_values = array(
 	'evl_create_time'=> 'now()',);
-	
 
-	
 }
 
 class MultiEventLog extends SystemMultiBase {
+	protected static $model_class = 'EventLog';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -73,22 +71,6 @@ class MultiEventLog extends SystemMultiBase {
         return $this->_get_resultsv2('evl_event_logs', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new EventLog($row->evl_event_log_id);
-			$child->load_from_data($row, array_keys(EventLog::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

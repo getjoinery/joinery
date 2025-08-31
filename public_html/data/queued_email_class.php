@@ -13,8 +13,7 @@ use PHPMailer\PHPMailer\SMTP;
 
 class QueuedEmailException extends SystemClassException {}
 
-class QueuedEmail extends SystemBase {
-	public static $prefix = 'equ';
+class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	public static $tablename = 'equ_queued_emails';
 	public static $pkey_column = 'equ_queued_email_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -86,7 +85,6 @@ class QueuedEmail extends SystemBase {
 		return self::$status_to_text[$this->get('equ_status')];
 	}
 
-
 	function get_stats() {
 		return SingleRowFetch('ers_recurring_email_logs', 'ers_recurring_email_log_id',
 			$this->get('equ_ers_recurring_email_log_id'), PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -151,11 +149,10 @@ class QueuedEmail extends SystemBase {
 		$dblink->commit();
 	}
 
-	
 }
 
-
 class MultiQueuedEmail extends SystemMultiBase {
+	protected static $model_class = 'QueuedEmail';
 
 	public static function EveryStatusChange($old_status, $new_status) {
 		$dbhelper = DbConnector::get_instance();
@@ -190,21 +187,6 @@ class MultiQueuedEmail extends SystemMultiBase {
 		}
 
 		return $this->_get_resultsv2('equ_queued_emails', $filters, $this->order_by, $only_count, $debug);
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new QueuedEmail($row->equ_queued_email_id);
-			$child->load_from_data($row, array_keys(QueuedEmail::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
 	}
 
 }

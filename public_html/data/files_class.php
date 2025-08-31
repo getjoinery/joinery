@@ -14,8 +14,7 @@ PathHelper::requireOnce('data/event_sessions_class.php');
 
 class FileException extends SystemClassException {}
 
-class File extends SystemBase {
-	public static $prefix = 'fil';
+class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
 	public static $pkey_column = 'fil_file_id';
 	public static $permanent_delete_actions = array(		'esf_fil_file_id' => 'prevent',
@@ -116,12 +115,10 @@ class File extends SystemBase {
 			return false;
 		}
 	}
-	
-	
+
 	//TAKES A SIZE ARGUMENT, AND ALSO EITHER 'SHORT' OR 'FULL'
 	function get_url($size='standard', $format='short') {
-		
-		
+
 		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
 		
@@ -233,7 +230,6 @@ class File extends SystemBase {
 		
 			//RESIZE THE PICTURE
 			$old_path = $upload_dir.'/'.$this->get('fil_name');
-		
 
 			//THUMBNAIL SIZE
 			if($size == 'all' || $size == 'thumbnail'){
@@ -298,8 +294,7 @@ class File extends SystemBase {
 					echo 'Caught exception: ',  $e->getMessage(), '\n';
 				}	
 			}
-			
-			
+
 			//SMALL SIZE
 			if($size == 'all' || $size == 'small'){
 				try
@@ -372,8 +367,7 @@ class File extends SystemBase {
 		
 		return $event_sessions;
 	}		
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -440,6 +434,7 @@ class File extends SystemBase {
 }
 
 class MultiFile extends SystemMultiBase {
+	protected static $model_class = 'File';
 
 	function get_file_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -505,24 +500,6 @@ class MultiFile extends SystemMultiBase {
 		return $this->_get_resultsv2('fil_files', $filters, $this->order_by, $only_count, $debug);
 	}
 
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new File($row->fil_file_id);
-			$child->load_from_data($row, array_keys(File::$fields));
-			$this->add($child);
-		}
-	}
-
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

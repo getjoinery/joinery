@@ -14,8 +14,7 @@ PathHelper::requireOnce('data/group_members_class.php');
 
 class GroupException extends SystemClassException {}
 
-class Group extends SystemBase {
-	public static $prefix = 'grp';
+class Group extends SystemBase {	public static $prefix = 'grp';
 	public static $tablename = 'grp_groups';
 	public static $pkey_column = 'grp_group_id';
 	public static $permanent_delete_actions = array(		'evr_grp_group_id' => 'prevent',
@@ -25,7 +24,6 @@ class Group extends SystemBase {
 		'erg_grp_group_id' => 'prevent',
 		'fil_grp_group_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
 
 	public static $fields = array(		'grp_group_id' => 'Primary key - Group ID',
 		'grp_name' => 'Group Name',
@@ -37,7 +35,6 @@ class Group extends SystemBase {
 		'grp_category' => 'Dynamic replacement for group type',
 	);
 
-	
 /**
 	 * Field specifications define database column properties and schema constraints
 	 * Available options:
@@ -57,8 +54,6 @@ class Group extends SystemBase {
 		//'grp_type' => array('type'=>'int2'),
 		'grp_category' => array('type'=>'varchar(24)'),
 	);	
-
-	
 
 public static $required_fields = array(
 		'grp_name');
@@ -108,8 +103,7 @@ public static $required_fields = array(
 	
 	//CREATES A NEW GROUP
 	public static function add_group($name, $user_id, $category){
-		
-		
+
 		if(!$name){
 			throw new GroupException('You cannot create a group without a name.');
 			exit();			
@@ -156,8 +150,7 @@ public static $required_fields = array(
 		));
 			
 		$groups_out->load();
-		
-		
+
 		if($return_type == 'objects'){
 			return $groups_out; 
 		}
@@ -190,7 +183,6 @@ public static $required_fields = array(
 			throw new GroupException('To get groups for a group member an foreign_key_id is required.');
 			exit();	
 		}
-		
 
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -204,8 +196,6 @@ public static $required_fields = array(
 			$q = $dblink->prepare($sql);
 			$q->bindValue(':foreign_key_id', $foreign_key_id, PDO::PARAM_INT);
 			$q->bindValue(':category', $category, PDO::PARAM_STR);
-			
-
 
 			$q->execute();
 			$q->setFetchMode(PDO::FETCH_OBJ);
@@ -214,8 +204,6 @@ public static $required_fields = array(
 			$dbhelper->handle_query_error($e);
 		}
 
-
-		
 		$groups = $q->fetchAll();
 		$groups_out = new MultiGroup();
 		foreach($groups as $group){
@@ -299,8 +287,7 @@ public static $required_fields = array(
 			throw new GroupException('To add a group member an id is required.');
 			exit();	
 		}
-	
-	
+
 		if(!$groupmember = $this->is_member_in_group($foreign_key_id)){
 			
 			$groupmember = new GroupMember(NULL);
@@ -317,9 +304,7 @@ public static $required_fields = array(
 			return $groupmember;
 		}
 	}
-	
-	
-	
+
 	//REMOVE A MEMBER FROM THIS GROUP
 	function remove_member($foreign_key_id){
 
@@ -386,8 +371,6 @@ public static $required_fields = array(
 		return $group_members;
 	}	
 
-
-	
 	function get_member_count() {
 		$count = new MultiGroupMember(array(
 			'group_id' => $this->key,
@@ -395,11 +378,9 @@ public static $required_fields = array(
 		
 		return $count->count_all();
 	}				
-	
 
 	// prepare() method now inherited from SystemBase with automatic unique constraint checking
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -410,11 +391,11 @@ public static $required_fields = array(
 			}
 		}
 	}
-	
 
 }
 
 class MultiGroup extends SystemMultiBase {
+	protected static $model_class = 'Group';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -454,24 +435,6 @@ class MultiGroup extends SystemMultiBase {
 
 		return $this->_get_resultsv2('grp_groups', $filters, $this->order_by, $only_count, $debug);
 	}
-
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Group($row->grp_group_id);
-			$child->load_from_data($row, array_keys(Group::$fields));
-			$this->add($child);
-		}
-	}
-
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
-
 
 ?>

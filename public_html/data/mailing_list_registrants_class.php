@@ -11,11 +11,9 @@ PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/users_class.php');
 
-	
 class MailingListRegistrantException extends SystemClassException {}
 
-class MailingListRegistrant extends SystemBase {
-	public static $prefix = 'mlr';
+class MailingListRegistrant extends SystemBase {	public static $prefix = 'mlr';
 	public static $tablename = 'mlr_mailing_list_registrants';
 	public static $pkey_column = 'mlr_mailing_list_registrant_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -74,7 +72,6 @@ class MailingListRegistrant extends SystemBase {
 				throw new MailingListRegistrantException('This is a duplicate mailing list registrant:'. $this->get('mlr_usr_user_id'));
 			}
 		}
-		
 
 	}
 	
@@ -100,13 +97,12 @@ class MailingListRegistrant extends SystemBase {
 }
 
 class MultiMailingListRegistrant extends SystemMultiBase {
+	protected static $model_class = 'MailingListRegistrant';
 
-	
 	function get_dropdown_array($include_new=FALSE) {
 		return false;
 	}
-	
-	
+
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
 
@@ -125,23 +121,6 @@ class MultiMailingListRegistrant extends SystemMultiBase {
 		return $this->_get_resultsv2('mlr_mailing_list_registrants', $filters, $this->order_by, $only_count, $debug);
 	}
 
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new MailingListRegistrant($row->mlr_mailing_list_registrant_id);
-			$child->load_from_data($row, array_keys(MailingListRegistrant::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

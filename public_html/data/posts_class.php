@@ -15,8 +15,7 @@ PathHelper::requireOnce('data/groups_class.php');
 
 class PostException extends SystemClassException {}
 
-class Post extends SystemBase {
-	public static $prefix = 'pst';
+class Post extends SystemBase {	public static $prefix = 'pst';
 	public static $tablename = 'pst_posts';
 	public static $pkey_column = 'pst_post_id';
 	public static $url_namespace = 'post';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
@@ -80,8 +79,7 @@ class Post extends SystemBase {
 					'This page link is a duplicate.');
 		}
 	}	
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -129,7 +127,7 @@ class Post extends SystemBase {
 }
 
 class MultiPost extends SystemMultiBase {
-
+	protected static $model_class = 'Post';
 
 	function get_post_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -215,23 +213,6 @@ class MultiPost extends SystemMultiBase {
 		return $this->_get_resultsv2('pst_posts', $filters, $this->order_by, $only_count, $debug);
 	}
 
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Post($row->pst_post_id);
-			$child->load_from_data($row, array_keys(Post::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

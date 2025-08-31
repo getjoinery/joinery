@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class VideoException extends SystemClassException {}
 
-class Video extends SystemBase {
-	public static $prefix = 'vid';
+class Video extends SystemBase {	public static $prefix = 'vid';
 	public static $tablename = 'vid_videos';
 	public static $pkey_column = 'vid_video_id';
 	public static $permanent_delete_actions = array(		'evs_vid_video_id' => 'prevent',
@@ -70,7 +69,6 @@ class Video extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array('vid_create_time' => 'now()');
-	
 
 	function get_embed($vidwidth = 560, $vidheight = 315) {
 		if($this->get('vid_delete_time')){
@@ -112,8 +110,6 @@ class Video extends SystemBase {
 		return $src;
 	}
 
-
-	
 	function get_source() {
 		if($this->get('vid_source') == 1){
 			return 'Youtube';
@@ -238,8 +234,7 @@ class Video extends SystemBase {
 		}	
 		return $vid_video_number;	
 	}	
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -308,7 +303,7 @@ class Video extends SystemBase {
 }
 
 class MultiVideo extends SystemMultiBase {
-
+	protected static $model_class = 'Video';
 
 	function get_video_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -352,22 +347,6 @@ class MultiVideo extends SystemMultiBase {
         return $this->_get_resultsv2('vid_videos', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Video($row->vid_video_id);
-			$child->load_from_data($row, array_keys(Video::$fields));
-			$this->add($child);
-		}
-	}
-	
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

@@ -45,6 +45,8 @@ class EventSessionsUnviewableDisplayException extends EventSessionsException imp
 */
 
 class EventSession extends SystemBase {
+	protected static $model_class = 'EventSessions';
+
 	public static $prefix = 'evs';
 	public static $tablename = 'evs_event_sessions';
 	public static $pkey_column = 'evs_event_session_id';
@@ -118,7 +120,6 @@ class EventSession extends SystemBase {
 					*/
 		);
 
-
 	public static function GetBySessionNumber($event_id, $session_number){
 		$results = new MultiEventSessions(array('event_id' => $event_id, 'session_number' => $session_number));
 		$results->load();
@@ -130,8 +131,7 @@ class EventSession extends SystemBase {
 			return false;
 		}		
 	}
-		
-	
+
 	function get_start_time($tz='event', $format='M j, Y g:i a T') {
 		$event = new Event($this->get('evs_evt_event_id'), TRUE);
 		if($tz == 'event' || !$tz){
@@ -213,10 +213,6 @@ class EventSession extends SystemBase {
 	
 	public static $json_vars = array(
 		'evs_event_id', 'evs_name', 'evs_description');
-
-
-
-
 
 	function prepare() {
 		if ($this->data === NULL) {
@@ -305,8 +301,7 @@ class EventSession extends SystemBase {
 		return $results->totalcount;
 
 	}	
-	
-	
+
 	function add_file($fil_file_id){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -395,7 +390,6 @@ class EventSession extends SystemBase {
 		return $output_array;
 	}
 
-
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -403,10 +397,10 @@ class EventSession extends SystemBase {
 		}
 	}	
 
-
 }
 
 class MultiEventSessions extends SystemMultiBase {
+	protected static $model_class = 'EventSession';
 
 	function get_sessions_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -421,9 +415,6 @@ class MultiEventSessions extends SystemMultiBase {
 		return $items;
 
 	}
-
-
-
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -465,21 +456,6 @@ class MultiEventSessions extends SystemMultiBase {
         }
         
         return $this->_get_resultsv2('evs_event_sessions', $filters, $this->order_by, $only_count, $debug);
-    }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new EventSession($row->evs_event_session_id);
-            $child->load_from_data($row, array_keys(EventSession::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
     }
 
 }

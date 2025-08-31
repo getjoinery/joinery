@@ -9,12 +9,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
 class ApiKeyException extends SystemClassException {}
 
-class ApiKey extends SystemBase {
-
-	public static $prefix = 'apk';
+class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	public static $tablename = 'apk_api_keys';
 	public static $pkey_column = 'apk_api_key_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -95,12 +92,11 @@ class ApiKey extends SystemBase {
 			}
 		}
 	}
-	
-	
+
 }
 
 class MultiApiKey extends SystemMultiBase {
-
+	protected static $model_class = 'ApiKey';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -136,22 +132,6 @@ class MultiApiKey extends SystemMultiBase {
         return $this->_get_resultsv2('apk_api_keys', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ApiKey($row->apk_api_key_id);
-			$child->load_from_data($row, array_keys(ApiKey::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

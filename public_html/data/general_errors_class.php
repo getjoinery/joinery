@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class GeneralErrorException extends SystemClassException {}
 
-class GeneralError extends SystemBase {
-	public static $prefix = 'err';
+class GeneralError extends SystemBase {	public static $prefix = 'err';
 	public static $tablename = 'err_general_errors';
 	public static $pkey_column = 'err_general_error_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -64,7 +63,6 @@ class GeneralError extends SystemBase {
 	public static $initial_default_values = array(
 	'err_create_time'=> 'now()',);
 
-	
 	function display_time($session) {
 		return LibraryFunctions::convert_time(
 			$this->get('err_log_time'), 'UTC', $session->get_timezone(), '%a, %d %b %Y %R:%S');
@@ -157,6 +155,7 @@ class GeneralError extends SystemBase {
 }
 
 class MultiGeneralError extends SystemMultiBase {
+	protected static $model_class = 'GeneralError';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -168,22 +167,6 @@ class MultiGeneralError extends SystemMultiBase {
 		return $this->_get_resultsv2('err_general_errors', $filters, $this->order_by, $only_count, $debug);
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new GeneralError($row->err_general_error_id);
-			$child->load_from_data($row, array_keys(GeneralError::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

@@ -11,11 +11,9 @@ PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/users_class.php');
 
-	
 class SurveyQuestionException extends SystemClassException {}
 
-class SurveyQuestion extends SystemBase {
-	public static $prefix = 'srq';
+class SurveyQuestion extends SystemBase {	public static $prefix = 'srq';
 	public static $tablename = 'srq_survey_questions';
 	public static $pkey_column = 'srq_survey_question_id';
 	public static $permanent_delete_actions = array(
@@ -54,8 +52,7 @@ class SurveyQuestion extends SystemBase {
 
 	public static $initial_default_values = array(
 		);		
-		
-	
+
 	private function _check_for_duplicates() {
 		
 		$count = new MultiSurveyQuestion(array(
@@ -69,8 +66,6 @@ class SurveyQuestion extends SystemBase {
 		}
 		return NULL;
 	}	
-	
-	
 
 	function prepare() {	
 		
@@ -82,7 +77,6 @@ class SurveyQuestion extends SystemBase {
 		
 	}
 
-	
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -102,6 +96,7 @@ class SurveyQuestion extends SystemBase {
 }
 
 class MultiSurveyQuestion extends SystemMultiBase {
+	protected static $model_class = 'SurveyQuestion';
 	function get_user_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
@@ -131,23 +126,7 @@ class MultiSurveyQuestion extends SystemMultiBase {
         
         return $this->_get_resultsv2('srq_survey_questions', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new SurveyQuestion($row->srq_survey_question_id);
-            $child->load_from_data($row, array_keys(SurveyQuestion::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

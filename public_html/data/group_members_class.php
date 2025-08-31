@@ -11,11 +11,9 @@ PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/users_class.php');
 
-	
 class GroupMemberException extends SystemClassException {}
 
-class GroupMember extends SystemBase {
-	public static $prefix = 'grm';
+class GroupMember extends SystemBase {	public static $prefix = 'grm';
 	public static $tablename = 'grm_group_members';
 	public static $pkey_column = 'grm_group_member_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -24,7 +22,6 @@ class GroupMember extends SystemBase {
 		'grm_foreign_key_id' => 'Foreign key pointing to the member in this group',
 	);
 
-	
 /**
 	 * Field specifications define database column properties and schema constraints
 	 * Available options:
@@ -39,8 +36,6 @@ class GroupMember extends SystemBase {
 		'grm_grp_group_id' => array('type'=>'int4', 'unique_with' => array('grm_foreign_key_id')),
 		'grm_foreign_key_id' => array('type'=>'int8'),
 	);	
-
-	
 
 public static $required_fields = array('grm_grp_group_id');
 
@@ -62,7 +57,6 @@ public static $required_fields = array('grm_grp_group_id');
 		
 		return $success;		
 	}	
-	
 
 	// Unique constraints now handled automatically by SystemBase
 	
@@ -76,6 +70,7 @@ public static $required_fields = array('grm_grp_group_id');
 }
 
 class MultiGroupMember extends SystemMultiBase {
+	protected static $model_class = 'GroupMember';
 	function get_user_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
@@ -114,24 +109,6 @@ class MultiGroupMember extends SystemMultiBase {
 		return $this->_get_resultsv2('grm_group_members', $filters, $this->order_by, $only_count, $debug);
 	}
 
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new GroupMember($row->grm_group_member_id);
-			$child->load_from_data($row, array_keys(GroupMember::$fields));
-			$this->add($child);
-		}
-	}
-
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

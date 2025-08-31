@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class DebugEmailLogException extends SystemClassException {}
 
-class DebugEmailLog extends SystemBase {
-	public static $prefix = 'del';
+class DebugEmailLog extends SystemBase {	public static $prefix = 'del';
 	public static $tablename = 'del_debug_email_logs';
 	public static $pkey_column = 'del_debug_email_log_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -54,6 +53,7 @@ class DebugEmailLog extends SystemBase {
 }
 
 class MultiDebugEmailLog extends SystemMultiBase {
+	protected static $model_class = 'DebugEmailLog';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -61,22 +61,6 @@ class MultiDebugEmailLog extends SystemMultiBase {
         return $this->_get_resultsv2('del_debug_email_logs', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new DebugEmailLog($row->del_debug_email_log_id);
-			$child->load_from_data($row, array_keys(DebugEmailLog::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

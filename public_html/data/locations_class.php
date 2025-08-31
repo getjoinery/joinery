@@ -9,11 +9,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
 class LocationException extends SystemClassException {}
 
-class Location extends SystemBase {
-	public static $prefix = 'loc';
+class Location extends SystemBase {	public static $prefix = 'loc';
 	public static $tablename = 'loc_locations';
 	public static $pkey_column = 'loc_location_id';
 	public static $url_namespace = 'location';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
@@ -66,8 +64,7 @@ class Location extends SystemBase {
 	public static $initial_default_values = array(
 	'loc_create_time' => 'now()'
 	);	
-	
-	
+
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -86,7 +83,7 @@ class Location extends SystemBase {
 }
 
 class MultiLocation extends SystemMultiBase {
-
+	protected static $model_class = 'Location';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -118,24 +115,6 @@ class MultiLocation extends SystemMultiBase {
 		return $this->_get_resultsv2('loc_locations', $filters, $this->order_by, $only_count, $debug);
 	}
 
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Location($row->loc_location_id);
-			$child->load_from_data($row, array_keys(Location::$fields));
-			$this->add($child);
-		}
-	}
-
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

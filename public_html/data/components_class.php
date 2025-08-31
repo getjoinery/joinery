@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class ComponentException extends SystemClassException {}
 
-class Component extends SystemBase {
-	public static $prefix = 'com';
+class Component extends SystemBase {	public static $prefix = 'com';
 	public static $tablename = 'com_components';
 	public static $pkey_column = 'com_component_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -54,35 +53,17 @@ class Component extends SystemBase {
 
 	public static $initial_default_values = array('com_create_time' => 'now()'
 		);		
-	
-	
-
 
 }
 
 class MultiComponent extends SystemMultiBase {
+	protected static $model_class = 'Component';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
 
         return $this->_get_resultsv2('com_components', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Component($row->com_component_id);
-			$child->load_from_data($row, array_keys(Component::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
-
 
 ?>

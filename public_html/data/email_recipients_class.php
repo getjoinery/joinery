@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class EmailRecipientException extends SystemClassException {}
 
-class EmailRecipient extends SystemBase {
-	public static $prefix = 'erc';
+class EmailRecipient extends SystemBase {	public static $prefix = 'erc';
 	public static $tablename = 'erc_email_recipients';
 	public static $pkey_column = 'erc_email_recipient_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -59,8 +58,7 @@ class EmailRecipient extends SystemBase {
 	public static $field_constraints = array();	
 	
 	public static $initial_default_values = array();
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -151,7 +149,6 @@ class EmailRecipient extends SystemBase {
 		
 		return $q->fetch()->count;
 	}	
-	
 
 	static function DeleteAll($erc_eml_email_id) {
 		
@@ -168,8 +165,6 @@ class EmailRecipient extends SystemBase {
 			$dbhelper->handle_query_error($e);
 		}	
 	}	
-	
-	
 
 	static function TrackingCodeForRecipient($erc_email_recipient_id) { 
 		// Checksummed tracking code for this recipient
@@ -182,8 +177,8 @@ class EmailRecipient extends SystemBase {
 	
 }
 
-
 class MultiEmailRecipient extends SystemMultiBase {
+	protected static $model_class = 'EmailRecipient';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -210,21 +205,6 @@ class MultiEmailRecipient extends SystemMultiBase {
 
         return $this->_get_resultsv2('erc_email_recipients', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new EmailRecipient($row->erc_email_recipient_id);
-			$child->load_from_data($row, array_keys(EmailRecipient::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
 
 ?>

@@ -11,12 +11,9 @@ PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/coupon_code_uses_class.php');
 
-
 class CouponCodeException extends SystemClassException {}
 
-class CouponCode extends SystemBase {
-
-	public static $prefix = 'ccd';
+class CouponCode extends SystemBase {	public static $prefix = 'ccd';
 	public static $tablename = 'ccd_coupon_codes';
 	public static $pkey_column = 'ccd_coupon_code_id';
 	public static $permanent_delete_actions = array(		'ccp_ccd_coupon_code_id' => 'prevent',
@@ -79,7 +76,6 @@ class CouponCode extends SystemBase {
 		'ccd_create_time' => 'now()'
 	);	
 
-	
 	function get_discount($full_price){
 		$discount = 0;
 		if($this->get('ccd_amount_discount')){
@@ -149,7 +145,6 @@ class CouponCode extends SystemBase {
 		return true;
 	}
 
-	
 	function prepare() {
 		if(CouponCode::GetByColumn('ccd_code', $this->get('ccd_code')) && !$this->key){
 			throw new CouponCodeException('That coupon code already exists.');
@@ -160,8 +155,7 @@ class CouponCode extends SystemBase {
 		}
 		
 	}	
-	
-	
+
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -172,7 +166,7 @@ class CouponCode extends SystemBase {
 }
 
 class MultiCouponCode extends SystemMultiBase {
-
+	protected static $model_class = 'CouponCode';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -185,8 +179,6 @@ class MultiCouponCode extends SystemMultiBase {
 		return $items;
 
 	}
-	
-
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -215,24 +207,7 @@ class MultiCouponCode extends SystemMultiBase {
 
         return $this->_get_resultsv2('ccd_coupon_codes', $filters, $this->order_by, $only_count, $debug);
     }
-	
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new CouponCode($row->ccd_coupon_code_id);
-			$child->load_from_data($row, array_keys(CouponCode::$fields));
-			$this->add($child);
-		}
-	}
-	
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
-
 
 ?>

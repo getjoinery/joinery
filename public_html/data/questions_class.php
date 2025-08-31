@@ -14,9 +14,7 @@ PathHelper::requireOnce('data/survey_answers_class.php');
 
 class QuestionException extends SystemClassException {}
 
-class Question extends SystemBase {
-	
-	public static $prefix = 'qst';
+class Question extends SystemBase {	public static $prefix = 'qst';
 	public static $tablename = 'qst_questions';
 	public static $pkey_column = 'qst_question_id';
 	public static $permanent_delete_actions = array(
@@ -80,7 +78,6 @@ class Question extends SystemBase {
 	public static $initial_default_values = array(
 	'qst_create_time' => 'now()', 'qst_is_published' => true
 	);	
-
 
 	function output_js_validation($validation_rules){
 		$validation_options = unserialize($this->get('qst_validate')); 
@@ -292,7 +289,6 @@ class Question extends SystemBase {
 		return $options;
 	}
 
-
 	function prepare() {
 		
 		//CHECK TO MAKE SURE WE HAVE AT LEAST ONE OPTION FOR QUESTION TYPES WITH OPTIONS
@@ -347,8 +343,7 @@ class Question extends SystemBase {
 			}			
 		}*/
 	}	
-	
-	
+
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -356,11 +351,10 @@ class Question extends SystemBase {
 		}
 	}
 
-	
 }
 
 class MultiQuestion extends SystemMultiBase {
-
+	protected static $model_class = 'Question';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -390,22 +384,6 @@ class MultiQuestion extends SystemMultiBase {
 		return $this->_get_resultsv2('qst_questions', $filters, $this->order_by, $only_count, $debug);
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Question($row->qst_question_id);
-			$child->load_from_data($row, array_keys(Question::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

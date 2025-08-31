@@ -15,9 +15,7 @@ class ProductRequirementInstanceException extends SystemClassException {}
 class DisplayableProductRequirementInstanceException extends ProductRequirementInstanceException implements DisplayableErrorMessage {}
 class DisplayablePermanentProductRequirementInstanceException extends ProductRequirementInstanceException implements DisplayablePermanentErrorMessage {}
 
-
-class ProductRequirementInstance extends SystemBase {
-	public static $prefix = 'pri';
+class ProductRequirementInstance extends SystemBase {	public static $prefix = 'pri';
 	public static $tablename = 'pri_product_requirement_instances';
 	public static $pkey_column = 'pri_product_requirement_instance_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -66,9 +64,6 @@ class ProductRequirementInstance extends SystemBase {
 			),
 					*/
 		);
-		
-	
-
 
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
@@ -77,10 +72,10 @@ class ProductRequirementInstance extends SystemBase {
 		}
 	}	
 
-
 }
 
 class MultiProductRequirementInstance extends SystemMultiBase {
+	protected static $model_class = 'ProductRequirementInstance';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -94,7 +89,6 @@ class MultiProductRequirementInstance extends SystemMultiBase {
 		return $items;
 
 	}
-
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -112,21 +106,6 @@ class MultiProductRequirementInstance extends SystemMultiBase {
 		}
 
 		return $this->_get_resultsv2('pri_product_requirement_instances', $filters, $this->order_by, $only_count, $debug);
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ProductRequirementInstance($row->pri_product_requirement_instance_id);
-			$child->load_from_data($row, array_keys(ProductRequirementInstance::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
 	}
 
 }

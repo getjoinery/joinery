@@ -8,8 +8,7 @@ PathHelper::requireOnce('includes/SystemClass.php');
 class PluginMigrationException extends SystemClassException {}
 class PluginMigrationNotSentException extends PluginMigrationException {}
 
-class PluginMigration extends SystemBase {
-    public static $prefix = 'plm';
+class PluginMigration extends SystemBase {    public static $prefix = 'plm';
     public static $tablename = 'plm_plugin_migrations';
     public static $pkey_column = 'plm_plugin_migration_id';
     public static $permanent_delete_actions = array(
@@ -67,26 +66,12 @@ class PluginMigration extends SystemBase {
 }
 
 class MultiPluginMigration extends SystemMultiBase {
+	protected static $model_class = 'PluginMigration';
 
     protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
         
         return $this->_get_resultsv2('plm_plugin_migrations', $filters, $this->order_by, $only_count, $debug);
-    }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new PluginMigration($row->plm_plugin_migration_id);
-            $child->load_from_data($row, array_keys(PluginMigration::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
     }
 }
 

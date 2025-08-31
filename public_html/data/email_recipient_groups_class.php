@@ -11,12 +11,10 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class EmailRecipientGroupException extends SystemClassException {}
 
-class EmailRecipientGroup extends SystemBase {
-	public static $prefix = 'erg';
+class EmailRecipientGroup extends SystemBase {	public static $prefix = 'erg';
 	public static $tablename = 'erg_email_recipient_groups';
 	public static $pkey_column = 'erg_email_recipient_group_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
 
 	public static $fields = array(
 		'erg_email_recipient_group_id' => 'Primary key - EmailRecipientGroup ID',
@@ -51,8 +49,7 @@ class EmailRecipientGroup extends SystemBase {
 	public static $field_constraints = array();	
 	
 	public static $initial_default_values = array();
-	
-	
+
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -62,8 +59,8 @@ class EmailRecipientGroup extends SystemBase {
 	
 }
 
-
 class MultiEmailRecipientGroup extends SystemMultiBase {
+	protected static $model_class = 'EmailRecipientGroup';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -94,22 +91,6 @@ class MultiEmailRecipientGroup extends SystemMultiBase {
 
         return $this->_get_resultsv2('erg_email_recipient_groups', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new EmailRecipientGroup($row->erg_email_recipient_group_id);
-			$child->load_from_data($row, array_keys(EmailRecipientGroup::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 
 }
 

@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class EventSessionFileException extends SystemClassException {}
 
-class EventSessionFile extends SystemBase {
-	public static $prefix = 'esf';
+class EventSessionFile extends SystemBase {	public static $prefix = 'esf';
 	public static $tablename = 'esf_event_session_files';
 	public static $pkey_column = 'esf_event_session_file_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -43,12 +42,11 @@ class EventSessionFile extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array();
-	
 
-	
 }
 
 class MultiEventSessionFile extends SystemMultiBase {
+	protected static $model_class = 'EventSessionFile';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -60,22 +58,6 @@ class MultiEventSessionFile extends SystemMultiBase {
         return $this->_get_resultsv2('esf_event_session_files', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new EventSessionFile($row->esf_event_session_file_id);
-			$child->load_from_data($row, array_keys(EventSessionFile::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

@@ -9,12 +9,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
-
 class EmailTemplateStoreException extends SystemClassException {}
 
-class EmailTemplateStore extends SystemBase {
-	public static $prefix = 'emt';
+class EmailTemplateStore extends SystemBase {	public static $prefix = 'emt';
 	public static $tablename = 'emt_email_templates';
 	public static $pkey_column = 'emt_email_template_id';
 	public static $permanent_delete_actions = array(		'mlt_emt_email_template_id' => 'prevent'
@@ -66,8 +63,7 @@ class EmailTemplateStore extends SystemBase {
 		'emt_create_time' => 'now()', 
 		'emt_update_time' => 'now()'
 		);		
-	
-	
+
 	private function _check_for_duplicate_email_template() {
 		$count = new MultiEmailTemplateStore(array(
 			'email_template_name' => $this->get('emt_name'),
@@ -79,7 +75,6 @@ class EmailTemplateStore extends SystemBase {
 		}
 		return NULL;
 	}		
-	
 
 	function prepare() {
 		
@@ -93,7 +88,6 @@ class EmailTemplateStore extends SystemBase {
 
 	}
 
-	
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 10) {
 			throw new SystemAuthenticationError(
@@ -110,10 +104,10 @@ class EmailTemplateStore extends SystemBase {
 		parent::save($debug);
 	}
 
-
 }
 
 class MultiEmailTemplateStore extends SystemMultiBase {
+	protected static $model_class = 'EmailTemplateStore';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -146,22 +140,6 @@ class MultiEmailTemplateStore extends SystemMultiBase {
         return $this->_get_resultsv2('emt_email_templates', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new EmailTemplateStore($row->emt_email_template_id);
-			$child->load_from_data($row, array_keys(EmailTemplateStore::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

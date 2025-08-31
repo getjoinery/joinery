@@ -13,8 +13,7 @@ PathHelper::requireOnce('data/page_contents_class.php');
 
 class PageException extends SystemClassException {}
 
-class Page extends SystemBase {
-	public static $prefix = 'pag';
+class Page extends SystemBase {	public static $prefix = 'pag';
 	public static $tablename = 'pag_pages';
 	public static $pkey_column = 'pag_page_id';
 	public static $url_namespace = 'page';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
@@ -62,7 +61,6 @@ class Page extends SystemBase {
 
 	public static $initial_default_values = array('pag_create_time' => 'now()'
 		);				
-
 
 	function get_filled_content(){
 
@@ -123,6 +121,7 @@ class Page extends SystemBase {
 }
 
 class MultiPage extends SystemMultiBase {
+	protected static $model_class = 'Page';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -172,22 +171,8 @@ class MultiPage extends SystemMultiBase {
 	}
 
 	// CHANGED: Updated load method
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Page($row->pag_page_id);
-			$child->load_from_data($row, array_keys(Page::$fields));
-			$this->add($child);
-		}
-	}
 
 	// NEW: Added count_all method
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
-
 
 ?>

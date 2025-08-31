@@ -11,14 +11,11 @@ PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('data/products_class.php');
 PathHelper::requireOnce('data/order_items_class.php');
 
-
 class OrderItemRequirementException extends SystemClassException {}
 class DisplayableOrderItemRequirementException extends OrderItemRequirementException implements DisplayableErrorMessage {}
 class DisplayablePermanentOrderItemRequirementException extends OrderItemRequirementException implements DisplayablePermanentErrorMessage {}
 
-
-class OrderItemRequirement extends SystemBase {
-	public static $prefix = 'oir';
+class OrderItemRequirement extends SystemBase {	public static $prefix = 'oir';
 	public static $tablename = 'oir_order_item_requirements';
 	public static $pkey_column = 'oir_order_item_requirement_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -73,9 +70,6 @@ class OrderItemRequirement extends SystemBase {
 			),
 					*/
 		);
-		
-	
-
 
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
@@ -84,10 +78,10 @@ class OrderItemRequirement extends SystemBase {
 		}
 	}	
 
-
 }
 
 class MultiOrderItemRequirement extends SystemMultiBase {
+	protected static $model_class = 'OrderItemRequirement';
 
 	/*
 	function get_dropdown_array($include_new=FALSE) {
@@ -104,7 +98,6 @@ class MultiOrderItemRequirement extends SystemMultiBase {
 	}
 	*/
 
-
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
 
@@ -113,21 +106,6 @@ class MultiOrderItemRequirement extends SystemMultiBase {
 		}
 
 		return $this->_get_resultsv2('oir_order_item_requirements', $filters, $this->order_by, $only_count, $debug);
-	}
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new OrderItemRequirement($row->oir_order_item_requirement_id);
-			$child->load_from_data($row, array_keys(OrderItemRequirement::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
 	}
 
 }

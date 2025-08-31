@@ -48,8 +48,7 @@ class EventUnviewableDisplayException extends EventException implements CustomEr
 }
 */
 
-class Event extends SystemBase {
-	public static $prefix = 'evt';
+class Event extends SystemBase {	public static $prefix = 'evt';
 	public static $tablename = 'evt_events';
 	public static $pkey_column = 'evt_event_id';
 	public static $url_namespace = 'event';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
@@ -171,9 +170,7 @@ class Event extends SystemBase {
 		//	'NoCaps',
 		//	),
 		);
-		
-	
-	
+
 	function get_leader() {
 		if($this->get('evt_usr_user_id_leader')){
 			$leader = new User($this->get('evt_usr_user_id_leader'), TRUE);
@@ -285,8 +282,7 @@ class Event extends SystemBase {
 		$event_sessions = new MultiEventSessions($searches);
 		return $event_sessions->count_all();
 	}
-	
-	
+
 	function get_lowest_session_number(){
 		$searches = array();
 		$searches['event_id'] = $this->key;
@@ -401,7 +397,6 @@ class Event extends SystemBase {
 		}
 		return FALSE;
 	}	
-	
 
 	function get_event_start_time($tz='event', $format='M j, Y g:i a T') {
 		/*
@@ -446,7 +441,6 @@ class Event extends SystemBase {
 		if(!$this->get('evt_start_time') && !$this->get('evt_end_time')){
 			return '';
 		}
-		
 
 		if($tz == 'event' || !$tz){
 			$start_day =  LibraryFunctions::convert_time($this->get('evt_start_time_local'), $this->get('evt_timezone'), $this->get('evt_timezone'), $dayformat);
@@ -478,16 +472,10 @@ class Event extends SystemBase {
 		}
 		
 	}	
-	
-	
-	
+
 	public static $json_vars = array(
 		'evt_event_id', 'evt_name', 'evt_description');
 
-
-
-
-	
 	function output_product_dropdown($formwriter, $currentvalue, $extra_data=array()) {
 		PathHelper::requireOnce('data/products_class.php');
 
@@ -522,7 +510,6 @@ class Event extends SystemBase {
 		return TRUE;
 	}	
 
-
 	function prepare() {
 		if ($this->data === NULL) {
 			throw new eventException('This request has no data.');
@@ -546,7 +533,6 @@ class Event extends SystemBase {
 		//$output_array['travel_text'] = $this->get_travel_text();
 		return $output_array;
 	}
-
 
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
@@ -600,8 +586,7 @@ class Event extends SystemBase {
 		return true;
 	}
 	*/
-	
-	
+
 	function copy() { 
 		// Returns a copy of this event, with history, etc reset so it can be used
 		$event = new event(NULL);
@@ -625,6 +610,7 @@ class Event extends SystemBase {
 }
 
 class MultiEvent extends SystemMultiBase {
+	protected static $model_class = 'Event';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -688,21 +674,6 @@ class MultiEvent extends SystemMultiBase {
 
         return $this->_get_resultsv2('evt_events', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Event($row->evt_event_id);
-			$child->load_from_data($row, array_keys(Event::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
 
