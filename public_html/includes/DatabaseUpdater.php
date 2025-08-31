@@ -300,7 +300,7 @@ class DatabaseUpdater {
         
         // Check if translation produced an error
         if (strpos($translation_output, 'ERROR:') !== false) {
-            $results['warnings'][] = "Column {$table_name}.{$field_name}: " . strip_tags($translation_output);
+            $results['errors'][] = "Column {$table_name}.{$field_name}: " . strip_tags($translation_output);
             return; // Skip this column modification
         }
         
@@ -868,7 +868,8 @@ class DatabaseUpdater {
             ['char', 'character'],
             ['bool', 'boolean'],
             ['timestamp', 'timestamp without time zone'],
-            ['timestamptz', 'timestamp with time zone']
+            ['timestamptz', 'timestamp with time zone'],
+            ['json', 'jsonb']  // json and jsonb are considered equivalent for our purposes
         ];
         
         // Check if both types belong to the same equivalence group

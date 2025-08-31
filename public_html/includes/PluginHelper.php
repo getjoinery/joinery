@@ -405,67 +405,6 @@ class PluginHelper extends ComponentBase {
     }
     
     /**
-     * Initialize all active plugins
-     */
-    public static function initializeActive() {
-        $results = ['success' => [], 'failed' => []];
-        $activePlugins = self::getActivePlugins();
-        
-        foreach ($activePlugins as $name => $plugin) {
-            try {
-                $plugin->initialize();
-                $results['success'][$name] = 'Plugin initialized';
-            } catch (Exception $e) {
-                $results['failed'][$name] = $e->getMessage();
-                error_log("Failed to initialize plugin '{$name}': " . $e->getMessage());
-            }
-        }
-        
-        return $results;
-    }
-    
-    /**
-     * Validate all available plugins
-     */
-    public static function validateAll() {
-        $results = [];
-        $plugins = self::getAvailablePlugins();
-        
-        foreach ($plugins as $name => $plugin) {
-            $validation = $plugin->validate();
-            $results[$name] = [
-                'valid' => $validation === true,
-                'errors' => $validation === true ? [] : $validation
-            ];
-        }
-        
-        return $results;
-    }
-    
-    /**
-     * Activate a plugin (static convenience method)
-     */
-    public static function activatePlugin($pluginName) {
-        $plugin = self::getInstance($pluginName);
-        
-        // Validate before activation
-        $validation = $plugin->validate();
-        if ($validation !== true) {
-            throw new Exception("Plugin validation failed: " . implode(', ', $validation));
-        }
-        
-        return $plugin->activate();
-    }
-    
-    /**
-     * Deactivate a plugin (static convenience method)
-     */
-    public static function deactivatePlugin($pluginName) {
-        $plugin = self::getInstance($pluginName);
-        return $plugin->deactivate();
-    }
-    
-    /**
      * Get plugin display name for UI
      */
     public function getPluginName() {
