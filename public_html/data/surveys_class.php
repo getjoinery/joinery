@@ -13,8 +13,7 @@ PathHelper::requireOnce('data/survey_answers_class.php');
 
 class SurveyException extends SystemClassException {}
 
-class Survey extends SystemBase {
-	public static $prefix = 'svy';
+class Survey extends SystemBase {	public static $prefix = 'svy';
 	public static $tablename = 'svy_surveys';
 	public static $pkey_column = 'svy_survey_id';
 	public static $permanent_delete_actions = array(
@@ -98,7 +97,7 @@ class Survey extends SystemBase {
 }
 
 class MultiSurvey extends SystemMultiBase {
-
+	protected static $model_class = 'Survey';
 
 	function get_survey_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -121,23 +120,7 @@ class MultiSurvey extends SystemMultiBase {
         
         return $this->_get_resultsv2('svy_surveys', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new Survey($row->svy_survey_id);
-            $child->load_from_data($row, array_keys(Survey::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

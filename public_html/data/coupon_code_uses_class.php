@@ -9,12 +9,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
 class CouponCodeUseException extends SystemClassException {}
 
-class CouponCodeUse extends SystemBase {
-
-	public static $prefix = 'ccu';
+class CouponCodeUse extends SystemBase {	public static $prefix = 'ccu';
 	public static $tablename = 'ccu_coupon_code_uses';
 	public static $pkey_column = 'ccu_coupon_code_use_id';
 	public static $permanent_delete_actions = array(
@@ -83,6 +80,7 @@ class CouponCodeUse extends SystemBase {
 }
 
 class MultiCouponCodeUse extends SystemMultiBase {
+	protected static $model_class = 'CouponCodeUse';
 
 /*
 	function get_dropdown_array($include_new=FALSE) {
@@ -120,22 +118,6 @@ class MultiCouponCodeUse extends SystemMultiBase {
         return $this->_get_resultsv2('ccu_coupon_code_uses', $filters, $this->order_by, $only_count, $debug);
     }
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new CouponCodeUse($row->ccu_coupon_code_use_id);
-			$child->load_from_data($row, array_keys(CouponCodeUse::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

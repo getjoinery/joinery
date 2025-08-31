@@ -8,8 +8,7 @@ PathHelper::requireOnce('includes/SystemClass.php');
 class PluginVersionException extends SystemClassException {}
 class PluginVersionNotSentException extends PluginVersionException {}
 
-class PluginVersion extends SystemBase {
-    public static $prefix = 'plv';
+class PluginVersion extends SystemBase {    public static $prefix = 'plv';
     public static $tablename = 'plv_plugin_versions';
     public static $pkey_column = 'plv_plugin_version_id';
     public static $permanent_delete_actions = array(
@@ -57,26 +56,12 @@ class PluginVersion extends SystemBase {
 }
 
 class MultiPluginVersion extends SystemMultiBase {
+	protected static $model_class = 'PluginVersion';
 
     protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
         
         return $this->_get_resultsv2('plv_plugin_versions', $filters, $this->order_by, $only_count, $debug);
-    }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new PluginVersion($row->plv_plugin_version_id);
-            $child->load_from_data($row, array_keys(PluginVersion::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
     }
 }
 

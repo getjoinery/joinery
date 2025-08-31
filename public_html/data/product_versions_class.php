@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class ProductVersionException extends SystemClassException {}
 
-class ProductVersion extends SystemBase {
-	public static $prefix = 'esf';
+class ProductVersion extends SystemBase {	public static $prefix = 'esf';
 	public static $tablename = 'prv_product_versions';
 	public static $pkey_column = 'prv_product_version_id';
 	
@@ -51,8 +50,7 @@ class ProductVersion extends SystemBase {
 		'prv_plan_order_month' => array('type'=>'int4'),
 		'prv_plan_order_year' => array('type'=>'int4'),
 	);
-	
-	
+
 	public static $required_fields = array('prv_pro_product_id', 'prv_version_name', 'prv_version_price', 'prv_status');
 	
 	public static $field_constraints = array();
@@ -71,6 +69,7 @@ class ProductVersion extends SystemBase {
 }
 
 class MultiProductVersion extends SystemMultiBase {
+	protected static $model_class = 'ProductVersion';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -96,22 +95,6 @@ class MultiProductVersion extends SystemMultiBase {
 		return $this->_get_resultsv2('prv_product_versions', $filters, $this->order_by, $only_count, $debug);
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ProductVersion($row->prv_product_version_id);
-			$child->load_from_data($row, array_keys(ProductVersion::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
 
 ?>

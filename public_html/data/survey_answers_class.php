@@ -11,11 +11,9 @@ PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/users_class.php');
 
-	
 class SurveyAnswerException extends SystemClassException {}
 
-class SurveyAnswer extends SystemBase {
-	public static $prefix = 'sva';
+class SurveyAnswer extends SystemBase {	public static $prefix = 'sva';
 	public static $tablename = 'sva_survey_answers';
 	public static $pkey_column = 'sva_survey_answer_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -27,7 +25,6 @@ class SurveyAnswer extends SystemBase {
 		'sva_create_time' => 'Time of answer'
 	);
 
-	
 /**
 	 * Field specifications define database column properties and schema constraints
 	 * Available options:
@@ -45,8 +42,6 @@ class SurveyAnswer extends SystemBase {
 		'sva_answer' => array('type'=>'text'),
 		'sva_create_time' => array('type'=>'timestamp(6)'),
 	);
-	
-	
 
 public static $required_fields = array('sva_svy_survey_id', 'sva_qst_question_id');
 
@@ -55,8 +50,7 @@ public static $required_fields = array('sva_svy_survey_id', 'sva_qst_question_id
 	public static $zero_variables = array();	
 
 	public static $initial_default_values = array('sva_create_time'=>'now()');		
-		
-	
+
 	function check_for_duplicates() {
 		
 		$count = new MultiSurveyAnswer(array(
@@ -86,7 +80,6 @@ public static $required_fields = array('sva_svy_survey_id', 'sva_qst_question_id
 		}
 		return false;
 	}	
-	
 
 	// Unique constraints now handled automatically by SystemBase
 	
@@ -100,6 +93,7 @@ public static $required_fields = array('sva_svy_survey_id', 'sva_qst_question_id
 }
 
 class MultiSurveyAnswer extends SystemMultiBase {
+	protected static $model_class = 'SurveyAnswer';
 	function get_user_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
@@ -129,23 +123,7 @@ class MultiSurveyAnswer extends SystemMultiBase {
         
         return $this->_get_resultsv2('sva_survey_answers', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new SurveyAnswer($row->sva_survey_answer_id);
-            $child->load_from_data($row, array_keys(SurveyAnswer::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

@@ -8,8 +8,7 @@ PathHelper::requireOnce('includes/SystemClass.php');
 class PluginDependencyException extends SystemClassException {}
 class PluginDependencyNotSentException extends PluginDependencyException {}
 
-class PluginDependency extends SystemBase {
-    public static $prefix = 'pld';
+class PluginDependency extends SystemBase {    public static $prefix = 'pld';
     public static $tablename = 'pld_plugin_dependencies';
     public static $pkey_column = 'pld_plugin_dependency_id';
     public static $permanent_delete_actions = array(
@@ -57,26 +56,12 @@ class PluginDependency extends SystemBase {
 }
 
 class MultiPluginDependency extends SystemMultiBase {
+	protected static $model_class = 'PluginDependency';
 
     protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
         
         return $this->_get_resultsv2('pld_plugin_dependencies', $filters, $this->order_by, $only_count, $debug);
-    }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new PluginDependency($row->pld_plugin_dependency_id);
-            $child->load_from_data($row, array_keys(PluginDependency::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
     }
 }
 

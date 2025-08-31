@@ -11,10 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class ProductGroupException extends SystemClassException {}
 
-class ProductGroup extends SystemBase {
-	
-	
-	public static $prefix = 'prg';
+class ProductGroup extends SystemBase {	public static $prefix = 'prg';
 	public static $tablename = 'prg_product_groups';
 	public static $pkey_column = 'prg_product_group_id';
 	public static $permanent_delete_actions = array(		'pro_prg_product_group_id' => 'prevent'
@@ -57,6 +54,7 @@ class ProductGroup extends SystemBase {
 }
 
 class MultiProductGroup extends SystemMultiBase {
+	protected static $model_class = 'ProductGroup';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -81,21 +79,8 @@ class MultiProductGroup extends SystemMultiBase {
 	}
 
 	// CHANGED: Updated load method
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ProductGroup($row->prg_product_group_id);
-			$child->load_from_data($row, array_keys(ProductGroup::$fields));
-			$this->add($child);
-		}
-	}
 
 	// NEW: Added count_all method
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
 

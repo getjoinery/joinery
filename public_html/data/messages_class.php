@@ -4,13 +4,11 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SystemClass.php');
-	
 
 class MessageException extends SystemClassException {}
 class MessageNotSentException extends MessageException {};
 
-class Message extends SystemBase {
-	public static $prefix = 'msg';
+class Message extends SystemBase {	public static $prefix = 'msg';
 	public static $tablename = 'msg_messages';
 	public static $pkey_column = 'msg_message_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -59,9 +57,7 @@ class Message extends SystemBase {
 			return '';
 		}
 	}
-	
 
-	
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -73,10 +69,10 @@ class Message extends SystemBase {
 		}
 	}
 
-	
 }
 
 class MultiMessage extends SystemMultiBase {
+	protected static $model_class = 'Message';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -104,23 +100,6 @@ class MultiMessage extends SystemMultiBase {
 		return $this->_get_resultsv2('msg_messages', $filters, $this->order_by, $only_count, $debug);
 	}
 
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Message($row->msg_message_id);
-			$child->load_from_data($row, array_keys(Message::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
 }
-
-
 
 ?>

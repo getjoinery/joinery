@@ -9,12 +9,9 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
-
 class SettingException extends SystemClassException {}
 
-class Setting extends SystemBase {
-	public static $prefix = 'stg';
+class Setting extends SystemBase {	public static $prefix = 'stg';
 	public static $tablename = 'stg_settings';
 	public static $pkey_column = 'stg_setting_id';
 	public static $permanent_delete_actions = array(
@@ -80,7 +77,6 @@ class Setting extends SystemBase {
 		}
 		return NULL;
 	}		
-	
 
 	function prepare() {
 		
@@ -94,7 +90,6 @@ class Setting extends SystemBase {
 
 	}
 
-	
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 10) {
 			throw new SystemAuthenticationError(
@@ -105,6 +100,7 @@ class Setting extends SystemBase {
 }
 
 class MultiSetting extends SystemMultiBase {
+	protected static $model_class = 'Setting';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -132,23 +128,7 @@ class MultiSetting extends SystemMultiBase {
         
         return $this->_get_resultsv2('stg_settings', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new Setting($row->stg_setting_id);
-            $child->load_from_data($row, array_keys(Setting::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

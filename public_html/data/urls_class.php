@@ -53,9 +53,7 @@ class Url extends SystemBase {
 
 	public static $initial_default_values = array('url_create_time' => 'now()'
 		);		
-	
 
-	
 	function get_type_text() {
 		if($this->get('url_type') == 301){
 			return 'HTTP/1.1 301 Moved Permanently';
@@ -64,8 +62,7 @@ class Url extends SystemBase {
 			return 'HTTP/1.1 302 Found';
 		}		
 	}
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -80,6 +77,7 @@ class Url extends SystemBase {
 }
 
 class MultiUrl extends SystemMultiBase {
+	protected static $model_class = 'Url';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -90,22 +88,6 @@ class MultiUrl extends SystemMultiBase {
         
         return $this->_get_resultsv2('url_urls', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new Url($row->url_url_id);
-            $child->load_from_data($row, array_keys(Url::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 }
-
 
 ?>

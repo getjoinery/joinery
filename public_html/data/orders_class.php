@@ -15,8 +15,7 @@ PathHelper::requireOnce('data/order_items_class.php');
 
 class OrderException extends SystemClassException {}
 
-class Order extends SystemBase {
-	public static $prefix = 'ord';
+class Order extends SystemBase {	public static $prefix = 'ord';
 	public static $tablename = 'ord_orders';
 	public static $pkey_column = 'ord_order_id';
 	public static $permanent_delete_actions = array(
@@ -29,7 +28,6 @@ class Order extends SystemBase {
 	public const STATUS_UNPAID = 1;
 	public const STATUS_PAID = 2;
 	public const STATUS_ERROR = 3;
-
 
 	public static $fields = array(
 		'ord_order_id' => 'Primary key - Order ID',
@@ -95,7 +93,6 @@ class Order extends SystemBase {
 		'ord_test_mode' => false
 		);	
 
-	
 	function is_stripe_order(){
 		if($this->get('ord_stripe_session_id') || $this->get('ord_stripe_payment_intent_id') || $this->get('ord_stripe_charge_id') || $this->get('ord_stripe_invoice_id')){
 			return true;
@@ -105,7 +102,6 @@ class Order extends SystemBase {
 		}
 	}
 
-	
 	/*
 	function save_serialized_cart($cart){
 		$cart_serialized = serialize($cart->get_items());
@@ -125,8 +121,6 @@ class Order extends SystemBase {
 		return $cart_serialized;
 	}
 	*/
-	
-	
 
 	public static function GetByStripeSession($session_id) {
 		$data = SingleRowFetch('ord_orders', 'ord_stripe_session_id',
@@ -206,8 +200,8 @@ class Order extends SystemBase {
 	
 }
 
-
 class MultiOrder extends SystemMultiBase {
+	protected static $model_class = 'Order';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -252,21 +246,8 @@ class MultiOrder extends SystemMultiBase {
 	}
 
 	// CHANGED: Updated load method
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Order($row->ord_order_id);
-			$child->load_from_data($row, array_keys(Order::$fields));
-			$this->add($child);
-		}
-	}
 
 	// NEW: Added count_all method
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
 

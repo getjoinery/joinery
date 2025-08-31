@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class EventTypeException extends SystemClassException {}
 
-class EventType extends SystemBase {
-	public static $prefix = 'ety';
+class EventType extends SystemBase {	public static $prefix = 'ety';
 	public static $tablename = 'ety_event_types';
 	public static $pkey_column = 'ety_event_type_id';
 	public static $permanent_delete_actions = array(		'evt_ety_event_type_id' => 'prevent',
@@ -42,12 +41,11 @@ class EventType extends SystemBase {
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array();
-	
-	
 
 }
 
 class MultiEventType extends SystemMultiBase {
+	protected static $model_class = 'EventType';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -68,21 +66,6 @@ class MultiEventType extends SystemMultiBase {
         
         return $this->_get_resultsv2('ety_event_types', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new EventType($row->ety_event_type_id);
-			$child->load_from_data($row, array_keys(EventType::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 }
 
 ?>

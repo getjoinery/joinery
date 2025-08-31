@@ -15,9 +15,7 @@ class ProductRequirementException extends SystemClassException {}
 class DisplayableProductRequirementException extends ProductRequirementException implements DisplayableErrorMessage {}
 class DisplayablePermanentProductRequirementException extends ProductRequirementException implements DisplayablePermanentErrorMessage {}
 
-
-class ProductRequirement extends SystemBase {
-	public static $prefix = 'prq';
+class ProductRequirement extends SystemBase {	public static $prefix = 'prq';
 	public static $tablename = 'prq_product_requirements';
 	public static $pkey_column = 'prq_product_requirement_id';
 	public static $permanent_delete_actions = array(		'pri_prq_product_requirement_id' => 'delete',
@@ -89,7 +87,6 @@ class ProductRequirement extends SystemBase {
 		}
 	}
 
-
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
@@ -97,10 +94,10 @@ class ProductRequirement extends SystemBase {
 		}
 	}
 
-
 }
 
 class MultiProductRequirement extends SystemMultiBase {
+	protected static $model_class = 'ProductRequirement';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -115,7 +112,6 @@ class MultiProductRequirement extends SystemMultiBase {
 
 	}
 
-
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
 
@@ -126,23 +122,6 @@ class MultiProductRequirement extends SystemMultiBase {
 		}
 
 		return $this->_get_resultsv2('prq_product_requirements', $filters, $this->order_by, $only_count, $debug);
-	}
-
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ProductRequirement($row->prq_product_requirement_id);
-			$child->load_from_data($row, array_keys(ProductRequirement::$fields));
-			$this->add($child);
-		}
-	}
-
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
 	}
 
 }

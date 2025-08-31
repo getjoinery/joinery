@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class PageContentException extends SystemClassException {}
 
-class PageContent extends SystemBase {
-	public static $prefix = 'pac';
+class PageContent extends SystemBase {	public static $prefix = 'pac';
 	public static $tablename = 'pac_page_contents';
 	public static $pkey_column = 'pac_page_content_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
@@ -69,8 +68,7 @@ class PageContent extends SystemBase {
 	public static $initial_default_values = array(
 		'pac_create_time' => 'now()', 'pac_is_published' => FALSE
 		);
-		
-	
+
 	function get_content(){
 		if($this->get('pac_published_time') && !$this->get('pac_delete_time')){
 			return $this->get('pac_body');
@@ -97,8 +95,6 @@ class PageContent extends SystemBase {
 		}
 	}	
 
-	
-	
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -125,12 +121,10 @@ class PageContent extends SystemBase {
 		parent::save($debug);
 	}
 
-	
 }
 
 class MultiPageContent extends SystemMultiBase {
-
-
+	protected static $model_class = 'PageContent';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -163,23 +157,9 @@ class MultiPageContent extends SystemMultiBase {
 	}
 
 	// CHANGED: Updated load method
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new PageContent($row->pac_page_content_id);
-			$child->load_from_data($row, array_keys(PageContent::$fields));
-			$this->add($child);
-		}
-	}
 
 	// NEW: Added count_all method
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
-
 
 ?>

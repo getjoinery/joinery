@@ -2,8 +2,7 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 
-class Theme extends SystemBase {
-    public static $prefix = 'thm';
+class Theme extends SystemBase {    public static $prefix = 'thm';
     public static $tablename = 'thm_themes';
     public static $pkey_column = 'thm_theme_id';
     
@@ -111,6 +110,7 @@ class Theme extends SystemBase {
 }
 
 class MultiTheme extends SystemMultiBase {
+	protected static $model_class = 'Theme';
     public static $table_name = 'thm_themes';
     public static $table_primary_key = 'thm_theme_id';
     protected static $default_options = array();
@@ -131,21 +131,6 @@ class MultiTheme extends SystemMultiBase {
         }
         
         return $this->_get_resultsv2('thm_themes', $filters, $this->order_by, $only_count, $debug);
-    }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new Theme($row->thm_theme_id);
-            $child->load_from_data($row, array_keys(Theme::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
     }
 }
 ?>

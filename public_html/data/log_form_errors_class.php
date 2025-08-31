@@ -11,8 +11,7 @@ PathHelper::requireOnce('includes/Validator.php');
 
 class FormErrorException extends SystemClassException {}
 
-class FormError extends SystemBase {
-	public static $prefix = 'lfe';
+class FormError extends SystemBase {	public static $prefix = 'lfe';
 	public static $tablename = 'lfe_log_form_errors';
 	public static $pkey_column = 'lfe_log_form_error_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
@@ -48,7 +47,6 @@ class FormError extends SystemBase {
 		'lfe_context' =>  array('type'=>'varchar(255)'),
 	);
 
-
 	public static $required_fields = array();
 	
 	public static $field_constraints = array();
@@ -57,9 +55,7 @@ class FormError extends SystemBase {
 	
 	public static $initial_default_values = array(
 	'lfe_log_time'=> 'now()',);
-	
 
-	
 	function display_time($session) {
 		return LibraryFunctions::convert_time(
 			$this->get('lfe_log_time'), 'UTC', $session->get_timezone(), '%a, %d %b %Y %R:%S');
@@ -78,10 +74,10 @@ class FormError extends SystemBase {
 		$obj->save();
 	}
 
-	
 }
 
 class MultiFormError extends SystemMultiBase {
+	protected static $model_class = 'FormError';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -93,25 +89,6 @@ class MultiFormError extends SystemMultiBase {
 		return $this->_get_resultsv2('lfe_log_form_errors', $filters, $this->order_by, $only_count, $debug);
 	}
 
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new FormError($row->lfe_log_form_error_id);
-			$child->load_from_data($row, array_keys(FormError::$fields));
-			$this->add($child);
-		}
-	}
-
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
-
-
 }
-
 
 ?>

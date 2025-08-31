@@ -13,15 +13,13 @@ PathHelper::requireOnce('data/users_class.php');
 class EmailException extends SystemClassException {}
 class EmailNotSentException extends EmailException {};
 
-class Email extends SystemBase {
-	public static $prefix = 'eml';
+class Email extends SystemBase {	public static $prefix = 'eml';
 	public static $tablename = 'eml_emails';
 	public static $pkey_column = 'eml_email_id';
 	public static $permanent_delete_actions = array(		'erc_eml_email_id' => 'delete',
 		'erg_eml_email_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	
+
 	const FORMAT_HTML = 1;
 	const FORMAT_PLAINTEXT = 2;
 	
@@ -108,8 +106,7 @@ class Email extends SystemBase {
 		//$settings = Globalvars::get_instance();
 		//$this->webdir = $settings->get_setting('webDir');
 	}
-	
-	
+
 	//THIS ADDS AN ENTRY TO THE RECIPIENT GROUPS TABLE WITH THE EVENT OR GROUP TO ADD
 	//THE OP FIELD TELLS THE MAILER WHETHER TO ADD THESE RECIPIENTS TO THE EMAIL OR SUBTRACT THEM WHEN IT'S TIME TO QUEUE THE EMAIL
 	function add_recipient_group($evt_event_id, $grp_group_id, $op='add'){
@@ -154,7 +151,6 @@ class Email extends SystemBase {
 		return $email_recipient_groups;
 		
 	}	
-	
 
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
@@ -166,7 +162,6 @@ class Email extends SystemBase {
 			}
 		}
 	}	
-
 
 	function get_status_text() {
 		if($this->get('eml_status') == Email::EMAIL_DELETED) {
@@ -199,7 +194,6 @@ class Email extends SystemBase {
 		
 		return true;		
 	}		
-	
 
 	function get_user() { 
 		if (!array_key_exists('user', $this->cached_references)) { 
@@ -212,7 +206,6 @@ class Email extends SystemBase {
 	function get_unsent_recipients() { 
 		return MultiEmailRecipient::GetUnsentRecipientsForEmail($this->key);
 	}
-
 
 	function get_tracking_code() { 
 		$medium = 'email';
@@ -260,6 +253,7 @@ class Email extends SystemBase {
 }
 
 class MultiEmail extends SystemMultiBase {
+	protected static $model_class = 'Email';
 
 	const SCHEDULED_PAST = 1;
 	const SCHEDULED_FUTURE = 2;
@@ -287,21 +281,6 @@ class MultiEmail extends SystemMultiBase {
 
         return $this->_get_resultsv2('eml_emails', $filters, $this->order_by, $only_count, $debug);
     }
-
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new Email($row->eml_email_id);
-			$child->load_from_data($row, array_keys(Email::$fields));
-			$this->add($child);
-		}
-	}
-
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
-	}
 
 }
 
