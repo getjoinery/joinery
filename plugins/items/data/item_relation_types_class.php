@@ -38,8 +38,6 @@ class ItemRelationType extends SystemBase {
 		'itt_item_relation_type_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
 		'itt_name' => array('type'=>'varchar(100)'),
 	);
-	
-	
 
 public static $required_fields = array();
 	
@@ -48,12 +46,11 @@ public static $required_fields = array();
 	public static $zero_variables = array();
 	
 	public static $initial_default_values = array();
-	
-	
 
 }
 
 class MultiItemRelationType extends SystemMultiBase {
+	protected static $model_class = 'ItemRelationType';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -71,19 +68,6 @@ class MultiItemRelationType extends SystemMultiBase {
 		$filters = [];
 		// This class doesn't have any filter options in the original, so filters array stays empty
 		return $this->_get_resultsv2('itt_item_relation_types', $filters, $this->order_by, $only_count, $debug);
-	}
-	function load($debug = false) {
-		parent::load();
-		$q = $this->getMultiResults(false, $debug);
-		foreach($q->fetchAll() as $row) {
-			$child = new ItemRelationType($row->itt_item_relation_type_id);
-			$child->load_from_data($row, array_keys(ItemRelationType::$fields));
-			$this->add($child);
-		}
-	}
-	function count_all($debug = false) {
-		$q = $this->getMultiResults(TRUE, $debug);
-		return $q;
 	}
 }
 

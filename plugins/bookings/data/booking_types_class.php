@@ -62,9 +62,6 @@ class BookingType extends SystemBase {
 		'bkt_update_time' => array('type'=>'timestamp(6)'),
 	);
 
-
-	
-
 public static $required_fields = array();
 
 	public static $field_constraints = array();	
@@ -85,7 +82,6 @@ public static $required_fields = array();
 		}
 	}
 
-	
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -97,10 +93,10 @@ public static $required_fields = array();
 		}
 	}
 
-
 }
 
 class MultiBookingType extends SystemMultiBase {
+	protected static $model_class = 'BookingType';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -119,24 +115,7 @@ class MultiBookingType extends SystemMultiBase {
         
         return $this->_get_resultsv2('bkt_booking_types', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new BookingType($row->bkt_booking_type_id);
-            $child->load_from_data($row, array_keys(BookingType::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
-
 
 ?>

@@ -9,7 +9,6 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
 class CtldRuleException extends SystemClassException {}
 
 class CtldRule extends SystemBase {
@@ -46,8 +45,6 @@ class CtldRule extends SystemBase {
 		'cdr_rule_action' => array('type'=>'int2'),
 		'cdr_rule_via' => array('type'=>'varchar(32)'),
 	);
-			
-	
 
 public static $required_fields = array();
 
@@ -63,11 +60,10 @@ public static $required_fields = array();
 	public static $initial_default_values = array(
 	);	
 
-	
 }
 
 class MultiCtldRule extends SystemMultiBase {
-
+	protected static $model_class = 'CtldRule';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -98,23 +94,7 @@ class MultiCtldRule extends SystemMultiBase {
         
         return $this->_get_resultsv2('cdr_ctldrules', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new CtldRule($row->cdr_ctldrule_id);
-            $child->load_from_data($row, array_keys(CtldRule::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

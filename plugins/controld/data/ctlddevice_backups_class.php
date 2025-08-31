@@ -14,7 +14,6 @@ PathHelper::requireOnce('plugins/controld/data/ctldprofiles_class.php');
 PathHelper::requireOnce('plugins/controld/data/ctldfilters_class.php');
 PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
 
-
 class CtldDeviceBackupException extends SystemClassException {}
 
 class CtldDeviceBackup extends SystemBase {
@@ -24,8 +23,6 @@ class CtldDeviceBackup extends SystemBase {
 	public static $pkey_column = 'cdb_ctlddevice_backup_id';
 	public static $permanent_delete_actions = array(
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-
 
 	public static $fields = array(
 		'cdb_ctlddevice_backup_id' => 'Primary key - CtldDeviceBackup ID',
@@ -53,8 +50,6 @@ class CtldDeviceBackup extends SystemBase {
 		'cdb_delete_time' => array('type'=>'timestamp(6)'),
 		'cdb_deactivation_pin' => array('type'=>'varchar(10)'),
 	);
-			
-	
 
 public static $required_fields = array();
 
@@ -66,18 +61,15 @@ public static $required_fields = array();
 		'cdb_create_time' => 'now()'
 	);	
 
-
 	function get_readable_name(){
 		return preg_replace('/^user\d+-/', '', $this->get('cdb_device_backup_name'));
 		
 	}
-	
-	
-	
+
 }
 
 class MultiCtldDeviceBackup extends SystemMultiBase {
-
+	protected static $model_class = 'CtldDeviceBackup';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -104,23 +96,7 @@ class MultiCtldDeviceBackup extends SystemMultiBase {
         
         return $this->_get_resultsv2('cdb_ctlddevice_backups', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new CtldDeviceBackup($row->cdb_ctlddevice_backup_id);
-            $child->load_from_data($row, array_keys(CtldDeviceBackup::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

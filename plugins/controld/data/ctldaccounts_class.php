@@ -11,7 +11,6 @@ PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
 
-
 class CtldAccountException extends SystemClassException {}
 
 class CtldAccount extends SystemBase {
@@ -60,8 +59,6 @@ class CtldAccount extends SystemBase {
 		'cda_create_time' => array('type'=>'timestamp(6)'),
 		'cda_delete_time' => array('type'=>'timestamp(6)'),
 	);
-			
-	
 
 public static $required_fields = array();
 
@@ -78,15 +75,13 @@ public static $required_fields = array();
 		'cda_create_time' => 'now()'
 	);	
 
-	
 	function prepare() {
 		if(CtldAccount::GetByColumn('cda_usr_user_id', $this->get('cda_usr_user_id')) && !$this->key){
 			throw new CtldAccountException('That controld user id already exists.');
 		}		
 		
 	}	
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get('cda_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -128,13 +123,11 @@ public static $required_fields = array();
 		
 		return true;
 	}
-	
-	
+
 	function can_add_device(){
 		if(!$this->is_active()){
 			return false;
 		}
-
 
 		$devices = new MultiCtldDevice(
 			array(
@@ -149,8 +142,7 @@ public static $required_fields = array();
 		}	
 		return true;
 	}
-	
-	
+
 	//RETURNS THE ORDER ITEM THAT CORRESPONDS TO THIS USER'S SUBSCRIPTION
 	static function GetPlanOrderItem($user_id){
 		
@@ -176,13 +168,12 @@ public static $required_fields = array();
 			return false;
 		}
 
-		
 	}
 	
 }
 
 class MultiCtldAccount extends SystemMultiBase {
-
+	protected static $model_class = 'CtldAccount';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -217,23 +208,7 @@ class MultiCtldAccount extends SystemMultiBase {
         
         return $this->_get_resultsv2('cda_ctldaccounts', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new CtldAccount($row->cda_ctldaccount_id);
-            $child->load_from_data($row, array_keys(CtldAccount::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

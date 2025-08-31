@@ -16,7 +16,6 @@ PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
 PathHelper::requireOnce('plugins/controld/data/ctldrules_class.php');
 PathHelper::requireOnce('plugins/controld/data/ctlddevice_backups_class.php');
 
-
 class CtldDeviceException extends SystemClassException {}
 
 class CtldDevice extends SystemBase {
@@ -26,8 +25,6 @@ class CtldDevice extends SystemBase {
 	public static $pkey_column = 'cdd_ctlddevice_id';
 	public static $permanent_delete_actions = array(
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-
 
 	public static $fields = array(
 		'cdd_ctlddevice_id' => 'Primary key - CtldDevice ID',
@@ -77,8 +74,6 @@ class CtldDevice extends SystemBase {
 		'cdd_allow_device_edits' => array('type'=>'int4'),
 		'cdd_activate_time' => array('type'=>'timestamp(6)'),
 	);
-			
-	
 
 public static $required_fields = array();
 
@@ -95,7 +90,6 @@ public static $required_fields = array();
 		'cdd_create_time' => 'now()'
 	);	
 
-	
 	function prepare() {
 		/*
 		if(CtldDevice::GetByColumn('cdd_device_id', $this->get('cdd_device_id')) && !$this->key){
@@ -126,8 +120,7 @@ public static $required_fields = array();
 			}
 		}
 	}
-	
-	
+
 	static function createDevice($device, $profile1, $profile2, $post_vars){
 			$cd = new ControlDHelper();
 			$user = new User($profile1->get('cdp_usr_user_id'), TRUE);
@@ -147,7 +140,6 @@ public static $required_fields = array();
 				
 			);
 
-			
 			$result = $cd->createDevice($data);
 			$success = $result['success'];			
 			
@@ -194,8 +186,7 @@ public static $required_fields = array();
 		}
 		return true;
 	}
-	
-	
+
 	function get_time_to_active_profile($profile_choice){
 		if(!$this->get('cdd_cdp_ctldprofile_id_secondary')){
 			return [
@@ -203,7 +194,6 @@ public static $required_fields = array();
 				'minutes' => 0
 			];		
 		}	
-
 
 		$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
 		
@@ -237,8 +227,7 @@ public static $required_fields = array();
 						'minutes' => 0
 					];
 			}
-			
-			
+
 		}
 		else if ($profile_choice == 'secondary'){
 			$tz = new DateTimeZone($profile->get('cdp_schedule_timezone'));
@@ -286,8 +275,7 @@ public static $required_fields = array();
 		}
 
 	}
-	
-	
+
 	function get_schedule_string($profile_choice){
 		if(!$this->get('cdd_cdp_ctldprofile_id_secondary')){
 			return '';		
@@ -323,8 +311,7 @@ public static $required_fields = array();
 				return 'primary';
 			}			
 		}
-		
-		
+
 		$profile = new CtldProfile($this->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
 		
 		if(!$profile->get('cdp_schedule_start') || !$profile->get('cdp_schedule_end')){
@@ -388,8 +375,6 @@ public static $required_fields = array();
 			return true;
 		}
 
-
-
 		// IF WITHIN 24 HOURS OF ACTIVATION
 		if($this->get('cdd_activate_time')){
 			$current_timestamp = time();
@@ -398,14 +383,11 @@ public static $required_fields = array();
 				return true;
 			}
 		}
-	
-		
-		
+
 		//IF IT IS THE DAY OF CREATION
 		if(date('Y-m-d', strtotime($this->get('cdd_create_time'))) === date("Y-m-d")){
 			return true;
 		}
-		
 
 		//IF IT IS SUNDAY 
 		$weekday = 'Sunday';
@@ -422,16 +404,11 @@ public static $required_fields = array();
 		// Get the current day in the specified timezone, in lowercase
 		$currentDay = strtolower(date('l')); // 'l' returns full weekday name
 
-
-
 		// Check if the input day matches the current day
 		return $weekday === $currentDay;
 
 	}
-	
-	
 
-	
 	//PROFILE CHOICE IS PRIMARY OR SECONDARY
 	function permanent_delete_profile($profile_choice){
 		if($profile_choice == 'primary'){
@@ -447,8 +424,7 @@ public static $required_fields = array();
 		
 		return true;
 	}
-	
-	
+
 	function permanent_delete($debug = false){
 		$cd = new ControlDHelper();
 		
@@ -458,8 +434,6 @@ public static $required_fields = array();
 		}	
 		
 		$result = $this->permanent_delete_profile('primary');
-
-
 
 		//NOW DELETE THE DEVICE AT REMOTE
 		$result = $cd->deleteDevice($this->get('cdd_device_id'));	
@@ -489,7 +463,7 @@ public static $required_fields = array();
 }
 
 class MultiCtldDevice extends SystemMultiBase {
-
+	protected static $model_class = 'CtldDevice';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -524,23 +498,7 @@ class MultiCtldDevice extends SystemMultiBase {
         
         return $this->_get_resultsv2('cdd_ctlddevices', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new CtldDevice($row->cdd_ctlddevice_id);
-            $child->load_from_data($row, array_keys(CtldDevice::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

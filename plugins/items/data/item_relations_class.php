@@ -55,8 +55,6 @@ class ItemRelation extends SystemBase {
 		'itr_create_time' => array('type'=>'timestamp(6)'),
 		'itr_delete_time' => array('type'=>'timestamp(6)'),
 	);
-	
-	
 
 public static $required_fields = array();
 
@@ -67,7 +65,6 @@ public static $required_fields = array();
 	public static $initial_default_values = array('itr_create_time' => 'now()'
 		);				
 
-	
 	function save($debug=false) {
 		
 		parent::save($debug);
@@ -76,7 +73,7 @@ public static $required_fields = array();
 }
 
 class MultiItemRelation extends SystemMultiBase {
-
+	protected static $model_class = 'ItemRelation';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -87,22 +84,6 @@ class MultiItemRelation extends SystemMultiBase {
         
         return $this->_get_resultsv2('itr_item_relations', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new ItemRelation($row->itr_item_relation_id);
-            $child->load_from_data($row, array_keys(ItemRelation::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 }
-
 
 ?>

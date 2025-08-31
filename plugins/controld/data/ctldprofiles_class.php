@@ -60,8 +60,6 @@ class CtldProfile extends SystemBase {
 		'cdp_schedule_timezone' => array('type'=>'varchar(64)'),
 		'cdp_schedule_id' => array('type'=>'varchar(64)'),
 	);
-			
-	
 
 public static $required_fields = array();
 
@@ -78,7 +76,6 @@ public static $required_fields = array();
 		'cdp_create_time' => 'now()'
 	);	
 
-	
 	function prepare() {
 		/*
 		if(CtldProfile::GetByColumn('cdp_profile_id', $this->get('cdp_profile_id')) && !$this->key){
@@ -87,8 +84,7 @@ public static $required_fields = array();
 */		
 		
 	}	
-	
-	
+
 	function authenticate_write($data) {
 		if ($this->get('cdd_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
@@ -313,13 +309,10 @@ public static $required_fields = array();
 		}	
 		return true;
 	}
-	
-	
+
 	function add_or_edit_schedule($device, $post_vars){
 		$user = new User($this->get('cdp_usr_user_id'), TRUE);
 		$cd = new ControlDHelper();
-		
-		
 
 		if(!$this->get('cdp_schedule_id')){
 			//CREATE A SCHEDULE
@@ -327,8 +320,7 @@ public static $required_fields = array();
 				if($post_vars['start_time'] >= $post_vars['end_time']){
 					return false;
 				}
-				
-				
+
 				$name = $user->key . '-' . $user->get('usr_last_name') .'-'. $this->key;
 				$result = $cd->createSchedule($this->get('cdp_profile_id'), $device->get('cdd_device_id'), $name, 1, $post_vars['start_time'], $post_vars['end_time'], $device->get('cdd_timezone'), $post_vars['days_blocked']);
 				
@@ -348,16 +340,14 @@ public static $required_fields = array();
 			}
 		}
 		else{
-			
-			
+
 			if($post_vars['start_time'] != '' && $post_vars['end_time'] != '' && count($post_vars['days_blocked'])){
 				if($post_vars['start_time'] >= $post_vars['end_time']){
 					return false;
 				}
 				//EDIT THE SCHEDULE IF NECESSARY
 				if($post_vars['start_time'] != $this->get('cdp_schedule_start') || $post_vars['end_time'] != $this->get('cdp_schedule_end') || serialize($post_vars['days_blocked']) != $this->get('cdp_schedule_days') || $device->get('cdd_timezone') != $this->get('cdp_schedule_timezone')) {
-				
-						
+
 						$result = $cd->modifySchedule($this->get('cdp_schedule_id'), 1, $post_vars['start_time'], $post_vars['end_time'], $device->get('cdd_timezone'), $post_vars['days_blocked']);
 						
 						if($result['success']){
@@ -377,8 +367,7 @@ public static $required_fields = array();
 		}
 		
 	}
-	
-	
+
 	function permanent_delete_schedule(){
 		$cd = new ControlDHelper();
 		//DELETE THE SCHEDULE IF PRESENT
@@ -407,14 +396,12 @@ public static $required_fields = array();
 		
 		//DELETE THE CUSTOM RULES
 		$this->permanent_delete_all_rules();	
-		
-		
+
 		$result = $cd->deleteProfile($this->get('cdp_profile_id'));
 		if(!$result['success']){
 			throw new SystemDisplayablePermanentError('Unable to delete profile.');
 			exit;
 		}		
-
 
 		$this->permanent_delete_all_filters();
 		
@@ -529,8 +516,6 @@ exit;
 		return $numchanges;
 		
 	}
-	
-
 
 	function update_remote_services($newvalues){
 		$numchanges = 0;
@@ -553,12 +538,6 @@ exit;
 		foreach($services as $service){
 			$cached_services[$service->get('cds_service_pk')] = $service->get('cds_is_active');
 		}
-
-
-
-
-
-
 
 		foreach($all_services as $all_service_key=>$all_service_desc){
 			if(isset($newvalues['block_'.$all_service_key])){
@@ -630,7 +609,7 @@ exit;
 }
 
 class MultiCtldProfile extends SystemMultiBase {
-
+	protected static $model_class = 'CtldProfile';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -669,23 +648,7 @@ class MultiCtldProfile extends SystemMultiBase {
         
         return $this->_get_resultsv2('cdp_ctldprofiles', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new CtldProfile($row->cdp_ctldprofile_id);
-            $child->load_from_data($row, array_keys(CtldProfile::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

@@ -36,7 +36,6 @@ class Item extends SystemBase {
 		'itm_delete_time' => 'Time of deletion',
 	);
 
-	
 /**
 	 * Field specifications define database column properties and schema constraints
 	 * Available options:
@@ -57,8 +56,6 @@ class Item extends SystemBase {
 		'itm_create_time' => array('type'=>'timestamp(6)'),
 		'itm_delete_time' => array('type'=>'timestamp(6)'),
 	);
-	
-	
 
 public static $required_fields = array();
 
@@ -69,7 +66,6 @@ public static $required_fields = array();
 	public static $initial_default_values = array('itm_create_time' => 'now()'
 		);				
 
-	
 	function save($debug=false) {
 		
 		//CHECK FOR DUPLICATES
@@ -90,6 +86,7 @@ public static $required_fields = array();
 }
 
 class MultiItem extends SystemMultiBase {
+	protected static $model_class = 'Item';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -133,22 +130,6 @@ class MultiItem extends SystemMultiBase {
         
         return $this->_get_resultsv2('itm_items', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new Item($row->itm_item_id);
-            $child->load_from_data($row, array_keys(Item::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 }
-
 
 ?>

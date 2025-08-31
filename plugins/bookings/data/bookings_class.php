@@ -39,7 +39,6 @@ class Booking extends SystemBase {
 		'bkn_update_time' => 'Time updated',
 	);
 
-	
 /**
 	 * Field specifications define database column properties and schema constraints
 	 * Available options:
@@ -68,9 +67,6 @@ class Booking extends SystemBase {
 		'bkn_delete_time' => array('type'=>'timestamp(6)'),
 		'bkn_update_time' => array('type'=>'timestamp(6)'),
 	);
-
-
-	
 
 public static $required_fields = array();
 
@@ -106,6 +102,7 @@ public static $required_fields = array();
 }
 
 class MultiBooking extends SystemMultiBase {
+	protected static $model_class = 'Booking';
 
 	protected function getMultiResults($only_count = false, $debug = false) {
         $filters = [];
@@ -132,24 +129,7 @@ class MultiBooking extends SystemMultiBase {
         
         return $this->_get_resultsv2('bkn_bookings', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new Booking($row->bkn_booking_id);
-            $child->load_from_data($row, array_keys(Booking::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
-
 
 ?>

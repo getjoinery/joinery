@@ -9,7 +9,6 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemClass.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-
 class CtldFilterException extends SystemClassException {}
 
 class CtldFilter extends SystemBase {
@@ -42,8 +41,6 @@ class CtldFilter extends SystemBase {
 		'cdf_filter_pk' => array('type'=>'varchar(32)'),
 		'cdf_is_active' => array('type'=>'int2'),
 	);
-			
-	
 
 public static $required_fields = array();
 
@@ -59,11 +56,10 @@ public static $required_fields = array();
 	public static $initial_default_values = array(
 	);	
 
-	
 }
 
 class MultiCtldFilter extends SystemMultiBase {
-
+	protected static $model_class = 'CtldFilter';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -94,23 +90,7 @@ class MultiCtldFilter extends SystemMultiBase {
         
         return $this->_get_resultsv2('cdf_ctldfilters', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new CtldFilter($row->cdf_ctldfilter_id);
-            $child->load_from_data($row, array_keys(CtldFilter::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>

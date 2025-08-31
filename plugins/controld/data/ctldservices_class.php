@@ -11,7 +11,6 @@ PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
 
-
 class CtldServiceException extends SystemClassException {}
 
 class CtldService extends SystemBase {
@@ -44,8 +43,6 @@ class CtldService extends SystemBase {
 		'cds_service_pk' => array('type'=>'varchar(32)'),
 		'cds_is_active' => array('type'=>'int2'),
 	);
-			
-	
 
 public static $required_fields = array();
 
@@ -61,11 +58,10 @@ public static $required_fields = array();
 	public static $initial_default_values = array(
 	);	
 
-	
 }
 
 class MultiCtldService extends SystemMultiBase {
-
+	protected static $model_class = 'CtldService';
 
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
@@ -96,23 +92,7 @@ class MultiCtldService extends SystemMultiBase {
         
         return $this->_get_resultsv2('cds_ctldservices', $filters, $this->order_by, $only_count, $debug);
     }
-    
-    function load($debug = false) {
-        parent::load();
-        $q = $this->getMultiResults(false, $debug);
-        foreach($q->fetchAll() as $row) {
-            $child = new CtldService($row->cds_ctldservice_id);
-            $child->load_from_data($row, array_keys(CtldService::$fields));
-            $this->add($child);
-        }
-    }
-    
-    function count_all($debug = false) {
-        $q = $this->getMultiResults(TRUE, $debug);
-        return $q;
-    }
 
 }
-
 
 ?>
