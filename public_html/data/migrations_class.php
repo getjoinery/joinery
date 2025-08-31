@@ -204,8 +204,8 @@ class Migration extends SystemBase {
 				];
 			}
 			
-			// Check the test condition if provided
-			if (isset($migration['test']) && $migration['test']) {
+			// Check the test condition if provided (optional)
+			if (isset($migration['test']) && $migration['test'] && trim($migration['test']) !== '') {
 				$dbconnector = DbConnector::get_instance();
 				$dblink = $dbconnector->get_db_link();
 				
@@ -221,6 +221,7 @@ class Migration extends SystemBase {
 					];
 				}
 			}
+			// Note: If test condition is empty/null, we rely solely on hash-based protection
 			
 			return [
 				'should_run' => true,

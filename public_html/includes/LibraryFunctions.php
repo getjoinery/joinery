@@ -37,6 +37,12 @@ class LibraryFunctions {
 		else if($data_type == 'date'){
 			return 'date';
 		}
+		else if($data_type == 'jsonb'){
+			return 'jsonb';
+		}
+		else if($data_type == 'json'){
+			return 'json';
+		}
 		else if($data_type == 'character'){
 			return 'character';
 		}

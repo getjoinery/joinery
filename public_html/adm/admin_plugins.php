@@ -20,8 +20,17 @@ $message_type = '';
 // Check if plugin system is properly set up
 $system_health = null;
 try {
-    $repair = new PluginSystemRepair();
-    $system_health = $repair->healthCheck();
+    // Basic health check - just verify plugin directory exists
+    $plugin_dir = PathHelper::getAbsolutePath('plugins');
+    if (!is_dir($plugin_dir)) {
+        $system_health = [
+            'overall_status' => 'needs_repair',
+            'issues' => ['Plugin directory does not exist'],
+            'recommendations' => ['Create /plugins/ directory with proper permissions']
+        ];
+    } else {
+        $system_health = ['overall_status' => 'ok'];
+    }
 } catch (Exception $e) {
     $system_health = [
         'overall_status' => 'error',
@@ -35,8 +44,35 @@ if ($_POST) {
     $action = isset($_POST['action']) ? $_POST['action'] : '';
     $plugin_name = isset($_POST['plugin_name']) ? $_POST['plugin_name'] : '';
     
-    // Validate plugin name
-    if (!$plugin_name || !Plugin::is_valid_plugin_name($plugin_name)) {
+    // Handle upload action separately as it doesn't require plugin_name
+    if ($action === 'upload') {
+        try {
+            if (isset($_FILES['plugin_zip']) && $_FILES['plugin_zip']['error'] === UPLOAD_ERR_OK) {
+                $plugin_manager = new PluginManager();
+                $installed_plugin_name = $plugin_manager->installPlugin($_FILES['plugin_zip']['tmp_name']);
+                $message = "Plugin '$installed_plugin_name' installed successfully.";
+                $message_type = 'success';
+            } else {
+                $message = "Upload failed. Please check the file and try again.";
+                $message_type = 'danger';
+            }
+        } catch (Exception $e) {
+            $message = 'Upload failed: ' . htmlspecialchars($e->getMessage());
+            $message_type = 'danger';
+        }
+    } elseif ($action === 'sync') {
+        // Sync doesn't require plugin name either
+        try {
+            $plugin_manager = new PluginManager();
+            $synced = $plugin_manager->syncWithFilesystem();
+            $message = 'Synced ' . count($synced) . ' plugins from filesystem.';
+            $message_type = 'success';
+        } catch (Exception $e) {
+            $message = 'Sync failed: ' . htmlspecialchars($e->getMessage());
+            $message_type = 'danger';
+        }
+    } elseif (!$plugin_name || !Plugin::is_valid_plugin_name($plugin_name)) {
+        // Other actions require valid plugin name
         $message = 'Invalid plugin name.';
         $message_type = 'danger';
     } else {
@@ -107,15 +143,19 @@ if ($_POST) {
                     $message_type = 'warning';
                 }
                 
-            } elseif ($action === 'check_updates') {
-                $version_detector = new PluginVersionDetector();
-                $updates = $version_detector->checkAllPlugins();
-                if (empty($updates)) {
-                    $message = 'All plugins are up to date.';
-                    $message_type = 'info';
-                } else {
-                    $message = 'Updates available for: ' . implode(', ', array_keys($updates));
-                    $message_type = 'warning';
+            } elseif ($action === 'mark_stock') {
+                $plugin = Plugin::get_by_plugin_name($plugin_name);
+                if ($plugin) {
+                    $plugin->mark_as_stock();
+                    $message = 'Plugin "' . htmlspecialchars($plugin_name) . '" marked as stock.';
+                    $message_type = 'success';
+                }
+            } elseif ($action === 'mark_custom') {
+                $plugin = Plugin::get_by_plugin_name($plugin_name);
+                if ($plugin) {
+                    $plugin->mark_as_custom();
+                    $message = 'Plugin "' . htmlspecialchars($plugin_name) . '" marked as custom.';
+                    $message_type = 'success';
                 }
                 
             } elseif ($action === 'repair_plugin') {
@@ -157,22 +197,8 @@ $plugins = MultiPlugin::get_all_plugins_with_status();
 
 // Plugin data loaded successfully
 
-// Check for updates
-$version_detector = new PluginVersionDetector();
-$plugin_updates = array();
-foreach ($plugins as &$plugin) {
-    if ($plugin['directory_exists'] && $plugin['plugin']) {
-        $update_info = $version_detector->checkForUpdate($plugin['name']);
-        $plugin['update_available'] = $update_info['update_available'];
-        $plugin['available_version'] = $update_info['available_version'];
-        if ($update_info['update_available']) {
-            $plugin_updates[$plugin['name']] = $update_info;
-        }
-    }
-}
-unset($plugin); // Critical: Unset the reference to prevent corruption
-
-// Update checking completed
+// Plugin updates will be checked by the deployment system
+// No need for version checking here anymore
 
 $page->admin_header(array(
     'menu-id' => 'plugins',
@@ -213,6 +239,40 @@ $page->admin_header(array(
                 <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
             </div>
         <?php endif; ?>
+        
+        <!-- Upload Plugin Form -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Upload New Plugin</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data" class="row g-3">
+                    <div class="col-md-8">
+                        <input type="file" name="plugin_zip" class="form-control" accept=".zip" required>
+                        <div class="form-text">
+                            Upload a ZIP file containing plugin files with plugin.json manifest.
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" name="action" value="upload" class="btn btn-primary">
+                            <i class="fas fa-upload"></i> Upload Plugin
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Sync Button -->
+        <div class="mb-3">
+            <form method="post" style="display: inline;">
+                <button type="submit" name="action" value="sync" class="btn btn-info">
+                    <i class="fas fa-sync"></i> Sync with Filesystem
+                </button>
+            </form>
+            <small class="text-muted ms-2">
+                Scan plugin directory and update database registry
+            </small>
+        </div>
         
         <h5 class="mb-3">Available Plugins</h5>
         
@@ -277,6 +337,17 @@ $page->admin_header(array(
                 
                 // Status column
                 $status_cell = $plugin['status_badge'];
+                
+                // Add stock/custom badge
+                if ($plugin['plugin']) {
+                    $is_stock = $plugin['plugin']->is_stock();
+                    if ($is_stock) {
+                        $status_cell .= ' <span class="badge bg-info">Stock</span>';
+                    } else {
+                        $status_cell .= ' <span class="badge bg-warning">Custom</span>';
+                    }
+                }
+                
                 if (!$plugin['directory_exists']) {
                     $status_cell .= '<br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Directory missing</small>';
                 }
@@ -366,6 +437,26 @@ $page->admin_header(array(
                         $action_cell .= $formwriter->new_form_button('Uninstall', 'btn btn-danger btn-sm', '', 'return confirm(\'Are you sure you want to uninstall this plugin?\');');
                         $action_cell .= $formwriter->end_form(true);
                         
+                    }
+                    
+                    // Add stock/custom toggle buttons if plugin is installed
+                    if ($plugin['plugin']) {
+                        $is_stock = $plugin['plugin']->is_stock();
+                        $action_cell .= '<div class="mt-2">';
+                        if ($is_stock) {
+                            $action_cell .= $formwriter->begin_form('plugin_custom_' . $plugin['name'], 'POST', '', true);
+                            $action_cell .= $formwriter->hiddeninput('action', 'mark_custom');
+                            $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                            $action_cell .= $formwriter->new_form_button('→ Custom', 'btn btn-outline-warning btn-sm', '', 'title="Mark as Custom"');
+                            $action_cell .= $formwriter->end_form(true);
+                        } else {
+                            $action_cell .= $formwriter->begin_form('plugin_stock_' . $plugin['name'], 'POST', '', true);
+                            $action_cell .= $formwriter->hiddeninput('action', 'mark_stock');
+                            $action_cell .= $formwriter->hiddeninput('plugin_name', $plugin['name']);
+                            $action_cell .= $formwriter->new_form_button('→ Stock', 'btn btn-outline-info btn-sm', '', 'title="Mark as Stock"');
+                            $action_cell .= $formwriter->end_form(true);
+                        }
+                        $action_cell .= '</div>';
                     }
                     
                     $action_cell .= '</div>';
