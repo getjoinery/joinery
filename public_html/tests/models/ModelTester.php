@@ -74,10 +74,15 @@ class ModelTester {
                 if ($verbose) echo "Read-only mode: Skipping CRUD operations, running validation only...<br>\n"; flush();
                 // Note: Primary key validation already ran above
                 // Note: permanent_delete_actions validation already ran above
+                
+                if ($verbose) echo "Validating sequence synchronization...<br>\n"; flush();
+                $this->test_automated_sequence_synchronization($debug);
                 if ($verbose) echo "Read-only validation completed successfully<br>\n"; flush();
             } else {
                 // Full test mode: Run all tests including CRUD operations
-                if ($verbose) echo "Starting CRUD tests...<br>\n"; flush();
+                if ($verbose) echo "Starting sequence synchronization tests...<br>\n"; flush();
+                $this->test_automated_sequence_synchronization($debug);
+                if ($verbose) echo "Sequence tests completed, starting CRUD tests...<br>\n"; flush();
                 $this->test_automated_crud($debug);
                 if ($verbose) echo "CRUD tests completed, starting validation tests...<br>\n"; flush();
                 $this->test_automated_validation($debug);
@@ -1748,6 +1753,70 @@ class ModelTester {
             
         } catch (Exception $e) {
             $this->test_warn("Could not validate primary key configuration for {$model_class}: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Test sequence synchronization for models with serial primary keys
+     * Ensures that:
+     * 1. The expected sequence exists
+     * 2. The sequence value is greater than the maximum value in the table
+     */
+    protected function test_automated_sequence_synchronization($debug = false) {
+        $verbose = $this->is_verbose();
+        if ($debug || $verbose) echo "Testing sequence synchronization...<br>\n";
+        
+        $model_class = $this->model_class;
+        $table_name = $model_class::$tablename;
+        $pkey_column = $model_class::$pkey_column;
+        
+        // Check if this model uses a serial primary key
+        $field_specs = $model_class::$field_specifications ?? [];
+        if (!isset($field_specs[$pkey_column]) || !isset($field_specs[$pkey_column]['serial']) || !$field_specs[$pkey_column]['serial']) {
+            if ($verbose) echo "Model does not use serial primary key, skipping sequence test<br>\n";
+            return;
+        }
+        
+        try {
+            $dbconnector = DbConnector::get_instance();
+            $dblink = $dbconnector->get_db_link();
+            
+            // Build expected sequence name
+            $sequence_name = $table_name . '_' . $pkey_column . '_seq';
+            
+            // Check if sequence exists
+            $seq_sql = "SELECT last_value FROM pg_sequences WHERE sequencename = ? AND schemaname = 'public'";
+            $seq_q = $dblink->prepare($seq_sql);
+            $seq_q->execute([$sequence_name]);
+            $seq_result = $seq_q->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$seq_result) {
+                $this->test_fail("Sequence '{$sequence_name}' does not exist for model {$model_class}");
+                return;
+            }
+            
+            $current_seq_value = $seq_result['last_value'];
+            
+            // Get current max value from table
+            $max_sql = "SELECT COALESCE(MAX($pkey_column), 0) as max_val FROM $table_name";
+            $max_q = $dblink->prepare($max_sql);
+            $max_q->execute();
+            $max_result = $max_q->fetch(PDO::FETCH_ASSOC);
+            $max_val = $max_result['max_val'];
+            
+            // Sequence should be greater than max table value (or equal if no records exist)
+            if ($current_seq_value <= $max_val && $max_val > 0) {
+                $this->test_fail("Sequence '{$sequence_name}' is out of sync. Sequence value: {$current_seq_value}, Max table value: {$max_val}. This will cause primary key conflicts.");
+                return;
+            }
+            
+            // All checks passed
+            if ($verbose) {
+                $this->test_pass("Sequence synchronization valid: {$sequence_name} (seq: {$current_seq_value}, max: {$max_val})");
+            }
+            
+        } catch (Exception $e) {
+            $this->test_fail("Could not validate sequence synchronization for {$model_class}: " . $e->getMessage());
         }
     }
     

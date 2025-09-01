@@ -1466,7 +1466,7 @@ class LibraryFunctions {
 			DbConnector::BeginTransaction();
 		}
 
-		if(is_array($pkeys)){
+		if(is_array($p_keys)){
 			$numkeys = count($p_keys);
 		}
 		else{
