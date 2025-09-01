@@ -218,6 +218,7 @@ function smart_get($key) {
 
 /**
  * Auto-detect if a field is a timestamp based on its type specification
+ * Optimized for performance with quick rejection of non-timestamp types
  */
 protected function is_timestamp_field($field_name) {
     if (!isset(static::$field_specifications[$field_name])) {
@@ -225,9 +226,61 @@ protected function is_timestamp_field($field_name) {
     }
     
     $type = strtolower(static::$field_specifications[$field_name]['type'] ?? '');
-    return (strpos($type, 'timestamp') !== false || 
-            strpos($type, 'datetime') !== false ||
-            (strpos($type, 'date') !== false && strpos($type, 'update') === false));
+    
+    // Quick rejection: if type starts with clearly non-timestamp types, return false immediately
+    $first_char = $type[0] ?? '';
+    if ($first_char === 'v' || $first_char === 'i' || $first_char === 'b' || 
+        $first_char === 'n' || $first_char === 'f' || $first_char === 'c') {
+        return false; // varchar, int*, bool*, numeric, float, char
+    }
+    
+    // Additional optimization: check first two characters for "te" (text fields)
+    if ($first_char === 't' && isset($type[1]) && $type[1] === 'e') {
+        return false; // text, textarea - definitely not timestamps
+    }
+    
+    // Final switch statement for complete type matching (no strpos() calls needed)
+    switch ($type) {
+        // Standard timestamp variants
+        case 'timestamp':
+        case 'timestamptz':
+        case 'timestamp with time zone':
+        case 'timestamp without time zone':
+        
+        // Timestamp with precision (0-6 fractional seconds)
+        case 'timestamp(0)':
+        case 'timestamp(1)':
+        case 'timestamp(2)':
+        case 'timestamp(3)':
+        case 'timestamp(4)':
+        case 'timestamp(5)':
+        case 'timestamp(6)':
+        
+        // Timestamp with time zone and precision
+        case 'timestamptz(0)':
+        case 'timestamptz(1)':
+        case 'timestamptz(2)':
+        case 'timestamptz(3)':
+        case 'timestamptz(4)':
+        case 'timestamptz(5)':
+        case 'timestamptz(6)':
+        
+        // Other date/time types
+        case 'datetime':
+        case 'date':
+        case 'time':
+        case 'time(0)':
+        case 'time(1)':
+        case 'time(2)':
+        case 'time(3)':
+        case 'time(4)':
+        case 'time(5)':
+        case 'time(6)':
+            return true;
+            
+        default:
+            return false;
+    }
 }
 ```
 
