@@ -1642,8 +1642,24 @@ class LibraryFunctions {
 			return $p_keys;
 		}
 		else{
-			$seq = $tablename . '_' . substr($tablename, 0, strlen($tablename)-1) . '_id_seq';
-			$pkeyname = substr($tablename, 0, strlen($tablename)-1) . '_id';
+			// Find the primary key column for this table by checking the model classes
+			$pkey_column = null;
+			$classes = LibraryFunctions::discover_model_classes(['require_tablename' => true]);
+			foreach ($classes as $class) {
+				if ($class::$tablename === $tablename && isset($class::$pkey_column)) {
+					$pkey_column = $class::$pkey_column;
+					break;
+				}
+			}
+			
+			// If we can't find the primary key column, throw an exception
+			if ($pkey_column === null) {
+				throw new SystemClassException('Cannot determine primary key column for table ' . $tablename . '. Model class not found or missing $pkey_column property.');
+			}
+			
+			// Use the correct sequence name format from DatabaseUpdater
+			$seq = $tablename . '_' . $pkey_column . '_seq';
+			$pkeyname = $pkey_column;
 
 			//CHECK TO SEE IF SEQUENCE EXISTS
 			$columnsql = "SELECT COUNT(*) FROM information_schema.sequences WHERE sequence_name ='$seq'";
