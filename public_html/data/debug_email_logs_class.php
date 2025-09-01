@@ -15,41 +15,32 @@ class DebugEmailLog extends SystemBase {	public static $prefix = 'del';
 	public static $tablename = 'del_debug_email_logs';
 	public static $pkey_column = 'del_debug_email_log_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(
-		'del_debug_email_log_id' => 'Primary key - DebugEmailLog ID',
-		'del_subject' => 'subject of the email',
-		'del_recipient_email' => 'recipient email',
-		'del_body' => 'Body of the email',
-		'del_create_time' => 'Time added',
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'del_debug_email_log_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'del_subject' => array('type'=>'varchar(255)'),
-		'del_recipient_email' => array('type'=>'varchar(255)'),
-		'del_body' => array('type'=>'text'),
-		'del_create_time' =>  array('type'=>'timestamp(6)'),
+	    'del_debug_email_log_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'del_subject' => array('type'=>'varchar(255)'),
+	    'del_recipient_email' => array('type'=>'varchar(255)'),
+	    'del_body' => array('type'=>'text'),
+	    'del_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-			
-	public static $required_fields = array();
-	
+
 	public static $field_constraints = array();
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-	'del_create_time'=> 'now()',);
-	
+
 }
 
 class MultiDebugEmailLog extends SystemMultiBase {

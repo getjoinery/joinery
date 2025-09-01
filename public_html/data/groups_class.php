@@ -25,48 +25,35 @@ class Group extends SystemBase {	public static $prefix = 'grp';
 		'fil_grp_group_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(		'grp_group_id' => 'Primary key - Group ID',
-		'grp_name' => 'Group Name',
-		'grp_usr_user_id_created' => 'User who created the group',
-		'grp_create_time' => 'Created',
-		'grp_update_time' => 'Updated',
-		'grp_delete_time' => 'Is this group deleted?',
-		//'grp_type' => 'Type of group:  1-user, 2-event, 3-post',
-		'grp_category' => 'Dynamic replacement for group type',
-	);
-
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'grp_group_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'grp_name' => array('type'=>'varchar(100)', 'unique_with' => array('grp_category')),
-		'grp_usr_user_id_created' => array('type'=>'int4'),
-		'grp_create_time' => array('type'=>'timestamp(6)'),
-		'grp_update_time' => array('type'=>'timestamp(6)'),
-		'grp_delete_time' => array('type'=>'timestamp(6)'),
-		//'grp_type' => array('type'=>'int2'),
-		'grp_category' => array('type'=>'varchar(24)'),
+	    'grp_group_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'grp_name' => array('type'=>'varchar(100)', 'required'=>true, 'unique_with'=>array (
+  0 => 'grp_category',
+)),
+	    'grp_usr_user_id_created' => array('type'=>'int4'),
+	    'grp_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'grp_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'grp_delete_time' => array('type'=>'timestamp(6)'),
+	    'grp_category' => array('type'=>'varchar(24)'),
 	);	
 
-public static $required_fields = array(
-		'grp_name');
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
 
-	public static $initial_default_values = array(
-		'grp_create_time' => 'now()', 
-		'grp_update_time' => 'now()'
-		);		
-	
 	//RETURNS A GROUP OBJECT WITH A SPECIFIED NAME
 	public static function get_by_name($name, $category, $return_deleted=false) {
 		if(!$name){

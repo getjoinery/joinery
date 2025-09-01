@@ -41,58 +41,37 @@ class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 	public static $permanent_delete_actions = array(		'odi_evr_event_registrant_id' => 'prevent'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(
-		'evr_event_registrant_id' => 'Primary key - EventRegistrant ID',
-		'evr_evt_event_id' => 'The event',
-		'evr_usr_user_id' => 'The attendee',
-		'evr_recording_consent' => 'Consent to record',
-		'evr_first_event' => 'Is this the persons first event',
-		'evr_create_time' => 'Timestamp when this request was created',
-		'evr_other_events' => '',
-		'evr_health_notes' => 'Health notes',
-		'evr_extra_info_completed' => 'Whether the person has entered the needed questions for the event',
-		'evr_ord_order_id' => 'Order for the registration',
-		'evr_expires_time' => 'Time at which this registration expires.', 
-		'evr_odi_order_item_id' => 'Order Item ID for this registration',
-		'evr_delete_time' => 'Time of deletion',
-		'evr_grp_group_id' => 'Event bundle that created this registration, if applicable'
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'evr_event_registrant_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'evr_evt_event_id' => array('type'=>'int4'),
-		'evr_usr_user_id' => array('type'=>'int4'),
-		'evr_recording_consent' => array('type'=>'bool'),
-		'evr_first_event' => array('type'=>'bool'),
-		'evr_create_time' =>  array('type'=>'timestamp(6)'),
-		'evr_other_events' => array('type'=>'varchar(255)'),
-		'evr_health_notes' => array('type'=>'varchar(255)'),
-		'evr_extra_info_completed' => array('type'=>'bool'),
-		'evr_ord_order_id' => array('type'=>'int4'),
-		'evr_expires_time' => array('type'=>'timestamp(6)'),
-		'evr_odi_order_item_id' => array('type'=>'int4'),
-		'evr_delete_time' => array('type'=>'timestamp(6)'),
-		'evr_grp_group_id' => array('type'=>'int4'),
+	    'evr_event_registrant_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'evr_evt_event_id' => array('type'=>'int4', 'required'=>true),
+	    'evr_usr_user_id' => array('type'=>'int4', 'required'=>true),
+	    'evr_recording_consent' => array('type'=>'bool'),
+	    'evr_first_event' => array('type'=>'bool'),
+	    'evr_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'evr_other_events' => array('type'=>'varchar(255)'),
+	    'evr_health_notes' => array('type'=>'varchar(255)'),
+	    'evr_extra_info_completed' => array('type'=>'bool'),
+	    'evr_ord_order_id' => array('type'=>'int4'),
+	    'evr_expires_time' => array('type'=>'timestamp(6)'),
+	    'evr_odi_order_item_id' => array('type'=>'int4'),
+	    'evr_delete_time' => array('type'=>'timestamp(6)'),
+	    'evr_grp_group_id' => array('type'=>'int4'),
 	);
-			 
-	public static $required_fields = array(
-		'evr_evt_event_id', 'evr_usr_user_id'
-	);
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-		'evr_create_time' => 'now()'
-	);	
 
 	public static $field_constraints = array(
 

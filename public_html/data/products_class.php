@@ -611,70 +611,46 @@ class Product extends SystemBase {
 	
 	const PRODUCT_ID_OPTIONAL_DONATION=4;
 
-	public static $fields = array(
-		'pro_product_id' => 'Primary key - Product ID',
-		'pro_name' => 'Product name',
-		'pro_short_description' => 'Product Description',
-		'pro_description' => 'Product Description',
-		'pro_requirements' => 'Requirements of this product',
-		'pro_max_cart_count' => 'Maximum number of this item that can be bought at one time',
-		'pro_max_purchase_count' => 'Maximum number of this item that can be bought total',
-		'pro_prg_product_group_id' => 'Product group this product is part of',
-		'pro_after_purchase_message' => 'Message shown after purchase of the item',
-		'pro_evt_event_id' => 'Event id if the order is for an event',
-		'pro_expires' => 'How much time until the purchase expires.',
-		'pro_is_active' => 'Active or disabled',
-		'pro_grp_group_id' => 'The group id of the bundle if the product is for a bundle',
-		'pro_type' => 'Type of product e.g. event ticket or digital item',
-		'pro_digital_link' => 'Link for a digital download',
-		'pro_num_remaining_calc' => 'Calculated field of number remaining in stock',
-		'pro_link' => 'Link to use for accessing',
-		'pro_delete_time' => 'time deleted',
-		'pro_product_scripts' => 'Comma separated list of scripts to run upon purchase',
-		'pro_stripe_product_id' => 'Product ID at Stripe',
-		'pro_stripe_product_id_test' => 'Product ID at Stripe in test mode',
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'pro_product_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'pro_name' => array('type'=>'varchar(255)'),
-		'pro_short_description' => array('type'=>'text'),
-		'pro_description' => array('type'=>'text'),
-		'pro_requirements' => array('type'=>'int4'),
-		'pro_max_cart_count' => array('type'=>'int4'),
-		'pro_max_purchase_count' => array('type'=>'int4'),
-		'pro_prg_product_group_id' => array('type'=>'int4'),
-		'pro_after_purchase_message' =>  array('type'=>'text'),
-		'pro_evt_event_id' => array('type'=>'int4'),
-		'pro_expires' =>  array('type'=>'int4'),
-		'pro_is_active' => array('type'=>'bool'),
-		'pro_grp_group_id' => array('type'=>'int4'),
-		'pro_type' => array('type'=>'int4'),
-		'pro_digital_link' =>  array('type'=>'varchar(255)'),
-		'pro_num_remaining_calc' => array('type'=>'int4'),
-		'pro_link' => array('type'=>'varchar(255)'),
-		'pro_delete_time' => array('type'=>'timestamp(6)'),
-		'pro_product_scripts' => array('type'=>'text'),
-		'pro_stripe_product_id' =>  array('type'=>'varchar(64)'),
-		'pro_stripe_product_id_test' =>  array('type'=>'varchar(64)'),
+	    'pro_product_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'pro_name' => array('type'=>'varchar(255)', 'required'=>true),
+	    'pro_short_description' => array('type'=>'text'),
+	    'pro_description' => array('type'=>'text'),
+	    'pro_requirements' => array('type'=>'int4'),
+	    'pro_max_cart_count' => array('type'=>'int4'),
+	    'pro_max_purchase_count' => array('type'=>'int4'),
+	    'pro_prg_product_group_id' => array('type'=>'int4'),
+	    'pro_after_purchase_message' => array('type'=>'text'),
+	    'pro_evt_event_id' => array('type'=>'int4'),
+	    'pro_expires' => array('type'=>'int4'),
+	    'pro_is_active' => array('type'=>'bool'),
+	    'pro_grp_group_id' => array('type'=>'int4'),
+	    'pro_type' => array('type'=>'int4'),
+	    'pro_digital_link' => array('type'=>'varchar(255)'),
+	    'pro_num_remaining_calc' => array('type'=>'int4'),
+	    'pro_link' => array('type'=>'varchar(255)', 'required'=>true),
+	    'pro_delete_time' => array('type'=>'timestamp(6)'),
+	    'pro_product_scripts' => array('type'=>'text'),
+	    'pro_stripe_product_id' => array('type'=>'varchar(64)'),
+	    'pro_stripe_product_id_test' => array('type'=>'varchar(64)'),
 	);
-			 
-	public static $required_fields = array('pro_link', 'pro_name');
 
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array();	
 
 	public function get_requirement_info($output='text') {
 		$requirements_out = array();

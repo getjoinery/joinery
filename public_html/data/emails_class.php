@@ -35,68 +35,45 @@ class Email extends SystemBase {	public static $prefix = 'eml';
 	public $webdir = '';
 	public $cdn = '';
 
-	public static $fields = array(
-		'eml_email_id' => 'Primary key - Email ID',
-		'eml_description' => 'Description of the email',
-		'eml_usr_user_id' => 'Email creator, can be NULL',
-		'eml_from_address' => 'From address',
-		'eml_from_name' => 'From name',
-		'eml_subject' => 'Subject line',
-		'eml_preview_text' => 'Preview text for the first line in email readers',
-		'eml_reply_to' => 'Reply address', // usually the user's name/address who was sending the email
-		'eml_message_html' => 'The message HTML, before being merged with recipient',
-		'eml_message_plain' => 'The message text, before being merged with recipient',
-		'eml_message_template_html' => 'HTML body template',
-		'eml_message_template_plain' => 'Source for the plaintext template, defaults to NULL',
-		'eml_sent_time' => 'Time_sent',
-		'eml_status' => 'Status see above',
-		'eml_scheduled_time' => 'Scheduled time to send',
-		'eml_type' => 'Type of email for opt out purposes',
-		'eml_delete_time' => 'Time of deletion',
-		'eml_ctt_contact_type_id' => 'The contact type of this email for unsubscribes',  
-		'eml_mlt_mailing_list_id' => 'The mailing list for this email, null for custom',
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'eml_email_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'eml_description' => array('type'=>'varchar(255)'),
-		'eml_usr_user_id' => array('type'=>'int4'),
-		'eml_from_address' =>  array('type'=>'varchar(255)'),
-		'eml_from_name' =>  array('type'=>'varchar(255)'),
-		'eml_subject' => array('type'=>'varchar(255)'),
-		'eml_preview_text' => array('type'=>'varchar(255)'),
-		'eml_reply_to' => array('type'=>'varchar(255)'),
-		'eml_message_html' => array('type'=>'text'),
-		'eml_message_plain' => array('type'=>'text'),
-		'eml_message_template_html' => array('type'=>'text'),
-		'eml_message_template_plain' => array('type'=>'text'),
-		'eml_sent_time' => array('type'=>'timestamp(6)'),
-		'eml_status' =>  array('type'=>'int2'),
-		'eml_scheduled_time' => array('type'=>'timestamp(6)'),
-		'eml_type' => array('type'=>'int2'),
-		'eml_delete_time' => array('type'=>'timestamp(6)'),
-		'eml_ctt_contact_type_id' => array('type'=>'int4'),
-		'eml_mlt_mailing_list_id' => array('type'=>'int4'),
+	    'eml_email_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'eml_description' => array('type'=>'varchar(255)'),
+	    'eml_usr_user_id' => array('type'=>'int4'),
+	    'eml_from_address' => array('type'=>'varchar(255)'),
+	    'eml_from_name' => array('type'=>'varchar(255)'),
+	    'eml_subject' => array('type'=>'varchar(255)'),
+	    'eml_preview_text' => array('type'=>'varchar(255)'),
+	    'eml_reply_to' => array('type'=>'varchar(255)'),
+	    'eml_message_html' => array('type'=>'text'),
+	    'eml_message_plain' => array('type'=>'text'),
+	    'eml_message_template_html' => array('type'=>'text'),
+	    'eml_message_template_plain' => array('type'=>'text'),
+	    'eml_sent_time' => array('type'=>'timestamp(6)'),
+	    'eml_status' => array('type'=>'int2'),
+	    'eml_scheduled_time' => array('type'=>'timestamp(6)'),
+	    'eml_type' => array('type'=>'int2'),
+	    'eml_delete_time' => array('type'=>'timestamp(6)'),
+	    'eml_ctt_contact_type_id' => array('type'=>'int4'),
+	    'eml_mlt_mailing_list_id' => array('type'=>'int4'),
 	);
-			
-	public static $required_fields = array();
-	
+
 	public static $field_constraints = array();
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-	);	
-	
+
 	public function __construct($key, $load=FALSE) { 
 		parent::__construct($key, $load);
 

@@ -17,58 +17,40 @@ class Video extends SystemBase {	public static $prefix = 'vid';
 	public static $permanent_delete_actions = array(		'evs_vid_video_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 	public static $url_namespace = 'video'; 
-	
-	public static $fields = array(		'vid_video_id' => 'Primary key - Video ID',
-		'vid_title' => 'Video Title',
-		'vid_link' => 'Link to the video',
-		'vid_description' => 'Description',
-		'vid_usr_user_id' => 'User this video is associated with',
-		'vid_source' => 'Website of video',
-		'vid_video_number' => 'Website video identifier',
-		'vid_create_time' => 'Time added',
-		'vid_video_text'=>'Original code',
-		'vid_version' => 'Code version for turnhere videos',
-		'vid_delete_time' => 'Time of deletion',
-		'vid_min_permission' => 'Permission level required to view video',
-		'vid_grp_group_id' => 'Group with permission to see video',
-		'vid_evt_event_id' => 'Event registrants with permission to see video',
-		//'vid_is_listed' => 'Whether to list the video in indexes'
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'vid_video_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'vid_title' => array('type'=>'varchar(255)'),
-		'vid_link' => array('type'=>'varchar(255)'),
-		'vid_description' => array('type'=>'text'),
-		'vid_usr_user_id' =>  array('type'=>'int4'),
-		'vid_source' =>  array('type'=>'int2'),
-		'vid_video_number' =>  array('type'=>'varchar(255)'),
-		'vid_create_time' =>  array('type'=>'timestamp(6)'),
-		'vid_video_text'=> array('type'=>'text'),
-		'vid_version' =>  array('type'=>'int2'),
-		'vid_delete_time' => array('type'=>'timestamp(6)'),
-		'vid_min_permission' => array('type'=>'int2'),
-		'vid_grp_group_id' => array('type'=>'int4'),
-		'vid_evt_event_id' => array('type'=>'int4'),
-		//'vid_is_listed' => array('type'=>'int2'),
+	    'vid_video_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'vid_title' => array('type'=>'varchar(255)'),
+	    'vid_link' => array('type'=>'varchar(255)'),
+	    'vid_description' => array('type'=>'text'),
+	    'vid_usr_user_id' => array('type'=>'int4'),
+	    'vid_source' => array('type'=>'int2'),
+	    'vid_video_number' => array('type'=>'varchar(255)'),
+	    'vid_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'vid_video_text' => array('type'=>'text'),
+	    'vid_version' => array('type'=>'int2'),
+	    'vid_delete_time' => array('type'=>'timestamp(6)'),
+	    'vid_min_permission' => array('type'=>'int2'),
+	    'vid_grp_group_id' => array('type'=>'int4'),
+	    'vid_evt_event_id' => array('type'=>'int4'),
 	);
-	
-	public static $required_fields = array();
-	
+
 	public static $field_constraints = array();
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array('vid_create_time' => 'now()');
 
 	function get_embed($vidwidth = 560, $vidheight = 315) {
 		if($this->get('vid_delete_time')){

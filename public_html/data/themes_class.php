@@ -5,54 +5,72 @@ PathHelper::requireOnce('includes/SystemClass.php');
 class Theme extends SystemBase {    public static $prefix = 'thm';
     public static $tablename = 'thm_themes';
     public static $pkey_column = 'thm_theme_id';
+
+    /**
     
-    public static $fields = array(
-        'thm_theme_id' => 'Primary key - Theme ID',
-        'thm_name' => 'Theme folder name (e.g. falcon, tailwind)',
-        'thm_display_name' => 'Display name for admin interface', 
-        'thm_description' => 'Theme description',
-        'thm_version' => 'Theme version',
-        'thm_author' => 'Theme author',
-        'thm_is_active' => 'Is this the active theme?',
-        'thm_is_stock' => 'Is this a stock theme (auto-updated)?',
-        'thm_status' => 'Status: installed, active, inactive, error',
-        'thm_metadata' => 'JSON metadata from theme.json',
-        'thm_installed_time' => 'When theme was installed',
-        'thm_create_time' => 'Record creation time',
-        'thm_update_time' => 'Record update time'
-    );
+     * Field specifications define database column properties and validation rules
+    
+     * 
+    
+     * Database schema properties (used by update_database):
+    
+     *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
+    
+     *   'is_nullable' => true/false - Whether NULL values are allowed
+    
+     *   'serial' => true/false - Auto-incrementing field
+    
+     * 
+    
+     * Validation and behavior properties (used by SystemBase):
+    
+     *   'required' => true/false - Field must have non-empty value on save
+    
+     *   'default' => mixed - Default value for new records (applied on INSERT only)
+    
+     *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+    
+     * 
+    
+     * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
+    
+     */
     
     public static $field_specifications = array(
-        'thm_theme_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-        'thm_name' => array('type'=>'varchar(50)', 'is_nullable'=>false, 'unique'=>true),
+    
+        'thm_theme_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+    
+        'thm_name' => array('type'=>'varchar(50)', 'is_nullable'=>false, 'required'=>true, 'unique'=>true),
+    
         'thm_display_name' => array('type'=>'varchar(100)'),
+    
         'thm_description' => array('type'=>'text'),
+    
         'thm_version' => array('type'=>'varchar(20)'),
+    
         'thm_author' => array('type'=>'varchar(100)'),
-        'thm_is_active' => array('type'=>'bool'),
-        'thm_is_stock' => array('type'=>'bool'),
-        'thm_status' => array('type'=>'varchar(20)'),
+    
+        'thm_is_active' => array('type'=>'bool', 'default'=>false),
+    
+        'thm_is_stock' => array('type'=>'bool', 'default'=>true),
+    
+        'thm_status' => array('type'=>'varchar(20)', 'default'=>'installed'),
+    
         'thm_metadata' => array('type'=>'jsonb'),
-        'thm_installed_time' => array('type'=>'timestamp(6)'),
-        'thm_create_time' => array('type'=>'timestamp(6)'),
-        'thm_update_time' => array('type'=>'timestamp(6)')
+    
+        'thm_installed_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+    
+        'thm_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+    
+        'thm_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+    
     );
     
     public static $json_vars = array('thm_metadata');
-    public static $timestamp_fields = array('thm_create_time', 'thm_update_time', 'thm_installed_time');
-    public static $required_fields = array('thm_name');
-    public static $zero_variables = array();
+
     public static $field_constraints = array();
     public static $permanent_delete_actions = array();
-    public static $initial_default_values = array(
-        'thm_is_active' => false,
-        'thm_is_stock' => true,
-        'thm_status' => 'installed',
-        'thm_installed_time' => 'now()',
-        'thm_create_time' => 'now()',
-        'thm_update_time' => 'now()'
-    );
-    
+
     /**
      * Get theme by name
      */

@@ -17,35 +17,32 @@ class GroupMember extends SystemBase {	public static $prefix = 'grm';
 	public static $tablename = 'grm_group_members';
 	public static $pkey_column = 'grm_group_member_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(		'grm_grp_group_id' => 'group id',
-		'grm_foreign_key_id' => 'Foreign key pointing to the member in this group',
-	);
 
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'grm_group_member_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'grm_grp_group_id' => array('type'=>'int4', 'unique_with' => array('grm_foreign_key_id')),
-		'grm_foreign_key_id' => array('type'=>'int8'),
+	    'grm_group_member_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'grm_grp_group_id' => array('type'=>'int4', 'required'=>true, 'unique_with'=>array (
+  0 => 'grm_foreign_key_id',
+)),
+	    'grm_foreign_key_id' => array('type'=>'int8'),
 	);	
 
-public static $required_fields = array('grm_grp_group_id');
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
 
-	public static $initial_default_values = array(
-		);		
-	
 	function remove(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();

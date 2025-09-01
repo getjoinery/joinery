@@ -12,41 +12,33 @@ class ProductDetail extends SystemBase {	public static $prefix = 'prd';
 	public static $tablename = 'prd_product_details';
 	public static $pkey_column = 'prd_product_detail_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(		'prd_product_detail_id' => 'Primary key - ProductDetail ID',
-		'prd_pro_product_id' => 'Product id',
-		'prd_prv_product_version_id' => 'Product version',
-		'prd_usr_user_id' => 'Person who purchased the item',
-		'prd_num_sessions' => 'Number of sessions purchased',
-		'prd_num_used' => 'Number of sessions used',
-		'prd_notes' => 'notes',
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'prd_product_detail_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'prd_pro_product_id' => array('type'=>'int4'),
-		'prd_prv_product_version_id' => array('type'=>'int4'),
-		'prd_usr_user_id' => array('type'=>'int4'),
-		'prd_num_sessions' => array('type'=>'int4'),
-		'prd_num_used' => array('type'=>'int4'),
-		'prd_notes' => array('type'=>'text'),
+	    'prd_product_detail_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'prd_pro_product_id' => array('type'=>'int4'),
+	    'prd_prv_product_version_id' => array('type'=>'int4'),
+	    'prd_usr_user_id' => array('type'=>'int4', 'required'=>true),
+	    'prd_num_sessions' => array('type'=>'int4'),
+	    'prd_num_used' => array('type'=>'int4', 'required'=>true),
+	    'prd_notes' => array('type'=>'text'),
 	);	
-	public static $required_fields = array('prd_usr_user_id', 'prd_num_used');
 
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array();
 
 }
 

@@ -73,92 +73,54 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	const VISIBILITY_PUBLIC = 1;
 	const VISIBILITY_PUBLIC_UNLISTED = 2;	
 
-	public static $fields = array(
-		'evt_event_id' => 'Primary key - Event ID',
-		'evt_name' => 'Name',
-		'evt_description' => 'Description',
-		'evt_short_description' => 'Short description',
-		'evt_usr_user_id_leader' => 'Who is leading the retreat',
-		'evt_location' => 'Location of the retreat',
-		'evt_start_time' => 'Timestamp when this event begins',
-		'evt_start_time_local' => 'Stored local start time',
-		'evt_end_time' => 'Timestamp when this event ends',
-		'evt_end_time_local' => 'Stored local end time',
-		'evt_create_time' => 'Timestamp when this request was created',
-		'evt_external_register_link' => 'Link to register if the event is not being registered here',
-		'evt_timezone' => 'Timezone where the event is happening',
-		'evt_is_accepting_signups' => 'Are we taking signups',
-		'evt_picture_link' => 'If present, is the promo picture for the event', //DEPRECATED
-		'evt_collect_extra_info' => 'extra info',
-		'evt_grp_group_id' => 'Group for the event registrants', //DEPRECATED
-		'evt_private_info' => 'Information displayed only to registrants',
-		'evt_status' => '1: active, 2: completed, 3: cancelled', 
-		'evt_max_signups' => 'Max amount of signups',
-		'evt_allow_waiting_list' => 'If true, waiting list is active',
-		'evt_session_display_type' => '1=condensed, 2=separate pages for each session',
-		'evt_visibility'=>'0=private, 1=public,2=public but unlisted',
-		'evt_fil_file_id' => 'File id of the picture attached',
-		'evt_link' => 'Link for the event',
-		'evt_show_add_to_calendar_link' => 'Whether to show the calendar link',
-		'evt_ety_event_type_id' => 'Type of event',
-		'evt_delete_time' => 'Time of deletion',
-		'evt_svy_survey_id'=> 'Survey, if attached',
-		'evt_survey_required' => 'Is the survey required before registration?',
-		'evt_loc_location_id'  => 'Location id if there is a location attached'
-	); 
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'evt_event_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'evt_name' => array('type'=>'varchar(255)'),
-		'evt_description' =>   array('type'=>'text'),
-		'evt_short_description' =>  array('type'=>'text'),
-		'evt_usr_user_id_leader' => array('type'=>'int4'),
-		'evt_location' => array('type'=>'varchar(255)'),
-		'evt_start_time' => array('type'=>'timestamp(6)'),
-		'evt_start_time_local' => array('type'=>'timestamp(6)'),
-		'evt_end_time' => array('type'=>'timestamp(6)'),
-		'evt_end_time_local' => array('type'=>'timestamp(6)'),
-		'evt_create_time' => array('type'=>'timestamp(6)'),
-		'evt_external_register_link' => array('type'=>'varchar(255)'),
-		'evt_timezone' => array('type'=>'varchar(32)'),
-		'evt_is_accepting_signups' => array('type'=>'bool'),
-		'evt_picture_link' => array('type'=>'varchar(255)'), //DEPRECATED
-		'evt_collect_extra_info' => array('type'=>'bool'),
-		'evt_grp_group_id' => array('type'=>'int4'), //DEPRECATED
-		'evt_private_info' =>  array('type'=>'text'),
-		'evt_status' =>  array('type'=>'int4'),
-		'evt_max_signups' =>  array('type'=>'int4'),
-		'evt_allow_waiting_list' =>  array('type'=>'bool'),
-		'evt_session_display_type' =>  array('type'=>'int4'),
-		'evt_visibility'=> array('type'=>'int4'),
-		'evt_fil_file_id' => array('type'=>'int4'),
-		'evt_link' => array('type'=>'varchar(255)'),
-		'evt_show_add_to_calendar_link' => array('type'=>'bool'),
-		'evt_ety_event_type_id' => array('type'=>'int4'),
-		'evt_delete_time' => array('type'=>'timestamp(6)'),
-		'evt_svy_survey_id' => array('type'=>'int4'),
-		'evt_survey_required' => array('type'=>'int2'),
-		'evt_loc_location_id' => array('type'=>'int4'),
+	    'evt_event_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'evt_name' => array('type'=>'varchar(255)', 'required'=>true),
+	    'evt_description' => array('type'=>'text'),
+	    'evt_short_description' => array('type'=>'text'),
+	    'evt_usr_user_id_leader' => array('type'=>'int4'),
+	    'evt_location' => array('type'=>'varchar(255)'),
+	    'evt_start_time' => array('type'=>'timestamp(6)'),
+	    'evt_start_time_local' => array('type'=>'timestamp(6)'),
+	    'evt_end_time' => array('type'=>'timestamp(6)'),
+	    'evt_end_time_local' => array('type'=>'timestamp(6)'),
+	    'evt_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'evt_external_register_link' => array('type'=>'varchar(255)'),
+	    'evt_timezone' => array('type'=>'varchar(32)'),
+	    'evt_is_accepting_signups' => array('type'=>'bool'),
+	    'evt_picture_link' => array('type'=>'varchar(255)'),
+	    'evt_collect_extra_info' => array('type'=>'bool'),
+	    'evt_grp_group_id' => array('type'=>'int4'),
+	    'evt_private_info' => array('type'=>'text'),
+	    'evt_status' => array('type'=>'int4', 'default'=>1),
+	    'evt_max_signups' => array('type'=>'int4'),
+	    'evt_allow_waiting_list' => array('type'=>'bool'),
+	    'evt_session_display_type' => array('type'=>'int4'),
+	    'evt_visibility' => array('type'=>'int4', 'default'=>0),
+	    'evt_fil_file_id' => array('type'=>'int4'),
+	    'evt_link' => array('type'=>'varchar(255)'),
+	    'evt_show_add_to_calendar_link' => array('type'=>'bool', 'default'=>true),
+	    'evt_ety_event_type_id' => array('type'=>'int4'),
+	    'evt_delete_time' => array('type'=>'timestamp(6)'),
+	    'evt_svy_survey_id' => array('type'=>'int4'),
+	    'evt_survey_required' => array('type'=>'int2'),
+	    'evt_loc_location_id' => array('type'=>'int4'),
 	); 
-			
-	public static $required_fields = array(
-		'evt_name'
-	);
-
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-		'evt_create_time' => 'now()', 'evt_visibility' => 0, 'evt_status' => 1, 'evt_show_add_to_calendar_link' => true
-	);	
 
 	public static $field_constraints = array(
 		'evt_name' => array(
@@ -590,7 +552,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	function copy() { 
 		// Returns a copy of this event, with history, etc reset so it can be used
 		$event = new event(NULL);
-		foreach (self::$fields as $field => $description) { 
+		foreach (self::$field_specifications as $field => $spec) { 
 			$event->set($field, $this->get($field));
 		}
 		$event->set('evt_created_time', 'NOW');

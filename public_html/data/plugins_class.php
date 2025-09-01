@@ -14,64 +14,39 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 	public static $permanent_delete_actions = array(
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
-	public static $fields = array(
-		'plg_plugin_id' => 'Primary key - Plugin ID',
-		'plg_name' => 'Name of the plugin',
-		'plg_activated_time' => 'Activation time',
-		'plg_active' => 'Active status (1/0)',
-		'plg_installed_time' => 'Installation time',
-		'plg_last_activated_time' => 'Last activation time',
-		'plg_last_deactivated_time' => 'Last deactivation time',
-		'plg_uninstalled_time' => 'Uninstall time',
-		'plg_status' => 'Plugin status (installed/active/inactive/error)',
-		'plg_install_error' => 'Installation error message',
-		'plg_metadata' => 'Plugin metadata JSON',
-		'plg_is_stock' => 'Is this a stock plugin (auto-updated)?',
-		'plg_create_time' => 'Record creation time',
-		'plg_update_time' => 'Record update time'
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'plg_plugin_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'plg_name' => array('type'=>'varchar(128)', 'unique'=>true),
-		'plg_activated_time' => array('type'=>'timestamp(6)'),
-		'plg_active' => array('type'=>'int4', 'is_nullable'=>true),
-		'plg_installed_time' => array('type'=>'timestamp(6)'),
-		'plg_last_activated_time' => array('type'=>'timestamp(6)'),
-		'plg_last_deactivated_time' => array('type'=>'timestamp(6)'),
-		'plg_uninstalled_time' => array('type'=>'timestamp(6)'),
-		'plg_status' => array('type'=>'varchar(20)'),
-		'plg_install_error' => array('type'=>'text'),
-		'plg_metadata' => array('type'=>'text'),
-		'plg_is_stock' => array('type'=>'bool'),
-		'plg_create_time' => array('type'=>'timestamp(6)'),
-		'plg_update_time' => array('type'=>'timestamp(6)')
+	    'plg_plugin_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'plg_name' => array('type'=>'varchar(128)', 'required'=>true, 'unique'=>true),
+	    'plg_activated_time' => array('type'=>'timestamp(6)'),
+	    'plg_active' => array('type'=>'int4', 'is_nullable'=>true),
+	    'plg_installed_time' => array('type'=>'timestamp(6)'),
+	    'plg_last_activated_time' => array('type'=>'timestamp(6)'),
+	    'plg_last_deactivated_time' => array('type'=>'timestamp(6)'),
+	    'plg_uninstalled_time' => array('type'=>'timestamp(6)'),
+	    'plg_status' => array('type'=>'varchar(20)'),
+	    'plg_install_error' => array('type'=>'text'),
+	    'plg_metadata' => array('type'=>'text'),
+	    'plg_is_stock' => array('type'=>'bool', 'default'=>true),
+	    'plg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'plg_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
-	public static $required_fields = array('plg_name');
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $timestamp_fields = array('plg_create_time', 'plg_update_time', 
-		'plg_installed_time', 'plg_activated_time', 'plg_last_activated_time', 
-		'plg_last_deactivated_time', 'plg_uninstalled_time');
-
-	public static $initial_default_values = array(
-		'plg_is_stock' => true,
-		'plg_create_time' => 'now()',
-		'plg_update_time' => 'now()'
-	);	
 
 	function authenticate_write($data) {
 			if ($data['current_user_permission'] < 10) {
