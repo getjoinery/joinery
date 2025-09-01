@@ -75,33 +75,36 @@ class Example extends SystemBase {
 **IMPORTANT:** These are all runtime properties that control data storage and retrieval behavior. They do NOT affect database schema generation, which only uses `'type'` and `'is_nullable'`.
 
 ### Required Fields
-- **Property:** `'required' => true|false|array`
+- **Property:** `'required' => true|false`
 - **Replaces:** `$required_fields`
 - **Runtime behavior:** Validation during `save()` method
 - **Schema impact:** None
 - **Usage:**
   - `true`: Field must have non-null, non-empty value
   - `false` or omitted: Field is optional
-  - `array`: List of alternative fields (at least one must be set)
 
 ### Default Values
 - **Property:** `'default' => mixed`
 - **Replaces:** `$initial_default_values`
-- **Runtime behavior:** Applied during `save()` when creating new records
+- **Runtime behavior:** Applied during `save()` when creating new records (INSERT only)
 - **Schema impact:** None (database defaults are separate)
 - **Usage:**
   - Sets initial value when field is NULL
-  - Supports database functions like `'now()'`
+  - Database functions like `'now()'`, `'uuid_generate_v4()'` are passed as-is to the database
   - Only applied to new records (`$this->key === NULL`)
+  - Applied BEFORE zero_on_create
+  - Works with all field types including JSON
 
 ### Zero Variables
 - **Property:** `'zero_on_create' => true|false`
 - **Replaces:** `$zero_variables`
-- **Runtime behavior:** Applied during `save()` when creating new records
+- **Runtime behavior:** Applied during `save()` when creating new records (INSERT only)
 - **Schema impact:** None
 - **Usage:**
   - Sets field to 0 when creating new records if field is NULL
-  - Only applies to numeric fields
+  - Applied AFTER defaults
+  - If field has both `default` and `zero_on_create`, an exception is thrown
+  - No type validation - passes through to database (developer responsibility)
 
 ### Timestamp Auto-Detection
 - **Auto-detected when:** `'type'` contains 'timestamp', 'datetime', or 'date'
@@ -111,6 +114,21 @@ class Example extends SystemBase {
 - **Usage:**
   - Automatically returns DateTime objects
   - No explicit declaration needed
+
+## Implementation Clarifications
+
+### Key Design Decisions
+
+1. **Operation Order:** Defaults → zero_on_create → required validation
+2. **No Backwards Compatibility:** Clean break, no support for legacy arrays after migration
+3. **Required Fields:** Only boolean support (true/false), no array alternatives
+4. **Empty Values:** Empty string ('') is considered empty for required validation
+5. **SQL Functions:** Passed as-is to database (e.g., 'now()', 'uuid_generate_v4()')
+6. **Type Checking:** Developer responsibility - database handles type mismatches
+7. **JSON Fields:** Can be required and have defaults (specified as JSON strings)
+8. **INSERT vs UPDATE:** Defaults and zero_on_create only apply on INSERT
+9. **Error Messages:** Use field name directly (no display_name lookup)
+10. **Timestamp Detection:** Case-insensitive with fallback for edge cases
 
 ## Implementation Changes
 
@@ -154,39 +172,34 @@ foreach (static::$required_fields as $required_field) {
 #### After: save() method
 ```php
 // Process field specifications for defaults, zeros, and requirements
-foreach (static::$field_specifications as $field_name => $spec) {
-    // Handle default values (replaces $initial_default_values)
-    if (isset($spec['default']) && $this->get($field_name) === NULL) {
-        $this->set($field_name, $spec['default']);
-    }
-    
-    // Handle zero_on_create (replaces $zero_variables)
-    if (isset($spec['zero_on_create']) && $spec['zero_on_create'] === true) {
-        if ($this->key === NULL && $this->get($field_name) === NULL) {
-            $this->set($field_name, 0);
+// Order of operations: 1) defaults, 2) zero_on_create, 3) required validation
+if ($this->key === NULL) {  // Only for INSERT operations
+    // STEP 1: Apply defaults first
+    foreach (static::$field_specifications as $field_name => $spec) {
+        if (isset($spec['default']) && $this->get($field_name) === NULL) {
+            $this->set($field_name, $spec['default']);  // SQL functions passed as-is
         }
     }
     
-    // Handle required fields (replaces $required_fields)
-    if (isset($spec['required'])) {
-        if (is_array($spec['required'])) {
-            // Check if at least one of the alternative fields is set
-            $one_true = FALSE;
-            foreach($spec['required'] as $alt_field) {
-                if ($this->get($alt_field)) {
-                    $one_true = TRUE;
-                    break;
-                }
+    // STEP 2: Apply zero_on_create (after defaults)
+    foreach (static::$field_specifications as $field_name => $spec) {
+        if (isset($spec['zero_on_create']) && $spec['zero_on_create'] === true) {
+            // Check for conflict with default
+            if (isset($spec['default'])) {
+                throw new SystemClassException("Field '$field_name' cannot have both 'default' and 'zero_on_create' properties");
             }
-            if (!$one_true) {
-                $display_names = array_map(function($f) { return static::$field_specifications[$f]['display_name'] ?? $f; }, $spec['required']);
-                throw new SystemClassException('One of ' . implode(', ', $display_names) . ' must be set.');
+            if ($this->get($field_name) === NULL) {
+                $this->set($field_name, 0);  // Let database handle type compatibility
             }
-        } else if ($spec['required'] === true) {
-            if (is_null($this->get($field_name)) || $this->get($field_name) === '') {
-                $display_name = $spec['display_name'] ?? $field_name;
-                throw new SystemClassException('Required field "' . $display_name . '" must be set.');
-            }
+        }
+    }
+}
+
+// STEP 3: Validate required fields (for both INSERT and UPDATE)
+foreach (static::$field_specifications as $field_name => $spec) {
+    if (isset($spec['required']) && $spec['required'] === true) {
+        if (is_null($this->get($field_name)) || $this->get($field_name) === '') {
+            throw new SystemClassException("Required field '$field_name' must be set.");
         }
     }
 }
@@ -279,6 +292,13 @@ protected function is_timestamp_field($field_name) {
             return true;
             
         default:
+            // Fallback: check if type contains timestamp-related keywords (handles edge cases)
+            if (strpos(strtolower($type), 'timestamp') !== false || 
+                strpos(strtolower($type), 'datetime') !== false || 
+                strpos(strtolower($type), 'date') === 0 || 
+                strpos(strtolower($type), 'time') === 0) {
+                return true;
+            }
             return false;
     }
 }
@@ -424,6 +444,7 @@ public static $field_specifications = array(
 
 1. **Risk:** Breaking existing functionality
    - **Solution:** Thorough testing of all models after conversion
+   - **Note:** No backwards compatibility - hard cutover, all models must be migrated at once
 
 2. **Risk:** Performance impact from auto-detection
    - **Solution:** Simple string matching is fast enough for production use
@@ -431,12 +452,347 @@ public static $field_specifications = array(
 3. **Risk:** Third-party plugin compatibility
    - **Solution:** Update all plugins as part of the implementation
 
+4. **Risk:** Conflicting field properties
+   - **Solution:** Throw exception if field has both `default` and `zero_on_create`
+   - **Validation:** Done at runtime during save()
+
 ## Testing Requirements
 
 1. **Unit Tests:** Test new field_specifications format in SystemBase
 2. **Integration Tests:** Verify save(), load(), prepare() methods
 3. **Model Tests:** Test each converted model thoroughly
 4. **Performance Tests:** Ensure no significant performance degradation
+5. **Test Framework Updates:** Update the model testing framework as shown below
+
+### Test Framework Changes Required
+
+#### Location: `/utils/test_model.php` or similar test utilities
+
+**Before: Test Model Generation**
+```php
+// Old test model structure with separate arrays
+class TestModel extends SystemBase {
+    public static $prefix = 'tst';
+    public static $tablename = 'tst_test_model';
+    public static $pkey_column = 'tst_id';
+    
+    public static $field_specifications = array(
+        'tst_id' => array('type'=>'bigserial'),
+        'tst_name' => array('type'=>'varchar(255)', 'is_nullable'=>false),
+        'tst_created' => array('type'=>'timestamp', 'is_nullable'=>false),
+        'tst_count' => array('type'=>'integer', 'is_nullable'=>true),
+        'tst_active' => array('type'=>'boolean', 'is_nullable'=>false),
+    );
+    
+    public static $required_fields = array('tst_name');
+    public static $zero_variables = array('tst_count');
+    public static $initial_default_values = array(
+        'tst_created' => 'now()',
+        'tst_active' => true,
+    );
+    public static $timestamp_fields = array('tst_created');
+}
+
+// Test validation functions
+function validate_required_fields($model) {
+    foreach ($model::$required_fields as $field) {
+        if (!$model->get($field)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function check_zero_variables($model) {
+    foreach ($model::$zero_variables as $field) {
+        if ($model->get($field) !== 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function verify_defaults($model) {
+    foreach ($model::$initial_default_values as $field => $default) {
+        // Check if default was applied
+    }
+}
+
+function is_timestamp_field($model, $field) {
+    return in_array($field, $model::$timestamp_fields);
+}
+```
+
+**After: Updated Test Model Generation**
+```php
+// New test model structure with consolidated field_specifications
+class TestModel extends SystemBase {
+    public static $prefix = 'tst';
+    public static $tablename = 'tst_test_model';
+    public static $pkey_column = 'tst_id';
+    
+    public static $field_specifications = array(
+        'tst_id' => array('type'=>'bigserial'),
+        'tst_name' => array(
+            'type'=>'varchar(255)', 
+            'is_nullable'=>false,
+            'required'=>true
+        ),
+        'tst_created' => array(
+            'type'=>'timestamp',  // Auto-detected as timestamp
+            'is_nullable'=>false,
+            'default'=>'now()'
+        ),
+        'tst_count' => array(
+            'type'=>'integer', 
+            'is_nullable'=>true,
+            'zero_on_create'=>true
+        ),
+        'tst_active' => array(
+            'type'=>'boolean', 
+            'is_nullable'=>false,
+            'default'=>true
+        ),
+    );
+    
+    // No more separate arrays - all merged into field_specifications
+}
+
+// Updated test validation functions
+function validate_required_fields($model) {
+    foreach ($model::$field_specifications as $field_name => $spec) {
+        if (isset($spec['required']) && $spec['required'] === true) {
+            if (!$model->get($field_name)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function check_zero_variables($model) {
+    foreach ($model::$field_specifications as $field_name => $spec) {
+        if (isset($spec['zero_on_create']) && $spec['zero_on_create'] === true) {
+            if ($model->get($field_name) !== 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function verify_defaults($model) {
+    foreach ($model::$field_specifications as $field_name => $spec) {
+        if (isset($spec['default'])) {
+            // Check if default was applied
+            $value = $model->get($field_name);
+            if ($spec['default'] === 'now()') {
+                // Check for valid timestamp
+                if (!$value || strtotime($value) === false) {
+                    return false;
+                }
+            } else if ($value !== $spec['default']) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function is_timestamp_field($model, $field) {
+    // Use the new auto-detection method
+    return $model->is_timestamp_field($field);
+}
+```
+
+#### Test Case Updates
+
+**Before: Legacy Array Tests**
+```php
+class ModelFieldTest extends PHPUnit\Framework\TestCase {
+    
+    public function testRequiredFields() {
+        $model = new TestModel(NULL);
+        
+        // Test that required fields from $required_fields array are enforced
+        $this->assertContains('tst_name', TestModel::$required_fields);
+        
+        try {
+            $model->save();
+            $this->fail('Should have thrown exception for missing required field');
+        } catch (SystemClassException $e) {
+            $this->assertStringContainsString('Required field', $e->getMessage());
+        }
+    }
+    
+    public function testZeroVariables() {
+        $model = new TestModel(NULL);
+        
+        // Verify field is in zero_variables array
+        $this->assertContains('tst_count', TestModel::$zero_variables);
+        
+        $model->save();
+        $this->assertEquals(0, $model->get('tst_count'));
+    }
+    
+    public function testInitialDefaults() {
+        $model = new TestModel(NULL);
+        
+        // Check initial_default_values array
+        $this->assertArrayHasKey('tst_active', TestModel::$initial_default_values);
+        $this->assertTrue(TestModel::$initial_default_values['tst_active']);
+        
+        $model->save();
+        $this->assertTrue($model->get('tst_active'));
+    }
+    
+    public function testTimestampFields() {
+        $model = new TestModel(NULL);
+        
+        // Verify field is in timestamp_fields array
+        $this->assertContains('tst_created', TestModel::$timestamp_fields);
+        
+        $model->set('tst_created', '2024-01-01 12:00:00');
+        $result = $model->smart_get('tst_created');
+        $this->assertInstanceOf(DateTime::class, $result);
+    }
+}
+```
+
+**After: Consolidated field_specifications Tests**
+```php
+class ModelFieldTest extends PHPUnit\Framework\TestCase {
+    
+    public function testRequiredFields() {
+        $model = new TestModel(NULL);
+        
+        // Test that required property in field_specifications is enforced
+        $this->assertTrue(TestModel::$field_specifications['tst_name']['required']);
+        
+        try {
+            $model->save();
+            $this->fail('Should have thrown exception for missing required field');
+        } catch (SystemClassException $e) {
+            $this->assertStringContainsString('Required field', $e->getMessage());
+        }
+    }
+    
+    public function testZeroVariables() {
+        $model = new TestModel(NULL);
+        
+        // Verify zero_on_create property
+        $this->assertTrue(TestModel::$field_specifications['tst_count']['zero_on_create']);
+        
+        $model->save();
+        $this->assertEquals(0, $model->get('tst_count'));
+    }
+    
+    public function testInitialDefaults() {
+        $model = new TestModel(NULL);
+        
+        // Check default property in field_specifications
+        $this->assertArrayHasKey('default', TestModel::$field_specifications['tst_active']);
+        $this->assertTrue(TestModel::$field_specifications['tst_active']['default']);
+        
+        $model->save();
+        $this->assertTrue($model->get('tst_active'));
+    }
+    
+    public function testTimestampAutoDetection() {
+        $model = new TestModel(NULL);
+        
+        // Test auto-detection based on type
+        $this->assertEquals('timestamp', TestModel::$field_specifications['tst_created']['type']);
+        
+        // Verify is_timestamp_field() method works
+        $this->assertTrue($model->is_timestamp_field('tst_created'));
+        $this->assertFalse($model->is_timestamp_field('tst_name'));
+        
+        $model->set('tst_created', '2024-01-01 12:00:00');
+        $result = $model->smart_get('tst_created');
+        $this->assertInstanceOf(DateTime::class, $result);
+    }
+    
+    public function testLegacyArraysRemoved() {
+        // Ensure legacy arrays no longer exist
+        $this->assertFalse(property_exists('TestModel', 'required_fields'));
+        $this->assertFalse(property_exists('TestModel', 'zero_variables'));
+        $this->assertFalse(property_exists('TestModel', 'initial_default_values'));
+        $this->assertFalse(property_exists('TestModel', 'timestamp_fields'));
+    }
+}
+```
+
+#### Mock Model Generator Updates
+
+**Before: Generate test models with legacy arrays**
+```php
+function generate_test_model($fields) {
+    $code = "class GeneratedModel extends SystemBase {\n";
+    $code .= "    public static \$field_specifications = array(\n";
+    
+    $required = array();
+    $zeros = array();
+    $defaults = array();
+    $timestamps = array();
+    
+    foreach ($fields as $name => $config) {
+        $code .= "        '$name' => array('type'=>'{$config['type']}'";
+        if (isset($config['is_nullable'])) {
+            $code .= ", 'is_nullable'=>" . ($config['is_nullable'] ? 'true' : 'false');
+        }
+        $code .= "),\n";
+        
+        if (!empty($config['required'])) $required[] = $name;
+        if (!empty($config['zero'])) $zeros[] = $name;
+        if (isset($config['default'])) $defaults[$name] = $config['default'];
+        if (strpos($config['type'], 'timestamp') !== false) $timestamps[] = $name;
+    }
+    
+    $code .= "    );\n";
+    $code .= "    public static \$required_fields = " . var_export($required, true) . ";\n";
+    $code .= "    public static \$zero_variables = " . var_export($zeros, true) . ";\n";
+    $code .= "    public static \$initial_default_values = " . var_export($defaults, true) . ";\n";
+    $code .= "    public static \$timestamp_fields = " . var_export($timestamps, true) . ";\n";
+    $code .= "}\n";
+    
+    return $code;
+}
+```
+
+**After: Generate test models with consolidated structure**
+```php
+function generate_test_model($fields) {
+    $code = "class GeneratedModel extends SystemBase {\n";
+    $code .= "    public static \$field_specifications = array(\n";
+    
+    foreach ($fields as $name => $config) {
+        $code .= "        '$name' => array(\n";
+        $code .= "            'type' => '{$config['type']}'";
+        
+        if (isset($config['is_nullable'])) {
+            $code .= ",\n            'is_nullable' => " . ($config['is_nullable'] ? 'true' : 'false');
+        }
+        if (!empty($config['required'])) {
+            $code .= ",\n            'required' => true";
+        }
+        if (!empty($config['zero'])) {
+            $code .= ",\n            'zero_on_create' => true";
+        }
+        if (isset($config['default'])) {
+            $value = is_string($config['default']) ? "'{$config['default']}'" : var_export($config['default'], true);
+            $code .= ",\n            'default' => $value";
+        }
+        
+        $code .= "\n        ),\n";
+    }
+    
+    $code .= "    );\n";
+    $code .= "}\n";
+    
+    return $code;
+}
+```
 
 ## Success Criteria
 
