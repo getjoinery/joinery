@@ -180,19 +180,25 @@ try {
             // Build expected sequence name
             $sequence_name = $table_name . '_' . $pkey_column . '_seq';
             
-            // Check if this sequence exists
-            $seq_sql = "SELECT last_value FROM pg_sequences WHERE sequencename = ? AND schemaname = 'public'";
-            $seq_q = $dblink->prepare($seq_sql);
-            $seq_q->execute([$sequence_name]);
-            $seq_result = $seq_q->fetch(PDO::FETCH_ASSOC);
-            
-            if (!$seq_result) {
+            // Check if this sequence exists and get current value
+            try {
+                $seq_sql = "SELECT last_value FROM $sequence_name";
+                $seq_q = $dblink->prepare($seq_sql);
+                $seq_q->execute();
+                $seq_result = $seq_q->fetch(PDO::FETCH_ASSOC);
+                
+                if (!$seq_result) {
+                    output("ERROR: Could not get current value from sequence $sequence_name (class: $class)", 'error');
+                    $stats['errors']++;
+                    continue;
+                }
+                
+                $current_value = $seq_result['last_value'];
+            } catch (PDOException $e) {
                 output("NO SEQUENCE: $sequence_name (class: $class)", 'skip');
                 $stats['skipped']++;
                 continue;
             }
-
-            $current_value = $seq_result['last_value'];
             
             // Get current max value from table
             $max_sql = "SELECT COALESCE(MAX($pkey_column), 0) as max_val FROM $table_name";
