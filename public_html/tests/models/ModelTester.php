@@ -319,8 +319,15 @@ class ModelTester {
         $model_class = $this->model_class;
         
         if ($verbose) echo "Testing required fields...<br>\n"; flush();
-        // Test required fields
-        foreach ($model_class::$required_fields as $required_field) {
+        // Test required fields - get required fields from field_specifications
+        $required_fields = [];
+        foreach ($model_class::$field_specifications as $field_name => $spec) {
+            if (isset($spec['required']) && $spec['required'] === true) {
+                $required_fields[] = $field_name;
+            }
+        }
+        
+        foreach ($required_fields as $required_field) {
             if ($verbose) echo "Testing required field: $required_field<br>\n"; flush();
             try {
                 $this->test_required_field($required_field, $debug);
@@ -584,8 +591,11 @@ class ModelTester {
         $test_data = [];
         $model_class = $this->model_class;
         
-        foreach ($model_class::$required_fields as $field) {
-            $test_data[$field] = $this->generate_field_value($field, $index);
+        // Get required fields from field_specifications
+        foreach ($model_class::$field_specifications as $field_name => $spec) {
+            if (isset($spec['required']) && $spec['required'] === true) {
+                $test_data[$field_name] = $this->generate_field_value($field_name, $index);
+            }
         }
         
         return $test_data;
@@ -641,7 +651,9 @@ class ModelTester {
         $max_length = isset($matches[1]) ? (int)$matches[1] : 255;
         
         // Check if this field is required - avoid empty strings for required fields
-        $is_required = in_array($field, $this->model_class::$required_fields);
+        $model_class = $this->model_class;
+        $field_spec = $model_class::$field_specifications[$field] ?? [];
+        $is_required = isset($field_spec['required']) && $field_spec['required'] === true;
         
         // Strategic string patterns for comprehensive testing
         $patterns = [];
@@ -725,7 +737,7 @@ class ModelTester {
         $patterns = [0, 1, -1, 100, -100, 999, 9999, 2147483647, -2147483648];
         
         // Check for field-specific boundaries from model specifications
-        $properties = $this->model_class::$fields[$field] ?? [];
+        $properties = $this->model_class::$field_specifications[$field] ?? [];
         if (is_array($properties)) {
             if (isset($properties['min'])) {
                 array_unshift($patterns, $properties['min'], $properties['min'] + 1);
@@ -915,7 +927,7 @@ class ModelTester {
      * Get all testable fields (not just required ones)
      */
     protected function get_all_testable_fields() {
-        $fields = $this->model_class::$fields;
+        $fields = $this->model_class::$field_specifications;
         $testable = [];
         
         foreach ($fields as $field => $properties) {
@@ -935,7 +947,19 @@ class ModelTester {
      */
     protected function generate_test_data_with_all_fields($include_optional = false) {
         $test_data = [];
-        $fields = $include_optional ? $this->get_all_testable_fields() : $this->model_class::$required_fields;
+        $model_class = $this->model_class;
+        
+        if ($include_optional) {
+            $fields = $this->get_all_testable_fields();
+        } else {
+            // Get required fields from field_specifications
+            $fields = [];
+            foreach ($model_class::$field_specifications as $field_name => $spec) {
+                if (isset($spec['required']) && $spec['required'] === true) {
+                    $fields[$field_name] = $spec;
+                }
+            }
+        }
         
         foreach ($fields as $field => $properties) {
             if (is_string($properties)) {
@@ -965,27 +989,13 @@ class ModelTester {
      * Better type detection using multiple sources
      */
     protected function get_field_type($field) {
-        $properties = $this->model_class::$fields[$field] ?? [];
-        
-        // Check field_specifications first (most authoritative)
+        // Use field_specifications as the primary source
         if (isset($this->model_class::$field_specifications[$field]['type'])) {
             return $this->model_class::$field_specifications[$field]['type'];
         }
         
-        // Check multiple possible type indicators in properties
-        if (is_array($properties)) {
-            if (isset($properties['type'])) {
-                return $properties['type'];
-            }
-            
-            if (isset($properties['db_type'])) {
-                return $properties['db_type'];
-            }
-        }
-        
-        // Fall back to field specifications if available
-        $spec = $this->model_class::$field_specifications[$field] ?? [];
-        return $spec['type'] ?? 'varchar(255)';
+        // Fall back to default if not found
+        return 'varchar(255)';
     }
 
     /**
@@ -1151,9 +1161,10 @@ class ModelTester {
         $nullable_fields = [];
         $model_class = $this->model_class;
         
-        // Get all fields that are NOT in required fields
+        // Get all fields that are NOT required
         foreach ($model_class::$field_specifications as $field => $spec) {
-            if (!in_array($field, $model_class::$required_fields)) {
+            $is_required = isset($spec['required']) && $spec['required'] === true;
+            if (!$is_required) {
                 // Skip primary key and auto-generated fields
                 if ($field !== $model_class::$pkey_column && 
                     strpos(strtolower($field), 'create_time') === false &&
@@ -1207,9 +1218,10 @@ class ModelTester {
         
         $model_class = $this->model_class;
         
-        // Check if this field has a default value
-        if (isset($model_class::$initial_default_values[$field])) {
-            $default_value = $model_class::$initial_default_values[$field];
+        // Check if this field has a default value in field_specifications
+        $field_spec = $model_class::$field_specifications[$field] ?? [];
+        if (isset($field_spec['default'])) {
+            $default_value = $field_spec['default'];
             echo "  <span style='color: #ff9800;'>[WARN] Required field $field has default value '$default_value' - save will succeed instead of failing when field is omitted</span><br>\n";
             self::$test_warn_count++;
             return;
@@ -1366,8 +1378,16 @@ class ModelTester {
         // Debug: check if we have all required fields
         $verbose = $this->is_verbose();
         if ($debug || $verbose) {
+            // Get required fields from field_specifications for debugging
+            $required_fields = [];
+            foreach ($model_class::$field_specifications as $field_name => $spec) {
+                if (isset($spec['required']) && $spec['required'] === true) {
+                    $required_fields[] = $field_name;
+                }
+            }
+            
             echo "  Testing integer constraint for field: $field<br>\n";
-            echo "  Required fields: " . implode(', ', $model_class::$required_fields) . "<br>\n";
+            echo "  Required fields: " . implode(', ', $required_fields) . "<br>\n";
             echo "  Generated test data fields: " . implode(', ', array_keys($test_data)) . "<br>\n";
         }
         

@@ -16,43 +16,33 @@ class Url extends SystemBase {
 	public static $tablename = 'url_urls';
 	public static $pkey_column = 'url_url_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(		'url_url_id' => 'Primary key - Url ID',
-		'url_incoming' => 'Incoming url',
-		'url_redirect_url' => 'Url to redirect to',
-		'url_redirect_file' => 'File to load',
-		'url_type' => 'Type of redirect - 301, 302, etc',
-		'url_create_time' => 'Time added',
-		'url_delete_time' => 'Time deleted',
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'url_url_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'url_incoming' => array('type'=>'varchar(255)'),
-		'url_redirect_url' => array('type'=>'varchar(255)'),
-		'url_redirect_file' => array('type'=>'varchar(255)'),
-		'url_type' => array('type'=>'int2'),
-		'url_create_time' => array('type'=>'timestamp(6)'),
-		'url_delete_time' => array('type'=>'timestamp(6)'),
+	    'url_url_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'url_incoming' => array('type'=>'varchar(255)', 'required'=>true),
+	    'url_redirect_url' => array('type'=>'varchar(255)'),
+	    'url_redirect_file' => array('type'=>'varchar(255)'),
+	    'url_type' => array('type'=>'int2'),
+	    'url_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'url_delete_time' => array('type'=>'timestamp(6)'),
 	);
-	
-	public static $required_fields = array('url_incoming');
 
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array('url_create_time' => 'now()'
-		);		
 
 	function get_type_text() {
 		if($this->get('url_type') == 301){

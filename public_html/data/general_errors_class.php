@@ -15,53 +15,38 @@ class GeneralError extends SystemBase {	public static $prefix = 'err';
 	public static $tablename = 'err_general_errors';
 	public static $pkey_column = 'err_general_error_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(		'err_general_error_id' => 'Primary key - GeneralError ID',
-		'err_error' => 'error',
-		'err_code' => 'error',
-		'err_usr_user_id' => 'User this err_general_error is associated with',
-		'err_description' => 'Time added',
-		'err_file' => 'User Agent string',
-		'err_line' => 'The page this log form error occured on',
-		'err_context' => 'The URL of the page this happened on',
-		'err_path' => 'The full form',
-		'err_message' => 'The DOM selector form the form (in case more than one form on the page)',
-		'err_level' => '',
-		'err_create_time' => '',
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'err_general_error_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'err_error' => array('type'=>'varchar(255)'),
-		'err_code' => array('type'=>'varchar(32)'),
-		'err_usr_user_id' => array('type'=>'int4'),
-		'err_description' => array('type'=>'varchar(255)'),
-		'err_file' => array('type'=>'varchar(255)'),
-		'err_line' => array('type'=>'varchar(32)'),
-		'err_context' => array('type'=>'text'),
-		'err_path' => array('type'=>'varchar(255)'),
-		'err_message' => array('type'=>'varchar(255)'),
-		'err_level' => array('type'=>'varchar(255)'),
-		'err_create_time' => array('type'=>'timestamp(6)'),
+	    'err_general_error_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'err_error' => array('type'=>'varchar(255)'),
+	    'err_code' => array('type'=>'varchar(32)'),
+	    'err_usr_user_id' => array('type'=>'int4'),
+	    'err_description' => array('type'=>'varchar(255)'),
+	    'err_file' => array('type'=>'varchar(255)'),
+	    'err_line' => array('type'=>'varchar(32)'),
+	    'err_context' => array('type'=>'text'),
+	    'err_path' => array('type'=>'varchar(255)'),
+	    'err_message' => array('type'=>'varchar(255)'),
+	    'err_level' => array('type'=>'varchar(255)'),
+	    'err_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-			
-	public static $required_fields = array();
-	
+
 	public static $field_constraints = array();
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-	'err_create_time'=> 'now()',);
 
 	function display_time($session) {
 		return LibraryFunctions::convert_time(

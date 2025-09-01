@@ -69,85 +69,51 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;
 
-	public static $fields = array(
-		'usr_user_id' => 'Primary key - User ID',
-		'usr_first_name' => 'First Name',
-		'usr_last_name' => 'Last Name',
-		'usr_email' => 'Email Address',
-		'usr_signup_date' => 'Signup date',
-		'usr_password' => 'Password hash',
-		'usr_permission' => 'Permission level',
-		'usr_timezone' => 'String of timezone',
-		'usr_email_is_verified' => 'Is their email verified?',
-		'usr_email_is_verified_time' => 'Timestamp when email was verified',
-		'usr_is_activated' => 'Is their account activated?',
-		'usr_is_disabled' => 'Is their account disabled?',
-		'usr_lastlogin_time' => 'Time of last login',
-		'usr_pic_picture_id' => 'Profile picture ID',
-		'usr_phn_phone_number_id' => 'Default phone number',
-		'usr_contact_preferences' => 'User\'s contact preferences',  //THIS IS SOON DEPRECATED
-		'usr_disabled_time' => 'When user disabled',
-		'usr_nickname' => 'Nickname if exists',
-		'usr_authhash' => 'first 8 characters of sha256 hash of user id and a salt, used for one click unsubscribe',
-		'usr_stripe_customer_id' => 'Stripe customer id for the api',
-		'usr_mailchimp_user_id' => 'User id for the mailchimp service',
-		'usr_signup_ip' => 'ip of the user when they signed up',
-		'usr_contact_preference_last_changed' => 'last time contact preferences was changed',
-		'usr_organization_name' => 'Organization instead of person',
-		'usr_delete_time' => 'Time of deletion',
-		'usr_password_recovery_disabled' => 'When TRUE, password recovery is disabled.',
-		'usr_calendly_uri' => 'Uri for user for calendly integration',
-		//'usr_contact_type_unsubscribes' => 'Contains a serialized array of contact types that the user has unsubscribed from',
-		'usr_stripe_customer_id_test' => 'Stripe customer id in the test sandbox.',
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'usr_user_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'usr_first_name' => array('type'=>'varchar(32)'),
-		'usr_last_name' => array('type'=>'varchar(32)'),
-		'usr_email' => array('type'=>'varchar(64)'),
-		'usr_signup_date' => array('type'=>'date'),
-		'usr_password' => array('type'=>'varchar(255)'),
-		'usr_permission' => array('type'=>'int4'),
-		'usr_timezone' => array('type'=>'varchar(32)'),
-		'usr_email_is_verified' => array('type'=>'bool'),
-		'usr_email_is_verified_time' => array('type'=>'timestamp(6)'),
-		'usr_is_activated' => array('type'=>'bool'),
-		'usr_is_disabled' => array('type'=>'bool'),
-		'usr_lastlogin_time' => array('type'=>'timestamp(6)'),
-		'usr_pic_picture_id' => array('type'=>'int4'),
-		'usr_phn_phone_number_id' => array('type'=>'int4'),
-		'usr_contact_preferences' => array('type'=>'varchar(32)'),
-		'usr_disabled_time' => array('type'=>'timestamp(6)'),
-		'usr_nickname' => array('type'=>'varchar(32)'),
-		'usr_authhash' => array('type'=>'varchar(32)'),
-		'usr_stripe_customer_id' => array('type'=>'varchar(32)'),
-		'usr_mailchimp_user_id' => array('type'=>'varchar(64)'),
-		'usr_signup_ip' => array('type'=>'varchar(64)'),
-		'usr_contact_preference_last_changed' => array('type'=>'timestamp(6)'),
-		'usr_organization_name' => array('type'=>'varchar(32)'),
-		'usr_delete_time' => array('type'=>'timestamp(6)'),
-		'usr_password_recovery_disabled' => array('type'=>'bool'),
-		'usr_calendly_uri' => array('type'=>'varchar(255)'),
-		//'usr_contact_type_unsubscribes' => array('type'=>'varchar(255)'),
-		'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
+	    'usr_user_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'usr_first_name' => array('type'=>'varchar(32)', 'required'=>true),
+	    'usr_last_name' => array('type'=>'varchar(32)'),
+	    'usr_email' => array('type'=>'varchar(64)', 'required'=>true),
+	    'usr_signup_date' => array('type'=>'date', 'default'=>'now()'),
+	    'usr_password' => array('type'=>'varchar(255)'),
+	    'usr_permission' => array('type'=>'int4', 'zero_on_create'=>true),
+	    'usr_timezone' => array('type'=>'varchar(32)', 'required'=>true, 'default'=>'America/New_York'),
+	    'usr_email_is_verified' => array('type'=>'bool', 'default'=>false),
+	    'usr_email_is_verified_time' => array('type'=>'timestamp(6)'),
+	    'usr_is_activated' => array('type'=>'bool', 'default'=>false),
+	    'usr_is_disabled' => array('type'=>'bool', 'default'=>false),
+	    'usr_lastlogin_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'usr_pic_picture_id' => array('type'=>'int4'),
+	    'usr_phn_phone_number_id' => array('type'=>'int4'),
+	    'usr_contact_preferences' => array('type'=>'varchar(32)'),
+	    'usr_disabled_time' => array('type'=>'timestamp(6)'),
+	    'usr_nickname' => array('type'=>'varchar(32)'),
+	    'usr_authhash' => array('type'=>'varchar(32)'),
+	    'usr_stripe_customer_id' => array('type'=>'varchar(32)'),
+	    'usr_mailchimp_user_id' => array('type'=>'varchar(64)'),
+	    'usr_signup_ip' => array('type'=>'varchar(64)'),
+	    'usr_contact_preference_last_changed' => array('type'=>'timestamp(6)'),
+	    'usr_organization_name' => array('type'=>'varchar(32)'),
+	    'usr_delete_time' => array('type'=>'timestamp(6)'),
+	    'usr_password_recovery_disabled' => array('type'=>'bool'),
+	    'usr_calendly_uri' => array('type'=>'varchar(255)'),
+	    'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
 	);
-	
-	public static $timestamp_fields = array(
-		'usr_email_is_verified_time', 'usr_lastlogin_time', 'usr_admin_disabled_time',
-		'usr_signup_date');
-
-	public static $required_fields = array(
-		'usr_first_name', 'usr_first_name', 'usr_email', 'usr_timezone');
 
 	public static $field_constraints = array(
 	/*
@@ -158,18 +124,6 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			array('WordLength', 2, 64)
 			),
 			*/
-	);
-	
-	public static $zero_variables = array(
-				'usr_permission');
-				
-	public static $initial_default_values = array(
-		'usr_timezone'=> 'America/New_York',
-		'usr_is_activated' => FALSE,
-		'usr_is_disabled' => FALSE,
-		'usr_email_is_verified' => FALSE,
-		'usr_signup_date' => 'now()',
-		'usr_lastlogin_time' => 'now()',
 	);
 
 	private static function UcName($string) {
@@ -599,7 +553,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		}
 
 		$user = new User($data->usr_user_id);
-		$user->load_from_data($data, array_keys(User::$fields));
+		$user->load_from_data($data, array_keys(User::$field_specifications));
 		return $user;
 	}
 
@@ -612,7 +566,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		}
 
 		$user = new User($data->usr_user_id);
-		$user->load_from_data($data, array_keys(User::$fields));
+		$user->load_from_data($data, array_keys(User::$field_specifications));
 		return $user;
 	}
 
@@ -625,7 +579,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		}
 
 		$user = new User($data->usr_user_id);
-		$user->load_from_data($data, array_keys(User::$fields));
+		$user->load_from_data($data, array_keys(User::$field_specifications));
 		return $user;
 	}
 	

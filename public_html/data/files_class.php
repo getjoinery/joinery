@@ -21,55 +21,39 @@ class File extends SystemBase {	public static $prefix = 'fil';
 		'evt_fil_file_id' => 'prevent',
 		'mlt_fil_file_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(
-		'fil_file_id' => 'Primary key - File ID',
-		'fil_name' => 'Name',
-		'fil_title' => 'Human readable title',
-		'fil_description' => 'Description',
-		'fil_type' => 'Type',
-		'fil_usr_user_id' => 'User who uploaded',
-		'fil_create_time' => 'Created',
-		'fil_delete_time' => 'Time of file deletion',
-		'fil_gal_gallery_id' => 'Gallery this file is part of TODO',
-		'fil_min_permission' => 'Permission level required to view file',
-		'fil_grp_group_id' => 'Group with permission to see file',
-		'fil_evt_event_id' => 'Event registrants with permission to see file',
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'fil_file_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'fil_name' => array('type'=>'varchar(255)'),
-		'fil_title' => array('type'=>'varchar(255)'),
-		'fil_description' => array('type'=>'text'),
-		'fil_type' => array('type'=>'varchar(128)'),
-		'fil_usr_user_id' => array('type'=>'int4'),
-		'fil_create_time' => array('type'=>'timestamp(6)'),
-		'fil_delete_time' => array('type'=>'timestamp(6)'),
-		'fil_gal_gallery_id' => array('type'=>'int4'),
-		'fil_min_permission' => array('type'=>'int2'),
-		'fil_grp_group_id' => array('type'=>'int4'),
-		'fil_evt_event_id' => array('type'=>'int4'),
+	    'fil_file_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'fil_name' => array('type'=>'varchar(255)'),
+	    'fil_title' => array('type'=>'varchar(255)'),
+	    'fil_description' => array('type'=>'text'),
+	    'fil_type' => array('type'=>'varchar(128)'),
+	    'fil_usr_user_id' => array('type'=>'int4'),
+	    'fil_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'fil_delete_time' => array('type'=>'timestamp(6)'),
+	    'fil_gal_gallery_id' => array('type'=>'int4'),
+	    'fil_min_permission' => array('type'=>'int2'),
+	    'fil_grp_group_id' => array('type'=>'int4'),
+	    'fil_evt_event_id' => array('type'=>'int4'),
 	);
-			  
-	public static $required_fields = array();
-	
+
 	public static $field_constraints = array();
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-	'fil_create_time'=> 'now()','fil_min_permission' => null);
-	
+
 	public static function get_by_name($name) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();

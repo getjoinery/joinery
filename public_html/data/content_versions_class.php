@@ -24,54 +24,37 @@ class ContentVersion extends SystemBase {	public static $prefix = 'cnv';
 	const TYPE_LOCATION = 7;
 	const TYPE_ITEM = 8;
 
-	public static $fields = array(
-		'cnv_content_version_id' => 'Primary key - ContentVersion ID',
-		'cnv_title' => 'Title',
-		'cnv_usr_user_id' => 'User who created the version',
-		'cnv_description' => 'Description to recognize this version',
-		'cnv_type' => 'Type of content, see above',
-		'cnv_foreign_key_id' => 'Contains the foreign key to whatever table the version is for',
-		'cnv_next_version_id' => 'Key of the next newer version',
-		'cnv_previous_version_id' => 'Key of the previous version',
-		'cnv_content' => 'Body of the content_version',
-		'cnv_create_time' => 'Time Created',
-		'cnv_delete_time' => 'Time Deleted'
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'cnv_content_version_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'cnv_title' => array('type'=>'varchar(255)'),
-		'cnv_usr_user_id' => array('type'=>'int4'),
-		'cnv_description' => array('type'=>'varchar(255)'),
-		'cnv_type' => array('type'=>'varchar(255)'),
-		'cnv_foreign_key_id' => array('type'=>'int4'),
-		'cnv_next_version_id' => array('type'=>'int4'),
-		'cnv_previous_version_id' => array('type'=>'int4'),
-		'cnv_content' => array('type'=>'text'),
-		'cnv_create_time' => array('type'=>'timestamp(6)'),
-		'cnv_delete_time' => array('type'=>'timestamp(6)'),
+	    'cnv_content_version_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'cnv_title' => array('type'=>'varchar(255)'),
+	    'cnv_usr_user_id' => array('type'=>'int4'),
+	    'cnv_description' => array('type'=>'varchar(255)'),
+	    'cnv_type' => array('type'=>'varchar(255)'),
+	    'cnv_foreign_key_id' => array('type'=>'int4', 'required'=>true),
+	    'cnv_next_version_id' => array('type'=>'int4'),
+	    'cnv_previous_version_id' => array('type'=>'int4'),
+	    'cnv_content' => array('type'=>'text'),
+	    'cnv_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'cnv_delete_time' => array('type'=>'timestamp(6)'),
 	);
-			
-	public static $required_fields = array('cnv_foreign_key_id'
-		);
 
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-	'cnv_create_time' => 'now()'
-	);	
-	
+
 	function get_previous_version(){
 		if($this->get('cnv_previous_version_id')){
 			return new ContentVersion($this->get('cnv_previous_version_id'), TRUE);

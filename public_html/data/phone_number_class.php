@@ -18,41 +18,33 @@ class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	public static $permanent_delete_actions = array(		'act_activation_codes' => 'delete',
 		'usr_phn_phone_number_id' => 'prevent',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
-	
-	public static $fields = array(		'phn_phone_number_id' => 'Primary key - PhoneNumber ID',
-		'phn_phone_number' => 'Phone number',
-		'phn_is_private' => 'Is this phone number private?',
-		'phn_is_verified' => 'Is this phone number verified?',
-		'phn_usr_user_id' => 'User who owns this phone #',
-		'phn_phone_carrier' => 'Carrier of this phone number',
-		'phn_is_default' => 'Is this the users default phone #?',
-		'phn_create_time' => 'Creation time', 
-		'phn_cco_country_code_id' => 'Country code for the phone number',
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'phn_phone_number_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'phn_phone_number' => array('type'=>'varchar(30)'),
-		'phn_is_private' => array('type'=>'bool'),
-		'phn_is_verified' => array('type'=>'bool'),
-		'phn_usr_user_id' => array('type'=>'int4'),
-		'phn_phone_carrier' => array('type'=>'varchar(64)'),
-		'phn_is_default' => array('type'=>'bool'),
-		'phn_create_time' => array('type'=>'timestamp(6)'), 
-		'phn_cco_country_code_id' => array('type'=>'int4'),
+	    'phn_phone_number_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'phn_phone_number' => array('type'=>'varchar(30)', 'required'=>true),
+	    'phn_is_private' => array('type'=>'bool'),
+	    'phn_is_verified' => array('type'=>'bool'),
+	    'phn_usr_user_id' => array('type'=>'int4', 'required'=>true),
+	    'phn_phone_carrier' => array('type'=>'varchar(64)'),
+	    'phn_is_default' => array('type'=>'bool'),
+	    'phn_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'phn_cco_country_code_id' => array('type'=>'int4', 'default'=>1),
 	);
-				 
-	public static $required_fields = array(
-		'phn_phone_number', 'phn_usr_user_id');
 
 	public static $field_constraints = array(
 	/*
@@ -67,12 +59,7 @@ class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 			'NoCaps',
 			),*/
 		);
-		
-	public static $zero_variables = array();
 
-	public static $initial_default_values = array(
-		'phn_create_time' => 'now()', 'phn_cco_country_code_id' => 1);	
-	
 	public static $phone_carriers = array(
 		'Alltel'=>'message.alltel.com',
 		'AT&T'=>'txt.att.net',

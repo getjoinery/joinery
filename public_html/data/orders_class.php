@@ -29,69 +29,44 @@ class Order extends SystemBase {	public static $prefix = 'ord';
 	public const STATUS_PAID = 2;
 	public const STATUS_ERROR = 3;
 
-	public static $fields = array(
-		'ord_order_id' => 'Primary key - Order ID',
-		'ord_usr_user_id' => 'User of the order',
-		'ord_timestamp' => 'Time of order',
-		'ord_total_cost' => 'Total cost of the order',
-		'ord_billing_address_id' => 'ID of the billing address associated with this order (if there is one)',
-		'ord_stripe_session_id' => 'Stripe session id for stripe checkout',
-		'ord_stripe_payment_intent_id' => 'Payment intent id for stripe checkout',
-		'ord_raw_response' => 'Raw response sent to stripe checkout webhook',
-		'ord_raw_cart' => 'Raw cart output before processing',
-		'ord_serialized_cart' => 'Saved cart for display later',
-		'ord_status' => '1=unpaid, 2=paid, 3=error',
-		'ord_error' => 'Error if the order does not go through.',
-		'ord_refund_amount' => 'Amount refunded',
-		'ord_refund_time' => 'Time of last refund', 
-		'ord_refund_note' => 'Note for the refund',
-		'ord_stripe_charge_id' => 'Charge ID from stripe',
-		'ord_stripe_invoice_id' => 'Stripe invoice for subscriptions',
-		'ord_test_mode' => 'This is a test order',
-		'ord_stripe_subscription_id_temp' => 'Temporary storage for subscription ids coming from stripe checkout webhook'
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'ord_order_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'ord_usr_user_id' => array('type'=>'int4'),
-		'ord_timestamp' => array('type'=>'timestamp(6)'),
-		'ord_total_cost' => array('type'=>'numeric(10,2)'),
-		'ord_billing_address_id' => array('type'=>'int4'),
-		'ord_stripe_session_id' => array('type'=>'varchar(70)'),
-		'ord_stripe_payment_intent_id' => array('type'=>'varchar(32)'),
-		'ord_raw_response' => array('type'=>'text'),
-		'ord_raw_cart' => array('type'=>'text'),
-		'ord_serialized_cart' => array('type'=>'text'),
-		'ord_status' => array('type'=>'int4'),
-		'ord_error' => array('type'=>'varchar(255)'),
-		'ord_refund_amount' => array('type'=>'int4'),
-		'ord_refund_time' => array('type'=>'timestamp(6)'), 
-		'ord_refund_note' => array('type'=>'varchar(255)'),
-		'ord_stripe_charge_id' => array('type'=>'varchar(64)'),
-		'ord_stripe_invoice_id' => array('type'=>'varchar(64)'),
-		'ord_test_mode' => array('type'=>'bool'),
-		'ord_stripe_subscription_id_temp' =>  array('type'=>'varchar(255)'),
+	    'ord_order_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'ord_usr_user_id' => array('type'=>'int4'),
+	    'ord_timestamp' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'ord_total_cost' => array('type'=>'numeric(10,2)'),
+	    'ord_billing_address_id' => array('type'=>'int4'),
+	    'ord_stripe_session_id' => array('type'=>'varchar(70)'),
+	    'ord_stripe_payment_intent_id' => array('type'=>'varchar(32)'),
+	    'ord_raw_response' => array('type'=>'text'),
+	    'ord_raw_cart' => array('type'=>'text'),
+	    'ord_serialized_cart' => array('type'=>'text'),
+	    'ord_status' => array('type'=>'int4'),
+	    'ord_error' => array('type'=>'varchar(255)'),
+	    'ord_refund_amount' => array('type'=>'int4'),
+	    'ord_refund_time' => array('type'=>'timestamp(6)'),
+	    'ord_refund_note' => array('type'=>'varchar(255)'),
+	    'ord_stripe_charge_id' => array('type'=>'varchar(64)'),
+	    'ord_stripe_invoice_id' => array('type'=>'varchar(64)'),
+	    'ord_test_mode' => array('type'=>'bool', 'default'=>false),
+	    'ord_stripe_subscription_id_temp' => array('type'=>'varchar(255)'),
 	);
 
-	public static $required_fields = array();
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array(
-		'ord_timestamp' => 'now()',
-		'ord_test_mode' => false
-		);	
 
 	function is_stripe_order(){
 		if($this->get('ord_stripe_session_id') || $this->get('ord_stripe_payment_intent_id') || $this->get('ord_stripe_charge_id') || $this->get('ord_stripe_invoice_id')){
@@ -131,7 +106,7 @@ class Order extends SystemBase {	public static $prefix = 'ord';
 		}
 
 		$order = new Order($data->ord_order_id);
-		$order->load_from_data($data, array_keys(Order::$fields));
+		$order->load_from_data($data, array_keys(Order::$field_specifications));
 		return $order;
 	}
 	
@@ -144,7 +119,7 @@ class Order extends SystemBase {	public static $prefix = 'ord';
 		}
 
 		$order = new Order($data->ord_order_id);
-		$order->load_from_data($data, array_keys(Order::$fields));
+		$order->load_from_data($data, array_keys(Order::$field_specifications));
 		return $order;
 	}	
 
@@ -157,7 +132,7 @@ class Order extends SystemBase {	public static $prefix = 'ord';
 		}
 
 		$order = new Order($data->ord_order_id);
-		$order->load_from_data($data, array_keys(Order::$fields));
+		$order->load_from_data($data, array_keys(Order::$field_specifications));
 		return $order;
 	}	
 

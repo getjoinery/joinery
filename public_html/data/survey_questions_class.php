@@ -18,40 +18,31 @@ class SurveyQuestion extends SystemBase {	public static $prefix = 'srq';
 	public static $pkey_column = 'srq_survey_question_id';
 	public static $permanent_delete_actions = array(
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(
-		'srq_survey_question_id' => 'ID of the survey question',
-		'srq_svy_survey_id' => 'Survey id',
-		'srq_qst_question_id' => 'Question id',
-		'srq_order' => 'Order of the questions',
-		'srq_delete_time' => 'Time of deletion',
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'srq_survey_question_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'srq_svy_survey_id' => array('type'=>'int4', 'is_nullable'=>false),
-		'srq_qst_question_id' => array('type'=>'int4'),
-		'srq_order' => array('type'=>'int4'),
-		'srq_delete_time' => array('type'=>'timestamp(6)'),
+	    'srq_survey_question_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'srq_svy_survey_id' => array('type'=>'int4', 'is_nullable'=>false, 'required'=>true),
+	    'srq_qst_question_id' => array('type'=>'int4', 'required'=>true),
+	    'srq_order' => array('type'=>'int4'),
+	    'srq_delete_time' => array('type'=>'timestamp(6)'),
 	);
-	
-	public static $required_fields = array('srq_svy_survey_id', 'srq_qst_question_id');
 
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array(
-		);		
 
 	private function _check_for_duplicates() {
 		

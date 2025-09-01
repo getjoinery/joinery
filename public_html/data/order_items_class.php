@@ -28,69 +28,45 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	public const STATUS_PAID = 2;
 	public const STATUS_ERROR = 3;
 
-	public static $fields = array(		'odi_order_item_id' => 'Primary key - OrderItem ID',
-		'odi_ord_order_id' => 'Order ID',
-		'odi_pro_product_id' => 'Product ID',
-		'odi_prv_product_version_id' => 'Product Version (if there is one)',
-		'odi_product_info' => 'Serialized PHP array of the associated information with this product',
-		'odi_price' => 'Price of the item when it was sold',
-		'odi_status' => 'Current Status of this Order',
-		'odi_status_change_time' => 'Timestamp of last status change',
-		'odi_usr_user_id' => 'User who gets the product',
-		'odi_evr_event_registrant_id' => 'If is event registration, registrant id',
-		'odi_comment' => 'Optional comment',
-		'odi_stripe_subscription_id' => 'Stripe subscription',
-		'odi_is_subscription' => 'True if this order item is a subscription',
-		'odi_subscription_cancelled_time' => 'If subscription, when it was cancelled',
-		'odi_refund_amount' => 'Amount from this order item that has been refunded',
-		'odi_refund_note' => 'Note for the refund',
-		'odi_refund_time' => 'Time of last refund',
-		'odi_stripe_foreign_invoice_id' => 'Stripe invoice id if it is the first of a subscription', 
-		'odi_subscription_status' => 'Status if it is a subscription',
-		'odi_subscription_period_end' => 'End date of the subscription period',
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'odi_order_item_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'odi_ord_order_id' => array('type'=>'int4'),
-		'odi_pro_product_id' => array('type'=>'int4'),
-		'odi_prv_product_version_id' => array('type'=>'int4'),
-		'odi_product_info' => array('type'=>'text'),
-		'odi_price' => array('type'=>'numeric(10,2)'),
-		'odi_status' => array('type'=>'int2'),
-		'odi_status_change_time' => array('type'=>'timestamp(6)'),
-		'odi_usr_user_id' => array('type'=>'int4'),
-		'odi_evr_event_registrant_id' => array('type'=>'int4'),
-		'odi_comment' => array('type'=>'varchar(255)'),
-		'odi_stripe_subscription_id' => array('type'=>'varchar(255)'),
-		'odi_is_subscription' => array('type'=>'bool'),
-		'odi_subscription_cancelled_time' => array('type'=>'timestamp(6)'),
-		'odi_refund_amount' => array('type'=>'numeric(10,2)'),
-		'odi_refund_note' => array('type'=>'varchar(255)'),
-		'odi_refund_time' => array('type'=>'timestamp(6)'),
-		'odi_stripe_foreign_invoice_id' => array('type'=>'varchar(64)'),
-		'odi_subscription_status' => array('type'=>'varchar(64)'),
-		'odi_subscription_period_end' => array('type'=>'timestamp(6)'),
+	    'odi_order_item_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'odi_ord_order_id' => array('type'=>'int4', 'required'=>true),
+	    'odi_pro_product_id' => array('type'=>'int4', 'required'=>true),
+	    'odi_prv_product_version_id' => array('type'=>'int4'),
+	    'odi_product_info' => array('type'=>'text'),
+	    'odi_price' => array('type'=>'numeric(10,2)'),
+	    'odi_status' => array('type'=>'int2'),
+	    'odi_status_change_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'odi_usr_user_id' => array('type'=>'int4'),
+	    'odi_evr_event_registrant_id' => array('type'=>'int4'),
+	    'odi_comment' => array('type'=>'varchar(255)'),
+	    'odi_stripe_subscription_id' => array('type'=>'varchar(255)'),
+	    'odi_is_subscription' => array('type'=>'bool'),
+	    'odi_subscription_cancelled_time' => array('type'=>'timestamp(6)'),
+	    'odi_refund_amount' => array('type'=>'numeric(10,2)'),
+	    'odi_refund_note' => array('type'=>'varchar(255)'),
+	    'odi_refund_time' => array('type'=>'timestamp(6)'),
+	    'odi_stripe_foreign_invoice_id' => array('type'=>'varchar(64)'),
+	    'odi_subscription_status' => array('type'=>'varchar(64)'),
+	    'odi_subscription_period_end' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $required_fields = array('odi_ord_order_id', 'odi_pro_product_id');
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array(
-		'odi_status_change_time' => 'now()'
-		);
 
 	function get_order() {
 		$order = new Order($this->get('odi_ord_order_id'), TRUE);
@@ -110,7 +86,7 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 
 	protected function _unsafe_edit() {
 		$rowdata = array();
-		foreach(array_keys(self::$fields) as $field) {
+		foreach(array_keys(self::$field_specifications) as $field) {
 			$rowdata[$field] = $this->get($field);
 		}
 

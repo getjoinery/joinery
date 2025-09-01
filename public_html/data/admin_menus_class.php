@@ -19,51 +19,35 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 		 
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(
-		'amu_admin_menu_id' => 'Primary key - AdminMenu ID',
-		'amu_menudisplay' => 'Display Name', 
-		'amu_slug' => 'Display Name', 
-		'amu_parent_menu_id' => 'amu_admin_menu_id of parent if a subitem', 
-		'amu_defaultpage' => 'link to the page, just the filename',
-		'amu_order' => 'The order',
-		'amu_min_permission' => 'Min permission 1-10',
-		'amu_disable' => 'If disabled',
-		'amu_icon' => 'Icon for the menu item',
-		'amu_setting_activate' => 'Setting that will turn this on',
-	);
-
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'amu_admin_menu_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false), 
-		'amu_menudisplay' => array('type'=>'varchar(32)'),
-		'amu_slug' => array('type'=>'varchar(32)'),
-		'amu_parent_menu_id' => array('type'=>'int4'),
-		'amu_defaultpage' => array('type'=>'varchar(64)'),
-		'amu_order' => array('type'=>'int2'),
-		'amu_min_permission' => array('type'=>'int4'),
-		'amu_disable' => array('type'=>'int2'),
-		'amu_icon' => array('type'=>'varchar(16)'),
-		'amu_setting_activate' => array('type'=>'varchar(64)'),
+	    'amu_admin_menu_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'amu_menudisplay' => array('type'=>'varchar(32)', 'required'=>true),
+	    'amu_slug' => array('type'=>'varchar(32)'),
+	    'amu_parent_menu_id' => array('type'=>'int4'),
+	    'amu_defaultpage' => array('type'=>'varchar(64)', 'required'=>true),
+	    'amu_order' => array('type'=>'int2', 'required'=>true),
+	    'amu_min_permission' => array('type'=>'int4', 'required'=>true),
+	    'amu_disable' => array('type'=>'int2', 'default'=>0),
+	    'amu_icon' => array('type'=>'varchar(16)'),
+	    'amu_setting_activate' => array('type'=>'varchar(64)'),
 	);
 
-	public static $required_fields = array(
-		'amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission');
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array(
-		'amu_disable' => 0, 
-		);		 
 
 	function authenticate_write($data) {
 		// If the user's ID doesn't match, we have to make
