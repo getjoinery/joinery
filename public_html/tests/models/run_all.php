@@ -38,10 +38,17 @@
 		echo '<div style="background: #f0f8ff; border: 1px solid #007bff; padding: 10px; margin: 10px 0; border-radius: 5px;">';
 		echo '<strong>🗄️ Database:</strong> ' . htmlspecialchars($db_info['db_name']);
 		if ($test_mode) {
-			echo ' <span style="color: #007bff; font-weight: bold;">(TEST MODE)</span>';
+			echo ' <span style="color: #007bff; font-weight: bold;">(TEST DATABASE)</span>';
 		} else {
-			echo ' <span style="color: #28a745; font-weight: bold;">(LIVE MODE)</span>';
+			echo ' <span style="color: #dc3545; font-weight: bold;">(⚠️ LIVE DATABASE)</span>';
 		}
+		echo '<br><small><strong>Note:</strong> ';
+		if ($test_mode) {
+			echo 'Running against test database - data changes are safe and isolated from live data.';
+		} else {
+			echo 'Running against LIVE PRODUCTION database - all changes will affect real data!';
+		}
+		echo '</small>';
 		echo '</div>';
 		
 	} catch (Exception $e) {

@@ -1785,7 +1785,7 @@ class ModelTester {
             $sequence_name = $table_name . '_' . $pkey_column . '_seq';
             
             // Check if sequence exists and get current value
-            // Note: We use currval() which is more reliable than pg_sequences.last_value
+            // Note: We use direct sequence query which is more reliable than pg_sequences.last_value
             // because pg_sequences only updates after nextval() is called
             try {
                 $seq_sql = "SELECT last_value FROM $sequence_name";
@@ -1812,8 +1812,9 @@ class ModelTester {
             $max_result = $max_q->fetch(PDO::FETCH_ASSOC);
             $max_val = $max_result['max_val'];
             
-            // Sequence should be greater than max table value (or equal if no records exist)
-            if ($current_seq_value <= $max_val && $max_val > 0) {
+            // Sequence should be greater than or equal to max table value
+            // Only fail if sequence is strictly less than max value (which would cause conflicts)
+            if ($current_seq_value < $max_val) {
                 $this->test_fail("Sequence '{$sequence_name}' is out of sync. Sequence value: {$current_seq_value}, Max table value: {$max_val}. This will cause primary key conflicts.");
                 return;
             }
