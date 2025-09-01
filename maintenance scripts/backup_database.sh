@@ -4,21 +4,65 @@
 # Global flag for encryption (default: encrypted)
 ENCRYPT_BACKUPS=true
 
-# Check for .pgpass file or PGPASSWORD environment variable
-if [[ ! -f ~/.pgpass ]] && [[ -z "$PGPASSWORD" ]]; then
-    echo "⚠️  No .pgpass file found and PGPASSWORD not set."
-    echo "You will be prompted for the postgres password multiple times."
-    echo ""
-    echo "To avoid this in the future, create a .pgpass file:"
-    echo "  echo 'localhost:5432:*:postgres:YOUR_PASSWORD' > ~/.pgpass"
-    echo "  chmod 600 ~/.pgpass"
-    echo ""
-    read -p "Press Enter to continue with password prompts..."
-    echo ""
-elif [[ -f ~/.pgpass ]]; then
+# Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt
+
+# Check for .pgpass file first
+if [[ -f ~/.pgpass ]]; then
     echo "✓ Found .pgpass file - using passwordless authentication."
 elif [[ -n "$PGPASSWORD" ]]; then
     echo "✓ Found PGPASSWORD environment variable - using passwordless authentication."
+else
+    # Try to find and load password from config file
+    CONFIG_FILE=""
+    CONFIG_PASSWORD=""
+    
+    # Strategy 1: Try database names with _test suffix removed
+    # Note: For backup script, we might only have one database name, so check if it's available
+    if [[ -n "$DATABASE_NAME" ]]; then
+        # Single database backup - try the specified database name
+        for DB_NAME in "$DATABASE_NAME"; do
+            # Remove _test suffix if present
+            SITENAME="${DB_NAME%_test}"
+            if [[ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]]; then
+                CONFIG_FILE="/var/www/html/${SITENAME}/config/Globalvars_site.php"
+                break
+            fi
+        done
+        
+        # Strategy 2: Try original database name as-is
+        if [[ -z "$CONFIG_FILE" ]] && [[ -f "/var/www/html/${DATABASE_NAME}/config/Globalvars_site.php" ]]; then
+            CONFIG_FILE="/var/www/html/${DATABASE_NAME}/config/Globalvars_site.php"
+        fi
+    fi
+    
+    # Strategy 3: Look for any config file in /var/www/html/*/config/
+    if [[ -z "$CONFIG_FILE" ]]; then
+        CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
+    fi
+    
+    if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
+        echo "✓ Found config file: $CONFIG_FILE"
+        # Extract password from config file
+        CONFIG_PASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+        if [[ -n "$CONFIG_PASSWORD" ]]; then
+            export PGPASSWORD="$CONFIG_PASSWORD"
+            echo "✓ Using database password from config file."
+        fi
+    fi
+    
+    # If still no password, fall back to interactive prompt
+    if [[ -z "$PGPASSWORD" ]]; then
+        echo "⚠️  No .pgpass file found, no config file found, and PGPASSWORD not set."
+        echo "You will be prompted for the postgres password multiple times."
+        echo ""
+        echo "To avoid this in the future, either:"
+        echo "  1) Create a .pgpass file: echo 'localhost:5432:*:postgres:YOUR_PASSWORD' > ~/.pgpass && chmod 600 ~/.pgpass"
+        echo "  2) Set PGPASSWORD: export PGPASSWORD='your_password'"
+        echo "  3) Ensure config file exists at /var/www/html/SITENAME/config/Globalvars_site.php"
+        echo ""
+        read -p "Press Enter to continue with password prompts..."
+        echo ""
+    fi
 fi
 
 now=$(date +"%m_%d_%Y")
@@ -36,8 +80,7 @@ backup_database() {
         # Create compressed + encrypted backup using temporary file
         local temp_file=$(mktemp --suffix=.sql)
         
-        echo "🔑 Enter PostgreSQL password for user 'postgres':"
-        if pg_dump -U postgres -W "$db_name" > "$temp_file"; then
+        if pg_dump -U postgres "$db_name" > "$temp_file"; then
             echo "✓ Database dump completed"
             echo ""
             echo "🔐 Enter encryption password for backup file:"
@@ -65,8 +108,7 @@ backup_database() {
         echo ""
         
         # Create plaintext backup
-        echo "🔑 Enter PostgreSQL password for user 'postgres':"
-        if pg_dump -U postgres -W "$db_name" > "$backup_file"; then
+        if pg_dump -U postgres "$db_name" > "$backup_file"; then
             # Set restrictive permissions on plaintext file
             chmod 600 "$backup_file"
             echo "✓ Plaintext backup of '$db_name' complete: $backup_file"
@@ -99,8 +141,7 @@ backup_all_databases() {
     
     # Get list of all databases (excluding system databases)
     echo "Getting list of databases..."
-    echo "🔑 Enter PostgreSQL password for user 'postgres':"
-    databases=$(psql -U postgres -W -t -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres', 'template0', 'template1');" 2>/dev/null)
+    databases=$(psql -U postgres -t -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres', 'template0', 'template1');" 2>/dev/null)
     
     if [ $? -ne 0 ]; then
         echo "✗ Error: Could not connect to PostgreSQL or retrieve database list."
