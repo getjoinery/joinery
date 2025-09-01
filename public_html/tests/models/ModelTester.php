@@ -399,6 +399,12 @@ class ModelTester {
             // Create first record
             $model1 = new $model_class(null);
             $test_data = $this->generate_valid_test_data();
+            
+            // Ensure the unique field has a value
+            if (!isset($test_data[$field])) {
+                $test_data[$field] = $this->generate_field_value($field, 0);
+            }
+            
             foreach ($test_data as $test_field => $value) {
                 $model1->set($test_field, $value);
             }
@@ -459,6 +465,14 @@ class ModelTester {
             // Create first record
             $model1 = new $model_class(null);
             $test_data = $this->generate_valid_test_data();
+            
+            // Ensure all unique constraint fields have values
+            foreach ($all_fields as $constraint_field) {
+                if (!isset($test_data[$constraint_field])) {
+                    $test_data[$constraint_field] = $this->generate_field_value($constraint_field, 0);
+                }
+            }
+            
             foreach ($test_data as $test_field => $value) {
                 $model1->set($test_field, $value);
             }
