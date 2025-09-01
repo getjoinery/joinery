@@ -37,49 +37,35 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 		self::NORMAL_MAILER_ERROR => 'Non-Recurring Email Error',
 	);
 
-	public static $fields = array(		
-		'equ_queued_email_id' => 'Primary key - QueuedEmail ID',
-		'equ_from_name' => 'Name the email is from',
-		'equ_from' => 'Address the email is from',
-		'equ_to' => 'Address the email is to',
-		'equ_to_name' => 'Name the email is to',
-		'equ_body' => 'Body of the email',
-		'equ_subject' => 'Subject of the email',
-		'equ_timestamp' => 'Timestamp the email was created',
-		'equ_status' => 'Status the email is in',
-		'equ_ers_recurring_email_log_id' => 'Log ID this is linked with',
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'equ_queued_email_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'equ_from_name' => array('type'=>'varchar(70)'),
-		'equ_from' => array('type'=>'varchar(64)'),
-		'equ_to' => array('type'=>'varchar(64)'),
-		'equ_to_name' => array('type'=>'varchar(70)'),
-		'equ_body' => array('type'=>'text'),
-		'equ_subject' => array('type'=>'varchar(128)'),
-		'equ_timestamp' => array('type'=>'timestamp(6)'),
-		'equ_status' => array('type'=>'int2'),
-		'equ_ers_recurring_email_log_id' => array('type'=>'int4'),
+	    'equ_queued_email_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'equ_from_name' => array('type'=>'varchar(70)', 'required'=>true),
+	    'equ_from' => array('type'=>'varchar(64)', 'required'=>true),
+	    'equ_to' => array('type'=>'varchar(64)', 'required'=>true),
+	    'equ_to_name' => array('type'=>'varchar(70)', 'required'=>true),
+	    'equ_body' => array('type'=>'text', 'required'=>true),
+	    'equ_subject' => array('type'=>'varchar(128)', 'required'=>true),
+	    'equ_timestamp' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'equ_status' => array('type'=>'int2', 'default'=>0),
+	    'equ_ers_recurring_email_log_id' => array('type'=>'int4'),
 	);
 
-	public static $required_fields = array('equ_from_name', 'equ_from', 'equ_to', 'equ_to_name', 'equ_body', 'equ_subject');
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-	'equ_timestamp' => 'now()', 'equ_status'=> 0);
 
 	function get_status() {
 		return self::$status_to_text[$this->get('equ_status')];

@@ -75,13 +75,14 @@ class Example extends SystemBase {
 **IMPORTANT:** These are all runtime properties that control data storage and retrieval behavior. They do NOT affect database schema generation, which only uses `'type'` and `'is_nullable'`.
 
 ### Required Fields
-- **Property:** `'required' => true|false`
-- **Replaces:** `$required_fields`
-- **Runtime behavior:** Validation during `save()` method
+- **Property:** `'required' => true|false` (Phase 1 - no array support)
+- **Replaces:** `$required_fields` array elements
+- **Runtime behavior:** Validation during `save()` method (exact current behavior)
 - **Schema impact:** None
 - **Usage:**
-  - `true`: Field must have non-null, non-empty value
+  - `true`: Field must have non-null, non-empty string value (checks `is_null() || === ''`)
   - `false` or omitted: Field is optional
+  - Note: Array support (alternative fields) exists in current code but not migrated in Phase 1
 
 ### Default Values
 - **Property:** `'default' => mixed`
@@ -89,7 +90,8 @@ class Example extends SystemBase {
 - **Runtime behavior:** Applied during `save()` when creating new records (INSERT only)
 - **Schema impact:** None (database defaults are separate)
 - **Usage:**
-  - Sets initial value when field is NULL
+  - Sets initial value when `get($field)` returns NULL (maintains current behavior)
+  - Note: Due to PHP's isset() behavior, this includes both unset fields AND fields explicitly set to NULL
   - Database functions like `'now()'`, `'uuid_generate_v4()'` are passed as-is to the database
   - Only applied to new records (`$this->key === NULL`)
   - Applied BEFORE zero_on_create
@@ -102,9 +104,9 @@ class Example extends SystemBase {
 - **Schema impact:** None
 - **Usage:**
   - Sets field to 0 when creating new records if field is NULL
-  - Applied AFTER defaults
-  - If field has both `default` and `zero_on_create`, an exception is thrown
-  - No type validation - passes through to database (developer responsibility)
+  - Applied AFTER defaults (maintains current order)
+  - Both `default` and `zero_on_create` CAN coexist (current behavior allows this)
+  - No type validation - passes through to database (maintains current behavior)
 
 ### Timestamp Auto-Detection
 - **Auto-detected when:** `'type'` contains 'timestamp', 'datetime', or 'date'
@@ -117,18 +119,20 @@ class Example extends SystemBase {
 
 ## Implementation Clarifications
 
-### Key Design Decisions
+### Key Design Decisions - NO BEHAVIOR CHANGES
 
-1. **Operation Order:** Defaults → zero_on_create → required validation
-2. **No Backwards Compatibility:** Clean break, no support for legacy arrays after migration
-3. **Required Fields:** Only boolean support (true/false), no array alternatives
-4. **Empty Values:** Empty string ('') is considered empty for required validation
-5. **SQL Functions:** Passed as-is to database (e.g., 'now()', 'uuid_generate_v4()')
-6. **Type Checking:** Developer responsibility - database handles type mismatches
-7. **JSON Fields:** Can be required and have defaults (specified as JSON strings)
-8. **INSERT vs UPDATE:** Defaults and zero_on_create only apply on INSERT
-9. **Error Messages:** Use field name directly (no display_name lookup)
-10. **Timestamp Detection:** Case-insensitive with fallback for edge cases
+This is a pure refactoring - we are ONLY changing where the metadata is stored, not how it works.
+
+1. **Operation Order:** Defaults → zero_on_create → required validation (EXACT current order)
+2. **No Backwards Compatibility:** Clean break, all models migrated at once
+3. **Required Fields:** Phase 1 only migrates simple required fields (not array alternatives)
+4. **Empty Values:** EXACT current behavior - `is_null() || === ''` for required validation
+5. **SQL Functions:** EXACT current behavior - passed as-is to database
+6. **Type Checking:** EXACT current behavior - no validation, database handles it
+7. **Default + Zero:** EXACT current behavior - both can coexist, zero can override default
+8. **INSERT vs UPDATE:** EXACT current behavior - defaults/zeros only on INSERT
+9. **Error Messages:** EXACT current format - field name in quotes
+10. **NULL Handling:** EXACT current behavior - defaults apply when `get()` returns NULL
 
 ## Implementation Changes
 
@@ -171,35 +175,33 @@ foreach (static::$required_fields as $required_field) {
 
 #### After: save() method
 ```php
-// Process field specifications for defaults, zeros, and requirements
-// Order of operations: 1) defaults, 2) zero_on_create, 3) required validation
-if ($this->key === NULL) {  // Only for INSERT operations
-    // STEP 1: Apply defaults first
+// EXACT SAME BEHAVIOR AS CURRENT - just reading from field_specifications instead of separate arrays
+
+if ($this->key === NULL) {
+    // SET INITIAL DEFAULT VALUES (exact current logic)
     foreach (static::$field_specifications as $field_name => $spec) {
-        if (isset($spec['default']) && $this->get($field_name) === NULL) {
-            $this->set($field_name, $spec['default']);  // SQL functions passed as-is
+        if (isset($spec['default'])) {
+            if ($this->get($field_name) === NULL) {
+                $this->set($field_name, $spec['default']);
+            }
         }
     }
     
-    // STEP 2: Apply zero_on_create (after defaults)
+    // SET ZERO VARIABLES (exact current logic)
     foreach (static::$field_specifications as $field_name => $spec) {
         if (isset($spec['zero_on_create']) && $spec['zero_on_create'] === true) {
-            // Check for conflict with default
-            if (isset($spec['default'])) {
-                throw new SystemClassException("Field '$field_name' cannot have both 'default' and 'zero_on_create' properties");
-            }
-            if ($this->get($field_name) === NULL) {
-                $this->set($field_name, 0);  // Let database handle type compatibility
+            if ($this->key === NULL && $this->get($field_name) === NULL) {
+                $this->set($field_name, 0);
             }
         }
     }
 }
 
-// STEP 3: Validate required fields (for both INSERT and UPDATE)
+// CHECK REQUIRED FIELDS (exact current logic, minus array support for Phase 1)
 foreach (static::$field_specifications as $field_name => $spec) {
     if (isset($spec['required']) && $spec['required'] === true) {
         if (is_null($this->get($field_name)) || $this->get($field_name) === '') {
-            throw new SystemClassException("Required field '$field_name' must be set.");
+            throw new SystemClassException('Required field "' . $field_name . '" must be set.');
         }
     }
 }
@@ -388,31 +390,40 @@ public static $field_specifications = array(
 ## Files Requiring Changes
 
 ### Core System Files
-1. **`/includes/SystemBase.php`**
-   - Update save() method (lines ~910-950)
-   - Update smart_get() method (lines ~217-220)
-   - Update export_as_array() method (lines ~475-479)
+1. **`/includes/SystemBase.php`** or **`/includes/SystemClass.php`**
+   - Update save() method to read from field_specifications
+   - Update smart_get() method to use is_timestamp_field()
+   - Update export_as_array() to use is_timestamp_field()
    - Add is_timestamp_field() helper method
-   - Remove all references to $required_fields, $zero_variables, $initial_default_values, $timestamp_fields
+   - Remove ALL references to legacy arrays
 
-2. **`/includes/SystemClass.php`** (if separate from SystemBase)
-   - Remove static property declarations for legacy arrays
+### Test Framework Files (Must Update)
+2. **`/tests/models/ModelTester.php`**
+   - Line 323, 587, 644, 938, 1156, 1370: References to `::$required_fields`
+   - Update to read from field_specifications['field']['required']
 
-### Data Model Files (All files in /data/)
-- activation_codes_class.php
-- comments_class.php
-- event_registrants_class.php
-- events_class.php
-- plugins_class.php
-- posts_class.php
-- products_class.php
-- settings_class.php
-- themes_class.php
-- users_class.php
-- Any other *_class.php files
+3. **`/tests/models/MultiModelTester.php`**
+   - Line 415: Reference to `::$required_fields`
+   - Update to read from field_specifications
+
+### Other Files with Legacy Array References
+4. **`/logic/register_logic.php`**
+   - Check for any references to legacy arrays
+   
+5. **`/data/products_class.php`**
+   - Line 1119: Custom iteration over $required_fields (may need special handling)
+
+### Data Model Files (67+ files in /data/)
+All files must have their legacy arrays merged into field_specifications:
+- **Required fields:** 74 files use `$required_fields`
+- **Zero variables:** 69 files use `$zero_variables`  
+- **Initial defaults:** 71 files use `$initial_default_values`
+- **Timestamp fields:** 8 files use `$timestamp_fields`
+
+Examples: activation_codes_class.php, comments_class.php, event_registrants_class.php, events_class.php, plugins_class.php, posts_class.php, products_class.php, settings_class.php, themes_class.php, users_class.php, and 57+ others
 
 ### Plugin Data Models
-- `/plugins/*/data/*_class.php` - All plugin model files
+- `/plugins/*/data/*_class.php` - All plugin model files must be migrated
 
 ## Implementation Steps
 
@@ -453,8 +464,8 @@ public static $field_specifications = array(
    - **Solution:** Update all plugins as part of the implementation
 
 4. **Risk:** Conflicting field properties
-   - **Solution:** Throw exception if field has both `default` and `zero_on_create`
-   - **Validation:** Done at runtime during save()
+   - **Note:** Both `default` and `zero_on_create` can coexist (maintains current behavior)
+   - **Execution order:** Defaults applied first, then zero_on_create can override
 
 ## Testing Requirements
 
@@ -794,6 +805,24 @@ function generate_test_model($fields) {
 }
 ```
 
+## Verification Steps
+
+After implementation, verify NO references to legacy arrays remain:
+
+```bash
+# These commands should return NO results (except in specs/docs):
+grep -r "\$required_fields" --include="*.php" /var/www/html/joinerytest/public_html
+grep -r "\$zero_variables" --include="*.php" /var/www/html/joinerytest/public_html  
+grep -r "\$initial_default_values" --include="*.php" /var/www/html/joinerytest/public_html
+grep -r "\$timestamp_fields" --include="*.php" /var/www/html/joinerytest/public_html
+```
+
+Key files to double-check:
+- `/includes/SystemClass.php` - Core implementation
+- `/tests/models/*.php` - Test framework
+- `/data/*_class.php` - All model files
+- `/plugins/*/data/*_class.php` - Plugin models
+
 ## Success Criteria
 
 1. All models successfully converted to new structure
@@ -801,6 +830,8 @@ function generate_test_model($fields) {
 3. No performance degradation in common operations
 4. Form generation and validation work correctly with new structure
 5. Database update system continues to function properly
+6. **NO references to legacy arrays remain in PHP code**
+7. All tests pass with new structure
 
 ## Phase 2: Merge $fields Array (Future Enhancement)
 

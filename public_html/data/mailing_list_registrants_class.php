@@ -17,39 +17,31 @@ class MailingListRegistrant extends SystemBase {	public static $prefix = 'mlr';
 	public static $tablename = 'mlr_mailing_list_registrants';
 	public static $pkey_column = 'mlr_mailing_list_registrant_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(		'mlr_mailing_list_registrant_id' => 'Primary key - MailingListRegistrant ID',
-		'mlr_mlt_mailing_list_id' => 'Mailing list id',
-		'mlr_usr_user_id' => 'Foreign key pointing to the member in this group',
-		'mlr_change_time' => 'Time created',
-		'mlr_delete_time' => 'Time created',
-	);
 
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'mlr_mailing_list_registrant_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'mlr_mlt_mailing_list_id' => array('type'=>'int4'),
-		'mlr_usr_user_id' => array('type'=>'int4'),
-		'mlr_change_time' => array('type'=>'timestamp(6)'),
-		'mlr_delete_time' => array('type'=>'timestamp(6)'),
+	    'mlr_mailing_list_registrant_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'mlr_mlt_mailing_list_id' => array('type'=>'int4', 'required'=>true),
+	    'mlr_usr_user_id' => array('type'=>'int4', 'required'=>true),
+	    'mlr_change_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'mlr_delete_time' => array('type'=>'timestamp(6)'),
 	);	
 
-	public static $required_fields = array('mlr_mlt_mailing_list_id', 'mlr_usr_user_id');
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array(
-		'mlr_change_time' => 'now()');		
 
 	public static function CheckIfExists($user_id, $mailing_list_id) {
 		

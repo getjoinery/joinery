@@ -97,53 +97,37 @@ class Address extends SystemBase {	public static $prefix = 'usa';
 		'WY'=>"Wyoming"
 	);
 
-	public static $fields = array(
-		'usa_users_addr_id' => 'Primary key - Address ID',
-		'usa_type' => 'Address type',
-		'usa_address1' => 'Line 1 of address',
-		'usa_address2' => 'Line 2 of address',
-		'usa_city' => 'City',
-		'usa_state' => 'State',
-		'usa_zip_code_id' => 'Zip code',
-		'usa_usr_user_id' => 'User Id this address belongs to',
-		'usa_is_default' => 'Is this the default address?',
-		'usa_timezone' => 'Timezone this address is in',
-		'usa_create_time' => 'time created', 
-		'usa_cco_country_code_id' => 'Country code id',
-	);
-
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'usa_users_addr_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false), 
-		'usa_type' => array('type'=>'int2'),
-		'usa_address1' => array('type'=>'varchar(128)'),
-		'usa_address2' => array('type'=>'varchar(64)'),
-		'usa_city' => array('type'=>'varchar(64)'),
-		'usa_state' => array('type'=>'varchar(32)'),
-		'usa_zip_code_id' => array('type'=>'varchar(10)'),
-		'usa_usr_user_id' => array('type'=>'int8', 'is_nullable'=>false),
-		'usa_is_default' => array('type'=>'bool'),
-		'usa_timezone' => array('type'=>'varchar(64)'),
-		'usa_create_time' => array('type'=>'timestamp(6)'),
-		'usa_cco_country_code_id' => array('type'=>'int2'),
+	    'usa_users_addr_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'usa_type' => array('type'=>'int2'),
+	    'usa_address1' => array('type'=>'varchar(128)'),
+	    'usa_address2' => array('type'=>'varchar(64)'),
+	    'usa_city' => array('type'=>'varchar(64)'),
+	    'usa_state' => array('type'=>'varchar(32)'),
+	    'usa_zip_code_id' => array('type'=>'varchar(10)'),
+	    'usa_usr_user_id' => array('type'=>'int8', 'is_nullable'=>false),
+	    'usa_is_default' => array('type'=>'bool'),
+	    'usa_timezone' => array('type'=>'varchar(64)'),
+	    'usa_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'usa_cco_country_code_id' => array('type'=>'int2'),
 	);
 
-	public static $required_fields = array();
-	
 	public static $field_constraints = array();
-	
-	public static $zero_variables = array();
-
-	public static $initial_default_values = array(
-		'usa_create_time' => 'now()');
 
 	public static $json_vars = array(
 		'usa_address1', 'usa_address2', 'usa_city', 'usa_state', 'usa_zip_code_id',
@@ -410,7 +394,7 @@ class Address extends SystemBase {	public static $prefix = 'usa';
 
 	function export_as_array() {
 		$address_data = array();
-		foreach(array_keys(self::$fields) as $field) {
+		foreach(array_keys(self::$field_specifications) as $field) {
 			$address_data[$field] = $this->get($field);
 		}
 

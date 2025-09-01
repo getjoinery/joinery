@@ -40,14 +40,11 @@ abstract class SystemBase {
 	protected $loaded;
 	protected $cached_references;
 
-	static $fields = array();
-	static $timestamp_fields = array();	// Used for the mailer
 	static $constants = array();
 	static $required = array();
 	static $required_user = array();	
 	static $field_constraints = array();
-	static $field_constraints_user = array();	
-	static $initial_default_values = array();
+	static $field_constraints_user = array();
 	static $json_vars = array('key');
 	static $permanent_delete_actions = array();
 
@@ -102,7 +99,7 @@ abstract class SystemBase {
 		$pkey_column_value = $data->$pkey_column_name;
 
 		$object = new $classname($pkey_column_value);
-		$object->load_from_data($data, array_keys($classname::$fields));
+		$object->load_from_data($data, array_keys($classname::$field_specifications));
 		return $object;
 	}
 	
@@ -185,7 +182,7 @@ abstract class SystemBase {
 	//END LINK FUNCTIONS
 	
 	function set($key, $value, $check_existance=TRUE) {
-		if ($check_existance && !array_key_exists($key, static::$fields)) {
+		if ($check_existance && !array_key_exists($key, static::$field_specifications)) {
 			//TODO BETTER LOGGING HERE
 			error_log('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
 			//throw new SystemClassException('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
@@ -195,7 +192,7 @@ abstract class SystemBase {
 	
 	
 	function set_all_to_null(){
-		foreach(array_keys(static::$fields) as $field) {
+		foreach(array_keys(static::$field_specifications) as $field) {
 			$this->set($field, NULL);
 		}
 	}
@@ -214,10 +211,89 @@ abstract class SystemBase {
 	}
 
 	function smart_get($key) {
-		if (in_array($key, static::$timestamp_fields)) {
-			return new DateTime($this->get($key));
+		// Auto-detect timestamp fields from type
+		if ($this->is_timestamp_field($key)) {
+			$value = $this->get($key);
+			if ($value) {
+				return new DateTime($value);
+			}
 		}
+		
 		return $this->get($key);
+	}
+
+	/**
+	 * Auto-detect if a field is a timestamp based on its type specification
+	 * Optimized for performance with quick rejection of non-timestamp types
+	 */
+	protected function is_timestamp_field($field_name) {
+		if (!isset(static::$field_specifications[$field_name])) {
+			return false;
+		}
+		
+		$type = strtolower(static::$field_specifications[$field_name]['type'] ?? '');
+		
+		// Quick rejection: if type starts with clearly non-timestamp types, return false immediately
+		$first_char = $type[0] ?? '';
+		if ($first_char === 'v' || $first_char === 'i' || $first_char === 'b' || 
+			$first_char === 'n' || $first_char === 'f' || $first_char === 'c') {
+			return false; // varchar, int*, bool*, numeric, float, char
+		}
+		
+		// Additional optimization: check first two characters for "te" (text fields)
+		if ($first_char === 't' && isset($type[1]) && $type[1] === 'e') {
+			return false; // text, textarea - definitely not timestamps
+		}
+		
+		// Final switch statement for complete type matching (no strpos() calls needed)
+		switch ($type) {
+			// Standard timestamp variants
+			case 'timestamp':
+			case 'timestamptz':
+			case 'timestamp with time zone':
+			case 'timestamp without time zone':
+			
+			// Timestamp with precision (0-6 fractional seconds)
+			case 'timestamp(0)':
+			case 'timestamp(1)':
+			case 'timestamp(2)':
+			case 'timestamp(3)':
+			case 'timestamp(4)':
+			case 'timestamp(5)':
+			case 'timestamp(6)':
+			
+			// Timestamp with time zone and precision
+			case 'timestamptz(0)':
+			case 'timestamptz(1)':
+			case 'timestamptz(2)':
+			case 'timestamptz(3)':
+			case 'timestamptz(4)':
+			case 'timestamptz(5)':
+			case 'timestamptz(6)':
+			
+			// Other date/time types
+			case 'datetime':
+			case 'date':
+			case 'time':
+			case 'time(0)':
+			case 'time(1)':
+			case 'time(2)':
+			case 'time(3)':
+			case 'time(4)':
+			case 'time(5)':
+			case 'time(6)':
+				return true;
+				
+			default:
+				// Fallback: check if type contains timestamp-related keywords (handles edge cases)
+				if (strpos(strtolower($type), 'timestamp') !== false || 
+					strpos(strtolower($type), 'datetime') !== false || 
+					strpos(strtolower($type), 'date') === 0 || 
+					strpos(strtolower($type), 'time') === 0) {
+					return true;
+				}
+				return false;
+		}
 	}
 	
 	function get($key) {
@@ -319,7 +395,7 @@ abstract class SystemBase {
 		foreach($q->fetchAll() as $row) {
 			$numresults++;
 			$child = new $this_class($row->$pkey_column_name);
-			$child->load_from_data($row, array_keys($this_class::$fields));
+			$child->load_from_data($row, array_keys($this_class::$field_specifications));
 			$this_multi_array->add($child);
 		}
 		
@@ -469,12 +545,12 @@ abstract class SystemBase {
 
 	function export_as_array() {
 		$out_array = array();
-		foreach(array_keys(static::$fields) as $field) {
+		foreach(array_keys(static::$field_specifications) as $field) {
 			$out_array[$field] = $this->get($field);
 		}
-		foreach(static::$timestamp_fields as $field) {
-			if ($this->get($field)) {
-				$out_array[$field] = new DateTime($this->get($field));
+		foreach(static::$field_specifications as $field_name => $spec) {
+			if ($this->is_timestamp_field($field_name) && $this->get($field_name)) {
+				$out_array[$field_name] = new DateTime($this->get($field_name));
 			}
 		}
 		$out_array['key'] = $this->key;
@@ -620,7 +696,7 @@ abstract class SystemBase {
 	}
 
 	function soft_delete(){
-		foreach(array_keys(get_class($this)::$fields) as $field) {
+		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			if($field == static::$prefix.'_delete_time'){
 				$this->set(static::$prefix.'_delete_time', 'now()');
 				$this->save();
@@ -632,7 +708,7 @@ abstract class SystemBase {
 	}
 	
 	function undelete(){
-		foreach(array_keys(get_class($this)::$fields) as $field) {
+		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			if($field == static::$prefix.'_delete_time'){
 				$this->set(static::$prefix.'_delete_time', NULL);
 				$this->save();	
@@ -906,46 +982,34 @@ abstract class SystemBase {
 			throw new SystemClassException('This '.static::$tablename.' object has no data.');
 		}		
 		
+		// EXACT SAME BEHAVIOR AS CURRENT - just reading from field_specifications instead of separate arrays
+		
 		if ($this->key === NULL) {
-			//SET INITIAL DEFAULT VALUES
-			foreach (static::$initial_default_values as $key => $value) {
-				if ($this->get($key) === NULL) {
-					$this->set($key, $value);
+			// SET INITIAL DEFAULT VALUES (exact current logic)
+			foreach (static::$field_specifications as $field_name => $spec) {
+				if (isset($spec['default'])) {
+					if ($this->get($field_name) === NULL) {
+						$this->set($field_name, $spec['default']);
+					}
 				}
 			}
 			
-			//SET ZERO VARIABLES
-			foreach (static::$zero_variables as $variable) {
-				if ($this->key === NULL && $this->get($variable) === NULL) {
-					$this->set($variable, 0);
+			// SET ZERO VARIABLES (exact current logic)
+			foreach (static::$field_specifications as $field_name => $spec) {
+				if (isset($spec['zero_on_create']) && $spec['zero_on_create'] === true) {
+					if ($this->key === NULL && $this->get($field_name) === NULL) {
+						$this->set($field_name, 0);
+					}
 				}
 			}
 		}
 
-		//CHECK REQUIRED FIELDS
-		foreach (static::$required_fields as $required_field) {
-			if (gettype($required_field) == 'array') {
-				$one_true = FALSE;
-				foreach($required_field as $element) {
-
-					if ($this->get($element)) {
-						// If they pass an array, we check to see if one of them is true
-						// If so, we are good.
-						$one_true = TRUE;
-						break;
-					}
+		// CHECK REQUIRED FIELDS (exact current logic, minus array support for Phase 1)
+		foreach (static::$field_specifications as $field_name => $spec) {
+			if (isset($spec['required']) && $spec['required'] === true) {
+				if (is_null($this->get($field_name)) || $this->get($field_name) === '') {
+					throw new SystemClassException('Required field "' . $field_name . '" must be set.');
 				}
-
-				if (!$one_true) {
-					$display_names = array();
-					foreach($required_field as $field) {
-						$display_names[] = "'" . $field . "'";
-					}
-					throw new SystemClassException('One of ' . implode(', ', $display_names) . ' must be set.');
-				}
-			} 
-			else if (is_null($this->get($required_field)) || $this->get($required_field) === '') {
-				throw new SystemClassException('Required field "' . $required_field . '" must be set.');
 			}
 		}
 		
@@ -974,7 +1038,7 @@ abstract class SystemBase {
 		}
 
 		$rowdata = array();
-		foreach(array_keys(get_class($this)::$fields) as $field) {
+		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			$rowdata[$field] = $this->get($field);
 		}
 
@@ -1013,7 +1077,7 @@ abstract class SystemBase {
 	function get_json() { 
 		// build the json-ready PHP object (to be passed into json_encode) 
 		$json = array();
-		foreach (array_keys(static::$fields) as $field) {
+		foreach (array_keys(static::$field_specifications) as $field) {
 			if (in_array($field, static::$json_vars)) { 
 				// make sanitary for display
 				$json[$field] = htmlspecialchars($this->get($field));
@@ -1276,7 +1340,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 			$child = new $childClassName($row->$pkey_column);
 			
 			// Load data into the child object
-			$child->load_from_data($row, array_keys($childClassName::$fields));
+			$child->load_from_data($row, array_keys($childClassName::$field_specifications));
 			
 			// Add to collection
 			$this->add($child);

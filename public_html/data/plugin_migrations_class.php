@@ -14,27 +14,26 @@ class PluginMigration extends SystemBase {    public static $prefix = 'plm';
     public static $permanent_delete_actions = array(
     );  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-    public static $fields = array(
-        'plm_plugin_migration_id' => 'Primary key - Plugin Migration ID',
-        'plm_plugin_name' => 'Plugin name',
-        'plm_migration_id' => 'Migration identifier',
-        'plm_version' => 'Migration version',
-        'plm_applied_time' => 'When migration was applied',
-        'plm_rollback_time' => 'When migration was rolled back',
-        'plm_status' => 'Migration status',
-        'plm_up_sql' => 'SQL for applying migration',
-        'plm_down_sql' => 'SQL for rolling back migration',
-        'plm_error_message' => 'Error message if migration failed',
-    );
-
-    /**
-     * Field specifications define database column properties and schema constraints
+        /**
+     * Field specifications define database column properties and validation rules
+     * 
+     * Database schema properties (used by update_database):
+     *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
+     *   'is_nullable' => true/false - Whether NULL values are allowed
+     *   'serial' => true/false - Auto-incrementing field
+     * 
+     * Validation and behavior properties (used by SystemBase):
+     *   'required' => true/false - Field must have non-empty value on save
+     *   'default' => mixed - Default value for new records (applied on INSERT only)
+     *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+     * 
+     * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
      */
     public static $field_specifications = array(
-        'plm_plugin_migration_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-        'plm_plugin_name' => array('type'=>'varchar(255)', 'is_nullable'=>false),
-        'plm_migration_id' => array('type'=>'varchar(255)', 'is_nullable'=>false),
-        'plm_version' => array('type'=>'varchar(20)', 'is_nullable'=>false),
+        'plm_plugin_migration_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+        'plm_plugin_name' => array('type'=>'varchar(255)', 'is_nullable'=>false, 'required'=>true),
+        'plm_migration_id' => array('type'=>'varchar(255)', 'is_nullable'=>false, 'required'=>true),
+        'plm_version' => array('type'=>'varchar(20)', 'is_nullable'=>false, 'required'=>true),
         'plm_applied_time' => array('type'=>'timestamp(6)'),
         'plm_rollback_time' => array('type'=>'timestamp(6)'),
         'plm_status' => array('type'=>'varchar(20)'),
@@ -43,8 +42,6 @@ class PluginMigration extends SystemBase {    public static $prefix = 'plm';
         'plm_error_message' => array('type'=>'text'),
     );
 
-    public static $required_fields = array('plm_plugin_name', 'plm_migration_id', 'plm_version');
-
     public static $field_constraints = array(
         // Note: Unique constraints should be defined in field_specifications, not field_constraints
         // 'plm_plugin_name_migration_id_unique' => array(
@@ -52,10 +49,6 @@ class PluginMigration extends SystemBase {    public static $prefix = 'plm';
         //     'fields' => array('plm_plugin_name', 'plm_migration_id')
         // )
     );
-
-    public static $zero_variables = array();
-
-    public static $initial_default_values = array();
 
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {

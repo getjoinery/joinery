@@ -54,58 +54,38 @@ class EventSession extends SystemBase {
 		'esf_evs_event_session_id' => 'delete',
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(		'evs_evt_event_id' => 'event ID',
-		'evs_title' => 'Session title',
-		'evs_content' => 'Page content',
-		'evs_start_time' => 'start time',
-		'evs_start_time_local' => 'Stored local start time',
-		'evs_end_time' => 'end time',
-		'evs_end_time_local' => 'Stored local start time',
-		'evs_links' => 'html box for a list of links',
-		'evs_picture_link' => 'link to a picture',
-		'evs_is_public' => 'Is this request public?',
-		'evs_order' => 'sort order',
-		'evs_vid_video_id' => 'Video attached to session',
-		'evs_session_number' => 'Optional number for ordering the sessions',
-		'evs_delete_time' => 'Time of deletion',
-		); 
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'evs_event_session_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'evs_evt_event_id' => array('type'=>'int4'),
-		'evs_title' => array('type'=>'varchar(255)'),
-		'evs_content' => array('type'=>'text'),
-		'evs_start_time' => array('type'=>'timestamp(6)'),
-		'evs_start_time_local' => array('type'=>'timestamp(6)'),
-		'evs_end_time' => array('type'=>'timestamp(6)'),
-		'evs_end_time_local' => array('type'=>'timestamp(6)'),
-		'evs_links' => array('type'=>'text'),
-		'evs_picture_link' => array('type'=>'varchar(255)'),
-		'evs_is_public' => array('type'=>'bool'),
-		'evs_order' => array('type'=>'int2'),
-		'evs_vid_video_id' => array('type'=>'int4'),
-		'evs_session_number' => array('type'=>'int2'),
-		'evs_delete_time' => array('type'=>'timestamp(6)'),
-		); 
-			 	
-	public static $required_fields = array(
-		'evs_evt_event_id'
-	);
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-		'evs_is_public' => FALSE
-	);	
+	    'evs_event_session_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'evs_evt_event_id' => array('type'=>'int4', 'required'=>true),
+	    'evs_title' => array('type'=>'varchar(255)'),
+	    'evs_content' => array('type'=>'text'),
+	    'evs_start_time' => array('type'=>'timestamp(6)'),
+	    'evs_start_time_local' => array('type'=>'timestamp(6)'),
+	    'evs_end_time' => array('type'=>'timestamp(6)'),
+	    'evs_end_time_local' => array('type'=>'timestamp(6)'),
+	    'evs_links' => array('type'=>'text'),
+	    'evs_picture_link' => array('type'=>'varchar(255)'),
+	    'evs_is_public' => array('type'=>'bool', 'default'=>false),
+	    'evs_order' => array('type'=>'int2'),
+	    'evs_vid_video_id' => array('type'=>'int4'),
+	    'evs_session_number' => array('type'=>'int2'),
+	    'evs_delete_time' => array('type'=>'timestamp(6)'),
+	); 
 
 	public static $field_constraints = array(
 	/*

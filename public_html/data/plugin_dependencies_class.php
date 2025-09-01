@@ -14,26 +14,28 @@ class PluginDependency extends SystemBase {    public static $prefix = 'pld';
     public static $permanent_delete_actions = array(
     );  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-    public static $fields = array(
-        'pld_plugin_dependency_id' => 'Primary key - Plugin Dependency ID',
-        'pld_plugin_name' => 'Plugin name that has the dependency',
-        'pld_depends_on' => 'Plugin name that this plugin depends on',
-        'pld_version_constraint' => 'Version constraint for dependency',
-        'pld_dependency_type' => 'Type of dependency (requires, conflicts, etc)',
-    );
-
-    /**
-     * Field specifications define database column properties and schema constraints
+        /**
+     * Field specifications define database column properties and validation rules
+     * 
+     * Database schema properties (used by update_database):
+     *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
+     *   'is_nullable' => true/false - Whether NULL values are allowed
+     *   'serial' => true/false - Auto-incrementing field
+     * 
+     * Validation and behavior properties (used by SystemBase):
+     *   'required' => true/false - Field must have non-empty value on save
+     *   'default' => mixed - Default value for new records (applied on INSERT only)
+     *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+     * 
+     * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
      */
     public static $field_specifications = array(
-        'pld_plugin_dependency_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-        'pld_plugin_name' => array('type'=>'varchar(255)', 'is_nullable'=>false),
-        'pld_depends_on' => array('type'=>'varchar(255)', 'is_nullable'=>false),
+        'pld_plugin_dependency_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+        'pld_plugin_name' => array('type'=>'varchar(255)', 'is_nullable'=>false, 'required'=>true),
+        'pld_depends_on' => array('type'=>'varchar(255)', 'is_nullable'=>false, 'required'=>true),
         'pld_version_constraint' => array('type'=>'varchar(50)'),
         'pld_dependency_type' => array('type'=>'varchar(20)'),
     );
-
-    public static $required_fields = array('pld_plugin_name', 'pld_depends_on');
 
     public static $field_constraints = array(
         // Note: Unique constraints should be defined in field_specifications, not field_constraints
@@ -42,10 +44,6 @@ class PluginDependency extends SystemBase {    public static $prefix = 'pld';
         //     'fields' => array('pld_plugin_name', 'pld_depends_on')
         // )
     );
-
-    public static $zero_variables = array();
-
-    public static $initial_default_values = array();
 
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {

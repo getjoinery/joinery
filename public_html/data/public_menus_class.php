@@ -16,42 +16,31 @@ class PublicMenu extends SystemBase {	public static $prefix = 'pmu';
 	public static $pkey_column = 'pmu_public_menu_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(		'pmu_public_menu_id' => 'Primary key - PublicMenu ID',
-		'pmu_name' => 'Display Name', 
-		'pmu_link' => 'link to the page, starting with a slash',
-		'pmu_is_active' => 'Is this public_menu active?',
-		'pmu_parent_menu_id' => 'pmu_public_menu_id of parent if a subitem',
-		'pmu_order' => 'Order of appearance'
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'pmu_public_menu_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'pmu_name' => array('type'=>'varchar(100)'),
-		'pmu_link' => array('type'=>'varchar(100)'),
-		'pmu_is_active' => array('type'=>'bool'),
-		'pmu_parent_menu_id' => array('type'=>'int4'),
-		'pmu_order' => array('type'=>'int2'),
+	    'pmu_public_menu_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'pmu_name' => array('type'=>'varchar(100)', 'required'=>true),
+	    'pmu_link' => array('type'=>'varchar(100)', 'required'=>true),
+	    'pmu_is_active' => array('type'=>'bool', 'default'=>1),
+	    'pmu_parent_menu_id' => array('type'=>'int4'),
+	    'pmu_order' => array('type'=>'int2'),
 	);	
 
-	public static $required_fields = array(
-		'pmu_name', 'pmu_link');
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array(
-		'pmu_is_active' => 1, 
-		);		
 
 	function authenticate_write($data) {
 		if ($data['current_user_permission'] < 10) {

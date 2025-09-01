@@ -16,58 +16,37 @@ class Comment extends SystemBase {	public static $prefix = 'cmt';
 		'cmt_comment_id_parent' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(
-		'cmt_comment_id' => 'Primary key - Comment ID',
-		'cmt_comment_id_parent' => 'Parent comment for threaded',
-		'cmt_usr_user_id' => 'Comment author',
-		'cmt_author_name' => 'Author name',
-		'cmt_pst_post_id' => 'Post to attach to the comment',
-		'cmt_body' => 'The comment',
-		'cmt_created_time' => 'Time_sent',
-		'cmt_is_approved' => 'Is it deleted',
-		'cmt_delete_time' => 'Time of deletion',
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'cmt_comment_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'cmt_comment_id_parent' => array('type'=>'int4'),
-		'cmt_usr_user_id' => array('type'=>'int4'),
-		'cmt_author_name' => array('type'=>'varchar(255)'),
-		'cmt_pst_post_id' => array('type'=>'int4'),
-		'cmt_body' => array('type'=>'text'),
-		'cmt_created_time' => array('type'=>'timestamp(6)'),
-		'cmt_is_approved' => array('type'=>'bool'),
-		'cmt_delete_time' => array('type'=>'timestamp(6)'),
+	    'cmt_comment_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'cmt_comment_id_parent' => array('type'=>'int4'),
+	    'cmt_usr_user_id' => array('type'=>'int4'),
+	    'cmt_author_name' => array('type'=>'varchar(255)'),
+	    'cmt_pst_post_id' => array('type'=>'int4', 'required'=>true),
+	    'cmt_body' => array('type'=>'text', 'required'=>true),
+	    'cmt_created_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'cmt_is_approved' => array('type'=>'bool', 'default'=>true),
+	    'cmt_delete_time' => array('type'=>'timestamp(6)'),
 	);
-
-	public static $timestamp_fields = array(
-		'usr_email_is_verified_time', 'usr_lastlogin_time', 'usr_admin_disabled_time',
-		'usr_signup_date');
-
-	public static $required_fields = array(
-		'cmt_body', 'cmt_pst_post_id');
 
 	public static $field_constraints = array(
 
 	);
-	
-	public static $zero_variables = array(
-				);
-				
-	public static $initial_default_values = array(
-		'cmt_created_time'=> 'now()',
-		'cmt_is_approved' => TRUE,
-	);
-	
+
 	function display_title(){
 		if($this->get('cmt_body')){
 			return substr(strip_tags($this->get('cmt_body')), 0, 100);

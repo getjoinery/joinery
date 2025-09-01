@@ -16,47 +16,34 @@ class StripeInvoice extends SystemBase {	public static $prefix = 'siv';
 	public static $pkey_column = 'siv_stripe_invoice_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(		
-		'siv_stripe_invoice_id' => 'Primary key - StripeInvoice ID',
-		'siv_stripe_foreign_invoice_id' => 'ID at stripe',
-		'siv_timestamp' => 'Time of stripe_invoice',
-		'siv_amount_paid' => 'Total paid of the stripe_invoice',
-		'siv_usr_user_id' => 'ID of the attached user',
-		'siv_stripe_subscription_id' => 'Subscription id if it is a subscription',
-		'siv_description' => 'Payment intent id for stripe checkout',
-		'siv_stripe_charge_id' => 'Stripe charge id',
-		'siv_stripe_payment_intent_id' => 'Stripe payment intent id',
-	);
-
-	/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'siv_stripe_invoice_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'siv_stripe_foreign_invoice_id' => array('type'=>'varchar(32)'),
-		'siv_timestamp' => array('type'=>'timestamp(6)'),
-		'siv_amount_paid' => array('type'=>'numeric(10,2)'),
-		'siv_usr_user_id' => array('type'=>'int4'),
-		'siv_stripe_subscription_id' => array('type'=>'varchar(32)'),
-		'siv_description' => array('type'=>'text'),
-		'siv_stripe_charge_id' => array('type'=>'varchar(32)'),
-		'siv_stripe_payment_intent_id' => array('type'=>'varchar(32)'),
+	    'siv_stripe_invoice_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'siv_stripe_foreign_invoice_id' => array('type'=>'varchar(32)'),
+	    'siv_timestamp' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'siv_amount_paid' => array('type'=>'numeric(10,2)'),
+	    'siv_usr_user_id' => array('type'=>'int4'),
+	    'siv_stripe_subscription_id' => array('type'=>'varchar(32)'),
+	    'siv_description' => array('type'=>'text'),
+	    'siv_stripe_charge_id' => array('type'=>'varchar(32)'),
+	    'siv_stripe_payment_intent_id' => array('type'=>'varchar(32)'),
 	);
-			  	
-	public static $required_fields = array();
 
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array('siv_timestamp' => 'now()'
-		);	
 
 	public static function GetByStripeSession($session_id) {
 		$data = SingleRowFetch('siv_stripe_invoices', 'siv_stripe_session_id',
@@ -67,7 +54,7 @@ class StripeInvoice extends SystemBase {	public static $prefix = 'siv';
 		}
 
 		$stripe_invoice = new StripeInvoice($data->siv_stripe_invoice_id);
-		$stripe_invoice->load_from_data($data, array_keys(StripeInvoice::$fields));
+		$stripe_invoice->load_from_data($data, array_keys(StripeInvoice::$field_specifications));
 		return $stripe_invoice;
 	}
 
