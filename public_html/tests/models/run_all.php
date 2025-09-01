@@ -60,25 +60,57 @@
 		$verbose = true;
 	}
 	
-	// Check if user wants read-only mode (no insert/update/delete operations)
-	$read_only_mode = false;
+	// Determine if we're on live database
+	$is_live_database = !$test_mode;
+	
+	// Check test mode preference
+	$read_only_mode = true; // Default to read-only for safety
+	$force_crud_mode = false;
+	
 	if(isset($_GET['read_only']) && $_GET['read_only']){
 		$read_only_mode = true;
+	} elseif(isset($_GET['force_crud']) && $_GET['force_crud']){
+		$force_crud_mode = true;
+		$read_only_mode = false;
+	} elseif($is_live_database) {
+		// On live database, default to read-only unless explicitly forced
+		$read_only_mode = true;
+	} else {
+		// On test database, allow CRUD by default
+		$read_only_mode = false;
 	}
 	
-	// Always show read-only option for live database testing
-	if (!$read_only_mode) {
-		echo '<div style="background: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin: 10px 0; border-radius: 5px;">';
-		echo '<strong>💡 Live Database Option:</strong> For safe schema/configuration validation without any data changes:<br>';
-		echo '<a href="?read_only=1' . ($verbose ? '&verbose=1' : '') . '" style="background: #28a745; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; margin: 5px 0; display: inline-block;">🔍 Run Read-Only Validation on Live Database</a>';
-		echo '<br><small>Read-only mode: Primary keys, field specs, configuration validation only (no CRUD operations)</small>';
-		echo '</div>';
-	}
-	
-	if ($read_only_mode) {
-		echo '<div style="background: #d4edda; border: 1px solid #c3e6cb; padding: 10px; margin: 10px 0; border-radius: 5px;">';
-		echo '<strong>🔍 READ-ONLY MODE:</strong> Schema and configuration validation only (no insert/update/delete operations)';
-		echo '</div>';
+	// Show appropriate options based on database type
+	if ($is_live_database) {
+		if (!$force_crud_mode) {
+			// Default read-only mode on live database
+			echo '<div style="background: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; margin: 10px 0; border-radius: 5px;">';
+			echo '<strong>🛡️ LIVE DATABASE PROTECTION:</strong> Running in read-only mode by default<br>';
+			echo '<small>Schema and configuration validation only (no insert/update/delete operations)</small><br><br>';
+			echo '<strong>⚠️ DANGER ZONE:</strong> Run full CRUD tests on live database?<br>';
+			echo '<a href="?force_crud=1' . ($verbose ? '&verbose=1' : '') . '" style="background: #dc3545; color: white; padding: 8px 12px; text-decoration: none; border-radius: 3px; margin: 5px 0; display: inline-block;" onclick="return confirm(\'🚨 WARNING: This will run INSERT/UPDATE/DELETE operations on the LIVE database.\\n\\nThis may:\\n• Create test data that needs to be cleaned up\\n• Modify existing data\\n• Potentially cause data corruption\\n\\nAre you absolutely sure you want to continue?\')">💥 FORCE Full CRUD Tests (DANGEROUS)</a>';
+			echo '</div>';
+		} else {
+			// CRUD mode explicitly requested on live database
+			echo '<div style="background: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; margin: 10px 0; border-radius: 5px;">';
+			echo '<strong>🚨 DANGER: CRUD MODE ON LIVE DATABASE</strong><br>';
+			echo 'You have explicitly requested to run INSERT/UPDATE/DELETE operations on the live database.<br>';
+			echo '<a href="?read_only=1' . ($verbose ? '&verbose=1' : '') . '" style="background: #28a745; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; margin: 5px 0; display: inline-block;">🛡️ Switch to Safe Read-Only Mode</a>';
+			echo '</div>';
+		}
+	} else {
+		// Test database - show both options
+		if ($read_only_mode) {
+			echo '<div style="background: #d4edda; border: 1px solid #c3e6cb; padding: 10px; margin: 10px 0; border-radius: 5px;">';
+			echo '<strong>🔍 READ-ONLY MODE:</strong> Schema and configuration validation only<br>';
+			echo '<a href="?' . ($verbose ? 'verbose=1' : '') . '" style="background: #007bff; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; margin: 5px 0; display: inline-block;">🧪 Run Full CRUD Tests</a>';
+			echo '</div>';
+		} else {
+			echo '<div style="background: #cce5ff; border: 1px solid #b3d9ff; padding: 10px; margin: 10px 0; border-radius: 5px;">';
+			echo '<strong>🧪 FULL TEST MODE:</strong> Running all tests including CRUD operations<br>';
+			echo '<a href="?read_only=1' . ($verbose ? '&verbose=1' : '') . '" style="background: #28a745; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; margin: 5px 0; display: inline-block;">🔍 Switch to Read-Only Mode</a>';
+			echo '</div>';
+		}
 	}
 	
 	// Display time limit safety notice
