@@ -1784,18 +1784,26 @@ class ModelTester {
             // Build expected sequence name
             $sequence_name = $table_name . '_' . $pkey_column . '_seq';
             
-            // Check if sequence exists
-            $seq_sql = "SELECT last_value FROM pg_sequences WHERE sequencename = ? AND schemaname = 'public'";
-            $seq_q = $dblink->prepare($seq_sql);
-            $seq_q->execute([$sequence_name]);
-            $seq_result = $seq_q->fetch(PDO::FETCH_ASSOC);
-            
-            if (!$seq_result) {
-                $this->test_fail("Sequence '{$sequence_name}' does not exist for model {$model_class}");
+            // Check if sequence exists and get current value
+            // Note: We use currval() which is more reliable than pg_sequences.last_value
+            // because pg_sequences only updates after nextval() is called
+            try {
+                $seq_sql = "SELECT last_value FROM $sequence_name";
+                $seq_q = $dblink->prepare($seq_sql);
+                $seq_q->execute();
+                $seq_result = $seq_q->fetch(PDO::FETCH_ASSOC);
+                
+                if (!$seq_result) {
+                    $this->test_fail("Could not get current value from sequence '{$sequence_name}' for model {$model_class}");
+                    return;
+                }
+                
+                $current_seq_value = $seq_result['last_value'];
+            } catch (PDOException $e) {
+                // Sequence doesn't exist
+                $this->test_fail("Sequence '{$sequence_name}' does not exist for model {$model_class}. Error: " . $e->getMessage());
                 return;
             }
-            
-            $current_seq_value = $seq_result['last_value'];
             
             // Get current max value from table
             $max_sql = "SELECT COALESCE(MAX($pkey_column), 0) as max_val FROM $table_name";
