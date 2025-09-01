@@ -4,8 +4,12 @@
  * 
  * This utility fixes PostgreSQL sequence synchronization issues that can occur when:
  * - Data is imported directly without using the model's save() method
- * - Sequences get out of sync due to manual database operations
+ * - Sequences get out of sync due to manual database operations  
  * - Database restores don't properly update sequence values
+ * 
+ * ⚠️ IMPORTANT: This utility ONLY operates on the LIVE/PRODUCTION database.
+ * It does NOT fix test database sequences. Test databases should be rebuilt
+ * or have sequences manually fixed as needed for testing purposes.
  * 
  * PROBLEM:
  * When a sequence's current value is less than or equal to the maximum primary key
