@@ -22,48 +22,35 @@ class ItemRelation extends SystemBase {
 		//'pac_itr_item_relation_id' => 'delete',
 		//'com_itr_item_relation_id' => 'null'
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(
-		'itr_item_relation_id' => 'Primary key - ItemRelation ID',
-		'itr_itm_item_id_left' => 'Name of item_relation',
-		'itr_itm_item_id_right' => 'Name of item_relation',
-		'itr_external_link' => 'External link if no right relation',
-		'itr_itt_item_relation_type_id' => 'Type to the item_relation',
-		'itr_usr_user_id' => 'User this item_relation is associated with',
-		'itr_published_time' => 'Time published',
-		'itr_create_time' => 'Time Created',
-		'itr_delete_time' => 'Time of deletion',
-	);
-	
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)'  < /dev/null |  |  'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'itr_item_relation_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'itr_itm_item_id_left' => array('type'=>'int4'),
-		'itr_itm_item_id_right' => array('type'=>'int4'),
-		'itr_external_link' => array('type'=>'text'),
-		'itr_itt_item_relation_type_id' => array('type'=>'int4'),
-		'itr_usr_user_id' => array('type'=>'int4'),
-		'itr_published_time' => array('type'=>'timestamp(6)'),
-		'itr_create_time' => array('type'=>'timestamp(6)'),
-		'itr_delete_time' => array('type'=>'timestamp(6)'),
+	    'itr_item_relation_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'itr_itm_item_id_left' => array('type'=>'int4'),
+	    'itr_itm_item_id_right' => array('type'=>'int4'),
+	    'itr_external_link' => array('type'=>'text'),
+	    'itr_itt_item_relation_type_id' => array('type'=>'int4'),
+	    'itr_usr_user_id' => array('type'=>'int4'),
+	    'itr_published_time' => array('type'=>'timestamp(6)'),
+	    'itr_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'itr_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-public static $required_fields = array();
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array();	
-
-	public static $initial_default_values = array('itr_create_time' => 'now()'
-		);				
 
 	function save($debug=false) {
 		

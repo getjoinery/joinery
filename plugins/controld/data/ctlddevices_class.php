@@ -26,68 +26,46 @@ class CtldDevice extends SystemBase {
 	public static $permanent_delete_actions = array(
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
-	public static $fields = array(
-		'cdd_ctlddevice_id' => 'Primary key - CtldDevice ID',
-		'cdd_device_id' => 'ID from controld',
-		'cdd_device_name' => 'Name of device',
-		'cdd_device_type' => 'Type of OS on the device',
-		'cdd_profile_id_primary' => 'ID from controld',
-		'cdd_profile_id_secondary' => 'ID from controld',
-		'cdd_cdp_ctldprofile_id_primary' => 'Local foreign key',
-		'cdd_cdp_ctldprofile_id_secondary' => 'Local foreign key',
-		'cdd_usr_user_id' => 'User id this profile is assigned to',
-		'cdd_is_active' => 'Is it active?',
-		'cdd_create_time' => 'Time Created',
-		'cdd_delete_time' => 'Time deleted',
-		'cdd_controld_resolver' => 'Link/code to provision this device at controld',
-		'cdd_deactivation_pin' => 'Pin to turn off the service',
-		'cdd_timezone' => 'Timezone for this device for use in controld',
-		'cdd_allow_device_edits' => 'Override for the edit restrictions',
-		'cdd_activate_time' => 'Time this was activated',
-	);
-	
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)'  < /dev/null |  |  'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'cdd_ctlddevice_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'cdd_device_id' => array('type'=>'varchar(64)'),
-		'cdd_device_name' => array('type'=>'varchar(64)'),
-		'cdd_device_type' => array('type'=>'varchar(32)'),
-		'cdd_profile_id_primary' => array('type'=>'varchar(64)'),
-		'cdd_profile_id_secondary' => array('type'=>'varchar(64)'),
-		'cdd_cdp_ctldprofile_id_primary' => array('type'=>'int4'),
-		'cdd_cdp_ctldprofile_id_secondary' => array('type'=>'int4'),
-		'cdd_usr_user_id' => array('type'=>'int4'),
-		'cdd_is_active' => array('type'=>'bool'),
-		'cdd_create_time' => array('type'=>'timestamp(6)'),
-		'cdd_delete_time' => array('type'=>'timestamp(6)'),
-		'cdd_controld_resolver' => array('type'=>'varchar(128)'),
-		'cdd_deactivation_pin' => array('type'=>'varchar(10)'),
-		'cdd_timezone' => array('type'=>'varchar(64)'),
-		'cdd_allow_device_edits' => array('type'=>'int4'),
-		'cdd_activate_time' => array('type'=>'timestamp(6)'),
+	    'cdd_ctlddevice_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'cdd_device_id' => array('type'=>'varchar(64)'),
+	    'cdd_device_name' => array('type'=>'varchar(64)'),
+	    'cdd_device_type' => array('type'=>'varchar(32)'),
+	    'cdd_profile_id_primary' => array('type'=>'varchar(64)'),
+	    'cdd_profile_id_secondary' => array('type'=>'varchar(64)'),
+	    'cdd_cdp_ctldprofile_id_primary' => array('type'=>'int4'),
+	    'cdd_cdp_ctldprofile_id_secondary' => array('type'=>'int4'),
+	    'cdd_usr_user_id' => array('type'=>'int4'),
+	    'cdd_is_active' => array('type'=>'bool'),
+	    'cdd_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'cdd_delete_time' => array('type'=>'timestamp(6)'),
+	    'cdd_controld_resolver' => array('type'=>'varchar(128)'),
+	    'cdd_deactivation_pin' => array('type'=>'varchar(10)'),
+	    'cdd_timezone' => array('type'=>'varchar(64)'),
+	    'cdd_allow_device_edits' => array('type'=>'int4'),
+	    'cdd_activate_time' => array('type'=>'timestamp(6)'),
 	);
-
-public static $required_fields = array();
 
 	public static $field_constraints = array(
 		/*'cdd_code' => array(
 			array('WordLength', 0, 64),
 			'NoCaps',
 			),*/
-	);	
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-		'cdd_create_time' => 'now()'
 	);	
 
 	function prepare() {

@@ -19,62 +19,42 @@ class Booking extends SystemBase {
 	const BOOKING_STATUS_COMPLETED = 2;
 	const BOOKING_STATUS_CANCELED = 3;
 
-	public static $fields = array(
-		'bkn_booking_id' => 'Booking id',
-		'bkn_calendly_event_uri' => 'Calendly uuid',
-		'bkn_usr_user_id_booked' => 'Person being booked',
-		'bkn_usr_user_id_client' => 'Person booking',
-		'bkn_pro_product_id' => 'Product booked',
-		'bkn_bkt_booking_type_id' => 'Foreign key to the booking type table',
-		'bkn_type' => 'Type of booking from calendly',
-		'bkn_notes' => 'Notes',
-		'bkn_start_time' => 'Start time of booking',
-		'bkn_end_time' => 'End time of booking',
-		'bkn_status' => 'Status of booking',
-		'bkn_cancel_link' => 'Link to cancel',
-		'bkn_reschedule_link' => 'Link to reschedule',
-		'bkn_location' => 'Location of meeting (zoom link or something)',
-		'bkn_create_time' => 'Time created',
-		'bkn_delete_time' => 'Time of deletion',
-		'bkn_update_time' => 'Time updated',
-	);
-
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'bkn_booking_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'bkn_calendly_event_uri' => array('type'=>'varchar(255)'),
-		'bkn_usr_user_id_booked' => array('type'=>'int4'),
-		'bkn_usr_user_id_client' => array('type'=>'int4'),
-		'bkn_pro_product_id' => array('type'=>'int4'),
-		'bkn_bkt_booking_type_id' => array('type'=>'varchar(255)'),
-		'bkn_type' => array('type'=>'varchar(255)'),
-		'bkn_notes' => array('type'=>'varchar(255)'),
-		'bkn_start_time' => array('type'=>'timestamp(6)'),
-		'bkn_end_time' => array('type'=>'timestamp(6)'),
-		'bkn_status' => array('type'=>'int4'),
-		'bkn_cancel_link' => array('type'=>'varchar(255)'),
-		'bkn_reschedule_link' => array('type'=>'varchar(255)'),
-		'bkn_location' => array('type'=>'varchar(255)'),
-		'bkn_create_time' => array('type'=>'timestamp(6)'),
-		'bkn_delete_time' => array('type'=>'timestamp(6)'),
-		'bkn_update_time' => array('type'=>'timestamp(6)'),
+	    'bkn_booking_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'bkn_calendly_event_uri' => array('type'=>'varchar(255)'),
+	    'bkn_usr_user_id_booked' => array('type'=>'int4'),
+	    'bkn_usr_user_id_client' => array('type'=>'int4'),
+	    'bkn_pro_product_id' => array('type'=>'int4'),
+	    'bkn_bkt_booking_type_id' => array('type'=>'varchar(255)'),
+	    'bkn_type' => array('type'=>'varchar(255)'),
+	    'bkn_notes' => array('type'=>'varchar(255)'),
+	    'bkn_start_time' => array('type'=>'timestamp(6)'),
+	    'bkn_end_time' => array('type'=>'timestamp(6)'),
+	    'bkn_status' => array('type'=>'int4', 'zero_on_create'=>true),
+	    'bkn_cancel_link' => array('type'=>'varchar(255)'),
+	    'bkn_reschedule_link' => array('type'=>'varchar(255)'),
+	    'bkn_location' => array('type'=>'varchar(255)'),
+	    'bkn_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'bkn_delete_time' => array('type'=>'timestamp(6)'),
+	    'bkn_update_time' => array('type'=>'timestamp(6)'),
 	);
 
-public static $required_fields = array();
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array('bkn_status');	
-
-	public static $initial_default_values = array('bkn_create_time' => 'now()');	
 
 	static function GetByCalendlyUri($calendly_uri){
 		$results = new MultiBooking(array('calendly_uri' => $calendly_uri));

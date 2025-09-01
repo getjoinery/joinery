@@ -21,54 +21,38 @@ class BookingType extends SystemBase {
 	const BOOKING_STATUS_INACTIVE = 0;
 	const BOOKING_STATUS_ACTIVE = 1;
 
-	public static $fields = array(
-		'bkt_booking_type_id' => 'BookingType id',
-		'bkt_calendly_event_type_uri' => 'Calendly uuid',
-		'bkt_usr_user_id' => 'Owner',
-		'bkt_pro_product_id' => 'Product booked',
-		'bkt_name' => 'Name of booking_type',
-		'bkt_slug' => 'Url safe slug',
-		'bkt_description_html' => 'Html description',
-		'bkt_description_plain' => 'Plain description',
-		'bkt_status' => 'Status of booking_type',
-		'bkt_schedule_link' => 'Link to schedule',
-		'bkt_create_time' => 'Time created',
-		'bkt_delete_time' => 'Time of deletion',
-		'bkt_update_time' => 'Time updated',
-	);
-	
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)'  < /dev/null |  |  'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'bkt_booking_type_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'bkt_calendly_event_type_uri' => array('type'=>'varchar(255)'),
-		'bkt_usr_user_id' => array('type'=>'int4'),
-		'bkt_pro_product_id' => array('type'=>'int4'),
-		'bkt_name' => array('type'=>'varchar(255)'),
-		'bkt_slug' => array('type'=>'varchar(255)'),
-		'bkt_description_html' => array('type'=>'varchar(255)'),
-		'bkt_description_plain' => array('type'=>'varchar(255)'),
-		'bkt_status' => array('type'=>'int4'),
-		'bkt_schedule_link' => array('type'=>'varchar(255)'),
-		'bkt_create_time' => array('type'=>'timestamp(6)'),
-		'bkt_delete_time' => array('type'=>'timestamp(6)'),
-		'bkt_update_time' => array('type'=>'timestamp(6)'),
+	    'bkt_booking_type_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'bkt_calendly_event_type_uri' => array('type'=>'varchar(255)'),
+	    'bkt_usr_user_id' => array('type'=>'int4'),
+	    'bkt_pro_product_id' => array('type'=>'int4'),
+	    'bkt_name' => array('type'=>'varchar(255)'),
+	    'bkt_slug' => array('type'=>'varchar(255)'),
+	    'bkt_description_html' => array('type'=>'varchar(255)'),
+	    'bkt_description_plain' => array('type'=>'varchar(255)'),
+	    'bkt_status' => array('type'=>'int4', 'zero_on_create'=>true),
+	    'bkt_schedule_link' => array('type'=>'varchar(255)'),
+	    'bkt_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'bkt_delete_time' => array('type'=>'timestamp(6)'),
+	    'bkt_update_time' => array('type'=>'timestamp(6)'),
 	);
 
-public static $required_fields = array();
-
 	public static $field_constraints = array();	
-	
-	public static $zero_variables = array('bkt_status');	
-
-	public static $initial_default_values = array('bkt_create_time' => 'now()');	
 
 	static function GetByCalendlyUri($calendly_uri){
 		$results = new MultiBookingType(array('calendly_uri' => $calendly_uri));

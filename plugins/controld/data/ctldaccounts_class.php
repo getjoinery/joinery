@@ -28,51 +28,38 @@ class CtldAccount extends SystemBase {
 	const BASIC_PLAN_MAX_DEVICES = 1;
 	const PREMIUM_PLAN_MAX_DEVICES = 3;
 	const PRO_PLAN_MAX_DEVICES = 10;	
-	
-	public static $fields = array(
-		'cda_ctldaccount_id' => 'Primary key - CtldAccount ID',
-		'cda_plan' => 'Plan of this user',
-		'cda_plan_max_devices' => 'Max devices allowed',
-		'cda_usr_user_id' => 'User id this profile is assigned to',
-		'cda_is_active' => 'Is it active?',
-		'cda_period_end' => 'Time this user is up for renewal',
-		'cda_create_time' => 'Time Created',
-		'cda_delete_time' => 'Time deleted',
-	);
-	
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)'  < /dev/null |  |  'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'cda_ctldaccount_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'cda_plan' => array('type'=>'int4'),
-		'cda_plan_max_devices' => array('type'=>'int4'),
-		'cda_usr_user_id' => array('type'=>'int4'),
-		'cda_is_active' => array('type'=>'bool'),
-		'cda_period_end' => array('type'=>'timestamp(6)'),
-		'cda_create_time' => array('type'=>'timestamp(6)'),
-		'cda_delete_time' => array('type'=>'timestamp(6)'),
+	    'cda_ctldaccount_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'cda_plan' => array('type'=>'int4'),
+	    'cda_plan_max_devices' => array('type'=>'int4'),
+	    'cda_usr_user_id' => array('type'=>'int4'),
+	    'cda_is_active' => array('type'=>'bool'),
+	    'cda_period_end' => array('type'=>'timestamp(6)'),
+	    'cda_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	    'cda_delete_time' => array('type'=>'timestamp(6)'),
 	);
-
-public static $required_fields = array();
 
 	public static $field_constraints = array(
 		/*'cda_code' => array(
 			array('WordLength', 0, 64),
 			'NoCaps',
 			),*/
-	);	
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
-		'cda_create_time' => 'now()'
 	);	
 
 	function prepare() {

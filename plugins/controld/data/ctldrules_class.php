@@ -18,46 +18,36 @@ class CtldRule extends SystemBase {
 	public static $pkey_column = 'cdr_ctldrule_id';
 	public static $permanent_delete_actions = array(
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
-	public static $fields = array(
-		'cdr_ctldrule_id' => 'Primary key - CtldRule ID',
-		'cdr_cdp_ctldprofile_id' => 'Foreign key to profile',
-		'cdr_rule_hostname' => 'Hostname of the rule',
-		'cdr_is_active' => 'Is it active?',
-		'cdr_rule_action' => '0 = BLOCK. 1 = BYPASS, 2 = SPOOF, 3 = REDIRECT',
-		'cdr_rule_via' => 'Spoof/Redirect target. If SPOOF, this can be an IPv4 or hostname. If REDIRECT, this must be a valid proxy identifier.',
-	);
-	
-/**
-	 * Field specifications define database column properties and schema constraints
-	 * Available options:
-	 *   'type' => 'varchar(255)'  < /dev/null |  |  'int4' | 'int8' | 'text' | 'timestamp(6)' | 'numeric(10,2)' | 'bool' | etc.
-	 *   'serial' => true/false - Auto-incrementing field
+
+	/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
 	 *   'is_nullable' => true/false - Whether NULL values are allowed
-	 *   'unique' => true - Field must be unique (single field constraint)
-	 *   'unique_with' => array('field1', 'field2') - Composite unique constraint with other fields
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
 	public static $field_specifications = array(
-		'cdr_ctldrule_id' => array('type'=>'int8', 'serial'=>true, 'is_nullable'=>false),
-		'cdr_cdp_ctldprofile_id' => array('type'=>'varchar(64)'),
-		'cdr_rule_hostname' =>  array('type'=>'varchar(128)'),
-		'cdr_is_active' => array('type'=>'int2'),
-		'cdr_rule_action' => array('type'=>'int2'),
-		'cdr_rule_via' => array('type'=>'varchar(32)'),
+	    'cdr_ctldrule_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'cdr_cdp_ctldprofile_id' => array('type'=>'varchar(64)'),
+	    'cdr_rule_hostname' => array('type'=>'varchar(128)'),
+	    'cdr_is_active' => array('type'=>'int2'),
+	    'cdr_rule_action' => array('type'=>'int2'),
+	    'cdr_rule_via' => array('type'=>'varchar(32)'),
 	);
-
-public static $required_fields = array();
 
 	public static $field_constraints = array(
 		/*'cdr_code' => array(
 			array('WordLength', 0, 64),
 			'NoCaps',
 			),*/
-	);	
-	
-	public static $zero_variables = array();
-	
-	public static $initial_default_values = array(
 	);	
 
 }
