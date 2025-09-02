@@ -45,7 +45,6 @@ abstract class SystemBase {
 	static $required_user = array();	
 	static $field_constraints = array();
 	static $field_constraints_user = array();
-	static $json_vars = array('key');
 	static $permanent_delete_actions = array();
 
 	function __construct($key, $and_load=FALSE) {
@@ -294,6 +293,27 @@ abstract class SystemBase {
 				}
 				return false;
 		}
+	}
+	
+	/**
+	 * Auto-detect if a field is a JSON field based on its type specification
+	 * Optimized for performance with quick rejection of non-JSON types
+	 */
+	protected function is_json_field($field_name) {
+		if (!isset(static::$field_specifications[$field_name])) {
+			return false;
+		}
+		
+		$type = static::$field_specifications[$field_name]['type'] ?? '';
+		
+		// Optimized: Quick rejection based on first character
+		$first_char = $type[0] ?? '';
+		if ($first_char !== 'j') {
+			return false; // Not json/jsonb - immediate rejection
+		}
+		
+		// Only perform exact comparison if starts with 'j'
+		return $type === 'json' || $type === 'jsonb';
 	}
 	
 	function get($key) {
@@ -1078,7 +1098,7 @@ abstract class SystemBase {
 		// build the json-ready PHP object (to be passed into json_encode) 
 		$json = array();
 		foreach (array_keys(static::$field_specifications) as $field) {
-			if (in_array($field, static::$json_vars)) { 
+			if ($this->is_json_field($field)) { 
 				// make sanitary for display
 				$json[$field] = htmlspecialchars($this->get($field));
 			}

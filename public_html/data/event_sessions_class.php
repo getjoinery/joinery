@@ -191,8 +191,6 @@ class EventSession extends SystemBase {
 		return $calendar_links;
 	}
 	
-	public static $json_vars = array(
-		'evs_event_id', 'evs_name', 'evs_description');
 
 	function prepare() {
 		if ($this->data === NULL) {

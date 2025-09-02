@@ -77,8 +77,6 @@ class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 
 		);
 
-	public static $json_vars = array(
-		'evr_event_registrant_id', 'evr_evt_event_id', 'evr_usr_user_id');
 
 	static function check_if_registrant_exists($userid, $eventid){
 		$sql = 'SELECT * FROM evr_event_registrants WHERE evr_usr_user_id = ? AND evr_evt_event_id = ?';

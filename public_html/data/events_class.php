@@ -435,8 +435,6 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 		
 	}	
 
-	public static $json_vars = array(
-		'evt_event_id', 'evt_name', 'evt_description');
 
 	function output_product_dropdown($formwriter, $currentvalue, $extra_data=array()) {
 		PathHelper::requireOnce('data/products_class.php');
