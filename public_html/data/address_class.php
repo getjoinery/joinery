@@ -129,11 +129,6 @@ class Address extends SystemBase {	public static $prefix = 'usa';
 
 	public static $field_constraints = array();
 
-	public static $json_vars = array(
-		'usa_address1', 'usa_address2', 'usa_city', 'usa_state', 'usa_zip_code_id',
-	);
-
-	public static $json_prefix = 'usa_';
 
 	private static function UcAddress($string) {
 		$test_string = preg_replace('/[^A-Za-z]/', '', $string);
@@ -410,15 +405,6 @@ class Address extends SystemBase {	public static $prefix = 'usa';
 		return $address_data;
 	}
 
-	function get_json() {
-		// build the json-ready PHP object (to be passed into json_encode)
-		$json = array();
-		foreach(self::$json_vars as $field) {
-			// strip out the prefix when shipping as JSON, also make sanitary for display
-			$json[str_replace(self::$json_prefix, '', $field)] = htmlspecialchars($this->get($field));
-		}
-		return $json;
-	}
 
 	function get_number_and_street() {
 		$exploded_street = explode(' ', $this->get('usa_address1'), 1);

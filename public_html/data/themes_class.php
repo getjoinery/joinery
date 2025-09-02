@@ -66,7 +66,6 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
     
     );
     
-    public static $json_vars = array('thm_metadata');
 
     public static $field_constraints = array();
     public static $permanent_delete_actions = array();
