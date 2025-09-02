@@ -4,7 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function address_edit_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	PathHelper::requireOnce('includes/SystemClass.php');
+	PathHelper::requireOnce('includes/SystemBase.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	

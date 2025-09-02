@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class SettingException extends SystemClassException {}
+class SettingException extends SystemBaseException {}
 
 class Setting extends SystemBase {	public static $prefix = 'stg';
 	public static $tablename = 'stg_settings';

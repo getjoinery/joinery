@@ -8,12 +8,12 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/order_items_class.php');
 
-class OrderException extends SystemClassException {}
+class OrderException extends SystemBaseException {}
 
 class Order extends SystemBase {	public static $prefix = 'ord';
 	public static $tablename = 'ord_orders';

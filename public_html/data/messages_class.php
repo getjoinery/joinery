@@ -3,9 +3,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
-class MessageException extends SystemClassException {}
+class MessageException extends SystemBaseException {}
 class MessageNotSentException extends MessageException {};
 
 class Message extends SystemBase {	public static $prefix = 'msg';

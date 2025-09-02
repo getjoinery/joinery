@@ -7,13 +7,13 @@ PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/content_versions_class.php');
 PathHelper::requireOnce('data/groups_class.php');
 
-class PostException extends SystemClassException {}
+class PostException extends SystemBaseException {}
 
 class Post extends SystemBase {	public static $prefix = 'pst';
 	public static $tablename = 'pst_posts';

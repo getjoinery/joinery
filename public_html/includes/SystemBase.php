@@ -17,21 +17,21 @@ interface DisplayableErrorMessageNoLog {}
 interface DisplayablePermanentErrorMessage {}
 interface DisplayablePermanentErrorMessageNoLog {}
 
-class SystemClassException extends Exception {}
+class SystemBaseException extends Exception {}
 
-class SystemInvalidFormError extends SystemClassException {}
+class SystemInvalidFormError extends SystemBaseException {}
 
-class SystemClassNoKeyError extends SystemClassException {}
+class SystemBaseNoKeyError extends SystemBaseException {}
 
-class SystemAuthenticationError extends SystemClassException {}
+class SystemAuthenticationError extends SystemBaseException {}
 
-class SystemDisplayableError extends SystemClassException implements DisplayableErrorMessage {}
+class SystemDisplayableError extends SystemBaseException implements DisplayableErrorMessage {}
 
-class SystemDisplayablePermanentError extends SystemClassException implements DisplayablePermanentErrorMessage {}
+class SystemDisplayablePermanentError extends SystemBaseException implements DisplayablePermanentErrorMessage {}
 
-class SystemDisplayableErrorNoLog extends SystemClassException implements DisplayableErrorMessageNoLog {}
+class SystemDisplayableErrorNoLog extends SystemBaseException implements DisplayableErrorMessageNoLog {}
 
-class SystemDisplayablePermanentErrorNoLog extends SystemClassException implements DisplayablePermanentErrorMessageNoLog {}
+class SystemDisplayablePermanentErrorNoLog extends SystemBaseException implements DisplayablePermanentErrorMessageNoLog {}
 
 abstract class SystemBase {
 	
@@ -54,15 +54,15 @@ abstract class SystemBase {
 		$this->cached_references = array();
 		
 		if(!static::$prefix){
-			throw new SystemClassException('This object has no prefix.');
+			throw new SystemBaseException('This object has no prefix.');
 		}
 		
 		if(!static::$tablename){
-			throw new SystemClassException('This object has no table name.');
+			throw new SystemBaseException('This object has no table name.');
 		}
 		
 		if(!static::$pkey_column){
-			throw new SystemClassException('This object has no primary key.');
+			throw new SystemBaseException('This object has no primary key.');
 		}
 
 		if ($and_load) {
@@ -73,11 +73,11 @@ abstract class SystemBase {
 	//THIS FUNCTION RETURNS ONLY ONE ROW AS AN OBJECT WHICH MATCHES THE COLUMN AND VALUE PROVIDED
 	public static function GetByColumn($column, $value) {
 		if(empty($column) || (empty($value) && $value !== 0)){
-			throw new SystemClassException('To load a row using GetByColumn, you must pass a column and value.');
+			throw new SystemBaseException('To load a row using GetByColumn, you must pass a column and value.');
 		}
 
 		if(!isset(static::$field_specifications[$column])){
-			throw new SystemClassException('That column '.$column.' does not exist in '.static::$tablename);
+			throw new SystemBaseException('That column '.$column.' does not exist in '.static::$tablename);
 		}
 
 		$field_type = static::$field_specifications[$column]['type'];
@@ -134,7 +134,7 @@ abstract class SystemBase {
 	function create_url($input_url) {
 		//REQUIRE THAT THE OBJECT IS LOADED
 		if(!$input_url){
-			throw new SystemClassException('You must pass a string to the create_url function.');
+			throw new SystemBaseException('You must pass a string to the create_url function.');
 		}
 
 		$classname = get_called_class();
@@ -150,7 +150,7 @@ abstract class SystemBase {
 		while($result = $classname::get_by_link($tmp, true)){
 			$safety++;
 			if($safety > 50){
-				throw new SystemClassException('Create_url is stuck in a loop. Check the presence of link Multi search.');
+				throw new SystemBaseException('Create_url is stuck in a loop. Check the presence of link Multi search.');
 				exit;
 			}
 			if($result->key == $this->key){
@@ -167,7 +167,7 @@ abstract class SystemBase {
 
 	function get_url($format='short') {
 		if(!isset(static::$url_namespace)){
-			throw new SystemClassException('URL namespace is not set in object '.get_called_class().'.');
+			throw new SystemBaseException('URL namespace is not set in object '.get_called_class().'.');
 		}
 		
 		if($format == 'full'){
@@ -184,7 +184,7 @@ abstract class SystemBase {
 		if ($check_existance && !array_key_exists($key, static::$field_specifications)) {
 			//TODO BETTER LOGGING HERE
 			error_log('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
-			//throw new SystemClassException('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
+			//throw new SystemBaseException('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
 		}
 		$this->data->$key = $value;
 	}
@@ -329,7 +329,7 @@ abstract class SystemBase {
 	//IF SEARCH_DELETED IS TRUE, IT WILL ALSO SEARCH ALL DELETED ITEMS
 	public static function CheckForDuplicate($obj_to_check, $fields=NULL, $search_deleted=false) {
 		if(!isset($fields) || $fields == '' || $fields == NULL){
-			throw new SystemClassException('You must pass some fields to check for duplicates.');
+			throw new SystemBaseException('You must pass some fields to check for duplicates.');
 		}
 		
 		$dbhelper = DbConnector::get_instance();
@@ -433,7 +433,7 @@ abstract class SystemBase {
 	//IF SEARCH_DELETED IS TRUE, IT WILL ALSO SEARCH ALL DELETED ITEMS
 	public function check_for_duplicate($fields=NULL, $search_deleted=false) {
 		if(!isset($fields) || $fields == '' || $fields == NULL){
-			throw new SystemClassException('You must pass some fields to check for duplicates.');
+			throw new SystemBaseException('You must pass some fields to check for duplicates.');
 		}
 		
 		$dbhelper = DbConnector::get_instance();
@@ -560,7 +560,7 @@ abstract class SystemBase {
 		if ($this->key) {
 			return md5(get_class($this) . " " . $this->key);
 		}
-		throw new SystemClassException('Cannot hash an element with no key.');
+		throw new SystemBaseException('Cannot hash an element with no key.');
 	}
 
 	function export_as_array() {
@@ -702,7 +702,7 @@ abstract class SystemBase {
 	function load() {
 		$this->loaded = TRUE;
 		if ($this->key === NULL) {
-			throw new SystemClassNoKeyError('Cannot load a '.static::$tablename.' object with no key.');
+			throw new SystemBaseNoKeyError('Cannot load a '.static::$tablename.' object with no key.');
 		}
 		
 		$this->data = SingleRowFetch(static::$tablename, static::$pkey_column,
@@ -752,7 +752,7 @@ abstract class SystemBase {
 	function permanent_delete($debug=false){
 		// Check if the primary key is incorrectly included in permanent_delete_actions
 		if(isset(static::$permanent_delete_actions) && array_key_exists(static::$pkey_column, static::$permanent_delete_actions)){
-			throw new SystemClassException('Primary key ' . static::$pkey_column . ' should not be included in permanent_delete_actions for ' . static::$tablename . '. The main record deletion is handled automatically.');
+			throw new SystemBaseException('Primary key ' . static::$pkey_column . ' should not be included in permanent_delete_actions for ' . static::$tablename . '. The main record deletion is handled automatically.');
 		}
 		
 		$dbhelper = DbConnector::get_instance();
@@ -823,7 +823,7 @@ abstract class SystemBase {
 							$dblink->rollBack();
 						}
 						
-						throw new SystemClassException('Cannot permanent delete '.static::$pkey_column.'='.$this->key.' from '.static::$tablename.'. Columns exist in table '. $table_name);
+						throw new SystemBaseException('Cannot permanent delete '.static::$pkey_column.'='.$this->key.' from '.static::$tablename.'. Columns exist in table '. $table_name);
 						return false;
 					}
 					
@@ -999,7 +999,7 @@ abstract class SystemBase {
 	// And to save it to the database
 	function save($debug=false) {
 		if ($this->data === NULL) {
-			throw new SystemClassException('This '.static::$tablename.' object has no data.');
+			throw new SystemBaseException('This '.static::$tablename.' object has no data.');
 		}		
 		
 		// EXACT SAME BEHAVIOR AS CURRENT - just reading from field_specifications instead of separate arrays
@@ -1028,7 +1028,7 @@ abstract class SystemBase {
 		foreach (static::$field_specifications as $field_name => $spec) {
 			if (isset($spec['required']) && $spec['required'] === true) {
 				if (is_null($this->get($field_name)) || $this->get($field_name) === '') {
-					throw new SystemClassException('Required field "' . $field_name . '" must be set.');
+					throw new SystemBaseException('Required field "' . $field_name . '" must be set.');
 				}
 			}
 		}
@@ -1333,19 +1333,19 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		if ($this->loadable) {
 			$this->loaded = TRUE;
 		} else {
-			throw new SystemClassException('This MultiBase was explicitly set unloaded with $options === NULL');
+			throw new SystemBaseException('This MultiBase was explicitly set unloaded with $options === NULL');
 		}
 		
 		// Generic implementation for all Multi classes
 		if (!isset(static::$model_class)) {
-			throw new SystemClassException("Multi class " . get_class($this) . " must define \$model_class property");
+			throw new SystemBaseException("Multi class " . get_class($this) . " must define \$model_class property");
 		}
 		
 		$childClassName = static::$model_class;
 		
 		// Verify the child class exists
 		if (!class_exists($childClassName)) {
-			throw new SystemClassException("Model class {$childClassName} not found for " . get_class($this));
+			throw new SystemBaseException("Model class {$childClassName} not found for " . get_class($this));
 		}
 		
 		// Get the primary key column from the child class
@@ -1435,7 +1435,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		if (isset($this->multi_data[$location])) {
 			return $this->multi_data[$location];
 		} else {
-			throw new SystemClassException('Given location doesn\'t exist.');
+			throw new SystemBaseException('Given location doesn\'t exist.');
 		}
 	}
 
@@ -1525,7 +1525,7 @@ class SystemMultiBaseIncremental implements Iterator {
 	}
 }
 
-// Since SystemClass is the base of everything, it needs to be defined before
+// Since SystemBase is the base of everything, it needs to be defined before
 // we setup the default exception handler.  Thus in this case it is OK for us to
 // require_once things not at the top of the file!
 require_once('SessionControl.php');

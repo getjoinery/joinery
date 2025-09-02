@@ -8,7 +8,7 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/order_items_class.php');
@@ -19,9 +19,9 @@ PathHelper::requireOnce('data/product_versions_class.php');
 PathHelper::requireOnce('data/product_requirements_class.php');
 PathHelper::requireOnce('data/product_requirement_instances_class.php');
 
-class ProductException extends SystemClassException {}
+class ProductException extends SystemBaseException {}
 
-class BasicProductRequirementException extends SystemClassException {}
+class BasicProductRequirementException extends SystemBaseException {}
 
 abstract class BasicProductRequirement {
 	protected static $model_class = 'Product';

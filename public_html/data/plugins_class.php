@@ -3,9 +3,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
-class PluginException extends SystemClassException {}
+class PluginException extends SystemBaseException {}
 class PluginNotSentException extends PluginException {};
 
 class Plugin extends SystemBase {	public static $prefix = 'plg';

@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class VideoException extends SystemClassException {}
+class VideoException extends SystemBaseException {}
 
 class Video extends SystemBase {	public static $prefix = 'vid';
 	public static $tablename = 'vid_videos';

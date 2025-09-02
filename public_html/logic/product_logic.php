@@ -5,7 +5,7 @@ function product_logic($get_vars, $post_vars, $product){
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/ShoppingCart.php');
-	PathHelper::requireOnce('includes/SystemClass.php');
+	PathHelper::requireOnce('includes/SystemBase.php');
 
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/questions_class.php');

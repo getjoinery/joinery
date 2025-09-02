@@ -6,7 +6,7 @@ PathHelper::requireOnce('data/users_class.php');
 PathHelper::requireOnce('data/queued_email_class.php');
 PathHelper::requireOnce('includes/EmailMessage.php');
 
-class RecurringMailerException extends SystemClassException {}
+class RecurringMailerException extends SystemBaseException {}
 
 class RecurringMailerTooManyEmailsException extends RecurringMailerException {}
 

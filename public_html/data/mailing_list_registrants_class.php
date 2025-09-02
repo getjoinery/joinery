@@ -6,12 +6,12 @@ PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/users_class.php');
 
-class MailingListRegistrantException extends SystemClassException {}
+class MailingListRegistrantException extends SystemBaseException {}
 
 class MailingListRegistrant extends SystemBase {	public static $prefix = 'mlr';
 	public static $tablename = 'mlr_mailing_list_registrants';

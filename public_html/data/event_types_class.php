@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class EventTypeException extends SystemClassException {}
+class EventTypeException extends SystemBaseException {}
 
 class EventType extends SystemBase {	public static $prefix = 'ety';
 	public static $tablename = 'ety_event_types';

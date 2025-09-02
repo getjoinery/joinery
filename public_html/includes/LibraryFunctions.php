@@ -1,6 +1,6 @@
 <?php
 require_once('PathHelper.php');
-require_once('SystemClass.php');
+require_once('SystemBase.php');
 require_once('ThemeHelper.php');
 require_once('PluginHelper.php');
 
@@ -1654,7 +1654,7 @@ class LibraryFunctions {
 			
 			// If we can't find the primary key column, throw an exception
 			if ($pkey_column === null) {
-				throw new SystemClassException('Cannot determine primary key column for table ' . $tablename . '. Model class not found or missing $pkey_column property.');
+				throw new SystemBaseException('Cannot determine primary key column for table ' . $tablename . '. Model class not found or missing $pkey_column property.');
 			}
 			
 			// Use the correct sequence name format from DatabaseUpdater
@@ -1675,7 +1675,7 @@ class LibraryFunctions {
 			}
 			else{
 				//TODO THIS NEEDS TO BE ALTERED TO RETURN THE PKEY
-				throw new SystemClassException('Sequence '.$seq.' does not exist.');
+				throw new SystemBaseException('Sequence '.$seq.' does not exist.');
 			}
 
 			if($use_transaction){

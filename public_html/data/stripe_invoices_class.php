@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class StripeInvoiceException extends SystemClassException {}
+class StripeInvoiceException extends SystemBaseException {}
 
 class StripeInvoice extends SystemBase {	public static $prefix = 'siv';
 	public static $tablename = 'siv_stripe_invoices';
