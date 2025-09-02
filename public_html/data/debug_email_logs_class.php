@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php'); 
 
-class DebugEmailLogException extends SystemClassException {}
+class DebugEmailLogException extends SystemBaseException {}
 
 class DebugEmailLog extends SystemBase {	public static $prefix = 'del';
 	public static $tablename = 'del_debug_email_logs';

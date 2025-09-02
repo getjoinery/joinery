@@ -1,9 +1,9 @@
 <?php
 
-require_once('SystemClass.php');
+require_once('SystemBase.php');
 
 
-class FieldConstraintError extends SystemClassException implements DisplayableErrorMessage {}
+class FieldConstraintError extends SystemBaseException implements DisplayableErrorMessage {}
 
 function NoSymbols($field, $value) {
 	$allowed_check = '/^[A-Za-z0-9\.\*&,\- @\':\(\)+?!#%]+$/';

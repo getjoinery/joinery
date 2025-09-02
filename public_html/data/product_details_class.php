@@ -3,9 +3,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
-class ProductDetailException extends SystemClassException {}
+class ProductDetailException extends SystemBaseException {}
 class ProductDetailNotSentException extends ProductDetailException {};
 
 class ProductDetail extends SystemBase {	public static $prefix = 'prd';

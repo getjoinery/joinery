@@ -6,12 +6,12 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/users_class.php');
 
-class WaitingListException extends SystemClassException {}
+class WaitingListException extends SystemBaseException {}
 
 class WaitingList extends SystemBase {	public static $prefix = 'ewl';
 	public static $tablename = 'ewl_waiting_lists';

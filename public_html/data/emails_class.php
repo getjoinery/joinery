@@ -5,12 +5,12 @@ PathHelper::requireOnce('includes/Globalvars.php');
 $settings = Globalvars::get_instance();
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('data/email_recipients_class.php');
 PathHelper::requireOnce('data/email_recipient_groups_class.php');
 PathHelper::requireOnce('data/users_class.php');	
 
-class EmailException extends SystemClassException {}
+class EmailException extends SystemBaseException {}
 class EmailNotSentException extends EmailException {};
 
 class Email extends SystemBase {	public static $prefix = 'eml';

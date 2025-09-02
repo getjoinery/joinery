@@ -6,12 +6,12 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/survey_answers_class.php');
 
-class SurveyException extends SystemClassException {}
+class SurveyException extends SystemBaseException {}
 
 class Survey extends SystemBase {	public static $prefix = 'svy';
 	public static $tablename = 'svy_surveys';

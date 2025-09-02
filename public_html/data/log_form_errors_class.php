@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class FormErrorException extends SystemClassException {}
+class FormErrorException extends SystemBaseException {}
 
 class FormError extends SystemBase {	public static $prefix = 'lfe';
 	public static $tablename = 'lfe_log_form_errors';

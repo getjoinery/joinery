@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class EventSessionFileException extends SystemClassException {}
+class EventSessionFileException extends SystemBaseException {}
 
 class EventSessionFile extends SystemBase {	public static $prefix = 'esf';
 	public static $tablename = 'esf_event_session_files';

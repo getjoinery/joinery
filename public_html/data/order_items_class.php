@@ -6,7 +6,7 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 PathHelper::requireOnce('includes/EmailTemplate.php');
 PathHelper::requireOnce('includes/EmailSender.php');
@@ -16,7 +16,7 @@ PathHelper::requireOnce('data/address_class.php');
 PathHelper::requireOnce('data/order_item_requirements_class.php');
 PathHelper::requireOnce('data/products_class.php');
 
-class OrderItemException extends SystemClassException {}
+class OrderItemException extends SystemBaseException {}
 
 class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	public static $tablename = 'odi_order_items';

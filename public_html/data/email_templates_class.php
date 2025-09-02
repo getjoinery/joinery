@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class EmailTemplateStoreException extends SystemClassException {}
+class EmailTemplateStoreException extends SystemBaseException {}
 
 class EmailTemplateStore extends SystemBase {	public static $prefix = 'emt';
 	public static $tablename = 'emt_email_templates';

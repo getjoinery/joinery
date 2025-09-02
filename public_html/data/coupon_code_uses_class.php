@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class CouponCodeUseException extends SystemClassException {}
+class CouponCodeUseException extends SystemBaseException {}
 
 class CouponCodeUse extends SystemBase {	public static $prefix = 'ccu';
 	public static $tablename = 'ccu_coupon_code_uses';

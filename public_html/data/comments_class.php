@@ -4,9 +4,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
-class CommentException extends SystemClassException {}
+class CommentException extends SystemBaseException {}
 class CommentNotSentException extends CommentException {};
 
 class Comment extends SystemBase {	public static $prefix = 'cmt';

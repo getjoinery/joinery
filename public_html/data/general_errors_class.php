@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class GeneralErrorException extends SystemClassException {}
+class GeneralErrorException extends SystemBaseException {}
 
 class GeneralError extends SystemBase {	public static $prefix = 'err';
 	public static $tablename = 'err_general_errors';
