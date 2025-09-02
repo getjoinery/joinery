@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class SessionAnalyticException extends SystemClassException {}
+class SessionAnalyticException extends SystemBaseException {}
 
 class SessionAnalytic extends SystemBase {	public static $prefix = 'sev';
 	public static $tablename = 'sev_session_analytics';

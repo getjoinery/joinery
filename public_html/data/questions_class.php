@@ -6,13 +6,13 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/question_options_class.php');
 PathHelper::requireOnce('data/survey_answers_class.php');
 
-class QuestionException extends SystemClassException {}
+class QuestionException extends SystemBaseException {}
 
 class Question extends SystemBase {	public static $prefix = 'qst';
 	public static $tablename = 'qst_questions';

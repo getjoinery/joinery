@@ -3,9 +3,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
-class UpgradeException extends SystemClassException {}
+class UpgradeException extends SystemBaseException {}
 class UpgradeNotSentException extends UpgradeException {};
 
 class Upgrade extends SystemBase {	public static $prefix = 'upg';

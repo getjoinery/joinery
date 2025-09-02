@@ -6,13 +6,13 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('data/content_versions_class.php');
 PathHelper::requireOnce('data/groups_class.php');
 
-class CouponCodeProductException extends SystemClassException {}
+class CouponCodeProductException extends SystemBaseException {}
 
 class CouponCodeProduct extends SystemBase {	public static $prefix = 'ccp';
 	public static $tablename = 'ccp_coupon_code_products';

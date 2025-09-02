@@ -6,12 +6,12 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/SmtpMailer.php');
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
 
-class QueuedEmailException extends SystemClassException {}
+class QueuedEmailException extends SystemBaseException {}
 
 class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	public static $tablename = 'equ_queued_emails';

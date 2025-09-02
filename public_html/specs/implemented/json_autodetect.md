@@ -14,7 +14,7 @@ Implement optimized auto-detection of JSON fields based on field type specificat
 
 ## Files to Update: 7 Total
 
-### 1. Core Implementation: SystemClass.php
+### 1. Core Implementation: SystemBase.php
 
 **BEFORE:**
 ```php
@@ -189,7 +189,7 @@ function get_json() {
 
 ## Migration Path
 
-1. **Update SystemClass.php** - Add `is_json_field()` method and update `get_json()`
+1. **Update SystemBase.php** - Add `is_json_field()` method and update `get_json()`
 2. **Remove simple $json_vars** from 4 model classes (themes, events, event_sessions, event_registrants)
 3. **Handle address_class.php** custom logic (decide on Option 1 or 2)
 4. **Test API endpoints** to ensure JSON output unchanged

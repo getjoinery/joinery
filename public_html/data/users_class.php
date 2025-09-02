@@ -8,7 +8,7 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
 PathHelper::requireOnce('data/groups_class.php');
 PathHelper::requireOnce('data/address_class.php');
@@ -18,7 +18,7 @@ PathHelper::requireOnce('data/visitor_events_class.php');
 PathHelper::requireOnce('data/contact_types_class.php');
 PathHelper::requireOnce('data/mailing_lists_class.php');
 
-class UserException extends SystemClassException {}
+class UserException extends SystemBaseException {}
 class DisplayableUserException extends UserException implements DisplayableErrorMessage {}
 
 class User extends SystemBase {	public static $prefix = 'usr';

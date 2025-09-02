@@ -7,7 +7,7 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
 PathHelper::requireOnce('data/mailing_list_registrants_class.php');
 PathHelper::requireOnce('data/users_class.php');
@@ -20,7 +20,7 @@ $composer_dir = $settings->get_setting('composerAutoLoad');
 require $composer_dir.'autoload.php';
 use MailchimpAPI\Mailchimp;
 
-class MailingListException extends SystemClassException {}
+class MailingListException extends SystemBaseException {}
 class DisplayableMailingListException extends MailingListException implements DisplayableErrorMessage {}
 class DisplayablePermanentMailingListException extends MailingListException implements DisplayablePermanentErrorMessage {}
 

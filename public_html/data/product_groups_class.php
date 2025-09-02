@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class ProductGroupException extends SystemClassException {}
+class ProductGroupException extends SystemBaseException {}
 
 class ProductGroup extends SystemBase {	public static $prefix = 'prg';
 	public static $tablename = 'prg_product_groups';

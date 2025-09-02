@@ -6,12 +6,12 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
 PathHelper::requireOnce('data/events_class.php');
 PathHelper::requireOnce('data/users_class.php');
 
-class EventRegistrantException extends SystemClassException {}
+class EventRegistrantException extends SystemBaseException {}
 class DisplayableEventRegistrantException extends EventRegistrantException implements DisplayableErrorMessage {}
 class DisplayablePermanentEventRegistrantException extends EventRegistrantException implements DisplayablePermanentErrorMessage {}
 

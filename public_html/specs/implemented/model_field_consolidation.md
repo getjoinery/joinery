@@ -165,10 +165,10 @@ foreach (static::$required_fields as $required_field) {
             }
         }
         if (!$one_true) {
-            throw new SystemClassException('One of ' . implode(', ', $display_names) . ' must be set.');
+            throw new SystemBaseException('One of ' . implode(', ', $display_names) . ' must be set.');
         }
     } else if (is_null($this->get($required_field)) || $this->get($required_field) === '') {
-        throw new SystemClassException('Required field "' . $required_field . '" must be set.');
+        throw new SystemBaseException('Required field "' . $required_field . '" must be set.');
     }
 }
 ```
@@ -201,7 +201,7 @@ if ($this->key === NULL) {
 foreach (static::$field_specifications as $field_name => $spec) {
     if (isset($spec['required']) && $spec['required'] === true) {
         if (is_null($this->get($field_name)) || $this->get($field_name) === '') {
-            throw new SystemClassException('Required field "' . $field_name . '" must be set.');
+            throw new SystemBaseException('Required field "' . $field_name . '" must be set.');
         }
     }
 }
@@ -390,7 +390,7 @@ public static $field_specifications = array(
 ## Files Requiring Changes
 
 ### Core System Files
-1. **`/includes/SystemBase.php`** or **`/includes/SystemClass.php`**
+1. **`/includes/SystemBase.php`** or **`/includes/SystemBase.php`**
    - Update save() method to read from field_specifications
    - Update smart_get() method to use is_timestamp_field()
    - Update export_as_array() to use is_timestamp_field()
@@ -631,7 +631,7 @@ class ModelFieldTest extends PHPUnit\Framework\TestCase {
         try {
             $model->save();
             $this->fail('Should have thrown exception for missing required field');
-        } catch (SystemClassException $e) {
+        } catch (SystemBaseException $e) {
             $this->assertStringContainsString('Required field', $e->getMessage());
         }
     }
@@ -683,7 +683,7 @@ class ModelFieldTest extends PHPUnit\Framework\TestCase {
         try {
             $model->save();
             $this->fail('Should have thrown exception for missing required field');
-        } catch (SystemClassException $e) {
+        } catch (SystemBaseException $e) {
             $this->assertStringContainsString('Required field', $e->getMessage());
         }
     }
@@ -818,7 +818,7 @@ grep -r "\$timestamp_fields" --include="*.php" /var/www/html/joinerytest/public_
 ```
 
 Key files to double-check:
-- `/includes/SystemClass.php` - Core implementation
+- `/includes/SystemBase.php` - Core implementation
 - `/tests/models/*.php` - Test framework
 - `/data/*_class.php` - All model files
 - `/plugins/*/data/*_class.php` - Plugin models

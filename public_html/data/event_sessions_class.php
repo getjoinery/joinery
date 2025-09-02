@@ -6,7 +6,7 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
 PathHelper::requireOnce('data/event_registrants_class.php');
 PathHelper::requireOnce('data/event_session_files_class.php');
@@ -20,7 +20,7 @@ PathHelper::requireOnce('includes/calendar-links/Generators/Yahoo.php');
 PathHelper::requireOnce('includes/calendar-links/Generators/WebOutlook.php');
 use Spatie\CalendarLinks\Link;
 
-class EventSessionsException extends SystemClassException {}
+class EventSessionsException extends SystemBaseException {}
 class DisplayableEventSessionsException extends EventSessionsException implements DisplayableErrorMessage {}
 class DisplayablePermanentEventSessionsException extends EventSessionsException implements DisplayablePermanentErrorMessage {}
 

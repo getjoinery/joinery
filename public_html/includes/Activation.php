@@ -1,7 +1,7 @@
 <?php
 
 require_once('PathHelper.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
 // ErrorHandler.php no longer needed - using new ErrorManager system
 PathHelper::requireOnce('includes/DbConnector.php');
@@ -14,7 +14,7 @@ PathHelper::requireOnce('includes/Activation.php');
 PathHelper::requireOnce('data/users_class.php');
 PathHelper::requireOnce('data/phone_number_class.php');
 
-class ActivationError extends SystemClassException {}
+class ActivationError extends SystemBaseException {}
 
 class Activation {
 

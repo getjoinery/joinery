@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class ApiKeyException extends SystemClassException {}
+class ApiKeyException extends SystemBaseException {}
 
 class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	public static $tablename = 'apk_api_keys';

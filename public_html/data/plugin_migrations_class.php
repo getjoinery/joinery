@@ -3,9 +3,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
-class PluginMigrationException extends SystemClassException {}
+class PluginMigrationException extends SystemBaseException {}
 class PluginMigrationNotSentException extends PluginMigrationException {}
 
 class PluginMigration extends SystemBase {    public static $prefix = 'plm';

@@ -16,7 +16,7 @@
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
 /**
  * Single Example Record Class
@@ -261,7 +261,7 @@ class Example extends SystemBase
     
     // NOTE: json_vars is LEGACY - being consolidated into field_specifications
     // JSON fields are now AUTO-DETECTED from field_specifications using optimized is_json_field() method
-    // Auto-detection logic (in SystemClass):
+    // Auto-detection logic (in SystemBase):
     //
     // protected function is_json_field($field_name) {
     //     if (!isset(static::$field_specifications[$field_name])) {
@@ -416,7 +416,7 @@ class MultiExample extends SystemMultiBase
  * // $example->set('exm_name', '');  // Don't set required field
  * try {
  *     $example->save();
- * } catch (SystemClassException $e) {
+ * } catch (SystemBaseException $e) {
  *     echo $e->getMessage();  // "Required field 'exm_name' must be set."
  * }
  * 

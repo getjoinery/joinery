@@ -5,9 +5,9 @@ PathHelper::requireOnce('includes/Globalvars.php');
 $settings = Globalvars::get_instance();
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
-class MigrationException extends SystemClassException {}
+class MigrationException extends SystemBaseException {}
 class MigrationNotSentException extends MigrationException {};
 
 class Migration extends SystemBase {	public static $prefix = 'mig';

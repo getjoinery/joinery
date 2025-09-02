@@ -1,6 +1,6 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
 class Theme extends SystemBase {    public static $prefix = 'thm';
     public static $tablename = 'thm_themes';

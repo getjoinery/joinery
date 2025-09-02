@@ -6,12 +6,12 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 
 PathHelper::requireOnce('data/products_class.php');
 PathHelper::requireOnce('data/order_items_class.php');
 
-class OrderItemRequirementException extends SystemClassException {}
+class OrderItemRequirementException extends SystemBaseException {}
 class DisplayableOrderItemRequirementException extends OrderItemRequirementException implements DisplayableErrorMessage {}
 class DisplayablePermanentOrderItemRequirementException extends OrderItemRequirementException implements DisplayablePermanentErrorMessage {}
 

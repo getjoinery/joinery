@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class EmailRecipientGroupException extends SystemClassException {}
+class EmailRecipientGroupException extends SystemBaseException {}
 
 class EmailRecipientGroup extends SystemBase {	public static $prefix = 'erg';
 	public static $tablename = 'erg_email_recipient_groups';

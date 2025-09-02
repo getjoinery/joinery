@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class AddressException extends SystemClassException {}
+class AddressException extends SystemBaseException {}
 class DisplayableAddressException extends AddressException implements DisplayableErrorMessage {}
 class AddressTravelMismatchException extends DisplayableAddressException {}
 

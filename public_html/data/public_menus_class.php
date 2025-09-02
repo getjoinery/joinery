@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class PublicMenuException extends SystemClassException {}
+class PublicMenuException extends SystemBaseException {}
 
 class PublicMenu extends SystemBase {	public static $prefix = 'pmu';
 	public static $tablename = 'pmu_public_menus';
