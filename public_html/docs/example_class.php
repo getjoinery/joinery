@@ -59,8 +59,6 @@ class Example extends SystemBase
     );
     
     // REQUIRED: Complete field specifications - defines database schema AND runtime behavior
-    // CONSOLIDATED: Replaces legacy arrays $required_fields, $initial_default_values, 
-    //              $zero_variables, $timestamp_fields (auto-detected from type)
     //
     // SUPPORTED DATA TYPES (from LibraryFunctions::translate_data_types):
     // Text types:    'varchar(length)', 'text', 'character(length)'
@@ -71,13 +69,16 @@ class Example extends SystemBase
     // JSON types:    'json', 'jsonb' (jsonb recommended for performance)
     // Serial types:  'bigserial' (auto-incrementing primary keys)
     //
-    // NEW PROPERTIES (Runtime behavior - do NOT affect database schema):
-    // 'required' => true           - Field must be non-null and non-empty string (replaces $required_fields)
-    // 'default' => mixed           - Default value for new records only (replaces $initial_default_values)
-    // 'zero_on_create' => true     - Set to 0 when creating if NULL (replaces $zero_variables)
+    // Runtime behavior properties (do NOT affect database schema):
+    // 'required' => true           - Field must be non-null and non-empty string
+    // 'default' => mixed           - Default value for new records only
+    // 'zero_on_create' => true     - Set to 0 when creating if NULL
+    // 'unique' => true             - Single field unique constraint
+    // 'unique_with' => array(...)  - Multi-field unique constraint
     // 
     // AUTO-DETECTION:
-    // - Timestamp fields detected from type: 'timestamp', 'date' (replaces $timestamp_fields)
+    // - Timestamp fields detected from type: 'timestamp', 'date'
+    // - JSON fields detected from type: 'json', 'jsonb'
     //
     public static $field_specifications = array(
         // Primary key specification
@@ -91,8 +92,8 @@ class Example extends SystemBase
         'exm_name' => array(
             'type' => 'varchar(255)',      // Supported: varchar(length)
             'is_nullable' => false,
-            'required' => true,            // NEW: Replaces $required_fields array
-            'unique' => true               // NEW: Single field unique constraint
+            'required' => true
+            'unique' => true               // Single field unique constraint
         ),
         'exm_description' => array(
             'type' => 'text',              // Supported: text (unlimited length)
@@ -106,14 +107,14 @@ class Example extends SystemBase
         'exm_code' => array(
             'type' => 'character(5)',      // Supported: character(length) - fixed length
             'is_nullable' => true,
-            'unique_with' => array('exm_category_id')  // NEW: Multi-field unique constraint
+            'unique_with' => array('exm_category_id')  // Multi-field unique constraint
         ),
         
         // Numeric fields - integer/int4, bigint/int8, smallint/int2, numeric
         'exm_status' => array(
             'type' => 'integer',           // Supported: integer (same as int4)
             'is_nullable' => false,
-            'default' => 1                 // NEW: Replaces $initial_default_values array
+            'default' => 1
         ),
         'exm_price' => array(
             'type' => 'numeric(10,2)',     // Supported: numeric(precision,scale) for money
@@ -122,7 +123,7 @@ class Example extends SystemBase
         'exm_counter' => array(
             'type' => 'int8',              // Supported: int8 (same as bigint)
             'is_nullable' => true,
-            'zero_on_create' => true       // NEW: Replaces $zero_variables array
+            'zero_on_create' => true
         ),
         'exm_small_number' => array(
             'type' => 'int2',              // Supported: int2 (same as smallint)
@@ -133,7 +134,7 @@ class Example extends SystemBase
         'exm_is_active' => array(
             'type' => 'bool',              // Supported: bool (same as boolean)
             'is_nullable' => false,
-            'default' => true              // NEW: Replaces $initial_default_values array
+            'default' => true
         ),
         
         // Foreign key field
@@ -161,19 +162,19 @@ class Example extends SystemBase
         'exm_event_date' => array(
             'type' => 'date',              // Supported: date (no time)
             'is_nullable' => true
-            // NOTE: Automatically detected as timestamp field for smart_get()
+            // Automatically detected as timestamp field for smart_get()
         ),
         'exm_created' => array(
             'type' => 'timestamp',         // Supported: timestamp (without time zone)
             'is_nullable' => false,
-            'default' => 'CURRENT_TIMESTAMP' // NEW: Replaces $initial_default_values array
-            // NOTE: Automatically detected as timestamp field - no need for $timestamp_fields
+            'default' => 'CURRENT_TIMESTAMP'
+            // Automatically detected as timestamp field
         ),
         'exm_updated' => array(
             'type' => 'timestamp with time zone', // Supported: timestamp with time zone
             'is_nullable' => false,
             'default' => 'CURRENT_TIMESTAMP'
-            // NOTE: Automatically detected as timestamp field - no need for $timestamp_fields  
+            // Automatically detected as timestamp field  
         ),
         'exm_delete_time' => array(
             'type' => 'timestamp with time zone',
@@ -230,21 +231,6 @@ class Example extends SystemBase
         // Custom constraint functions can be defined in your class and referenced by name
     );
     
-    // OPTIONAL: Unique constraints - MODERN APPROACH (field_specifications)
-    // NEW: Unique constraints are now defined WITHIN field_specifications
-    // See field_specifications above for examples:
-    // - 'unique' => true                           - Single field unique constraint
-    // - 'unique_with' => array('other_field')      - Multi-field unique constraint
-    //
-    // These constraints are:
-    // - Checked during save() operations
-    // - Enforced at database level by DatabaseUpdater
-    // - Applied only to new records (INSERT operations)
-    // - Throw DisplayableUserException on violations
-    
-    // NOTE: Timestamp fields are now AUTO-DETECTED based on field type
-    // NOTE: Required fields, defaults, and zero variables are now in field_specifications
-    // Legacy arrays removed: $timestamp_fields, $required_fields, $initial_default_values, $zero_variables
     
     // REQUIRED: Actions to take when permanently deleting records
     // This array MUST be defined (even if empty) for all model classes
