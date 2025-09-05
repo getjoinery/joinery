@@ -5,6 +5,15 @@ PathHelper::requireOnce('includes/PublicPageBase.php');
 
 class PublicPageTailwind extends PublicPageBase {
 
+	// Implement abstract method from PublicPageBase
+	protected function getTableClasses() {
+		return [
+			'wrapper' => 'my-6 flex flex-col -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8 py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8 shadow overflow-hidden border-b border-gray-200 sm:rounded-lg',
+			'table' => 'min-w-full divide-y divide-gray-200',
+			'header' => 'bg-gray-50'
+		];
+	}
+
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
 		$page->public_header(
@@ -1054,46 +1063,6 @@ class PublicPageTailwind extends PublicPageBase {
 	}
 
 
-	function tableheader($headers, $class='', $id='table1'){
-		echo '<div class="my-6"><div class="flex flex-col">
-		  <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-			<div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
-			  <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
-				<table class="min-w-full divide-y divide-gray-200">
-				  <thead class="bg-gray-50">
-					<tr>';
-		
-
-		foreach ($headers as $value) {
-			printf('<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" abbr="%s">%s</th>', $value, $value);
-		}
-		echo '</tr>
-          </thead><tbody class="bg-white divide-y divide-gray-200">';
-	}
-
-	function disprow($dataarray){
-
-		echo '<tr>';
-
-		foreach ($dataarray as $value) {
-			if ($value == "") {
-				$value = "&nbsp";
-			}
-
-
-			printf('<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">%s</td>', $value);
-
-		}
-		echo "</tr>\n";
-		$this->rowcount++;
-	}
-
-	function endtable(){
-		echo '</tbody></table>      </div>
-    </div>
-  </div>
-</div></div>';
-	}
 }
 
 ?>
