@@ -166,9 +166,9 @@ class PublicPageTailwind extends PublicPageBase {
 		}	
 
 		$cart = $session->get_shopping_cart();
-		if($numitems = $cart->count_items()){
+		$numitems = $cart->count_items();
+		if($numitems > 0){
 			$cart_menu = array('Cart' => '/cart');
-
 		}
 		else{
 			$cart_menu = NULL;

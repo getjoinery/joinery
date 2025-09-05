@@ -70,23 +70,11 @@ class PublicPageFalcon extends PublicPageBase {
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 
-		try {
-			$cart = $session->get_shopping_cart();
-			// Check if cart object is complete and has the method we need
-			if (is_object($cart) && method_exists($cart, 'count_items')) {
-				if($numitems = $cart->count_items()){
-					$cart_menu = array('Cart' => '/cart');
-				} else {
-					$cart_menu = NULL;
-				}
-			} else {
-				// Cart object is incomplete, clear it and create new one
-				unset($_SESSION['shopping_cart']);
-				$cart_menu = NULL;
-			}
-		} catch (Error $e) {
-			// Handle incomplete object error
-			unset($_SESSION['shopping_cart']);
+		$cart = $session->get_shopping_cart();
+		$numitems = $cart->count_items();
+		if($numitems > 0){
+			$cart_menu = array('Cart' => '/cart');
+		} else {
 			$cart_menu = NULL;
 		}
 			
