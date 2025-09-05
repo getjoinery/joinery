@@ -136,10 +136,27 @@ class SessionControl{
 	}
 
 	public function get_shopping_cart() {
-		if (!isset($_SESSION['shopping_cart'])) {
-			$_SESSION['shopping_cart'] = new ShoppingCart();
+		try {
+			if (!isset($_SESSION['shopping_cart'])) {
+				return new ShoppingCart();
+			}
+			
+			$cart = $_SESSION['shopping_cart'];
+			
+			// Validate cart object integrity
+			if (!is_object($cart) || !method_exists($cart, 'count_items')) {
+				error_log('Shopping cart object corrupted, recreating');
+				unset($_SESSION['shopping_cart']);
+				return new ShoppingCart();
+			}
+			
+			return $cart;
+			
+		} catch (Error $e) {
+			error_log('Shopping cart error: ' . $e->getMessage());
+			unset($_SESSION['shopping_cart']);
+			return new ShoppingCart();
 		}
-		return $_SESSION['shopping_cart'];
 	}
 	
 
