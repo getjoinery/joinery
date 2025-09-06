@@ -431,4 +431,46 @@ class PluginHelper extends ComponentBase {
             return false;
         }
     }
+    
+    /**
+     * Get a service instance from a plugin
+     * Services provide business logic without UI dependencies
+     */
+    public static function getService($plugin_name, $service_name = null) {
+        $service_name = $service_name ?: 'Service';
+        $service_file = "plugins/{$plugin_name}/services/{$service_name}.php";
+        
+        if (file_exists(PathHelper::getIncludePath($service_file))) {
+            PathHelper::requireOnce($service_file);
+            $class_name = ucfirst($plugin_name) . $service_name;
+            if (class_exists($class_name)) {
+                return new $class_name();
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Check if a plugin provides a specific service
+     */
+    public static function hasService($plugin_name, $service_name = null) {
+        $service_name = $service_name ?: 'Service';
+        $service_file = "plugins/{$plugin_name}/services/{$service_name}.php";
+        return file_exists(PathHelper::getIncludePath($service_file));
+    }
+    
+    /**
+     * Get all plugins of a specific type
+     */
+    public static function getByType($type) {
+        $plugins = [];
+        foreach (self::getAvailablePlugins() as $name => $plugin) {
+            $metadata = $plugin->getMetadata();
+            if (isset($metadata['type']) && $metadata['type'] === $type) {
+                $plugins[$name] = $plugin;
+            }
+        }
+        return $plugins;
+    }
 }
