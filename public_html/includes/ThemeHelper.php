@@ -143,70 +143,109 @@ class ThemeHelper extends ComponentBase {
     // These provide convenient access without needing the instance
     
     /**
-     * Get URL to theme asset
+     * Get URL to theme asset with plugin fallback
      */
     public static function asset($path, $themeName = null) {
-        if (!$themeName) {
-            $settings = Globalvars::get_instance();
-            $themeName = $settings->get_setting('theme_template', true, true);
+        if ($themeName === null) {
+            $themeName = self::getActive();
         }
         
-        // Check if asset exists in theme
-        $themeAssetPath = PathHelper::getIncludePath("theme/{$themeName}/{$path}");
-        if (file_exists($themeAssetPath)) {
-            return "/theme/{$themeName}/{$path}";
+        // Check theme first
+        $theme_asset = "/theme/{$themeName}/assets/{$path}";
+        if (file_exists($_SERVER['DOCUMENT_ROOT'] . $theme_asset)) {
+            $version = self::getAssetVersion($themeName, $path);
+            $versionString = $version ? "?v={$version}" : '';
+            return "{$theme_asset}{$versionString}";
         }
         
-        // Fallback to base path
-        $basePath = PathHelper::getIncludePath($path);
-        if (file_exists($basePath)) {
-            return "/{$path}";
+        // Check current plugin
+        $current_plugin = RouteHelper::getCurrentPlugin();
+        if ($current_plugin) {
+            $plugin_asset = "/plugins/{$current_plugin}/assets/{$path}";
+            if (file_exists($_SERVER['DOCUMENT_ROOT'] . $plugin_asset)) {
+                // Plugin asset versioning will be added later
+                return $plugin_asset;
+            }
         }
         
-        // Return theme path anyway (might be dynamically generated)
-        return "/theme/{$themeName}/{$path}";
+        // Return theme path even if not found (will 404)
+        $version = self::getAssetVersion($themeName, $path);
+        $versionString = $version ? "?v={$version}" : '';
+        return "{$theme_asset}{$versionString}";
     }
     
     /**
-     * Include file from theme with fallback to base (static helper)
+     * Include file from theme with fallback to plugin and base (static helper)
      * 
      * @param string $path Path to file to include
      * @param string|null $themeName Optional theme name override
      * @param array $variables Variables to make available in the included file
+     * @param string|null $plugin_specify Optional plugin name to use for fallback
      * @return bool Success
      */
-    public static function includeThemeFile($path, $themeName = null, array $variables = []) {
-        // Extract variables into local scope
-        extract($variables, EXTR_SKIP);
-        
-        try {
-            $instance = self::getInstance($themeName);
-            
-            // Try theme-specific file first
-            $themeFile = $instance->getIncludePath($path);
-            if (file_exists($themeFile)) {
-                require_once($themeFile);
-                return true;
-            }
-            
-            // Try base path fallback
-            $basePath = PathHelper::getIncludePath($path);
-            if (file_exists($basePath)) {
-                require_once($basePath);
-                return true;
-            }
-            
-            return false;
-            
-        } catch (Exception $e) {
-            // If theme doesn't exist, try base path
-            $basePath = PathHelper::getIncludePath($path);
-            if (file_exists($basePath)) {
-                require_once($basePath);
-                return true;
-            }
-            return false;
+    public static function includeThemeFile($path, $themeName = null, array $variables = [], $plugin_specify = null) {
+        if ($themeName === null) {
+            $themeName = self::getActive();
         }
+        
+        // Determine if path starts with 'includes/' (theme-specific includes)
+        $is_includes_path = strpos($path, 'includes/') === 0;
+        
+        if ($is_includes_path) {
+            // Theme includes: check theme/{theme}/{path}.php directly
+            $theme_path = "theme/{$themeName}/{$path}.php";
+            if (file_exists(PathHelper::getIncludePath($theme_path))) {
+                extract($variables);
+                include PathHelper::getIncludePath($theme_path);
+                return true;
+            }
+            
+            // Fallback to base path for includes
+            $base_path = "{$path}.php";
+            if (file_exists(PathHelper::getIncludePath($base_path))) {
+                extract($variables);
+                include PathHelper::getIncludePath($base_path);
+                return true;
+            }
+        } else {
+            // View files: use the plugin/theme view resolution system
+            
+            // 1. Theme views get first priority
+            $theme_path = "theme/{$themeName}/views/{$path}.php";
+            if (file_exists(PathHelper::getIncludePath($theme_path))) {
+                extract($variables);
+                include PathHelper::getIncludePath($theme_path);
+                return true;
+            }
+            
+            // 2. Check plugin (specified or current based on route)
+            $plugin = $plugin_specify ?: RouteHelper::getCurrentPlugin();
+            if ($plugin) {
+                $plugin_path = "plugins/{$plugin}/views/{$path}.php";
+                if (file_exists(PathHelper::getIncludePath($plugin_path))) {
+                    extract($variables);
+                    include PathHelper::getIncludePath($plugin_path);
+                    return true;
+                }
+            }
+            
+            // 3. Base views fallback
+            $base_path = "views/{$path}.php";
+            if (file_exists(PathHelper::getIncludePath($base_path))) {
+                extract($variables);
+                include PathHelper::getIncludePath($base_path);
+                return true;
+            }
+        }
+        
+        // Not found - log if debug mode
+        $settings = Globalvars::get_instance();
+        if ($settings->get_setting('debug') == '1') {
+            error_log("File not found: {$path} (theme: {$themeName}, plugin: " . ($plugin_specify ?: RouteHelper::getCurrentPlugin()) . ")");
+            echo "<!-- File not found: {$path} -->\n";
+        }
+        
+        return false;
     }
     
     /**
@@ -323,5 +362,73 @@ class ThemeHelper extends ComponentBase {
         }
         
         return $results;
+    }
+    
+    /**
+     * New method for views that MUST exist (used by routes)
+     */
+    public static function requireThemeFile($path, $themeName = null, $variables = [], $plugin_specify = null) {
+        $result = self::includeThemeFile($path, $themeName, $variables, $plugin_specify);
+        
+        if (!$result) {
+            $settings = Globalvars::get_instance();
+            $debug = $settings->get_setting('debug') == '1';
+            
+            $plugin = $plugin_specify ?: RouteHelper::getCurrentPlugin();
+            $attempted = self::getViewResolutionOrder($path, $themeName, $plugin);
+            error_log("Required view not found: {$path}");
+            
+            if ($debug) {
+                error_log("Attempted: " . implode(', ', $attempted));
+                echo "<!-- Required view not found: {$path} -->\n";
+                echo "<!-- Attempted: " . implode(', ', $attempted) . " -->\n";
+            }
+            
+            // Use existing 404 function
+            LibraryFunctions::display_404_page();
+            exit;
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * Get active theme name
+     */
+    public static function getActive() {
+        $settings = Globalvars::get_instance();
+        return $settings->get_setting('theme_template', true, true);
+    }
+    
+    /**
+     * Helper method for getting view resolution order (useful for debugging)
+     */
+    public static function getViewResolutionOrder($path, $themeName = null, $plugin = null) {
+        if ($themeName === null) {
+            $themeName = self::getActive();
+        }
+        
+        $order = [];
+        $order[] = "theme/{$themeName}/views/{$path}.php";
+        
+        if (!$plugin) {
+            $plugin = RouteHelper::getCurrentPlugin();
+        }
+        if ($plugin) {
+            $order[] = "plugins/{$plugin}/views/{$path}.php";
+        }
+        
+        $order[] = "views/{$path}.php";
+        
+        return $order;
+    }
+    
+    /**
+     * Get asset version for cache busting
+     */
+    private static function getAssetVersion($themeName, $path) {
+        // This method is referenced in the asset() method but didn't exist
+        // For now, return null - can be implemented later for cache busting
+        return null;
     }
 }

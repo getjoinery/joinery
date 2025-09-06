@@ -13,6 +13,8 @@ require_once('PathHelper.php');
 
 class RouteHelper {
     
+    private static $current_plugin = null;
+    
     // ========================================
     // ROUTE DEBUGGING CONFIGURATION
     // ========================================
@@ -765,6 +767,74 @@ class RouteHelper {
     }
     
     /**
+     * Get the currently active plugin based on route
+     */
+    public static function getCurrentPlugin() {
+        return self::$current_plugin;
+    }
+    
+    /**
+     * Detect which plugin owns the current route (optimized)
+     */
+    private static function detectPluginByRoute($path) {
+        // 1. FASTEST: Check standard /plugins/{name}/ pattern first
+        if (preg_match('#^/plugins/([^/]+)/#', $path, $matches)) {
+            // Just check directory exists, don't load metadata
+            if (is_dir(PathHelper::getIncludePath("plugins/{$matches[1]}"))) {
+                return $matches[1];
+            }
+        }
+        
+        // 2. FASTER: Only check plugins that declare routes_prefix
+        // Scan directory for plugin.json files instead of loading all plugins
+        $plugins_dir = PathHelper::getIncludePath('plugins');
+        if (!is_dir($plugins_dir)) {
+            return null;
+        }
+        
+        $directories = scandir($plugins_dir);
+        foreach ($directories as $dir) {
+            if ($dir === '.' || $dir === '..' || !is_dir($plugins_dir . '/' . $dir)) {
+                continue;
+            }
+            
+            $plugin_json = $plugins_dir . '/' . $dir . '/plugin.json';
+            if (file_exists($plugin_json)) {
+                $metadata = json_decode(file_get_contents($plugin_json), true);
+                if (isset($metadata['routes_prefix']) && strpos($path, $metadata['routes_prefix']) === 0) {
+                    return $dir;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Merge routes arrays without duplicates (first wins)
+     */
+    private static function mergeRoutes($existing, $new) {
+        foreach (['static', 'custom', 'dynamic'] as $type) {
+            if (isset($new[$type])) {
+                foreach ($new[$type] as $pattern => $config) {
+                    // Only add if pattern doesn't already exist (first wins)
+                    if (!isset($existing[$type][$pattern])) {
+                        $existing[$type][$pattern] = $config;
+                    }
+                }
+            }
+        }
+        return $existing;
+    }
+    
+    /**
+     * Clear the current plugin (useful for testing)
+     */
+    public static function clearCurrentPlugin() {
+        self::$current_plugin = null;
+    }
+    
+    /**
      * Process all routes and handle the request
      * 
      * This is the main routing method that processes routes in the correct order:
@@ -834,6 +904,9 @@ class RouteHelper {
             exit();
         }
         
+        // Detect current plugin based on route
+        self::$current_plugin = self::detectPluginByRoute($request_path);
+        
         // Normalize request path to always have leading slash for consistent pattern matching
         if (empty($request_path)) {
             $request_path = '/';
@@ -894,9 +967,38 @@ class RouteHelper {
         $session = SessionControl::get_instance();
         error_log("Core objects instantiated");
         
-        // Load THE theme's serve.php (only one theme active at a time)
-        error_log("Loading theme serve.php...");
-        ThemeHelper::includeThemeFile('serve.php');
+        // Build complete route array with proper priority
+        $all_routes = ['static' => [], 'custom' => [], 'dynamic' => []];
+        $original_routes = $routes; // Save the original routes passed to this method
+        
+        // 1. Theme routes have highest priority
+        $theme = ThemeHelper::getActive();
+        $theme_routes_file = "theme/{$theme}/serve.php";
+        if (file_exists(PathHelper::getIncludePath($theme_routes_file))) {
+            $routes = [];
+            include PathHelper::getIncludePath($theme_routes_file);
+            if (!empty($routes)) {
+                $all_routes = self::mergeRoutes($all_routes, $routes);
+            }
+        }
+        
+        // 2. Plugin routes (if detected) have second priority
+        if (self::$current_plugin) {
+            $plugin_routes_file = "plugins/" . self::$current_plugin . "/serve.php";
+            if (file_exists(PathHelper::getIncludePath($plugin_routes_file))) {
+                $routes = [];
+                include PathHelper::getIncludePath($plugin_routes_file);
+                if (!empty($routes)) {
+                    $all_routes = self::mergeRoutes($all_routes, $routes);
+                }
+            }
+        }
+        
+        // 3. Main routes have lowest priority
+        $all_routes = self::mergeRoutes($all_routes, $original_routes);
+        
+        // Use merged routes for processing
+        $routes = $all_routes;
         
         // Get theme directory for theme overrides (themes only, never plugins)
         $theme_template = $settings->get_setting('theme_template');
