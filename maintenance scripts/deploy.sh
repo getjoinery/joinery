@@ -519,12 +519,15 @@ show_usage() {
     echo "  $0 [site_name]                    # Full deploy to live site"
     echo "  $0 [site_name] --test             # Full deploy to test site (site_name_test)"
     echo "  $0 [site_name] --fix-permissions  # Fix permissions only (no deployment)"
+    echo "  $0 [site_name] --rollback [dir]   # Manual rollback to last backup or specified directory"
     echo "  $0 [site_name] --norollback       # Disable rollback on deployment failure"
     echo ""
     echo "Examples:"
     echo "  $0 getjoinery                     # Full deploy to getjoinery (live)"
     echo "  $0 getjoinery --test              # Full deploy to getjoinery_test"
     echo "  $0 getjoinery --fix-permissions   # Fix permissions on getjoinery"
+    echo "  $0 getjoinery --rollback          # Rollback to public_html_last"
+    echo "  $0 getjoinery --rollback public_html_failed_20240907_143000  # Rollback to specific failed deployment"
     echo "  $0 getjoinery --test --norollback # Full deploy to test site without rollback"
     echo ""
     echo "Note: Permission fixes work best when run with sudo"
@@ -541,10 +544,14 @@ fi
 LIVE_SITE="$1"
 IS_TEST_DEPLOY=false
 IS_FIX_PERMISSIONS_ONLY=false
+IS_MANUAL_ROLLBACK=false
 DISABLE_ROLLBACK=false
+ROLLBACK_SOURCE_DIR=""
 
-# Parse arguments
-for arg in "$@"; do
+# Parse arguments with better handling for rollback directory parameter
+i=1
+while [ $i -le $# ]; do
+    arg="${!i}"
     case $arg in
         --test)
             IS_TEST_DEPLOY=true
@@ -552,10 +559,23 @@ for arg in "$@"; do
         --fix-permissions)
             IS_FIX_PERMISSIONS_ONLY=true
             ;;
+        --rollback)
+            IS_MANUAL_ROLLBACK=true
+            # Check if next argument is a directory name (not another flag)
+            next_i=$((i + 1))
+            if [ $next_i -le $# ]; then
+                next_arg="${!next_i}"
+                if [[ ! "$next_arg" =~ ^-- ]]; then
+                    ROLLBACK_SOURCE_DIR="$next_arg"
+                    i=$next_i  # Skip the next argument since we consumed it
+                fi
+            fi
+            ;;
         --norollback)
             DISABLE_ROLLBACK=true
             ;;
     esac
+    i=$((i + 1))
 done
 
 # Set target site and deploy type
@@ -620,6 +640,121 @@ if [ "$IS_FIX_PERMISSIONS_ONLY" = true ]; then
     
     echo "========================================="
     echo "SUCCESS: Permissions fixed for '$TARGET_SITE'!"
+    echo "========================================="
+    exit 0
+fi
+
+# IF MANUAL ROLLBACK, HANDLE AND EXIT
+if [ "$IS_MANUAL_ROLLBACK" = true ]; then
+    echo "========================================="
+    echo "MANUAL ROLLBACK:"
+    echo "Target site: $TARGET_SITE"
+    echo "========================================="
+    
+    # Determine source directory for rollback
+    site_root="/var/www/html/$TARGET_SITE"
+    public_html_dir="$site_root/public_html"
+    source_dir=""
+    
+    if [ -n "$ROLLBACK_SOURCE_DIR" ]; then
+        # User specified a directory
+        if [[ "$ROLLBACK_SOURCE_DIR" =~ ^/ ]]; then
+            # Absolute path provided
+            source_dir="$ROLLBACK_SOURCE_DIR"
+        else
+            # Relative path - assume it's under the site root
+            source_dir="$site_root/$ROLLBACK_SOURCE_DIR"
+        fi
+        
+        if [[ ! -d "$source_dir" ]]; then
+            echo "ERROR: Specified rollback directory does not exist: $source_dir"
+            exit 1
+        fi
+        
+        if [[ -z "$(ls -A "$source_dir" 2>/dev/null)" ]]; then
+            echo "ERROR: Specified rollback directory is empty: $source_dir"
+            exit 1
+        fi
+        
+        echo "Rollback source: $source_dir"
+    else
+        # Default to public_html_last
+        source_dir="$site_root/public_html_last"
+        
+        if [[ ! -d "$source_dir" ]] || [[ -z "$(ls -A "$source_dir" 2>/dev/null)" ]]; then
+            echo "ERROR: Default backup directory not found or empty: $source_dir"
+            echo ""
+            echo "Available rollback options:"
+            for dir in "$site_root"/public_html_failed_* "$site_root/public_html_last"; do
+                if [[ -d "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
+                    echo "  $(basename "$dir")"
+                fi
+            done
+            echo ""
+            echo "Usage: $0 $LIVE_SITE --rollback [directory_name]"
+            exit 1
+        fi
+        
+        echo "Rollback source: $source_dir (default backup)"
+    fi
+    
+    echo "Current deployment: $public_html_dir"
+    echo "Failed deployment will be preserved for debugging"
+    echo "========================================="
+    read -p "Continue with rollback? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Rollback cancelled."
+        exit 0
+    fi
+    
+    # Perform the rollback using modified logic
+    echo "Starting rollback process..."
+    
+    # Create a temporary directory for the current deployment
+    failed_dir="$site_root/public_html_failed_$(date +%Y%m%d_%H%M%S)"
+    echo "Moving current deployment to: $failed_dir"
+    
+    # Move the current public_html to preserve it for debugging
+    if [[ -d "$public_html_dir" ]]; then
+        mv "$public_html_dir" "$failed_dir" || {
+            echo "ERROR: Could not move current deployment"
+            exit 1
+        }
+        
+        # Create .htaccess to block web access to failed deployment directory
+        echo "Creating .htaccess to block web access to failed deployment directory..."
+        cat > "$failed_dir/.htaccess" << 'EOF'
+# Block all web access to failed deployment directory
+Order Deny,Allow
+Deny from all
+
+# Alternative syntax for Apache 2.4+
+<RequireAll>
+    Require all denied
+</RequireAll>
+EOF
+    fi
+    
+    # Recreate public_html directory
+    mkdir -p "$public_html_dir"
+    
+    # Restore from source directory
+    echo "Restoring from: $source_dir"
+    cp -r "$source_dir"/* "$public_html_dir/" || {
+        echo "ERROR: Failed to restore from source directory"
+        exit 1
+    }
+    
+    # Fix permissions
+    echo "Fixing permissions after rollback..."
+    chown -R www-data:user1 "$public_html_dir" 2>/dev/null || echo "Warning: Could not change ownership (try with sudo)"
+    chmod -R 775 "$public_html_dir" 2>/dev/null || echo "Warning: Could not change permissions (try with sudo)"
+    
+    echo "========================================="
+    echo "SUCCESS: Manual rollback completed for '$TARGET_SITE'!"
+    echo "Restored from: $source_dir"
+    echo "Previous deployment preserved at: $failed_dir"
     echo "========================================="
     exit 0
 fi
@@ -895,6 +1030,83 @@ if [[ "$returnvalue" != 1 ]]; then
 else
     echo "Database update successful."
 fi
+
+# PHP SYNTAX VALIDATION
+echo "Running PHP syntax validation on all files..."
+php_error_count=0
+while IFS= read -r -d '' file; do
+    if ! php -l "$file" >/dev/null 2>&1; then
+        echo "SYNTAX ERROR in: $file"
+        php -l "$file"
+        ((php_error_count++))
+    fi
+done < <(find "/var/www/html/$TARGET_SITE/public_html" -name "*.php" -print0)
+
+if [[ $php_error_count -gt 0 ]]; then
+    echo "ERROR: $php_error_count PHP syntax errors found."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    exit 1
+fi
+echo "PHP syntax validation passed (0 errors)."
+
+# PLUGIN LOADING TEST - Test that all plugin class files can be included
+echo "Testing plugin class file loading..."
+plugin_error_count=0
+while IFS= read -r -d '' file; do
+    # Test if the file can be included without errors
+    if ! php -r "
+        error_reporting(E_ALL);
+        set_error_handler(function(\$errno, \$errstr) {
+            echo \"INCLUDE ERROR: \$errstr\n\";
+            exit(1);
+        });
+        try {
+            include_once '$file';
+        } catch (Exception \$e) {
+            echo 'EXCEPTION in $file: ' . \$e->getMessage() . \"\n\";
+            exit(1);
+        } catch (Error \$e) {
+            echo 'FATAL ERROR in $file: ' . \$e->getMessage() . \"\n\";
+            exit(1);
+        }
+    " >/dev/null 2>&1; then
+        echo "PLUGIN LOADING ERROR in: $file"
+        ((plugin_error_count++))
+    fi
+done < <(find "/var/www/html/$TARGET_SITE/public_html/plugins" -name "*_class.php" -print0 2>/dev/null)
+
+if [[ $plugin_error_count -gt 0 ]]; then
+    echo "ERROR: $plugin_error_count plugin loading errors found."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"  
+    exit 1
+fi
+echo "Plugin loading test passed."
+
+# BASIC RUNTIME TEST - Test that the application can bootstrap
+echo "Testing basic application bootstrap..."
+if ! php -r "
+    \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html';
+    chdir('/var/www/html/$TARGET_SITE/public_html');
+    
+    // Test core includes
+    try {
+        require_once('includes/PathHelper.php');
+        require_once('includes/Globalvars.php');
+        require_once('includes/SystemBase.php');
+        echo 'Bootstrap test passed\n';
+    } catch (Exception \$e) {
+        echo 'BOOTSTRAP ERROR: ' . \$e->getMessage() . \"\n\";
+        exit(1);
+    } catch (Error \$e) {
+        echo 'BOOTSTRAP FATAL: ' . \$e->getMessage() . \"\n\"; 
+        exit(1);
+    }
+" 2>/dev/null; then
+    echo "ERROR: Basic application bootstrap failed."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    exit 1
+fi
+echo "Application bootstrap test passed."
 
 # CLEANUP: Remove staging directory after successful deployment ONLY
 echo "Cleaning up staging directory..."
