@@ -23,6 +23,7 @@
 	$verbose = false;
 	$upgrade = false;
 	$cleanup = false;
+	$quiet = false;
 	
 	// Check URL parameters or command line arguments
 	if (isset($_REQUEST['verbose']) && $_REQUEST['verbose']) {
@@ -35,6 +36,12 @@
 		$upgrade = $_REQUEST['upgrade'];
 	} elseif (isset($argv) && in_array('--upgrade', $argv)) {
 		$upgrade = true;
+	}
+	
+	if (isset($_REQUEST['quiet']) && $_REQUEST['quiet']) {
+		$quiet = $_REQUEST['quiet'];
+	} elseif (isset($argv) && in_array('--quiet', $argv)) {
+		$quiet = true;
 	}
 	
 	if (isset($_REQUEST['cleanup']) && $_REQUEST['cleanup']) {
@@ -288,12 +295,14 @@
 		foreach($validation_result['valid_migrations'] as $migration){
 			$should_run_result = $migclass->shouldRunMigration($migration);
 			
-			// Always show migration status, not just in verbose mode
+			// Show migration status (skip messages can be suppressed with --quiet flag)
 			if($should_run_result['should_run']){
 				echo "WILL RUN migration " . ($migration['database_version'] ?? 'UNKNOWN') . "<br>\n";
 			} else {
-				// Always show why we're skipping
-				echo "SKIPPING migration " . ($migration['database_version'] ?? 'UNKNOWN') . " - Reason: " . $should_run_result['reason'] . "<br>\n";
+				// Show skip message unless quiet mode is enabled
+				if (!$quiet) {
+					echo "SKIPPING migration " . ($migration['database_version'] ?? 'UNKNOWN') . " - Reason: " . $should_run_result['reason'] . "<br>\n";
+				}
 			}
 			
 			// Show additional details in verbose mode
