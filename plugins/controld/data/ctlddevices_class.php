@@ -6,7 +6,7 @@ PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
 PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
@@ -16,7 +16,7 @@ PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
 PathHelper::requireOnce('plugins/controld/data/ctldrules_class.php');
 PathHelper::requireOnce('plugins/controld/data/ctlddevice_backups_class.php');
 
-class CtldDeviceException extends SystemClassException {}
+class CtldDeviceException extends SystemBaseException {}
 
 class CtldDevice extends SystemBase {
 

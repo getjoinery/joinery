@@ -6,10 +6,10 @@ PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class CtldRuleException extends SystemClassException {}
+class CtldRuleException extends SystemBaseException {}
 
 class CtldRule extends SystemBase {
 

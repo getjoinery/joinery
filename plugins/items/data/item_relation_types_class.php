@@ -7,10 +7,10 @@ PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SessionControl.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemClass.php');
+PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-class ItemRelationTypeException extends SystemClassException {}
+class ItemRelationTypeException extends SystemBaseException {}
 
 class ItemRelationType extends SystemBase {
 	public static $prefix = 'itt';
