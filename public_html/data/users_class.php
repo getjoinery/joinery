@@ -801,6 +801,12 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	//TESTS FOR THIS CLASS
 	static function test($debug=false, $verbose=false, $read_only=false){
 		parent::test($debug, $verbose, $read_only);
+		
+		// Skip test database operations in read-only mode
+		if ($read_only) {
+			return true;
+		}
+		
 		$dbhelper = DbConnector::get_instance();
 		$dbhelper->set_test_mode();
 		$dblink = $dbhelper->get_db_link();		
