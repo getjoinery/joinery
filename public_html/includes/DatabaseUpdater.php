@@ -892,16 +892,17 @@ class DatabaseUpdater {
             
             if ($duplicate_info['has_duplicates']) {
                 // Display clear warning for unique constraint duplicates
-                echo "<br>⚠️  <strong>UNIQUE CONSTRAINT WARNING</strong><br>\n";
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br>\n";
-                echo "<strong>Table:</strong> {$table_name}<br>\n";
-                echo "<strong>Columns:</strong> " . implode(', ', $columns) . "<br>\n";
-                echo "<strong>Issue:</strong> Duplicate values found - cannot create unique constraint<br>\n";
-                echo "<br><strong>Duplicate values detected:</strong><br>\n";
+                echo "<br>⚠️  UNIQUE CONSTRAINT WARNING<br>";
+                echo "═══════════════════════════════════════════════════════════════════════════════<br>";
+                echo "Table: {$table_name}<br>";
+                echo "Columns: " . implode(', ', $columns) . "<br>";
+                echo "Issue: Duplicate values found - cannot create unique constraint<br>";
+                echo "<br>";
+                echo "Duplicate values detected:<br>";
                 
                 foreach ($duplicate_info['duplicates'] as $value => $count) {
                     if ($value === 'UNKNOWN') {
-                        echo "  🔸 {$duplicate_info['duplicates'][$value]}<br>\n";
+                        echo "  • {$duplicate_info['duplicates'][$value]}<br>";
                     } else {
                         // Parse the combined value back into readable format
                         $parts = explode('|', $value);
@@ -910,16 +911,18 @@ class DatabaseUpdater {
                             for ($i = 0; $i < count($columns); $i++) {
                                 $readable_parts[] = $columns[$i] . "='" . $parts[$i] . "'";
                             }
-                            echo "  🔸 Values (" . implode(', ', $readable_parts) . "): <strong>{$count}</strong> occurrences<br>\n";
+                            echo "  • Values (" . implode(', ', $readable_parts) . "): {$count} occurrences<br>";
                         } else {
-                            echo "  🔸 Value '<strong>{$value}</strong>': <strong>{$count}</strong> occurrences<br>\n";
+                            echo "  • Value '{$value}': {$count} occurrences<br>";
                         }
                     }
                 }
                 
-                echo "<br><strong>Action:</strong> Unique constraint creation skipped<br>\n";
-                echo "<strong>Impact:</strong> Database will continue to function normally<br>\n";
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br><br>\n";
+                echo "<br>";
+                echo "Action: Unique constraint creation skipped<br>";
+                echo "Impact: Database will continue to function normally<br>";
+                echo "═══════════════════════════════════════════════════════════════════════════════<br>";
+                echo "<br>";
                 
                 // Return true to indicate we handled this gracefully (not an error)
                 return true;
@@ -1178,26 +1181,29 @@ class DatabaseUpdater {
             
             if ($duplicate_info['has_duplicates']) {
                 // Log duplicates as clear warnings but don't fail
-                echo "<br>⚠️  <strong>PRIMARY KEY CONSTRAINT WARNING</strong><br>\n";
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br>\n";
-                echo "<strong>Table:</strong> {$table_name}<br>\n";
-                echo "<strong>Column:</strong> {$pkey_column}<br>\n";
-                echo "<strong>Issue:</strong> Duplicate values found - cannot create primary key constraint<br>\n";
-                echo "<br><strong>Duplicate values detected:</strong><br>\n";
+                echo "<br>⚠️  PRIMARY KEY CONSTRAINT WARNING<br>";
+                echo "═══════════════════════════════════════════════════════════════════════════════<br>";
+                echo "Table: {$table_name}<br>";
+                echo "Column: {$pkey_column}<br>";
+                echo "Issue: Duplicate values found - cannot create primary key constraint<br>";
+                echo "<br>";
+                echo "Duplicate values detected:<br>";
                 
                 foreach ($duplicate_info['duplicates'] as $value => $count) {
                     if ($value === '') {
-                        echo "  🔸 NULL values: <strong>{$count}</strong> occurrences<br>\n";
+                        echo "  • NULL values: {$count} occurrences<br>";
                     } elseif ($value === 'UNKNOWN') {
-                        echo "  🔸 {$duplicate_info['duplicates'][$value]}<br>\n";
+                        echo "  • {$duplicate_info['duplicates'][$value]}<br>";
                     } else {
-                        echo "  🔸 Value '<strong>{$value}</strong>': <strong>{$count}</strong> occurrences<br>\n";
+                        echo "  • Value '{$value}': {$count} occurrences<br>";
                     }
                 }
                 
-                echo "<br><strong>Action:</strong> Primary key constraint creation skipped<br>\n";
-                echo "<strong>Impact:</strong> Database will continue to function normally<br>\n";
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br><br>\n";
+                echo "<br>";
+                echo "Action: Primary key constraint creation skipped<br>";
+                echo "Impact: Database will continue to function normally<br>";
+                echo "═══════════════════════════════════════════════════════════════════════════════<br>";
+                echo "<br>";
                 
                 // Don't attempt to add the constraint, but return true to not fail the overall operation
                 // Primary key constraints are not essential for database functioning
