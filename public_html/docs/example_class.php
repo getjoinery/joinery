@@ -92,7 +92,7 @@ class Example extends SystemBase
         'exm_name' => array(
             'type' => 'varchar(255)',      // Supported: varchar(length)
             'is_nullable' => false,
-            'required' => true
+            'required' => true,
             'unique' => true               // Single field unique constraint
         ),
         'exm_description' => array(
