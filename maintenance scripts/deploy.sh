@@ -1054,13 +1054,22 @@ echo "Testing plugin class file loading..."
 plugin_error_count=0
 while IFS= read -r -d '' file; do
     # Test if the file can be included without errors
+    # CRITICAL: Set working directory and document root so PathHelper works correctly
     if ! php -r "
+        \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html';
+        chdir('/var/www/html/$TARGET_SITE/public_html');
+        
         error_reporting(E_ALL);
         set_error_handler(function(\$errno, \$errstr) {
             echo \"INCLUDE ERROR: \$errstr\n\";
             exit(1);
         });
+        
         try {
+            // Bootstrap PathHelper first so plugin files can use it
+            require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
+            
+            // Now test the plugin file
             include_once '$file';
         } catch (Exception \$e) {
             echo 'EXCEPTION in $file: ' . \$e->getMessage() . \"\n\";
@@ -1090,9 +1099,9 @@ if ! php -r "
     
     // Test core includes
     try {
-        require_once('includes/PathHelper.php');
-        require_once('includes/Globalvars.php');
-        require_once('includes/SystemBase.php');
+        require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
+        require_once('/var/www/html/$TARGET_SITE/public_html/includes/Globalvars.php');
+        require_once('/var/www/html/$TARGET_SITE/public_html/includes/SystemBase.php');
         echo 'Bootstrap test passed\n';
     } catch (Exception \$e) {
         echo 'BOOTSTRAP ERROR: ' . \$e->getMessage() . \"\n\";
