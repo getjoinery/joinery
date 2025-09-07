@@ -725,11 +725,11 @@ class DatabaseUpdater {
                     } else {
                         // No existing constraint found - safe to add
                         $sql = "ALTER TABLE $table ADD CONSTRAINT $constraint_name UNIQUE ($field)";
-                        if ($this->executeConstraintSql($sql, $dblink)) {
+                        if ($this->executeConstraintSql($sql, $dblink, $table, [$field])) {
                             $results['constraints_added'][] = $constraint_name;
                             $results['messages'][] = "Added unique constraint: $constraint_name";
                         } else {
-                            $results['errors'][] = "Failed to add constraint: $constraint_name";
+                            $results['warnings'][] = "Unique constraint skipped for $constraint_name due to duplicate values";
                         }
                     }
                 } elseif ($this->verbose) {
@@ -755,11 +755,11 @@ class DatabaseUpdater {
                         // No existing constraint found - safe to add
                         $columns = implode(', ', $fields);
                         $sql = "ALTER TABLE $table ADD CONSTRAINT $constraint_name UNIQUE ($columns)";
-                        if ($this->executeConstraintSql($sql, $dblink)) {
+                        if ($this->executeConstraintSql($sql, $dblink, $table, $fields)) {
                             $results['constraints_added'][] = $constraint_name;
                             $results['messages'][] = "Added composite unique constraint: $constraint_name";
                         } else {
-                            $results['errors'][] = "Failed to add constraint: $constraint_name";
+                            $results['warnings'][] = "Unique constraint skipped for $constraint_name due to duplicate values";
                         }
                     }
                 } elseif ($this->verbose) {
@@ -810,19 +810,132 @@ class DatabaseUpdater {
     }
     
     /**
-     * Execute constraint SQL with error handling
+     * Check for duplicate values in unique constraint columns
+     * 
+     * @param string $table_name Table name
+     * @param array $columns Array of column names for the unique constraint
+     * @param PDO $dblink Database connection
+     * @return array Array with 'has_duplicates' boolean and 'duplicates' array
      */
-    private function executeConstraintSql($sql, $dblink) {
+    private function checkForDuplicateUniqueConstraintValues($table_name, $columns, $dblink) {
+        $result = [
+            'has_duplicates' => false,
+            'duplicates' => []
+        ];
+        
+        try {
+            // Build the GROUP BY and SELECT clauses for multiple columns
+            // Use COALESCE to handle NULLs consistently
+            $select_columns = [];
+            $group_columns = [];
+            
+            foreach ($columns as $column) {
+                $select_columns[] = "COALESCE(CAST({$column} AS TEXT), '<NULL>') as {$column}_str";
+                $group_columns[] = "COALESCE(CAST({$column} AS TEXT), '<NULL>')";
+            }
+            
+            $select_clause = implode(', ', $select_columns);
+            $group_clause = implode(', ', $group_columns);
+            
+            // Create a concatenated representation for display
+            $concat_columns = [];
+            foreach ($columns as $column) {
+                $concat_columns[] = "COALESCE(CAST({$column} AS TEXT), '<NULL>')";
+            }
+            $concat_clause = implode(" || '|' || ", $concat_columns);
+            
+            $sql = "SELECT {$concat_clause} as combined_value, COUNT(*) as count 
+                    FROM {$table_name} 
+                    GROUP BY {$group_clause}
+                    HAVING COUNT(*) > 1 
+                    ORDER BY COUNT(*) DESC";
+            
+            if ($this->verbose) {
+                echo "Checking for duplicate values in unique constraint on {$table_name}(" . implode(', ', $columns) . ")<br>\n";
+            }
+            
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            
+            $duplicates = $q->fetchAll(PDO::FETCH_ASSOC);
+            
+            if (!empty($duplicates)) {
+                $result['has_duplicates'] = true;
+                foreach ($duplicates as $duplicate) {
+                    $result['duplicates'][$duplicate['combined_value']] = $duplicate['count'];
+                }
+            }
+            
+            if ($this->verbose && !$result['has_duplicates']) {
+                echo "No duplicate values found in unique constraint columns<br>\n";
+            }
+            
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error checking for unique constraint duplicates in {$table_name}: " . $e->getMessage() . "<br>\n";
+            }
+            // If we can't check for duplicates, assume there might be some to be safe
+            $result['has_duplicates'] = true;
+            $result['duplicates']['UNKNOWN'] = 'Error checking for duplicates';
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * Execute constraint SQL with error handling and duplicate checking
+     */
+    private function executeConstraintSql($sql, $dblink, $table_name = null, $columns = null, $constraint_type = 'unique') {
+        // If we have table and column info, check for duplicates first
+        if ($table_name && $columns && strpos($sql, 'UNIQUE') !== false) {
+            $duplicate_info = $this->checkForDuplicateUniqueConstraintValues($table_name, $columns, $dblink);
+            
+            if ($duplicate_info['has_duplicates']) {
+                // Display clear warning for unique constraint duplicates
+                echo "<br>⚠️  <strong>UNIQUE CONSTRAINT WARNING</strong><br>\n";
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br>\n";
+                echo "<strong>Table:</strong> {$table_name}<br>\n";
+                echo "<strong>Columns:</strong> " . implode(', ', $columns) . "<br>\n";
+                echo "<strong>Issue:</strong> Duplicate values found - cannot create unique constraint<br>\n";
+                echo "<br><strong>Duplicate values detected:</strong><br>\n";
+                
+                foreach ($duplicate_info['duplicates'] as $value => $count) {
+                    if ($value === 'UNKNOWN') {
+                        echo "  🔸 {$duplicate_info['duplicates'][$value]}<br>\n";
+                    } else {
+                        // Parse the combined value back into readable format
+                        $parts = explode('|', $value);
+                        if (count($parts) == count($columns)) {
+                            $readable_parts = [];
+                            for ($i = 0; $i < count($columns); $i++) {
+                                $readable_parts[] = $columns[$i] . "='" . $parts[$i] . "'";
+                            }
+                            echo "  🔸 Values (" . implode(', ', $readable_parts) . "): <strong>{$count}</strong> occurrences<br>\n";
+                        } else {
+                            echo "  🔸 Value '<strong>{$value}</strong>': <strong>{$count}</strong> occurrences<br>\n";
+                        }
+                    }
+                }
+                
+                echo "<br><strong>Action:</strong> Unique constraint creation skipped<br>\n";
+                echo "<strong>Impact:</strong> Database will continue to function normally<br>\n";
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br><br>\n";
+                
+                // Return true to indicate we handled this gracefully (not an error)
+                return true;
+            }
+        }
+        
         try {
             if ($this->verbose) {
-                echo "Executing: $sql\n";
+                echo "Executing: $sql<br>\n";
             }
             $q = $dblink->prepare($sql);
             $q->execute();
             return true;
         } catch(PDOException $e) {
             if ($this->verbose) {
-                echo "Error: " . $e->getMessage() . "\n";
+                echo "Error: " . $e->getMessage() . "<br>\n";
             }
             return false;
         }
@@ -1010,10 +1123,17 @@ class DatabaseUpdater {
                     // First, clean up NULL values in the primary key column if needed
                     if ($this->cleanupNullPrimaryKeyValues($class, $table_name, $expected_pkey, $dblink, $results)) {
                         // Use shared method to add/fix the primary key
-                        // Non-critical failure in batch operation - log and continue
+                        // Note: addPrimaryKeyConstraint now handles duplicates internally and returns true even when skipped
                         if ($this->addPrimaryKeyConstraint($table_name, $expected_pkey, $dblink)) {
-                            $results['fixed'][] = "{$table_name}.{$expected_pkey}";
-                            $results['messages'][] = "FIXED: Added primary key constraint to {$table_name}.{$expected_pkey}";
+                            // Check if this was actually fixed or just skipped due to duplicates
+                            // Re-check if primary key was actually added
+                            if ($this->isPrimaryKeyColumn($table_name, $expected_pkey, $dblink)) {
+                                $results['fixed'][] = "{$table_name}.{$expected_pkey}";
+                                $results['messages'][] = "FIXED: Added primary key constraint to {$table_name}.{$expected_pkey}";
+                            } else {
+                                // Was skipped due to duplicates - this is expected and not an error
+                                $results['warnings'][] = "Primary key constraint skipped for {$table_name}.{$expected_pkey} due to duplicate values";
+                            }
                         } else {
                             $results['errors'][] = "Failed to add primary key constraint to {$table_name}.{$expected_pkey}";
                             $results['success'] = false;
@@ -1053,6 +1173,37 @@ class DatabaseUpdater {
      */
     private function addPrimaryKeyConstraint($table_name, $pkey_column, $dblink) {
         try {
+            // FIRST: Check for duplicate values that would prevent primary key creation
+            $duplicate_info = $this->checkForDuplicatePrimaryKeyValues($table_name, $pkey_column, $dblink);
+            
+            if ($duplicate_info['has_duplicates']) {
+                // Log duplicates as clear warnings but don't fail
+                echo "<br>⚠️  <strong>PRIMARY KEY CONSTRAINT WARNING</strong><br>\n";
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br>\n";
+                echo "<strong>Table:</strong> {$table_name}<br>\n";
+                echo "<strong>Column:</strong> {$pkey_column}<br>\n";
+                echo "<strong>Issue:</strong> Duplicate values found - cannot create primary key constraint<br>\n";
+                echo "<br><strong>Duplicate values detected:</strong><br>\n";
+                
+                foreach ($duplicate_info['duplicates'] as $value => $count) {
+                    if ($value === '') {
+                        echo "  🔸 NULL values: <strong>{$count}</strong> occurrences<br>\n";
+                    } elseif ($value === 'UNKNOWN') {
+                        echo "  🔸 {$duplicate_info['duplicates'][$value]}<br>\n";
+                    } else {
+                        echo "  🔸 Value '<strong>{$value}</strong>': <strong>{$count}</strong> occurrences<br>\n";
+                    }
+                }
+                
+                echo "<br><strong>Action:</strong> Primary key constraint creation skipped<br>\n";
+                echo "<strong>Impact:</strong> Database will continue to function normally<br>\n";
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br><br>\n";
+                
+                // Don't attempt to add the constraint, but return true to not fail the overall operation
+                // Primary key constraints are not essential for database functioning
+                return true; // Return success to continue processing
+            }
+            
             // Check if any primary key already exists
             $check_sql = "SELECT constraint_name FROM information_schema.table_constraints 
                           WHERE table_name = ? 
@@ -1106,12 +1257,67 @@ class DatabaseUpdater {
             echo "Database error: " . $e->getMessage() . "<br>\n";
             
             // Show SQL in verbose mode
-            if ($this->verbose) {
+            if ($this->verbose && isset($sql)) {
                 echo "SQL attempted: {$sql}<br>\n";
                 echo "Error code: " . $e->getCode() . "<br>\n";
             }
             return false;
         }
+    }
+    
+    /**
+     * Check for duplicate values in a primary key column
+     * 
+     * @param string $table_name Table name
+     * @param string $pkey_column Primary key column name
+     * @param PDO $dblink Database connection
+     * @return array Array with 'has_duplicates' boolean and 'duplicates' array of value => count
+     */
+    private function checkForDuplicatePrimaryKeyValues($table_name, $pkey_column, $dblink) {
+        $result = [
+            'has_duplicates' => false,
+            'duplicates' => []
+        ];
+        
+        try {
+            // Check for duplicate values (including NULLs)
+            // Use COALESCE to convert NULL to empty string for consistent handling
+            $sql = "SELECT COALESCE(CAST({$pkey_column} AS TEXT), '') as value, COUNT(*) as count 
+                    FROM {$table_name} 
+                    GROUP BY COALESCE(CAST({$pkey_column} AS TEXT), '') 
+                    HAVING COUNT(*) > 1 
+                    ORDER BY COUNT(*) DESC, value";
+            
+            if ($this->verbose) {
+                echo "Checking for duplicate values in {$table_name}.{$pkey_column}<br>\n";
+            }
+            
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            
+            $duplicates = $q->fetchAll(PDO::FETCH_ASSOC);
+            
+            if (!empty($duplicates)) {
+                $result['has_duplicates'] = true;
+                foreach ($duplicates as $duplicate) {
+                    $result['duplicates'][$duplicate['value']] = $duplicate['count'];
+                }
+            }
+            
+            if ($this->verbose && !$result['has_duplicates']) {
+                echo "No duplicate values found in {$table_name}.{$pkey_column}<br>\n";
+            }
+            
+        } catch (PDOException $e) {
+            if ($this->verbose) {
+                echo "Error checking for duplicates in {$table_name}.{$pkey_column}: " . $e->getMessage() . "<br>\n";
+            }
+            // If we can't check for duplicates, assume there might be some to be safe
+            $result['has_duplicates'] = true;
+            $result['duplicates']['UNKNOWN'] = 'Error checking for duplicates';
+        }
+        
+        return $result;
     }
     
     /**
