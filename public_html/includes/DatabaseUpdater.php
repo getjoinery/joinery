@@ -326,13 +326,41 @@ class DatabaseUpdater {
                 $results['columns_modified'][] = "{$table_name}.{$field_name}";
                 $results['messages'][] = "Modified column type: {$table_name}.{$field_name} to {$field_type}";
             } catch (PDOException $e) {
-                // Clean up the PostgreSQL error message to avoid confusion with "ERROR:" in the middle
+                // Check if this is a type casting issue and if we can force it
+                if (strpos($e->getMessage(), 'cannot be cast automatically') !== false) {
+                    // Check if table is empty or if we should try forced conversion
+                    $count_sql = "SELECT COUNT(*) as row_count FROM {$table_name}";
+                    $count_q = $dblink->prepare($count_sql);
+                    $count_q->execute();
+                    $row_count = $count_q->fetch(PDO::FETCH_ASSOC)['row_count'];
+                    
+                    if ($row_count == 0) {
+                        // Table is empty, we can safely force the conversion
+                        try {
+                            $force_sql = "ALTER TABLE {$table_name} ALTER COLUMN {$field_name} TYPE {$field_type} USING {$field_name}::{$field_type}";
+                            $force_q = $dblink->prepare($force_sql);
+                            $force_q->execute();
+                            $results['columns_modified'][] = "{$table_name}.{$field_name}";
+                            $results['messages'][] = "FORCED column type conversion: {$table_name}.{$field_name} to {$field_type} (table was empty)";
+                            return; // Success, exit the method
+                        } catch (PDOException $force_e) {
+                            // Even forced conversion failed
+                            $current_type = $live_column_info['data_type'] ?? 'unknown';
+                            $results['errors'][] = "CRITICAL: Could not force column conversion {$table_name}.{$field_name} from {$current_type} to {$field_type} even with empty table: " . $force_e->getMessage();
+                            return;
+                        }
+                    } else {
+                        // Table has data - this is a critical error that must be fixed before deployment
+                        $current_type = $live_column_info['data_type'] ?? 'unknown';
+                        $results['errors'][] = "CRITICAL: Could not modify column {$table_name}.{$field_name} from {$current_type} to {$field_type}: Cannot cast automatically and table contains {$row_count} rows. This datatype mismatch will cause application crashes. Manual intervention required - run: ALTER TABLE {$table_name} ALTER COLUMN {$field_name} TYPE {$field_type} USING {$field_name}::{$field_type};";
+                        return;
+                    }
+                }
+                
+                // Other type of error - treat as critical
                 $error_message = $e->getMessage();
                 $error_message = str_replace('ERROR:', 'PostgreSQL says:', $error_message);
                 $current_type = $live_column_info['data_type'] ?? 'unknown';
-                
-                // Datatype mismatches are serious - they can cause application crashes
-                // This should be treated as an error, not just a warning
                 $results['errors'][] = "CRITICAL: Could not modify column {$table_name}.{$field_name} from {$current_type} to {$field_type}: " . $error_message . " This datatype mismatch could cause application crashes.";
             }
         }
