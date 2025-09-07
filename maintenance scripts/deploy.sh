@@ -1,9 +1,42 @@
 #!/usr/bin/env bash
-#version 2.5 - Added automatic rollback via bash traps
+#version 2.7 - Fixed plugin/theme deployment to use atomic staging with custom preservation
+# MODIFIED: Added comprehensive PHP syntax validation during deployment
+# MODIFIED: Added plugin loading test with proper PathHelper context
+# MODIFIED: Added basic runtime bootstrap test
+# MODIFIED: Added manual rollback capability with optional directory selection
 # MODIFIED: Preserve staging directory on deployment failures for debugging
 # MODIFIED: Added --norollback flag to disable rollback functionality
 # MODIFIED: Improved rollback functionality to handle directory conflicts
 # MODIFIED: Added trap-based automatic rollback system
+
+# Deploy script version
+DEPLOY_VERSION="2.7"
+
+# Simple JSON value extractor (no jq dependency)
+get_json_value() {
+    local json_file="$1"
+    local key="$2"
+    local default_value="$3"
+    
+    if [[ ! -f "$json_file" ]]; then
+        echo "$default_value"
+        return
+    fi
+    
+    # Extract value using sed and grep (handles quoted strings)
+    local value=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$json_file" 2>/dev/null | sed "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/")
+    
+    # Handle boolean values
+    if [[ -z "$value" ]]; then
+        value=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*[a-z]*" "$json_file" 2>/dev/null | sed "s/.*\"$key\"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/")
+    fi
+    
+    if [[ -n "$value" ]]; then
+        echo "$value"
+    else
+        echo "$default_value"
+    fi
+}
 
 # Global deployment state
 DEPLOYMENT_SUCCESS=false
@@ -223,11 +256,7 @@ EOF
                 # Check if theme is stock by reading manifest
                 local is_stock
                 if [[ -f "$manifest_file" ]]; then
-                    is_stock=$(jq -r '.is_stock // true' "$manifest_file" 2>/dev/null)
-                    # Validate jq output
-                    if [[ "$is_stock" != "true" && "$is_stock" != "false" ]]; then
-                        is_stock="true"
-                    fi
+                    is_stock=$(get_json_value "$manifest_file" "is_stock" "true")
                 else
                     # Fallback if jq fails
                     is_stock="true"
@@ -291,11 +320,7 @@ EOF
                 # Check if plugin is stock by reading manifest
                 local is_stock
                 if [[ -f "$manifest_file" ]]; then
-                    is_stock=$(jq -r '.is_stock // true' "$manifest_file" 2>/dev/null)
-                    # Validate jq output
-                    if [[ "$is_stock" != "true" && "$is_stock" != "false" ]]; then
-                        is_stock="true"
-                    fi
+                    is_stock=$(get_json_value "$manifest_file" "is_stock" "true")
                 else
                     # Fallback if jq fails
                     is_stock="true"
@@ -335,6 +360,7 @@ EOF
 deploy_theme_plugin() {
     local target_site="$1"
     local site_root="/var/www/html/$target_site"
+    local staging_dir="$site_root/public_html_stage"
     
     echo "Downloading themes and plugins from joinery repository to $target_site..."
     
@@ -370,46 +396,68 @@ deploy_theme_plugin() {
     rm -rf .git
     cd - > /dev/null
 
-    # Deploy themes to /var/www/html/sitename/theme (outside public_html)
+    # Deploy themes directly to public_html_stage
     if [[ -d "$theme_stage_dir/theme" ]]; then
-        echo "Deploying themes to $site_root/theme..."
-        rm -rf "$site_root/theme_old"
-        if [[ -d "$site_root/theme" ]]; then
-            mv "$site_root/theme" "$site_root/theme_old"
-        fi
-        mv "$theme_stage_dir/theme" "$site_root/theme"
-        chown -R www-data:user1 "$site_root/theme" 2>/dev/null || true
-        chmod -R 775 "$site_root/theme" 2>/dev/null || true
-        echo "Themes deployed successfully to $site_root/theme"
+        echo "Deploying stock themes to staging directory..."
+        echo "DEBUG: Moving from '$theme_stage_dir/theme' to '$staging_dir/theme'"
+        mkdir -p "$staging_dir"
+        
+        # Show what themes are being deployed
+        for theme_path in "$theme_stage_dir/theme"/*/; do
+            if [[ -d "$theme_path" ]]; then
+                theme_name=$(basename "$theme_path")
+                source_manifest="$theme_path/theme.json"
+                theme_version=$(get_json_value "$source_manifest" "version" "unknown")
+                theme_description=$(get_json_value "$source_manifest" "description" "")
+                echo "  📦 DEPLOYING stock theme: $theme_name v$theme_version - $theme_description"
+            fi
+        done
+        
+        mv "$theme_stage_dir/theme" "$staging_dir/theme" || {
+            echo "ERROR: Failed to move themes to staging directory"
+            return 1
+        }
+        echo "Stock themes deployed successfully to staging directory"
     else
         echo "ERROR: No theme directory found in joinery repository - deployment cannot continue"
         return 1
     fi
 
-    # Deploy plugins to /var/www/html/sitename/plugins (outside public_html)  
+    # Deploy plugins directly to public_html_stage
     if [[ -d "$plugins_stage_dir/plugins" ]]; then
-        echo "Deploying plugins to $site_root/plugins..."
-        rm -rf "$site_root/plugins_old"
-        if [[ -d "$site_root/plugins" ]]; then
-            mv "$site_root/plugins" "$site_root/plugins_old"
-        fi
-        mv "$plugins_stage_dir/plugins" "$site_root/plugins"
-        chown -R www-data:user1 "$site_root/plugins" 2>/dev/null || true
-        chmod -R 775 "$site_root/plugins" 2>/dev/null || true
-        echo "Plugins deployed successfully to $site_root/plugins"
+        echo "Deploying stock plugins to staging directory..."
+        echo "DEBUG: Moving from '$plugins_stage_dir/plugins' to '$staging_dir/plugins'"
+        mkdir -p "$staging_dir"
+        
+        # Show what plugins are being deployed
+        for plugin_path in "$plugins_stage_dir/plugins"/*/; do
+            if [[ -d "$plugin_path" ]]; then
+                plugin_name=$(basename "$plugin_path")
+                source_manifest="$plugin_path/plugin.json"
+                plugin_version=$(get_json_value "$source_manifest" "version" "unknown")
+                plugin_description=$(get_json_value "$source_manifest" "description" "")
+                echo "  🔌 DEPLOYING stock plugin: $plugin_name v$plugin_version - $plugin_description"
+            fi
+        done
+        
+        mv "$plugins_stage_dir/plugins" "$staging_dir/plugins" || {
+            echo "ERROR: Failed to move plugins to staging directory"
+            return 1
+        }
+        echo "Stock plugins deployed successfully to staging directory"
     else
         echo "ERROR: No plugins directory found in joinery repository - deployment cannot continue"
         return 1
     fi
 
-    # Validate that directories were created successfully
-    if [[ ! -d "$site_root/theme" ]]; then
-        echo "ERROR: Theme directory was not created successfully at $site_root/theme"
+    # Validate that directories were created successfully in staging
+    if [[ ! -d "$staging_dir/theme" ]]; then
+        echo "ERROR: Theme directory was not created successfully in staging directory"
         return 1
     fi
     
-    if [[ ! -d "$site_root/plugins" ]]; then
-        echo "ERROR: Plugins directory was not created successfully at $site_root/plugins"
+    if [[ ! -d "$staging_dir/plugins" ]]; then
+        echo "ERROR: Plugins directory was not created successfully in staging directory"
         return 1
     fi
 
@@ -423,93 +471,67 @@ deploy_theme_plugin() {
 }
 
 # Function to merge themes and plugins into public_html after main code deployment
-merge_themes_plugins_to_public_html() {
+preserve_custom_themes_plugins() {
     local target_site="$1"
     local site_root="/var/www/html/$target_site"
     local public_html_dir="$site_root/public_html"
+    local staging_dir="$site_root/public_html_stage"
     
-    echo "Merging themes and plugins into public_html..."
-    
-    # Ensure public_html theme and plugins directories exist
-    mkdir -p "$public_html_dir/theme"
-    mkdir -p "$public_html_dir/plugins"
-    
-    # MERGE THEMES: overwrite same names, preserve different names
-    echo "Merging themes from $site_root/theme to $public_html_dir/theme..."
-    if [[ -d "$site_root/theme" ]]; then
-        # Copy all themes from joinery repo, overwriting any with same names
-        for theme_path in "$site_root/theme"/*/; do
-            if [[ -d "$theme_path" ]]; then
-                theme_name=$(basename "$theme_path")
-                target_theme_path="$public_html_dir/theme/$theme_name"
+    # PRESERVE CUSTOM THEMES from existing public_html
+    if [[ -d "$public_html_dir/theme" ]]; then
+        echo "Checking for custom themes to preserve..."
+        for existing_theme_path in "$public_html_dir/theme"/*/; do
+            if [[ -d "$existing_theme_path" ]]; then
+                theme_name=$(basename "$existing_theme_path")
+                existing_manifest="$existing_theme_path/theme.json"
                 
-                if [[ -d "$target_theme_path" ]]; then
-                    echo "  OVERWRITING existing theme: $theme_name (from joinery repo)"
-                    rm -rf "$target_theme_path"
-                else
-                    echo "  Adding theme: $theme_name (from joinery repo)"
+                # Check if this theme is marked as custom (not stock)
+                if [[ -f "$existing_manifest" ]]; then
+                    is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
+                    if [[ "$is_stock" == "false" ]]; then
+                        theme_version=$(get_json_value "$existing_manifest" "version" "unknown")
+                        theme_description=$(get_json_value "$existing_manifest" "description" "")
+                        echo "  🔒 PRESERVING custom theme: $theme_name v$theme_version - $theme_description"
+                        
+                        # Copy custom theme to staging directory
+                        cp -r "$existing_theme_path" "$staging_dir/theme/" || {
+                            echo "ERROR: Failed to preserve custom theme $theme_name"
+                            return 1
+                        }
+                    fi
                 fi
-                
-                cp -r "$theme_path" "$public_html_dir/theme/" || {
-                    echo "ERROR: Failed to copy theme $theme_name"
-                    return 1
-                }
-                
-                # Fix permissions for theme
-                chown -R www-data:user1 "$target_theme_path" 2>/dev/null || true
-                chmod -R 775 "$target_theme_path" 2>/dev/null || true
             fi
         done
-        echo "Theme merge completed."
-    else
-        echo "ERROR: No themes directory found at $site_root/theme"
-        return 1
     fi
     
-    # MERGE PLUGINS: overwrite same names, preserve different names  
-    echo "Merging plugins from $site_root/plugins to $public_html_dir/plugins..."
-    if [[ -d "$site_root/plugins" ]]; then
-        # Copy all plugins from joinery repo, overwriting any with same names
-        for plugin_path in "$site_root/plugins"/*/; do
-            if [[ -d "$plugin_path" ]]; then
-                plugin_name=$(basename "$plugin_path")
-                target_plugin_path="$public_html_dir/plugins/$plugin_name"
+    # PRESERVE CUSTOM PLUGINS from existing public_html  
+    if [[ -d "$public_html_dir/plugins" ]]; then
+        echo "Checking for custom plugins to preserve..."
+        for existing_plugin_path in "$public_html_dir/plugins"/*/; do
+            if [[ -d "$existing_plugin_path" ]]; then
+                plugin_name=$(basename "$existing_plugin_path")
+                existing_manifest="$existing_plugin_path/plugin.json"
                 
-                if [[ -d "$target_plugin_path" ]]; then
-                    echo "  OVERWRITING existing plugin: $plugin_name (from joinery repo)"
-                    rm -rf "$target_plugin_path"
-                else
-                    echo "  Adding plugin: $plugin_name (from joinery repo)"
+                # Check if this plugin is marked as custom (not stock)
+                if [[ -f "$existing_manifest" ]]; then
+                    is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
+                    if [[ "$is_stock" == "false" ]]; then
+                        plugin_version=$(get_json_value "$existing_manifest" "version" "unknown")
+                        plugin_description=$(get_json_value "$existing_manifest" "description" "")
+                        echo "  🔒 PRESERVING custom plugin: $plugin_name v$plugin_version - $plugin_description"
+                        
+                        # Copy custom plugin to staging directory
+                        cp -r "$existing_plugin_path" "$staging_dir/plugins/" || {
+                            echo "ERROR: Failed to preserve custom plugin $plugin_name"
+                            return 1
+                        }
+                    fi
                 fi
-                
-                cp -r "$plugin_path" "$public_html_dir/plugins/" || {
-                    echo "ERROR: Failed to copy plugin $plugin_name"
-                    return 1
-                }
-                
-                # Fix permissions for plugin
-                chown -R www-data:user1 "$target_plugin_path" 2>/dev/null || true
-                chmod -R 775 "$target_plugin_path" 2>/dev/null || true
             fi
         done
-        echo "Plugin merge completed."
-    else
-        echo "ERROR: No plugins directory found at $site_root/plugins"
-        return 1
     fi
     
-    # Final validation
-    if [[ ! -d "$public_html_dir/theme" ]]; then
-        echo "ERROR: Theme directory missing after merge: $public_html_dir/theme"
-        return 1
-    fi
-    
-    if [[ ! -d "$public_html_dir/plugins" ]]; then
-        echo "ERROR: Plugins directory missing after merge: $public_html_dir/plugins"
-        return 1
-    fi
-    
-    echo "Theme and plugin merge to public_html complete."
+    echo "Custom theme and plugin preservation complete."
     return 0
 }
 
@@ -763,6 +785,7 @@ deploy_directory="/var/www/html/$TARGET_SITE"
 
 # Show deployment configuration
 echo "========================================="
+echo "DEPLOY.SH VERSION: $DEPLOY_VERSION"
 echo "DEPLOYMENT CONFIGURATION:"
 echo "Deploy type: $DEPLOY_TYPE"
 echo "Live site: $LIVE_SITE"
@@ -909,8 +932,22 @@ Deny from all
 </RequireAll>
 EOF
 
-# DO THE MAIN CODE DEPLOY (with smart theme/plugin merging)
-echo "Deploying main application code..."
+# DOWNLOAD THEMES AND PLUGINS FROM JOINERY REPOSITORY
+echo "Downloading themes and plugins from joinery repository..."
+if ! deploy_theme_plugin "$TARGET_SITE"; then
+    echo "ERROR: Theme/plugin download failed. Aborting deployment."
+    exit 1
+fi
+
+# PRESERVE CUSTOM THEMES AND PLUGINS FROM EXISTING PUBLIC_HTML
+echo "Preserving custom themes and plugins from existing deployment..."
+if ! preserve_custom_themes_plugins "$TARGET_SITE"; then
+    echo "ERROR: Custom theme/plugin preservation failed."
+    exit 1
+fi
+
+# DO THE MAIN CODE DEPLOY (with themes and plugins already in staging)
+echo "Deploying main application code with themes and plugins..."
 cd /var/www/html/$TARGET_SITE/public_html_stage || {
     echo "ERROR: Could not change to staging directory"
     exit 1
@@ -925,33 +962,15 @@ for item in *; do
 done
 cd - > /dev/null
 
-# DOWNLOAD THEMES AND PLUGINS FROM JOINERY REPOSITORY
-echo "Downloading themes and plugins from joinery repository..."
-if ! deploy_theme_plugin "$TARGET_SITE"; then
-    echo "ERROR: Theme/plugin download failed. Aborting deployment."
-    exit 1
-fi
-
-# MERGE THEMES AND PLUGINS INTO PUBLIC_HTML
-echo "Merging themes and plugins into public_html..."
-if ! merge_themes_plugins_to_public_html "$TARGET_SITE"; then
-    echo "ERROR: Theme/plugin merge failed."
-    exit 1
-fi
-
 # VALIDATE CRITICAL DIRECTORIES EXIST AFTER DEPLOYMENT
-echo "Validating critical directories after deployment and merge..."
+echo "Validating critical directories after deployment..."
 if [[ ! -d "/var/www/html/$TARGET_SITE/public_html/theme" ]]; then
-    echo "ERROR: Theme directory missing after merge: /var/www/html/$TARGET_SITE/public_html/theme"
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
-    echo "DEBUGGING: Theme source directory: /var/www/html/$TARGET_SITE/theme"
+    echo "ERROR: Theme directory missing after deployment: /var/www/html/$TARGET_SITE/public_html/theme"
     exit 1
 fi
 
 if [[ ! -d "/var/www/html/$TARGET_SITE/public_html/plugins" ]]; then
-    echo "ERROR: Plugins directory missing after merge: /var/www/html/$TARGET_SITE/public_html/plugins"
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
-    echo "DEBUGGING: Plugins source directory: /var/www/html/$TARGET_SITE/plugins"
+    echo "ERROR: Plugins directory missing after deployment: /var/www/html/$TARGET_SITE/public_html/plugins"
     exit 1
 fi
 
@@ -1061,8 +1080,13 @@ while IFS= read -r -d '' file; do
         
         error_reporting(E_ALL);
         set_error_handler(function(\$errno, \$errstr) {
-            echo \"INCLUDE ERROR: \$errstr\n\";
-            exit(1);
+            // Only treat actual errors and warnings as failures, ignore deprecation notices
+            if (\$errno & (E_ERROR | E_WARNING | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR)) {
+                echo \"INCLUDE ERROR: \$errstr\n\";
+                exit(1);
+            }
+            // Ignore E_DEPRECATED, E_USER_DEPRECATED, E_NOTICE, E_STRICT
+            return true;
         });
         
         try {
