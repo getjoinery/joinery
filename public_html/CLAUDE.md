@@ -38,18 +38,6 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 PathHelper::requireOnce('migrations/migrations.php');
 ```
 
-## Custom Slash Commands
-
-**Location:** `/home/user1/.claude/commands/`
-
-When the user types a slash command (e.g., `/implement`, `/refactor`), always check if a custom command exists before proceeding:
-
-1. **Check for custom command:** Look for `/home/user1/.claude/commands/{command}.md`
-2. **If found:** Read the command file and follow its instructions exactly
-3. **If not found:** Proceed with built-in slash command or ask for clarification
-
-Custom commands override built-in behavior and provide specific workflows tailored to this project.
-
 ## Architecture Patterns
 
 ### Directory Structure & Responsibilities
@@ -58,62 +46,24 @@ Custom commands override built-in behavior and provide specific workflows tailor
 - `/views/` - Base presentation templates
 - `/adm/` - Complete admin interface (currently uses Falcon theme)
 - `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterMaster, etc.)
-- `/theme/` - Multi-theme system (falcon=Bootstrap, tailwind=legacy Tailwind CSS option)
-- `/plugins/` - Self-contained modules with own MVC structure
+- `/theme/` - Multi-theme system (falcon=Bootstrap, tailwind=legacy Tailwind CSS option) [symlinked]
+- `/plugins/` - Self-contained modules with own MVC structure [symlinked]
 - `/ajax/` - AJAX endpoints and webhook handlers
 - `/api/` - REST API with key-based authentication
 - `/utils/` - Maintenance scripts and development tools
 - `/migrations/` - Version-controlled database schema changes
+- `/specs/` - Feature specifications (active and implemented)
+- `/docs/` - Documentation and Claude-specific guidance
+- `/tests/` - Test suites (email, functional, integration, models)
+- `/home/user1/joinery/joinery/maintenance_scripts/` - Development and deployment scripts [separate git repo]
 
-### Theme Override System
-The system checks for theme-specific files first, then falls back to base files:
-1. `/theme/[theme]/views/page.php` (theme-specific)
-2. `/views/page.php` (base fallback)
+### Routing & Theme System
 
-Theme is selected via `theme_template` setting and can be changed at runtime.
+**Main Entry:** `serve.php` processes all requests via RouteHelper
+**Theme Override:** Checks `/theme/[theme]/views/` first, then `/views/` fallback
+**Plugin Routes:** Admin pages auto-discovered at `/plugins/{plugin}/admin/*`
 
-### Theme Routing System
-Each theme can define its own routes via `/theme/[name]/serve.php` using RouteHelper format:
-
-```php
-<?php
-// theme/mytheme/serve.php - RouteHelper format routes for mytheme theme
-$routes = [
-    'dynamic' => [
-        '/special-page' => ['view' => 'views/special-page'],
-        '/event/{slug}' => ['model' => 'Event', 'model_file' => 'data/events_class'],
-    ],
-    'custom' => [
-        '/complex-feature' => function($params, $settings, $session, $template_directory) {
-            return ThemeHelper::includeThemeFile('views/complex-feature.php');
-        },
-    ],
-];
-```
-
-Theme routes are processed by RouteHelper using the same pattern matching as main serve.php routes.
-
-### Routing System (serve.php + RouteHelper.php)
-
-**Route Pattern Rules:**
-- **Route patterns** in serve.php always start with `/` (e.g., `/tests/*`, `/page/{slug}`)
-- **File paths** in route configurations are always relative (e.g., `'view' => 'tests/{path}'`)
-- **Request paths** are automatically normalized by RouteHelper (leading slashes added if missing)
-
-**Route Processing Order:**
-1. Static routes (main serve.php)
-2. Theme serve.php routes (if exists)
-3. Custom routes (main serve.php)
-4. Dynamic routes (main serve.php)
-5. View directory fallback
-6. 404 page
-
-### Plugin Architecture (Backend Only)
-Plugins in `/plugins/[name]/` provide backend functionality only:
-- Add admin interface pages (served via `/plugins/{plugin}/admin/*` automatic discovery)
-- Include database migrations and data models
-- Hook into system events
-- **NO routing control** - all user-facing routes are controlled by themes
+For complete details on themes, plugins, and routing: **📖 [Plugin Developer Guide](/docs/claude/plugin_developer_guide.md)**
 
 ## Database & Configuration
 
@@ -123,13 +73,16 @@ Plugins in `/plugins/[name]/` provide backend functionality only:
 - Additional, database-stored settings in `stg_settings` table, accessed with settings singleton
 - `$settings = Globalvars::get_instance()` - Get settings singleton
 - `$settings->get_setting('setting_name')` - Get configuration value
+- **Note:** There is no `set_setting()` method - see `/adm/admin_settings.php` for how to change settings
 
 ### Important Settings
 - **composerAutoLoad**: Path to vendor directory (e.g., `/home/user1/vendor/`)
   - This setting contains the path to the vendor directory, NOT the full path to autoload.php
   - Code should append `autoload.php` to this path when using it
 
-### Data Classes Pattern
+### Data Model Classes (Single and Multi Patterns)
+
+#### Single Object Pattern (extends SystemBase)
 ```php
 class TableName extends SystemBase {
     public static $prefix = 'tbl';
@@ -196,6 +149,47 @@ class TableName extends SystemBase {
 }
 ```
 
+#### Multi-Object Collection Pattern (extends SystemMultiBase)
+```php
+class MultiTableName extends SystemMultiBase {
+    public static $table_name = 'tbl_table_name';
+    public static $table_primary_key = 'tbl_id';
+    protected static $default_options = array();
+    
+    // Constructor
+    function __construct($options = array(), $order_by = array(), 
+                        $limit = NULL, $offset = NULL, $operation = 'AND', $write_lock = FALSE);
+    
+    // Loading Methods
+    function load($debug = false); // Load all matching objects
+    function count_all(); // Get total count without loading (implemented in concrete classes)
+    
+    // Collection Access Methods
+    function get($index); // Get object at specific index (0-based)
+    function get_by_key($key); // Get object by primary key value
+    function is_valid($location); // Check if index exists
+    function contains($item); // Check if collection contains object
+    function contains_key($key); // Check if collection contains key
+    
+    // Collection Manipulation Methods
+    function add($value); // Add object to collection
+    function remove($location); // Remove object at index
+    
+    // Iterator Implementation (IteratorAggregate, Countable)
+    function count(); // Get number of loaded objects
+    function getIterator(); // Returns ArrayIterator for foreach loops
+    function incremental_iterator($incremental_limit = 200); // For large datasets
+    
+    // Authentication
+    function authenticate_read($data); // Calls authenticate_read on all children
+    
+    // Internal Methods (used by concrete implementations)
+    protected function _get_resultsv2($table, $filters = [], $sorts = [], 
+                                     $only_count = false, $debug = false);
+	// More methods are available in the SystemMultiBase class
+}
+```
+
 ### DbConnector Usage and Database Calls
 
 **CRITICAL RULE:** **NEVER use DbConnector directly if there is a model class available!**
@@ -254,57 +248,7 @@ $product = new Product(NULL);         // Creates new object for insertion
 $product = new Product();
 ```
 
-### Multi-Object Collections (SystemMultiBase)
-
-**Constructor Pattern:**
-```php
-new MultiClassName($search_criteria, $order_by, $limit, $offset, $operation, $write_lock)
-```
-
-**Selected Method Reference:**
-```php
-class MultiTableName extends SystemMultiBase {
-    public static $table_name = 'tbl_table_name';
-    public static $table_primary_key = 'tbl_id';
-    protected static $default_options = array();
-    
-    // Constructor
-    function __construct($options = array(), $order_by = array(), 
-                        $limit = NULL, $offset = NULL, $operation = 'AND', $write_lock = FALSE);
-    
-    // Loading Methods
-    function load($debug = false); // Load all matching objects
-    function count_all(); // Get total count without loading (implemented in concrete classes)
-    
-    // Collection Access Methods
-    function get($index); // Get object at specific index (0-based)
-    function get_by_key($key); // Get object by primary key value
-    function is_valid($location); // Check if index exists
-    function contains($item); // Check if collection contains object
-    function contains_key($key); // Check if collection contains key
-    
-    // Collection Manipulation Methods
-    function add($value); // Add object to collection
-    function remove($location); // Remove object at index
-
-    
-    // Iterator Implementation (IteratorAggregate, Countable)
-    function count(); // Get number of loaded objects
-    function getIterator(); // Returns ArrayIterator for foreach loops
-    function incremental_iterator($incremental_limit = 200); // For large datasets
-    
-    
-    // Authentication
-    function authenticate_read($data); // Calls authenticate_read on all children
-    
-    // Internal Methods (used by concrete implementations)
-    protected function _get_resultsv2($table, $filters = [], $sorts = [], 
-                                     $only_count = false, $debug = false);
-	// More methods are available in the SystemBase class
-}
-```
-
-**Examples:**
+### Usage Examples:
 ```php
 // Search criteria patterns
 $criteria = array('pro_is_active' => 1);
@@ -337,6 +281,26 @@ For complete guidance on creating admin interface pages, including required setu
 
 **📖 [Admin Pages Documentation](/docs/claude/CLAUDE_admin_pages.md)**
 
+
+## Common Tasks & Quick Reference
+
+### Session Check (Admin Pages)
+```php
+$session = new Session(Globalvars::get_instance());
+if (!$session->is_logged_in() || !$session->is_admin()) {
+    header("Location: /login");
+    exit();
+}
+```
+
+### Tests
+- `/tests/email/` - Email sending and authentication patterns
+- `/tests/functional/products/` - Product-related functionality  
+- `/tests/integration/` - External services (Mailgun, PHPMailer, routing)
+- `/tests/models/` - Data model CRUD operations and validation
+
+### Deployment Scripts
+Located in `/home/user1/joinery/joinery/maintenance_scripts/`
 
 ## Development Workflow
 
@@ -446,39 +410,17 @@ sudo systemctl restart apache2
 
 ## Plugin Development
 
-### Plugin Directory Structure (Backend Only)
-```
-/plugins/[name]/
-├── admin/        # Admin interface files ✅
-├── data/         # Data model classes ✅
-├── includes/     # Helper classes ✅
-├── migrations/   # Database changes ✅
-├── plugin.json   # Plugin metadata ✅
-└── ❌ NO: serve.php, views/, assets/
-```
-
-### Plugin Admin Access
-- **URL Pattern:** `/plugins/{plugin}/admin/{page}`
-- **Automatic discovery** - no need to register pages
-- **Frontend control:** Only themes control user-facing routes
-
-## Development Restrictions
-
-**IMPORTANT: Do not make changes to files in the following directories without explicit instructions:**
-
-- `/includes/` - Core system classes and libraries
-- `/migrations/` - Database schema changes and version control
-- `/api/` - REST API endpoints and authentication
-- `/data/` - Existing data model classes (new classes are allowed)
+Plugins provide backend functionality with admin interfaces at `/plugins/{plugin}/admin/*`.
+See **📖 [Plugin Developer Guide](/docs/claude/plugin_developer_guide.md)** for complete details.
 
 ## Best Practices
 
-1. **Syntax Validation**: ALWAYS run `php -l filename.php` on all PHP files before completing any task
-2. **Method Verification**: NEVER assume available functions - always check class definitions first
-3. **Security**: Always validate and sanitize user input
-4. **FormWriter**: Always use FormWriter class for forms
-5. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
-6. **Respect Restrictions**: Only modify restricted directories with explicit user permission
+1. **Custom Commands**: Check `/home/user1/.claude/commands/` for project-specific slash commands before proceeding
+2. **Syntax Validation**: ALWAYS run `php -l filename.php` on all PHP files before completing any task
+3. **Method Verification**: NEVER assume available functions - always check class definitions first
+4. **Security**: Always validate and sanitize user input
+5. **FormWriter**: Always use FormWriter class for forms
+6. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
 
 ## Security Notes
 
