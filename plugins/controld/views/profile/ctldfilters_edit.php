@@ -1,10 +1,10 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage');
-	require_once(LibraryFunctions::get_logic_file_path('ctldfilters_edit_logic.php'));
+	PathHelper::requireOnce('plugins/controld/logic/ctldfilters_edit_logic.php');
 
 	$page_vars = ctldfilters_edit_logic($_GET, $_POST);
 	$profile_choice = $page_vars['profile_choice'];

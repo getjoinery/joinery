@@ -3,6 +3,14 @@ require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageBase.php');
 
 class PublicPage extends PublicPageBase {
 
+	// Implement abstract method from PublicPageBase
+	protected function getTableClasses() {
+		return [
+			'wrapper' => 'uk-overflow-auto',
+			'table' => 'uk-table uk-table-striped',
+			'header' => 'uk-table-header'
+		];
+	}
 
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();

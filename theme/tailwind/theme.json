@@ -11,5 +11,5 @@
   },
   "cssFramework": "tailwind",
   "formWriterBase": "FormWriterMasterTailwind",
-  "publicPageBase": "PublicPageFalcon"
+  "publicPageBase": "PublicPageTailwind"
 }

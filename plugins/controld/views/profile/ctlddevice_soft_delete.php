@@ -1,12 +1,12 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage');
-	require_once(LibraryFunctions::get_logic_file_path('ctlddevice_delete_logic.php'));
+	PathHelper::requireOnce('plugins/controld/logic/ctlddevice_soft_delete_logic.php');
 
-	$page_vars = ctlddevice_delete_logic($_GET, $_POST);
+	$page_vars = ctlddevice_soft_delete_logic($_GET, $_POST);
 	$device = $page_vars['device'];
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();
@@ -34,13 +34,13 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	
 
 	
-	$validation_rules = array();
-	$validation_rules['confirm']['required']['value'] = 'true';
+	//$validation_rules = array();
+	//$validation_rules['confirm']['required']['value'] = 'true';
 
-	echo $formwriter->set_validate($validation_rules);	
+	//echo $formwriter->set_validate($validation_rules);	
 
 
-	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctlddevice_delete', true);
+	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctlddevice_soft_delete', true);
 	
 		?>
                         <div class="job-content">
@@ -55,18 +55,16 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 		
 	echo $formwriter->hiddeninput('device_id', $device->key);
 	
-	echo '<p>You are about to delete this device. If you want to reactivate you will need to set up a new device.</p>';
+	echo '<p>You are about to delete this device. </p>';
 	
 
 
 		
 	
-	echo $formwriter->checkboxinput("Confirm deletion", "confirm", "checkbox", "left", 0, 1, "");
-	
 	
 	
 	echo $formwriter->start_buttons('form-btn col-6');
-	echo $formwriter->new_form_button('Delete', 'th-btn');
+	echo $formwriter->new_form_button('Confirm Delete', 'th-btn');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);	
 

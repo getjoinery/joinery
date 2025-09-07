@@ -1,46 +1,37 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Globalvars.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage');
-	require_once(LibraryFunctions::get_logic_file_path('ctlddevice_delete_logic.php'));
+	PathHelper::requireOnce('plugins/controld/logic/ctldprofile_delete_logic.php');
 
-	$page_vars = ctlddevice_delete_logic($_GET, $_POST);
-	$device = $page_vars['device'];
+	$page_vars = ctldprofile_delete_logic($_GET, $_POST);
+	$profile = $page_vars['profile'];
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();
-	$name = $device->get_readable_name();
 
 
 	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
-		'title' => 'Device Add/Edit', 
+		'title' => 'Delete Profile', 
 		'breadcrumbs' => array (
 			'My Profile' => '/profile',
-			'Delete Device' => ''),
+			'Delete Profile' => ''),
 	);
 	$page->public_header($hoptions,NULL);
 
-	echo PublicPage::BeginPage('Delete Device', $hoptions);
-	
-
-
-
+	echo PublicPage::BeginPage('Delete Profile', $hoptions);
 	
 	$formwriter = LibraryFunctions::get_formwriter_object();
-	
-	
-
-	
 	$validation_rules = array();
 	$validation_rules['confirm']['required']['value'] = 'true';
 
 	echo $formwriter->set_validate($validation_rules);	
 
 
-	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctlddevice_delete', true);
+	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctldprofile_delete', true);
 	
 		?>
                         <div class="job-content">
@@ -53,9 +44,9 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	<?php
 	
 		
-	echo $formwriter->hiddeninput('device_id', $device->key);
+	echo $formwriter->hiddeninput('profile_id', $profile->key);
 	
-	echo '<p>You are about to delete this device. If you want to reactivate you will need to set up a new device.</p>';
+	echo '<p>You are about to delete this scheduled profile. After your scheduled profile is deleted, your default profile will always be active.</p>';
 	
 
 
@@ -66,7 +57,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	
 	
 	echo $formwriter->start_buttons('form-btn col-6');
-	echo $formwriter->new_form_button('Delete', 'th-btn');
+	echo $formwriter->new_form_button('Delete', 'primary');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);	
 

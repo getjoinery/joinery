@@ -5,6 +5,15 @@ require_once($siteDir . '/includes/PublicPageBase.php');
 
 class PublicPage extends PublicPageBase {
 
+	// Implement abstract method from PublicPageBase
+	protected function getTableClasses() {
+		return [
+			'wrapper' => 'table-responsive scrollbar',
+			'table' => 'table',
+			'header' => 'thead-light'
+		];
+	}
+
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
 		$page->public_header(

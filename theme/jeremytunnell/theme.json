@@ -9,7 +9,7 @@
     "php": ">=7.4",
     "joinery": ">=1.0.0"
   },
-  "cssFramework": "custom",
-  "formWriterBase": "FormWriterMasterBootstrap",
-  "publicPageBase": "PublicPageFalcon"
+  "cssFramework": "wordpress",
+  "formWriterBase": "FormWriterMasterDefault",
+  "publicPageBase": "PublicPageBase"
 }

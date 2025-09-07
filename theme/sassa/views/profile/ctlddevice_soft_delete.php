@@ -3,7 +3,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	ThemeHelper::includeThemeFile('includes/PublicPage');
 	require_once(LibraryFunctions::get_logic_file_path('ctlddevice_soft_delete_logic.php'));
 
 	$page_vars = ctlddevice_soft_delete_logic($_GET, $_POST);
