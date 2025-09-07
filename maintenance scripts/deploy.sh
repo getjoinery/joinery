@@ -402,16 +402,7 @@ deploy_theme_plugin() {
         echo "DEBUG: Moving from '$theme_stage_dir/theme' to '$staging_dir/theme'"
         mkdir -p "$staging_dir"
         
-        # Show what themes are being deployed
-        for theme_path in "$theme_stage_dir/theme"/*/; do
-            if [[ -d "$theme_path" ]]; then
-                theme_name=$(basename "$theme_path")
-                source_manifest="$theme_path/theme.json"
-                theme_version=$(get_json_value "$source_manifest" "version" "unknown")
-                theme_description=$(get_json_value "$source_manifest" "description" "")
-                echo "  📦 DEPLOYING stock theme: $theme_name v$theme_version - $theme_description"
-            fi
-        done
+        # Deploy stock themes (status will be shown during merge operation)
         
         mv "$theme_stage_dir/theme" "$staging_dir/theme" || {
             echo "ERROR: Failed to move themes to staging directory"
@@ -429,16 +420,7 @@ deploy_theme_plugin() {
         echo "DEBUG: Moving from '$plugins_stage_dir/plugins' to '$staging_dir/plugins'"
         mkdir -p "$staging_dir"
         
-        # Show what plugins are being deployed
-        for plugin_path in "$plugins_stage_dir/plugins"/*/; do
-            if [[ -d "$plugin_path" ]]; then
-                plugin_name=$(basename "$plugin_path")
-                source_manifest="$plugin_path/plugin.json"
-                plugin_version=$(get_json_value "$source_manifest" "version" "unknown")
-                plugin_description=$(get_json_value "$source_manifest" "description" "")
-                echo "  🔌 DEPLOYING stock plugin: $plugin_name v$plugin_version - $plugin_description"
-            fi
-        done
+        # Deploy stock plugins (status will be shown during merge operation)
         
         mv "$plugins_stage_dir/plugins" "$staging_dir/plugins" || {
             echo "ERROR: Failed to move plugins to staging directory"
@@ -477,55 +459,73 @@ preserve_custom_themes_plugins() {
     local public_html_dir="$site_root/public_html"
     local staging_dir="$site_root/public_html_stage"
     
-    # PRESERVE CUSTOM THEMES from existing public_html
-    if [[ -d "$public_html_dir/theme" ]]; then
-        echo "Checking for custom themes to preserve..."
-        for existing_theme_path in "$public_html_dir/theme"/*/; do
-            if [[ -d "$existing_theme_path" ]]; then
-                theme_name=$(basename "$existing_theme_path")
-                existing_manifest="$existing_theme_path/theme.json"
+    echo "Processing themes and plugins..."
+    
+    # SHOW STATUS FOR ALL THEMES (STOCK AND CUSTOM)
+    if [[ -d "$staging_dir/theme" ]]; then
+        for staging_theme_path in "$staging_dir/theme"/*/; do
+            if [[ -d "$staging_theme_path" ]]; then
+                theme_name=$(basename "$staging_theme_path")
+                staging_manifest="$staging_theme_path/theme.json"
+                theme_version=$(get_json_value "$staging_manifest" "version" "unknown")
+                theme_description=$(get_json_value "$staging_manifest" "description" "")
                 
-                # Check if this theme is marked as custom (not stock)
-                if [[ -f "$existing_manifest" ]]; then
-                    is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
-                    if [[ "$is_stock" == "false" ]]; then
-                        theme_version=$(get_json_value "$existing_manifest" "version" "unknown")
-                        theme_description=$(get_json_value "$existing_manifest" "description" "")
-                        echo "  🔒 PRESERVING custom theme: $theme_name v$theme_version - $theme_description"
-                        
-                        # Copy custom theme to staging directory
-                        cp -r "$existing_theme_path" "$staging_dir/theme/" || {
-                            echo "ERROR: Failed to preserve custom theme $theme_name"
-                            return 1
-                        }
+                # Check if theme exists in previous deployment
+                existing_theme_path="$site_root/public_html_last/theme/$theme_name"
+                if [[ -d "$existing_theme_path" ]]; then
+                    existing_manifest="$existing_theme_path/theme.json"
+                    if [[ -f "$existing_manifest" ]]; then
+                        is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
+                        if [[ "$is_stock" == "false" ]]; then
+                            echo "  🔒 PRESERVING custom theme: $theme_name v$theme_version - $theme_description"
+                            # Copy custom theme over stock version in staging
+                            cp -r "$existing_theme_path" "$staging_dir/theme/" || {
+                                echo "ERROR: Failed to preserve custom theme $theme_name"
+                                return 1
+                            }
+                        else
+                            echo "  📦 UPDATING stock theme: $theme_name v$theme_version - $theme_description"
+                        fi
+                    else
+                        echo "  📦 UPDATING theme: $theme_name v$theme_version - $theme_description"
                     fi
+                else
+                    echo "  ✨ ADDING new theme: $theme_name v$theme_version - $theme_description"
                 fi
             fi
         done
     fi
     
-    # PRESERVE CUSTOM PLUGINS from existing public_html  
-    if [[ -d "$public_html_dir/plugins" ]]; then
-        echo "Checking for custom plugins to preserve..."
-        for existing_plugin_path in "$public_html_dir/plugins"/*/; do
-            if [[ -d "$existing_plugin_path" ]]; then
-                plugin_name=$(basename "$existing_plugin_path")
-                existing_manifest="$existing_plugin_path/plugin.json"
+    # SHOW STATUS FOR ALL PLUGINS (STOCK AND CUSTOM)
+    if [[ -d "$staging_dir/plugins" ]]; then
+        for staging_plugin_path in "$staging_dir/plugins"/*/; do
+            if [[ -d "$staging_plugin_path" ]]; then
+                plugin_name=$(basename "$staging_plugin_path")
+                staging_manifest="$staging_plugin_path/plugin.json"
+                plugin_version=$(get_json_value "$staging_manifest" "version" "unknown")
+                plugin_description=$(get_json_value "$staging_manifest" "description" "")
                 
-                # Check if this plugin is marked as custom (not stock)
-                if [[ -f "$existing_manifest" ]]; then
-                    is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
-                    if [[ "$is_stock" == "false" ]]; then
-                        plugin_version=$(get_json_value "$existing_manifest" "version" "unknown")
-                        plugin_description=$(get_json_value "$existing_manifest" "description" "")
-                        echo "  🔒 PRESERVING custom plugin: $plugin_name v$plugin_version - $plugin_description"
-                        
-                        # Copy custom plugin to staging directory
-                        cp -r "$existing_plugin_path" "$staging_dir/plugins/" || {
-                            echo "ERROR: Failed to preserve custom plugin $plugin_name"
-                            return 1
-                        }
+                # Check if plugin exists in previous deployment
+                existing_plugin_path="$site_root/public_html_last/plugins/$plugin_name"
+                if [[ -d "$existing_plugin_path" ]]; then
+                    existing_manifest="$existing_plugin_path/plugin.json"
+                    if [[ -f "$existing_manifest" ]]; then
+                        is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
+                        if [[ "$is_stock" == "false" ]]; then
+                            echo "  🔒 PRESERVING custom plugin: $plugin_name v$plugin_version - $plugin_description"
+                            # Copy custom plugin over stock version in staging  
+                            cp -r "$existing_plugin_path" "$staging_dir/plugins/" || {
+                                echo "ERROR: Failed to preserve custom plugin $plugin_name"
+                                return 1
+                            }
+                        else
+                            echo "  🔌 UPDATING stock plugin: $plugin_name v$plugin_version - $plugin_description"
+                        fi
+                    else
+                        echo "  🔌 UPDATING plugin: $plugin_name v$plugin_version - $plugin_description"
                     fi
+                else
+                    echo "  ⚡ ADDING new plugin: $plugin_name v$plugin_version - $plugin_description"
                 fi
             fi
         done
