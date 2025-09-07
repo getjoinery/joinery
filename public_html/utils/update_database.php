@@ -239,7 +239,6 @@
 		
 		// Load migrations using Migration class
 		$migrations = Migration::loadMigrations();
-		echo "Migrations loaded successfully: " . count($migrations) . " migrations found<br>\n";
 		
 		// Validate migrations using Migration class
 		$validation_result = Migration::validateMigrations($migrations);
