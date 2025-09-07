@@ -326,7 +326,14 @@ class DatabaseUpdater {
                 $results['columns_modified'][] = "{$table_name}.{$field_name}";
                 $results['messages'][] = "Modified column type: {$table_name}.{$field_name} to {$field_type}";
             } catch (PDOException $e) {
-                $results['warnings'][] = "Could not modify column {$table_name}.{$field_name}: " . $e->getMessage();
+                // Clean up the PostgreSQL error message to avoid confusion with "ERROR:" in the middle
+                $error_message = $e->getMessage();
+                $error_message = str_replace('ERROR:', 'PostgreSQL says:', $error_message);
+                $current_type = $live_column_info['data_type'] ?? 'unknown';
+                
+                // Datatype mismatches are serious - they can cause application crashes
+                // This should be treated as an error, not just a warning
+                $results['errors'][] = "CRITICAL: Could not modify column {$table_name}.{$field_name} from {$current_type} to {$field_type}: " . $error_message . " This datatype mismatch could cause application crashes.";
             }
         }
         
