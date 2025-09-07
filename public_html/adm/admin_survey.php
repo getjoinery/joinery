@@ -144,7 +144,7 @@
 	
 	if($numquestions){
 		echo '<tr><td colspan="3">';
-		$formwriter = LibraryFunctions::get_formwriter_object('form3, 'admin');
+		$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
 		//$validation_rules = array();
 		//$validation_rules['evt_event_id']['required']['value'] = 'true';
 		//echo $formwriter->set_validate($validation_rules);
