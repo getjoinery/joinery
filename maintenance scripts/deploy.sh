@@ -946,6 +946,107 @@ if ! preserve_custom_themes_plugins "$TARGET_SITE"; then
     exit 1
 fi
 
+# RUN PRE-DEPLOYMENT TESTS ON STAGING
+echo "Running pre-deployment tests on staging environment..."
+
+# PHP SYNTAX VALIDATION ON STAGING
+echo "Validating PHP syntax on staging files..."
+php_error_count=0
+while IFS= read -r -d '' file; do
+    if ! php -l "$file" >/dev/null 2>&1; then
+        echo "SYNTAX ERROR in: $file"
+        php -l "$file"
+        ((php_error_count++))
+    fi
+done < <(find "/var/www/html/$TARGET_SITE/public_html_stage" -name "*.php" -print0)
+
+if [[ $php_error_count -gt 0 ]]; then
+    echo "ERROR: $php_error_count PHP syntax errors found in staging."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    exit 1
+fi
+echo "PHP syntax validation passed on staging."
+
+# PLUGIN LOADING TEST ON STAGING
+echo "Testing plugin class file loading on staging..."
+plugin_error_count=0
+while IFS= read -r -d '' file; do
+    # Test if the file can be included without errors
+    # CRITICAL: Set working directory and document root so PathHelper works correctly
+    if ! php -r "
+        \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
+        chdir('/var/www/html/$TARGET_SITE/public_html_stage');
+        
+        error_reporting(E_ALL);
+        set_error_handler(function(\$errno, \$errstr) {
+            // Only treat actual errors and warnings as failures, ignore deprecation notices
+            if (\$errno & (E_ERROR | E_WARNING | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR)) {
+                echo \"INCLUDE ERROR: \$errstr\n\";
+                exit(1);
+            }
+            // Ignore E_DEPRECATED, E_USER_DEPRECATED, E_NOTICE, E_STRICT
+            return true;
+        });
+        
+        try {
+            // Bootstrap PathHelper first so plugin files can use it
+            require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
+            
+            // Now test the plugin file
+            include_once '$file';
+        } catch (Exception \$e) {
+            echo 'EXCEPTION in $file: ' . \$e->getMessage() . \"\n\";
+            exit(1);
+        }
+    " >/dev/null 2>&1; then
+        echo "PLUGIN LOADING ERROR in: $file"
+        ((plugin_error_count++))
+    fi
+done < <(find "/var/www/html/$TARGET_SITE/public_html_stage/plugins" -name "*_class.php" -print0 2>/dev/null)
+
+if [[ $plugin_error_count -gt 0 ]]; then
+    echo "ERROR: $plugin_error_count plugin loading errors found in staging."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    exit 1
+fi
+echo "Plugin loading test passed on staging."
+
+# MODEL TESTS ON STAGING
+echo "Running model tests on staging..."
+if ! php -r "
+    \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
+    chdir('/var/www/html/$TARGET_SITE/public_html_stage');
+    
+    // Set output buffering to capture any output
+    ob_start();
+    
+    // Include the model test runner
+    try {
+        include 'tests/models/run_all.php';
+        \$output = ob_get_contents();
+        ob_end_clean();
+        
+        // Check for test failures in output
+        if (strpos(\$output, 'FAIL') !== false || strpos(\$output, 'ERROR') !== false) {
+            echo 'Model tests failed - check output for details';
+            exit(1);
+        }
+        
+        echo 'Model tests completed successfully';
+    } catch (Exception \$e) {
+        ob_end_clean();
+        echo 'Model test error: ' . \$e->getMessage();
+        exit(1);
+    }
+" > /dev/null 2>&1; then
+    echo "ERROR: Model tests failed in staging."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    exit 1
+fi
+echo "Model tests passed on staging."
+
+echo "All pre-deployment tests passed on staging."
+
 # DO THE MAIN CODE DEPLOY (with themes and plugins already in staging)
 echo "Deploying main application code with themes and plugins..."
 cd /var/www/html/$TARGET_SITE/public_html_stage || {
@@ -1050,70 +1151,7 @@ else
     echo "Database update successful."
 fi
 
-# PHP SYNTAX VALIDATION
-echo "Running PHP syntax validation on all files..."
-php_error_count=0
-while IFS= read -r -d '' file; do
-    if ! php -l "$file" >/dev/null 2>&1; then
-        echo "SYNTAX ERROR in: $file"
-        php -l "$file"
-        ((php_error_count++))
-    fi
-done < <(find "/var/www/html/$TARGET_SITE/public_html" -name "*.php" -print0)
-
-if [[ $php_error_count -gt 0 ]]; then
-    echo "ERROR: $php_error_count PHP syntax errors found."
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
-    exit 1
-fi
-echo "PHP syntax validation passed (0 errors)."
-
-# PLUGIN LOADING TEST - Test that all plugin class files can be included
-echo "Testing plugin class file loading..."
-plugin_error_count=0
-while IFS= read -r -d '' file; do
-    # Test if the file can be included without errors
-    # CRITICAL: Set working directory and document root so PathHelper works correctly
-    if ! php -r "
-        \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html';
-        chdir('/var/www/html/$TARGET_SITE/public_html');
-        
-        error_reporting(E_ALL);
-        set_error_handler(function(\$errno, \$errstr) {
-            // Only treat actual errors and warnings as failures, ignore deprecation notices
-            if (\$errno & (E_ERROR | E_WARNING | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR)) {
-                echo \"INCLUDE ERROR: \$errstr\n\";
-                exit(1);
-            }
-            // Ignore E_DEPRECATED, E_USER_DEPRECATED, E_NOTICE, E_STRICT
-            return true;
-        });
-        
-        try {
-            // Bootstrap PathHelper first so plugin files can use it
-            require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
-            
-            // Now test the plugin file
-            include_once '$file';
-        } catch (Exception \$e) {
-            echo 'EXCEPTION in $file: ' . \$e->getMessage() . \"\n\";
-            exit(1);
-        } catch (Error \$e) {
-            echo 'FATAL ERROR in $file: ' . \$e->getMessage() . \"\n\";
-            exit(1);
-        }
-    " >/dev/null 2>&1; then
-        echo "PLUGIN LOADING ERROR in: $file"
-        ((plugin_error_count++))
-    fi
-done < <(find "/var/www/html/$TARGET_SITE/public_html/plugins" -name "*_class.php" -print0 2>/dev/null)
-
-if [[ $plugin_error_count -gt 0 ]]; then
-    echo "ERROR: $plugin_error_count plugin loading errors found."
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"  
-    exit 1
-fi
-echo "Plugin loading test passed."
+# PHP syntax validation and plugin loading tests now run on staging before deployment
 
 # BASIC RUNTIME TEST - Test that the application can bootstrap
 echo "Testing basic application bootstrap..."
