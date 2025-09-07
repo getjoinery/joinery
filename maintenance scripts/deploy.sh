@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 2.7 - Fixed plugin/theme deployment to use atomic staging with custom preservation
+#version 3.0 - SKIPPING migration messages now hidden by default, only shown with --verbose flag
 # MODIFIED: Added comprehensive PHP syntax validation during deployment
 # MODIFIED: Added plugin loading test with proper PathHelper context
 # MODIFIED: Added basic runtime bootstrap test
@@ -10,7 +10,14 @@
 # MODIFIED: Added trap-based automatic rollback system
 
 # Deploy script version
-DEPLOY_VERSION="2.7"
+DEPLOY_VERSION="3.0"
+
+# Helper function for verbose output
+verbose_echo() {
+    if [ "$VERBOSE" = true ]; then
+        echo "$@"
+    fi
+}
 
 # Simple JSON value extractor (no jq dependency)
 get_json_value() {
@@ -175,13 +182,20 @@ EOF
 # Function to fix permissions
 fix_permissions() {
     local target_site="$1"
-    echo "Fixing permissions for $target_site..."
+    local has_warnings=false
+    
+    if [ "$VERBOSE" = true ]; then
+        echo "Fixing permissions for $target_site..."
+    fi
     
     # Check if running with sufficient privileges
     if [ "$EUID" -ne 0 ]; then
-        echo "WARNING: Not running as root/sudo. Permission changes may fail."
-        echo "For best results, run this script with: sudo $0 $*"
-        echo "Attempting permission changes anyway..."
+        has_warnings=true
+        if [ "$VERBOSE" = true ]; then
+            echo "WARNING: Not running as root/sudo. Permission changes may fail."
+            echo "For best results, run this script with: sudo $0 $*"
+            echo "Attempting permission changes anyway..."
+        fi
     fi
     
     # Test for site existence
@@ -192,22 +206,56 @@ fix_permissions() {
     fi
     
     # Set the correct ownership and permissions (suppress errors for non-root execution)
-    echo "Setting ownership to www-data..."
-    chown -R www-data "/var/www/html/$target_site" 2>/dev/null || echo "  Warning: Could not change ownership (may need sudo)"
+    if [ "$VERBOSE" = true ]; then
+        echo "Setting ownership to www-data..."
+    fi
+    if ! chown -R www-data "/var/www/html/$target_site" 2>/dev/null; then
+        has_warnings=true
+        if [ "$VERBOSE" = true ]; then
+            echo "  Warning: Could not change ownership (may need sudo)"
+        fi
+    fi
     
-    echo "Setting group to user1..."
-    chgrp -R user1 "/var/www/html/$target_site" 2>/dev/null || echo "  Warning: Could not change group (may need sudo)"
+    if [ "$VERBOSE" = true ]; then
+        echo "Setting group to user1..."
+    fi
+    if ! chgrp -R user1 "/var/www/html/$target_site" 2>/dev/null; then
+        has_warnings=true
+        if [ "$VERBOSE" = true ]; then
+            echo "  Warning: Could not change group (may need sudo)"
+        fi
+    fi
     
-    echo "Setting permissions to 775..."
-    chmod -R 775 "/var/www/html/$target_site" 2>/dev/null || echo "  Warning: Could not change permissions (may need sudo)"
+    if [ "$VERBOSE" = true ]; then
+        echo "Setting permissions to 775..."
+    fi
+    if ! chmod -R 775 "/var/www/html/$target_site" 2>/dev/null; then
+        has_warnings=true
+        if [ "$VERBOSE" = true ]; then
+            echo "  Warning: Could not change permissions (may need sudo)"
+        fi
+    fi
     
     # Special permissions for uploads directory if it exists
     if [[ -d "/var/www/html/$target_site/uploads" ]]; then
-        echo "Setting uploads directory permissions to 777..."
-        chmod -R 777 "/var/www/html/$target_site/uploads" 2>/dev/null || echo "  Warning: Could not change uploads permissions (may need sudo)"
+        if [ "$VERBOSE" = true ]; then
+            echo "Setting uploads directory permissions to 777..."
+        fi
+        if ! chmod -R 777 "/var/www/html/$target_site/uploads" 2>/dev/null; then
+            has_warnings=true
+            if [ "$VERBOSE" = true ]; then
+                echo "  Warning: Could not change uploads permissions (may need sudo)"
+            fi
+        fi
     fi
     
-    echo "Permissions update complete for $target_site."
+    if [ "$VERBOSE" = true ]; then
+        echo "Permissions update complete for $target_site."
+    elif [ "$has_warnings" = true ]; then
+        echo "  Permissions updated (warnings occurred - use --verbose for details)"
+    else
+        echo "  Permissions updated successfully"
+    fi
 }
 
 # Function to deploy themes and plugins from staging to public_html
@@ -365,41 +413,58 @@ deploy_theme_plugin() {
     echo "Downloading themes and plugins from joinery repository to $target_site..."
     
     # DEPLOY THEMES to /var/www/html/sitename/theme (outside public_html)
-    echo "Setting up theme deployment to $site_root/theme..."
+    verbose_echo "Setting up theme deployment to $site_root/theme..."
     local theme_stage_dir="$site_root/theme_stage"
     rm -rf "$theme_stage_dir"
     mkdir -p "$theme_stage_dir"
     
     # Clone repo for themes
-    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$theme_stage_dir"
+    verbose_echo "Cloning themes from: $THEME_PLUGIN_REPO_URL"
+    if [ "$VERBOSE" = true ]; then
+        git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$theme_stage_dir"
+    else
+        git clone --quiet --no-checkout "$THEME_PLUGIN_REPO_URL" "$theme_stage_dir" 2>/dev/null
+    fi
     cd "$theme_stage_dir" || exit 1
     git config core.sparseCheckout true
     git sparse-checkout init --cone
     git sparse-checkout set theme
-    git checkout main
+    if [ "$VERBOSE" = true ]; then
+        git checkout main
+    else
+        git checkout --quiet main 2>/dev/null
+    fi
     rm -rf .git
     cd - > /dev/null
 
     # DEPLOY PLUGINS to /var/www/html/sitename/plugins (outside public_html)
-    echo "Setting up plugin deployment to $site_root/plugins..."
+    verbose_echo "Setting up plugin deployment to $site_root/plugins..."
     local plugins_stage_dir="$site_root/plugins_stage"
     rm -rf "$plugins_stage_dir"
     mkdir -p "$plugins_stage_dir"
     
     # Clone repo for plugins
-    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$plugins_stage_dir"
+    verbose_echo "Cloning plugins from: $THEME_PLUGIN_REPO_URL"
+    if [ "$VERBOSE" = true ]; then
+        git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$plugins_stage_dir"
+    else
+        git clone --quiet --no-checkout "$THEME_PLUGIN_REPO_URL" "$plugins_stage_dir" 2>/dev/null
+    fi
     cd "$plugins_stage_dir" || exit 1
     git config core.sparseCheckout true
     git sparse-checkout init --cone
     git sparse-checkout set plugins
-    git checkout main
+    if [ "$VERBOSE" = true ]; then
+        git checkout main
+    else
+        git checkout --quiet main 2>/dev/null
+    fi
     rm -rf .git
     cd - > /dev/null
 
     # Deploy themes directly to public_html_stage
     if [[ -d "$theme_stage_dir/theme" ]]; then
-        echo "Deploying stock themes to staging directory..."
-        echo "DEBUG: Moving from '$theme_stage_dir/theme' to '$staging_dir/theme'"
+        verbose_echo "Deploying stock themes to staging directory..."
         mkdir -p "$staging_dir"
         
         # Deploy stock themes (status will be shown during merge operation)
@@ -408,7 +473,7 @@ deploy_theme_plugin() {
             echo "ERROR: Failed to move themes to staging directory"
             return 1
         }
-        echo "Stock themes deployed successfully to staging directory"
+        verbose_echo "Stock themes deployed successfully to staging directory"
     else
         echo "ERROR: No theme directory found in joinery repository - deployment cannot continue"
         return 1
@@ -416,8 +481,7 @@ deploy_theme_plugin() {
 
     # Deploy plugins directly to public_html_stage
     if [[ -d "$plugins_stage_dir/plugins" ]]; then
-        echo "Deploying stock plugins to staging directory..."
-        echo "DEBUG: Moving from '$plugins_stage_dir/plugins' to '$staging_dir/plugins'"
+        verbose_echo "Deploying stock plugins to staging directory..."
         mkdir -p "$staging_dir"
         
         # Deploy stock plugins (status will be shown during merge operation)
@@ -426,7 +490,7 @@ deploy_theme_plugin() {
             echo "ERROR: Failed to move plugins to staging directory"
             return 1
         }
-        echo "Stock plugins deployed successfully to staging directory"
+        verbose_echo "Stock plugins deployed successfully to staging directory"
     else
         echo "ERROR: No plugins directory found in joinery repository - deployment cannot continue"
         return 1
@@ -444,7 +508,7 @@ deploy_theme_plugin() {
     fi
 
     # Cleanup staging directories
-    echo "Cleaning up theme/plugin staging directories..."
+    verbose_echo "Cleaning up theme/plugin staging directories..."
     rm -rf "$theme_stage_dir"
     rm -rf "$plugins_stage_dir"
     
@@ -459,7 +523,10 @@ preserve_custom_themes_plugins() {
     local public_html_dir="$site_root/public_html"
     local staging_dir="$site_root/public_html_stage"
     
-    echo "Processing themes and plugins..."
+    local theme_count=0
+    local theme_added=0
+    local theme_updated=0
+    local theme_preserved=0
     
     # SHOW STATUS FOR ALL THEMES (STOCK AND CUSTOM)
     if [[ -d "$staging_dir/theme" ]]; then
@@ -469,6 +536,7 @@ preserve_custom_themes_plugins() {
                 staging_manifest="$staging_theme_path/theme.json"
                 theme_version=$(get_json_value "$staging_manifest" "version" "unknown")
                 theme_description=$(get_json_value "$staging_manifest" "description" "")
+                ((theme_count++))
                 
                 # Check if theme exists in previous deployment
                 existing_theme_path="$site_root/public_html_last/theme/$theme_name"
@@ -477,24 +545,33 @@ preserve_custom_themes_plugins() {
                     if [[ -f "$existing_manifest" ]]; then
                         is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
                         if [[ "$is_stock" == "false" ]]; then
-                            echo "  🔒 PRESERVING custom theme: $theme_name v$theme_version - $theme_description"
+                            verbose_echo "  🔒 PRESERVING custom theme: $theme_name v$theme_version - $theme_description"
+                            ((theme_preserved++))
                             # Copy custom theme over stock version in staging
                             cp -r "$existing_theme_path" "$staging_dir/theme/" || {
                                 echo "ERROR: Failed to preserve custom theme $theme_name"
                                 return 1
                             }
                         else
-                            echo "  📦 UPDATING stock theme: $theme_name v$theme_version - $theme_description"
+                            verbose_echo "  📦 UPDATING stock theme: $theme_name v$theme_version - $theme_description"
+                            ((theme_updated++))
                         fi
                     else
-                        echo "  📦 UPDATING theme: $theme_name v$theme_version - $theme_description"
+                        verbose_echo "  📦 UPDATING theme: $theme_name v$theme_version - $theme_description"
+                        ((theme_updated++))
                     fi
                 else
-                    echo "  ✨ ADDING new theme: $theme_name v$theme_version - $theme_description"
+                    verbose_echo "  ✨ ADDING new theme: $theme_name v$theme_version - $theme_description"
+                    ((theme_added++))
                 fi
             fi
         done
     fi
+    
+    local plugin_count=0
+    local plugin_added=0
+    local plugin_updated=0
+    local plugin_preserved=0
     
     # SHOW STATUS FOR ALL PLUGINS (STOCK AND CUSTOM)
     if [[ -d "$staging_dir/plugins" ]]; then
@@ -504,6 +581,7 @@ preserve_custom_themes_plugins() {
                 staging_manifest="$staging_plugin_path/plugin.json"
                 plugin_version=$(get_json_value "$staging_manifest" "version" "unknown")
                 plugin_description=$(get_json_value "$staging_manifest" "description" "")
+                ((plugin_count++))
                 
                 # Check if plugin exists in previous deployment
                 existing_plugin_path="$site_root/public_html_last/plugins/$plugin_name"
@@ -512,26 +590,68 @@ preserve_custom_themes_plugins() {
                     if [[ -f "$existing_manifest" ]]; then
                         is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
                         if [[ "$is_stock" == "false" ]]; then
-                            echo "  🔒 PRESERVING custom plugin: $plugin_name v$plugin_version - $plugin_description"
+                            verbose_echo "  🔒 PRESERVING custom plugin: $plugin_name v$plugin_version - $plugin_description"
+                            ((plugin_preserved++))
                             # Copy custom plugin over stock version in staging  
                             cp -r "$existing_plugin_path" "$staging_dir/plugins/" || {
                                 echo "ERROR: Failed to preserve custom plugin $plugin_name"
                                 return 1
                             }
                         else
-                            echo "  🔌 UPDATING stock plugin: $plugin_name v$plugin_version - $plugin_description"
+                            verbose_echo "  🔌 UPDATING stock plugin: $plugin_name v$plugin_version - $plugin_description"
+                            ((plugin_updated++))
                         fi
                     else
-                        echo "  🔌 UPDATING plugin: $plugin_name v$plugin_version - $plugin_description"
+                        verbose_echo "  🔌 UPDATING plugin: $plugin_name v$plugin_version - $plugin_description"
+                        ((plugin_updated++))
                     fi
                 else
-                    echo "  ⚡ ADDING new plugin: $plugin_name v$plugin_version - $plugin_description"
+                    verbose_echo "  ⚡ ADDING new plugin: $plugin_name v$plugin_version - $plugin_description"
+                    ((plugin_added++))
                 fi
             fi
         done
     fi
     
-    echo "Custom theme and plugin preservation complete."
+    # Show summary
+    local theme_msg=""
+    local plugin_msg=""
+    
+    if [ $theme_count -gt 0 ]; then
+        if [ $theme_updated -gt 0 ] && [ $theme_added -eq 0 ] && [ $theme_preserved -eq 0 ]; then
+            theme_msg="Updated $theme_updated themes"
+        elif [ $theme_added -gt 0 ] && [ $theme_updated -eq 0 ] && [ $theme_preserved -eq 0 ]; then
+            theme_msg="Added $theme_added themes"
+        else
+            local parts=()
+            [ $theme_added -gt 0 ] && parts+=("$theme_added new")
+            [ $theme_updated -gt 0 ] && parts+=("$theme_updated updated")  
+            [ $theme_preserved -gt 0 ] && parts+=("$theme_preserved preserved")
+            theme_msg="Themes: $(IFS=', '; echo "${parts[*]}")"
+        fi
+    fi
+    
+    if [ $plugin_count -gt 0 ]; then
+        if [ $plugin_updated -gt 0 ] && [ $plugin_added -eq 0 ] && [ $plugin_preserved -eq 0 ]; then
+            plugin_msg="Updated $plugin_updated plugins"
+        elif [ $plugin_added -gt 0 ] && [ $plugin_updated -eq 0 ] && [ $plugin_preserved -eq 0 ]; then
+            plugin_msg="Added $plugin_added plugins"
+        else
+            local parts=()
+            [ $plugin_added -gt 0 ] && parts+=("$plugin_added new")
+            [ $plugin_updated -gt 0 ] && parts+=("$plugin_updated updated")
+            [ $plugin_preserved -gt 0 ] && parts+=("$plugin_preserved preserved")
+            plugin_msg="Plugins: $(IFS=', '; echo "${parts[*]}")"
+        fi
+    fi
+    
+    if [ -n "$theme_msg" ] && [ -n "$plugin_msg" ]; then
+        echo "✓ $theme_msg, $plugin_msg"
+    elif [ -n "$theme_msg" ]; then
+        echo "✓ $theme_msg"
+    elif [ -n "$plugin_msg" ]; then
+        echo "✓ $plugin_msg" 
+    fi
     return 0
 }
 
@@ -543,6 +663,7 @@ show_usage() {
     echo "  $0 [site_name] --fix-permissions  # Fix permissions only (no deployment)"
     echo "  $0 [site_name] --rollback [dir]   # Manual rollback to last backup or specified directory"
     echo "  $0 [site_name] --norollback       # Disable rollback on deployment failure"
+    echo "  $0 [site_name] --verbose          # Show detailed output (git clones, individual files, etc.)"
     echo ""
     echo "Examples:"
     echo "  $0 getjoinery                     # Full deploy to getjoinery (live)"
@@ -569,6 +690,7 @@ IS_FIX_PERMISSIONS_ONLY=false
 IS_MANUAL_ROLLBACK=false
 DISABLE_ROLLBACK=false
 ROLLBACK_SOURCE_DIR=""
+VERBOSE=false
 
 # Parse arguments with better handling for rollback directory parameter
 i=1
@@ -595,6 +717,9 @@ while [ $i -le $# ]; do
             ;;
         --norollback)
             DISABLE_ROLLBACK=true
+            ;;
+        --verbose|-v)
+            VERBOSE=true
             ;;
     esac
     i=$((i + 1))
@@ -873,11 +998,6 @@ fi
 
 # DEPLOYMENT OPERATIONS START HERE - Set flag for rollback system
 DEPLOYMENT_STARTED=true
-echo "========================================="
-echo "STARTING DEPLOYMENT OPERATIONS"
-echo "Target: $TARGET_SITE ($DEPLOY_TYPE)"
-echo "Automatic rollback: $([ "$DISABLE_ROLLBACK" = true ] && echo "DISABLED" || echo "ENABLED")"
-echo "========================================="
 
 # Remove old theme/plugin directories if they exist
 if [[ -d "/var/www/html/$TARGET_SITE/theme" ]]; then
@@ -902,15 +1022,27 @@ rm -rf /var/www/html/$TARGET_SITE/public_html_stage
 mkdir /var/www/html/$TARGET_SITE/public_html_stage
 
 # CLONE THE REPO DIRECTLY INTO staging directory
-git clone --no-checkout "$REPO_URL" /var/www/html/$TARGET_SITE/public_html_stage
+verbose_echo "Cloning repository: $REPO_URL"
+if [ "$VERBOSE" = true ]; then
+    git clone --no-checkout "$REPO_URL" /var/www/html/$TARGET_SITE/public_html_stage
+else
+    git clone --quiet --no-checkout "$REPO_URL" /var/www/html/$TARGET_SITE/public_html_stage
+fi
 
 # MOVE INTO THE CLONED DIRECTORY
 cd /var/www/html/$TARGET_SITE/public_html_stage || exit 1
 
 # PULL ONLY THE SPECIFIED FOLDERS
-git pull origin main
-git checkout main
+verbose_echo "Pulling latest changes from main branch"
+if [ "$VERBOSE" = true ]; then
+    git pull origin main
+    git checkout main
+else
+    git pull --quiet origin main
+    git checkout --quiet main
+fi
 rm -rf .git
+echo "✓ Repository cloned and updated to latest version"
 
 # CLEAR THE LAST FOLDER AND SAVE CURRENT TO LAST
 rm -rf /var/www/html/$TARGET_SITE/public_html_last
@@ -920,7 +1052,7 @@ if [[ -d /var/www/html/$TARGET_SITE/public_html ]] && [[ "$(ls -A /var/www/html/
 fi
 
 # Create .htaccess to block web access to backup directory
-echo "Creating .htaccess to block web access to backup directory..."
+verbose_echo "Creating .htaccess to block web access to backup directory..."
 cat > /var/www/html/$TARGET_SITE/public_html_last/.htaccess << 'EOF'
 # Block all web access to backup directory
 Order Deny,Allow
@@ -933,14 +1065,13 @@ Deny from all
 EOF
 
 # DOWNLOAD THEMES AND PLUGINS FROM JOINERY REPOSITORY
-echo "Downloading themes and plugins from joinery repository..."
 if ! deploy_theme_plugin "$TARGET_SITE"; then
     echo "ERROR: Theme/plugin download failed. Aborting deployment."
     exit 1
 fi
 
 # PRESERVE CUSTOM THEMES AND PLUGINS FROM EXISTING PUBLIC_HTML
-echo "Preserving custom themes and plugins from existing deployment..."
+verbose_echo "Preserving custom themes and plugins from existing deployment..."
 if ! preserve_custom_themes_plugins "$TARGET_SITE"; then
     echo "ERROR: Custom theme/plugin preservation failed."
     exit 1
@@ -950,13 +1081,17 @@ fi
 echo "Running pre-deployment tests on staging environment..."
 
 # PHP SYNTAX VALIDATION ON STAGING
-echo "Validating PHP syntax on staging files..."
+verbose_echo "Validating PHP syntax on staging files..."
 php_error_count=0
+php_file_count=0
 while IFS= read -r -d '' file; do
+    ((php_file_count++))
     if ! php -l "$file" >/dev/null 2>&1; then
         echo "SYNTAX ERROR in: $file"
         php -l "$file"
         ((php_error_count++))
+    else
+        verbose_echo "  ✓ $file"
     fi
 done < <(find "/var/www/html/$TARGET_SITE/public_html_stage" -name "*.php" -print0)
 
@@ -965,12 +1100,14 @@ if [[ $php_error_count -gt 0 ]]; then
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     exit 1
 fi
-echo "PHP syntax validation passed on staging."
+verbose_echo "✓ PHP syntax validation passed ($php_file_count files checked)"
 
 # PLUGIN LOADING TEST ON STAGING
-echo "Testing plugin class file loading on staging..."
+verbose_echo "Testing plugin class file loading on staging..."
 plugin_error_count=0
+plugin_file_count=0
 while IFS= read -r -d '' file; do
+    ((plugin_file_count++))
     # Test if the file can be included without errors
     # CRITICAL: Set working directory and document root so PathHelper works correctly
     if ! php -r "
@@ -1001,6 +1138,8 @@ while IFS= read -r -d '' file; do
     " >/dev/null 2>&1; then
         echo "PLUGIN LOADING ERROR in: $file"
         ((plugin_error_count++))
+    else
+        verbose_echo "  ✓ $(basename $file)"
     fi
 done < <(find "/var/www/html/$TARGET_SITE/public_html_stage/plugins" -name "*_class.php" -print0 2>/dev/null)
 
@@ -1009,10 +1148,10 @@ if [[ $plugin_error_count -gt 0 ]]; then
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     exit 1
 fi
-echo "Plugin loading test passed on staging."
+verbose_echo "✓ Plugin loading test passed ($plugin_file_count files checked)"
 
 # MODEL TESTS ON STAGING
-echo "Running model tests on staging..."
+verbose_echo "Running model tests on staging..."
 if ! php -r "
     \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
     chdir('/var/www/html/$TARGET_SITE/public_html_stage');
@@ -1043,42 +1182,56 @@ if ! php -r "
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     exit 1
 fi
-echo "Model tests passed on staging."
+verbose_echo "✓ Model tests passed on staging"
 
-echo "All pre-deployment tests passed on staging."
+# APPLICATION BOOTSTRAP TEST ON STAGING
+verbose_echo "Testing application bootstrap on staging..."
+if ! php -r "
+    \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
+    chdir('/var/www/html/$TARGET_SITE/public_html_stage');
+    
+    // Test core includes
+    try {
+        require_once('includes/PathHelper.php');
+        PathHelper::requireOnce('includes/Globalvars.php');
+        PathHelper::requireOnce('includes/DbConnector.php');
+        echo 'Bootstrap test completed successfully';
+    } catch (Exception \$e) {
+        echo 'Bootstrap error: ' . \$e->getMessage();
+        exit(1);
+    }
+" >/dev/null 2>&1; then
+    echo "ERROR: Application bootstrap test failed in staging."
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    exit 1
+fi
+verbose_echo "✓ Application bootstrap test passed on staging"
+
+echo "✓ All pre-deployment tests passed on staging"
 
 # DO THE MAIN CODE DEPLOY (with themes and plugins already in staging)
-echo "Deploying main application code with themes and plugins..."
+echo "✓ Deploying application code..."
 cd /var/www/html/$TARGET_SITE/public_html_stage || {
     echo "ERROR: Could not change to staging directory"
     exit 1
 }
 
+file_count=0
 for item in *; do
-    echo "Copying $item..."
+    verbose_echo "  Copying $item..."
     cp -r "$item" "/var/www/html/$TARGET_SITE/public_html/" || {
         echo "ERROR: Failed to copy $item"
         exit 1
     }
+    ((file_count++))
 done
 cd - > /dev/null
+echo "✓ Deployed $file_count components to public_html"
 
-# VALIDATE CRITICAL DIRECTORIES EXIST AFTER DEPLOYMENT
-echo "Validating critical directories after deployment..."
-if [[ ! -d "/var/www/html/$TARGET_SITE/public_html/theme" ]]; then
-    echo "ERROR: Theme directory missing after deployment: /var/www/html/$TARGET_SITE/public_html/theme"
-    exit 1
-fi
-
-if [[ ! -d "/var/www/html/$TARGET_SITE/public_html/plugins" ]]; then
-    echo "ERROR: Plugins directory missing after deployment: /var/www/html/$TARGET_SITE/public_html/plugins"
-    exit 1
-fi
-
-echo "Critical directories validation passed."
+# Directory validation already performed during staging
 
 # FIX PERMISSIONS AFTER DEPLOYMENT
-echo "Fixing permissions after deployment..."
+verbose_echo "✓ Fixing permissions after deployment..."
 fix_permissions "$TARGET_SITE"
 
 # CHECK AND INSTALL COMPOSER DEPENDENCIES IF NEEDED
@@ -1107,7 +1260,7 @@ if [[ "$returnvalue" != 0 ]]; then
     fi
     exit 1
 else
-    echo "Composer dependencies validated/installed successfully."
+    echo "✓ Composer dependencies validated/installed successfully"
 fi
 
 # Check if update_database.php exists
@@ -1139,7 +1292,11 @@ if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; 
     exit 1
 fi
 
-/usr/bin/php /var/www/html/$TARGET_SITE/public_html/utils/update_database.php --upgrade
+if [ "$VERBOSE" = true ]; then
+    /usr/bin/php /var/www/html/$TARGET_SITE/public_html/utils/update_database.php --upgrade --verbose
+else
+    /usr/bin/php /var/www/html/$TARGET_SITE/public_html/utils/update_database.php --upgrade
+fi
 returnvalue=$?
 
 if [[ "$returnvalue" != 1 ]]; then
@@ -1147,66 +1304,40 @@ if [[ "$returnvalue" != 1 ]]; then
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "DEBUGGING: You can examine the staged files to understand what was deployed."
     exit 1
-else
-    echo "Database update successful."
 fi
 
 # PHP syntax validation and plugin loading tests now run on staging before deployment
 
-# BASIC RUNTIME TEST - Test that the application can bootstrap
-echo "Testing basic application bootstrap..."
-if ! php -r "
-    \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html';
-    chdir('/var/www/html/$TARGET_SITE/public_html');
-    
-    // Test core includes
-    try {
-        require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
-        require_once('/var/www/html/$TARGET_SITE/public_html/includes/Globalvars.php');
-        require_once('/var/www/html/$TARGET_SITE/public_html/includes/SystemBase.php');
-        echo 'Bootstrap test passed\n';
-    } catch (Exception \$e) {
-        echo 'BOOTSTRAP ERROR: ' . \$e->getMessage() . \"\n\";
-        exit(1);
-    } catch (Error \$e) {
-        echo 'BOOTSTRAP FATAL: ' . \$e->getMessage() . \"\n\"; 
-        exit(1);
-    }
-" 2>/dev/null; then
-    echo "ERROR: Basic application bootstrap failed."
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
-    exit 1
-fi
-echo "Application bootstrap test passed."
+# Bootstrap test now runs on staging before deployment
 
 # CLEANUP: Remove staging directory after successful deployment ONLY
-echo "Cleaning up staging directory..."
+verbose_echo "Cleaning up staging directory..."
 rm -rf /var/www/html/$TARGET_SITE/public_html_stage
 
 # CLEANUP: Remove backup directory after successful deployment
-echo "Cleaning up backup directory..."
+verbose_echo "Cleaning up backup directory..."
 if [[ -d "/var/www/html/$TARGET_SITE/public_html_last" ]]; then
     rm -rf /var/www/html/$TARGET_SITE/public_html_last
-    echo "Removed backup directory: public_html_last"
+    verbose_echo "Removed backup directory: public_html_last"
 else
-    echo "No backup directory to clean up"
+    verbose_echo "No backup directory to clean up"
 fi
 
 # CLEANUP: Remove old failed deployment directories after successful deployment
-echo "Cleaning up old failed deployment directories..."
+verbose_echo "Cleaning up old failed deployment directories..."
 failed_dirs_count=0
 for failed_dir in /var/www/html/$TARGET_SITE/public_html_failed_*; do
     if [[ -d "$failed_dir" ]]; then
-        echo "Removing old failed deployment: $(basename "$failed_dir")"
+        verbose_echo "Removing old failed deployment: $(basename "$failed_dir")"
         rm -rf "$failed_dir"
         ((failed_dirs_count++))
     fi
 done
 
 if [[ $failed_dirs_count -eq 0 ]]; then
-    echo "No failed deployment directories to clean up"
+    verbose_echo "No failed deployment directories to clean up"
 else
-    echo "Removed $failed_dirs_count failed deployment directories"
+    verbose_echo "Removed $failed_dirs_count failed deployment directories"
 fi
 
 # DEPLOYMENT COMPLETED SUCCESSFULLY
