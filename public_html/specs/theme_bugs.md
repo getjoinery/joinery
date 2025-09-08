@@ -17,62 +17,110 @@ This specification addresses remaining bugs in the theme and plugin system, impl
 
 ### PathHelper.php
 
-Modify `getThemeFilePath()` to check plugin directory when plugin theme active (for loading PHP classes like PublicPage and FormWriter):
+Add new centralized theme helper methods and modify `getThemeFilePath()` to use them:
+
+**Add these new public static methods:**
+   ```php
+   /**
+    * Get the active theme directory path (handles both regular and plugin themes)
+    * @return string Theme directory relative path (e.g., 'theme/falcon' or 'plugins/controld')
+    * @throws Exception if plugin theme is active but plugin not found
+    */
+   public static function getActiveThemeDirectory() {
+       $settings = Globalvars::get_instance();
+       $theme_template = $settings->get_setting('theme_template');
+       
+       if ($theme_template === 'plugin') {
+           $active_plugin = $settings->get_setting('active_theme_plugin');
+           
+           if (!$active_plugin) {
+               throw new Exception("Plugin theme is active but no plugin selected. Please contact administrator.");
+           }
+           
+           $plugin_dir = self::getIncludePath("plugins/$active_plugin");
+           if (!is_dir($plugin_dir)) {
+               throw new Exception("Plugin theme is active but plugin '$active_plugin' not found. Please contact administrator.");
+           }
+           
+           return "plugins/$active_plugin";
+       }
+       
+       // Validate regular theme exists
+       $theme_dir = self::getIncludePath("theme/$theme_template");
+       if (!is_dir($theme_dir)) {
+           throw new Exception("Theme '$theme_template' directory not found. Please contact administrator.");
+       }
+       
+       return "theme/$theme_template";
+   }
+   
+   /**
+    * Check if the current theme is a plugin-provided theme
+    * @return bool True if plugin theme is active
+    */
+   public static function isPluginTheme() {
+       $settings = Globalvars::get_instance();
+       return $settings->get_setting('theme_template') === 'plugin';
+   }
+   
+   /**
+    * Get the active theme plugin name (if plugin theme is active)
+    * @return string|null Plugin name or null if not using plugin theme
+    */
+   public static function getActiveThemePlugin() {
+       if (!self::isPluginTheme()) {
+           return null;
+       }
+       $settings = Globalvars::get_instance();
+       return $settings->get_setting('active_theme_plugin');
+   }
+   ```
+
+**Modify `getThemeFilePath()` to use the new centralized methods:**
    ```php
    public static function getThemeFilePath($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $debug = false){
-       $settings = Globalvars::get_instance();
        $siteDir = PathHelper::getBasePath();
        
        // ... existing subdirectory handling ...
        
-       // Determine theme directory
-       if($theme_name){
-           $theme_template = $theme_name;
-       } else {
-           $theme_template = $settings->get_setting('theme_template');
-       }
-       
-       /**
-        * PLUGIN THEME SUPPORT
-        * 
-        * When the special 'plugin' theme is selected, a plugin can act as the complete theme provider.
-        * This allows plugins like ControlD to provide a full UI replacement including:
-        * - PublicPage.php (base page class)
-        * - FormWriter.php (form generation class)
-        * - Other theme infrastructure files
-        * 
-        * How it works:
-        * 1. Admin selects 'plugin' as the theme
-        * 2. Admin selects which plugin provides the UI (stored in 'active_theme_plugin' setting)
-        * 3. This code redirects theme file lookups to the plugin directory
-        * 
-        * Example: If active_theme_plugin='controld' and looking for 'PublicPage.php' in 'includes':
-        * - Normal theme would check: /theme/falcon/includes/PublicPage.php
-        * - Plugin theme checks: /plugins/controld/includes/PublicPage.php
-        * 
-        * IMPORTANT: Skip plugin theme logic for core system files to prevent circular dependencies
-        * Core files like Globalvars.php must always load from system directories
-        */
+       // IMPORTANT: Core system files must always load from system directories
+       // to prevent circular dependencies during bootstrap
        $core_system_files = array('Globalvars.php', 'Globalvars_site.php', 'DbConnector.php', 'PathHelper.php');
-       if($theme_template === 'plugin' && !in_array($filename, $core_system_files)) {
-           // Get which plugin is providing the theme functionality
-           $active_theme_plugin = $settings->get_setting('active_theme_plugin');
-           
-           if($active_theme_plugin && is_dir($siteDir.'/plugins/'.$active_theme_plugin)) {
-               // Build path to file in plugin directory instead of theme directory
-               $theme_file = $siteDir.'/plugins/'.$active_theme_plugin.$subdirectory.'/'.$filename;
+       $is_core_file = in_array($filename, $core_system_files);
+       
+       // Don't use plugin theme for core files or when specific theme requested
+       if (!$is_core_file && !$theme_name) {
+           try {
+               // Use centralized method to get active theme directory
+               $theme_dir = self::getActiveThemeDirectory();
+               $theme_file = $siteDir . '/' . $theme_dir . $subdirectory . '/' . $filename;
                
-               if(file_exists($theme_file)) {
-                   // Return the plugin file path in requested format
-                   if($path_format == 'system'){
+               if (file_exists($theme_file)) {
+                   if ($path_format == 'system') {
                        return $theme_file;  // Full system path
                    } else {
-                       return '/plugins/'.$active_theme_plugin.$subdirectory.'/'.$filename;  // Web path
+                       return '/' . $theme_dir . $subdirectory . '/' . $filename;  // Web path
                    }
                }
+           } catch (Exception $e) {
+               // Log error and fall through to default theme handling
+               error_log("Theme error: " . $e->getMessage());
+               // Could optionally re-throw here to stop execution
            }
-           // If plugin doesn't have this specific file, that's ok - fall through to normal logic
-           // This allows plugins to provide only the files they want to override
+       }
+       
+       // Fall back to specific theme or default theme handling
+       if ($theme_name) {
+           $theme_dir = "theme/$theme_name";
+       } else {
+           // Use a safe default if theme resolution failed above
+           $settings = Globalvars::get_instance();
+           $theme_template = $settings->get_setting('theme_template');
+           if ($theme_template === 'plugin') {
+               $theme_dir = "theme/falcon"; // Safe fallback
+           } else {
+               $theme_dir = "theme/$theme_template";
+           }
        }
        
        // ... rest of existing logic (checks theme directory, then base directory) ...
@@ -80,115 +128,73 @@ Modify `getThemeFilePath()` to check plugin directory when plugin theme active (
 
 ### RouteHelper.php
 
-Modify the template directory assignment around line 1010 to handle plugin themes (for loading view files):
+Modify the template directory assignment around line 1010 to use PathHelper's centralized theme methods:
    ```php
    // Around line 1007-1012, replace the template_directory assignment with:
    
    /**
-    * PLUGIN THEME TEMPLATE DIRECTORY
-    * 
-    * This section determines which directory to use for template/view files.
-    * Normally this points to /theme/{themename}/ but when 'plugin' theme is active,
-    * it points to /plugins/{pluginname}/ instead.
-    * 
-    * This allows plugins to provide complete view overrides including:
-    * - Homepage (/views/index.php)
-    * - User profile pages
-    * - Any other system views
-    * 
-    * The $template_directory is passed to all route handlers and used to check
-    * for theme-specific view overrides before falling back to base views.
+    * Template Directory Resolution
+    * Uses PathHelper's centralized theme methods to determine the correct
+    * template directory for loading view files.
     */
-   $template_directory = null;
    
-   if ($theme_template === 'plugin') {
-       /**
-        * Plugin Theme Mode
-        * A plugin is providing the complete theme/UI
-        * Example: ControlD plugin acting as the entire user interface
-        */
+   try {
+       // Use PathHelper's centralized method to get the active theme directory
+       // This handles both regular themes and plugin themes automatically
+       // PathHelper::getActiveThemeDirectory() already validates directory exists
+       $theme_dir = PathHelper::getActiveThemeDirectory();
+       $template_directory = PathHelper::getIncludePath($theme_dir);
        
-       // Get which plugin is providing the theme
-       $active_theme_plugin = $settings->get_setting('active_theme_plugin');
-       
-       if ($active_theme_plugin && is_dir(PathHelper::getIncludePath('plugins/'.$active_theme_plugin))) {
-           // Use the plugin directory as the template directory
-           // This means views will be loaded from /plugins/{plugin}/views/ first
-           $template_directory = PathHelper::getIncludePath('plugins/'.$active_theme_plugin);
-       } else {
-           // Plugin theme selected but plugin is missing or not configured
-           // Throw exception to prevent system from running in broken state
-           throw new Exception("Plugin theme is active but plugin '$active_theme_plugin' not found or not configured. Please contact administrator.");
-       }
-   } else if (ThemeHelper::themeExists($theme_template)) {
-       /**
-        * Normal Theme Mode
-        * Standard theme like 'falcon', 'sassa', etc.
-        */
-       $template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
-   } else {
-       // Theme doesn't exist - this shouldn't happen in production
-       error_log("ERROR: Theme '$theme_template' does not exist or is invalid");
+   } catch (Exception $e) {
+       // Plugin theme configuration error - log and throw
+       error_log("Template directory error: " . $e->getMessage());
+       throw $e; // Re-throw to prevent system from running in broken state
    }
    ```
 
 ### ThemeHelper.php
 
-Modify the `asset()` method around line 148 to handle plugin theme assets:
+Modify the `asset()` method around line 148 to use PathHelper's centralized theme methods:
    ```php
    public static function asset($path, $themeName = null) {
-       if ($themeName === null) {
-           $themeName = self::getActive();
-       }
-       
-       /**
-        * PLUGIN THEME ASSET SUPPORT
-        * 
-        * When 'plugin' theme is active, assets (CSS, JS, images) need to be loaded
-        * from the plugin directory instead of the theme directory.
-        * 
-        * This modification allows plugins to provide complete asset sets including:
-        * - Stylesheets (/assets/css/)
-        * - JavaScript (/assets/js/)
-        * - Images (/assets/img/)
-        * - Fonts (/assets/fonts/)
-        * 
-        * Example: If active_theme_plugin='controld' and requesting 'css/style.css':
-        * - Normal theme would serve: /theme/falcon/assets/css/style.css
-        * - Plugin theme serves: /plugins/controld/assets/css/style.css
-        * 
-        * This completes the plugin theme system by ensuring all resources
-        * (PHP classes, views, and assets) can be served from the plugin directory.
-        */
-       if ($themeName === 'plugin') {
-           $settings = Globalvars::get_instance();
-           $active_theme_plugin = $settings->get_setting('active_theme_plugin');
-           
-           if ($active_theme_plugin) {
-               // Build path to asset in plugin directory
-               $plugin_asset = "/plugins/{$active_theme_plugin}/assets/{$path}";
-               
-               // Check if asset exists in plugin using PathHelper
-               $plugin_asset_path = PathHelper::getIncludePath("plugins/{$active_theme_plugin}/assets/{$path}");
-               if (file_exists($plugin_asset_path)) {
-                   // Return plugin asset path
-                   return $plugin_asset;
-               }
-               // If asset not found in plugin, fall through to normal theme logic
-               // This allows plugins to selectively override only some assets
+       // If specific theme requested, handle it directly
+       if ($themeName !== null && $themeName !== 'plugin') {
+           // Normal theme asset loading for specific theme
+           $theme_asset = "/theme/{$themeName}/assets/{$path}";
+           $theme_asset_path = PathHelper::getIncludePath("theme/{$themeName}/assets/{$path}");
+           if (file_exists($theme_asset_path)) {
+               $version = self::getAssetVersion($themeName, $path);
+               $versionString = $version ? "?v={$version}" : '';
+               return "{$theme_asset}{$versionString}";
            }
        }
        
-       /**
-        * Normal Theme Asset Loading
-        * Check standard theme directory for assets
-        */
-       $theme_asset = "/theme/{$themeName}/assets/{$path}";
-       $theme_asset_path = PathHelper::getIncludePath("theme/{$themeName}/assets/{$path}");
-       if (file_exists($theme_asset_path)) {
-           $version = self::getAssetVersion($themeName, $path);
-           $versionString = $version ? "?v={$version}" : '';
-           return "{$theme_asset}{$versionString}";
+       // For active theme (including plugin themes), use centralized PathHelper
+       if ($themeName === null || $themeName === 'plugin') {
+           try {
+               // Get the active theme directory using centralized method
+               $theme_dir = PathHelper::getActiveThemeDirectory();
+               $asset_path = "/{$theme_dir}/assets/{$path}";
+               $asset_full_path = PathHelper::getIncludePath("{$theme_dir}/assets/{$path}");
+               
+               if (file_exists($asset_full_path)) {
+                   // For plugin themes, no versioning for simplicity
+                   // For regular themes, apply versioning
+                   if (PathHelper::isPluginTheme()) {
+                       return $asset_path;
+                   } else {
+                       // Extract theme name from path for versioning
+                       $theme_parts = explode('/', $theme_dir);
+                       $theme_name = end($theme_parts);
+                       $version = self::getAssetVersion($theme_name, $path);
+                       $versionString = $version ? "?v={$version}" : '';
+                       return "{$asset_path}{$versionString}";
+                   }
+               }
+           } catch (Exception $e) {
+               // Log error but don't throw - fall through to existing fallback logic
+               error_log("Asset loading error: " . $e->getMessage());
+           }
        }
        
        // ... rest of existing fallback logic (checking current plugin, etc.) ...
