@@ -1000,17 +1000,24 @@ class RouteHelper {
         // Use merged routes for processing
         $routes = $all_routes;
         
-        // Get theme directory for theme overrides (themes only, never plugins)
-        $theme_template = $settings->get_setting('theme_template');
-        error_log("Theme template setting: " . var_export($theme_template, true));
+        /**
+         * Template Directory Resolution
+         * Uses PathHelper's centralized theme methods to determine the correct
+         * template directory for loading view files.
+         */
         
-        $template_directory = null;
-        if (ThemeHelper::themeExists($theme_template)) {
-            // $template_directory will be absolute path like /var/www/html/theme/falcon
-            $template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
-            error_log("Theme directory: " . var_export($template_directory, true));
-        } else {
-            error_log("Theme does not exist or is invalid");
+        try {
+            // Use PathHelper's centralized method to get the active theme directory
+            // This handles both regular themes and plugin themes automatically
+            // PathHelper::getActiveThemeDirectory() already validates directory exists
+            $theme_dir = PathHelper::getActiveThemeDirectory();
+            $template_directory = PathHelper::getIncludePath($theme_dir);
+            error_log("Template directory: " . var_export($template_directory, true));
+            
+        } catch (Exception $e) {
+            // Plugin theme configuration error - log and throw
+            error_log("Template directory error: " . $e->getMessage());
+            throw $e; // Re-throw to prevent system from running in broken state
         }
 
         // 1. Check for database-stored URL redirects

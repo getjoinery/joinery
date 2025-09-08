@@ -242,14 +242,6 @@ Add plugin selector dropdown:
    
    The `active_theme_plugin` setting will save automatically with the existing form processing, just like all other settings.
 
-**Testing**:
-- Test that plugin theme + controld redirects homepage to /controld
-- Verify PublicPage.php loads from /plugins/controld/includes/
-- Test missing plugin shows helpful error
-- Test that regular themes still work normally
-- Verify login redirects to plugin login route
-
-
 ---
 
 ## Required Migrations and Updates
