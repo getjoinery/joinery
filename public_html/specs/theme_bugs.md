@@ -91,8 +91,22 @@ Add new centralized theme helper methods and modify `getThemeFilePath()` to use 
        $core_system_files = array('Globalvars.php', 'Globalvars_site.php', 'DbConnector.php', 'PathHelper.php');
        $is_core_file = in_array($filename, $core_system_files);
        
-       // Don't use plugin theme for core files or when specific theme requested
-       if (!$is_core_file && !$theme_name) {
+       // Handle when specific theme is requested
+       if ($theme_name) {
+           $theme_dir = "theme/$theme_name";
+           $theme_file = $siteDir . '/' . $theme_dir . $subdirectory . '/' . $filename;
+           
+           if (file_exists($theme_file)) {
+               if ($path_format == 'system') {
+                   return $theme_file;  // Full system path
+               } else {
+                   return '/' . $theme_dir . $subdirectory . '/' . $filename;  // Web path
+               }
+           }
+           // Fall through to check base directory
+       }
+       // Don't use plugin theme for core files
+       else if (!$is_core_file) {
            try {
                // Use centralized method to get active theme directory
                $theme_dir = self::getActiveThemeDirectory();
@@ -106,27 +120,13 @@ Add new centralized theme helper methods and modify `getThemeFilePath()` to use 
                    }
                }
            } catch (Exception $e) {
-               // Log error and fall through to default theme handling
+               // Log error and re-throw - don't silently fall back
                error_log("Theme error: " . $e->getMessage());
-               // Could optionally re-throw here to stop execution
+               throw $e;
            }
        }
        
-       // Fall back to specific theme or default theme handling
-       if ($theme_name) {
-           $theme_dir = "theme/$theme_name";
-       } else {
-           // Use a safe default if theme resolution failed above
-           $settings = Globalvars::get_instance();
-           $theme_template = $settings->get_setting('theme_template');
-           if ($theme_template === 'plugin') {
-               $theme_dir = "theme/falcon"; // Safe fallback
-           } else {
-               $theme_dir = "theme/$theme_template";
-           }
-       }
-       
-       // ... rest of existing logic (checks theme directory, then base directory) ...
+       // ... rest of existing logic (checks base directory) ...
    ```
 
 ### RouteHelper.php
@@ -160,20 +160,15 @@ Modify the template directory assignment around line 1010 to use PathHelper's ce
 Modify the `asset()` method around line 148 to use PathHelper's centralized theme methods:
    ```php
    public static function asset($path, $themeName = null) {
-       // If specific theme requested, handle it directly
-       if ($themeName !== null && $themeName !== 'plugin') {
-           // Normal theme asset loading for specific theme
+       // If specific theme requested, load from that theme directory
+       if ($themeName !== null) {
            $theme_asset = "/theme/{$themeName}/assets/{$path}";
            $theme_asset_path = PathHelper::getIncludePath("theme/{$themeName}/assets/{$path}");
            if (file_exists($theme_asset_path)) {
-               $version = self::getAssetVersion($themeName, $path);
-               $versionString = $version ? "?v={$version}" : '';
-               return "{$theme_asset}{$versionString}";
+               return $theme_asset;
            }
-       }
-       
-       // For active theme (including plugin themes), use centralized PathHelper
-       if ($themeName === null || $themeName === 'plugin') {
+       } else {
+           // No specific theme - use the currently active theme (regular or plugin)
            try {
                // Get the active theme directory using centralized method
                $theme_dir = PathHelper::getActiveThemeDirectory();
@@ -181,18 +176,7 @@ Modify the `asset()` method around line 148 to use PathHelper's centralized them
                $asset_full_path = PathHelper::getIncludePath("{$theme_dir}/assets/{$path}");
                
                if (file_exists($asset_full_path)) {
-                   // For plugin themes, no versioning for simplicity
-                   // For regular themes, apply versioning
-                   if (PathHelper::isPluginTheme()) {
-                       return $asset_path;
-                   } else {
-                       // Extract theme name from path for versioning
-                       $theme_parts = explode('/', $theme_dir);
-                       $theme_name = end($theme_parts);
-                       $version = self::getAssetVersion($theme_name, $path);
-                       $versionString = $version ? "?v={$version}" : '';
-                       return "{$asset_path}{$versionString}";
-                   }
+                   return $asset_path;
                }
            } catch (Exception $e) {
                // Log error but don't throw - fall through to existing fallback logic
