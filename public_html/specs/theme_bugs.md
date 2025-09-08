@@ -81,7 +81,10 @@ Add new centralized theme helper methods and modify `getThemeFilePath()` to use 
    public static function getThemeFilePath($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $debug = false){
        $siteDir = PathHelper::getBasePath();
        
-       // ... existing subdirectory handling ...
+       // SUBDIRECTORY WORKS WITH OR WITHOUT SLASH
+       if (substr($subdirectory, 0, 1) !== '/') {
+           $subdirectory = '/' . $subdirectory; // Add a forward slash if it doesn't exist
+       }
        
        // IMPORTANT: Core system files must always load from system directories
        // to prevent circular dependencies during bootstrap
@@ -212,8 +215,7 @@ Add plugin selector dropdown:
    if ($current_theme === 'plugin') {
        // Use existing method to get available plugins
        $available_plugins = PluginHelper::getAvailablePlugins();
-       // Filter for theme providers if desired
-       // TODO: Check existing method signature and adapt as needed
+       // Could filter for theme providers using $plugin_helper->providesTheme() if needed
        
        // Create FormWriter dropdown following existing admin_settings pattern
        $current_plugin = $settings->get_setting('active_theme_plugin');
@@ -221,8 +223,9 @@ Add plugin selector dropdown:
        
        // Build options array for FormWriter
        $plugin_options = array('' => '-- Select Plugin --');
-       foreach ($available_plugins as $plugin_name => $display_name) {
-           $plugin_options[$plugin_name] = $display_name;
+       foreach ($available_plugins as $plugin_name => $plugin_helper) {
+           // PluginHelper::getAvailablePlugins returns array of PluginHelper instances
+           $plugin_options[$plugin_name] = $plugin_helper->getDisplayName();
        }
        
        echo $formwriter->dropinput('Active Theme Plugin', 'active_theme_plugin', '', $plugin_options, $current_plugin, 'Select which plugin provides the user interface', FALSE);
@@ -272,7 +275,7 @@ These migrations MUST be added to `/migrations/migrations.php`:
 ```php
 // Migration 1: Rename blank theme to plugin theme
 $migration = array();
-$migration['database_version'] = '0.XX'; // Use next version number
+$migration['database_version'] = '0.XX'; // TODO: Replace XX with actual next version number
 $migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'theme_template' AND stg_value = 'blank'";
 $migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'plugin' WHERE stg_name = 'theme_template' AND stg_value = 'blank';";
 $migration['migration_file'] = NULL;
@@ -280,7 +283,7 @@ $migrations[] = $migration;
 
 // Migration 2: Add active_theme_plugin setting  
 $migration = array();
-$migration['database_version'] = '0.XX'; // Use next version number
+$migration['database_version'] = '0.XX'; // TODO: Replace XX with actual next version number
 $migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'active_theme_plugin'";
 $migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('active_theme_plugin', '');";
 $migration['migration_file'] = NULL;
