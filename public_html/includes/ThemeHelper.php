@@ -196,6 +196,7 @@ class ThemeHelper extends ComponentBase {
             $theme_path = "theme/{$themeName}/{$path}.php";
             if (file_exists(PathHelper::getIncludePath($theme_path))) {
                 extract($variables);
+                self::outputDebugComments($theme_path, $themeName, $plugin_specify);
                 include PathHelper::getIncludePath($theme_path);
                 return true;
             }
@@ -204,6 +205,7 @@ class ThemeHelper extends ComponentBase {
             $base_path = "{$path}.php";
             if (file_exists(PathHelper::getIncludePath($base_path))) {
                 extract($variables);
+                self::outputDebugComments($base_path, $themeName, $plugin_specify);
                 include PathHelper::getIncludePath($base_path);
                 return true;
             }
@@ -214,6 +216,7 @@ class ThemeHelper extends ComponentBase {
             $theme_path = "theme/{$themeName}/views/{$path}.php";
             if (file_exists(PathHelper::getIncludePath($theme_path))) {
                 extract($variables);
+                self::outputDebugComments($theme_path, $themeName, $plugin_specify);
                 include PathHelper::getIncludePath($theme_path);
                 return true;
             }
@@ -224,6 +227,7 @@ class ThemeHelper extends ComponentBase {
                 $plugin_path = "plugins/{$plugin}/views/{$path}.php";
                 if (file_exists(PathHelper::getIncludePath($plugin_path))) {
                     extract($variables);
+                    self::outputDebugComments($plugin_path, $themeName, $plugin);
                     include PathHelper::getIncludePath($plugin_path);
                     return true;
                 }
@@ -233,6 +237,7 @@ class ThemeHelper extends ComponentBase {
             $base_path = "views/{$path}.php";
             if (file_exists(PathHelper::getIncludePath($base_path))) {
                 extract($variables);
+                self::outputDebugComments($base_path, $themeName, $plugin_specify);
                 include PathHelper::getIncludePath($base_path);
                 return true;
             }
@@ -430,5 +435,43 @@ class ThemeHelper extends ComponentBase {
         // This method is referenced in the asset() method but didn't exist
         // For now, return null - can be implemented later for cache busting
         return null;
+    }
+    
+    /**
+     * Output helpful debug comments for theme/plugin file loading
+     */
+    private static function outputDebugComments($file_path, $theme_name, $plugin = null) {
+        // Only show debug comments when debug setting is enabled
+        $settings = Globalvars::get_instance();
+        if ($settings->get_setting('debug') != '1') {
+            return;
+        }
+        
+        echo "<!-- System Info\n";
+        echo "Theme: " . htmlspecialchars($theme_name) . "\n";
+        if ($theme_name === 'plugin') {
+            $active_theme_plugin = $settings->get_setting('active_theme_plugin');
+            echo "Active Theme Plugin: " . htmlspecialchars($active_theme_plugin ?: '(none set)') . "\n";
+        }
+        if ($plugin) {
+            echo "Plugin: " . htmlspecialchars($plugin) . "\n";
+        }
+        echo "File: " . htmlspecialchars($file_path) . "\n";
+        echo "Route: " . htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'unknown') . "\n";
+        
+        // Check if session exists and is safe to access
+        if (class_exists('Session')) {
+            try {
+                $session = new Session($settings);
+                echo "Session: " . ($session->is_logged_in() ? 'logged_in' : 'guest') . "\n";
+            } catch (Exception $e) {
+                echo "Session: unknown\n";
+            }
+        } else {
+            echo "Session: unknown\n";
+        }
+        
+        echo "Timestamp: " . date('Y-m-d H:i:s') . "\n";
+        echo "-->\n";
     }
 }
