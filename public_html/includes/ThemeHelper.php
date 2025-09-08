@@ -146,32 +146,43 @@ class ThemeHelper extends ComponentBase {
      * Get URL to theme asset with plugin fallback
      */
     public static function asset($path, $themeName = null) {
-        if ($themeName === null) {
-            $themeName = self::getActive();
+        // If specific theme requested, load from that theme directory
+        if ($themeName !== null) {
+            $theme_asset = "/theme/{$themeName}/assets/{$path}";
+            $theme_asset_path = PathHelper::getIncludePath("theme/{$themeName}/assets/{$path}");
+            if (file_exists($theme_asset_path)) {
+                return $theme_asset;
+            }
+        } else {
+            // No specific theme - use the currently active theme (regular or plugin)
+            try {
+                // Get the active theme directory using centralized method
+                $theme_dir = PathHelper::getActiveThemeDirectory();
+                $asset_path = "/{$theme_dir}/assets/{$path}";
+                $asset_full_path = PathHelper::getIncludePath("{$theme_dir}/assets/{$path}");
+                
+                if (file_exists($asset_full_path)) {
+                    return $asset_path;
+                }
+            } catch (Exception $e) {
+                // Log error but don't throw - fall through to existing fallback logic
+                error_log("Asset loading error: " . $e->getMessage());
+            }
         }
         
-        // Check theme first
-        $theme_asset = "/theme/{$themeName}/assets/{$path}";
-        if (file_exists($_SERVER['DOCUMENT_ROOT'] . $theme_asset)) {
-            $version = self::getAssetVersion($themeName, $path);
-            $versionString = $version ? "?v={$version}" : '';
-            return "{$theme_asset}{$versionString}";
-        }
-        
-        // Check current plugin
+        // Check current plugin (existing fallback behavior)
         $current_plugin = RouteHelper::getCurrentPlugin();
         if ($current_plugin) {
             $plugin_asset = "/plugins/{$current_plugin}/assets/{$path}";
-            if (file_exists($_SERVER['DOCUMENT_ROOT'] . $plugin_asset)) {
-                // Plugin asset versioning will be added later
+            $plugin_asset_path = PathHelper::getIncludePath("plugins/{$current_plugin}/assets/{$path}");
+            if (file_exists($plugin_asset_path)) {
                 return $plugin_asset;
             }
         }
         
-        // Return theme path even if not found (will 404)
-        $version = self::getAssetVersion($themeName, $path);
-        $versionString = $version ? "?v={$version}" : '';
-        return "{$theme_asset}{$versionString}";
+        // Return default theme path even if not found (will 404)
+        $default_theme = self::getActive();
+        return "/theme/{$default_theme}/assets/{$path}";
     }
     
     /**
@@ -192,13 +203,21 @@ class ThemeHelper extends ComponentBase {
         $is_includes_path = strpos($path, 'includes/') === 0;
         
         if ($is_includes_path) {
-            // Theme includes: check theme/{theme}/{path}.php directly
-            $theme_path = "theme/{$themeName}/{$path}.php";
-            if (file_exists(PathHelper::getIncludePath($theme_path))) {
-                extract($variables);
-                self::outputDebugComments($theme_path, $themeName, $plugin_specify);
-                include PathHelper::getIncludePath($theme_path);
-                return true;
+            // Use PathHelper to get the correct theme file path (handles plugin themes)
+            try {
+                // PathHelper::getThemeFilePath handles both regular themes and plugin themes
+                // For 'includes/PublicPage', we want PublicPage.php in /includes directory
+                $filename = basename($path) . '.php';
+                $subdirectory = '/' . dirname($path);
+                $full_path = PathHelper::getThemeFilePath($filename, $subdirectory, 'system', $themeName);
+                if (file_exists($full_path)) {
+                    extract($variables);
+                    self::outputDebugComments($full_path, $themeName, $plugin_specify);
+                    include $full_path;
+                    return true;
+                }
+            } catch (Exception $e) {
+                // File not found in theme, try base path fallback
             }
             
             // Fallback to base path for includes

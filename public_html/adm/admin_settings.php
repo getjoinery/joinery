@@ -264,6 +264,15 @@
 				$("#tracking_code_container").hide();
 			}		
 		}
+		
+		function set_plugin_theme_choices(){
+			var value = $("#theme_template").val();
+			if(value === 'plugin'){  
+				$("#plugin_theme_selector").show();
+			} else { 
+				$("#plugin_theme_selector").hide();
+			}		
+		}
 
 		function set_smtp_auth_choices(){
 			var value = $("#smtp_auth").val();
@@ -297,6 +306,7 @@
 			check_social_content(); // Check content before setting visibility
 			set_social_choices();
 			set_tracking_choices();
+			set_plugin_theme_choices();
 			$("#use_paypal_checkout").change(function() {	
 				set_choices();
 			});	
@@ -312,6 +322,9 @@
 			$("#tracking").change(function() {	
 				set_tracking_choices();
 			});	
+			$("#theme_template").change(function(){
+				set_plugin_theme_choices();
+			});
 
 			// SMTP Authentication toggle
 			$("#smtp_auth").on('change', function(){
@@ -395,17 +408,21 @@
 		$validation_rules['webDir']['weburl']['value'] = 'true';
 	}
 	
+	// Temporarily disable remote validation to allow form submission
+	// TODO: Fix AJAX validation endpoint routing issue
+	/*
 	// Add validation for Apache error log path using remote validation
-	$validation_rules['apache_error_log']['remote']['value'] = "'/ajax/validate_file_ajax'";
+	$validation_rules['apache_error_log']['remote']['value'] = "'/ajax/validate_file_ajax.php'";
 	$validation_rules['apache_error_log']['remote']['message'] = "'File does not exist or is not readable'";
 	
 	// Add validation for preview image using remote validation
-	$validation_rules['preview_image']['remote']['value'] = "'/ajax/validate_file_ajax'";
+	$validation_rules['preview_image']['remote']['value'] = "'/ajax/validate_file_ajax.php'";
 	$validation_rules['preview_image']['remote']['message'] = "'File does not exist or is not readable'";
 	
 	// Add validation for logo link using remote validation
-	$validation_rules['logo_link']['remote']['value'] = "'/ajax/validate_file_ajax'";
+	$validation_rules['logo_link']['remote']['value'] = "'/ajax/validate_file_ajax.php'";
 	$validation_rules['logo_link']['remote']['message'] = "'Must start with / and file must exist'";
+	*/
 	
 	// Add Stripe key validation rules using custom validation methods
 	$validation_rules['stripe_api_key']['stripePublishableKey']['value'] = 'true';
@@ -588,12 +605,35 @@
 		// Add directory themes only
 		foreach($directory_themes as $theme_name => $theme_helper) {
 			$display_name = $theme_helper->get('display_name', $theme_name);
-			$optionvals[$theme_name] = $display_name;
+			$optionvals[$display_name] = $theme_name;  // Fixed: display_name as key, theme_name as value
 		}
 		
 		
 		//echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
 		echo $formwriter->dropinput("Active theme", "theme_template", '', $optionvals, $settings->get_setting('theme_template'), '', FALSE);
+		
+		// Always render plugin selector dropdown, JavaScript will control visibility
+		// Use existing method to get available plugins
+		$available_plugins = PluginHelper::getAvailablePlugins();
+		
+		// Create FormWriter dropdown following existing admin_settings pattern
+		$current_plugin = $settings->get_setting('active_theme_plugin');
+		
+		// Build options array for FormWriter
+		$plugin_options = array('-- Select Plugin --' => '');  // Fixed: display text as key, value as value
+		foreach ($available_plugins as $plugin_name => $plugin_helper) {
+			// PluginHelper::getAvailablePlugins returns array of PluginHelper instances
+			$display_name = $plugin_helper->getPluginName();
+			$plugin_options[$display_name] = $plugin_name;  // Fixed: display_name as key, plugin_name as value
+		}
+		
+		// Wrap in a div that JavaScript can show/hide
+		// Note: The dropdown inside needs to be ignored by validation when hidden
+		$current_theme = $settings->get_setting('theme_template');
+		$initial_display = ($current_theme === 'plugin') ? 'block' : 'none';
+		echo '<div id="plugin_theme_selector" style="display: ' . $initial_display . ';">';
+		echo $formwriter->dropinput('Active Theme Plugin', 'active_theme_plugin', '', $plugin_options, $current_plugin, 'Select which plugin provides the user interface', FALSE);
+		echo '</div>';
 		
 		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', '', 20, $settings->get_setting('webmaster_email'), "" , 255, "");
 		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");

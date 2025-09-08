@@ -759,5 +759,21 @@
 		$migration['migration_sql'] = NULL;
 		$migration['migration_file'] = 'theme_plugin_registry_sync.php';
 		$migrations[] = $migration;
+		
+		// Migration 1: Rename blank theme to plugin theme
+		$migration = array();
+		$migration['database_version'] = '0.57';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'theme_template' AND stg_value = 'blank'";
+		$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'plugin' WHERE stg_name = 'theme_template' AND stg_value = 'blank';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Migration 2: Add active_theme_plugin setting  
+		$migration = array();
+		$migration['database_version'] = '0.57';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'active_theme_plugin'";
+		$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('active_theme_plugin', '');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
 
  
