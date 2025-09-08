@@ -32,7 +32,7 @@ When "plugin" theme is selected:
 
 ### PathHelper.php
 
-Modify `getThemeFilePath()` to check plugin directory when plugin theme active:
+Modify `getThemeFilePath()` to check plugin directory when plugin theme active (for loading PHP classes like PublicPage and FormWriter):
    ```php
    public static function getThemeFilePath($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $debug = false){
        $settings = Globalvars::get_instance();
@@ -65,6 +65,64 @@ Modify `getThemeFilePath()` to check plugin directory when plugin theme active:
        }
        
        // ... rest of existing logic (will throw exception if file not found) ...
+   ```
+
+### RouteHelper.php
+
+Modify the template directory assignment around line 1010 to handle plugin themes (for loading view files):
+   ```php
+   // Around line 1007-1012, replace the template_directory assignment with:
+   $template_directory = null;
+   
+   if ($theme_template === 'plugin') {
+       $active_theme_plugin = $settings->get_setting('active_theme_plugin');
+       if ($active_theme_plugin && is_dir(PathHelper::getIncludePath('plugins/'.$active_theme_plugin))) {
+           $template_directory = PathHelper::getIncludePath('plugins/'.$active_theme_plugin);
+       } else {
+           // Fall back to a default theme if plugin not found
+           $template_directory = PathHelper::getIncludePath('theme/falcon');
+           error_log("Plugin theme active but plugin '$active_theme_plugin' not found, falling back to falcon");
+       }
+   } else if (ThemeHelper::themeExists($theme_template)) {
+       $template_directory = PathHelper::getIncludePath('theme/'.$theme_template);
+       error_log("Theme directory: " . var_export($template_directory, true));
+   } else {
+       error_log("Theme does not exist or is invalid");
+   }
+   ```
+
+### ThemeHelper.php
+
+Modify the `asset()` method around line 148 to handle plugin theme assets:
+   ```php
+   public static function asset($path, $themeName = null) {
+       if ($themeName === null) {
+           $themeName = self::getActive();
+       }
+       
+       // NEW: Check if plugin theme
+       if ($themeName === 'plugin') {
+           $settings = Globalvars::get_instance();
+           $active_theme_plugin = $settings->get_setting('active_theme_plugin');
+           if ($active_theme_plugin) {
+               $plugin_asset = "/plugins/{$active_theme_plugin}/assets/{$path}";
+               if (file_exists($_SERVER['DOCUMENT_ROOT'] . $plugin_asset)) {
+                   // TODO: Add versioning support if needed
+                   return $plugin_asset;
+               }
+           }
+       }
+       
+       // Check theme first (existing code continues)
+       $theme_asset = "/theme/{$themeName}/assets/{$path}";
+       if (file_exists($_SERVER['DOCUMENT_ROOT'] . $theme_asset)) {
+           $version = self::getAssetVersion($themeName, $path);
+           $versionString = $version ? "?v={$version}" : '';
+           return "{$theme_asset}{$versionString}";
+       }
+       
+       // ... rest of existing fallback logic ...
+   }
    ```
 
 ### admin_settings.php
