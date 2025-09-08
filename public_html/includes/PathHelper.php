@@ -1,6 +1,7 @@
 <?php
 require_once('ThemeHelper.php');
 require_once('PluginHelper.php');
+require_once(__DIR__ . '/Globalvars.php');
 
 class PathHelper {
     private static $root_dir = null;
@@ -139,7 +140,27 @@ class PathHelper {
             }
         }
         
-        return false;
+        // Build helpful error message
+        $searched_paths = [];
+        if ($theme_file) {
+            $searched_paths[] = $theme_file;
+        }
+        $searched_paths[] = $default_file;
+        
+        $error_msg = "Theme file not found: $filename";
+        if ($theme_template) {
+            $error_msg .= " for theme '$theme_template'";
+        }
+        $error_msg .= "\nSearched paths:\n - " . implode("\n - ", $searched_paths);
+        
+        // Add helpful suggestion based on theme
+        if ($theme_template === 'blank') {
+            $error_msg .= "\nSuggestion: For blank theme, ensure a plugin provides UI or switch to a different theme";
+        } else {
+            $error_msg .= "\nSuggestion: Create $filename in your theme's $subdirectory directory or ensure the file exists in the base $subdirectory directory";
+        }
+        
+        throw new Exception($error_msg);
     }
 }
 ?>
