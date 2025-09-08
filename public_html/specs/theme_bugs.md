@@ -146,31 +146,14 @@ When "plugin" theme is selected:
        // ... rest unchanged ...
    ```
    
-   **Login route (modify existing):**
-   ```php
-   '/login' => function($params, $settings, $session, $template_directory) {
-       $theme = $settings->get_setting('theme_template', true, true);
-       
-       if ($theme === 'plugin') {
-           $active_theme_plugin = $settings->get_setting('active_theme_plugin');
-           if ($active_theme_plugin && is_dir(PathHelper::getIncludePath('plugins/'.$active_theme_plugin))) {
-               // Redirect to plugin's login route using RouteHelper
-               PathHelper::requireOnce('includes/LibraryFunctions.php');
-               $redirect_url = RouteHelper::url("/$blank_theme_plugin/login");
-               LibraryFunctions::Redirect($redirect_url);
-               exit;
-           }
-           // If no plugin, fall through to minimal login
-       }
-       
-       // Original login logic for non-blank themes...
-   ```
+   **Note**: Login route (`/login`) remains unchanged - system login is always used regardless of theme. Plugins cannot override the login route.
 
 5. **Plugin requirements for theme providers**:
-   - **Must provide routes**: `/[plugin-name]`, `/[plugin-name]/login` (if custom login needed)
+   - **Must provide route**: `/[plugin-name]` (main dashboard/homepage)
    - **Must provide files**:
      - `/plugins/[name]/includes/PublicPage.php` (or variant)
      - `/plugins/[name]/includes/FormWriter*.php` (can be wrapper of system FormWriter)
+   - **Cannot define**: `/login`, `/logout`, `/register` routes (system handles authentication)
    - **Optional**: Plugin manifest can include `"provides_theme": true` for admin UI clarity
    - **Note**: Admin pages (`/adm/*`) remain separate and do not use the theme system
 
@@ -293,31 +276,18 @@ When "plugin" theme is selected:
 
 **Implementation** in RouteHelper or when serving views:
 ```php
-if ($debug_mode || $development_environment) {
-    echo "<!-- \n";
-    echo "Theme: " . $theme . "\n";
-    if ($theme === 'plugin') {
-        echo "Active Theme Plugin: " . $active_theme_plugin . "\n";
-    }
-    echo "File: " . $current_file . "\n";
-    echo "Route: " . $_SERVER['REQUEST_URI'] . "\n";
-    echo "Session: " . ($session->is_logged_in() ? 'logged_in' : 'guest') . "\n";
-    echo "-->\n";
+// Always include helpful debug comments in HTML output
+echo "<!-- System Info\n";
+echo "Theme: " . $theme . "\n";
+if ($theme === 'plugin') {
+    echo "Active Theme Plugin: " . $active_theme_plugin . "\n";
 }
+echo "File: " . $current_file . "\n";
+echo "Route: " . $_SERVER['REQUEST_URI'] . "\n";
+echo "Session: " . ($session->is_logged_in() ? 'logged_in' : 'guest') . "\n";
+echo "Timestamp: " . date('Y-m-d H:i:s') . "\n";
+echo "-->\n";
 ```
-
----
-
-### Bug 5: Add Graceful Fallbacks
-
-**Problem**: If plugin missing required files, system breaks
-
-**Solution**: Add minimal fallback implementations
-
-**Implementation**:
-1. If PublicPage.php not found in plugin, create minimal inline class (already happens with exception)
-2. If plugin directory doesn't exist, reset `blank_theme_plugin` setting
-3. Cache plugin existence checks for performance
 
 ---
 
@@ -424,19 +394,19 @@ Add new section describing the three types of plugins:
 - Routes always active when plugin installed
 
 #### 2. Theme Provider Plugins
-**Purpose**: Provide complete UI/theme when blank theme selected
+**Purpose**: Provide complete UI/theme when plugin theme selected
 **Examples**: ControlD, custom branded interfaces
 **Requirements**:
 - Must provide `/[plugin-name]` main route
 - Must provide `/plugins/[name]/includes/PublicPage.php`
 - Must provide `/plugins/[name]/includes/FormWriter*.php` (can wrap system classes)
-- Should provide `/[plugin-name]/login` if custom auth needed
 - Should set `"provides_theme": true` in plugin.json for clarity
 
 **Restrictions**:
-- Can define protected routes BUT only active when selected as theme provider
+- CANNOT define authentication routes (`/login`, `/logout`, `/register`)
 - Must handle all theme responsibilities when active
 - Must provide all required theme infrastructure files
+- System login is always used for authentication
 
 **How it works**:
 1. User selects "plugin" theme in settings
@@ -478,12 +448,133 @@ Document admin_settings.php changes:
 
 ---
 
-## Migration Notes
+## Required Migrations and Updates
 
-For existing controld installations:
-1. Add PublicPage.php to `/plugins/controld/includes/`
-2. Add FormWriter classes to `/plugins/controld/includes/`
-3. Ensure `/controld` route exists (it already does)
-4. Optionally add `/controld/login` route
-5. Add `"provides_theme": true` to plugin.json
-6. No changes to existing route definitions needed!
+### Database Migrations (Part of Bug 3 Implementation)
+
+These migrations MUST be added to `/migrations/migrations.php`:
+
+```php
+// Migration 1: Rename blank theme to plugin theme
+$migration = array();
+$migration['database_version'] = '0.XX'; // Use next version number
+$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'theme_template' AND stg_value = 'blank'";
+$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'plugin' WHERE stg_name = 'theme_template' AND stg_value = 'blank';";
+$migration['migration_file'] = NULL;
+$migrations[] = $migration;
+
+// Migration 2: Add active_theme_plugin setting  
+$migration = array();
+$migration['database_version'] = '0.XX'; // Use next version number
+$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'active_theme_plugin'";
+$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('active_theme_plugin', '');";
+$migration['migration_file'] = NULL;
+$migrations[] = $migration;
+```
+
+### File System Changes
+
+1. **Rename theme directory**: 
+   - FROM: `/theme/blank/`
+   - TO: `/theme/plugin/`
+   
+2. **Update theme.json** in `/theme/plugin/`:
+   ```json
+   {
+     "name": "plugin",
+     "display_name": "Plugin-Provided Theme",
+     "description": "Delegates all theme functionality to a selected plugin",
+     "author": "System",
+     "version": "1.0.0",
+     "framework": "none",
+     "is_plugin_theme": true
+   }
+   ```
+
+### ControlD Plugin Updates
+
+For ControlD to work as a theme provider, these files MUST be added:
+
+1. **Create** `/plugins/controld/includes/PublicPage.php`:
+   ```php
+   <?php
+   // Minimal PublicPage implementation for ControlD
+   class PublicPage {
+       public function public_header($options = []) {
+           // ControlD specific header
+           echo '<!DOCTYPE html><html><head>';
+           echo '<title>' . ($options['title'] ?? 'ControlD') . '</title>';
+           echo '</head><body>';
+       }
+       
+       public function public_footer($options = []) {
+           echo '</body></html>';
+       }
+       
+       public static function BeginPage($class = '') {
+           return '<div class="controld-page ' . $class . '">';
+       }
+       
+       public static function EndPage() {
+           return '</div>';
+       }
+   }
+   ```
+
+2. **Create** `/plugins/controld/includes/FormWriter.php`:
+   ```php
+   <?php
+   // Wrapper for system FormWriter
+   PathHelper::requireOnce('includes/FormWriterMaster.php');
+   
+   class FormWriter extends FormWriterMaster {
+       // Use system FormWriter with any ControlD-specific overrides
+   }
+   ```
+
+3. **Update** `/plugins/controld/plugin.json`:
+   ```json
+   {
+       "name": "controld",
+       "display_name": "ControlD DNS Filtering",
+       "version": "2.0.0",
+       "description": "Complete ControlD DNS filtering service with integrated UI",
+       "author": "System Developer",
+       "type": "application",
+       "routes_prefix": "/controld",
+       "provides": ["dns_filtering", "device_management", "content_filtering"],
+       "provides_theme": true,
+       "is_stock": true,
+       "requires": {
+           "php": ">=8.0",
+           "extensions": ["curl"]
+       }
+   }
+   ```
+
+4. **Verify** `/plugins/controld/serve.php` has main route:
+   ```php
+   $routes = [
+       'dynamic' => [
+           '/controld' => [
+               'view' => 'views/index',
+               'plugin_specify' => 'controld'
+           ],
+           // ... other routes
+       ]
+   ];
+   ```
+
+### Testing Migration
+
+After implementing migrations:
+
+1. Run database migrations: `php /utils/update_database.php`
+2. Verify settings in database:
+   ```sql
+   SELECT * FROM stg_settings WHERE stg_name IN ('theme_template', 'active_theme_plugin');
+   ```
+3. Check theme directory renamed properly
+4. Test homepage redirect to `/controld` when plugin theme active
+5. Verify PublicPage loads from plugin directory
+6. Confirm FormWriter works correctly
