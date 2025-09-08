@@ -408,21 +408,17 @@
 		$validation_rules['webDir']['weburl']['value'] = 'true';
 	}
 	
-	// Temporarily disable remote validation to allow form submission
-	// TODO: Fix AJAX validation endpoint routing issue
-	/*
 	// Add validation for Apache error log path using remote validation
-	$validation_rules['apache_error_log']['remote']['value'] = "'/ajax/validate_file_ajax.php'";
+	$validation_rules['apache_error_log']['remote']['value'] = "'/ajax/validate_file_ajax'";
 	$validation_rules['apache_error_log']['remote']['message'] = "'File does not exist or is not readable'";
 	
 	// Add validation for preview image using remote validation
-	$validation_rules['preview_image']['remote']['value'] = "'/ajax/validate_file_ajax.php'";
+	$validation_rules['preview_image']['remote']['value'] = "'/ajax/validate_file_ajax'";
 	$validation_rules['preview_image']['remote']['message'] = "'File does not exist or is not readable'";
 	
 	// Add validation for logo link using remote validation
-	$validation_rules['logo_link']['remote']['value'] = "'/ajax/validate_file_ajax.php'";
+	$validation_rules['logo_link']['remote']['value'] = "'/ajax/validate_file_ajax'";
 	$validation_rules['logo_link']['remote']['message'] = "'Must start with / and file must exist'";
-	*/
 	
 	// Add Stripe key validation rules using custom validation methods
 	$validation_rules['stripe_api_key']['stripePublishableKey']['value'] = 'true';

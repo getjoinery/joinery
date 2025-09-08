@@ -473,9 +473,15 @@ class RouteHelper {
             return false;
         }
         
-        // Test/Utils routes - allow plugin overrides, no theme overrides
-        if (strpos($view_path, 'tests/') === 0 || strpos($view_path, 'utils/') === 0) {
-            $route_type = strpos($view_path, 'tests/') === 0 ? 'tests' : 'utils';
+        // Test/Utils/Ajax routes - allow plugin overrides, no theme overrides
+        if (strpos($view_path, 'tests/') === 0 || strpos($view_path, 'utils/') === 0 || strpos($view_path, 'ajax/') === 0) {
+            if (strpos($view_path, 'tests/') === 0) {
+                $route_type = 'tests';
+            } elseif (strpos($view_path, 'utils/') === 0) {
+                $route_type = 'utils';
+            } else {
+                $route_type = 'ajax';
+            }
             
             // Check for plugin override
             if (preg_match('#^/' . $route_type . '/(.+)$#', $path, $matches)) {
@@ -508,24 +514,6 @@ class RouteHelper {
                 return true;
             }
             return false;
-        }
-        
-        // Ajax routes - check plugin overrides first
-        if (strpos($view_path, 'ajax/') === 0) {
-            if (preg_match('#^/ajax/(.+)$#', $path, $matches)) {
-                $file = $matches[1];
-                
-                if (!class_exists('PluginHelper')) {
-                    PathHelper::requireOnce('includes/PluginHelper.php');
-                }
-                
-                $activePlugins = PluginHelper::getActivePlugins();
-                foreach ($activePlugins as $pluginName => $pluginHelper) {
-                    if ($pluginHelper->includeFile('ajax/' . $file)) {
-                        return true;
-                    }
-                }
-            }
         }
         
         // STANDARD VIEW LOADING with theme overrides
