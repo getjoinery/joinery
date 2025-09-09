@@ -53,7 +53,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 
 if($_GET['new_version']){
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form("product-quantity", "POST", "/profile/subscription_edit", true); 
 	echo $formwriter->hiddeninput('product_id', $page_vars['product']->key);
 	echo '<p>You are about to change your subscription to the '.$page_vars['product']->get('pro_name').' You will be charged immediately for the difference. </p>';

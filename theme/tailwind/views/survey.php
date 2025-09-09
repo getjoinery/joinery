@@ -18,7 +18,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo PublicPage::BeginPanel();
 
 
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form('form1', 'POST', '/survey', true);
 
 	if($invalid_messages){

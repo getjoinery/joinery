@@ -233,7 +233,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 							foreach($page_vars['register_urls'] as $register_url){
 								
-								$formwriter = LibraryFunctions::get_formwriter_object('form1');
+								$formwriter = $page->getFormWriter('form1');
 								echo $formwriter->new_button($register_url['label'], $register_url['link'], 'primary', 'full');	
 								echo $formwriter->end_form();
 							}			

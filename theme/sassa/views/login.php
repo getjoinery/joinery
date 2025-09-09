@@ -45,7 +45,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 			}
 		}   		
 		
-		$formwriter = LibraryFunctions::get_formwriter_object('form1');
+		$formwriter = $page->getFormWriter('form1');
 
 		$validation_rules = array();
 		$validation_rules['email']['required']['value'] = 'true';

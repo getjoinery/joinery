@@ -38,7 +38,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	}	
 
 	
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form("", "post", "/profile/contact_preferences");
 	
 	if(empty($page_vars['optionvals'])){

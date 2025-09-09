@@ -26,7 +26,7 @@ require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
 	if (!$page_vars['display_empty_form']) {
 		echo '<p>Is everything correct?</p>';
 		$settings = Globalvars::get_instance();
-		$formwriter = LibraryFunctions::get_formwriter_object('product_form');
+		$formwriter = $page->getFormWriter('product_form');
 		echo $formwriter->begin_form("", "POST", "/product"); 
 
 		echo $formwriter->hiddeninput('product_id', $product_id);
@@ -88,7 +88,7 @@ Career Area
 						
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT 
 				if(!$product->is_sold_out()){
-					$formwriter = LibraryFunctions::get_formwriter_object('product_form');
+					$formwriter = $page->getFormWriter('product_form');
 					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 					echo $formwriter->hiddeninput('product_id', $product_id);
 

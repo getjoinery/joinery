@@ -19,7 +19,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo PublicPage::BeginPage('Log In');
 	
 	
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 	
 	
 

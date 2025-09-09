@@ -37,7 +37,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo '<h2 class="sec-title">Cancel Subscription</h2>';
 		
 	
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form("", "post", "/profile/subscription_cancel");
 
 

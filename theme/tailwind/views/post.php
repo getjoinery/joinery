@@ -67,7 +67,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 							
 								<?php
 								$settings = Globalvars::get_instance();
-								$formwriter = LibraryFunctions::get_formwriter_object('form1');
+								$formwriter = $page->getFormWriter('form1');
 								$validation_rules = array();
 								$validation_rules['cmt']['required']['value'] = 'true';
 								$validation_rules['cmt']['minlength']['value'] = 20;
@@ -156,7 +156,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 									if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
 											echo '<div id="comment'.$comment->key.'container" style="display:none;">';
 											$settings = Globalvars::get_instance();
-											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key);
+											$formwriter = $page->getFormWriter('form'.$comment->key);
 	
 											$validation_rules = array();
 											$validation_rules['cmt']['required']['value'] = 'true';

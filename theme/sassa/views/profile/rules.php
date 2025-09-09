@@ -74,7 +74,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 	if($account->get('cda_plan') == CtldAccount::PRO_PLAN){
 		if($device->are_filters_editable()){
-			$formwriter = LibraryFunctions::get_formwriter_object();
+			$formwriter = $page->getFormWriter();
 			$validation_rules = array();
 			$validation_rules['cdr_rule_hostname']['required']['value'] = 'true';
 			$validation_rules['cdr_rule_action']['required']['value'] = 'true';	

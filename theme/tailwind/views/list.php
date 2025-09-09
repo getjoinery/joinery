@@ -30,7 +30,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	}
 	
 		$settings = Globalvars::get_instance();
-		$formwriter = LibraryFunctions::get_formwriter_object('form1');
+		$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	$validation_rules['usr_first_name']['required']['value'] = 'true';

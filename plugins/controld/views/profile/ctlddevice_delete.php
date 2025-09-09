@@ -29,7 +29,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 
 	
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 	
 	
 

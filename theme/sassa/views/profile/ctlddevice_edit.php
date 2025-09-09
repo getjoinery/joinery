@@ -36,7 +36,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	
 	
 	
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 
 	$validation_rules = array();
 	$validation_rules['device_name']['required']['value'] = 'true';

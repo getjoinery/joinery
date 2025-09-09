@@ -42,7 +42,7 @@ Contact Area
 						if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
 							echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
 							foreach($page_vars['all_coupons'] as $coupon){
-								$formwriter = LibraryFunctions::get_formwriter_object('form_test_coupon');
+								$formwriter = $page->getFormWriter('form_test_coupon');
 								echo $formwriter->begin_form("mt-6", "get", '/cart');
 								echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
 								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary');
@@ -52,7 +52,7 @@ Contact Area
 						}
 
 						
-						$formwriter = LibraryFunctions::get_formwriter_object('form_coupon');
+						$formwriter = $page->getFormWriter('form_coupon');
 						
 						echo $formwriter->begin_form("mt-6", "get", '/cart');
 						echo '<div style="display: flex; align-items: center;">';
@@ -100,7 +100,7 @@ Contact Area
 					else{							
 						if($cart->is_billing_user_complete()){	
 							echo '<p>'.$cart->billing_user['first_name'] . ' ' . $cart->billing_user['last_name'] . ' ('. $cart->billing_user['email'].')</p>';
-							$formwriter = LibraryFunctions::get_formwriter_object('form_billing_user');
+							$formwriter = $page->getFormWriter('form_billing_user');
 							
 							//echo $formwriter->start_buttons();
 							echo $formwriter->new_button('Change billing user', '/cart?newbilling=1', 'secondary');
@@ -124,7 +124,7 @@ Contact Area
 							</script>
 							<?php	
 							*/
-							$formwriter = LibraryFunctions::get_formwriter_object('form2');
+							$formwriter = $page->getFormWriter('form2');
 							$validation_rules = array();
 							$validation_rules['billing_first_name']['required']['value'] = 'true';
 							$validation_rules['billing_last_name']['required']['value'] = 'true';
@@ -189,7 +189,7 @@ Contact Area
 						<?php
 						if($cart->get_total() > 0){			
 							echo '<h4>Pay with Stripe</h4>';
-							$formwriter = LibraryFunctions::get_formwriter_object('form_stripe');
+							$formwriter = $page->getFormWriter('form_stripe');
 							echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, 'th-btn');					
 						}		
 						?> </div> <?php

@@ -24,7 +24,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 	echo PublicPage::BeginPage('Delete Profile', $hoptions);
 	
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 	$validation_rules = array();
 	$validation_rules['confirm']['required']['value'] = 'true';
 

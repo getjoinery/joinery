@@ -32,7 +32,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo PublicPage::tab_menu($tab_menus, 'Change Password');
 	
 	
-	$formwriter = LibraryFunctions::get_formwriter_object();
+	$formwriter = $page->getFormWriter();
 				
 	$validation_rules = array();
 	if ($page_vars['has_old_password']) {

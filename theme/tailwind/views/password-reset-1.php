@@ -21,7 +21,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	}
 	else{
 		$settings = Globalvars::get_instance();
-		$formwriter = LibraryFunctions::get_formwriter_object('form1');
+		$formwriter = $page->getFormWriter('form1');
 		echo $formwriter->begin_form("", "post", "/password-reset-1", true); 
 		echo $formwriter->textinput("Enter the Email Address you registered with", "email", NULL, 20, htmlspecialchars($email), '', 64, NULL);
 		echo $formwriter->new_form_button('Submit');
