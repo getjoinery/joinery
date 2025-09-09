@@ -1,6 +1,6 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
+	// PathHelper is already loaded by RouteHelper before views are included
+	PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/Pager.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');

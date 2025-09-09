@@ -7,7 +7,7 @@ $routes = [
         // Blog-focused theme with custom styling
         
         // Blog routes (theme has blog.php and post.php views)
-        '/blog' => ['view' => 'views/blog'],
+        '/blog' => ['view' => 'blog'],
         '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class'],
     ],
     
