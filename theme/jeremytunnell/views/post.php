@@ -158,10 +158,10 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 						<div class="comment-author vcard">
 							<?php
 							if($comment->get('cmt_usr_user_id') == 1){
-								echo '<img alt="" src="/theme/jeremytunnell/images/jeremy.jpg" class="avatar avatar-80 photo" height="80" width="80">';
+								echo '<img alt="" src="'.PathHelper::getThemeFilePath('jeremy.jpg', 'assets/images', 'web', 'jeremytunnell').'" class="avatar avatar-80 photo" height="80" width="80">';
 							}
 							else{
-								echo '<img alt="" src="/theme/jeremytunnell/images/blank-avatar.png" class="avatar avatar-80 photo" height="80" width="80">';
+								echo '<img alt="" src="'.PathHelper::getThemeFilePath('blank-avatar.png', 'assets/images', 'web', 'jeremytunnell').'" class="avatar avatar-80 photo" height="80" width="80">';
 							}
 							?>
 							<b class="fn"><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></b> <span class="says">says:</span>					</div>
