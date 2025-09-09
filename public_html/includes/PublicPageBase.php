@@ -70,6 +70,18 @@ abstract class PublicPageBase {
 		
 	}
 	
+	/**
+	 * Get a FormWriter instance appropriate for this page
+	 * Wrapper around LibraryFunctions::get_formwriter_object() for cleaner view code
+	 * 
+	 * @param string $form_id The form identifier (default: 'form1')
+	 * @return FormWriter|FormWriterMaster The appropriate FormWriter instance
+	 */
+	public function getFormWriter($form_id = 'form1') {
+		PathHelper::requireOnce('includes/LibraryFunctions.php');
+		return LibraryFunctions::get_formwriter_object($form_id);
+	}
+	
 	public static function get_public_menu(){
 		return MultiPublicMenu::get_sorted_array();
 	}
