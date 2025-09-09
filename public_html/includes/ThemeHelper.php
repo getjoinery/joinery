@@ -255,35 +255,81 @@ class ThemeHelper extends ComponentBase {
         } else {
             // View files: use the plugin/theme view resolution system
             
-            // 1. Theme views get first priority
-            // Path already includes .php extension (validated above)
-            $theme_path = "theme/{$themeName}/views/{$path}";
-            if (file_exists(PathHelper::getIncludePath($theme_path))) {
-                extract($variables);
-                self::outputDebugComments($theme_path, $themeName, $plugin_specify);
-                include PathHelper::getIncludePath($theme_path);
-                return true;
-            }
-            
-            // 2. Check plugin (specified or current based on route)
-            $plugin = $plugin_specify ?: RouteHelper::getCurrentPlugin();
-            if ($plugin) {
-                $plugin_path = "plugins/{$plugin}/views/{$path}";
-                if (file_exists(PathHelper::getIncludePath($plugin_path))) {
-                    extract($variables);
-                    self::outputDebugComments($plugin_path, $themeName, $plugin);
-                    include PathHelper::getIncludePath($plugin_path);
-                    return true;
+            // STRICT VALIDATION in debug mode: View paths must follow convention
+            $settings = Globalvars::get_instance();
+            if ($settings->get_setting('debug') == '1') {
+                // Check if path contains a slash (required for all paths)
+                if (strpos($path, '/') === false) {
+                    throw new Exception(
+                        "ThemeHelper::includeThemeFile() validation error:\n" .
+                        "View path must contain a directory separator '/'\n" .
+                        "Given: '{$path}'\n" .
+                        "Expected format: 'views/filename.php' or 'views/subdir/filename.php'\n" .
+                        "For non-view files use format: 'adm/filename.php', 'ajax/filename.php', etc."
+                    );
+                }
+                
+                // Check if it's a view path - if so, must start with 'views/'
+                $known_non_view_dirs = ['adm/', 'ajax/', 'api/', 'utils/', 'tests/'];
+                $is_non_view = false;
+                foreach ($known_non_view_dirs as $dir) {
+                    if (strpos($path, $dir) === 0) {
+                        $is_non_view = true;
+                        break;
+                    }
+                }
+                
+                if (!$is_non_view && strpos($path, 'views/') !== 0) {
+                    throw new Exception(
+                        "ThemeHelper::includeThemeFile() validation error:\n" .
+                        "View files must start with 'views/' prefix\n" .
+                        "Given: '{$path}'\n" .
+                        "Expected: 'views/" . $path . "'\n" .
+                        "This enforces our convention that all view paths must be explicit"
+                    );
                 }
             }
             
-            // 3. Base views fallback
-            $base_path = "views/{$path}";
-            if (file_exists(PathHelper::getIncludePath($base_path))) {
-                extract($variables);
-                self::outputDebugComments($base_path, $themeName, $plugin_specify);
-                include PathHelper::getIncludePath($base_path);
-                return true;
+            // For view paths (starting with 'views/'), use direct concatenation
+            // No stripping needed since we enforce the convention
+            if (strpos($path, 'views/') === 0) {
+                // 1. Theme views get first priority
+                $theme_path = "theme/{$themeName}/{$path}";
+                if (file_exists(PathHelper::getIncludePath($theme_path))) {
+                    extract($variables);
+                    self::outputDebugComments($theme_path, $themeName, $plugin_specify);
+                    include PathHelper::getIncludePath($theme_path);
+                    return true;
+                }
+                
+                // 2. Check plugin (specified or current based on route)
+                $plugin = $plugin_specify ?: RouteHelper::getCurrentPlugin();
+                if ($plugin) {
+                    $plugin_path = "plugins/{$plugin}/{$path}";
+                    if (file_exists(PathHelper::getIncludePath($plugin_path))) {
+                        extract($variables);
+                        self::outputDebugComments($plugin_path, $themeName, $plugin);
+                        include PathHelper::getIncludePath($plugin_path);
+                        return true;
+                    }
+                }
+                
+                // 3. Base views fallback
+                if (file_exists(PathHelper::getIncludePath($path))) {
+                    extract($variables);
+                    self::outputDebugComments($path, $themeName, $plugin_specify);
+                    include PathHelper::getIncludePath($path);
+                    return true;
+                }
+            } else {
+                // Non-view paths (adm/, ajax/, etc.) - handle differently if needed
+                // For now, just try to include directly
+                if (file_exists(PathHelper::getIncludePath($path))) {
+                    extract($variables);
+                    self::outputDebugComments($path, $themeName, $plugin_specify);
+                    include PathHelper::getIncludePath($path);
+                    return true;
+                }
             }
         }
         
