@@ -3,7 +3,6 @@
 	PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('includes/FormWriterPublic.php');
 	
 	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
 	$page_vars = post_logic($_GET, $_POST, $post);
@@ -100,7 +99,7 @@
 				echo 'Your comment has been submitted.';
 			}
 			else{
-				$formwriter = new FormWriterPublic("form1", TRUE);
+				$formwriter = $page->getFormWriter("form1");
 				
 				$validation_rules = array();
 				$validation_rules['cmt']['required']['value'] = 'true';
@@ -108,7 +107,7 @@
 				$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
 				$validation_rules['name']['required']['value'] = 'true';
 				$validation_rules['name']['minlength']['value'] = 2;
-				$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules, 'blog');
+				$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
 				echo $formwriter->set_validate($validation_rules);			
 				
 				echo $formwriter->begin_form("uniForm", "post", $_SERVER['REQUEST_URI']);
