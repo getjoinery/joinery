@@ -290,6 +290,18 @@ For complete guidance on creating admin interface pages, including required setu
 
 ## Common Tasks & Quick Reference
 
+### Getting FormWriter Instances
+
+```php
+// In views with PublicPage available (preferred):
+$formwriter = $page->getFormWriter('form1');
+
+// In admin pages, utilities, or logic files:
+$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+
+// The wrapper automatically detects the correct FormWriter for the theme
+```
+
 ### Session Check (Admin Pages)
 ```php
 $session = new Session(Globalvars::get_instance());

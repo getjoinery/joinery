@@ -20,7 +20,7 @@
 	}
 	else if(!$event->get('evt_end_time') || $event->get('evt_end_time') > date('Y-m-d H:i:s')){
 		$settings = Globalvars::get_instance();
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
+		$formwriter = $page->getFormWriter('form1');
 		echo $formwriter->begin_form("form", "post", "/profile/event_withdraw");
 
 		echo '<h4>Confirm withdrawal from '.$event->get('evt_name').'</h4>';

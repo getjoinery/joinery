@@ -551,6 +551,34 @@ $supports_plugins = ThemeHelper::config('supports_plugins', [], 'theme-name');
 7. **Use ThemeHelper::includeThemeFile()** for view includes
 8. **Test view resolution chain** to ensure fallbacks work correctly
 
+### Working with Forms in Views
+
+#### Getting FormWriter Instances
+
+In views with PublicPage available (most frontend views):
+```php
+// Preferred method in views - uses PublicPage wrapper
+$formwriter = $page->getFormWriter('form1');
+```
+
+In contexts without PublicPage (admin, utilities, logic files):
+```php
+// Direct method - for admin pages, utilities, etc.
+$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+```
+
+The `$page->getFormWriter()` method automatically:
+- Detects the correct FormWriter class for the theme's CSS framework
+- Loads theme-specific FormWriter implementations if available
+- Falls back to system defaults appropriately
+- Handles all the complexity internally
+
+#### FormWriter Framework Mapping
+- **Bootstrap themes**: Uses `FormWriterMasterBootstrap`
+- **Tailwind themes**: Uses `FormWriterMasterTailwind`  
+- **UIKit themes**: Uses `FormWriterMasterUIkit`
+- **Custom themes**: Can provide their own `FormWriterPublic` class
+
 ### Example: ControlD Plugin Migration
 
 **Before (Plugin served routes):**

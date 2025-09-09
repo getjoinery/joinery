@@ -18,7 +18,7 @@
 	echo '<h3>Please fill out this extra info for your registration in the <strong>'. $event->get('evt_name') . '</strong> event.</h3>';
 
 	$settings = Globalvars::get_instance();
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
+	$formwriter = $page->getFormWriter('form1');
 	$validation_rules = array();
 	$validation_rules['phn_phone_number']['required']['value'] = 'true';
 	$validation_rules['privacy_policy']['required']['value'] = 'true';
