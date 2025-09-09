@@ -1,7 +1,8 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/FormWriterMaster.php');
+// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
+// Use PathHelper for other includes
+PathHelper::requireOnce('includes/DbConnector.php');
+PathHelper::requireOnce('includes/FormWriterMaster.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 

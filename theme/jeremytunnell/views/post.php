@@ -1,7 +1,6 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
+	PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	ThemeHelper::includeThemeFile('includes/FormWriterPublic.php');

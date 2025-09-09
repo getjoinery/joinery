@@ -1,7 +1,6 @@
 <?php
-	// PathHelper is already loaded by RouteHelper before views are included
+	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	PathHelper::requireOnce('includes/ThemeHelper.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/Pager.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
