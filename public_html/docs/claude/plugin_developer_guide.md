@@ -62,6 +62,43 @@ This allows themes to override any view while providing automatic fallback to pl
 
 ## Plugin Development
 
+### Core File Guarantees
+
+When developing plugins, the following core files are guaranteed to be available without requiring them:
+
+- **PathHelper** - Use for all file operations
+- **Globalvars** - Access configuration and settings
+- **SessionControl** - Handle session and authentication
+
+#### Example Usage in Plugins
+
+```php
+// In any plugin file (admin, views, includes, etc.)
+
+// ✅ CORRECT - Use directly without require
+$settings = Globalvars::get_instance();
+$theme = $settings->get_setting('theme_template');
+
+$session = new Session($settings);
+if (!$session->is_logged_in()) {
+    // Handle not logged in
+}
+
+// Use PathHelper for other includes
+PathHelper::requireOnce('data/users_class.php');
+
+// ❌ WRONG - Don't do this
+require_once(__DIR__ . '/../../includes/PathHelper.php');
+require_once(__DIR__ . '/../../includes/Globalvars.php');
+```
+
+#### Why This Matters
+
+1. **Cleaner Code** - No need for complex relative paths
+2. **Consistency** - Same pattern everywhere
+3. **Performance** - Files only loaded once
+4. **Maintainability** - Easier to refactor
+
 ### Required Plugin Structure
 
 ```
@@ -141,8 +178,11 @@ Plugin admin pages are accessed via the plugin admin discovery route:
 ```php
 // plugins/my-plugin/admin/admin_my_plugin.php
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+// Core files are already available - no need to require them
+// PathHelper, Globalvars, and SessionControl are pre-loaded
+
+// Use PathHelper for other includes
+PathHelper::requireOnce('includes/AdminPage.php');
 
 $session = SessionControl::get_instance();
 $session->check_permission(5);

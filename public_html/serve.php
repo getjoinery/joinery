@@ -1,8 +1,8 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
-// RouteHelper loads PathHelper and manages all other dependencies
+// Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
 
-
+// RouteHelper handles all routing and dependency loading
 require_once(__DIR__ . '/includes/RouteHelper.php');
 
 /*

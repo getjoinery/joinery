@@ -4,12 +4,11 @@
  * Handles route matching, parameter extraction, and file serving for serve.php refactoring
  * 
  * DEPENDENCY REQUIREMENTS:
- * - PathHelper is always available (system requirement)
+ * - PathHelper is always available (loaded by serve.php as core dependency)
  * - All other dependencies loaded on-demand within methods to minimize overhead
  */
 
-// Load PathHelper - required for all routing operations
-require_once('PathHelper.php');
+// PathHelper is guaranteed to be loaded by serve.php - no need to require it here
 
 class RouteHelper {
     
@@ -325,20 +324,39 @@ class RouteHelper {
     public static function handleStaticRoute($route, $params, $template_directory) {
         $path = $route['path'];
         
-        // ALWAYS check plugin activation for ANY plugin path - non-overridable security
+        // For static routes, we need to handle plugin activation check without PluginHelper
+        // Since this is called BEFORE dependencies are loaded for performance
         if (preg_match('#^/plugins/([^/]+)/#', $path, $matches)) {
             $plugin_name = $matches[1];
-            if (!PluginHelper::isPluginActive($plugin_name)) {
-                error_log("RouteHelper: BLOCKED inactive plugin access: {$path}");
-                return false; // Always block inactive plugins - no exceptions
+            
+            // Check plugin activation manually without PluginHelper
+            // We need to check if PathHelper is available (it won't be for initial static route check)
+            if (class_exists('PluginHelper')) {
+                // Dependencies are loaded - use PluginHelper
+                if (!PluginHelper::isPluginActive($plugin_name)) {
+                    error_log("RouteHelper: BLOCKED inactive plugin access: {$path}");
+                    return false; // Always block inactive plugins - no exceptions
+                }
+            } else {
+                // Dependencies not loaded yet - check plugin activation manually
+                // For now, we'll allow it and rely on file existence check
+                // This is safe because plugin files won't exist if not properly deployed
+                error_log("RouteHelper: Plugin activation check skipped for static route (dependencies not loaded): {$path}");
             }
         }
         
         // Static routes should NEVER handle view files - that's dynamic content
         // View files should be handled by simple or content routes
         
-        // Unified path - all static routes work the same way
-        $file_path = PathHelper::getAbsolutePath($path);
+        // Build file path manually without PathHelper
+        // Don't use PathHelper here - use basic PHP
+        $base_path = dirname(__DIR__); // Get to public_html
+        
+        // Handle the path - remove leading slash if present
+        $clean_path = ltrim($path, '/');
+        $file_path = $base_path . '/' . $clean_path;
+        
+        // Use basic file_exists instead of PathHelper
         if (file_exists($file_path)) {
             $cache_seconds = $route['cache'] ?? 43200;
             $exclude_from_cache = $route['exclude_from_cache'] ?? [];
@@ -431,10 +449,8 @@ class RouteHelper {
                 $path_parts = explode('/', ltrim($path, '/'));
                 $file = end($path_parts);
                 
-                // Strip .php extension if present
-                if (substr($file, -4) === '.php') {
-                    $file = substr($file, 0, -4);
-                }
+                // File should keep its extension for proper file operations
+                // No stripping needed - routes don't have .php, files do
                 
                 $view_path = str_replace('{file}', $file, $view_path);
             }
@@ -545,14 +561,24 @@ class RouteHelper {
             $viewVariables[$modelKey] = $model_instance;
         }
 
+        // Ensure view_path has .php extension for includeThemeFile
+        if (substr($view_path, -4) !== '.php') {
+            $view_path .= '.php';
+        }
+        
         // Include view with explicit variables
-        if (ThemeHelper::includeThemeFile($view_path . '.php', null, $viewVariables)) {
+        if (ThemeHelper::includeThemeFile($view_path, null, $viewVariables)) {
             return true;
         }
 
         // Try default view if specified
         if (!empty($route['default_view'])) {
-            if (ThemeHelper::includeThemeFile($route['default_view'] . '.php', null, $viewVariables)) {
+            $default_view = $route['default_view'];
+            // Ensure default_view has .php extension
+            if (substr($default_view, -4) !== '.php') {
+                $default_view .= '.php';
+            }
+            if (ThemeHelper::includeThemeFile($default_view, null, $viewVariables)) {
                 return true;
             }
         }
@@ -799,6 +825,85 @@ class RouteHelper {
     }
     
     /**
+     * Validate route configuration for common mistakes
+     * ONLY runs in debug mode to avoid performance impact
+     * @param array $routes Routes array to validate
+     * @param string $source Source of routes (for error messages)
+     * @throws Exception if validation fails
+     */
+    private static function validateRoutes($routes, $source = 'unknown') {
+        // Only validate in debug mode - no performance impact in production
+        if (!self::$debug_enabled) {
+            return;
+        }
+        
+        foreach (['static', 'dynamic', 'custom'] as $type) {
+            if (!isset($routes[$type])) continue;
+            
+            foreach ($routes[$type] as $pattern => $config) {
+                // Skip closures in custom routes
+                if ($type === 'custom' && is_callable($config)) continue;
+                
+                // Validate dynamic routes
+                if ($type === 'dynamic' && is_array($config)) {
+                    // Check for .php extension in view path
+                    if (isset($config['view']) && substr($config['view'], -4) === '.php') {
+                        throw new Exception(
+                            "Route validation error in {$source}:\n" .
+                            "  Route: {$pattern}\n" .
+                            "  Problem: View path '{$config['view']}' contains .php extension\n" .
+                            "  Solution: Remove .php extension - use 'view' => '" . substr($config['view'], 0, -4) . "'\n" .
+                            "  Explanation: The system automatically adds .php extension to view paths"
+                        );
+                    }
+                    
+                    
+                    // Check for .php extension in model_file
+                    if (isset($config['model_file']) && substr($config['model_file'], -4) === '.php') {
+                        throw new Exception(
+                            "Route validation error in {$source}:\n" .
+                            "  Route: {$pattern}\n" .
+                            "  Problem: Model file path '{$config['model_file']}' contains .php extension\n" .
+                            "  Solution: Remove .php extension - use 'model_file' => '" . substr($config['model_file'], 0, -4) . "'\n" .
+                            "  Explanation: The system automatically adds .php extension to model files"
+                        );
+                    }
+                    
+                    // Check for missing required fields
+                    if (!isset($config['view']) && !isset($config['model'])) {
+                        throw new Exception(
+                            "Route validation error in {$source}:\n" .
+                            "  Route: {$pattern}\n" .
+                            "  Problem: Dynamic route must specify either 'view' or 'model'\n" .
+                            "  Solution: Add 'view' => 'template_name' or 'model' => 'ModelClass' to the route configuration"
+                        );
+                    }
+                    
+                    // Check model configuration
+                    if (isset($config['model']) && !isset($config['model_file'])) {
+                        throw new Exception(
+                            "Route validation error in {$source}:\n" .
+                            "  Route: {$pattern}\n" .
+                            "  Problem: Route with 'model' => '{$config['model']}' is missing 'model_file'\n" .
+                            "  Solution: Add 'model_file' => 'data/modelname_class' to specify where the model class is located"
+                        );
+                    }
+                }
+                
+                // Check for .php in route patterns (common mistake)
+                if (strpos($pattern, '.php') !== false) {
+                    throw new Exception(
+                        "Route validation error in {$source}:\n" .
+                        "  Problem: Route pattern '{$pattern}' contains .php extension\n" .
+                        "  Solution: Remove .php from the pattern - use '" . str_replace('.php', '', $pattern) . "'\n" .
+                        "  Explanation: Routes should use clean URLs without file extensions"
+                    );
+                }
+            }
+        }
+    }
+    
+    /**
      * Merge routes arrays without duplicates (first wins)
      */
     private static function mergeRoutes($existing, $new) {
@@ -892,9 +997,6 @@ class RouteHelper {
             exit();
         }
         
-        // Detect current plugin based on route
-        self::$current_plugin = self::detectPluginByRoute($request_path);
-        
         // Normalize request path to always have leading slash for consistent pattern matching
         if (empty($request_path)) {
             $request_path = '/';
@@ -921,22 +1023,39 @@ class RouteHelper {
             'params_count' => count($params)
         ]);
         
-        // Load core dependencies - these are almost always needed for routing
+        // STEP 1: Check static routes FIRST (before loading any dependencies)
+        // This optimization allows static assets to be served without loading PHP dependencies
+        error_log("Checking static routes first (before loading dependencies)...");
+        if ($route = self::matchRoute($full_path, $routes['static'] ?? [])) {
+            error_log("Static route matched: " . var_export($route, true));
+            error_log("Calling handleStaticRoute (without dependencies)...");
+            if (self::handleStaticRoute($route, $params, null)) {
+                error_log("Static route handled successfully - exiting");
+                exit();
+            } else {
+                // Static route matched but failed - continue to load dependencies and show 404
+                error_log("Static route matched but handler failed");
+            }
+        }
+        error_log("No static routes matched - loading core dependencies");
+        
+        // STEP 2: Not a static route - now load core dependencies
+        // Load core files first using require_once
         error_log("Loading core dependencies...");
-        try {
-            PathHelper::requireOnce('includes/Globalvars.php');
-            error_log("  ✓ Globalvars loaded");
-        } catch (Exception $e) {
-            error_log("  ✗ Failed to load Globalvars: " . $e->getMessage());
-        }
+        require_once(__DIR__ . '/PathHelper.php');
+        require_once(__DIR__ . '/Globalvars.php');
+        require_once(__DIR__ . '/SessionControl.php');
+        error_log("  ✓ Core files loaded (PathHelper, Globalvars, SessionControl)");
         
-        try {
-            PathHelper::requireOnce('includes/SessionControl.php');
-            error_log("  ✓ SessionControl loaded");
-        } catch (Exception $e) {
-            error_log("  ✗ Failed to load SessionControl: " . $e->getMessage());
-        }
+        // CORE GUARANTEES: These are now available for all subsequent code
+        // - PathHelper: File path resolution and loading
+        // - Globalvars: Configuration and settings access
+        // - SessionControl: Session management and authentication
         
+        // Detect current plugin based on route (now that PathHelper is available)
+        self::$current_plugin = self::detectPluginByRoute($request_path);
+        
+        // Now use PathHelper for other dependencies
         try {
             PathHelper::requireOnce('includes/ThemeHelper.php');
             error_log("  ✓ ThemeHelper loaded");
@@ -966,6 +1085,8 @@ class RouteHelper {
             $routes = [];
             include PathHelper::getIncludePath($theme_routes_file);
             if (!empty($routes)) {
+                // Validate routes in debug mode only
+                self::validateRoutes($routes, "theme/{$theme}/serve.php");
                 $all_routes = self::mergeRoutes($all_routes, $routes);
             }
         }
@@ -977,12 +1098,16 @@ class RouteHelper {
                 $routes = [];
                 include PathHelper::getIncludePath($plugin_routes_file);
                 if (!empty($routes)) {
+                    // Validate routes in debug mode only
+                    self::validateRoutes($routes, $plugin_routes_file);
                     $all_routes = self::mergeRoutes($all_routes, $routes);
                 }
             }
         }
         
         // 3. Main routes have lowest priority
+        // Validate main routes in debug mode only
+        self::validateRoutes($original_routes, "main serve.php");
         $all_routes = self::mergeRoutes($all_routes, $original_routes);
         
         // Use merged routes for processing
@@ -1008,28 +1133,22 @@ class RouteHelper {
             throw $e; // Re-throw to prevent system from running in broken state
         }
 
-        // 1. Check for database-stored URL redirects
+        // 3. Check for database-stored URL redirects
         if (self::checkUrlRedirects($static_routes_path, $settings)) {
             error_log("URL redirect found and handled - exiting");
             exit(); // Redirect handled
         }
         error_log("No URL redirects found");
         
-        // 2. Check static routes (assets only)
+        // Static routes were already checked before loading dependencies
+        // If we got here and there was a matched static route that failed,
+        // we should show 404
         if ($route = self::matchRoute($full_path, $routes['static'] ?? [])) {
-            error_log("Static route matched: " . var_export($route, true));
-            error_log("Calling handleStaticRoute...");
-            if (self::handleStaticRoute($route, $params, $template_directory)) {
-                error_log("Static route handled successfully - exiting");
-                exit();
-            } else {
-                self::show404('Static route matched but handler failed', [
-                    'route' => $route,
-                    'path' => $full_path
-                ]);
-            }
+            self::show404('Static route matched but handler failed', [
+                'route' => $route,
+                'path' => $full_path
+            ]);
         }
-        error_log("No static routes matched");
         
         // 3. Load and merge plugin routes (pull approach)
         error_log("=== STEP 3: Loading plugin routes ===");

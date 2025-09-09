@@ -12,10 +12,16 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **NEVER use `$_SERVER['DOCUMENT_ROOT']` for include paths!**
 
+### Core File Guarantees
+**Always available without requiring:** PathHelper, Globalvars, SessionControl
+- Loaded by RouteHelper for all non-static requests
+- Use directly in themes/plugins/views without require_once
+- NOT loaded for static assets (CSS/JS/images) for performance
+
 ### Include Path Rules:
-- **Files in `/includes/`**: Use `PathHelper::requireOnce('includes/filename.php')` (or direct `require_once('filename.php')` only if always called from within `/includes/`)
-- **PathHelper itself**: Use `require_once(__DIR__ . '/relative/path/to/PathHelper.php')` - adjust the relative path based on where you're including from
+- **Files in `/includes/`**: Use `PathHelper::requireOnce('includes/filename.php')`
 - **All other files**: Use `PathHelper::requireOnce('path/to/file.php')`
+- **Core files (PathHelper, Globalvars, SessionControl)**: Already loaded - never need to be required
 
 ```php
 // ✅ CORRECT
