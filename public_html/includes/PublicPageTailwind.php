@@ -239,8 +239,6 @@ class PublicPageTailwind extends PublicPageBase {
 		
 
 		
-		<!--GDPR NOTICE  https://www.jqueryscript.net/other/GDPR-Cookie-Consent-Popup-Plugin.html-->
-		<!--<script src="<?php echo $this->theme_url; ?>/scripts/GDPR/jquery.ihavecookies.js"></script>-->
 	</head>
 	
 	<script language="javascript">
