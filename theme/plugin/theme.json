@@ -1,0 +1,13 @@
+{
+    "name": "plugin",
+    "display_name": "Plugin-Provided Theme",
+    "description": "Delegates all theme functionality to a selected plugin",
+    "author": "System",
+    "version": "1.0.0",
+    "framework": "none",
+    "is_plugin_theme": true,
+    "supports": {
+        "responsive": true,
+        "dark_mode": false
+    }
+}

@@ -1,5 +1,5 @@
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
+// PathHelper is already loaded by the time this file is included
 
 PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/DbConnector.php');

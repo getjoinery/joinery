@@ -1,25 +1,78 @@
 <?php
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once (LibraryFunctions::get_logic_file_path('pricing_logic.php'));
-	// PathHelper is already loaded
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage');
+	require_once(LibraryFunctions::get_logic_file_path('subscription_edit_logic.php'));	
+	require_once(LibraryFunctions::get_logic_file_path('pricing_logic.php'));
+	
+	$page_vars = subscription_edit_logic($_GET, $_POST);
+	$current_plan_id = $page_vars['current_plan_id'];
+	$product = $page_vars['product'];
+	
+	if(!$current_plan_id){
+		LibraryFunctions::redirect('/pricing');
+		exit;
+	}
+	
+	$tab_menus = array(
+		'My Profile' => '/profile',
+		'Edit Account' => '/profile/account_edit',
+		'Change Password' => '/profile/password_edit',
+		'Edit Address' => '/profile/address_edit',
+		'Edit Phone Number' => '/profile/phone_numbers_edit',
+		'Change Contact Preferences' => '/profile/contact_preferences',
+		'Change Subscription' => '/profile/subscription_edit',
+	);
+	
+	$page = new PublicPage();
+	$hoptions=array(
+		'title'=>'Change Subscription', 
+		'breadcrumbs' => array(
+			'My Profile' => '/profile/profile',
+			'Change Subscription' => '',
+		),
+	);
+	$page->public_header($hoptions); 
 
+	echo PublicPage::BeginPage('Change Subscription', $hoptions);
+	
+/*
+	foreach($page_vars['display_messages'] AS $display_message) {
+		if($display_message->identifier == 'userbox') {	
+			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+		}
+	}		
+*/
+	echo PublicPage::tab_menu($tab_menus, 'Change Subscription');
+	
+
+
+
+
+
+if($_GET['new_version']){
+	$formwriter = LibraryFunctions::get_formwriter_object();
+	echo $formwriter->begin_form("product-quantity", "POST", "/profile/subscription_edit", true); 
+	echo $formwriter->hiddeninput('product_id', $page_vars['product']->key);
+	echo '<p>You are about to change your subscription to the '.$page_vars['product']->get('pro_name').' You will be charged immediately for the difference. </p>';
+	if ($page_vars['product']->output_product_form($formwriter, $page_vars['user'], true)) {
+		echo $formwriter->new_form_button('Confirm plan change', 'th-btn');
+	}
+	echo $formwriter->end_form(true);
+	echo PublicPage::EndPage();	
+	$page->public_footer($foptions=array('track'=>TRUE));
+}
+else{
+	
 	$page_vars = pricing_logic($_GET, $_POST);
 	$page_choice = $page_vars['page_choice'];
 	$products = $page_vars['products'];
 	$product_versions = $page_vars['product_versions'];
 
+	?>
 
-	$page = new PublicPage(TRUE);
-	$page->public_header(array(
-		'is_valid_page' => $is_valid_page,
-		'title' => 'Pricing'
-	));
-	echo PublicPage::BeginPage('Pricing');
-
-	//echo PublicPage::BeginPanel();
-?>
 <!--==============================
 Price Area  
 ==============================-->
@@ -87,9 +140,16 @@ Price Area
                 <div class="row justify-content-center">
 					<?php foreach ($product_versions as $product_version){ 
 						$product = new Product($product_version->get('prv_pro_product_id'), TRUE);
-					?>
+					
+						$active = '';
+						if($current_plan_id == $product->key){
+							$active = 'active';
+						}
+						?>		
+					
+					
                     <div class="col-xl-4 col-md-6">
-                        <div class="price-box th-ani ">
+                        <div class="price-box th-ani <?php echo $active; ?>">
                             <div class="price-title-wrap">
                                 <h3 class="box-title"><?php echo $product->get('pro_name'); ?></h3>
                                 <!--<p class="subtitle">FREE</p>-->
@@ -118,7 +178,14 @@ Price Area
                                         <li class="unavailable">Updates for 1 Year</li>
                                     </ul>-->
                                 </div>
-                                <a href="<?php echo $product->get_url(). '?product_version_id='.$product_version->key; ?>" class="th-btn btn-fw style-radius">Get Started</a>
+                                <?php 
+									if($current_plan_id == $product->key){
+										echo '<a class="th-btn btn-fw style-radius">Current Plan</a>';
+									}
+									else{
+										echo '<a href="/profile/subscription_edit?new_version='.$product_version->key.'" class="th-btn btn-fw style-radius">Choose Plan</a>';
+									}
+									?>
                             </div>
                         </div>
                     </div>
@@ -126,105 +193,37 @@ Price Area
 					
                 </div>
             </div>
-			<!--
-            <div id="yearly" class="wrapper-full hide">
-                <div class="row justify-content-center">
-
-                    <div class="col-xl-4 col-md-6">
-                        <div class="price-box th-ani ">
-                            <div class="price-title-wrap">
-                                <h3 class="box-title">Basic Plan</h3>
-                                <p class="subtitle">FREE</p>
-                            </div>
-                            <p class="box-text">Perfect plan to get started</p>
-                            <h4 class="box-price">$199.00<span class="duration">/month</span></h4>
-                            <p class="box-text2">A free plan grants you access to some cool features of Spend.</p>
-                            <div class="box-content">
-                                <div class="available-list">
-                                    <ul>
-                                        <li>Limited Access Library</li>
-                                        <li>Commercia License</li>
-                                        <li>Hotline Support 24/7</li>
-                                        <li class="unavailable">100+ HTML UI Elements</li>
-                                        <li class="unavailable">WooCommerce Builder</li>
-                                        <li class="unavailable">Updates for 1 Year</li>
-                                    </ul>
-                                </div>
-                                <a href="contact.html" class="th-btn btn-fw style-radius">Get Your Free Plan</a>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="col-xl-4 col-md-6">
-                        <div class="price-box th-ani active">
-                            <div class="price-title-wrap">
-                                <h3 class="box-title">Standard Plan</h3>
-                                <p class="subtitle">ULTIMATE</p>
-                            </div>
-                            <p class="box-text">Best suits for great company!</p>
-                            <h4 class="box-price">$249.00<span class="duration">/month</span></h4>
-                            <p class="box-text2">If you a finance manager at big company, this plan is a perfect match.</p>
-                            <div class="box-content">
-                                <div class="available-list">
-                                    <ul>
-                                        <li>Limited Access Library</li>
-                                        <li>Commercia License</li>
-                                        <li>Hotline Support 24/7</li>
-                                        <li class="unavailable">100+ HTML UI Elements</li>
-                                        <li class="unavailable">WooCommerce Builder</li>
-                                        <li class="unavailable">Updates for 1 Year</li>
-                                    </ul>
-                                </div>
-                                <a href="contact.html" class="th-btn btn-fw style-radius">Get Your Standard plan</a>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="col-xl-4 col-md-6">
-                        <div class="price-box th-ani ">
-                            <div class="price-title-wrap">
-                                <h3 class="box-title">Premium Plan</h3>
-                                <p class="subtitle">PRO</p>
-                            </div>
-                            <p class="box-text">Perfect plan for professionals!</p>
-                            <h4 class="box-price">$299.00<span class="duration">/month</span></h4>
-                            <p class="box-text2">For professional only! Start arranging your expenses with our best templates.</p>
-                            <div class="box-content">
-                                <div class="available-list">
-                                    <ul>
-                                        <li>Limited Access Library</li>
-                                        <li>Commercia License</li>
-                                        <li>Hotline Support 24/7</li>
-                                        <li class="unavailable">100+ HTML UI Elements</li>
-                                        <li class="unavailable">WooCommerce Builder</li>
-                                        <li class="unavailable">Updates for 1 Year</li>
-                                    </ul>
-                                </div>
-                                <a href="contact.html" class="th-btn btn-fw style-radius">Get Your Premium Plan</a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-			-->
+			
         </div>
     </section>
+	
+	
+	<!--==============================
+About Area  
+==============================-->
 
-
-
-
-
-
-
-
-
-
-
-		<?php
- 
-	//echo PublicPage::EndPanel();
-	echo PublicPage::EndPage(); 
-	$page->public_footer($foptions=array('track'=>TRUE));
-
+        <div class="container ">
+            <div class="row gy-5 align-items-center">
+                    <div class="consultation-area">
+                        <form action="mail" method="POST" class="consultation-form">
+                            <h4 class="title mb-30 mt-n2 text-center">Cancel Subscription</h4>
+							<p class="text-center">Your account will remain active until the last day of your subscription.</p>
+                            <div class="row">
+                                <div class="col-12 form-group mb-0 text-center">
+                                    <?php echo '<a href="/profile/subscription_cancel?order_item_id='.$product_version->key.'" class="th-btn style-radius">Cancel Subscription</a>'; ?>
+                                </div>
+                            </div>
+                            <p class="form-messages mb-0 mt-3"></p>
+                        </form>
+                    </div>
+            </div>
+        </div>
+   
+	
+	
+	<?php
+			
+		echo PublicPage::EndPage();	
+		$page->public_footer($foptions=array('track'=>TRUE));
+}
 ?>
-

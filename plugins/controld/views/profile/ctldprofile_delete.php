@@ -1,10 +1,10 @@
 <?php
-	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/PathHelper.php');
+	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage');
-	PathHelper::requireOnce('plugins/controld/logic/ctldprofile_delete_logic.php');
+	require_once(LibraryFunctions::get_logic_file_path('ctldprofile_delete_logic.php'));
 
 	$page_vars = ctldprofile_delete_logic($_GET, $_POST);
 	$profile = $page_vars['profile'];

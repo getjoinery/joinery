@@ -578,7 +578,7 @@ var typology_js_settings = {"rtl_mode":"","header_sticky":"1","logo":"https:\/\/
 		$this->rowcount++;
 	}
 
-	function endtable(){
+	function endtable($pager = null){
 		$this->rowcount = 0;
 		echo '</table>';
 	}

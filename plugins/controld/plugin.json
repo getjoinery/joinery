@@ -1,13 +1,10 @@
 {
-    "name": "controld",
-    "display_name": "ControlD DNS Filtering",
-    "version": "2.0.0",
-    "description": "Complete ControlD DNS filtering service with integrated UI",
+    "name": "ControlD Integration",
+    "version": "1.1.0",
+    "description": "ControlD DNS filtering service integration with complete UI - migrated from Sassa theme",
     "author": "System Developer",
-    "type": "application",
-    "routes_prefix": "/controld",
-    "provides": ["dns_filtering", "device_management", "content_filtering"],
     "is_stock": true,
+    "provides_theme": true,
     "requires": {
         "php": ">=8.0",
         "extensions": ["curl"]
