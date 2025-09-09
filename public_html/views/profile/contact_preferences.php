@@ -44,7 +44,7 @@
 
 
 	$settings = Globalvars::get_instance();
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("", "post", "/profile/contact_preferences");
 	
 	if(empty($page_vars['optionvals'])){

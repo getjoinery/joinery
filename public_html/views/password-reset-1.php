@@ -48,7 +48,7 @@
 		<?php
 	}
 	else{
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
+		$formwriter = $page->getFormWriter('form1');
 		
 		?>
 		<main class="main" id="top">

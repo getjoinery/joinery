@@ -23,7 +23,7 @@
 	
 	
 	$settings = Globalvars::get_instance();
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', $settings->get_setting('form_style'));
+	$formwriter = $page->getFormWriter('form1');
 				
 	$validation_rules = array();
 	if ($page_vars['has_old_password']) {
