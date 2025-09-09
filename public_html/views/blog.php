@@ -1,9 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	
-	PathHelper::requireOnce('includes/SessionControl.php');
+	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
+	PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	require_once(LibraryFunctions::get_logic_file_path('blog_logic.php'));
  	
 	$page_vars = blog_logic($_GET, $_POST);
