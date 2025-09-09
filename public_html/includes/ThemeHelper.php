@@ -195,6 +195,30 @@ class ThemeHelper extends ComponentBase {
      * @return bool Success
      */
     public static function includeThemeFile($path, $themeName = null, array $variables = [], $plugin_specify = null) {
+        // STRICT VALIDATION in debug mode: Path must include .php extension
+        $settings = Globalvars::get_instance();
+        if ($settings->get_setting('debug') == '1') {
+            if (substr($path, -4) !== '.php') {
+                throw new Exception(
+                    "ThemeHelper::includeThemeFile() validation error:\n" .
+                    "Path must include .php extension for file inclusion\n" .
+                    "Given: '{$path}'\n" .
+                    "Expected: '{$path}.php'\n" .
+                    "Reason: includeThemeFile() operates on FILES, which have extensions"
+                );
+            }
+            
+            // Also validate no double .php
+            if (substr($path, -8) === '.php.php') {
+                throw new Exception(
+                    "ThemeHelper::includeThemeFile() validation error:\n" .
+                    "Path contains double .php extension\n" .
+                    "Given: '{$path}'\n" .
+                    "This usually indicates .php being added twice"
+                );
+            }
+        }
+        
         if ($themeName === null) {
             $themeName = self::getActive();
         }
@@ -206,8 +230,8 @@ class ThemeHelper extends ComponentBase {
             // Use PathHelper to get the correct theme file path (handles plugin themes)
             try {
                 // PathHelper::getThemeFilePath handles both regular themes and plugin themes
-                // For 'includes/PublicPage', we want PublicPage.php in /includes directory
-                $filename = basename($path) . '.php';
+                // Path should already have .php extension at this point (validated above in debug mode)
+                $filename = basename($path);
                 $subdirectory = '/' . dirname($path);
                 $full_path = PathHelper::getThemeFilePath($filename, $subdirectory, 'system', $themeName);
                 if (file_exists($full_path)) {
@@ -221,18 +245,19 @@ class ThemeHelper extends ComponentBase {
             }
             
             // Fallback to base path for includes
-            $base_path = "{$path}.php";
-            if (file_exists(PathHelper::getIncludePath($base_path))) {
+            // Path should already have .php extension at this point
+            if (file_exists(PathHelper::getIncludePath($path))) {
                 extract($variables);
-                self::outputDebugComments($base_path, $themeName, $plugin_specify);
-                include PathHelper::getIncludePath($base_path);
+                self::outputDebugComments($path, $themeName, $plugin_specify);
+                include PathHelper::getIncludePath($path);
                 return true;
             }
         } else {
             // View files: use the plugin/theme view resolution system
             
             // 1. Theme views get first priority
-            $theme_path = "theme/{$themeName}/views/{$path}.php";
+            // Path already includes .php extension (validated above)
+            $theme_path = "theme/{$themeName}/views/{$path}";
             if (file_exists(PathHelper::getIncludePath($theme_path))) {
                 extract($variables);
                 self::outputDebugComments($theme_path, $themeName, $plugin_specify);
@@ -243,7 +268,7 @@ class ThemeHelper extends ComponentBase {
             // 2. Check plugin (specified or current based on route)
             $plugin = $plugin_specify ?: RouteHelper::getCurrentPlugin();
             if ($plugin) {
-                $plugin_path = "plugins/{$plugin}/views/{$path}.php";
+                $plugin_path = "plugins/{$plugin}/views/{$path}";
                 if (file_exists(PathHelper::getIncludePath($plugin_path))) {
                     extract($variables);
                     self::outputDebugComments($plugin_path, $themeName, $plugin);
@@ -253,7 +278,7 @@ class ThemeHelper extends ComponentBase {
             }
             
             // 3. Base views fallback
-            $base_path = "views/{$path}.php";
+            $base_path = "views/{$path}";
             if (file_exists(PathHelper::getIncludePath($base_path))) {
                 extract($variables);
                 self::outputDebugComments($base_path, $themeName, $plugin_specify);
