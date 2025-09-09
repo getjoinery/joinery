@@ -3,7 +3,7 @@
 	require_once (LibraryFunctions::get_logic_file_path('pricing_logic.php'));
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage');
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 
 	$page_vars = pricing_logic($_GET, $_POST);
 	$page_choice = $page_vars['page_choice'];
