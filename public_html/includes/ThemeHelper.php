@@ -537,31 +537,29 @@ class ThemeHelper extends ComponentBase {
             return;
         }
         
-        echo "<!-- System Info\n";
-        echo "Theme: " . htmlspecialchars($theme_name) . "\n";
+        error_log("System Info - Theme: " . $theme_name);
         if ($theme_name === 'plugin') {
             $active_theme_plugin = $settings->get_setting('active_theme_plugin');
-            echo "Active Theme Plugin: " . htmlspecialchars($active_theme_plugin ?: '(none set)') . "\n";
+            error_log("System Info - Active Theme Plugin: " . ($active_theme_plugin ?: '(none set)'));
         }
         if ($plugin) {
-            echo "Plugin: " . htmlspecialchars($plugin) . "\n";
+            error_log("System Info - Plugin: " . $plugin);
         }
-        echo "File: " . htmlspecialchars($file_path) . "\n";
-        echo "Route: " . htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'unknown') . "\n";
+        error_log("System Info - File: " . $file_path);
+        error_log("System Info - Route: " . ($_SERVER['REQUEST_URI'] ?? 'unknown'));
         
         // Check if session exists and is safe to access
         if (class_exists('Session')) {
             try {
                 $session = new Session($settings);
-                echo "Session: " . ($session->is_logged_in() ? 'logged_in' : 'guest') . "\n";
+                error_log("System Info - Session: " . ($session->is_logged_in() ? 'logged_in' : 'guest'));
             } catch (Exception $e) {
-                echo "Session: unknown\n";
+                error_log("System Info - Session: unknown");
             }
         } else {
-            echo "Session: unknown\n";
+            error_log("System Info - Session: unknown");
         }
         
-        echo "Timestamp: " . date('Y-m-d H:i:s') . "\n";
-        echo "-->\n";
+        error_log("System Info - Timestamp: " . date('Y-m-d H:i:s'));
     }
 }
