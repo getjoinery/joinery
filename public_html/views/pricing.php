@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once (LibraryFunctions::get_logic_file_path('pricing_logic.php'));
+	ThemeHelper::includeThemeFile('logic/pricing_logic.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = pricing_logic($_GET, $_POST);

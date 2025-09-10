@@ -4,7 +4,7 @@
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('profile_logic.php'));
+	ThemeHelper::includeThemeFile('logic/profile_logic.php');
 
 	$page_vars = profile_logic($_GET, $_POST);
 	

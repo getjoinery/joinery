@@ -4,7 +4,7 @@
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once (LibraryFunctions::get_logic_file_path('login_logic.php'));
+	ThemeHelper::includeThemeFile('logic/login_logic.php');
 	
 	$page_vars = login_logic($_GET, $_POST);
 	$settings = $page_vars['settings'];

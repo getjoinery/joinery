@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('/includes/SessionControl.php');
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once (LibraryFunctions::get_logic_file_path('lists_logic.php'));
+	ThemeHelper::includeThemeFile('logic/lists_logic.php');
 
 	$page_vars = lists_logic($_GET, $_POST, $params);
 	$messages = $page_vars['messages'];

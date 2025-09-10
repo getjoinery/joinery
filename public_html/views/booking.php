@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once (LibraryFunctions::get_logic_file_path('booking_logic.php'));
+	ThemeHelper::includeThemeFile('logic/booking_logic.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
 	$page_vars = booking_logic($_GET, $_POST);

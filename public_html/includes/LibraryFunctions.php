@@ -393,58 +393,9 @@ class LibraryFunctions {
 
 	
 	
-	
-	static function get_logic_file_path($filename, $path_format='system', $debug=0){
-		$settings = Globalvars::get_instance();
-		$siteDir = PathHelper::getBasePath();
-		$theme_template = $settings->get_setting('theme_template');
-
-		// Only check directory themes
-		$theme_file = null;
-		$theme_url_path = null;
-		if (ThemeHelper::themeExists($theme_template)) {
-			$theme_file = $siteDir.'/theme/'.$theme_template.'/logic/'.$filename;
-			$theme_url_path = '/theme/'.$theme_template.'/logic/'.basename($filename, '.php');
-		}
-		
-		$main_file = $siteDir.'/logic/'.$filename;
-
-		if($debug){
-			echo 'Looking for theme logic file: '. $theme_file.'<br>';
-			echo 'Looking for main logic file: '. $main_file.'<br>';
-		}
-		if($theme_file && file_exists($theme_file)){
-			if($debug){
-				echo 'Found: '. $theme_file.'<br>';
-				exit;
-			}
-			if($path_format == 'system'){
-				//WE WANT A FILE PATH
-				return $theme_file;
-			}
-			else{
-				//WE WANT A URL
-				return $theme_url_path;
-			}
-		}
-		else if(file_exists($main_file)){
-			if($debug){
-				echo 'Found: '. $main_file.'<br>';
-				exit;
-			}
-			if($path_format == 'system'){
-				//WE WANT A FILE PATH
-				return $main_file;
-			}
-			else{
-				//WE WANT A URL
-				return '/logic/'.basename($filename, '.php');
-			}
-		}
-		else{
-			throw new SystemDisplayablePermanentError('Could not find the specified logic file: '. $filename);					
-		}
-	}
+	// Function get_logic_file_path() has been removed.
+	// Use ThemeHelper::includeThemeFile('logic/filename.php') instead.
+	// This provides proper theme and plugin override support.
 	
 	//RETURNS WHETHER THE CURRENT SESSION IS UNDER SSL OR NOT
 	static function isSecure()
