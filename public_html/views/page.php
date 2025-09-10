@@ -1,6 +1,6 @@
 <?php
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once (LibraryFunctions::get_logic_file_path('page_logic.php'));
+	ThemeHelper::includeThemeFile('logic/page_logic.php');
 
 	$page_vars = page_logic($_GET, $_POST, $page, $params);
 	$page = $page_vars['page'];

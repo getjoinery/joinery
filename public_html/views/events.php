@@ -2,7 +2,7 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once (LibraryFunctions::get_logic_file_path('events_logic.php'));
+	ThemeHelper::includeThemeFile('logic/events_logic.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = events_logic($_GET, $_POST);

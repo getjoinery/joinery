@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	require_once (LibraryFunctions::get_logic_file_path('products_logic.php'));
+	ThemeHelper::includeThemeFile('logic/products_logic.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	//OVERRIDE GET VARS

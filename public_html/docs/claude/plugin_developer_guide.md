@@ -106,6 +106,10 @@ require_once(__DIR__ . '/../../includes/Globalvars.php');
 ├── plugin.json                 # Plugin metadata
 ├── data/                       # Data model classes
 │   └── my_data_class.php
+├── logic/                      # Business logic files
+│   └── my_feature_logic.php
+├── views/                      # Plugin view templates (if needed)
+│   └── my_view.php
 ├── admin/                      # Admin interface files
 │   └── admin_my_plugin.php
 ├── includes/                   # Helper classes and libraries
@@ -485,32 +489,6 @@ All themes should include a `theme.json` file for proper system integration:
 
 ## ThemeHelper Enhanced Capabilities
 
-### includeThemeFile() Method
-
-The enhanced `ThemeHelper::includeThemeFile()` method now supports both view resolution and theme-specific includes:
-
-**For View Files (uses resolution chain):**
-```php
-// Searches: theme/{theme}/views/page.php → plugins/{plugin}/views/page.php → views/page.php
-$result = ThemeHelper::includeThemeFile('views/page.php', null, $variables, 'plugin_name');
-```
-
-**For Theme Includes (direct theme access):**
-```php
-// Loads: theme/{theme}/includes/PublicPage.php directly
-$result = ThemeHelper::includeThemeFile('includes/PublicPage.php');
-```
-
-**Method Signature:**
-```php
-public static function includeThemeFile(
-    $path,                    // File path to include
-    $themeName = null,        // Theme name (defaults to active)
-    array $variables = [],    // Variables to inject
-    $plugin_specify = null    // Plugin for view resolution
-)
-```
-
 ### Theme Management Methods
 
 **Get Active Theme:**
@@ -548,8 +526,7 @@ $supports_plugins = ThemeHelper::config('supports_plugins', [], 'theme-name');
 4. **Test plugin admin access** via `/plugins/{plugin}/admin/*`
 5. **Create theme.json** with proper metadata and plugin support
 6. **Implement theme-specific classes** (PublicPage, FormWriter) if needed
-7. **Use ThemeHelper::includeThemeFile()** for view includes
-8. **Test view resolution chain** to ensure fallbacks work correctly
+7. **Test view resolution chain** to ensure fallbacks work correctly
 
 ### Working with Forms in Views
 
@@ -604,7 +581,7 @@ $routes = [
 **Plugin now only provides:**
 - Admin interface: `/plugins/controld/admin/*`
 - Data models: `CtldAccount`, `CtldDevice`, etc.
-- Business logic: `ControlDHelper` class
+- Business logic: `ControlDHelper` class and logic files
 
 ## Key Benefits of Hybrid Architecture
 
@@ -638,6 +615,28 @@ $routes = [
 - Plugin code only loaded when needed
 - View resolution caching prevents repeated file system checks
 - Framework-specific optimizations in theme implementations
+
+## File Loading in Plugins and Themes
+
+**Two methods for including files:**
+
+1. **`PathHelper::requireOnce()`** - Direct loading, no overrides
+   ```php
+   PathHelper::requireOnce('data/user_class.php');  // Data models
+   PathHelper::requireOnce('includes/MyHelper.php'); // System files
+   ```
+
+2. **`ThemeHelper::includeThemeFile()`** - With override chain
+   ```php
+   // In plugin views - specify plugin as 4th parameter
+   ThemeHelper::includeThemeFile('logic/devices_logic.php', null, [], 'controld');
+   ThemeHelper::includeThemeFile('views/profile/devices.php', null, [], 'controld');
+   ```
+   **Override chain:** theme → plugin → base
+
+**When to use:**
+- `PathHelper`: Data models, helpers, non-overridable code
+- `ThemeHelper`: Views, logic, any overridable file
 
 ## Development Workflow
 
@@ -696,7 +695,6 @@ This shows detailed routing information in HTML comments.
 
 **Views not resolving correctly:**
 - Check view path format in routes (should not start with `/`)
-- Verify ThemeHelper::includeThemeFile() usage for theme includes vs views
 - Test view resolution chain: theme → plugin → system
 - Ensure plugin_specify parameter matches actual plugin directory name
 

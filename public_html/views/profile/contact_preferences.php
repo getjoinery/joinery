@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('contact_preferences_logic.php'));	
+	ThemeHelper::includeThemeFile('logic/contact_preferences_logic.php');	
 
 	$page_vars = contact_preferences_logic($_GET, $_POST);
 	$messages = $page_vars['messages'];
