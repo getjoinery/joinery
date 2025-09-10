@@ -808,7 +808,8 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 		
-		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/test/public_html/logs/error.log)", 'apache_error_log', '', 20, $settings->get_setting('apache_error_log'), "" , 255, "");
+		$site_template = $settings->get_setting('site_template');
+		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/{$site_template}/logs/error.log)", 'apache_error_log', '', 20, $settings->get_setting('apache_error_log'), "" , 255, "");
 		
 		echo $formwriter->textinput("Standard Error Message", 'standard_error', '', 20, $settings->get_setting('standard_error'), "" , 255, "");
 		
