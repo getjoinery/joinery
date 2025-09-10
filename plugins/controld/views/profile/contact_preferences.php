@@ -4,7 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('contact_preferences_logic.php'));	
+	ThemeHelper::includeThemeFile('logic/contact_preferences_logic.php', null, [], 'controld');	
 
 	$page_vars = contact_preferences_logic($_GET, $_POST);
 	$messages = $page_vars['messages'];

@@ -4,7 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('subscription_cancel_logic.php'));	
+	ThemeHelper::includeThemeFile('logic/subscription_cancel_logic.php');	
 	
 	$page_vars = subscription_cancel_logic($_GET, $_POST);
 	$current_order_item = $page_vars['current_order_item'];

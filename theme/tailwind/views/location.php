@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once (LibraryFunctions::get_logic_file_path('location_logic.php'));
+	ThemeHelper::includeThemeFile('logic/location_logic.php');
 
 	$page_vars = location_logic($_GET, $_POST, $location, $params);
 	$location = $page_vars['location'];

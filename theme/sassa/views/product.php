@@ -3,7 +3,7 @@ require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 ThemeHelper::includeThemeFile('includes/PublicPage.php');
-require_once (LibraryFunctions::get_logic_file_path('product_logic.php'));
+ThemeHelper::includeThemeFile('logic/product_logic.php');
 
 	$page_vars = product_logic($_GET, $_POST, $product);
 	$product = $page_vars['product'];

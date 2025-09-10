@@ -1,7 +1,7 @@
 <?php
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once(LibraryFunctions::get_logic_file_path('blog_logic.php'));
+	ThemeHelper::includeThemeFile('logic/blog_logic.php');
 
 	$page_vars = blog_logic($_GET, $_POST);
 	

@@ -3,7 +3,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once (LibraryFunctions::get_logic_file_path('event_waiting_list_logic.php'));
+	ThemeHelper::includeThemeFile('logic/event_waiting_list_logic.php');
 	
 	$event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.', TRUE, 'int');
 	$page_vars = event_waiting_list_logic($_GET, $_POST, $event_id);

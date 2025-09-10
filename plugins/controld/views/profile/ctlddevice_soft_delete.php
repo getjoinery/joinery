@@ -4,7 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('ctlddevice_soft_delete_logic.php'));
+	ThemeHelper::includeThemeFile('logic/ctlddevice_soft_delete_logic.php', null, [], 'controld');
 
 	$page_vars = ctlddevice_soft_delete_logic($_GET, $_POST);
 	$device = $page_vars['device'];

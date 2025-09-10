@@ -3,7 +3,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
+	ThemeHelper::includeThemeFile('logic/post_logic.php');
 
 	$page_vars = post_logic($_GET, $_POST, $post);
 	$post = $page_vars['post'];

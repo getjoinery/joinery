@@ -3,7 +3,7 @@
 	// PathHelper is already loaded
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once (LibraryFunctions::get_logic_file_path('cart_logic.php'));
+	ThemeHelper::includeThemeFile('logic/cart_logic.php', null, [], 'controld');
 
 	$page_vars = cart_logic($_GET, $_POST);
 	$cart = $page_vars['cart'];

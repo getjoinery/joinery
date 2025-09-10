@@ -4,7 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once (LibraryFunctions::get_logic_file_path('list_logic.php'));
+	ThemeHelper::includeThemeFile('logic/list_logic.php');
 
 	$page_vars = list_logic($_GET, $_POST, $mailing_list, $params);
 	$messages = $page_vars['messages'];

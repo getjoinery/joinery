@@ -11,7 +11,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_sessions_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_registrants_class.php');
 
-	require_once (LibraryFunctions::get_logic_file_path('event_logic.php'));
+	ThemeHelper::includeThemeFile('logic/event_logic.php');
 
 
 	$page_vars = event_logic($_GET, $_POST, $event, NULL);

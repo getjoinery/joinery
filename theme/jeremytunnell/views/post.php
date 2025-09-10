@@ -4,7 +4,7 @@
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	
-	require_once (LibraryFunctions::get_logic_file_path('post_logic.php'));
+	ThemeHelper::includeThemeFile('logic/post_logic.php');
 	$page_vars = post_logic($_GET, $_POST, $post);
 	$post = $page_vars['post'];
 	$session = $page_vars['session'];

@@ -3,7 +3,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once (LibraryFunctions::get_logic_file_path('password-reset-2_logic.php'));
+	ThemeHelper::includeThemeFile('logic/password-reset-2_logic.php');
 
 	$page_vars = password_reset_2_logic($_GET, $_POST);
 	

@@ -4,7 +4,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('account_edit_logic.php'));	
+	ThemeHelper::includeThemeFile('logic/account_edit_logic.php', null, [], 'controld');	
 	
 	$page_vars = account_edit_logic($_GET, $_POST);
 	
