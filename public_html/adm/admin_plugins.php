@@ -144,34 +144,48 @@ if ($action || $_POST) {
                 }
                 
             } elseif ($action === 'uninstall') {
-                $plugin = Plugin::get_by_plugin_name($plugin_name);
-                if ($plugin) {
-                    $result = $plugin->uninstall();
-                    if ($result['success']) {
-                        $message = implode('<br>', $result['messages']);
-                        $message_type = 'success';
-                    } else {
-                        $message = 'Uninstall failed:<br>' . implode('<br>', $result['errors']);
+                // Check if plugin is currently the active theme provider
+                PathHelper::requireOnce('includes/PluginHelper.php');
+                try {
+                    $plugin_helper = PluginHelper::getInstance($plugin_name);
+                    if ($plugin_helper->isActiveThemeProvider()) {
+                        $message = '<strong>Cannot Uninstall:</strong> ';
+                        $message .= "The plugin '{$plugin_name}' is currently the active theme provider. ";
+                        $message .= 'Please select a different theme in <a href="/adm/admin_settings">Settings</a> before uninstalling.';
                         $message_type = 'danger';
+                    } else {
+                        // Safe to proceed with uninstall
+                        $plugin = Plugin::get_by_plugin_name($plugin_name);
+                        if ($plugin) {
+                            $result = $plugin->uninstall();
+                            if ($result['success']) {
+                                $message = implode('<br>', $result['messages']);
+                                $message_type = 'success';
+                            } else {
+                                $message = 'Uninstall failed:<br>' . implode('<br>', $result['errors']);
+                                $message_type = 'danger';
+                            }
+                        } else {
+                            $message = 'Plugin record not found.';
+                            $message_type = 'warning';
+                        }
                     }
-                } else {
-                    $message = 'Plugin record not found.';
-                    $message_type = 'warning';
-                }
-                
-            } elseif ($action === 'mark_stock') {
-                $plugin = Plugin::get_by_plugin_name($plugin_name);
-                if ($plugin) {
-                    $plugin->mark_as_stock();
-                    $message = 'Plugin "' . htmlspecialchars($plugin_name) . '" marked as stock.';
-                    $message_type = 'success';
-                }
-            } elseif ($action === 'mark_custom') {
-                $plugin = Plugin::get_by_plugin_name($plugin_name);
-                if ($plugin) {
-                    $plugin->mark_as_custom();
-                    $message = 'Plugin "' . htmlspecialchars($plugin_name) . '" marked as custom.';
-                    $message_type = 'success';
+                } catch (Exception $e) {
+                    // Plugin helper not found - proceed with normal uninstall
+                    $plugin = Plugin::get_by_plugin_name($plugin_name);
+                    if ($plugin) {
+                        $result = $plugin->uninstall();
+                        if ($result['success']) {
+                            $message = implode('<br>', $result['messages']);
+                            $message_type = 'success';
+                        } else {
+                            $message = 'Uninstall failed:<br>' . implode('<br>', $result['errors']);
+                            $message_type = 'danger';
+                        }
+                    } else {
+                        $message = 'Plugin record not found.';
+                        $message_type = 'warning';
+                    }
                 }
                 
             } elseif ($action === 'repair_plugin') {
@@ -352,6 +366,17 @@ $page->begin_box(array('altlinks' => $altlinks));
                     } else {
                         $status_cell .= ' <span class="badge bg-warning">Custom</span>';
                     }
+                    
+                    // Check if this is the active theme provider
+                    try {
+                        PathHelper::requireOnce('includes/PluginHelper.php');
+                        $plugin_helper = PluginHelper::getInstance($plugin['name']);
+                        if ($plugin_helper->isActiveThemeProvider()) {
+                            $status_cell .= ' <span class="badge bg-primary">Active Theme Provider</span>';
+                        }
+                    } catch (Exception $e) {
+                        // Plugin helper not available - skip theme provider check
+                    }
                 }
                 
                 if (!$plugin['directory_exists']) {
@@ -374,6 +399,16 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $plugin_name = htmlspecialchars($plugin['name']);
                     $plugin_status = $plugin['plugin'] ? $plugin['plugin']->get('plg_status') : null;
                     
+                    // Check if this plugin is the active theme provider
+                    $is_active_theme_provider = false;
+                    try {
+                        PathHelper::requireOnce('includes/PluginHelper.php');
+                        $plugin_helper = PluginHelper::getInstance($plugin['name']);
+                        $is_active_theme_provider = $plugin_helper->isActiveThemeProvider();
+                    } catch (Exception $e) {
+                        // Plugin helper not available
+                    }
+                    
                     // Build actions array
                     $actions = array();
                     
@@ -393,22 +428,19 @@ $page->begin_box(array('altlinks' => $altlinks));
                     } elseif ($plugin_status === 'inactive' || $plugin_status === 'installed') {
                         // Inactive
                         $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
-                        $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
+                        // Only allow uninstall if not active theme provider
+                        if (!$is_active_theme_provider) {
+                            $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
+                        }
                     } elseif ($plugin_status === 'error') {
                         // Error
                         $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
-                        $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
-                    }
-                    
-                    // Add stock/custom toggle if plugin is installed
-                    if ($plugin['plugin']) {
-                        $is_stock = $plugin['plugin']->is_stock();
-                        if ($is_stock) {
-                            $actions['Mark as Custom'] = "javascript:submitPluginAction('mark_custom', '$plugin_name')";
-                        } else {
-                            $actions['Mark as Stock'] = "javascript:submitPluginAction('mark_stock', '$plugin_name')";
+                        // Only allow uninstall if not active theme provider
+                        if (!$is_active_theme_provider) {
+                            $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
                         }
                     }
+                    
                     
                     if (!empty($actions)) {
                         $action_cell = '<div class="dropdown">';
@@ -416,6 +448,12 @@ $page->begin_box(array('altlinks' => $altlinks));
                         $action_cell .= '<div class="dropdown-menu dropdown-menu-end py-0">';
                         foreach ($actions as $label => $action) {
                             $action_cell .= '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
+                        }
+                        // Add disabled uninstall option with explanation for active theme providers
+                        if ($is_active_theme_provider && ($plugin_status === 'inactive' || $plugin_status === 'installed' || $plugin_status === 'error')) {
+                            $action_cell .= '<a href="#" class="dropdown-item disabled" onclick="return false;" title="Cannot uninstall active theme provider">';
+                            $action_cell .= '<span class="text-muted">Uninstall (Active Theme)</span>';
+                            $action_cell .= '</a>';
                         }
                         $action_cell .= '</div>';
                         $action_cell .= '</div>';
