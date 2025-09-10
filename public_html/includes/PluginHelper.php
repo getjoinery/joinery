@@ -473,4 +473,117 @@ class PluginHelper extends ComponentBase {
         }
         return $plugins;
     }
+    
+    /**
+     * Check if plugin provides theme functionality
+     * @return bool
+     */
+    public function providesTheme() {
+        $metadata = $this->getMetadata();
+        return isset($metadata['provides_theme']) && $metadata['provides_theme'] === true;
+    }
+    
+    /**
+     * Validate if plugin can serve as a theme provider
+     * @return array ['valid' => bool, 'errors' => array, 'warnings' => array]
+     */
+    public function validateAsThemeProvider() {
+        $plugin_dir = PathHelper::getIncludePath("plugins/{$this->name}");
+        $errors = [];
+        $warnings = [];
+        
+        // Check for mandatory plugin.json
+        if (!$this->metadataExists()) {
+            $errors[] = "Missing required file: plugin.json - Plugin metadata is mandatory for theme providers";
+        } else {
+            // Check for provides_theme flag
+            $metadata = $this->getMetadata();
+            if (!isset($metadata['provides_theme']) || $metadata['provides_theme'] !== true) {
+                $errors[] = "plugin.json must have 'provides_theme': true to serve as theme provider";
+            }
+        }
+        
+        // Check required files
+        $required_files = [
+            'includes/PublicPage.php' => 'PublicPage class is required for theme functionality',
+            'includes/FormWriter.php' => 'FormWriter class is required for form generation'
+        ];
+        
+        foreach ($required_files as $file => $error_message) {
+            $file_path = $plugin_dir . '/' . $file;
+            if (!file_exists($file_path)) {
+                $errors[] = "Missing required file: {$file} - {$error_message}";
+            }
+        }
+        
+        // Check for main route in serve.php
+        $serve_file = $plugin_dir . '/serve.php';
+        if (file_exists($serve_file)) {
+            $serve_content = file_get_contents($serve_file);
+            
+            // Check for main plugin route
+            if (!preg_match("/['\"]\/?" . preg_quote($this->name, '/') . "['\"]\\s*=>/", $serve_content)) {
+                $warnings[] = "No main route '/{$this->name}' found in serve.php";
+            }
+            
+            // Check for restricted routes
+            $restricted_routes = ['/login', '/logout', '/register'];
+            foreach ($restricted_routes as $route) {
+                if (preg_match("/['\"]" . preg_quote($route, '/') . "['\"]\\s*=>/", $serve_content)) {
+                    $errors[] = "Plugin cannot define system route: {$route}";
+                }
+            }
+        } else {
+            $warnings[] = "No serve.php file found - plugin may not define any routes";
+        }
+        
+        // Check for recommended files
+        $recommended_files = [
+            'views/index.php' => 'Homepage view recommended',
+            'assets/css/style.css' => 'Theme styles recommended'
+        ];
+        
+        foreach ($recommended_files as $file => $message) {
+            $file_path = $plugin_dir . '/' . $file;
+            if (!file_exists($file_path)) {
+                $warnings[] = "Missing recommended file: {$file} - {$message}";
+            }
+        }
+        
+        return [
+            'valid' => empty($errors),
+            'errors' => $errors,
+            'warnings' => $warnings
+        ];
+    }
+    
+    /**
+     * Check if this plugin is currently the active theme provider
+     * @return bool
+     */
+    public function isActiveThemeProvider() {
+        $settings = Globalvars::get_instance();
+        $theme_template = $settings->get_setting('theme_template');
+        $active_plugin = $settings->get_setting('active_theme_plugin');
+        
+        return $theme_template === 'plugin' && $active_plugin === $this->name;
+    }
+    
+    /**
+     * Get all plugins that can provide theme functionality
+     * @return array Array of PluginHelper instances that are valid theme providers
+     */
+    public static function getValidThemeProviders() {
+        $all_plugins = self::getAvailablePlugins();
+        $theme_providers = [];
+        
+        foreach ($all_plugins as $plugin_name => $plugin_helper) {
+            $validation = $plugin_helper->validateAsThemeProvider();
+            if ($validation['valid']) {
+                $theme_providers[$plugin_name] = $plugin_helper;
+            }
+        }
+        
+        return $theme_providers;
+    }
 }
