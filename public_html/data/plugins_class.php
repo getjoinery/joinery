@@ -522,22 +522,6 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 	}
 	
 	/**
-	 * Mark plugin as stock
-	 */
-	public function mark_as_stock() {
-		$this->set('plg_is_stock', true);
-		$this->save();
-	}
-	
-	/**
-	 * Mark plugin as custom
-	 */
-	public function mark_as_custom() {
-		$this->set('plg_is_stock', false);
-		$this->save();
-	}
-	
-	/**
 	 * Load stock status from plugin.json metadata
 	 */
 	public function load_stock_status() {
