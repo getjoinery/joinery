@@ -847,3 +847,148 @@ protected function getTableClasses() {
 5. **Maintainability** - Updates to plugins don't break theme functionality
 
 This hybrid architecture provides maximum flexibility while maintaining clean separation of concerns and ensuring backward compatibility across all existing themes and plugins.
+
+## Plugin Theme System
+
+### Overview
+
+The plugin theme system allows plugins to act as complete theme providers, replacing the entire user interface while maintaining all plugin functionality. This enables white-label solutions, complete UI replacements, and branded experiences.
+
+### How the System Works
+
+1. **PathHelper** intercepts theme file requests and redirects to plugin directory for PHP classes
+2. **RouteHelper** sets template directory to plugin path for view loading
+3. **ThemeHelper** serves assets from plugin directory instead of theme directory
+4. **Admin Settings** provides UI for selecting which plugin provides the theme
+
+### Three Types of Plugins
+
+#### 1. Feature Plugins (Standard)
+**Purpose**: Add specific functionality without affecting the UI
+**Examples**: Bookings, Items, OAuth providers, Payment processors
+**Characteristics**:
+- Work within existing theme framework
+- Add new routes under `/[plugin-name]/*`
+- Can provide admin interfaces
+- Cannot override system views or routes
+
+**Directory Structure**:
+```
+/plugins/bookings/
+├── plugin.json
+├── serve.php
+├── admin/
+│   └── manage_bookings.php
+├── views/
+│   └── booking_list.php
+└── assets/
+    └── js/bookings.js
+```
+
+#### 2. Theme Provider Plugins
+**Purpose**: Complete UI replacement when selected as active theme
+**Examples**: ControlD, White-label solutions, Custom branded interfaces
+
+**Required Files**:
+```
+/plugins/controld/
+├── plugin.json (with "provides_theme": true)
+├── serve.php
+├── includes/
+│   ├── PublicPage.php (required - base page class)
+│   └── FormWriter.php (required - form generation)
+├── views/
+│   ├── index.php (homepage view)
+│   ├── profile.php (user profile)
+│   └── [other system view overrides]
+└── assets/
+    ├── css/style.css
+    ├── js/main.js
+    └── img/logo.png
+```
+
+**How Theme Provider Mode Works**:
+1. Admin selects "plugin" as the theme
+2. Admin selects specific plugin (e.g., "controld") as the theme provider
+3. System modifications activate:
+   - PathHelper loads PHP classes from `/plugins/controld/includes/`
+   - RouteHelper loads views from `/plugins/controld/views/`
+   - ThemeHelper loads assets from `/plugins/controld/assets/`
+4. Plugin provides complete UI while system handles core functionality
+
+#### 3. Hybrid Plugins
+**Purpose**: Dual-mode plugins that can work as features OR complete themes
+**Examples**: Complex applications with optional standalone mode
+
+**Behavior Modes**:
+- **Feature Mode**: When regular theme active, provides features within that theme
+- **Theme Mode**: When selected as theme provider, replaces entire UI
+- Same codebase, different activation modes
+
+## System Configuration Documentation
+
+### New Database Settings
+
+**`active_theme_plugin`**
+- **Type**: String (plugin directory name)
+- **Default**: Empty string
+- **Purpose**: Specifies which plugin provides the complete UI when plugin theme is active
+- **Valid Values**: Must match an installed plugin directory name
+- **Dependencies**: Only used when `theme_template = 'plugin'`
+- **Example**: `'controld'` to use ControlD plugin as theme
+
+### Modified Settings
+
+**`theme_template`**
+- **New Option**: `'plugin'` - Delegates all theme functionality to a plugin
+- **Existing Options**: `'falcon'`, `'sassa'`, `'tailwind'`, etc.
+
+## Admin Interface Documentation
+
+### Settings Page Updates (`/adm/admin_settings.php`)
+
+**Theme Selection Enhancement**:
+When "Plugin-Provided Theme" is selected from the theme dropdown:
+1. A new dropdown appears labeled "Active Theme Plugin"
+2. Dropdown populates with all installed plugins
+3. Plugins with `"provides_theme": true` are prioritized
+4. Help text explains the plugin must provide theme infrastructure
+
+**JavaScript Behavior**:
+- Plugin selector is hidden when regular themes are selected
+- Plugin selector shows immediately when "plugin" theme is selected
+- Settings save normally through existing form processing
+
+## Technical Implementation Notes
+
+### File Resolution Order
+
+When plugin theme is active, the system checks for files in this order:
+
+**For PHP Classes** (via PathHelper):
+1. `/plugins/{active_plugin}/includes/{file}`
+2. `/theme/plugin/includes/{file}` (fallback)
+3. `/includes/{file}` (system fallback)
+
+**For Views** (via RouteHelper/ThemeHelper):
+1. `/plugins/{active_plugin}/views/{file}`
+2. `/views/{file}` (system fallback)
+
+**For Assets** (via ThemeHelper):
+1. `/plugins/{active_plugin}/assets/{file}`
+2. `/theme/plugin/assets/{file}` (shouldn't exist)
+3. Current route's plugin assets (existing behavior)
+
+### Performance Considerations
+
+- **Additional Database Queries**: One extra query to get `active_theme_plugin` setting
+- **File Existence Checks**: Additional `is_dir()` and `file_exists()` checks
+- **Caching Opportunity**: Could cache plugin theme selection in session
+- **Impact**: Minimal - only adds conditional checks when plugin theme active
+
+### Security Considerations
+
+- **Plugin Validation**: System should verify plugin exists before activation
+- **Fallback Strategy**: Falls back to safe defaults if plugin missing
+- **No New Attack Vectors**: Uses existing file inclusion mechanisms
+- **Admin Only**: Theme selection requires admin permissions
