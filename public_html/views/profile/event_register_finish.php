@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('event_register_finish_logic.php'));
+	ThemeHelper::includeThemeFile('logic/event_register_finish_logic.php');
 
 	$settings = Globalvars::get_instance();
 	$page = new PublicPage();

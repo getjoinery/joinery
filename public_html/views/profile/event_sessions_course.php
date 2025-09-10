@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('event_sessions_course_logic.php'));
+	ThemeHelper::includeThemeFile('logic/event_sessions_course_logic.php');
 	
 	$page_vars = event_sessions_course_logic($_GET, $_POST);
 	

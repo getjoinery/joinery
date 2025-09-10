@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	require_once(LibraryFunctions::get_logic_file_path('subscriptions_logic.php'));
+	ThemeHelper::includeThemeFile('logic/subscriptions_logic.php');
 
 	$page_vars = subscriptions_logic($_GET, $_POST);
 	
@@ -396,7 +396,9 @@
 				<h6 class="font-small font-weight-normal uppercase">Your Appointments</h6>
 
 				<?php							
-			$logic_path = LibraryFunctions::get_logic_file_path('get_appointments_logic.php', 'url');
+			// Note: This needs a URL path for AJAX loading, not a file include
+			// TODO: Update this to use a proper AJAX endpoint
+			$logic_path = '/logic/get_appointments_logic.php';
 			echo '
 			<script>
 			$(document).ready(function() {

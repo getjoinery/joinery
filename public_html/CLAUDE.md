@@ -290,6 +290,33 @@ For complete guidance on creating admin interface pages, including required setu
 
 ## Common Tasks & Quick Reference
 
+### File Loading Methods
+
+**Two methods for including files:**
+
+1. **`PathHelper::requireOnce()`** - Direct file loading, no overrides
+   ```php
+   PathHelper::requireOnce('includes/LibraryFunctions.php');  // System files
+   PathHelper::requireOnce('data/user_class.php');           // Data models
+   ```
+
+2. **`ThemeHelper::includeThemeFile()`** - File loading with override chain
+   ```php
+   // Views, logic, and other overridable files
+   ThemeHelper::includeThemeFile('views/profile.php');           // View files
+   ThemeHelper::includeThemeFile('logic/pricing_logic.php');     // Logic files
+   ThemeHelper::includeThemeFile('includes/PublicPage.php');     // Theme includes
+   
+   // Plugin context (4th parameter)
+   ThemeHelper::includeThemeFile('logic/devices_logic.php', null, [], 'controld');
+   ```
+   
+   **Override chain:** theme/{theme}/path → plugins/{plugin}/path → /path
+
+**When to use each:**
+- `PathHelper::requireOnce()`: System files, data models, non-overridable code
+- `ThemeHelper::includeThemeFile()`: Views, logic, any file that themes/plugins should override
+
 ### Getting FormWriter Instances
 
 ```php
@@ -465,7 +492,7 @@ See **📖 [Plugin Developer Guide](/docs/claude/plugin_developer_guide.md)** fo
 
 **ThemeHelper** - Manages theme metadata and provides theme-specific functionality
 - `getInstance($themeName)` - Get singleton instance for theme operations
-- `includeThemeFile($path, $themeName, $variables)` - Include theme files with variable injection
+- `includeThemeFile($path, $themeName, $variables, $plugin)` - Include files with override support (see File Loading Methods)
 - `asset($path, $themeName)` - Generate theme asset URLs with cache busting
 - `config($key, $default, $themeName)` - Get theme configuration values
 - `switchTheme($themeName)` - Change active theme system-wide

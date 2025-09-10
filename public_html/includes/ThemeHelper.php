@@ -270,7 +270,7 @@ class ThemeHelper extends ComponentBase {
                 }
                 
                 // Check if it's a view path - if so, must start with 'views/'
-                $known_non_view_dirs = ['adm/', 'ajax/', 'api/', 'utils/', 'tests/'];
+                $known_non_view_dirs = ['adm/', 'ajax/', 'api/', 'utils/', 'tests/', 'logic/'];
                 $is_non_view = false;
                 foreach ($known_non_view_dirs as $dir) {
                     if (strpos($path, $dir) === 0) {
@@ -322,8 +322,29 @@ class ThemeHelper extends ComponentBase {
                     return true;
                 }
             } else {
-                // Non-view paths (adm/, ajax/, etc.) - handle differently if needed
-                // For now, just try to include directly
+                // Non-view paths (adm/, ajax/, logic/, etc.) - apply override chain
+                // 1. Check theme override first
+                $theme_path = "theme/{$themeName}/{$path}";
+                if (file_exists(PathHelper::getIncludePath($theme_path))) {
+                    extract($variables);
+                    self::outputDebugComments($theme_path, $themeName, $plugin_specify);
+                    include PathHelper::getIncludePath($theme_path);
+                    return true;
+                }
+                
+                // 2. Check plugin (for plugin-specific files like logic)
+                $plugin = $plugin_specify ?: RouteHelper::getCurrentPlugin();
+                if ($plugin) {
+                    $plugin_path = "plugins/{$plugin}/{$path}";
+                    if (file_exists(PathHelper::getIncludePath($plugin_path))) {
+                        extract($variables);
+                        self::outputDebugComments($plugin_path, $themeName, $plugin);
+                        include PathHelper::getIncludePath($plugin_path);
+                        return true;
+                    }
+                }
+                
+                // 3. Base fallback
                 if (file_exists(PathHelper::getIncludePath($path))) {
                     extract($variables);
                     self::outputDebugComments($path, $themeName, $plugin_specify);
