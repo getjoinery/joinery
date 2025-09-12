@@ -8,56 +8,11 @@ class LibraryFunctions {
 
 
 
-	//TRANSLATES INTERNAL POSTGRES TYPES TO USER TYPES
-	static function translate_data_types($data_type){
-		if($data_type == 'smallint'){
-			return 'int2';
-		}
-		else if($data_type == 'integer'){
-			return 'int4';
-		}
-		else if($data_type == 'bigint'){
-			return 'int8';
-		}		
-		else if($data_type == 'character varying'){
-			return 'varchar';
-		}		
-		else if($data_type == 'boolean'){
-			return 'bool';
-		}		
-		else if($data_type == 'timestamp without time zone'){
-			return 'timestamp';
-		}
-		else if($data_type == 'text'){
-			return 'text';
-		}		
-		else if($data_type == 'numeric'){
-			return 'numeric';
-		}	
-		else if($data_type == 'date'){
-			return 'date';
-		}
-		else if($data_type == 'jsonb'){
-			return 'jsonb';
-		}
-		else if($data_type == 'json'){
-			return 'json';
-		}
-		else if($data_type == 'character'){
-			return 'character';
-		}
-		else{
-			echo 'ERROR: Unrecognized data type '.$data_type;
-		}					
-	}
+	// Function translate_data_types() has been moved to DatabaseUpdater class.
+	// It was database-specific and only used by DatabaseUpdater.
 	
-	//EXTRACTS THE LENGTH FROM POSTGRES TYPES
-	static function extract_length_from_spec($data_type){
-	
-		preg_match_all('!\d+!', $data_type, $matches);
-		return $matches[0][0];
-	
-	}
+	// Function extract_length_from_spec() has been removed.
+	// It was only used once and has been inlined in ModelTester.php
 
 
 	/**
