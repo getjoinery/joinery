@@ -295,7 +295,7 @@ class DatabaseUpdater {
         
         // Translate database type to our standard format
         ob_start();
-        $live_data_type = LibraryFunctions::translate_data_types($live_column_info['data_type']);
+        $live_data_type = $this->translateDataTypes($live_column_info['data_type']);
         $translation_output = ob_get_clean();
         
         // Check if translation produced an error
@@ -601,7 +601,7 @@ class DatabaseUpdater {
         
         // Translate database type to our standard format
         ob_start();
-        $live_data_type = LibraryFunctions::translate_data_types($live_column_info['data_type']);
+        $live_data_type = $this->translateDataTypes($live_column_info['data_type']);
         $translation_output = ob_get_clean();
         
         // Check if translation produced an error
@@ -1655,6 +1655,53 @@ class DatabaseUpdater {
                 echo "Error finding constraint by columns: " . $e->getMessage() . "<br>\n";
             }
             return null;
+        }
+    }
+    
+    /**
+     * Translates internal PostgreSQL types to standardized user types
+     * @param string $data_type PostgreSQL data type from information_schema
+     * @return string Standardized data type name
+     */
+    private function translateDataTypes($data_type) {
+        if($data_type == 'smallint'){
+            return 'int2';
+        }
+        else if($data_type == 'integer'){
+            return 'int4';
+        }
+        else if($data_type == 'bigint'){
+            return 'int8';
+        }		
+        else if($data_type == 'character varying'){
+            return 'varchar';
+        }		
+        else if($data_type == 'boolean'){
+            return 'bool';
+        }		
+        else if($data_type == 'timestamp without time zone'){
+            return 'timestamp';
+        }
+        else if($data_type == 'text'){
+            return 'text';
+        }		
+        else if($data_type == 'numeric'){
+            return 'numeric';
+        }	
+        else if($data_type == 'date'){
+            return 'date';
+        }
+        else if($data_type == 'jsonb'){
+            return 'jsonb';
+        }
+        else if($data_type == 'json'){
+            return 'json';
+        }
+        else if($data_type == 'character'){
+            return 'character';
+        }
+        else{
+            echo 'ERROR: Unrecognized data type '.$data_type;
         }
     }
 }
