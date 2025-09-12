@@ -3,11 +3,10 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 
 	PathHelper::requireOnce('data/users_class.php');
-	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
+	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 	
 	echo 'feature turned off';
 	exit;

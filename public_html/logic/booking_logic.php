@@ -3,10 +3,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function booking_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
-	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
-	require_once(LibraryFunctions::get_plugin_file_path('booking_types_class.php', 'bookings', 'data'));
+	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

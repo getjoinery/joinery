@@ -1,11 +1,12 @@
 <?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	function items_logic ($get_vars, $post_vars) {
 		$page_vars = array();
 		
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Pager.php');
-		require_once(LibraryFunctions::get_plugin_file_path('items_class.php', 'items', '/data', 'system'));  	
+		PathHelper::requireOnce('includes/SessionControl.php');
+		PathHelper::requireOnce('includes/Pager.php');
+		require_once(PathHelper::getIncludePath('plugins/items/data/items_class.php'));  	
 		
 		$settings = Globalvars::get_instance();
 		$page_vars['settings'] = $settings;

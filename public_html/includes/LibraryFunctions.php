@@ -321,76 +321,10 @@ class LibraryFunctions {
 	}
 	
 	
-	//RETURNS THE PATH OF A FILE IN A PLUGIN, PLUGIN IS OPTIONAL, SUBDIRECTORY IS OPTIONAL
-	static function get_plugin_file_path($filename, $plugin='', $subdirectory='', $path_format='system'){
-		$siteDir = PathHelper::getBasePath();
-		
-		//MAKE SURE THEY START WITH A SLASH
-		if($plugin[0] != '/'){
-			$plugin = '/'.$plugin;
-		}
-		if($subdirectory[0] != '/'){
-			$subdirectory = '/'.$subdirectory;
-		}
-		
-		
-		if($plugin && $subdirectory){
-			$site_file = $siteDir.'/plugins'.$plugin.$subdirectory.'/'.$filename; 
-			if(file_exists($site_file)){
-				if($path_format == 'system'){
-					//WE WANT A FILE PATH
-					return $site_file;
-				}
-				else{
-					//WE WANT A URL
-					return '/plugins/'.$plugin.$subdirectory.'/'.$filename;
-				}
-			}
-		}
-		else if($plugin && !$subdirectory){
-			$plugin_dir = PathHelper::getBasePath()."/plugins";
-			$directories = LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
-			
-			foreach($directories as $directory){
-				$site_file = $siteDir.'/plugins'.$plugin.$directory.'/'.$filename;
-				
-				if(file_exists($site_file)){
-					if($path_format == 'system'){
-						//WE WANT A FILE PATH
-						return $site_file;
-					}
-					else{
-						//WE WANT A URL
-						return '/plugins/'.$plugin.$directory.'/'.$filename;
-					}
-				}
-			}
-		}
-		else{
-			$plugins = LibraryFunctions::list_plugins();
-			foreach($plugins as $plugin){
-				$plugin_dir = PathHelper::getBasePath()."/plugins";
-				$directories = LibraryFunctions::list_directories_in_directory($plugin_dir, 'filename');
-				
-				foreach($directories as $directory){
-					$site_file = $siteDir.'/plugins/'.$plugin.$directory.'/'.$filename;
-					
-					if(file_exists($site_file)){
-						if($path_format == 'system'){
-							//WE WANT A FILE PATH
-							return $site_file;
-						}
-						else{
-							//WE WANT A URL
-							return '/plugins/'.$plugin.$directory.'/'.$filename;
-						}
-					}
-				}
-			}				
-		}
-		return false;					
-	}
-
+	// Function get_plugin_file_path() has been removed.
+	// Use PathHelper::getIncludePath('plugins/plugin_name/path/to/file.php') instead.
+	// Example: PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php')
+	
 	
 	
 	// Function get_logic_file_path() has been removed.
