@@ -2,12 +2,12 @@
 	error_reporting(E_ERROR | E_PARSE);
 	require_once( __DIR__ . '/../includes/Globalvars.php');	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
 	require_once( __DIR__ . '/../includes/SessionControl.php');
+	require_once( __DIR__ . '/../includes/PathHelper.php');
 
 	require_once( __DIR__ . '/../data/users_class.php');
-	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
-	require_once(LibraryFunctions::get_plugin_file_path('booking_types_class.php', 'bookings', 'data'));
+	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

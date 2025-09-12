@@ -2,8 +2,9 @@
 	require_once( __DIR__ . '/../includes/Globalvars.php');
 	require_once( __DIR__ . '/../includes/DbConnector.php');
 	require_once( __DIR__ . '/../includes/FormattingFunctions.php');
+	require_once( __DIR__ . '/../includes/PathHelper.php');
 	require_once( __DIR__ . '/../data/orders_class.php');
-	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
+	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
 	header("HTTP/1.0 404 Not Found");
 	echo 'Feature turned off';
