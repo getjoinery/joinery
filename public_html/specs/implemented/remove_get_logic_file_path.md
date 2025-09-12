@@ -41,7 +41,9 @@ ThemeHelper::includeThemeFile('logic/example_logic.php');
 ### For Plugin-Specific Logic
 ```php
 // When called from a plugin view, specify the plugin
-ThemeHelper::includeThemeFile('logic/example_logic.php', null, [], 'plugin_name');
+// NOTE: Updated syntax after parameter simplification (2025-09-12)
+ThemeHelper::includeThemeFile('logic/example_logic.php', 'plugin_name');
+// OLD: ThemeHelper::includeThemeFile('logic/example_logic.php', null, [], 'plugin_name');
 ```
 
 ### Override Chain
@@ -108,9 +110,10 @@ ThemeHelper::includeThemeFile('logic/page_logic.php');
 // OLD (in plugin view)
 require_once(LibraryFunctions::get_logic_file_path('devices_logic.php'));
 
-// NEW (with plugin context)
+// NEW (with plugin context) - Updated syntax after parameter simplification (2025-09-12)
 $current_plugin = basename(dirname(dirname(__DIR__))); // Detect plugin from path
-ThemeHelper::includeThemeFile('logic/devices_logic.php', null, [], $current_plugin);
+ThemeHelper::includeThemeFile('logic/devices_logic.php', $current_plugin);
+// OLD: ThemeHelper::includeThemeFile('logic/devices_logic.php', null, [], $current_plugin);
 ```
 
 ## Testing Requirements

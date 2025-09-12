@@ -186,15 +186,19 @@ class ThemeHelper extends ComponentBase {
     }
     
     /**
-     * Include file from theme with fallback to plugin and base (static helper)
+     * Include file from theme with fallback chain support
      * 
-     * @param string $path Path to file to include
-     * @param string|null $themeName Optional theme name override
-     * @param array $variables Variables to make available in the included file
-     * @param string|null $plugin_specify Optional plugin name to use for fallback
-     * @return bool Success
+     * Searches for files in this order:
+     * 1. Theme override: theme/{active_theme}/{path}
+     * 2. Plugin version: plugins/{from_plugin}/{path} (if plugin specified or auto-detected)
+     * 3. Base fallback: {path}
+     * 
+     * @param string $path File path relative to theme/plugin directory (must include .php extension)
+     * @param string|null $from_plugin Plugin to load file from (null = auto-detect from route context)
+     * @param array $variables Variables to extract into included file scope for use in the included file
+     * @return bool Success - true if file was found and included, false otherwise
      */
-    public static function includeThemeFile($path, $themeName = null, array $variables = [], $plugin_specify = null) {
+    public static function includeThemeFile($path, $from_plugin = null, array $variables = []) {
         // STRICT VALIDATION in debug mode: Path must include .php extension
         $settings = Globalvars::get_instance();
         if ($settings->get_setting('debug') == '1') {
@@ -219,9 +223,11 @@ class ThemeHelper extends ComponentBase {
             }
         }
         
-        if ($themeName === null) {
-            $themeName = self::getActive();
-        }
+        // Get active theme for file resolution
+        $themeName = self::getActive();
+        
+        // Map parameter to internal variable for implementation
+        $plugin_specify = $from_plugin;
         
         // Determine if path starts with 'includes/' (theme-specific includes)
         $is_includes_path = strpos($path, 'includes/') === 0;
@@ -483,15 +489,15 @@ class ThemeHelper extends ComponentBase {
     /**
      * New method for views that MUST exist (used by routes)
      */
-    public static function requireThemeFile($path, $themeName = null, $variables = [], $plugin_specify = null) {
-        $result = self::includeThemeFile($path, $themeName, $variables, $plugin_specify);
+    public static function requireThemeFile($path, $from_plugin = null, $variables = []) {
+        $result = self::includeThemeFile($path, $from_plugin, $variables);
         
         if (!$result) {
             $settings = Globalvars::get_instance();
             $debug = $settings->get_setting('debug') == '1';
             
-            $plugin = $plugin_specify ?: RouteHelper::getCurrentPlugin();
-            $attempted = self::getViewResolutionOrder($path, $themeName, $plugin);
+            $plugin = $from_plugin ?: RouteHelper::getCurrentPlugin();
+            $attempted = self::getViewResolutionOrder($path, self::getActive(), $plugin);
             error_log("Required view not found: {$path}");
             
             if ($debug) {

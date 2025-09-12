@@ -628,9 +628,12 @@ $routes = [
 
 2. **`ThemeHelper::includeThemeFile()`** - With override chain
    ```php
-   // In plugin views - specify plugin as 4th parameter
-   ThemeHelper::includeThemeFile('logic/devices_logic.php', null, [], 'controld');
-   ThemeHelper::includeThemeFile('views/profile/devices.php', null, [], 'controld');
+   // In plugin views - specify plugin as 2nd parameter
+   ThemeHelper::includeThemeFile('logic/devices_logic.php', 'controld');
+   ThemeHelper::includeThemeFile('views/profile/devices.php', 'controld');
+   
+   // With variables as 3rd parameter
+   ThemeHelper::includeThemeFile('views/profile/devices.php', 'controld', ['user' => $user]);
    ```
    **Override chain:** theme → plugin → base
 
