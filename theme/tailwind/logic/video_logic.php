@@ -1,10 +1,10 @@
 <?php
 
 function video_logic($get_vars, $post_vars, $video, $params){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/videos_class.php');
+	PathHelper::requireOnce('data/videos_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

@@ -108,7 +108,7 @@ class PublicPage extends PublicPageBase {
 		//if($title){
 			
 		$output .= '
-    <div class="breadcumb-wrapper " data-bg-src="/theme/sassa/assets/img/bg/breadcumb-bg.jpg">
+    <div class="breadcumb-wrapper " data-bg-src="/plugins/controld/assets/img/bg/breadcumb-bg.jpg">
         <div class="container">
            <div class="breadcumb-content">
                 <h1 class="breadcumb-title">'.$title.'</h1>
@@ -243,22 +243,22 @@ Career Area
 
     <!-- Favicons - Place favicon.ico in the root directory -->
 	<!--
-    <link rel="apple-touch-icon" sizes="57x57" href="/theme/sassa/assets/img/favicons/apple-icon-57x57.png">
-    <link rel="apple-touch-icon" sizes="60x60" href="/theme/sassa/assets/img/favicons/apple-icon-60x60.png">
-    <link rel="apple-touch-icon" sizes="72x72" href="/theme/sassa/assets/img/favicons/apple-icon-72x72.png">
-    <link rel="apple-touch-icon" sizes="76x76" href="/theme/sassa/assets/img/favicons/apple-icon-76x76.png">
-    <link rel="apple-touch-icon" sizes="114x114" href="/theme/sassa/assets/img/favicons/apple-icon-114x114.png">
-    <link rel="apple-touch-icon" sizes="120x120" href="/theme/sassa/assets/img/favicons/apple-icon-120x120.png">
-    <link rel="apple-touch-icon" sizes="144x144" href="/theme/sassa/assets/img/favicons/apple-icon-144x144.png">
-    <link rel="apple-touch-icon" sizes="152x152" href="/theme/sassa/assets/img/favicons/apple-icon-152x152.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/theme/sassa/assets/img/favicons/apple-icon-180x180.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="/theme/sassa/assets/img/favicons/android-icon-192x192.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/theme/sassa/assets/img/favicons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="96x96" href="/theme/sassa/assets/img/favicons/favicon-96x96.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/theme/sassa/assets/img/favicons/favicon-16x16.png">
-    <link rel="manifest" href="/theme/sassa/assets/img/favicons/manifest.json">
+    <link rel="apple-touch-icon" sizes="57x57" href="/plugins/controld/assets/img/favicons/apple-icon-57x57.png">
+    <link rel="apple-touch-icon" sizes="60x60" href="/plugins/controld/assets/img/favicons/apple-icon-60x60.png">
+    <link rel="apple-touch-icon" sizes="72x72" href="/plugins/controld/assets/img/favicons/apple-icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="/plugins/controld/assets/img/favicons/apple-icon-76x76.png">
+    <link rel="apple-touch-icon" sizes="114x114" href="/plugins/controld/assets/img/favicons/apple-icon-114x114.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="/plugins/controld/assets/img/favicons/apple-icon-120x120.png">
+    <link rel="apple-touch-icon" sizes="144x144" href="/plugins/controld/assets/img/favicons/apple-icon-144x144.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/plugins/controld/assets/img/favicons/apple-icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/plugins/controld/assets/img/favicons/apple-icon-180x180.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/plugins/controld/assets/img/favicons/android-icon-192x192.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/plugins/controld/assets/img/favicons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="/plugins/controld/assets/img/favicons/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/plugins/controld/assets/img/favicons/favicon-16x16.png">
+    <link rel="manifest" href="/plugins/controld/assets/img/favicons/manifest.json">
     <meta name="msapplication-TileColor" content="#ffffff">
-    <meta name="msapplication-TileImage" content="/theme/sassa/assets/img/favicons/ms-icon-144x144.png">
+    <meta name="msapplication-TileImage" content="/plugins/controld/assets/img/favicons/ms-icon-144x144.png">
     <meta name="theme-color" content="#ffffff">
 	-->
 
@@ -278,18 +278,18 @@ Career Area
 	    All CSS File
 	============================== -->
     <!-- Bootstrap -->
-    <!--<link rel="stylesheet" href="/theme/sassa/assets/css/bootstrap.min.css">-->
+    <!--<link rel="stylesheet" href="/plugins/controld/assets/css/bootstrap.min.css">-->
 	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Fontawesome Icon -->
-    <link rel="stylesheet" href="/theme/sassa/assets/css/fontawesome.min.css">
+    <link rel="stylesheet" href="/plugins/controld/assets/css/fontawesome.min.css">
 	<!--<link href="https://cdn.jsdelivr.net/npm/@r3dz0n3/fontawesome-pro@6.3.0/css/fontawesome.min.css" rel="stylesheet">-->
     <!-- Magnific Popup -->
-    <!--<link rel="stylesheet" href="/theme/sassa/assets/css/magnific-popup.min.css">-->
+    <!--<link rel="stylesheet" href="/plugins/controld/assets/css/magnific-popup.min.css">-->
 	<link href="https://cdn.jsdelivr.net/npm/magnific-popup@1.2.0/dist/magnific-popup.min.css" rel="stylesheet">
     <!-- Swiper Slider -->
-    <link rel="stylesheet" href="/theme/sassa/assets/css/swiper-bundle.min.css">
+    <link rel="stylesheet" href="/plugins/controld/assets/css/swiper-bundle.min.css">
     <!-- Theme Custom CSS -->
-    <link rel="stylesheet" href="/theme/sassa/assets/css/style.css">
+    <link rel="stylesheet" href="/plugins/controld/assets/css/style.css">
     <!-- ControlD Plugin CSS -->
     <link rel="stylesheet" href="/plugins/controld/assets/css/controld-plugin.css">
 
@@ -331,7 +331,7 @@ Career Area
             <div class="loading-container">
                 <div class="loading"></div>
                 <div class="preloader-logo">
-                    <a class="icon-masking" href="home-hr-management.html"><span data-mask-src="/theme/sassa/assets/img/preloader.svg" class="mask-icon"></span><img src="/theme/sassa/assets/img/preloader.svg" alt="Sassa"></a>
+                    <a class="icon-masking" href="home-hr-management.html"><span data-mask-src="/plugins/controld/assets/img/preloader.svg" class="mask-icon"></span><img src="/plugins/controld/assets/img/preloader.svg" alt="Sassa"></a>
                 </div>
             </div>
         </div>
@@ -365,7 +365,7 @@ Career Area
                 <div class="recent-post-wrap">
                     <div class="recent-post">
                         <div class="media-img">
-                            <a href="blog-details.html"><img src="/theme/sassa/assets/img/blog/recent-post-1-1.jpg" alt="Blog Image"></a>
+                            <a href="blog-details.html"><img src="/plugins/controld/assets/img/blog/recent-post-1-1.jpg" alt="Blog Image"></a>
                         </div>
                         <div class="media-body">
                             <h4 class="post-title"><a class="text-inherit" href="blog-details.html">The Benefits of Managed IT Services post could</a></h4>
@@ -376,7 +376,7 @@ Career Area
                     </div>
                     <div class="recent-post">
                         <div class="media-img">
-                            <a href="blog-details.html"><img src="/theme/sassa/assets/img/blog/recent-post-1-2.jpg" alt="Blog Image"></a>
+                            <a href="blog-details.html"><img src="/plugins/controld/assets/img/blog/recent-post-1-2.jpg" alt="Blog Image"></a>
                         </div>
                         <div class="media-body">
                             <h4 class="post-title"><a class="text-inherit" href="blog-details.html">The Benefits of Managed IT Services post could</a></h4>
@@ -387,7 +387,7 @@ Career Area
                     </div>
                     <div class="recent-post">
                         <div class="media-img">
-                            <a href="blog-details.html"><img src="/theme/sassa/assets/img/blog/recent-post-1-3.jpg" alt="Blog Image"></a>
+                            <a href="blog-details.html"><img src="/plugins/controld/assets/img/blog/recent-post-1-3.jpg" alt="Blog Image"></a>
                         </div>
                         <div class="media-body">
                             <h4 class="post-title"><a class="text-inherit" href="blog-details.html">The Benefits of Managed IT Services post could</a></h4>
@@ -403,13 +403,13 @@ Career Area
                 <div class="th-widget-contact">
                     <div class="info-box">
                         <div class="box-icon">
-                            <img src="/theme/sassa/assets/img/icon/location.svg" alt="">
+                            <img src="/plugins/controld/assets/img/icon/location.svg" alt="">
                         </div>
                         <p class="box-text">55 Main Street, 2nd block Malborne, Australia</p>
                     </div>
                     <div class="info-box">
                         <div class="box-icon">
-                            <img src="/theme/sassa/assets/img/icon/mail.svg" alt="">
+                            <img src="/plugins/controld/assets/img/icon/mail.svg" alt="">
                         </div>
                         <p class="box-text">
                             <a href="mailto:info@Sassa.com" class="box-link">info@Sassa.com</a>
@@ -418,7 +418,7 @@ Career Area
                     </div>
                     <div class="info-box">
                         <div class="box-icon">
-                            <img src="/theme/sassa/assets/img/icon/call.svg" alt="">
+                            <img src="/plugins/controld/assets/img/icon/call.svg" alt="">
                         </div>
                         <p class="box-text">
                             <a href="tel:+16365414789" class="box-link">+163 6541 4789</a>
@@ -438,7 +438,7 @@ Career Area
             <button class="th-menu-toggle"><i class="fal fa-times"></i></button>
             <div class="mobile-logo">
 			<a class="icon-masking" href="/"><span data-mask-src="/static_files/scrolldaddylogonopadding.svg" class="mask-icon"></span><img src="/static_files/scrolldaddylogonopadding.svg" alt="ScrollDaddy" width="200"></a>
-               <!-- <a href="/"><img src="/theme/sassa/assets/img/logo.svg" alt="Sassa"></a>-->
+               <!-- <a href="/"><img src="/plugins/controld/assets/img/logo.svg" alt="Sassa"></a>-->
             </div>
 
             <div class="th-mobile-menu">
@@ -638,7 +638,7 @@ Career Area
                             <div class="th-widget-about">
                                 <div class="about-logo">
 								<h3 class="hero-title">ScrollDaddy</h3>
-                                    <!--<a class="icon-masking" href="index.html"><span data-mask-src="/theme/sassa/assets/img/logo.svg" class="mask-icon"></span><img src="/theme/sassa/assets/img/logo.svg" alt="Sassa"></a>-->
+                                    <!--<a class="icon-masking" href="index.html"><span data-mask-src="/plugins/controld/assets/img/logo.svg" class="mask-icon"></span><img src="/plugins/controld/assets/img/logo.svg" alt="Sassa"></a>-->
                                 </div>
                                 <p class="about-text">Manage your screentime and protect against internet threats.</p>
                                 <!--<div class="th-social">
@@ -728,36 +728,36 @@ Career Area
     All Js File
 ============================== -->
 
-    <!--<script src="/theme/sassa/assets/js/vendor/jquery-3.7.1.min.js"></script> //LOADED IN THE HEADER-->  
+    <!--<script src="/plugins/controld/assets/js/vendor/jquery-3.7.1.min.js"></script> //LOADED IN THE HEADER-->  
 	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
     <!-- Swiper Slider -->
-    <script src="/theme/sassa/assets/js/swiper-bundle.min.js"></script>
+    <script src="/plugins/controld/assets/js/swiper-bundle.min.js"></script>
     <!-- Bootstrap -->
-    <!--<script src="/theme/sassa/assets/js/bootstrap.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/bootstrap.min.js"></script>-->
 	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.min.js"></script>
     <!-- Magnific Popup -->
-    <!--<script src="/theme/sassa/assets/js/jquery.magnific-popup.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/jquery.magnific-popup.min.js"></script>-->
 	<script src="https://cdn.jsdelivr.net/npm/magnific-popup@1.2.0/dist/jquery.magnific-popup.min.js"></script>
     <!-- Counter Up -->
-    <!--<script src="/theme/sassa/assets/js/jquery.counterup.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/jquery.counterup.min.js"></script>-->
     <!-- Circle Progress -->
-    <!--<script src="/theme/sassa/assets/js/circle-progress.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/circle-progress.js"></script>-->
     <!-- Range Slider -->
-    <!--<script src="/theme/sassa/assets/js/jquery-ui.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/jquery-ui.min.js"></script>-->
 	<script src="https://cdn.jsdelivr.net/npm/jquery-ui@1.14.1/dist/jquery-ui.min.js"></script>
     <!-- Imagesloadedr -->
-    <!--<script src="/theme/sassa/assets/js/imagesloaded.pkgd.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/imagesloaded.pkgd.min.js"></script>-->
     <!-- isotope -->
-    <!--<script src="/theme/sassa/assets/js/isotope.pkgd.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/isotope.pkgd.min.js"></script>-->
     <!-- Tilt.jquery -->
-    <!--<script src="/theme/sassa/assets/js/tilt.jquery.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/tilt.jquery.min.js"></script>-->
     <!-- Nice-select -->
-    <!--<script src="/theme/sassa/assets/js/nice-select.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/nice-select.min.js"></script>-->
     <!-- wow -->
-    <!--<script src="/theme/sassa/assets/js/wow.min.js"></script>-->
+    <!--<script src="/plugins/controld/assets/js/wow.min.js"></script>-->
 
     <!-- Main Js File -->
-    <script src="/theme/sassa/assets/js/main.js"></script>
+    <script src="/plugins/controld/assets/js/main.js"></script>
     <!-- ControlD Plugin JS -->
     <script src="/plugins/controld/assets/js/controld-plugin.js"></script>
 

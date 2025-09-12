@@ -1,11 +1,11 @@
 <?php
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	ThemeHelper::includeThemeFile('includes/PublicPageTW.php');
-	ThemeHelper::includeThemeFile('includes/FormWriterPublicTW.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	ThemeHelper::includeThemeFile('includes/FormWriter.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/points_class.php');
+	PathHelper::requireOnce('data/points_class.php');
 	
 		
 	echo 'turned off';
@@ -15,17 +15,17 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$node_dir = $settings->get_setting('node_dir');
 
 	if($_REQUEST['point']){
-		if(!FormWriterPublic::honeypot_check($_REQUEST)){
+		if(!FormWriter::honeypot_check($_REQUEST)){
 			throw new SystemDisplayableError(
 				'Please leave the "Extra email" field blank.');			
 		}
 		
-		if(!FormWriterPublic::antispam_question_check($_REQUEST)){
+		if(!FormWriter::antispam_question_check($_REQUEST)){
 			throw new SystemDisplayableError(
 				'Please type the correct value into the anti-spam field.');			
 		}		
 		
-		$captcha_success = FormWriterPublic::captcha_check($_REQUEST);
+		$captcha_success = FormWriter::captcha_check($_REQUEST);
 		if (!$captcha_success) {
 			$errormsg = 'Sorry, you must click the CAPTCHA to submit the form.';
 			throw new SystemDisplayableError($errormsg);	
@@ -150,11 +150,11 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	}
 
 
-	$formwriter = new FormWriterPublic("form1", TRUE);
+	$formwriter = new FormWriter("form1", TRUE);
 	
 	$validation_rules = array();
 	$validation_rules['point']['required']['value'] = 'true';
-	$validation_rules = FormWriterPublic::antispam_question_validate($validation_rules);
+	$validation_rules = FormWriter::antispam_question_validate($validation_rules);
 	echo $formwriter->set_validate($validation_rules);		
 	
 	echo $formwriter->begin_form("", "get", "/explorer");

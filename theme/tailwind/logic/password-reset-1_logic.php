@@ -1,11 +1,11 @@
 <?php
 function password_reset_1_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
+	// ErrorHandler is now guaranteed available - line removed
+	// SessionControl is now guaranteed available - line removed
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	PathHelper::requireOnce('data/users_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

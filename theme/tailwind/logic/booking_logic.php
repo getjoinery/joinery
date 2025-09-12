@@ -1,8 +1,8 @@
 <?php
 
 function booking_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
 
 	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
 	require_once(LibraryFunctions::get_plugin_file_path('booking_types_class.php', 'bookings', 'data'));

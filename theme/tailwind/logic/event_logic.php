@@ -1,14 +1,14 @@
 <?php
 
 function event_logic($get_vars, $post_vars, $event){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_sessions_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_registrants_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_waiting_lists_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/locations_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/event_sessions_class.php');
+	PathHelper::requireOnce('data/event_registrants_class.php');
+	PathHelper::requireOnce('data/event_waiting_lists_class.php');
+	PathHelper::requireOnce('data/locations_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

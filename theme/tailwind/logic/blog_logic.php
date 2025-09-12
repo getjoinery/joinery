@@ -3,9 +3,9 @@
 	function blog_logic ($get_vars, $post_vars) {
 		$page_vars = array();
 		
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Pager.php');
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/data/posts_class.php');   	
+		// SessionControl is now guaranteed available - line removed
+		PathHelper::requireOnce('includes/Pager.php');
+		PathHelper::requireOnce('data/posts_class.php');   	
 		
 		$settings = Globalvars::get_instance();
 		$page_vars['settings'] = $settings;

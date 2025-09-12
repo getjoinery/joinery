@@ -2,7 +2,7 @@
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('includes/Pager.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	// LibraryFunctions is now guaranteed available - line removed
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	PathHelper::requireOnce('data/posts_class.php'); 	
 

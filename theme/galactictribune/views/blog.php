@@ -1,6 +1,6 @@
 <?php
-    PathHelper::requireOnce('includes/SessionControl.php');
-    PathHelper::requireOnce('includes/LibraryFunctions.php');
+    // SessionControl is now guaranteed available - line removed
+    // LibraryFunctions is now guaranteed available - line removed
     PathHelper::requireOnce('data/users_class.php');
     PathHelper::requireOnce('data/groups_class.php');
     ThemeHelper::includeThemeFile('includes/PublicPage.php');

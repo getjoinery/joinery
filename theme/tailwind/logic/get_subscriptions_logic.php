@@ -1,12 +1,12 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	// ErrorHandler is now guaranteed available - line removed
+	PathHelper::requireOnce('includes/StripeHelper.php');
+	// PathHelper is now guaranteed available - line removed
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	PathHelper::requireOnce('data/users_class.php');
 
 	$settings = Globalvars::get_instance();
 

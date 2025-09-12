@@ -1,21 +1,21 @@
 <?php
 function cart_charge_logic($get_vars, $post_vars){
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/StripeHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PaypalHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/orders_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/phone_number_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_details_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/event_registrants_class.php'); 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_codes_class.php'); 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/coupon_code_uses_class.php'); 
+	PathHelper::requireOnce('includes/ShoppingCart.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
+	PathHelper::requireOnce('includes/StripeHelper.php');
+	PathHelper::requireOnce('includes/PaypalHelper.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	PathHelper::requireOnce('data/groups_class.php');
+	PathHelper::requireOnce('data/orders_class.php');
+	PathHelper::requireOnce('data/products_class.php');
+	PathHelper::requireOnce('data/address_class.php');
+	PathHelper::requireOnce('data/phone_number_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/product_details_class.php');
+	PathHelper::requireOnce('data/event_registrants_class.php'); 
+	PathHelper::requireOnce('data/coupon_codes_class.php'); 
+	PathHelper::requireOnce('data/coupon_code_uses_class.php'); 
 	
 			
 	$page_vars = array();

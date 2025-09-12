@@ -1,14 +1,14 @@
 <?php
 function survey_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/surveys_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/survey_questions_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/questions_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/question_options_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/survey_answers_class.php');
+	PathHelper::requireOnce('data/surveys_class.php');
+	PathHelper::requireOnce('data/survey_questions_class.php');
+	PathHelper::requireOnce('data/questions_class.php');
+	PathHelper::requireOnce('data/question_options_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/survey_answers_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

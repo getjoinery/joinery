@@ -1,11 +1,11 @@
 <?php
 function subscription_edit_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Pager.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
+	PathHelper::requireOnce('includes/Pager.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldaccounts_class.php');
+	PathHelper::requireOnce('data/products_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

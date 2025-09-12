@@ -1,15 +1,15 @@
 <?php
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
 	
 	
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('includes/FormWriterPublic.php');
+	ThemeHelper::includeThemeFile('includes/FormWriter.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_sessions_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_registrants_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/event_sessions_class.php');
+	PathHelper::requireOnce('data/event_registrants_class.php');
 
 	ThemeHelper::includeThemeFile('logic/event_logic.php');
 

@@ -1,5 +1,5 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PublicPageBase.php');
+PathHelper::requireOnce('includes/PublicPageBase.php');
 
 class PublicPage extends PublicPageBase {
 
@@ -64,7 +64,7 @@ class PublicPage extends PublicPageBase {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-		<meta name="description" content="<?php echo $options['description']; ?>">
+		<meta name="description" content="<?php echo isset($options['description']) ? $options['description'] : ''; ?>">
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
@@ -96,7 +96,9 @@ class PublicPage extends PublicPageBase {
 	<?php	
 	if(empty($options['noheader'])){
 		if($_SESSION['permission'] == 10){
-			include("admin_debug.php");
+			if(file_exists("admin_debug.php")) {
+				include("admin_debug.php");
+			}
 		}
 		?>	
 
@@ -480,7 +482,9 @@ class PublicPage extends PublicPageBase {
 
 	}
 
-	function tableheader($headers, $version="default"){
+	function tableheader($headers, $options=array(), $pager=NULL){
+		// Legacy compatibility - if $options is a string, treat it as $version
+		$version = is_string($options) ? $options : (isset($options['version']) ? $options['version'] : 'default');
 		//version VARIABLE TOGGLES BETWEEN STYLESHEETS
 		echo "<table class='sortable admin_table' id='$version' cellspacing='0' summary=''>
 			<caption></caption>
@@ -511,7 +515,7 @@ class PublicPage extends PublicPageBase {
 		$this->rowcount++;
 	}
 
-	function endtable(){
+	function endtable($pager = null){
 		$this->rowcount = 0;
 		echo '</table>';
 	}

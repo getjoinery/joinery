@@ -2,8 +2,8 @@
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function products_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
 	PathHelper::requireOnce('includes/Pager.php');
 	PathHelper::requireOnce('data/products_class.php');
 	PathHelper::requireOnce('data/users_class.php');

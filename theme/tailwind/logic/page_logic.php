@@ -1,11 +1,11 @@
 <?php
 
 function page_logic($get_vars, $post_vars, $page, $params){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/page_contents_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/pages_class.php');
+	PathHelper::requireOnce('data/page_contents_class.php');
+	PathHelper::requireOnce('data/pages_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

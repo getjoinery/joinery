@@ -1,13 +1,13 @@
 <?php
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
 	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('includes/FormWriterPublic.php');
+	ThemeHelper::includeThemeFile('includes/FormWriter.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/address_class.php');
+	PathHelper::requireOnce('data/users_class.php');
 
 	$session = SessionControl::get_instance();
 

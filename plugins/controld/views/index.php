@@ -53,9 +53,9 @@ Hero Area
                         </div><!--
                         <div class="client-box mb-sm-0 mb-3">
                             <div class="client-thumb-group">
-                                <div class="thumb"><img src="/theme/sassa/assets/img/shape/client-1-1.png" alt="avater"></div>
-                                <div class="thumb"><img src="/theme/sassa/assets/img/shape/client-1-2.png" alt="avater"></div>
-                                <div class="thumb"><img src="/theme/sassa/assets/img/shape/client-1-3.png" alt="avater"></div>
+                                <div class="thumb"><img src="/plugins/controld/assets/img/shape/client-1-1.png" alt="avater"></div>
+                                <div class="thumb"><img src="/plugins/controld/assets/img/shape/client-1-2.png" alt="avater"></div>
+                                <div class="thumb"><img src="/plugins/controld/assets/img/shape/client-1-3.png" alt="avater"></div>
                                 <div class="thumb icon"><i class="fa-regular fa-plus"></i></div>
                             </div>
 							
@@ -117,7 +117,7 @@ About Area
                 <div class="col-md-6 col-xl-3">
                     <div class="feature-card ">
                         <!--<div class="box-icon">
-                            <img src="/theme/sassa/assets/img/icon/feature_1_1.svg" alt="Icon">
+                            <img src="/plugins/controld/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
                         <h3 class="box-title"><a href="#">Block Social Media</a></h3>
                         <p class="box-text">Block Facebook, Instagram, TikTok, and more.</p>
@@ -127,7 +127,7 @@ About Area
                 <div class="col-md-6 col-xl-3">
                     <div class="feature-card">
                          <!--<div class="box-icon">
-                            <img src="/theme/sassa/assets/img/icon/feature_1_1.svg" alt="Icon">
+                            <img src="/plugins/controld/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
                         <h3 class="box-title"><a href="#">Protect yourself online</a></h3>
                         <p class="box-text">Block known malware, phishing, and virus related sites.</p>
@@ -137,7 +137,7 @@ About Area
                 <div class="col-md-6 col-xl-3">
                     <div class="feature-card">
                          <!--<div class="box-icon">
-                            <img src="/theme/sassa/assets/img/icon/feature_1_1.svg" alt="Icon">
+                            <img src="/plugins/controld/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
                         <h3 class="box-title"><a href="#">Filter what you consume</a></h3>
                         <p class="box-text">Integrated ad blocker that works before content even gets to your computer.</p>
@@ -147,7 +147,7 @@ About Area
                 <div class="col-md-6 col-xl-3">
                     <div class="feature-card ">
                          <!--<div class="box-icon">
-                            <img src="/theme/sassa/assets/img/icon/feature_1_1.svg" alt="Icon">
+                            <img src="/plugins/controld/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
                         <h3 class="box-title"><a href="#">Block full time or scheduled</a></h3>
                         <p class="box-text">Choose to block full time, and on a schedule separately.</p>

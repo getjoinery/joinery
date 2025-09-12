@@ -4,17 +4,17 @@ function register_logic($get_vars, $post_vars){
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
 	if ($ajax) { 
-		require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AjaxErrorHandler.php');
+		PathHelper::requireOnce('includes/AjaxErrorHandler.php');
 	}
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/EmailTemplate.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SingleRowAccessor.php');
+	PathHelper::requireOnce('includes/Activation.php');
+	PathHelper::requireOnce('includes/EmailTemplate.php');
+	// ErrorHandler is now guaranteed available - line removed
+	// SessionControl is now guaranteed available - line removed
+	PathHelper::requireOnce('includes/SingleRowAccessor.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/address_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/address_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

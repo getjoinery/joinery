@@ -1,6 +1,6 @@
 {
   "name": "tailwind",
-  "displayName": "Tailwind CSS Theme",
+  "display_name": "Tailwind CSS Theme",
   "version": "1.0.0",
   "description": "Tailwind CSS based theme (legacy)",
   "author": "Joinery Team",

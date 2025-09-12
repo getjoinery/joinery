@@ -1,16 +1,16 @@
 <?php
 function product_logic($get_vars, $post_vars, $product){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ShoppingCart.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SystemClass.php');
+	// LibraryFunctions is now guaranteed available - line removed
+	// ErrorHandler is now guaranteed available - line removed
+	// SessionControl is now guaranteed available - line removed
+	PathHelper::requireOnce('includes/ShoppingCart.php');
+	PathHelper::requireOnce('includes/SystemClass.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/questions_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirements_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/product_requirement_instances_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/questions_class.php');
+	PathHelper::requireOnce('data/products_class.php');
+	PathHelper::requireOnce('data/product_requirements_class.php');
+	PathHelper::requireOnce('data/product_requirement_instances_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

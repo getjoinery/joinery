@@ -1,5 +1,5 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/settings_class.php');
+	PathHelper::requireOnce('data/settings_class.php');
 	$settings = Globalvars::get_instance();
 	
 header('Content-Type: text/plain');

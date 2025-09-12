@@ -1,25 +1,25 @@
 <?php
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	ThemeHelper::includeThemeFile('includes/PublicPageTW.php');
-	ThemeHelper::includeThemeFile('includes/FormWriterPublicTW.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
+	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	ThemeHelper::includeThemeFile('includes/FormWriter.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
+	PathHelper::requireOnce('data/page_contents_class.php');
 	ThemeHelper::includeThemeFile('logic/events_logic.php');
 	$page_vars = events_logic($_GET, $_POST);
 	$events = $page_vars['events'];
 
 	$session = SessionControl::get_instance();
 
-	$page = new PublicPageTW();
+	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Homepage',
 	);
 	$page->public_header($hoptions);
 
-	echo PublicPageTW::BeginPage('');
+	echo PublicPage::BeginPage('');
 	
 	?>
 	
@@ -444,7 +444,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 		<?php
 
-	echo PublicPageTW::EndPage();
+	echo PublicPage::EndPage();
 
 	$page->public_footer(array('track'=>TRUE));
 ?>

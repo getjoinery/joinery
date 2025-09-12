@@ -3,10 +3,10 @@
 function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 	$event_id = LibraryFunctions::fetch_variable_local($event_id, 'sdirection', NULL, 'required', '', 'safemode', 'int');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/events_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/event_waiting_lists_class.php');
+	// SessionControl is now guaranteed available - line removed
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/events_class.php');
+	PathHelper::requireOnce('data/event_waiting_lists_class.php');
 	
 	$event_id = LibraryFunctions::fetch_variable_local($event_id, '', 1, 'Event id is missing', '', 'safemode', 'int');
 	

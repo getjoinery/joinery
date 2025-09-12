@@ -1,12 +1,12 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once( __DIR__ . '/../../../includes/FormWriterMaster.php');
+// DbConnector is now guaranteed available - line removed
+// Globalvars is now guaranteed available - line removed
+PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
 
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriter extends FormWriterMaster {
+class FormWriter extends FormWriterMasterTailwind {
 
 	public $validate_style_info = 'errorElement: "p",
 							errorClass: "form-container",

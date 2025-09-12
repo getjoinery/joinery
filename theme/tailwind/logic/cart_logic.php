@@ -1,16 +1,16 @@
 <?php
 
 function cart_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/SessionControl.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/ShoppingCart.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/StripeHelper.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PaypalHelper.php');
+	// SessionControl is now guaranteed available - line removed
+	// LibraryFunctions is now guaranteed available - line removed
+	PathHelper::requireOnce('includes/ShoppingCart.php');
+	PathHelper::requireOnce('includes/StripeHelper.php');
+	PathHelper::requireOnce('includes/PaypalHelper.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/products_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/address_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/data/coupon_codes_class.php');
+	PathHelper::requireOnce('data/products_class.php');
+	PathHelper::requireOnce('data/address_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('data/coupon_codes_class.php');
 	
 	$page_vars = array();
 
