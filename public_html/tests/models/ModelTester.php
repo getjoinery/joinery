@@ -916,7 +916,9 @@ class ModelTester {
         $spec = $model_class::$field_specifications[$field] ?? [];
         $type = $spec['type'] ?? 'varchar(255)';
         
-        $field_length = LibraryFunctions::extract_length_from_spec($type);
+        // Extract length from type specification (e.g., "varchar(255)" -> "255")
+        preg_match_all('!\d+!', $type, $matches);
+        $field_length = $matches[0][0] ?? 255; // Default to 255 if no length found
         $base_value = LibraryFunctions::random_string($field_length);
         
         // Make it unique with index
