@@ -14,6 +14,24 @@ abstract class FormWriterBase {
 	protected $captcha_public;
 	protected $captcha_private;
 	protected $use_tabindex;
+	
+	/**
+	 * Default validation styling information
+	 * Can be overridden by child classes for framework-specific styling
+	 */
+	public $validate_style_info = 'errorElement: "span",
+		errorClass: "text-danger",
+		highlight: function(element, errorClass) {
+			var name = element.name.replace(/[\[\]]/gi, "");
+			$("#"+name).addClass("error");
+		},
+		unhighlight: function(element, errorClass) {
+			var name = element.name.replace(/[\[\]]/gi, "");
+			$("#"+name).removeClass("error");
+		},
+		errorPlacement: function(error, element) {
+			error.appendTo(element.parents(".errorplacement").eq(0));
+		}';
 
 	/**
 	 * FormWriter constructor
@@ -302,6 +320,119 @@ abstract class FormWriterBase {
 	 */
 	function hiddeninput($id, $value) {
 		return '<input type="hidden" class="hidden" name="'.$id.'" id="'.$id.'" value="'.$value.'" />';
+	}
+
+	/**
+	 * Generate basic form opening tag
+	 * Child classes can override this method completely for framework-specific implementations
+	 * @param string $class CSS classes for the form
+	 * @param string $method HTTP method (GET, POST)
+	 * @param string $action Form action URL
+	 * @param string $charset Character encoding (default: UTF-8)
+	 * @param string $onsubmit JavaScript onsubmit handler (optional)
+	 * @return string HTML for form opening tag
+	 */
+	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = null) {
+		$output = '<form id="' . $this->formid . '" class="' . $class . '" name="' . $this->formid . '" method="' . $method . '" action="' . $action . '" accept-charset="' . $charset . '">';
+		return $output;
+	}
+
+	/**
+	 * Generate basic form closing tag
+	 * Child classes can override this method completely for framework-specific implementations
+	 * @return string HTML for form closing tag
+	 */
+	function end_form() {
+		return '</form>';
+	}
+
+	/**
+	 * Generate form validation JavaScript
+	 * @param array $validation_rules Array of validation rules
+	 * @param string $custom_js Optional custom JavaScript to include
+	 * @param boolean $debug Whether to include debug functionality
+	 * @return string HTML with JavaScript for form validation
+	 */
+	function set_validate($validation_rules, $custom_js = NULL, $debug = false) {
+		$debugtext = '';
+		if ($debug) {
+			$debugtext = ',
+			invalidHandler: function(event, validator) {
+				if (validator.numberOfInvalids()) {
+					let errorList = "Please fix the following errors:\\n\\n";
+					$.each(validator.errorList, function(index, error) {
+						errorList += "- " + error.element.name + ": " + error.message + "\\n";
+					});
+					alert(errorList);
+				}
+			}';
+		}
+		
+		$output = '
+		<script type="text/javascript">
+			$(document).ready(function() {
+				// Custom phone number validator
+				jQuery.validator.addMethod("phoneUS", function(phone_number, element) {
+					phone_number = phone_number.replace(/\\s+/g, "");
+					return this.optional(element) || phone_number.length > 9 &&
+						phone_number.match(/^(1-?)?(\([2-9]\\d{2}\)|[2-9]\\d{2})-?[2-9]\\d{2}-?\\d{4}$/);
+				}, "Please specify a valid phone number");
+				
+				// Time parsing helper function
+				function parseTime(timeStr) {
+					var parts = timeStr.split(":");
+					return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+				}
+
+				// Custom validator to check that end_time is greater than start_time
+				$.validator.addMethod("timeGreaterThan", function(value, element, param) {
+					var startVal = $(param).val();
+					if (!startVal || !value) {
+						return true; // Let the required rule handle empty fields
+					}
+					return parseTime(value) > parseTime(startVal);
+				}, "End time must be after start time.");
+
+				$("#'.$this->formid.'").validate({
+					'.$custom_js.'
+					rules: {';
+		
+		$output .= "\r\n";
+		foreach ($validation_rules as $name => $rules) {
+			$output .= "\t\t\t\t\t\t" . $name . ': {';
+			$output .= "\r\n";
+			foreach ($rules as $type => $value) {
+				$output .= "\t\t\t\t\t\t\t" . $type . ': ' . $value['value'] . ',';
+				$output .= "\r\n";
+			}
+			$output .= "\t\t\t\t\t\t" . '},';
+			$output .= "\r\n";
+		}
+		$output .= "\t\t\t\t\t" . '},';
+		$output .= "\r\n";
+		
+		$output .= "\t\t\t\t\t" . 'messages: {';
+		$output .= "\r\n";
+		foreach ($validation_rules as $name => $rules) {
+			foreach ($rules as $rule_name => $rule_values) {
+				if (!empty($rule_values['message'])) {
+					$output .= "\t\t\t\t\t\t" . $name . ': {';
+					$output .= "\r\n";
+					$output .= "\t\t\t\t\t\t\t" . $rule_name . ': ' . $rule_values['message'] . ',';
+					$output .= "\r\n";
+					$output .= "\t\t\t\t\t\t" . '},';
+					$output .= "\r\n";
+				}
+			}
+		}
+		$output .= "\t\t\t\t\t" . '},';	
+		$output .= "\r\n";							
+		$output .= "\t\t\t\t\t" . $this->validate_style_info . $debugtext . '
+				});
+			});
+		</script>';
+
+		return $output;
 	}
 
 }

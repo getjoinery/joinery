@@ -142,60 +142,7 @@ class FormWriterMasterTailwind extends FormWriterBase {
 		return '</div>';
 	}
 	
-	function set_validate($validation_rules){
-		
-		$output = '
-		<script type="text/javascript">
-			$(document).ready(function() {
-
-				jQuery.validator.addMethod("phoneUS", function(phone_number, element) {
-				    phone_number = phone_number.replace(/\s+/g, "");
-					return this.optional(element) || phone_number.length > 9 &&
-						phone_number.match(/^(1-?)?(\([2-9]\d{2}\)|[2-9]\d{2})-?[2-9]\d{2}-?\d{4}$/);
-				}, "Please specify a valid phone number");
-
-					$("#'.$this->formid.'").validate({
-							rules: {';
-							$output .= "\r\n";
-							foreach($validation_rules as $name=>$rules){
-								$output .= $name .': {';
-								$output .= "\r\n";
-								foreach($rules as $type=>$value){
-									$output .=  $type . ': '. $value['value'] . ',';
-									$output .= "\r\n";
-								}
-								$output .=  '},';
-								$output .= "\r\n";
-							}
-							$output .=  '},';
-							$output .= "\r\n";
-							
-							$output .=  'messages: {';
-							$output .= "\r\n";
-							foreach($validation_rules as $name=>$rules){
-
-								foreach($rules as $rule_name=>$rule_values){
-									if($rule_values['message']){
-										$output .=  $name .': {';
-										$output .= "\r\n";
-										$output .=  $rule_name . ': '. $rule_values['message'] . ',';
-										$output .= "\r\n";
-										$output .=  '},';
-										$output .= "\r\n";
-									}
-								}
-							}
-							$output .=  '},';	
-							$output .= "\r\n";							
-							$output .=  $this->validate_style_info .'
-							});';
-
-			$output .= '});
-		  </script>';
-	
-		return $output;
-	
-	}
+	// set_validate method now inherited from FormWriterBase
 	
 
 
