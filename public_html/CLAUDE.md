@@ -10,24 +10,36 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 ## CRITICAL: File Include Rules
 
+**⚠️ NEVER REQUIRE PathHelper, Globalvars, or SessionControl - THEY ARE ALWAYS AVAILABLE! ⚠️**
+
 **NEVER use `$_SERVER['DOCUMENT_ROOT']` for include paths!**
 
 ### Core File Guarantees
-**Always available without requiring:** PathHelper, Globalvars, SessionControl
-- Loaded by RouteHelper for all non-static requests
-- Use directly in themes/plugins/views without require_once
-- NOT loaded for static assets (CSS/JS/images) for performance
+**These files are ALWAYS pre-loaded - NEVER use require/require_once for them:**
+- **PathHelper** - Always available in ALL PHP files (views, logic, includes, themes, plugins)
+- **Globalvars** - Always available in ALL PHP files  
+- **SessionControl** - Always available in ALL PHP files
+
+```php
+// ❌ WRONG - NEVER DO THIS
+require_once('PathHelper.php');
+require_once(__DIR__ . '/../includes/PathHelper.php');
+PathHelper::requireOnce('includes/PathHelper.php');
+
+// ✅ CORRECT - Just use them directly
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+$settings = Globalvars::get_instance();
+$session = SessionControl::get_instance();
+```
 
 ### Include Path Rules:
 - **Files in `/includes/`**: Use `PathHelper::requireOnce('includes/filename.php')`
 - **All other files**: Use `PathHelper::requireOnce('path/to/file.php')`
-- **Core files (PathHelper, Globalvars, SessionControl)**: Already loaded - never need to be required
+- **Core files (PathHelper, Globalvars, SessionControl)**: Already loaded - NEVER require them
 
 ```php
-// ✅ CORRECT
+// ✅ CORRECT for non-core files
 PathHelper::requireOnce('includes/LibraryFunctions.php');
-require_once(__DIR__ . '/../includes/PathHelper.php');  // from /data/ directory
-require_once(__DIR__ . '/PathHelper.php');              // from /includes/ directory
 
 // ❌ WRONG - NEVER do this
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/filename.php');
