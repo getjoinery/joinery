@@ -174,9 +174,9 @@ if (empty($errors)) {
 
     // Test theme functionality
     try {
-        $assetUrl = ThemeHelper::asset('css/theme.css');
+        $assetUrl = PathHelper::getThemeFilePath('theme.css', 'assets/css', 'web');
         echo "   Theme asset URL: {$assetUrl}\n";
-        
+
         $configValue = ThemeHelper::config('cssFramework', 'unknown');
         echo "   Theme CSS framework config: {$configValue}\n";
     } catch (Exception $e) {

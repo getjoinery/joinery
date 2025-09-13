@@ -2,7 +2,7 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('/includes/SessionControl.php');
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
-	ThemeHelper::includeThemeFile('logic/blog_logic.php');
+	require_once(PathHelper::getThemeFilePath('blog_logic.php', 'logic'));
 
 	$page_vars = blog_logic($_GET, $_POST);
 	

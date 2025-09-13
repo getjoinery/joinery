@@ -561,13 +561,14 @@ class RouteHelper {
             $viewVariables[$modelKey] = $model_instance;
         }
 
-        // Ensure view_path has .php extension for includeThemeFile
+        // Ensure view_path has .php extension for PathHelper::getThemeFilePath
         if (substr($view_path, -4) !== '.php') {
             $view_path .= '.php';
         }
         
         // Include view with explicit variables
-        if (ThemeHelper::includeThemeFile($view_path, null, $viewVariables)) {
+        if (file_exists(PathHelper::getThemeFilePath(basename($view_path), dirname($view_path)))) {
+            require_once(PathHelper::getThemeFilePath(basename($view_path), dirname($view_path)));
             return true;
         }
 
@@ -578,7 +579,8 @@ class RouteHelper {
             if (substr($default_view, -4) !== '.php') {
                 $default_view .= '.php';
             }
-            if (ThemeHelper::includeThemeFile($default_view, null, $viewVariables)) {
+            if (file_exists(PathHelper::getThemeFilePath(basename($default_view), dirname($default_view)))) {
+                require_once(PathHelper::getThemeFilePath(basename($default_view), dirname($default_view)));
                 return true;
             }
         }
@@ -1232,9 +1234,10 @@ class RouteHelper {
         // Try to find view file for any remaining paths
         $view_file = 'views/' . trim($request_path, '/') . '.php';
         error_log("Trying view fallback file: " . var_export($view_file, true));
-        if (ThemeHelper::includeThemeFile($view_file, null, ['is_valid_page' => true])) {
+        $is_valid_page = true; // Set before include
+        if (file_exists(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)))) {
+            require_once(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)));
             error_log("View fallback succeeded - exiting");
-            $is_valid_page = true;
             exit();
         }
         error_log("View fallback failed");

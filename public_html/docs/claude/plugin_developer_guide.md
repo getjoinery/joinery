@@ -313,7 +313,8 @@ $routes = [
         // Complex routing logic
         '/custom-handler' => function($params, $settings, $session, $template_directory) {
             // Custom logic here
-            return ThemeHelper::includeThemeFile('views/custom.php');
+            require_once(PathHelper::getThemeFilePath('custom.php', 'views'));
+            return true;
         },
     ],
 ];
@@ -626,20 +627,34 @@ $routes = [
    PathHelper::requireOnce('includes/MyHelper.php'); // System files
    ```
 
-2. **`ThemeHelper::includeThemeFile()`** - With override chain
+2. **`PathHelper::getThemeFilePath()`** - Theme-aware file resolution with override chain
    ```php
-   // In plugin views - specify plugin as 2nd parameter
-   ThemeHelper::includeThemeFile('logic/devices_logic.php', 'controld');
-   ThemeHelper::includeThemeFile('views/profile/devices.php', 'controld');
-   
-   // With variables as 3rd parameter
-   ThemeHelper::includeThemeFile('views/profile/devices.php', 'controld', ['user' => $user]);
+   // Files that can be overridden by themes
+   require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic'));
+   require_once(PathHelper::getThemeFilePath('devices.php', 'views/profile'));
+
+   // With explicit plugin context (5th parameter)
+   require_once(PathHelper::getThemeFilePath('devices.php', 'views/profile', 'system', null, 'controld'));
+
+   // Parameters: filename, subdirectory, path_format, theme_name, plugin_name
    ```
    **Override chain:** theme → plugin → base
 
 **When to use:**
-- `PathHelper`: Data models, helpers, non-overridable code
-- `ThemeHelper`: Views, logic, any overridable file
+- `PathHelper::requireOnce()`: System files, data models (wrapper around require_once)
+- `PathHelper::getIncludePath()`: Direct file access, no theme overrides needed (plugins, data files)
+- `PathHelper::getThemeFilePath()`: Files that themes/plugins can override (views, logic, includes)
+
+### File Override System
+
+**Important:** The file override system uses `PathHelper::getThemeFilePath()` which checks:
+1. Theme override: `/theme/{theme}/{subdirectory}/{filename}`
+2. Plugin version: `/plugins/{plugin}/{subdirectory}/{filename}`
+3. Base fallback: `/{subdirectory}/{filename}`
+
+Always use the two-parameter format:
+- First parameter: filename only (e.g., 'profile.php')
+- Second parameter: subdirectory path (e.g., 'views', 'logic', 'views/profile')
 
 ## Development Workflow
 

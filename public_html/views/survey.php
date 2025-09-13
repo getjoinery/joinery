@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
-	ThemeHelper::includeThemeFile('logic/survey_logic.php');
+	require_once(PathHelper::getThemeFilePath('survey_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 
