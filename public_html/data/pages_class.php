@@ -55,7 +55,7 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 		//LOOK FOR THE SCRIPT FILE AND REPLACE CONTENT PLACEHOLDERS {{}}
 		if($this->get('pag_script_filename')){
 			// Include the logic file using ThemeHelper
-			ThemeHelper::includeThemeFile('logic/' . $this->get('pag_script_filename'));
+			require_once(PathHelper::getThemeFilePath($this->get('pag_script_filename'), 'logic'));
 
 			$content_out = $this->get('pag_body');
 			

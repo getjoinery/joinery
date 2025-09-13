@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	ThemeHelper::includeThemeFile('logic/event_withdraw_logic.php');
+	require_once(PathHelper::getThemeFilePath('event_withdraw_logic.php', 'logic'));
 
 
 	$page = new PublicPage();

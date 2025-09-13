@@ -2,7 +2,7 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	ThemeHelper::includeThemeFile('logic/cart_logic.php');
+	require_once(PathHelper::getThemeFilePath('cart_logic.php', 'logic'));
 
 	$page_vars = cart_logic($_GET, $_POST);
 	$cart = $page_vars['cart'];

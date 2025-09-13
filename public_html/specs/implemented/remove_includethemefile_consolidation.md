@@ -162,9 +162,8 @@ public static function getThemeFilePath($filename, $subdirectory='', $path_forma
         error_log("  Base: $base_path");
     }
     
-    // Return false to indicate file not found
-    // Caller can decide whether to throw exception
-    return false;
+    // Throw exception when file not found
+    throw new Exception($error_msg);
 }
 ```
 
@@ -601,22 +600,22 @@ if ($dryRun) {
 ## Implementation Checklist
 
 ### Phase 1 (Manual):
-- [ ] Enhance `PathHelper::getThemeFilePath()` with new features
-- [ ] Manually update RouteHelper.php (3 complex instances)
-- [ ] Manually update serve.php (1 complex instance)
-- [ ] Manually update data/pages_class.php (dynamic path)
-- [ ] Manually update data/page_contents_class.php (dynamic path)
-- [ ] Remove 4 methods from ThemeHelper.php
-- [ ] Update CLAUDE.md documentation
-- [ ] Test Phase 1 changes thoroughly
+- [x] Enhance `PathHelper::getThemeFilePath()` with new features ✓ (completed 2025-01-13)
+- [x] Manually update RouteHelper.php (3 complex instances) ✓ (completed 2025-01-13)
+- [x] Manually update serve.php (1 complex instance) ✓ (completed 2025-01-13)
+- [x] Manually update data/pages_class.php (dynamic path) ✓ (completed 2025-01-13)
+- [x] Manually update data/page_contents_class.php (dynamic path) ✓ (completed 2025-01-13)
+- [x] Remove 4 methods from ThemeHelper.php ✓ (completed 2025-01-13)
+- [x] Update CLAUDE.md documentation ✓ (completed 2025-01-13)
+- [x] Test Phase 1 changes thoroughly ✓ (completed 2025-01-13)
 
 ### Phase 2 (Automated):
-- [ ] Create migration script `/utils/migrate_includethemefile.php`
-- [ ] Run script in dry-run mode
-- [ ] Review proposed changes
-- [ ] Run script in actual mode
-- [ ] Verify PHP syntax on all modified files
-- [ ] Run comprehensive test suite
+- [x] Create migration script `/utils/migrate_includethemefile.php` ✓ (completed 2025-01-13)
+- [x] Run script in dry-run mode ✓ (completed 2025-01-13)
+- [x] Review proposed changes ✓ (completed 2025-01-13)
+- [x] Run script in actual mode ✓ (completed 2025-01-13)
+- [x] Verify PHP syntax on all modified files ✓ (completed 2025-01-13)
+- [x] Run comprehensive test suite ✓ (completed 2025-01-13)
 - [ ] Commit all changes
 
 ## Success Criteria

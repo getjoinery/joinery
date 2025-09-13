@@ -60,7 +60,7 @@ class PageContent extends SystemBase {	public static $prefix = 'pac';
 		//LOOK FOR THE SCRIPT FILE AND REPLACE CONTENT PLACEHOLDERS {{}}
 		if($this->get('pac_script_filename')){
 			// Include the logic file using ThemeHelper
-			ThemeHelper::includeThemeFile('logic/' . $this->get('pac_script_filename'));
+			require_once(PathHelper::getThemeFilePath($this->get('pac_script_filename'), 'logic'));
 
 			$content_out = $this->get_content();
 			
