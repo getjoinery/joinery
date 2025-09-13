@@ -83,7 +83,8 @@
 			</div>
 
 		</div>
-	<?php 
+	<?php
+	$settings = Globalvars::get_instance();
 	if($settings->get_setting('show_comments')){
 	?>	
 	
