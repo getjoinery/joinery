@@ -2,8 +2,8 @@
 	// LibraryFunctions is now guaranteed available - line removed
 	// PathHelper is now guaranteed available - line removed
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('logic/password-reset-1_logic.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('password-reset-1_logic.php', 'logic'));
 
 	$page_vars = password_reset_1_logic($_GET, $_POST);
 

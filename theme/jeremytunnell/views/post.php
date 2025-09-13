@@ -2,9 +2,9 @@
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	PathHelper::requireOnce('includes/ThemeHelper.php');
 	// LibraryFunctions is now guaranteed available - line removed
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
-	ThemeHelper::includeThemeFile('logic/post_logic.php');
+	require_once(PathHelper::getThemeFilePath('post_logic.php', 'logic'));
 	$page_vars = post_logic($_GET, $_POST, $post);
 	$post = $page_vars['post'];
 	$session = $page_vars['session'];

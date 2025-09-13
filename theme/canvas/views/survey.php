@@ -1,8 +1,8 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	ThemeHelper::includeThemeFile('logic/survey_logic.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('survey_logic.php', 'logic'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = survey_logic($_GET, $_POST);
 	$survey = $page_vars['survey'];

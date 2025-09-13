@@ -1,9 +1,9 @@
 <?php
 	// LibraryFunctions is now guaranteed available - line removed
-	ThemeHelper::includeThemeFile('logic/pricing_logic.php');
+	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic'));
 	// PathHelper is now guaranteed available - line removed
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = pricing_logic($_GET, $_POST);
 	

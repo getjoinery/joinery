@@ -2,7 +2,7 @@
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	PathHelper::requireOnce('includes/ShoppingCart.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$session = SessionControl::get_instance();
 	$session_id = $_GET['session_id']; 

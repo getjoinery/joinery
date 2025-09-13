@@ -1,6 +1,6 @@
 <?php
 	// LibraryFunctions is now guaranteed available - line removed
-	ThemeHelper::includeThemeFile('logic/cart_charge_logic.php');
+	require_once(PathHelper::getThemeFilePath('cart_charge_logic.php', 'logic'));
 
 	$page_vars = cart_charge_logic($_GET, $_POST);
 	

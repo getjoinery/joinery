@@ -3,8 +3,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('logic/ctldprofile_delete_logic.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('ctldprofile_delete_logic.php', 'logic'));
 
 	$page_vars = ctldprofile_delete_logic($_GET, $_POST);
 	$profile = $page_vars['profile'];

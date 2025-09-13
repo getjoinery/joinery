@@ -1,7 +1,7 @@
 <?php
 	// SessionControl is now guaranteed available - line removed
 	// LibraryFunctions is now guaranteed available - line removed
-	ThemeHelper::includeThemeFile('logic/blog_logic.php');
+	require_once(PathHelper::getThemeFilePath('blog_logic.php', 'logic'));
 
 	$page_vars = blog_logic($_GET, $_POST);
 	

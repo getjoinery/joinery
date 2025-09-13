@@ -3,8 +3,8 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('logic/contact_preferences_logic.php', null, [], 'controld');	
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic', 'system', null, 'controld'));	
 
 	$page_vars = contact_preferences_logic($_GET, $_POST);
 	$messages = $page_vars['messages'];

@@ -1,9 +1,9 @@
 <?php
 	// LibraryFunctions is now guaranteed available - line removed
-	ThemeHelper::includeThemeFile('logic/event_logic.php');
+	require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
 	// PathHelper is now guaranteed available - line removed
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
 	$page_vars = event_logic($_GET, $_POST, $event);
 	$event = $page_vars['event'];

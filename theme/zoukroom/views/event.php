@@ -4,14 +4,14 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	// LibraryFunctions is now guaranteed available - line removed
 	
 	
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('includes/FormWriter.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/event_sessions_class.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
 
-	ThemeHelper::includeThemeFile('logic/event_logic.php');
+	require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
 
 
 	$page_vars = event_logic($_GET, $_POST, $event, NULL);

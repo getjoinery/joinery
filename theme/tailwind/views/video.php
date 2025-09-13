@@ -1,8 +1,8 @@
 <?php
 	// PathHelper is now guaranteed available - line removed
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('logic/video_logic.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('video_logic.php', 'logic'));
 
 	$page_vars = video_logic($_GET, $_POST, $video, $params);
 	$video = $page_vars['video'];

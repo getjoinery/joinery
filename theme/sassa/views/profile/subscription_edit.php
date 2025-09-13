@@ -3,9 +3,9 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('logic/subscription_edit_logic.php');	
-	ThemeHelper::includeThemeFile('logic/pricing_logic.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('subscription_edit_logic.php', 'logic'));	
+	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic'));
 	
 	$page_vars = subscription_edit_logic($_GET, $_POST);
 	$current_plan_id = $page_vars['current_plan_id'];

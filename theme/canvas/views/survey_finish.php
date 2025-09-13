@@ -2,7 +2,7 @@
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/surveys_class.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$survey_id = LibraryFunctions::decode(LibraryFunctions::fetch_variable('survey_id', NULL, 0, 'Survey id is required'));
 

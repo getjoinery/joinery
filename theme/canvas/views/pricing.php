@@ -1,8 +1,8 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	ThemeHelper::includeThemeFile('logic/pricing_logic.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = pricing_logic($_GET, $_POST);
 	

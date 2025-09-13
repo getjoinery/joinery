@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	// PathHelper is already loaded
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$session = SessionControl::get_instance();
 	$session->logout();

@@ -3,7 +3,7 @@
 	// LibraryFunctions is now guaranteed available - line removed
 	// PathHelper is now guaranteed available - line removed
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/pages_class.php');

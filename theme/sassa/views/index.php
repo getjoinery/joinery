@@ -3,11 +3,11 @@
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/page_contents_class.php');
 
-	ThemeHelper::includeThemeFile('logic/pricing_logic.php');
+	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic'));
 
 	$page_vars = pricing_logic($_GET, $_POST);
 	$page_choice = $page_vars['page_choice'];

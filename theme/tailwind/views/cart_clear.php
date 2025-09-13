@@ -1,6 +1,6 @@
 <?php
 	// LibraryFunctions is now guaranteed available - line removed
-	ThemeHelper::includeThemeFile('logic/cart_clear_logic.php');
+	require_once(PathHelper::getThemeFilePath('cart_clear_logic.php', 'logic'));
 
 	$page_vars = cart_clear_logic($_GET, $_POST);
 	

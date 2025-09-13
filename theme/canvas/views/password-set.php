@@ -1,8 +1,8 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('logic/password-set_logic.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('password-set_logic.php', 'logic'));
 
 	$page_vars = password_set_logic($_GET, $_POST);
 

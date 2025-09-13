@@ -2,8 +2,8 @@
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 // PathHelper is already loaded
 PathHelper::requireOnce('includes/ThemeHelper.php');
-ThemeHelper::includeThemeFile('includes/PublicPage.php');
-ThemeHelper::includeThemeFile('logic/product_logic.php', null, [], 'controld');
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = product_logic($_GET, $_POST, $product);
 	$product = $page_vars['product'];

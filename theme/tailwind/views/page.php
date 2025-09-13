@@ -1,8 +1,8 @@
 <?php
 	// PathHelper is now guaranteed available - line removed
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('logic/page_logic.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('page_logic.php', 'logic'));
 
 	$page_vars = page_logic($_GET, $_POST, $page, $params);
 	$page = $page_vars['page'];

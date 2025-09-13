@@ -25,7 +25,7 @@ $routes = [
         // Items plugin routes (moved from plugin)
         '/items' => function($params, $settings, $session, $template_directory) {
             if($params[1] && $params[1] != 'tag') return false;
-            return ThemeHelper::includeThemeFile('views/items.php');
+            return require_once(PathHelper::getThemeFilePath('items.php', 'views'));
         },
     ],
 ];

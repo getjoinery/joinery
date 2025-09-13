@@ -2,7 +2,7 @@
 	// PathHelper is always available - never require it
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	ThemeHelper::includeThemeFile('logic/login_logic.php');
+	require_once(PathHelper::getThemeFilePath('login_logic.php', 'logic'));
 	
 	$page_vars = login_logic($_GET, $_POST);
 	$settings = $page_vars['settings'];

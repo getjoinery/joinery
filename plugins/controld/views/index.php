@@ -3,11 +3,11 @@
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	// PathHelper is already loaded
 PathHelper::requireOnce('includes/ThemeHelper.php');
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	PathHelper::requireOnce('data/page_contents_class.php');
 
-	ThemeHelper::includeThemeFile('logic/pricing_logic.php', null, [], 'controld');
+	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = pricing_logic($_GET, $_POST);
 	$page_choice = $page_vars['page_choice'];

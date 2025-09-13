@@ -2,8 +2,8 @@
 PathHelper::requireOnce('includes/ThemeHelper.php');
 	// SessionControl is now guaranteed available - line removed
 	// LibraryFunctions is now guaranteed available - line removed
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
-	ThemeHelper::includeThemeFile('includes/FormWriter.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/address_class.php');

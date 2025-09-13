@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('includes/Pager.php');
 	// LibraryFunctions is now guaranteed available - line removed
-	ThemeHelper::includeThemeFile('includes/PublicPage.php');
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	PathHelper::requireOnce('data/posts_class.php'); 	
 
 	$session = SessionControl::get_instance();
