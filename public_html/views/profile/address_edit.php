@@ -3,7 +3,7 @@
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	ThemeHelper::includeThemeFile('logic/address_edit_logic.php');
+	require_once(PathHelper::getThemeFilePath('address_edit_logic.php', 'logic'));
 	
 	$page_vars = address_edit_logic($_GET, $_POST);
 	$address_id = $page_vars['usa_address_id'];

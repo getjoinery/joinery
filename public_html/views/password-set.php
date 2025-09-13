@@ -2,7 +2,7 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	ThemeHelper::includeThemeFile('logic/password-set_logic.php');
+	require_once(PathHelper::getThemeFilePath('password-set_logic.php', 'logic'));
 
 	$page_vars = password_set_logic($_GET, $_POST);
 

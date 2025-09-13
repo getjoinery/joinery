@@ -283,7 +283,7 @@ class LibraryFunctions {
 	
 	
 	// Function get_logic_file_path() has been removed.
-	// Use ThemeHelper::includeThemeFile('logic/filename.php') instead.
+	// Use require_once(PathHelper::getThemeFilePath('filename.php', 'logic')) instead.
 	// This provides proper theme and plugin override support.
 	
 	//RETURNS WHETHER THE CURRENT SESSION IS UNDER SSL OR NOT

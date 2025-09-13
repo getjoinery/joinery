@@ -312,25 +312,38 @@ For complete guidance on creating admin interface pages, including required setu
    PathHelper::requireOnce('data/user_class.php');           // Data models
    ```
 
-2. **`ThemeHelper::includeThemeFile()`** - File loading with override chain
+2. **`PathHelper::getThemeFilePath()`** - Theme-aware file resolution with override chain
    ```php
-   // Views, logic, and other overridable files
-   ThemeHelper::includeThemeFile('views/profile.php');           // View files
-   ThemeHelper::includeThemeFile('logic/pricing_logic.php');     // Logic files
-   ThemeHelper::includeThemeFile('includes/PublicPage.php');     // Theme includes
-   
-   // Plugin context (2nd parameter)
-   ThemeHelper::includeThemeFile('logic/devices_logic.php', 'controld');
-   
-   // With variables (3rd parameter)
-   ThemeHelper::includeThemeFile('views/profile.php', null, ['user' => $user]);
+   // Files that can be overridden by themes
+   require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+   require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic'));
+   require_once(PathHelper::getThemeFilePath('profile.php', 'views'));
+
+   // With explicit plugin context (5th parameter)
+   require_once(PathHelper::getThemeFilePath('devices_logic.php', 'logic', 'system', null, 'controld'));
+
+   // Parameters: filename, subdirectory, path_format, theme_name, plugin_name
    ```
-   
+
    **Override chain:** theme/{theme}/path → plugins/{plugin}/path → /path
+   **Format:** Always use two parameters - filename and subdirectory separately
 
 **When to use each:**
-- `PathHelper::requireOnce()`: System files, data models, non-overridable code
-- `ThemeHelper::includeThemeFile()`: Views, logic, any file that themes/plugins should override
+- `PathHelper::requireOnce()`: System files, data models (wrapper around require_once)
+- `PathHelper::getIncludePath()`: Direct file access, no theme overrides needed (plugins, data files)
+- `PathHelper::getThemeFilePath()`: Files that themes/plugins can override (views, logic, includes)
+
+**Examples:**
+```php
+// System file - never overridden
+PathHelper::requireOnce('includes/LibraryFunctions.php');
+
+// Plugin file - direct access
+require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
+
+// Theme-overridable file
+require_once(PathHelper::getThemeFilePath('profile.php', 'views'));
+```
 
 ### Getting FormWriter Instances
 
@@ -507,7 +520,6 @@ See **📖 [Plugin Developer Guide](/docs/claude/plugin_developer_guide.md)** fo
 
 **ThemeHelper** - Manages theme metadata and provides theme-specific functionality
 - `getInstance($themeName)` - Get singleton instance for theme operations
-- `includeThemeFile($path, $from_plugin, $variables)` - Include files with override support (see File Loading Methods)
 - `asset($path, $themeName)` - Generate theme asset URLs with cache busting
 - `config($key, $default, $themeName)` - Get theme configuration values
 - `switchTheme($themeName)` - Change active theme system-wide

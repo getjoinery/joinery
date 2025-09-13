@@ -19,7 +19,7 @@ class PathHelper {
     }
     
     public static function getBasePath() {
-        return self::getRootDir();
+        return self::getRootDir() . '/';
     }
     
     public static function getAbsolutePath($relativePath) {
@@ -149,100 +149,147 @@ class PathHelper {
     }
     
     /**
-     * Get theme file path with fallback to base
-     * Moved from LibraryFunctions for proper architectural separation
+     * Get the full system path to a theme file with complete override chain support
+     *
+     * Resolution order:
+     * 1. Theme override: /theme/{theme}/{path}
+     * 2. Plugin context: /plugins/{plugin}/{path}
+     * 3. Base fallback: /{path}
+     *
+     * @param string $filename Filename only with .php extension (e.g., 'profile.php', 'PublicPage.php')
+     * @param string $subdirectory Subdirectory path without leading/trailing slashes (e.g., 'includes', 'assets/css')
+     * @param string $path_format 'system' for absolute paths, 'web' for URL paths
+     * @param string|null $theme_name Theme to use (null = current theme)
+     * @param string|null $plugin_name Plugin name (null = auto-detect from RouteHelper)
+     * @param bool $debug Enable debug output
+     * @return string|false Path to file or false if not found
+     * @throws Exception If file not found and required
      */
-    public static function getThemeFilePath($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $debug = false){
-        $siteDir = PathHelper::getBasePath();
-        
-        // SUBDIRECTORY WORKS WITH OR WITHOUT SLASH
-        if (substr($subdirectory, 0, 1) !== '/') {
-            $subdirectory = '/' . $subdirectory; // Add a forward slash if it doesn't exist
+    public static function getThemeFilePath($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $plugin_name=NULL, $debug = false) {
+
+        // STRICT INPUT VALIDATION - Enforce consistent format across codebase
+
+        // 1. Filename validation
+        if (empty($filename)) {
+            throw new Exception("Filename cannot be empty");
         }
-        
-        // IMPORTANT: Core system files must always load from system directories
-        // to prevent circular dependencies during bootstrap
-        $core_system_files = array('Globalvars.php', 'Globalvars_site.php', 'DbConnector.php', 'PathHelper.php');
-        $is_core_file = in_array($filename, $core_system_files);
-        
-        // Handle when specific theme is requested
+
+        // Removed PHP-only restriction to allow CSS, JS, and other asset files
+
+        // Filename cannot contain any directory separators
+        if (strpos($filename, '/') !== false || strpos($filename, '\\') !== false) {
+            throw new Exception("Filename cannot contain slashes. Use subdirectory parameter for path. Given: '$filename'");
+        }
+
+        // 2. Subdirectory validation
+        // Subdirectory cannot have leading or trailing slashes (none in current usage)
+        if (!empty($subdirectory)) {
+            if (substr($subdirectory, 0, 1) === '/' || substr($subdirectory, -1) === '/') {
+                throw new Exception("Subdirectory cannot have leading or trailing slashes. Given: '$subdirectory'. Use format: 'includes' or 'assets/css'");
+            }
+
+            // No double slashes allowed
+            if (strpos($subdirectory, '//') !== false) {
+                throw new Exception("Subdirectory cannot contain double slashes. Given: '$subdirectory'");
+            }
+
+            // No backslashes allowed (use forward slashes for nested paths)
+            if (strpos($subdirectory, '\\') !== false) {
+                throw new Exception("Subdirectory must use forward slashes. Given: '$subdirectory'");
+            }
+        }
+
+        // 3. Security validation - prevent path traversal
+        if (strpos($filename, '..') !== false || strpos($subdirectory, '..') !== false) {
+            throw new Exception("Path traversal attempt detected ('..') in filename or subdirectory");
+        }
+
+        // 4. Build clean path with exactly one slash between components
+        if ($subdirectory !== '') {
+            $relative_path = $subdirectory . '/' . $filename;
+        } else {
+            $relative_path = $filename;
+        }
+
+        // Get theme name if not specified
+        if ($theme_name === NULL) {
+            $theme_name = self::getActiveThemeDirectory();
+        }
+
+        // Auto-detect plugin name if not specified
+        if ($plugin_name === null && class_exists('RouteHelper')) {
+            $plugin_name = RouteHelper::getCurrentPlugin();
+        }
+
+
+        // Get the base directory - for 'system' we need full path, for 'web' we need URL path
+        $base_dir = self::getBasePath(); // Always need full path for file_exists checks
+
+        // 1. Try theme override first
         if ($theme_name) {
-            // Special handling for 'plugin' theme - use getActiveThemeDirectory
-            if ($theme_name === 'plugin') {
-                try {
-                    $theme_dir = self::getActiveThemeDirectory();
-                } catch (Exception $e) {
-                    // If we can't get the plugin theme directory, throw the error
-                    throw $e;
-                }
+            // getActiveThemeDirectory() returns "theme/falcon" or "plugins/pluginname"
+            // If it starts with "theme/" or "plugins/", use as-is, otherwise prepend "theme/"
+            if (strpos($theme_name, 'theme/') === 0 || strpos($theme_name, 'plugins/') === 0) {
+                $theme_check_path = $base_dir . $theme_name . '/' . $relative_path;
+                $theme_return_path = ($path_format === 'web') ? '/' . $theme_name . '/' . $relative_path : $theme_check_path;
             } else {
-                $theme_dir = "theme/$theme_name";
+                $theme_check_path = $base_dir . 'theme/' . $theme_name . '/' . $relative_path;
+                $theme_return_path = ($path_format === 'web') ? '/theme/' . $theme_name . '/' . $relative_path : $theme_check_path;
             }
-            $theme_file = $siteDir . '/' . $theme_dir . $subdirectory . '/' . $filename;
-            
-            if (file_exists($theme_file)) {
-                if ($path_format == 'system') {
-                    return $theme_file;  // Full system path
-                } else {
-                    return '/' . $theme_dir . $subdirectory . '/' . $filename;  // Web path
-                }
+            if ($debug) {
+                error_log("getThemeFilePath: Checking theme path: $theme_check_path");
             }
-            // Fall through to check base directory
-        }
-        // Don't use plugin theme for core files
-        else if (!$is_core_file) {
-            try {
-                // Use centralized method to get active theme directory
-                $theme_dir = self::getActiveThemeDirectory();
-                $theme_file = $siteDir . '/' . $theme_dir . $subdirectory . '/' . $filename;
-                
-                if (file_exists($theme_file)) {
-                    if ($path_format == 'system') {
-                        return $theme_file;  // Full system path
-                    } else {
-                        return '/' . $theme_dir . $subdirectory . '/' . $filename;  // Web path
-                    }
+            if (file_exists($theme_check_path)) {
+                if ($debug) {
+                    error_log("getThemeFilePath: Found in theme, returning: $theme_return_path");
                 }
-            } catch (Exception $e) {
-                // Log error and re-throw - don't silently fall back
-                error_log("Theme error: " . $e->getMessage());
-                throw $e;
+                return $theme_return_path;
             }
         }
-        
-        // Check base/default directory
-        $default_file = $siteDir . $subdirectory . '/' . $filename;
-        
+
+        // 2. Try plugin path if plugin name exists
+        if ($plugin_name) {
+            $plugin_check_path = $base_dir . 'plugins/' . $plugin_name . '/' . $relative_path;
+            $plugin_return_path = ($path_format === 'web') ? '/plugins/' . $plugin_name . '/' . $relative_path : $plugin_check_path;
+            if ($debug) {
+                error_log("getThemeFilePath: Checking plugin path: $plugin_check_path");
+            }
+            if (file_exists($plugin_check_path)) {
+                if ($debug) {
+                    error_log("getThemeFilePath: Found in plugin, returning: $plugin_return_path");
+                }
+                return $plugin_return_path;
+            }
+        }
+
+        // 3. Fall back to base directory
+        $base_check_path = $base_dir . $relative_path;
+        $base_return_path = ($path_format === 'web') ? '/' . $relative_path : $base_check_path;
         if ($debug) {
-            echo 'Theme directory: ' . (isset($theme_dir) ? $theme_dir : 'none') . '<br>';
-            echo 'Theme file: ' . (isset($theme_file) ? $theme_file : 'none') . '<br>';
-            echo 'Default file: ' . $default_file . '<br>';
+            error_log("getThemeFilePath: Checking base path: $base_check_path");
         }
-        
-        if (file_exists($default_file)) {
-            if ($path_format == 'system') {
-                return $default_file;
-            } else {
-                return $subdirectory . '/' . $filename;
+        if (file_exists($base_check_path)) {
+            if ($debug) {
+                error_log("getThemeFilePath: Found in base, returning: $base_return_path");
             }
+            return $base_return_path;
         }
-        
-        // Build helpful error message
-        $searched_paths = [];
-        if (isset($theme_file)) {
-            $searched_paths[] = $theme_file;
+
+        // File not found - throw exception with helpful error message
+        $error_msg = "File not found: $relative_path\n";
+        $error_msg .= "Searched locations:\n";
+        if ($theme_name) {
+            $error_msg .= "  Theme: " . (isset($theme_check_path) ? $theme_check_path : 'none') . "\n";
         }
-        $searched_paths[] = $default_file;
-        
-        $error_msg = "Theme file not found: $filename";
-        if (isset($theme_dir)) {
-            $error_msg .= " for theme directory '$theme_dir'";
+        if ($plugin_name) {
+            $error_msg .= "  Plugin: " . (isset($plugin_check_path) ? $plugin_check_path : 'none') . "\n";
         }
-        $error_msg .= "\nSearched paths:\n - " . implode("\n - ", $searched_paths);
-        
-        // Add helpful suggestion
-        $error_msg .= "\nSuggestion: Create $filename in your theme's $subdirectory directory or ensure the file exists in the base $subdirectory directory";
-        
+        $error_msg .= "  Base: $base_check_path";
+
+        if ($debug) {
+            error_log("getThemeFilePath: " . $error_msg);
+        }
+
         throw new Exception($error_msg);
     }
 }

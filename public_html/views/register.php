@@ -3,7 +3,7 @@
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	ThemeHelper::includeThemeFile('logic/register_logic.php');
+	require_once(PathHelper::getThemeFilePath('register_logic.php', 'logic'));
 
 	$page_vars = register_logic($_GET, $_POST);
 

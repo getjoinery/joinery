@@ -2,7 +2,7 @@
 	require_once(__DIR__ . '/../../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	ThemeHelper::includeThemeFile('logic/event_sessions_logic.php');	
+	require_once(PathHelper::getThemeFilePath('event_sessions_logic.php', 'logic'));	
 
 	$page_vars = event_sessions_logic($_GET, $_POST);
 	$pager = $page_vars['pager'];
