@@ -197,63 +197,113 @@ class LibraryFunctions {
 		
 
 		if($override_path){
+			if (!file_exists($override_path)) {
+				throw new Exception("Override FormWriter file not found: $override_path");
+			}
 			require_once($override_path);
-			$formwriter = new FormWriter($form_id);
-			return $formwriter;
+
+			if (!class_exists('FormWriter')) {
+				throw new Exception("FormWriter class not found in override file: $override_path");
+			}
+
+			try {
+				return new FormWriter($form_id);
+			} catch (Error $e) {
+				throw new Exception("Failed to instantiate override FormWriter: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+			}
 		}	
 		
 		if($override_name == 'admin'){
 			PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
-			$formwriter = new FormWriterMasterBootstrap($form_id);
-			return $formwriter;	
+			try {
+				return new FormWriterMasterBootstrap($form_id);
+			} catch (Error $e) {
+				throw new Exception("Failed to instantiate admin FormWriter (Bootstrap): " . $e->getMessage());
+			}
 		}
 		else if($override_name == 'tailwind'){
 			PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
-			$formwriter = new FormWriterMasterTailwind($form_id);
-			return $formwriter;	
+			try {
+				return new FormWriterMasterTailwind($form_id);
+			} catch (Error $e) {
+				throw new Exception("Failed to instantiate tailwind FormWriter: " . $e->getMessage());
+			}
 		}
 		
 		// Use ThemeHelper for theme-based selection
 		try {
 			PathHelper::requireOnce('includes/ThemeHelper.php');
 			$theme = ThemeHelper::getInstance(); // Gets current theme
-			
+
 			// First check if theme has custom FormWriter
 			$formWriterPath = $theme->getIncludePath('includes/FormWriter.php');
+
 			if (file_exists($formWriterPath)) {
 				require_once($formWriterPath);
-				return new FormWriter($form_id);
+
+				// Verify class exists after include
+				if (!class_exists('FormWriter')) {
+					throw new Exception("FormWriter class not found in theme file: $formWriterPath");
+				}
+
+				try {
+					return new FormWriter($form_id);
+				} catch (Error $e) {
+					throw new Exception("Failed to instantiate theme FormWriter: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+				}
 			}
-			
+
 			// Use base class from theme manifest
 			$baseClass = $theme->getFormWriterBase();
 			if ($baseClass && $baseClass !== 'FormWriter') {
 				$baseClassPath = PathHelper::getIncludePath("includes/{$baseClass}.php");
 				if (file_exists($baseClassPath)) {
 					require_once($baseClassPath);
-					return new $baseClass($form_id);
+
+					// Verify class exists after include
+					if (!class_exists($baseClass)) {
+						throw new Exception("FormWriter base class '$baseClass' not found in file: $baseClassPath");
+					}
+
+					try {
+						return new $baseClass($form_id);
+					} catch (Error $e) {
+						throw new Exception("Failed to instantiate FormWriter base class '$baseClass': " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+					}
 				}
 			}
-			
+
 			// If theme doesn't specify, determine from CSS framework
 			$cssFramework = $theme->getCssFramework();
 			switch($cssFramework) {
 				case 'bootstrap':
 					PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
-					return new FormWriterMasterBootstrap($form_id);
-					
+					try {
+						return new FormWriterMasterBootstrap($form_id);
+					} catch (Error $e) {
+						throw new Exception("Failed to instantiate FormWriterMasterBootstrap: " . $e->getMessage());
+					}
+
 				case 'tailwind':
 					PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
-					return new FormWriterMasterTailwind($form_id);
-					
+					try {
+						return new FormWriterMasterTailwind($form_id);
+					} catch (Error $e) {
+						throw new Exception("Failed to instantiate FormWriterMasterTailwind: " . $e->getMessage());
+					}
+
 				case 'uikit':
 					PathHelper::requireOnce('includes/FormWriterMaster.php');
-					return new FormWriterMaster($form_id);
+					try {
+						return new FormWriterMaster($form_id);
+					} catch (Error $e) {
+						throw new Exception("Failed to instantiate FormWriterMaster: " . $e->getMessage());
+					}
 			}
-			
+
 		} catch (Exception $e) {
-			// Log error but don't break - fall through to legacy method
-			error_log("ThemeHelper error in get_formwriter_object: " . $e->getMessage());
+			// Re-throw with context instead of silently logging
+			throw new Exception("ThemeHelper error in get_formwriter_object: " . $e->getMessage());
 		}
 		
 		// LEGACY FALLBACK: Updated to support plugin themes
@@ -265,13 +315,27 @@ class LibraryFunctions {
 			$theme_form = PathHelper::getBasePath() . '/theme/' . $theme_template . '/includes/FormWriter.php';
 			if (file_exists($theme_form)) {
 				require_once($theme_form);
-				return new FormWriter($form_id);
+
+				// Verify class exists after include
+				if (!class_exists('FormWriter')) {
+					throw new Exception("FormWriter class not found in legacy theme file: $theme_form");
+				}
+
+				try {
+					return new FormWriter($form_id);
+				} catch (Error $e) {
+					throw new Exception("Failed to instantiate legacy theme FormWriter: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+				}
 			}
 		}
 
 		// Final default - Bootstrap
 		PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
-		return new FormWriterMasterBootstrap($form_id);	
+		try {
+			return new FormWriterMasterBootstrap($form_id);
+		} catch (Error $e) {
+			throw new Exception("Failed to instantiate default FormWriterMasterBootstrap: " . $e->getMessage());
+		}	
 							
 	}
 	

@@ -948,6 +948,7 @@ class RouteHelper {
      * @return void Exits on successful route match or redirect
      */
     public static function processRoutes($routes, $request_path) {
+
         // Auto-enable debugging if requested via URL parameter or header
         $debug_enabled = self::autoEnableDebug();
         if ($debug_enabled) {
@@ -1048,7 +1049,13 @@ class RouteHelper {
         require_once(__DIR__ . '/Globalvars.php');
         require_once(__DIR__ . '/SessionControl.php');
         error_log("  ✓ Core files loaded (PathHelper, Globalvars, SessionControl)");
-        
+
+        // Register ErrorManager for comprehensive error handling (exceptions + fatal errors)
+        PathHelper::requireOnce('includes/ErrorHandler.php');
+        $errorManager = ErrorManager::getInstance();
+        $errorManager->register();
+        error_log("  ✓ ErrorManager registered for fatal error handling");
+
         // CORE GUARANTEES: These are now available for all subsequent code
         // - PathHelper: File path resolution and loading
         // - Globalvars: Configuration and settings access
@@ -1235,12 +1242,18 @@ class RouteHelper {
         $view_file = 'views/' . trim($request_path, '/') . '.php';
         error_log("Trying view fallback file: " . var_export($view_file, true));
         $is_valid_page = true; // Set before include
-        if (file_exists(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)))) {
-            require_once(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)));
-            error_log("View fallback succeeded - exiting");
-            exit();
+
+        try {
+            if (file_exists(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)))) {
+                require_once(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)));
+                error_log("View fallback succeeded - exiting");
+                exit();
+            }
+            error_log("View fallback failed");
+        } catch (Exception $e) {
+            error_log("Asset/view not found: " . $request_path . " - " . $e->getMessage());
+            LibraryFunctions::display_404_page();
         }
-        error_log("View fallback failed");
         
         // 7. Allow plugins to add custom routes (backward compatibility)
         error_log("=== STEP 7: Legacy plugin route handler ===");
@@ -1319,4 +1332,5 @@ class RouteHelper {
         
         return $all_plugin_routes;
     }
+
 }
