@@ -281,6 +281,7 @@ class ErrorManager {
     public function register(): void {
         if (!$this->registered) {
             set_exception_handler([$this, 'handleException']);
+            register_shutdown_function([$this, 'handleFatalError']);
             $this->registered = true;
         }
     }
@@ -301,7 +302,17 @@ class ErrorManager {
         
         exit;
     }
-    
+
+    public function handleFatalError(): void {
+        $error = error_get_last();
+        if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR])) {
+            $fatalException = new \ErrorException(
+                $error['message'], 0, $error['type'], $error['file'], $error['line']
+            );
+            $this->handleException($fatalException);
+        }
+    }
+
     private function buildContext(\Throwable $exception): ErrorContext {
         return new ErrorContext([
             'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
