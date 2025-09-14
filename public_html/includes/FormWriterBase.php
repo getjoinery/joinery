@@ -436,13 +436,44 @@ abstract class FormWriterBase {
 	}
 
 	/**
+	 * Generate buttons for multi-file upload interface
+	 * Can be overridden by framework implementations for specific styling
+	 * @param string $context 'browse', 'upload', or 'clear'
+	 * @param string $id Button ID
+	 * @param string $label Button label
+	 * @param boolean $disabled Whether button is disabled
+	 * @return string HTML for button
+	 */
+	protected function multi_upload_button($context, $id, $label, $disabled = false) {
+		$disabled_attr = $disabled ? ' disabled' : '';
+		$style_class = '';
+
+		switch($context) {
+			case 'browse':
+				$style_class = 'button primary';
+				break;
+			case 'upload':
+				$style_class = 'button primary';
+				break;
+			case 'clear':
+				$style_class = 'button secondary';
+				break;
+			default:
+				$style_class = 'button';
+		}
+
+		return '<button type="button" id="' . $id . '" class="' . $style_class . '"' . $disabled_attr . '>' . $label . '</button>';
+	}
+
+	/**
 	 * Generate a full-featured file upload interface with drag-and-drop
 	 * @param array $getvars Optional GET variables to include in upload
 	 * @param boolean $delete Whether to allow deletion
 	 * @param boolean $checkall Whether to check all files
-	 * @return void Outputs HTML directly
+	 * @return string HTML output
 	 */
-	static function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
+	function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
+		ob_start();
 		$getargs = '';
 		if($getvars){
 			foreach($getvars as $getvar=>$getval){
@@ -478,20 +509,16 @@ abstract class FormWriterBase {
 			<h3 style="color: #666; margin: 10px 0;">Drop files here or click to browse</h3>
 			<p style="color: #999; margin: 10px 0;">Maximum file size: <?php echo $max_size_display; ?> | Allowed types: <?php echo strtoupper(str_replace(',', ', ', $allowed_extensions)); ?></p>
 			<input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" style="display: none;">
-			<button type="button" id="browse-btn" class="button primary" style="margin-top: 10px;">
-				📁 Browse Files
-			</button>
+			<div style="margin-top: 10px;">
+				<?php echo $this->multi_upload_button('browse', 'browse-btn', '📁 Browse Files'); ?>
+			</div>
 		</div>
 
 		<!-- Upload Controls -->
 		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
 			<div>
-				<button type="button" id="upload-all-btn" class="button primary" disabled>
-					⬆️ Upload All
-				</button>
-				<button type="button" id="clear-all-btn" class="button secondary" style="margin-left: 10px;" disabled>
-					🗑️ Clear All
-				</button>
+				<?php echo $this->multi_upload_button('upload', 'upload-all-btn', '⬆️ Upload All', true); ?>
+				<span style="margin-left: 10px;"><?php echo $this->multi_upload_button('clear', 'clear-all-btn', '🗑️ Clear All', true); ?></span>
 			</div>
 			<div id="overall-progress" style="display: none; flex-grow: 1; margin-left: 20px;">
 				<progress id="overall-progress-bar" value="0" max="100" style="width: 100%; height: 20px;">0%</progress>
@@ -978,7 +1005,7 @@ abstract class FormWriterBase {
 
 	<!-- Modern browsers handle CORS natively, no IE8/9 support needed -->
 	  <?php
-
+		return ob_get_clean();
 	}
 
 }
