@@ -1,11 +1,11 @@
 <?php
 // Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 // Use PathHelper for other includes
-PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
+PathHelper::requireOnce('includes/FormWriterBase.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriter extends FormWriterMasterBootstrap {
+class FormWriter extends FormWriterBase {
 
 	function passwordinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly="") {
 	?>
@@ -29,14 +29,14 @@ class FormWriter extends FormWriterMasterBootstrap {
 
 	}
 
-	function text($id, $label, $value, $class) {
+	function text($id, $label, $value, $class, $layout = 'default') {
 		echo "<div class=\"$class errorplacement\">";
 		echo "<label>$label</label>";
 		echo "<p>$value</p>";
 		echo "</div>";
 	}
 
-	function textinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='text') {
+	function textinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='text', $layout='default') {
 
 		$value = str_replace('"', '&quot;', $value );
 	?>
@@ -126,6 +126,23 @@ class FormWriter extends FormWriterMasterBootstrap {
 
                 </div>
 		<?php
+	}
+
+	function start_buttons($class = '') {
+		return '';
+	}
+
+	function new_form_button($label='Submit', $style='primary', $width='standard', $class='', $id=NULL) {
+		$output = '<input type="submit" value="' . htmlspecialchars($label) . '" class="btn ' . $class . '"';
+		if($id) {
+			$output .= ' id="' . htmlspecialchars($id) . '"';
+		}
+		$output .= ' />';
+		return $output;
+	}
+
+	function end_buttons() {
+		return '';
 	}
 
 }
