@@ -124,17 +124,17 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 
 <div class="slot-r">
 				<ul id="menu-main-menu" class="typology-nav typology-main-navigation">
-<li id="menu-item-474" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-474"><a href="/page/about">About</a></li>
-<!--<li id="menu-item-475" class="menu-item menu-item-type-post_type menu-item-object-post menu-item-475"><a href="/contact">Contact</a></li>-->
-<!--<li id="menu-item-59" class="menu-item menu-item-type-taxonomy menu-item-object-category menu-item-59"><a href="category/humans/index.html">Category</a></li>
-<li id="menu-item-63" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-63"><a href="#">Features</a>
-<ul class="sub-menu">
-	<li id="menu-item-67" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-67"><a href="styleguide/index.html">Styleguide</a></li>
-	<li id="menu-item-433" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-433"><a href="blocks-wp-5-0-gutenberg/index.html">WordPress 5.0 blocks</a></li>
-	<li id="menu-item-196" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-196"><a href="shortcodes/index.html">Shortcodes</a></li>
-	<li id="menu-item-193" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-193"><a href="contact/index.html">Contact</a></li>
-</ul>
-</li>-->
+<?php
+	$menu_items = self::get_public_menu();
+	foreach($menu_items as $menu_item) {
+		// Only display parent menu items (not submenu placeholders)
+		if (isset($menu_item['parent']) && $menu_item['parent'] === true) {
+			echo '<li class="menu-item menu-item-type-post_type menu-item-object-page">';
+			echo '<a href="' . htmlspecialchars($menu_item['link']) . '">' . htmlspecialchars($menu_item['name']) . '</a>';
+			echo '</li>';
+		}
+	}
+?>
 </ul>			
 	<ul class="typology-nav typology-actions-list">
     <li class="typology-action-button typology-action-sidebar ">
@@ -314,19 +314,17 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 
 	<div class="widget typology-responsive-menu">
 					<ul id="menu-main-menu-1" class="typology-nav typology-main-navigation">
-					<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-home current-menu-item page_item page-item-35 current_page_item menu-item-476"><a href="/page/about">About</a></li>
-					<!--<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-home current-menu-item page_item page-item-35 current_page_item menu-item-476"><a href="" aria-current="page">Home</a></li>
-<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-474"><a href="example-page/index.html">Page</a></li>
-<li class="menu-item menu-item-type-post_type menu-item-object-post menu-item-475"><a href="what-does-your-pet-really-think-about-you/index.html">Post</a></li>
-<li class="menu-item menu-item-type-taxonomy menu-item-object-category menu-item-59"><a href="category/humans/index.html">Category</a></li>
-<li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-has-children menu-item-63"><a href="#">Features</a>
-<ul class="sub-menu">
-	<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-67"><a href="styleguide/index.html">Styleguide</a></li>
-	<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-433"><a href="blocks-wp-5-0-gutenberg/index.html">WordPress 5.0 blocks</a></li>
-	<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-196"><a href="shortcodes/index.html">Shortcodes</a></li>
-	<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-193"><a href="contact/index.html">Contact</a></li>-->
-</ul>
-</li>
+<?php
+	$menu_items = self::get_public_menu();
+	foreach($menu_items as $menu_item) {
+		// Only display parent menu items (not submenu placeholders)
+		if (isset($menu_item['parent']) && $menu_item['parent'] === true) {
+			echo '<li class="menu-item menu-item-type-post_type menu-item-object-page">';
+			echo '<a href="' . htmlspecialchars($menu_item['link']) . '">' . htmlspecialchars($menu_item['name']) . '</a>';
+			echo '</li>';
+		}
+	}
+?>
 </ul>		</div>
 
 					
