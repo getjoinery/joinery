@@ -466,6 +466,146 @@ abstract class FormWriterBase {
 	}
 
 	/**
+	 * Helper method for placeholder implementations
+	 * @param string $method_name Method name
+	 * @param array $params Parameters passed to the method
+	 * @return string HTML error message
+	 */
+	protected function _not_implemented($method_name, $params = array()) {
+		$class_name = get_class($this);
+		$param_info = array();
+		foreach ($params as $key => $value) {
+			if (is_array($value)) {
+				$param_info[] = "$key=[array with " . count($value) . " items]";
+			} elseif (is_bool($value)) {
+				$param_info[] = "$key=" . ($value ? 'true' : 'false');
+			} elseif (is_null($value)) {
+				$param_info[] = "$key=null";
+			} else {
+				$param_info[] = "$key='" . substr(strval($value), 0, 50) . "'";
+			}
+		}
+
+		return '<div style="border: 2px solid red; padding: 10px; margin: 10px 0; background: #fee;">
+			<strong>FormWriter Method Not Implemented</strong><br>
+			Class: ' . htmlspecialchars($class_name) . '<br>
+			Method: ' . htmlspecialchars($method_name) . '()<br>
+			Parameters: ' . htmlspecialchars(implode(', ', $param_info)) . '<br>
+			<small>This method needs to be implemented in ' . htmlspecialchars($class_name) . '</small>
+		</div>';
+	}
+
+	// Placeholder method stubs for form elements
+	function text($id, $label, $value, $class, $layout = 'default') {
+		return $this->_not_implemented('text', compact('id', 'label', 'value', 'class', 'layout'));
+	}
+
+	function textinput($label, $id, $class, $size, $value, $hint, $maxlength=255,
+					  $readonly='', $autocomplete=TRUE, $formhint=FALSE,
+					  $type='text', $layout='default') {
+		return $this->_not_implemented('textinput',
+			compact('label', 'id', 'class', 'size', 'value', 'hint',
+				   'maxlength', 'readonly', 'autocomplete', 'formhint', 'type', 'layout'));
+	}
+
+	function passwordinput($label, $id, $class, $size, $value, $hint,
+						  $maxlength=255, $readonly="", $layout='default') {
+		return $this->_not_implemented('passwordinput',
+			compact('label', 'id', 'class', 'size', 'value', 'hint',
+				   'maxlength', 'readonly', 'layout'));
+	}
+
+	function fileinput($label, $id, $class, $size, $hint, $layout='default') {
+		return $this->_not_implemented('fileinput',
+			compact('label', 'id', 'class', 'size', 'hint', 'layout'));
+	}
+
+	function textbox($label, $id, $class, $rows, $cols, $value, $hint, $htmlmode="no") {
+		return $this->_not_implemented('textbox',
+			compact('label', 'id', 'class', 'rows', 'cols', 'value', 'hint', 'htmlmode'));
+	}
+
+	function checkboxinput($label, $id, $class, $align, $value, $truevalue, $hint, $layout='default') {
+		return $this->_not_implemented('checkboxinput',
+			compact('label', 'id', 'class', 'align', 'value', 'truevalue', 'hint', 'layout'));
+	}
+
+	function checkboxList($label, $id, $class, $optionvals, $checkedvals=array(),
+						 $disabledvals=array(), $readonlyvals=array(), $hint='', $type='checkbox') {
+		return $this->_not_implemented('checkboxList',
+			compact('label', 'id', 'class', 'optionvals', 'checkedvals',
+				   'disabledvals', 'readonlyvals', 'hint', 'type'));
+	}
+
+	function radioinput($label, $id, $class, &$optionvals, $checkedval,
+					   $disabledvals, $readonlyvals, $hint) {
+		return $this->_not_implemented('radioinput',
+			compact('label', 'id', 'class', 'optionvals', 'checkedval',
+				   'disabledvals', 'readonlyvals', 'hint'));
+	}
+
+	function dropinput($label, $id, $class, &$optionvals, $input, $hint,
+					  $showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE,
+					  $imagedropdown=FALSE, $layout='default') {
+		return $this->_not_implemented('dropinput',
+			compact('label', 'id', 'class', 'optionvals', 'input', 'hint',
+				   'showdefault', 'forcestrict', 'ajaxendpoint', 'imagedropdown', 'layout'));
+	}
+
+	function dateinput($label, $id, $class, $size, $value, $hint, $maxlength=255,
+					  $readonly='', $autocomplete=TRUE, $formhint=FALSE, $layout='default') {
+		return $this->_not_implemented('dateinput',
+			compact('label', 'id', 'class', 'size', 'value', 'hint',
+				   'maxlength', 'readonly', 'autocomplete', 'formhint', 'layout'));
+	}
+
+	function timeinput($label, $id, $class, $value, $hint, $layout='default') {
+		return $this->_not_implemented('timeinput',
+			compact('label', 'id', 'class', 'value', 'hint', 'layout'));
+	}
+
+	function datetimeinput($label, $id, $class, $inputdatetime, $hint,
+						  $timehint, $datehint, $layout='default') {
+		return $this->_not_implemented('datetimeinput',
+			compact('label', 'id', 'class', 'inputdatetime', 'hint',
+				   'timehint', 'datehint', 'layout'));
+	}
+
+	function datetimeinput2($label, $id, $class, $value, $hint, $readonly=false,
+						   $formhint=FALSE, $layout='default') {
+		return $this->_not_implemented('datetimeinput2',
+			compact('label', 'id', 'class', 'value', 'hint', 'readonly',
+				   'formhint', 'layout'));
+	}
+
+	function imageinput($label, $id, $class, &$optionvals, $input, $hint,
+					   $showdefault=TRUE, $forcestrict=TRUE, $ajaxendpoint=FALSE) {
+		return $this->_not_implemented('imageinput',
+			compact('label', 'id', 'class', 'optionvals', 'input', 'hint',
+				   'showdefault', 'forcestrict', 'ajaxendpoint'));
+	}
+
+	function new_button($label='Submit', $link, $style='primary', $width='standard',
+					   $class='', $id=NULL) {
+		return $this->_not_implemented('new_button',
+			compact('label', 'link', 'style', 'width', 'class', 'id'));
+	}
+
+	function new_form_button($label='Submit', $style='primary', $width='standard',
+							$class='', $id=NULL) {
+		return $this->_not_implemented('new_form_button',
+			compact('label', 'style', 'width', 'class', 'id'));
+	}
+
+	function start_buttons($class = '') {
+		return $this->_not_implemented('start_buttons', compact('class'));
+	}
+
+	function end_buttons() {
+		return $this->_not_implemented('end_buttons', array());
+	}
+
+	/**
 	 * Generate a full-featured file upload interface with drag-and-drop
 	 * @param array $getvars Optional GET variables to include in upload
 	 * @param boolean $delete Whether to allow deletion
