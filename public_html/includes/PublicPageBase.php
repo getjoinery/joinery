@@ -83,6 +83,7 @@ abstract class PublicPageBase {
 	}
 	
 	public static function get_public_menu(){
+		PathHelper::requireOnce('data/public_menus_class.php');
 		return MultiPublicMenu::get_sorted_array();
 	}
 
