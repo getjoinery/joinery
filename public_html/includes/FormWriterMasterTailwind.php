@@ -1,1058 +1,578 @@
 <?php
-require_once('FormWriterBase.php');
-require_once('DbConnector.php');
-require_once('Globalvars.php');
-
-//THIS FORMWRITER MASTER IS FOR TAILWIND FORM STYLING
-
-// THESE FUNCTIONS GENERATE FORM INPUTS
+PathHelper::requireOnce('includes/FormWriterBase.php');
 
 class FormWriterMasterTailwind extends FormWriterBase {
 
-	protected $use_grid;
-	public $validate_style_info = 'errorElement: "span",
-							errorClass: "text-red-500",
-							highlight: function(element, errorClass) {
-								//REMOVE BRACKETS FOR CHECKBOX LISTS
-								var name = element.name.replace(/[\[\]]/gi, "");
-								$("#"+name).addClass("border-red-500 focus:border-red-500");
-							  },
-							  unhighlight: function(element, errorClass) {
-								//REMOVE BRACKETS FOR CHECKBOX LISTS
-								var name = element.name.replace(/[\[\]]/gi, "");
-								  $("#"+name).removeClass("border-red-500 focus:border-red-500");
-							  },
-							errorPlacement: function(error, element) {
-								error.appendTo(element.parents(".errorplacement").eq(0));
-							}';
-	
-	//FORM STYLING
-	protected $button_primary_class = 'inline-flex justify-center mr-3 mt-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';
-	protected $button_secondary_class = 'bg-white py-2 px-4 mr-3 mt-3 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500';	
-	
-	protected $fileinput_label_class = 'block text-sm font-medium text-gray-700';
-	protected $fileinput_input_class = '';
-	
-	protected $text_label_class = 'block text-sm font-medium text-gray-700';
-	
-	protected $textinput_label_class = 'block text-sm font-medium text-gray-700';
-	protected $textinput_input_class = 'shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md';
-	
-	protected $textbox_label_class = 'block text-sm font-medium text-gray-700';
-	protected $textbox_textarea_class = 'shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border border-gray-300 rounded-md';
-	
-	protected $checkbox_legend_class = 'text-base font-medium text-gray-900';
-	protected $checkbox_container_class = 'mt-4 space-y-4';
-	protected $checkbox_outer_wrapper_class = 'relative flex items-start';
-	protected $checkbox_inner_wrapper_class = 'flex items-center h-5';
-	protected $checkbox_input_class_checkbox = 'focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded';	
-	protected $checkbox_label_wrapper_class = 'ml-3 text-sm';	
-	protected $checkbox_label_class = 'font-medium text-gray-700';	
-	
-	protected $timeinput_label_class = 'block text-sm font-medium text-gray-700';
-	protected $timeinput_input_class = 'shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md timepicker';
-	
-	protected $dropinput_label_class = 'block text-sm font-medium text-gray-700';
-	protected $dropinput_select_class = 'mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md';
+	function start_form($id, $name, $action = null, $method = 'POST', $options = array(), $form_action_override = FALSE) {
+		$onsubmit = isset($options['onsubmit']) ? $options['onsubmit'] : '';
+		$class = isset($options['class']) ? $options['class'] : '';
+		$enctype = isset($options['enctype']) ? $options['enctype'] : '';
+		$data_attributes = isset($options['data']) ? $options['data'] : array();
 
+		$output = '<form id="' . $id . '" name="' . $name . '" method="' . $method . '"';
 
-
-
-
-	
-
-	function begin_form($class, $method, $action, $use_grid = false, $charset = 'UTF-8'){
-		$this->use_grid = $use_grid;
-		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'">';
-		
-		if($this->use_grid){
-			$output .= '<div class="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">';
+		if ($action !== null) {
+			$output .= ' action="' . $action . '"';
 		}
-		return $output;
-	}
 
-	function end_form(){
-		if($this->use_grid){
-			return '</div></form>';
+		if ($onsubmit) {
+			$output .= ' onsubmit="' . $onsubmit . '"';
 		}
-		else{
-			return '</form>';
-		}
-		
-	}
-	
-	
-	function start_buttons($class = 'flex justify-end') {
-		return '<div class="'.$class.'">';
-	}
 
-	//STYLE IS 'primary' or 'secondary'
-	//WIDTH IS 'standard' or 'full'
-	function new_button($label='Submit', $link, $style='primary', $width='standard', $class='', $id=NULL) {
-		
-		if($style == 'primary'){
-			$class = $this->button_primary_class . ' ' . $class;
+		if ($class) {
+			$output .= ' class="' . $class . '"';
 		}
-		else{
-			$class = $this->button_secondary_class . ' ' . $class;
+
+		if ($enctype) {
+			$output .= ' enctype="' . $enctype . '"';
 		}
-		
-		if($width == 'full'){
-			$class = 'w-full '. $class;
+
+		foreach ($data_attributes as $key => $value) {
+			$output .= ' data-' . $key . '="' . htmlspecialchars($value) . '"';
 		}
-		
-		
-		$output = '<a href="'.$link.'"><button type="button" class="'.$class.'"';
-		if($id != '' && !is_null($id)){
-			$output .= ' id="'.$id.'"';
-		}
+
 		$output .= '>';
-		$output .= $label.'</button></a>';
+
+		if (!$form_action_override) {
+			$output .= '<input type="hidden" name="action" value="' . str_replace('_', '-', $name) . '">';
+		}
+
 		return $output;
 	}
 
-	//STYLE IS 'primary' or 'secondary'
-	//WIDTH IS 'standard' or 'full'
-	function new_form_button($label='Submit', $style='primary', $width='standard', $class='', $id=NULL) {
-		
-		if($style == 'primary'){
-			$class = $this->button_primary_class . ' ' . $class;
-		}
-		else{
-			$class = $this->button_secondary_class . ' ' . $class;
+	function end_form() {
+		return '</form>';
+	}
+
+	function textinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
+		$type = isset($options['type']) ? $options['type'] : 'text';
+		$id = isset($options['id']) ? $options['id'] : $name;
+		$placeholder = isset($options['placeholder']) ? $options['placeholder'] : '';
+		$required = isset($options['required']) ? 'required' : '';
+		$readonly = isset($options['readonly']) ? 'readonly' : '';
+		$data_attributes = isset($options['data']) ? $options['data'] : array();
+
+		$output = '<div class="' . $class . ' mb-4">';
+		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
+		$output .= '<input type="' . $type . '" id="' . $id . '" name="' . $name . '" value="' . htmlspecialchars($value) . '"';
+		$output .= ' class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"';
+
+		if ($size) {
+			$output .= ' size="' . $size . '"';
 		}
 
-		if($width == 'full'){
-			$class = 'w-full sm:col-span-6 '. $class;
-		}		
-		
-		$output = '<button type="submit" class="'.$class.'"';
-		if($id != '' && !is_null($id)){
-			$output .= ' id="'.$id.'"';
+		if ($placeholder) {
+			$output .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
 		}
+
+		if ($required) {
+			$output .= ' ' . $required;
+		}
+
+		if ($readonly) {
+			$output .= ' ' . $readonly;
+		}
+
+		foreach ($data_attributes as $key => $val) {
+			$output .= ' data-' . $key . '="' . htmlspecialchars($val) . '"';
+		}
+
 		$output .= '>';
-		$output .= $label.'</button>';
+		$output .= '</div>';
+
 		return $output;
 	}
 
+	function textarea($label, $name, $class = '', $rows = 5, $cols = 50, $value = '', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : $name;
+		$placeholder = isset($options['placeholder']) ? $options['placeholder'] : '';
+		$required = isset($options['required']) ? 'required' : '';
+		$readonly = isset($options['readonly']) ? 'readonly' : '';
 
+		$output = '<div class="' . $class . ' mb-4">';
+		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
+		$output .= '<textarea id="' . $id . '" name="' . $name . '" rows="' . $rows . '" cols="' . $cols . '"';
+		$output .= ' class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"';
 
-	
+		if ($placeholder) {
+			$output .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+		}
+
+		if ($required) {
+			$output .= ' ' . $required;
+		}
+
+		if ($readonly) {
+			$output .= ' ' . $readonly;
+		}
+
+		$output .= '>' . htmlspecialchars($value) . '</textarea>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	function selectbox($label, $name, $options_array, $selected = '', $class = '', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : $name;
+		$required = isset($options['required']) ? 'required' : '';
+		$multiple = isset($options['multiple']) ? 'multiple' : '';
+
+		$output = '<div class="' . $class . ' mb-4">';
+		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
+		$output .= '<select id="' . $id . '" name="' . $name . '"';
+		$output .= ' class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"';
+
+		if ($required) {
+			$output .= ' ' . $required;
+		}
+
+		if ($multiple) {
+			$output .= ' ' . $multiple;
+		}
+
+		$output .= '>';
+
+		foreach ($options_array as $value => $display) {
+			$selected_attr = ($value == $selected) ? ' selected' : '';
+			$output .= '<option value="' . htmlspecialchars($value) . '"' . $selected_attr . '>' . htmlspecialchars($display) . '</option>';
+		}
+
+		$output .= '</select>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	function checkbox($label, $name, $value = '1', $checked = false, $class = '', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : $name;
+
+		$output = '<div class="' . $class . ' flex items-center mb-4">';
+		$output .= '<input type="checkbox" id="' . $id . '" name="' . $name . '" value="' . htmlspecialchars($value) . '"';
+		$output .= ' class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"';
+
+		if ($checked) {
+			$output .= ' checked';
+		}
+
+		$output .= '>';
+		$output .= '<label for="' . $id . '" class="ml-2 block text-sm text-gray-900">' . $label . '</label>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	function radiobutton($label, $name, $value, $checked = false, $class = '', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : $name . '_' . $value;
+
+		$output = '<div class="' . $class . ' flex items-center mb-2">';
+		$output .= '<input type="radio" id="' . $id . '" name="' . $name . '" value="' . htmlspecialchars($value) . '"';
+		$output .= ' class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"';
+
+		if ($checked) {
+			$output .= ' checked';
+		}
+
+		$output .= '>';
+		$output .= '<label for="' . $id . '" class="ml-2 block text-sm text-gray-900">' . $label . '</label>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	function fileinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : $name;
+		$accept = isset($options['accept']) ? $options['accept'] : '';
+		$multiple = isset($options['multiple']) ? 'multiple' : '';
+		$required = isset($options['required']) ? 'required' : '';
+
+		$output = '<div class="' . $class . ' mb-4">';
+		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
+		$output .= '<input type="file" id="' . $id . '" name="' . $name . '"';
+		$output .= ' class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"';
+
+		if ($accept) {
+			$output .= ' accept="' . htmlspecialchars($accept) . '"';
+		}
+
+		if ($multiple) {
+			$output .= ' ' . $multiple;
+		}
+
+		if ($required) {
+			$output .= ' ' . $required;
+		}
+
+		$output .= '>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	function hiddeninput($name, $value) {
+		return '<input type="hidden" name="' . $name . '" value="' . htmlspecialchars($value) . '">';
+	}
+
+	function submit($label, $name = 'submit', $class = '', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : $name;
+
+		$output = '<button type="submit" id="' . $id . '" name="' . $name . '"';
+		$output .= ' class="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ' . $class . '"';
+		$output .= '>' . $label . '</button>';
+
+		return $output;
+	}
+
+	function button($label, $onclick = '', $class = '', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : '';
+		$type = isset($options['type']) ? $options['type'] : 'button';
+
+		$output = '<button type="' . $type . '"';
+
+		if ($id) {
+			$output .= ' id="' . $id . '"';
+		}
+
+		if ($onclick) {
+			$output .= ' onclick="' . htmlspecialchars($onclick) . '"';
+		}
+
+		$output .= ' class="inline-flex justify-center rounded-md border border-gray-300 bg-white py-2 px-4 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ' . $class . '"';
+		$output .= '>' . $label . '</button>';
+
+		return $output;
+	}
+
+	function start_fieldset($legend = '', $class = '') {
+		$output = '<fieldset class="border border-gray-300 rounded-md p-4 mb-4 ' . $class . '">';
+		if ($legend) {
+			$output .= '<legend class="text-sm font-medium text-gray-900 px-2">' . $legend . '</legend>';
+		}
+		return $output;
+	}
+
+	function end_fieldset() {
+		return '</fieldset>';
+	}
+
+	function start_buttons($class = '') {
+		return '<div class="flex items-center justify-end gap-x-4 border-t border-gray-200 pt-4 mt-6 ' . $class . '">';
+	}
+
 	function end_buttons() {
 		return '</div>';
 	}
-	
-	// set_validate method now inherited from FormWriterBase
-	
 
-
-	function fileinput($label, $id, $class="sm:col-span-6", $size, $hint) {
-		$output = '
-		<div id="'.$id.'_container" class="'.$class.' errorplacement">
-		<label class="'.$this->fileinput_label_class.'" for="'.$id.'">'.$label.'</label>
-		<input name="'.$id.'" id="'.$id.'"  size="'.$size.'" type="file" class="'.$this->fileinput_input_class.'" />
-		</div>';
-		return $output;
+	function new_form_button($label, $name = 'submit', $type = 'submit', $class = '') {
+		if ($type == 'submit') {
+			return $this->submit($label, $name, $class);
+		} else {
+			return $this->button($label, '', $class, array('type' => $type));
+		}
 	}
 
-
-	function passwordinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly="") {
-		
-		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, TRUE, FALSE, 'password');
+	// Date/Time inputs using Tailwind styling
+	function dateinput($label, $name, $class = '', $value = '', $options = array()) {
+		$options['type'] = 'date';
+		return $this->textinput($label, $name, $class, 0, $value, $options);
 	}
 
-	function text($id, $label, $value, $class) {
-		
-		if(empty($class)){
-			$class = 'sm:col-span-6';
-		}
-		
-		$output = '
-		<div id="'.$id.'_container" class="'.$class.' errorplacement">
-		<label for="'.$id.'" class="'.$this->text_label_class.'">'.$label.'</label>
-		<span>'.$value.'</span>
-		</div>';
-		return $output;
+	function timeinput($label, $name, $class = '', $value = '', $options = array()) {
+		$options['type'] = 'time';
+		return $this->textinput($label, $name, $class, 0, $value, $options);
 	}
 
+	function datetimeinput($label, $name, $class = '', $value = '', $options = array()) {
+		$options['type'] = 'datetime-local';
+		return $this->textinput($label, $name, $class, 0, $value, $options);
+	}
 
+	// Email input with Tailwind styling
+	function emailinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
+		$options['type'] = 'email';
+		return $this->textinput($label, $name, $class, $size, $value, $options);
+	}
 
+	// Number input with Tailwind styling
+	function numberinput($label, $name, $class = '', $value = '', $options = array()) {
+		$options['type'] = 'number';
+		$min = isset($options['min']) ? $options['min'] : '';
+		$max = isset($options['max']) ? $options['max'] : '';
+		$step = isset($options['step']) ? $options['step'] : '';
 
-	function textinput($label, $id, $class='sm:col-span-6', $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='text') {
-		
-		if(empty($class)){
-			$class = 'sm:col-span-6';
+		$id = isset($options['id']) ? $options['id'] : $name;
+		$placeholder = isset($options['placeholder']) ? $options['placeholder'] : '';
+		$required = isset($options['required']) ? 'required' : '';
+		$readonly = isset($options['readonly']) ? 'readonly' : '';
+
+		$output = '<div class="' . $class . ' mb-4">';
+		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
+		$output .= '<input type="number" id="' . $id . '" name="' . $name . '" value="' . htmlspecialchars($value) . '"';
+		$output .= ' class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"';
+
+		if ($min !== '') {
+			$output .= ' min="' . $min . '"';
 		}
 
-
-		//FORMS ARE EITHER HORIZONTAL OR REGULAR
-		$layout = '';
-		if($layout == 'horizontal'){
-			$labelclass = $this->textinput_label_class_horizontal;
-			$containerclass = $this->textinput_container_class_horizontal;
-			$inputclass = $this->textinput_input_class;
-		}
-		else{
-			$labelclass = $this->textinput_label_class;
-			$containerclass = $this->textinput_container_class;
-			$inputclass = $this->textinput_input_class;
-		}
-		
-		if($value){
-			$value = str_replace('"', '&quot;', $value );
-		}
-		
-		/*
-		if($hint){ 
-			$hint_text = 'placeholder="'.$hint.'" onfocus="this.placeholder = \'\'" onblur="this.placeholder = \''.$hint.'\'"';
-		}	
-		*/
-
-	
-		$output = '<div id="'.$id . '_container" class="errorplacement '.$class.'">';
-		
-		if($label){
-			$output .= '<label for="'.$id.'" class="'.$labelclass.'">'.$label.'</label>';
-		} 
-		
-		if(!$autocomplete){
-			$autocomplete = 'autocomplete="off"';
-		}
-		else{
-			$autocomplete = '';
+		if ($max !== '') {
+			$output .= ' max="' . $max . '"';
 		}
 
-		
-		
-		if($formhint){
-			$output .= '<div class="mt-1 flex rounded-md shadow-sm">';
-			$output .= '<span class="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-sm">
-              '.$formhint.'
-            </span>';
+		if ($step !== '') {
+			$output .= ' step="' . $step . '"';
 		}
-		else{
-			$output .= '<div class="mt-1">';
-		}
-		
-		$output .= '<input name="'.$id.'" id="'.$id.'"'.$autocomplete.' value="'.$value.'" size="'.$size.'" type="'.$type.'" class="'.$inputclass.'" '.$hint_text.' maxlength="'.$maxlength.'" '.$readonly.$this->_get_next_tab_index().'/></div>';
-		
 
+		if ($placeholder) {
+			$output .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+		}
+
+		if ($required) {
+			$output .= ' ' . $required;
+		}
+
+		if ($readonly) {
+			$output .= ' ' . $readonly;
+		}
+
+		$output .= '>';
 		$output .= '</div>';
-		
+
 		return $output;
-
 	}
-	
 
+	// Password input with Tailwind styling
+	function passwordinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
+		$options['type'] = 'password';
+		return $this->textinput($label, $name, $class, $size, $value, $options);
+	}
 
+	// URL input with Tailwind styling
+	function urlinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
+		$options['type'] = 'url';
+		return $this->textinput($label, $name, $class, $size, $value, $options);
+	}
 
-	function textbox($label, $id, $class, $rows, $cols, $value, $hint, $htmlmode="no") {
-		
-		if(empty($class)){
-			$class = 'sm:col-span-6';
+	// Search input with Tailwind styling
+	function searchinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
+		$options['type'] = 'search';
+		return $this->textinput($label, $name, $class, $size, $value, $options);
+	}
+
+	// Range input with Tailwind styling
+	function rangeinput($label, $name, $class = '', $value = '', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : $name;
+		$min = isset($options['min']) ? $options['min'] : '0';
+		$max = isset($options['max']) ? $options['max'] : '100';
+		$step = isset($options['step']) ? $options['step'] : '1';
+
+		$output = '<div class="' . $class . ' mb-4">';
+		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
+		$output .= '<input type="range" id="' . $id . '" name="' . $name . '" value="' . htmlspecialchars($value) . '"';
+		$output .= ' min="' . $min . '" max="' . $max . '" step="' . $step . '"';
+		$output .= ' class="mt-1 block w-full"';
+		$output .= '>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	// Color input with Tailwind styling
+	function colorinput($label, $name, $class = '', $value = '#000000', $options = array()) {
+		$id = isset($options['id']) ? $options['id'] : $name;
+
+		$output = '<div class="' . $class . ' mb-4">';
+		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
+		$output .= '<input type="color" id="' . $id . '" name="' . $name . '" value="' . htmlspecialchars($value) . '"';
+		$output .= ' class="mt-1 block h-10 w-20 border border-gray-300 rounded cursor-pointer"';
+		$output .= '>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	// Alert/Message displays with Tailwind styling
+	function error_message($message, $class = '') {
+		$output = '<div class="rounded-md bg-red-50 p-4 mb-4 ' . $class . '">';
+		$output .= '<div class="flex">';
+		$output .= '<div class="flex-shrink-0">';
+		$output .= '<svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">';
+		$output .= '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />';
+		$output .= '</svg>';
+		$output .= '</div>';
+		$output .= '<div class="ml-3">';
+		$output .= '<p class="text-sm font-medium text-red-800">' . $message . '</p>';
+		$output .= '</div>';
+		$output .= '</div>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	function success_message($message, $class = '') {
+		$output = '<div class="rounded-md bg-green-50 p-4 mb-4 ' . $class . '">';
+		$output .= '<div class="flex">';
+		$output .= '<div class="flex-shrink-0">';
+		$output .= '<svg class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">';
+		$output .= '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />';
+		$output .= '</svg>';
+		$output .= '</div>';
+		$output .= '<div class="ml-3">';
+		$output .= '<p class="text-sm font-medium text-green-800">' . $message . '</p>';
+		$output .= '</div>';
+		$output .= '</div>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	function warning_message($message, $class = '') {
+		$output = '<div class="rounded-md bg-yellow-50 p-4 mb-4 ' . $class . '">';
+		$output .= '<div class="flex">';
+		$output .= '<div class="flex-shrink-0">';
+		$output .= '<svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">';
+		$output .= '<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />';
+		$output .= '</svg>';
+		$output .= '</div>';
+		$output .= '<div class="ml-3">';
+		$output .= '<p class="text-sm font-medium text-yellow-800">' . $message . '</p>';
+		$output .= '</div>';
+		$output .= '</div>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	function info_message($message, $class = '') {
+		$output = '<div class="rounded-md bg-blue-50 p-4 mb-4 ' . $class . '">';
+		$output .= '<div class="flex">';
+		$output .= '<div class="flex-shrink-0">';
+		$output .= '<svg class="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">';
+		$output .= '<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />';
+		$output .= '</svg>';
+		$output .= '</div>';
+		$output .= '<div class="ml-3">';
+		$output .= '<p class="text-sm font-medium text-blue-800">' . $message . '</p>';
+		$output .= '</div>';
+		$output .= '</div>';
+		$output .= '</div>';
+
+		return $output;
+	}
+
+	// Card/Panel components with Tailwind styling
+	function start_card($title = '', $class = '') {
+		$output = '<div class="bg-white overflow-hidden shadow rounded-lg ' . $class . '">';
+		if ($title) {
+			$output .= '<div class="px-4 py-5 sm:px-6 border-b border-gray-200">';
+			$output .= '<h3 class="text-lg leading-6 font-medium text-gray-900">' . $title . '</h3>';
+			$output .= '</div>';
 		}
-		
-		$output = '';
-		if($htmlmode == 'yes'){
-			$output .= '
-			
-			<script src="/adm/includes/Trumbowyg-2-26/dist/trumbowyg.min.js"></script>
-			<link rel="stylesheet" href="/adm/includes/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">
-			<script src="/adm/includes/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
-			<script src="/adm/includes/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js"></script>
-			<script src="/adm/includes/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
-			<script type="text/javascript">';
-			$output .= "
-				$(document).ready(function() {
-						$('.html_editable').trumbowyg({
-							autogrow: false,
-							autogrowOnEnter: false,
-							btns: [
-								['viewHTML'],
-								['undo', 'redo'], // Only supported in Blink browsers
-								['formatting'],
-								['strong', 'em', 'del'],
-								['superscript', 'subscript'],
-								['link'],
-								['insertImage'],
-								['preformatted'],
-								['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
-								['unorderedList', 'orderedList'],
-								['horizontalRule'],
-								['removeformat'], 
-								['fullscreen']
-							],
-							 semantic:{
-							  'div': 'div'
-							},
-							plugins: {
-								allowTagsFromPaste: {
-									allowedTags: ['p', 'br','blockquote', 'b', 'i', 'strong', 'em', 'ul', 'li', 'ol', 'a','code','pre','h1','h2','h3','h4','h5','embed','table','tr','td','th','img','video']
-								}
-							}
-						});
-						$('.trumbowyg-editor').attr('name', 'trumbobox');
+		$output .= '<div class="px-4 py-5 sm:p-6">';
 
+		return $output;
+	}
+
+	function end_card() {
+		return '</div></div>';
+	}
+
+	// Grid helpers with Tailwind styling
+	function start_grid($cols = 2, $class = '') {
+		return '<div class="grid grid-cols-' . $cols . ' gap-4 ' . $class . '">';
+	}
+
+	function end_grid() {
+		return '</div>';
+	}
+
+	// Table helpers with Tailwind styling
+	function start_table($headers = array(), $class = '') {
+		$output = '<div class="overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg ' . $class . '">';
+		$output .= '<table class="min-w-full divide-y divide-gray-300">';
+
+		if (!empty($headers)) {
+			$output .= '<thead class="bg-gray-50">';
+			$output .= '<tr>';
+			foreach ($headers as $header) {
+				$output .= '<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">' . $header . '</th>';
+			}
+			$output .= '</tr>';
+			$output .= '</thead>';
+			$output .= '<tbody class="bg-white divide-y divide-gray-200">';
+		}
+
+		return $output;
+	}
+
+	function end_table() {
+		return '</tbody></table></div>';
+	}
+
+	function table_row($cells = array(), $class = '') {
+		$output = '<tr class="' . $class . '">';
+		foreach ($cells as $cell) {
+			$output .= '<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">' . $cell . '</td>';
+		}
+		$output .= '</tr>';
+
+		return $output;
+	}
+
+	// Override the multi_upload_button to use Tailwind styles
+	protected function multi_upload_button($context, $id, $label, $disabled = false) {
+		$disabled_attr = $disabled ? ' disabled' : '';
+		$style_class = '';
+
+		switch($context) {
+			case 'browse':
+				$style_class = 'bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded';
+				break;
+			case 'upload':
+				$style_class = 'bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded';
+				break;
+			case 'clear':
+				$style_class = 'bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded ml-2';
+				break;
+		}
+
+		return '<button type="button" id="' . $id . '" class="' . $style_class . '"' . $disabled_attr . '>' . $label . '</button>';
+	}
+
+	// WYSIWYG with QuillJS for modern browsers (Tailwind doesn't have a built-in editor)
+	function wysiwyg($label, $name, $class = '', $value = '', $height = '300px', $options = array()) {
+			$id = isset($options['id']) ? $options['id'] : $name . '_editor';
+
+			$output = '<div class="' . $class . ' mb-4">';
+			$output .= '<label class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
+			$output .= '<div id="' . $id . '" style="height: ' . $height . ';" class="bg-white border border-gray-300 rounded-md">';
+			$output .= htmlspecialchars($value);
+			$output .= '</div>';
+			$output .= '<input type="hidden" name="' . $name . '" id="' . $name . '" value="' . htmlspecialchars($value) . '">';
+			$output .= '</div>';
+
+			// Add QuillJS
+			$output .= '<link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">';
+			$output .= '<script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>';
+			$output .= '<script>
+				var quill_' . $name . ' = new Quill("#' . $id . '", {
+					theme: "snow",
+					modules: {
+						toolbar: [
+							[{ "header": [1, 2, 3, false] }],
+							["bold", "italic", "underline", "strike"],
+							[{ "list": "ordered"}, { "list": "bullet" }],
+							["link", "image"],
+							["clean"]
+						]
+					}
 				});
-			</script>
-				
-			<style>
-			.trumbowyg-box,
-			.trumbowyg-editor,
-			.trumbowyg-textarea {
-				height: 500px;
-			}
-
-			.trumbowyg-box.trumbowyg-fullscreen,
-			.trumbowyg-box.trumbowyg-fullscreen .trumbowyg-editor,
-			.trumbowyg-box.trumbowyg-fullscreen .trumbowyg-textarea {
-				height: 100%;
-			}
-			/*
-			.trumbowyg-box {
-				max-height: 500px;
-			}
-			*/
-			</style>
-
-			";
-			$output .= '<div id="'.$id.'_container" class="errorplacement">
-				<label class="'.$this->textbox_label_class.'" for="'.$id.'">'.$label.'</label>
-					<div class="mt-1">
-					<textarea name="'.$id.'" id="'.$id.'" class="html_editable" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea></div>';
-		}
-		else{
-			$output .= '<div id="'.$id.'_container" class="'.$class.' errorplacement">
-				<label class="'.$this->textbox_label_class.'" for="'.$id.'">'.$label.'</label>
-					<div class="mt-1">
-					<textarea name="'.$id.'" id="'.$id.'" class="'.$this->textbox_textarea_class.'" rows="'.$rows.'" cols="'.$cols.'" placeholder="'.$hint.'">'.$value.'</textarea></div>';
-					
-			if($formhint){
-				$output .= '<div id="'.$id.'_hint"><small>'.$formhint.'</small></div>';
-			}
-		}
-
-		$output .= '
-		</div>';
-		
-		return $output;
-	}
-
-	
-
-	
-	function checkboxinput($label, $id, $class='sm:col-span-6', $align, $value, $truevalue, $hint){
-		
-		if($value == $truevalue){
-			$checked = 'checked="checked"'; 
-		}
-		else{
-			$checked = '';
-		}
-
-		return '<div id="'.$id.'_container" class="'.$class.' errorplacement">
-					<div class="'.$this->checkbox_outer_wrapper_class.'">
-						<div class="'.$this->checkbox_inner_wrapper_class.'">
-							<input class="'.$this->checkbox_input_class.'" type="checkbox" id="'.$id.'" name="'.$id.'" value="'.$value.'" '.$checked.' '.$disabled.' />
-						</div>
-						<div class="'.$this->checkbox_label_wrapper_class.'">
-							<label class="'.$this->checkbox_label_class.'" for="'.$id.'">'.$label.'</label>      
-						</div>
-					</div>
-				</div>';
-
-	}
-
-
-	/*******************************
-	GENERATES A CHECKBOX GROUP GIVEN AN ARRAY OF VALUES
-
-	INPUT: 	label (str)
-			id (str)
-			optionvals(associative array, 'label'=>'value')
-			checkedvals(single dimensional array)
-			readonlyvals(single dimensional array)
-	********************************/
-
-
-	
-	//IF TYPE IS 'RADIO' THIS BECOMES A RADIO INPUT
-	function checkboxList($label, $id, $class='sm:col-span-6', $optionvals, $checkedvals=array(), $disabledvals=array(), $readonlyvals=array(), $hint='', $type='checkbox') {
-		$output = '';
-
-		if(empty($optionvals)){
-			return false;
-		}
-		
-		if(empty($class)){
-			$class='sm:col-span-6';
-		}
-
-		if(!is_array($checkedvals)){
-			$checkedvals = array();
-		}
-
-		if($type=='checkbox'){
-			//$class= $this->checkbox_input_class_checkbox;
-		}
-		else if($type=='radio'){
-			$type='radio';
-			//$class= $this->checkbox_input_class_radio;
-			
-			if(is_array($checkedvals) && count($checkedvals) > 1){
-				throw new SystemDisplayableError('A radio field cannot have more than one checked value.');
-			}
-			
-			if($readonlyvals){
-				throw new SystemDisplayableError('A radio field cannot have read only values.');
-			}			
-		}
-		else{
-			throw new SystemDisplayableError('Invalid checkbox type.');
-		}
-
-	
-		$output .=  '<fieldset class="'.$class.'">';
-		$output .= '<legend class="'.$this->checkbox_legend_class.'">'.$label.'</label>';
-		$output .= '<div id="'.$id.'_container" class="'.$this->checkbox_container_class.' errorplacement">';
-
-
-		foreach ($optionvals as $key => $value) {
-			$uniqid = $id . $value;
-			if(in_array($value, $checkedvals)){
-				$checked = 'checked="checked"';
-			}
-			else{
-				$checked = '';
-			}
-			
-			//DISABLED MEANS THE VALUE IS NOT PASSED THROUGH POST
-			if(in_array($value, $disabledvals)){
-				$disabled = 'disabled="disabled"';
-			}
-			else{
-				$disabled = '';
-			}			
-
-			//READONLY MEANS IT CANNOT BE CHANGED AND IS SUBMITTED THROUGH POST
-			if(in_array($value, $readonlyvals)){
-				if($checked){
-					$output .= $this->hiddeninput($id.'[]', $value);	
-					$output .= '<label for="'.$uniqid.'">'.$key.' (checked, read only)</label><br>';
-				}
-				else{
-					$output .= $this->hiddeninput($id.'[]', '');	
-					$output .= '<label for="'.$uniqid.'">'.$key.' (unchecked, read only)</label><br>';
-				}
-			}
-			else{
-
-				$output .= '<div class="'.$this->checkbox_outer_wrapper_class.'">
-								<div class="'.$this->checkbox_inner_wrapper_class.'">
-									<input class="'.$this->checkbox_input_class.'" type="'.$type.'" id="'.$uniqid.'" name="'.$id.'[]" value="'.$value.'" '.$checked.' '.$disabled.' />
-								</div>
-								<div class="'.$this->checkbox_label_wrapper_class.'">
-									<label class="'.$this->checkbox_label_class.'" for="'.$uniqid.'">'.$key.'</label>      
-								</div>
-						</div>
-					   ';
-			}
-		}
-		$output .=  '</div></fieldset>';
-		
-		return $output;
-
-	}
-
-
-
-	/*******************************
-	GENERATES A RADIO GROUP GIVEN AN ARRAY OF VALUES
-
-	INPUT: 	label (str)
-			id (str)
-			optionvals(associative array, 'label'=>'value')
-			checkedval
-			readonlyvals(single dimensional array)
-	********************************/
-	function radioinput($label, $id, $class, &$optionvals, $checkedval, $disabledvals=array(), $readonlyvals=array(), $hint) {
-		
-		if(empty($class)){
-			$class='sm:col-span-6';
-		}		
-		
-		$checkedvals = array($checkedval);
-		return $this->checkboxList($label, $id, $class, $optionvals, $checkedvals, $disabledvals, $readonlyvals, $hint, 'radio');
-		
-	}
-
-	function dateinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='date'){
-	
-		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, $autocomplete, $formhint, $type);
-		
-	}
-	
-	//FORMAT 'HH:MM PM'
-	function timeinput($label, $id, $class, $value, $hint) {
-
-		return '
-		<link rel="stylesheet" href="/adm/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.css"/>
-		<script type="text/javascript" src="/adm/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.js"></script>
-		<script type="text/javascript">
-		$(document).ready(function(){
-			$("input.timepicker").timepicker({
-				timeFormat: "h:mm p",
-				interval: 15,
-				//minTime: "10",
-				//maxTime: "6:00pm",
-				//defaultTime: "11",
-				//startTime: "00:00",
-				//dynamic: false,
-				//dropdown: true,
-				//scrollbar: true
-			});
-		});
-		</script>
-		<!-- time Picker -->
-			<div id="'.$id.'_container" class="'.$class.' errorplacement">
-			  <label class="'.$this->timeinput_label_class.'" for="'.$id.'">'.$label.'</label>
-				<input class="'.$this->timeinput_input_class.'"  type="text" id="'.$id.'" name="'.$id.'" value="'.$value.'">
-			</div>';
-	
-	}
-
-
-
-
-	//DOES NOT CONVERT FOR TIMEZONES
-	function datetimeinput($label, $id, $class, $inputdatetime, $hint, $timehint, $datehint) {
-
-		if(empty($class)){
-			$class='sm:col-span-6';
-		}
-
-		if(!is_null($inputdatetime) && $inputdatetime != ''){
-			$session = SessionControl::get_instance();
-			$inputdate = LibraryFunctions::convert_time($inputdatetime, 'UTC', 'UTC', 'Y-m-d');
-			$inputtime = LibraryFunctions::convert_time($inputdatetime, 'UTC', 'UTC', 'g:i a');
-		}
-		else{
-			$inputdate = '';
-			$inputtime = '';
-		}
-		
-		
-		$output = $this->dateinput($label, $id.'_date', $class, NULL, $inputdate, $hint, NULL, NULL, NULL, NULL, $type='date');
-		
-		$output .= $this->timeinput($label, $id.'_time', $class, $inputtime, NULL); 
-		return $output;
-
-	}
-
-	function dropinput($label, $id, $class, &$optionvals, $input, $hint,$showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE, $imagedropdown=FALSE) {
-		
-		if(empty($class)){
-			$class='sm:col-span-6';
-		}
-		
-		$output = '';
-		
-		if($ajaxendpoint){
-			$output .= '<link href="/includes/select2.min.css" rel="stylesheet" />
-			<script src="/includes/select2.full.min.js"></script>';
-		
-			$output .= '<script type="text/javascript">
-			$(document).ready(function() {
-			  $("#'.$id.'").select2({
-				placeholder: "None",
-				ajax: {
-				  url: "'.$ajaxendpoint.'",
-				  dataType: "json",
-				  delay: 250,
-				  processResults: function (data) {
-					return {
-					  results: data
-					};
-				  },
-				  minimumInputLength: 3,
-				  cache: true
-				}
-			  });
-			});
-				</script>';
-		
-		}
-		
-		
-	
-			$output .= '<div id="'.$id.'_container" class="'.$class.' errorplacement">
-						<label class="'.$this->dropinput_label_class.'" for="'.$id.'">'.$label.'</label>
-						
-							<select name="'.$id.'" id="'.$id.'" class="'.$this->dropinput_select_class.'">';
-								
-
-
-			if($showdefault){
-				if($showdefault === true){
-					if(is_null($input)){
-						$output .=  '<option value="" selected="selected">Choose One';
-					}
-					else{
-						$output .= '<option value="">Choose One';
-					}
-				}
-				else{
-					if(is_null($input)){
-						$output .=  '<option value="" selected="selected">'.$showdefault;
-					}
-					else{
-						$output .= '<option value="">'.$showdefault;
-					}						
-				}
-			}
-
-
-			foreach ($optionvals as $key => $value) {
-			
-				if($forcestrict){
-					if ($input === $value) { 
-						$output .= '<option value="'. $value .'" selected="selected">' . $key . '</option>';
-					} 
-					else {
-						$output .= '<option value="'. $value .'">' . $key . '</option>';
-					}					
-				}
-				else{
-					if ($input == $value) { 
-						$output .= '<option value="'. $value .'" selected="selected">' . $key . '</option>';
-					} 
-					else {
-
-						$output .= '<option value="'. $value .'">' . $key . '</option>';
-					}
-				}
-			}
-			$output .= '</select>				
-						
-					</div>';	
-		
+				quill_' . $name . '.on("text-change", function() {
+					document.getElementById("' . $name . '").value = quill_' . $name . '.root.innerHTML;
+				});
+			</script>';
 
 			return $output;
-				 
+
 	}
-
-	function imageinput($label, $id, $class, &$optionvals, $input, $hint,$showdefault=TRUE, $forcestrict=TRUE, $ajaxendpoint=FALSE) {
-		
-		$output = '';
-		
-			$output .= '
-			<style>
-			.image-dropdown {
-				/*style the "box" in its minimzed state*/
-				border:1px solid black; width:600px; height:80px; overflow:hidden;
-				/*animate the dropdown collapsing*/
-				transition: height 0.1s;
-			}
-			.image-dropdown:hover {
-				/*when expanded, the dropdown will get native means of scrolling*/
-				height:400px; overflow-y:scroll;
-				/*animate the dropdown expanding*/
-				transition: height 0.5s;
-			}
-			.image-dropdown input {
-				/*hide the nasty default radio buttons!*/
-				position:absolute;top:0;left:0;opacity:0;
-			}
-			.image-dropdown label {
-				/*style the labels to look like dropdown options*/
-				display:none; margin:2px; height:80px; opacity:0.8;  overflow:hidden;
-				/*background:url("http://www.google.com/images/srpr/logo3w.png") 50% 50%;*/
-				}
-			.image-dropdown:hover label{
-				/*this is how labels render in the "expanded" state.
-				 we want to see only the selected radio button in the collapsed menu,
-				 and all of them when expanded*/
-				display:block;
-			}
-			.image-dropdown input:checked + label {
-				/*tricky! labels immediately following a checked radio button
-				  (with our markup they are semantically related) should be fully opaque
-				  and visible even in the collapsed menu*/
-				opacity:1 !important; font-weight: bold; display:block;
-			}
-			.dropimagewidth {
-				display: inline-block;
-				width: 80px;
-				padding-right: 5px;
-			}
-			</style>
-			';
-			
-			$output .= '<h5>'.$label.'</h5><div id="'.$id.'_container" class=" errorplacement image-dropdown">';
-								
-
-			if($showdefault){
-				if(is_null($input)){
-					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/adm/includes/images/image_placeholder_thumbnail.png"></span> No Image</label>';
-				}
-				else{
-					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/adm/includes/images/image_placeholder_thumbnail.png"></span> No Image</label>';
-				}
-			}
-
-
-			foreach ($optionvals as $key => $value) {			
-
-				if($forcestrict && $input === $value){
-					
-					$output .= '<input type="radio" id="' . $value . '_id" name="'.$id.'" value="'. $value .'" checked="checked" /><label for="' . $value . '_id"> ' . $key . '</label>';
-				} elseif ($input == $value) { 
-					$output .= '<input type="radio" id="' . $value . '_id" name="'.$id.'" value="'. $value .'" checked="checked" /><label for="' . $value . '_id"> ' . $key . '</label>';
-				} else {
-
-					$output .= '<input type="radio" id="' . $value . '_id" name="'.$id.'" value="'. $value .'" /><label for="' . $value . '_id"> ' . $key . '</label>';
-				}
-			}
-			$output .= '
-					</div>';
-
-		
-
-			return $output;
-				 
-	}
-
-
-
-
-	static function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
-		$getargs = '';
-		if($getvars){ 
-			foreach($getvars as $getvar=>$getval){
-				$getargs.= '<input type="hidden" name="'.$getvar.'" value="'.$getval.'"/>';      
-			}
-		}
-		
-		$settings = Globalvars::get_instance();
-		$allowed_extensions = $settings->get_setting('allowed_upload_extensions');
-		$accept_attr = '.' . str_replace(',', ',.', $allowed_extensions);
-		
-		// Get actual PHP upload limits
-		$upload_max = ini_get('upload_max_filesize');
-		$post_max = ini_get('post_max_size');
-		// Convert to bytes to compare
-		function parseSize($size) {
-			$unit = preg_replace('/[^bkmgtpezy]/i', '', $size);
-			$size = preg_replace('/[^0-9\.]/', '', $size);
-			if ($unit) {
-				return round($size * pow(1024, stripos('bkmgtpezy', $unit[0])));
-			} else {
-				return round($size);
-			}
-		}
-		$upload_max_bytes = parseSize($upload_max);
-		$post_max_bytes = parseSize($post_max);
-		$max_size = min($upload_max_bytes, $post_max_bytes);
-		$max_size_display = round($max_size / (1024 * 1024)) . 'MB';
-	?>
-		<!-- File Drop Zone -->
-		<div id="file-drop-zone" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center mb-6 bg-gray-50 transition-all duration-300 ease-in-out cursor-pointer hover:bg-blue-50 hover:border-blue-300">
-			<svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-				<path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-			</svg>
-			<h3 class="text-lg font-medium text-gray-700 mb-2">Drop files here or click to browse</h3>
-			<p class="text-sm text-gray-500 mb-4">Maximum file size: <?php echo $max_size_display; ?> | Allowed types: <?php echo strtoupper(str_replace(',', ', ', $allowed_extensions)); ?></p>
-			<input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" class="hidden">
-			<button type="button" id="browse-btn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded inline-flex items-center">
-				<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-5L12 5H5a2 2 0 00-2 2z"/>
-				</svg>
-				Browse Files
-			</button>
-		</div>
-
-		<!-- Upload Controls -->
-		<div class="flex justify-between items-center mb-6">
-			<div class="flex space-x-2">
-				<button type="button" id="upload-all-btn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded inline-flex items-center disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
-					</svg>
-					Upload All
-				</button>
-				<button type="button" id="clear-all-btn" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded inline-flex items-center disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-					</svg>
-					Clear All
-				</button>
-			</div>
-			<div id="overall-progress" class="flex-1 ml-4 hidden">
-				<div class="bg-gray-200 rounded-full h-2">
-					<div id="progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
-				</div>
-			</div>
-		</div>
-
-		<!-- Files Table -->
-		<div class="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg">
-			<table class="min-w-full divide-y divide-gray-200">
-				<thead class="bg-gray-50">
-					<tr>
-						<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-							<div class="flex items-center">
-								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-								</svg>
-								File Name
-							</div>
-						</th>
-						<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-							<div class="flex items-center">
-								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
-								</svg>
-								Size
-							</div>
-						</th>
-						<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-							<div class="flex items-center">
-								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-								</svg>
-								Status
-							</div>
-						</th>
-						<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-							<div class="flex items-center">
-								<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-								</svg>
-								Actions
-							</div>
-						</th>
-					</tr>
-				</thead>
-				<tbody id="files-list" class="bg-white divide-y divide-gray-200">
-					<tr id="no-files-message">
-						<td colspan="4" class="px-6 py-8 text-center text-gray-500">
-							<svg class="mx-auto h-16 w-16 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-								<path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-							</svg>
-							<div class="text-lg font-medium">No files selected</div>
-						</td>
-					</tr>
-				</tbody>
-			</table>
-		</div>
-
-		<?php if($getargs): ?>
-		<form id="hidden-form-data" class="hidden">
-			<?php echo $getargs; ?>
-		</form>
-		<?php endif; ?>
-		
-		<script>
-		$(function() {
-			'use strict';
-			
-			let selectedFiles = [];
-			
-			// Get allowed file extensions from server setting
-			const allowedExtensions = '<?php echo $allowed_extensions; ?>';
-			const allowedTypes = new RegExp('\\\\.(' + allowedExtensions.replace(/,/g, '|') + ')$', 'i');
-			const maxFileSize = <?php echo $max_size; ?>; // Maximum file size in bytes
-			
-			// DOM elements
-			const $dropZone = $('#file-drop-zone');
-			const $fileInput = $('#file-input');
-			const $browseBtn = $('#browse-btn');
-			const $uploadAllBtn = $('#upload-all-btn');
-			const $clearAllBtn = $('#clear-all-btn');
-			const $filesList = $('#files-list');
-			const $noFilesMessage = $('#no-files-message');
-			const $overallProgress = $('#overall-progress');
-			const $progressBar = $('#progress-bar');
-
-			// File size formatter
-			function formatFileSize(bytes) {
-				if (bytes === 0) return '0 Bytes';
-				const k = 1024;
-				const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-				const i = Math.floor(Math.log(bytes) / Math.log(k));
-				return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-			}
-
-			// Generate unique ID for each file
-			function generateFileId() {
-				return 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-			}
-
-			// Show toast notification
-			function showToast(message, type = 'info') {
-				console.log(type + ': ' + message);
-				if (type === 'error') {
-					alert('Error: ' + message);
-				} else {
-					alert(message);
-				}
-			}
-
-			// Add files to the list
-			function addFiles(files) {
-				Array.from(files).forEach(file => {
-					// Validate file type using server setting
-					if (!allowedTypes.test(file.name)) {
-						showToast('Invalid file type: ' + file.name + '. Allowed: ' + allowedExtensions, 'error');
-						return;
-					}
-
-					// Validate file size using server limit
-					if (file.size > maxFileSize) {
-						showToast('File too large: ' + file.name + '. Maximum size: <?php echo $max_size_display; ?>', 'error');
-						return;
-					}
-
-					const fileId = generateFileId();
-					const fileObj = {
-						id: fileId,
-						file: file,
-						status: 'pending'
-					};
-
-					selectedFiles.push(fileObj);
-					renderFileRow(fileObj);
-				});
-
-				updateUI();
-			}
-
-			// Render a file row in the table
-			function renderFileRow(fileObj) {
-				$noFilesMessage.addClass('hidden');
-				
-				const $row = $(`
-					<tr data-file-id="${fileObj.id}" class="file-row hover:bg-gray-50 transition-colors duration-200">
-						<td class="px-6 py-4 whitespace-nowrap">
-							<div class="flex items-center">
-								<svg class="w-5 h-5 text-gray-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-								</svg>
-								<span class="file-name text-sm font-medium text-gray-900">${fileObj.file.name}</span>
-							</div>
-						</td>
-						<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 file-size">${formatFileSize(fileObj.file.size)}</td>
-						<td class="px-6 py-4 whitespace-nowrap file-status">
-							<span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">Ready to upload</span>
-						</td>
-						<td class="px-6 py-4 whitespace-nowrap text-sm font-medium file-actions">
-							<button type="button" class="text-blue-600 hover:text-blue-900 mr-3 upload-single-btn" title="Upload this file">
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
-								</svg>
-							</button>
-							<button type="button" class="text-red-600 hover:text-red-900 remove-file-btn" title="Remove this file">
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-								</svg>
-							</button>
-						</td>
-					</tr>
-				`);
-
-				$filesList.append($row);
-			}
-
-			// Update UI state
-			function updateUI() {
-				const hasFiles = selectedFiles.length > 0;
-				const pendingFiles = selectedFiles.filter(f => f.status === 'pending').length;
-				
-				$uploadAllBtn.prop('disabled', pendingFiles === 0);
-				$clearAllBtn.prop('disabled', !hasFiles);
-				
-				if (!hasFiles) {
-					$noFilesMessage.removeClass('hidden');
-				}
-				
-				// Update button text with count
-				if (pendingFiles > 0) {
-					$uploadAllBtn.find('svg').next().text(`Upload All (${pendingFiles})`);
-				} else {
-					$uploadAllBtn.find('svg').next().text('Upload All');
-				}
-			}
-
-			// Event Handlers
-			$browseBtn.on('click', () => $fileInput[0].click());
-			
-			$fileInput.on('change', function() {
-				if (this.files.length > 0) {
-					addFiles(this.files);
-					this.value = ''; // Reset input
-				}
-			});
-
-			// Drag and drop functionality
-			$dropZone.on('dragover dragenter', function(e) {
-				e.preventDefault();
-				e.stopPropagation();
-				$(this).addClass('bg-blue-50 border-blue-300');
-			});
-
-			$dropZone.on('dragleave', function(e) {
-				e.preventDefault();
-				e.stopPropagation();
-				$(this).removeClass('bg-blue-50 border-blue-300');
-			});
-
-			$dropZone.on('drop', function(e) {
-				e.preventDefault();
-				e.stopPropagation();
-				$(this).removeClass('bg-blue-50 border-blue-300');
-				
-				const files = e.originalEvent.dataTransfer.files;
-				if (files.length > 0) {
-					addFiles(files);
-				}
-			});
-
-			// Clear all files
-			$clearAllBtn.on('click', function() {
-				if (confirm('Are you sure you want to clear all files?')) {
-					selectedFiles = [];
-					$filesList.find('.file-row').remove();
-					updateUI();
-				}
-			});
-
-			// Event delegation for dynamic buttons
-			$filesList.on('click', '.remove-file-btn', function() {
-				const $row = $(this).closest('.file-row');
-				const fileId = $row.data('file-id');
-				
-				// Remove from array
-				selectedFiles = selectedFiles.filter(f => f.id !== fileId);
-				
-				// Remove from DOM
-				$row.remove();
-				updateUI();
-			});
-
-			// Click to browse anywhere in drop zone
-			$dropZone.on('click', function(e) {
-				if (e.target === this || !$(e.target).closest('button').length) {
-					$fileInput[0].click();
-				}
-			});
-
-			console.log('Modern Tailwind file upload loaded');
-		});
-		</script>
-	<?php
-	}
-
 
 }
 ?>
