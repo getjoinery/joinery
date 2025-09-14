@@ -216,14 +216,18 @@ $routes = [
         // Uploads with authentication
         '/uploads/*' => function($params, $settings, $session) {
             if(!$settings->get_setting('files_active')) return false;
-            
+
             $upload_dir = $settings->get_setting('upload_dir');
-            $file = $params[2] ? $upload_dir.'/'.$params[1].'/'.$params[2] : $upload_dir.'/'.$params[1];
-            
+            // Build the full path from all params after "uploads"
+            // params[0] is empty, params[1] is "uploads", params[2+] is the subpath
+            $subpath_parts = array_slice($params, 2);
+            $subpath = implode('/', $subpath_parts);
+            $file = $upload_dir . '/' . $subpath;
+
             if(file_exists($file)){
                 PathHelper::requireOnce('data/files_class.php');
                 $file_obj = File::get_by_name(basename($file));
-                
+
                 if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){
                     RouteHelper::serveStaticFile($file, 43200);
                     return true;
