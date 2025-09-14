@@ -86,6 +86,240 @@ abstract class PublicPageBase {
 		return MultiPublicMenu::get_sorted_array();
 	}
 
+	/**
+	 * Get comprehensive menu data for all menu types
+	 * Consolidates menu logic from various theme implementations
+	 *
+	 * @return array Complete menu data structure
+	 */
+	public function get_menu_data() {
+		$session = SessionControl::get_instance();
+		$settings = Globalvars::get_instance();
+
+		// Initialize return array
+		$menu_data = [
+			'main_menu' => [],
+			'user_menu' => [],
+			'cart' => [],
+			'notifications' => [],
+			'site_info' => [],
+			'mobile_menu' => []
+		];
+
+		// 1. Process main navigation menu from database
+		try {
+			$menus = PublicPage::get_public_menu();
+			$menu_data['main_menu'] = $menus;
+
+			// Add current page detection
+			$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+			foreach ($menu_data['main_menu'] as &$menu_item) {
+				$menu_item['is_active'] = ($menu_item['link'] === $current_path);
+				if (!empty($menu_item['submenu'])) {
+					foreach ($menu_item['submenu'] as &$submenu_item) {
+						$submenu_item['is_active'] = ($submenu_item['link'] === $current_path);
+						if ($submenu_item['is_active']) {
+							$menu_item['is_active'] = true; // Parent is active if child is
+						}
+					}
+				}
+			}
+		} catch (Exception $e) {
+			$menu_data['main_menu'] = [];
+		}
+
+		// 2. Build user menu based on login state
+		$is_logged_in = $session->is_logged_in();
+		$menu_data['user_menu'] = [
+			'is_logged_in' => $is_logged_in,
+			'user_id' => $is_logged_in ? $session->get_user_id() : null,
+			'user_name' => null,
+			'display_name' => null,
+			'permission_level' => $session->get_permission(),
+			'avatar_url' => null,
+			'items' => []
+		];
+
+		if ($is_logged_in) {
+			// Get user information
+			if ($session->get_user_id()) {
+				try {
+					$user = new User($session->get_user_id(), TRUE);
+					$menu_data['user_menu']['user_name'] = $user->get('usr_email');
+					$menu_data['user_menu']['display_name'] = $user->display_name();
+
+					// Default avatar path
+					$menu_data['user_menu']['avatar_url'] = PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web');
+				} catch (Exception $e) {
+					// User load failed, use session data only
+					$menu_data['user_menu']['display_name'] = 'User';
+				}
+			}
+
+			// Logged in menu items - only include items that should be shown
+			$menu_data['user_menu']['items'] = [
+				// Navigation
+				[
+					'label' => 'Home',
+					'link' => '/',
+					'icon' => 'home'
+				],
+				[
+					'label' => 'My Profile',
+					'link' => '/profile',
+					'icon' => 'user'
+				],
+
+				// E-commerce related
+				[
+					'label' => 'Orders',
+					'link' => '/profile#orders',
+					'icon' => 'shopping-bag'
+				],
+				[
+					'label' => 'Subscriptions',
+					'link' => '/profile/subscriptions',
+					'icon' => 'refresh'
+				],
+
+				// Event related
+				[
+					'label' => 'My Events',
+					'link' => '/profile#events',
+					'icon' => 'calendar'
+				],
+				[
+					'label' => 'Event Sessions',
+					'link' => '/profile/event_sessions',
+					'icon' => 'clock'
+				],
+
+				// Authentication
+				[
+					'label' => 'Sign out',
+					'link' => '/logout',
+					'icon' => 'sign-out'
+				]
+			];
+
+			// Add admin items based on permission level (checked here, not in array)
+			$permission = $session->get_permission();
+			if ($permission >= 5) {
+				// Insert admin items before logout
+				array_splice($menu_data['user_menu']['items'], -1, 0, [
+					[
+						'label' => 'Admin Dashboard',
+						'link' => '/admin/admin_users',
+						'icon' => 'dashboard'
+					]
+				]);
+
+				// Advanced admin items for permission > 5
+				if ($permission > 5) {
+					array_splice($menu_data['user_menu']['items'], -1, 0, [
+						[
+							'label' => 'Admin Settings',
+							'link' => '/admin/admin_settings',
+							'icon' => 'wrench'
+						],
+						[
+							'label' => 'Admin Utilities',
+							'link' => '/admin/admin_utilities',
+							'icon' => 'tools'
+						]
+					]);
+				}
+
+				// Help available to all admin users
+				array_splice($menu_data['user_menu']['items'], -1, 0, [
+					[
+						'label' => 'Admin Help',
+						'link' => '/admin/admin_help',
+						'icon' => 'question-circle'
+					]
+				]);
+			}
+		} else {
+			// Logged out menu items
+			$register_active = $settings->get_setting('register_active', false, true);
+
+			$menu_data['user_menu']['items'] = [
+				[
+					'label' => 'Home',
+					'link' => '/',
+					'icon' => 'home'
+				],
+				[
+					'label' => 'Sign in',
+					'link' => '/login',
+					'icon' => 'sign-in'
+				],
+				[
+					'label' => 'Forgot Password',
+					'link' => '/password-reset-1',
+					'icon' => 'key'
+				]
+			];
+
+			if ($register_active) {
+				$menu_data['user_menu']['items'][] = [
+					'label' => 'Sign up',
+					'link' => '/register',
+					'icon' => 'user-plus'
+				];
+			}
+		}
+
+		// 3. Process shopping cart data
+		// Shopping cart is always available - no setting controls it
+		$cart = null;
+		$item_count = 0;
+
+		try {
+			$cart = $session->get_shopping_cart();
+			if ($cart) {
+				$item_count = $cart->count_items();
+			}
+		} catch (Exception $e) {
+			// Cart not available
+			$item_count = 0;
+		}
+
+		$menu_data['cart'] = [
+			'enabled' => true, // Cart is always enabled in the system
+			'item_count' => $item_count,
+			'total_items' => $item_count, // Could be different if we track quantity
+			'subtotal' => null, // Future: calculate subtotal
+			'link' => '/cart',
+			'has_items' => ($item_count > 0)
+		];
+
+		// 4. Notifications (placeholder for future implementation)
+		// No notifications system exists yet
+		$menu_data['notifications'] = [
+			'enabled' => false,
+			'count' => 0,
+			'unread_count' => 0,
+			'items' => []
+		];
+
+		// 5. Site information
+		$menu_data['site_info'] = [
+			'site_name' => $settings->get_setting('site_name', 'Joinery', true),
+			'site_description' => $settings->get_setting('site_description', '', true),
+			'logo_link' => $settings->get_setting('logo_link', null, true),
+			'theme' => $settings->get_setting('theme_template', 'falcon', true),
+			'register_enabled' => $settings->get_setting('register_active', false, true)
+		];
+
+		// 6. Mobile menu configuration
+		$menu_data['mobile_menu'] = [
+			'enabled' => true // Always enabled by default
+		];
+
+		return $menu_data;
+	}
+
 	public static function OutputGenericPublicPage($title, $header, $body, $options=array()) {
 		$page = new PublicPage();
 		$page->public_header(
