@@ -163,7 +163,8 @@
 				<aside class="sidebar col-lg-3">
 					<div class="sidebar-widgets-wrap">
 
-						<!-- Search Widget -->
+						<!-- Search Widget - Commented Out -->
+						<!--
 						<div class="widget widget_search clearfix">
 							<form role="search" method="get" class="search-form" action="/blog">
 								<div class="input-group">
@@ -174,8 +175,157 @@
 								</div>
 							</form>
 						</div>
+						-->
 
-						<!-- Recent Posts Widget -->
+						<!-- Popular/Recent/Comments Tab Widget -->
+						<div class="widget">
+							<ul class="nav canvas-tabs tabs nav-tabs size-sm mb-3" id="canvas-tab" role="tablist">
+								<li class="nav-item" role="presentation">
+									<button class="nav-link active" id="canvas-tab-1" data-bs-toggle="pill" data-bs-target="#tab-1" type="button" role="tab" aria-controls="canvas-tab-1" aria-selected="true">Pinned</button>
+								</li>
+								<li class="nav-item" role="presentation">
+									<button class="nav-link" id="canvas-tab-2" data-bs-toggle="pill" data-bs-target="#tab-2" type="button" role="tab" aria-controls="canvas-tab-2" aria-selected="false">Recents</button>
+								</li>
+								<li class="nav-item" role="presentation">
+									<button class="nav-link uil uil-comments-alt" id="canvas-tab-3" data-bs-toggle="pill" data-bs-target="#tab-3" type="button" role="tab" aria-controls="canvas-tab-3" aria-selected="false"></button>
+								</li>
+							</ul>
+
+							<div id="canvas-TabContent" class="tab-content">
+								<!-- Pinned Tab (Pinned Posts) -->
+								<div class="tab-pane show active" id="tab-1" role="tabpanel" aria-labelledby="canvas-tab-1" tabindex="0">
+									<div class="posts-sm row col-mb-30" id="pinned-post-list-sidebar">
+										<?php
+										// Get pinned posts
+										$pinned_posts = new MultiPost(
+											array('published' => TRUE, 'deleted' => false, 'pinned' => TRUE),
+											array('pst_published_time' => 'DESC'),
+											3, 0
+										);
+										$pinned_posts->load();
+										$num_pinned = $pinned_posts->count_all();
+
+										if($num_pinned > 0):
+											foreach($pinned_posts as $pinned_post):
+										?>
+										<div class="entry col-12">
+											<div class="grid-inner row g-0">
+												<div class="col-auto">
+													<div class="entry-image">
+														<a href="<?php echo $pinned_post->get_url(); ?>"><img class="rounded-circle" src="https://via.placeholder.com/80x80/1ABC9C/ffffff?text=Pin" alt="Pinned Post"></a>
+													</div>
+												</div>
+												<div class="col ps-3">
+													<div class="entry-title">
+														<h4><a href="<?php echo $pinned_post->get_url(); ?>"><?php echo htmlspecialchars($pinned_post->get('pst_title')); ?></a></h4>
+													</div>
+													<div class="entry-meta">
+														<ul>
+															<li><?php echo date('jS M Y', strtotime($pinned_post->get('pst_published_time'))); ?></li>
+														</ul>
+													</div>
+												</div>
+											</div>
+										</div>
+										<?php
+											endforeach;
+										else:
+										?>
+										<div class="entry col-12">
+											<div class="grid-inner row g-0">
+												<div class="col">
+													<p class="text-muted small">No pinned posts available.</p>
+												</div>
+											</div>
+										</div>
+										<?php endif; ?>
+									</div>
+								</div>
+
+								<!-- Recent Tab -->
+								<div class="tab-pane" id="tab-2" role="tabpanel" aria-labelledby="canvas-tab-2" tabindex="0">
+									<div class="posts-sm row col-mb-30" id="recent-post-list-sidebar">
+										<?php
+										$recent_posts = new MultiPost(
+											array('published' => TRUE, 'deleted' => false),
+											array('pst_published_time' => 'DESC'),
+											3, 0
+										);
+										$recent_posts->load();
+
+										foreach($recent_posts as $recent_post):
+										?>
+										<div class="entry col-12">
+											<div class="grid-inner row g-0">
+												<div class="col-auto">
+													<div class="entry-image">
+														<a href="<?php echo $recent_post->get_url(); ?>"><img class="rounded-circle" src="https://via.placeholder.com/80x80/f8f9fa/6c757d?text=Post" alt="Recent Post"></a>
+													</div>
+												</div>
+												<div class="col ps-3">
+													<div class="entry-title">
+														<h4><a href="<?php echo $recent_post->get_url(); ?>"><?php echo htmlspecialchars($recent_post->get('pst_title')); ?></a></h4>
+													</div>
+													<div class="entry-meta">
+														<ul>
+															<li><?php echo date('jS M Y', strtotime($recent_post->get('pst_published_time'))); ?></li>
+														</ul>
+													</div>
+												</div>
+											</div>
+										</div>
+										<?php endforeach; ?>
+									</div>
+								</div>
+
+								<!-- Comments Tab -->
+								<div class="tab-pane" id="tab-3" role="tabpanel" aria-labelledby="canvas-tab-3" tabindex="0">
+									<div class="posts-sm row col-mb-30" id="recent-comments-list-sidebar">
+										<div class="entry col-12">
+											<div class="grid-inner row g-0">
+												<div class="col-auto">
+													<div class="entry-image">
+														<a href="#"><img class="rounded-circle" src="https://via.placeholder.com/50x50/6c757d/ffffff?text=JD" alt="User Avatar"></a>
+													</div>
+												</div>
+												<div class="col ps-3">
+													<strong>John Doe:</strong> Great article! Really helped me understand the concepts better...
+												</div>
+											</div>
+										</div>
+
+										<div class="entry col-12">
+											<div class="grid-inner row g-0">
+												<div class="col-auto">
+													<div class="entry-image">
+														<a href="#"><img class="rounded-circle" src="https://via.placeholder.com/50x50/6c757d/ffffff?text=SM" alt="User Avatar"></a>
+													</div>
+												</div>
+												<div class="col ps-3">
+													<strong>Sarah Miller:</strong> Thanks for sharing this. The examples were very helpful...
+												</div>
+											</div>
+										</div>
+
+										<div class="entry col-12">
+											<div class="grid-inner row g-0">
+												<div class="col-auto">
+													<div class="entry-image">
+														<a href="#"><img class="rounded-circle" src="https://via.placeholder.com/50x50/6c757d/ffffff?text=MJ" alt="User Avatar"></a>
+													</div>
+												</div>
+												<div class="col ps-3">
+													<strong>Mike Johnson:</strong> Excellent tutorial! Looking forward to more posts like this...
+												</div>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- Recent Posts Widget - Commented Out -->
+						<!--
 						<div class="widget clearfix">
 							<h4>Recent Posts</h4>
 							<div class="posts-sm row col-mb-30" id="post-list-sidebar">
@@ -186,7 +336,7 @@
 									5, 0
 								);
 								$recent_posts->load();
-								
+
 								foreach($recent_posts as $recent_post):
 								?>
 								<div class="entry col-12">
@@ -213,6 +363,7 @@
 								<?php endforeach; ?>
 							</div>
 						</div>
+						-->
 
 						<!-- Tags Widget -->
 						<?php if(!empty($page_vars['tags'])): ?>
