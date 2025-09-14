@@ -435,4 +435,550 @@ abstract class FormWriterBase {
 		return $output;
 	}
 
+	/**
+	 * Generate a full-featured file upload interface with drag-and-drop
+	 * @param array $getvars Optional GET variables to include in upload
+	 * @param boolean $delete Whether to allow deletion
+	 * @param boolean $checkall Whether to check all files
+	 * @return void Outputs HTML directly
+	 */
+	static function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
+		$getargs = '';
+		if($getvars){
+			foreach($getvars as $getvar=>$getval){
+				$getargs.= '<input type="hidden" name="'.$getvar.'" value="'.$getval.'"/>';
+			}
+		}
+
+		$settings = Globalvars::get_instance();
+		$allowed_extensions = $settings->get_setting('allowed_upload_extensions');
+		$accept_attr = '.' . str_replace(',', ',.', $allowed_extensions);
+
+		// Get actual PHP upload limits
+		$upload_max = ini_get('upload_max_filesize');
+		$post_max = ini_get('post_max_size');
+		// Convert to bytes to compare
+		function parseSize($size) {
+			$unit = preg_replace('/[^bkmgtpezy]/i', '', $size);
+			$size = preg_replace('/[^0-9\.]/', '', $size);
+			if ($unit) {
+				return round($size * pow(1024, stripos('bkmgtpezy', $unit[0])));
+			} else {
+				return round($size);
+			}
+		}
+		$upload_max_bytes = parseSize($upload_max);
+		$post_max_bytes = parseSize($post_max);
+		$max_size = min($upload_max_bytes, $post_max_bytes);
+		$max_size_display = round($max_size / (1024 * 1024)) . 'MB';
+	?>
+		<!-- File Drop Zone -->
+		<div id="file-drop-zone" class="file-drop-zone" style="border: 2px dashed #ccc; border-radius: 5px; padding: 20px; text-align: center; margin-bottom: 20px; background-color: #f9f9f9; transition: all 0.3s ease; cursor: pointer;">
+			<div style="font-size: 48px; color: #999; margin-bottom: 10px;">☁️</div>
+			<h3 style="color: #666; margin: 10px 0;">Drop files here or click to browse</h3>
+			<p style="color: #999; margin: 10px 0;">Maximum file size: <?php echo $max_size_display; ?> | Allowed types: <?php echo strtoupper(str_replace(',', ', ', $allowed_extensions)); ?></p>
+			<input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" style="display: none;">
+			<button type="button" id="browse-btn" class="button primary" style="margin-top: 10px;">
+				📁 Browse Files
+			</button>
+		</div>
+
+		<!-- Upload Controls -->
+		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+			<div>
+				<button type="button" id="upload-all-btn" class="button primary" disabled>
+					⬆️ Upload All
+				</button>
+				<button type="button" id="clear-all-btn" class="button secondary" style="margin-left: 10px;" disabled>
+					🗑️ Clear All
+				</button>
+			</div>
+			<div id="overall-progress" style="display: none; flex-grow: 1; margin-left: 20px;">
+				<progress id="overall-progress-bar" value="0" max="100" style="width: 100%; height: 20px;">0%</progress>
+			</div>
+		</div>
+
+		<!-- Files Table -->
+		<div style="overflow-x: auto;">
+			<table style="width: 100%; border-collapse: collapse;">
+				<thead>
+					<tr style="background-color: #f5f5f5;">
+						<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">📄 File Name</th>
+						<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">📊 Size</th>
+						<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">ℹ️ Status</th>
+						<th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">⚙️ Actions</th>
+					</tr>
+				</thead>
+				<tbody id="files-list">
+					<tr id="no-files-message">
+						<td colspan="4" style="text-align: center; padding: 40px; color: #999;">
+							<div style="font-size: 32px; margin-bottom: 10px;">📤</div>
+							<div>No files selected</div>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
+		<?php if($getargs): ?>
+		<form id="hidden-form-data" style="display: none;">
+			<?php echo $getargs; ?>
+		</form>
+		<?php endif; ?>
+		<script>
+		$(function() {
+			'use strict';
+
+			let selectedFiles = [];
+
+			// Get allowed file extensions from server setting
+			const allowedExtensions = '<?php echo $allowed_extensions; ?>';
+			const allowedTypes = new RegExp('\\.(' + allowedExtensions.replace(/,/g, '|') + ')$', 'i');
+			const maxFileSize = <?php echo $max_size; ?>; // Maximum file size in bytes
+
+			// DOM elements
+			const $dropZone = $('#file-drop-zone');
+			const $fileInput = $('#file-input');
+			const $browseBtn = $('#browse-btn');
+			const $uploadAllBtn = $('#upload-all-btn');
+			const $clearAllBtn = $('#clear-all-btn');
+			const $filesList = $('#files-list');
+			const $noFilesMessage = $('#no-files-message');
+			const $overallProgress = $('#overall-progress');
+			const $progressBar = $('#overall-progress-bar');
+
+			// File size formatter
+			function formatFileSize(bytes) {
+				if (bytes === 0) return '0 Bytes';
+				const k = 1024;
+				const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+				const i = Math.floor(Math.log(bytes) / Math.log(k));
+				return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+			}
+
+			// Generate unique ID for each file
+			function generateFileId() {
+				return 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+			}
+
+			// Get file icon based on extension
+			function getFileIcon(filename) {
+				const ext = filename.split('.').pop().toLowerCase();
+				const iconMap = {
+					'pdf': '📕',
+					'doc': '📘',
+					'docx': '📘',
+					'xls': '📗',
+					'xlsx': '📗',
+					'jpg': '🖼️',
+					'jpeg': '🖼️',
+					'png': '🖼️',
+					'gif': '🖼️',
+					'mp3': '🎵',
+					'mp4': '🎬',
+					'm4a': '🎵'
+				};
+				return iconMap[ext] || '📄';
+			}
+
+			// Add files to the list
+			function addFiles(files) {
+				Array.from(files).forEach(file => {
+					// Validate file type using server setting
+					if (!allowedTypes.test(file.name)) {
+						showToast('Invalid file type: ' + file.name + '. Allowed: ' + allowedExtensions, 'error');
+						return;
+					}
+
+					// Validate file size using server limit
+					if (file.size > maxFileSize) {
+						showToast('File too large: ' + file.name + '. Maximum size: <?php echo $max_size_display; ?>', 'error');
+						return;
+					}
+
+					const fileId = generateFileId();
+					const fileObj = {
+						id: fileId,
+						file: file,
+						status: 'pending'
+					};
+
+					selectedFiles.push(fileObj);
+					renderFileRow(fileObj);
+				});
+
+				updateUI();
+			}
+
+			// Render a file row in the table
+			function renderFileRow(fileObj) {
+				$noFilesMessage.hide();
+
+				const fileIcon = getFileIcon(fileObj.file.name);
+				const $row = $(`
+					<tr data-file-id="${fileObj.id}" class="file-row" style="border-bottom: 1px solid #eee;">
+						<td style="padding: 10px;">
+							<div style="display: flex; align-items: center;">
+								<span style="margin-right: 8px; font-size: 20px;">${fileIcon}</span>
+								<span class="file-name">${fileObj.file.name}</span>
+							</div>
+						</td>
+						<td class="file-size" style="padding: 10px;">${formatFileSize(fileObj.file.size)}</td>
+						<td class="file-status" style="padding: 10px;">
+							<span style="padding: 2px 8px; background: #6c757d; color: white; border-radius: 3px; font-size: 12px;">Ready to upload</span>
+						</td>
+						<td class="file-actions" style="padding: 10px;">
+							<button type="button" class="button small upload-single-btn" title="Upload this file" style="padding: 4px 8px; font-size: 12px;">
+								⬆️
+							</button>
+							<button type="button" class="button small danger remove-file-btn" title="Remove this file" style="padding: 4px 8px; font-size: 12px; margin-left: 5px;">
+								❌
+							</button>
+						</td>
+					</tr>
+				`);
+
+				$filesList.append($row);
+			}
+
+			// Update UI state
+			function updateUI() {
+				const hasFiles = selectedFiles.length > 0;
+				const pendingFiles = selectedFiles.filter(f => f.status === 'pending').length;
+
+				$uploadAllBtn.prop('disabled', pendingFiles === 0);
+				$clearAllBtn.prop('disabled', !hasFiles);
+
+				if (!hasFiles) {
+					$noFilesMessage.show();
+				}
+
+				// Update button text with count
+				if (pendingFiles > 0) {
+					$uploadAllBtn.html(`⬆️ Upload All (${pendingFiles})`);
+				} else {
+					$uploadAllBtn.html('⬆️ Upload All');
+				}
+			}
+
+			// Show toast notification
+			function showToast(message, type = 'info') {
+				console.log(type + ': ' + message);
+				// Simple alert for now - can be enhanced with proper toast notifications
+				if (type === 'error') {
+					alert('Error: ' + message);
+				}
+			}
+
+			// Upload a single file
+			function uploadFile(fileObj) {
+				return new Promise((resolve, reject) => {
+					const formData = new FormData();
+					formData.append('files[]', fileObj.file);
+
+					// Add any additional form data
+					$('#hidden-form-data input').each(function() {
+						formData.append($(this).attr('name'), $(this).val());
+					});
+
+					const $row = $(`.file-row[data-file-id="${fileObj.id}"]`);
+					const $status = $row.find('.file-status');
+					const $actions = $row.find('.file-actions');
+
+					// Update UI to uploading state
+					$status.html('<span style="padding: 2px 8px; background: #007bff; color: white; border-radius: 3px; font-size: 12px;">Uploading...</span>');
+					$actions.html(`
+						<div style="display: flex; align-items: center;">
+							<progress value="0" max="100" style="width: 60px; height: 20px; margin-right: 8px;">0%</progress>
+							<span style="color: #666; font-size: 12px;">0%</span>
+						</div>
+					`);
+
+					// Create XMLHttpRequest for progress tracking
+					const xhr = new XMLHttpRequest();
+
+					xhr.upload.addEventListener('progress', function(e) {
+						if (e.lengthComputable) {
+							const progress = Math.round((e.loaded / e.total) * 100);
+							$actions.find('progress').val(progress).text(progress + '%');
+							$actions.find('span').text(progress + '%');
+							$status.html(`<span style="padding: 2px 8px; background: #007bff; color: white; border-radius: 3px; font-size: 12px;">Uploading ${progress}%</span>`);
+						}
+					});
+
+					xhr.addEventListener('load', function() {
+						if (xhr.status === 200) {
+							try {
+								const response = JSON.parse(xhr.responseText);
+								if (response.files && response.files[0]) {
+									const file = response.files[0];
+									console.log('Upload response file object:', file); // Debug log
+									if (file.url) {
+										// Success
+										$status.html('<span style="padding: 2px 8px; background: #28a745; color: white; border-radius: 3px; font-size: 12px;">✓ Upload successful</span>');
+										$actions.html(`
+											<a href="${file.url}" target="_blank" class="button small success" title="Download file" style="padding: 4px 8px; font-size: 12px; text-decoration: none;">
+												⬇️
+											</a>
+											<button type="button" class="button small danger remove-file-btn" title="Remove from list" style="padding: 4px 8px; font-size: 12px; margin-left: 5px;">
+												❌
+											</button>
+										`);
+
+										// Make filename clickable if we have a file ID
+										console.log('Checking for file_id:', file.file_id); // Debug log
+										if (file.file_id) {
+											const $nameElement = $row.find('.file-name');
+											const fileName = $nameElement.text();
+											const fileIcon = getFileIcon(fileName);
+
+											console.log('Making filename clickable:', fileName, 'with ID:', file.file_id); // Debug log
+
+											$nameElement.parent().html(`
+												<div style="display: flex; align-items: center;">
+													<span style="margin-right: 8px; font-size: 20px;">${fileIcon}</span>
+													<a href="/admin/admin_file?fil_file_id=${file.file_id}" style="color: #0066cc; text-decoration: none;">${fileName}</a>
+												</div>
+											`);
+										} else {
+											console.log('No file_id found in response'); // Debug log
+										}
+
+										fileObj.status = 'completed';
+										fileObj.url = file.url;
+										fileObj.file_id = file.file_id;
+										resolve(fileObj);
+									} else if (file.error) {
+										throw new Error(file.error);
+									}
+								} else {
+									throw new Error('Invalid response format');
+								}
+							} catch (e) {
+								reject(e);
+							}
+						} else {
+							reject(new Error('Upload failed with status: ' + xhr.status));
+						}
+					});
+
+					xhr.addEventListener('error', function() {
+						reject(new Error('Network error during upload'));
+					});
+
+					xhr.open('POST', '/admin/admin_file_upload_process');
+					xhr.send(formData);
+				}).catch(error => {
+					// Handle error
+					const $row = $(`.file-row[data-file-id="${fileObj.id}"]`);
+					const $status = $row.find('.file-status');
+					const $actions = $row.find('.file-actions');
+
+					$status.html(`<span style="padding: 2px 8px; background: #dc3545; color: white; border-radius: 3px; font-size: 12px;">⚠️ Error</span>`);
+					$actions.html(`
+						<button type="button" class="button small upload-single-btn" title="Retry upload" style="padding: 4px 8px; font-size: 12px;">
+							🔄
+						</button>
+						<button type="button" class="button small danger remove-file-btn" title="Remove this file" style="padding: 4px 8px; font-size: 12px; margin-left: 5px;">
+							❌
+						</button>
+					`);
+					fileObj.status = 'error';
+					showToast(`Upload failed: ${fileObj.file.name} - ${error.message}`, 'error');
+					throw error;
+				});
+			}
+
+			// Event Handlers
+			$browseBtn.on('click', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$fileInput[0].click(); // Use native click instead of jQuery
+			});
+
+			$fileInput.on('change', function() {
+				if (this.files.length > 0) {
+					addFiles(this.files);
+					this.value = ''; // Reset input
+				}
+			});
+
+			// Drag and drop styling
+			$dropZone.on('dragover dragenter', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).css({'border-color': '#007bff', 'background-color': '#e7f3ff'});
+			});
+
+			$dropZone.on('dragleave', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).css({'border-color': '#ccc', 'background-color': '#f9f9f9'});
+			});
+
+			$dropZone.on('drop', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				$(this).css({'border-color': '#ccc', 'background-color': '#f9f9f9'});
+
+				const files = e.originalEvent.dataTransfer.files;
+				if (files.length > 0) {
+					addFiles(files);
+				}
+			});
+
+			// Hover effect
+			$dropZone.on('mouseenter', function() {
+				$(this).css('background-color', '#e7f3ff');
+			}).on('mouseleave', function() {
+				$(this).css('background-color', '#f9f9f9');
+			});
+
+			// Upload all files
+			$uploadAllBtn.on('click', async function() {
+				const pendingFiles = selectedFiles.filter(f => f.status === 'pending');
+				if (pendingFiles.length === 0) return;
+
+				$overallProgress.show();
+				$uploadAllBtn.prop('disabled', true);
+
+				let completed = 0;
+				const total = pendingFiles.length;
+
+				for (const fileObj of pendingFiles) {
+					try {
+						await uploadFile(fileObj);
+						completed++;
+						const progress = Math.round((completed / total) * 100);
+						$progressBar.val(progress);
+					} catch (error) {
+						console.error('Upload failed:', error);
+						completed++; // Count errors as completed for progress
+						const progress = Math.round((completed / total) * 100);
+						$progressBar.val(progress);
+					}
+				}
+
+				setTimeout(() => {
+					$overallProgress.hide();
+					$progressBar.val(0);
+					updateUI();
+				}, 1000);
+			});
+
+			// Clear all files
+			$clearAllBtn.on('click', function() {
+				if (confirm('Are you sure you want to clear all files?')) {
+					selectedFiles = [];
+					$filesList.find('.file-row').remove();
+					updateUI();
+				}
+			});
+
+			// Event delegation for dynamic buttons
+			$filesList.on('click', '.upload-single-btn', function() {
+				const fileId = $(this).closest('.file-row').data('file-id');
+				const fileObj = selectedFiles.find(f => f.id === fileId);
+				if (fileObj && (fileObj.status === 'pending' || fileObj.status === 'error')) {
+					uploadFile(fileObj).then(() => {
+						updateUI();
+					}).catch(() => {
+						updateUI();
+					});
+				}
+			});
+
+			$filesList.on('click', '.remove-file-btn', function() {
+				const $row = $(this).closest('.file-row');
+				const fileId = $row.data('file-id');
+
+				// Remove from array
+				selectedFiles = selectedFiles.filter(f => f.id !== fileId);
+
+				// Remove from DOM with animation
+				$row.fadeOut(300, function() {
+					$(this).remove();
+					updateUI();
+				});
+			});
+
+			// Click to browse anywhere in drop zone (except on buttons)
+			$dropZone.on('click', function(e) {
+				// Only trigger if clicking directly on the drop zone, not on child elements
+				if (e.target === this) {
+					e.preventDefault();
+					e.stopPropagation();
+					$fileInput[0].click(); // Use native click
+				}
+			});
+		});
+		</script>
+
+		<style>
+		#file-drop-zone:hover {
+			background-color: #e7f3ff !important;
+			border-color: #007bff !important;
+		}
+
+		.file-row {
+			transition: background-color 0.2s ease;
+		}
+
+		.file-row:hover {
+			background-color: #f8f9fa;
+		}
+
+		.button {
+			cursor: pointer;
+			border: 1px solid #ccc;
+			background: #f5f5f5;
+			padding: 8px 16px;
+			border-radius: 4px;
+			font-size: 14px;
+		}
+
+		.button.primary {
+			background: #007bff;
+			color: white;
+			border-color: #0056b3;
+		}
+
+		.button.secondary {
+			background: #6c757d;
+			color: white;
+			border-color: #545b62;
+		}
+
+		.button.success {
+			background: #28a745;
+			color: white;
+			border-color: #1e7e34;
+		}
+
+		.button.danger {
+			background: #dc3545;
+			color: white;
+			border-color: #bd2130;
+		}
+
+		.button.small {
+			padding: 4px 8px;
+			font-size: 12px;
+		}
+
+		.button:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
+		}
+
+		progress {
+			border-radius: 4px;
+		}
+		</style>
+
+	<!-- Modern browsers handle CORS natively, no IE8/9 support needed -->
+	  <?php
+
+	}
+
 }
