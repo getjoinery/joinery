@@ -213,20 +213,36 @@ class LibraryFunctions {
 			}
 		}	
 		
-		if($override_name == 'admin'){
-			PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
+		if($override_name == 'admin' || $override_name == 'bootstrap'){
+			PathHelper::requireOnce('includes/FormWriterBootstrap.php');
 			try {
-				return new FormWriterMasterBootstrap($form_id);
+				return new FormWriterBootstrap($form_id);
 			} catch (Error $e) {
 				throw new Exception("Failed to instantiate admin FormWriter (Bootstrap): " . $e->getMessage());
 			}
 		}
 		else if($override_name == 'tailwind'){
-			PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
+			PathHelper::requireOnce('includes/FormWriterTailwind.php');
 			try {
-				return new FormWriterMasterTailwind($form_id);
+				return new FormWriterTailwind($form_id);
 			} catch (Error $e) {
 				throw new Exception("Failed to instantiate tailwind FormWriter: " . $e->getMessage());
+			}
+		}
+		else if($override_name == 'uikit'){
+			PathHelper::requireOnce('includes/FormWriterUIKit.php');
+			try {
+				return new FormWriterUIKit($form_id);
+			} catch (Error $e) {
+				throw new Exception("Failed to instantiate UIKit FormWriter: " . $e->getMessage());
+			}
+		}
+		else if($override_name == 'plain' || $override_name == 'html5'){
+			PathHelper::requireOnce('includes/FormWriterHTML5.php');
+			try {
+				return new FormWriterHTML5($form_id);
+			} catch (Error $e) {
+				throw new Exception("Failed to instantiate HTML5 FormWriter: " . $e->getMessage());
 			}
 		}
 		
@@ -277,27 +293,27 @@ class LibraryFunctions {
 			$cssFramework = $theme->getCssFramework();
 			switch($cssFramework) {
 				case 'bootstrap':
-					PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
+					PathHelper::requireOnce('includes/FormWriterBootstrap.php');
 					try {
-						return new FormWriterMasterBootstrap($form_id);
+						return new FormWriterBootstrap($form_id);
 					} catch (Error $e) {
-						throw new Exception("Failed to instantiate FormWriterMasterBootstrap: " . $e->getMessage());
+						throw new Exception("Failed to instantiate FormWriterBootstrap: " . $e->getMessage());
 					}
 
 				case 'tailwind':
-					PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
+					PathHelper::requireOnce('includes/FormWriterTailwind.php');
 					try {
-						return new FormWriterMasterTailwind($form_id);
+						return new FormWriterTailwind($form_id);
 					} catch (Error $e) {
-						throw new Exception("Failed to instantiate FormWriterMasterTailwind: " . $e->getMessage());
+						throw new Exception("Failed to instantiate FormWriterTailwind: " . $e->getMessage());
 					}
 
 				case 'uikit':
-					PathHelper::requireOnce('includes/FormWriterMaster.php');
+					PathHelper::requireOnce('includes/FormWriterUIKit.php');
 					try {
-						return new FormWriterMaster($form_id);
+						return new FormWriterUIKit($form_id);
 					} catch (Error $e) {
-						throw new Exception("Failed to instantiate FormWriterMaster: " . $e->getMessage());
+						throw new Exception("Failed to instantiate FormWriterUIKit: " . $e->getMessage());
 					}
 			}
 
