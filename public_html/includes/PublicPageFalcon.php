@@ -79,8 +79,9 @@ class PublicPageFalcon extends PublicPageBase {
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 
-		$cart = $session->get_shopping_cart();
-		$numitems = $cart->count_items();
+		$menu_data = $this->get_menu_data();
+		$cart_info = $menu_data['cart'];
+		$numitems = $cart_info['count'];
 		if($numitems > 0){
 			$cart_menu = array('Cart' => '/cart');
 		} else {
@@ -225,15 +226,17 @@ class PublicPageFalcon extends PublicPageBase {
 			<?php } ?>
 			
 			
-			<?php if(!$session->is_logged_in()){ ?>
-			<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="/login">Login</a></li></ul>
-			
-				<?php if($settings->get_setting('register_active')){ ?>
-				<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="/register">Register</a></li></ul>
+			<?php
+			$user_menu = $menu_data['user_menu'];
+			if(!$user_menu['is_logged_in']){ ?>
+			<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="<?php echo $user_menu['login_link']; ?>">Login</a></li></ul>
+
+				<?php if(!empty($user_menu['register_link'])){ ?>
+				<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="<?php echo $user_menu['register_link']; ?>">Register</a></li></ul>
 				<?php } ?>
 			<?php } ?>
 
-			<?php if($session->is_logged_in()){ ?>
+			<?php if($user_menu['is_logged_in']){ ?>
 			<li class="nav-item dropdown"><a class="nav-link pe-0 ps-2" id="navbarDropdownUser" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                 <div class="avatar avatar-xl">
                   <img class="rounded-circle" src="<?php echo PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web', 'falcon'); ?>" alt="" />
@@ -242,11 +245,20 @@ class PublicPageFalcon extends PublicPageBase {
               </a>
               <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end py-0" aria-labelledby="navbarDropdownUser">
                 <div class="bg-white dark__bg-1000 rounded-2 py-2">
-                  
+
 
                   <!--<div class="dropdown-divider"></div>-->
-                  <a class="dropdown-item" href="/profile">Profile</a>
-                  <a class="dropdown-item" href="/logout">Logout</a>
+                  <?php
+                  if (!empty($user_menu['profile_links'])) {
+                      foreach ($user_menu['profile_links'] as $link_name => $link_url) {
+                          echo '<a class="dropdown-item" href="'.$link_url.'">'.$link_name.'</a>';
+                      }
+                  } else {
+                      // Fallback to hardcoded links if profile_links not available
+                      echo '<a class="dropdown-item" href="/profile">Profile</a>';
+                      echo '<a class="dropdown-item" href="/logout">Logout</a>';
+                  }
+                  ?>
                 </div>
               </div>
             </li>
@@ -572,7 +584,8 @@ class PublicPageFalcon extends PublicPageBase {
             <div class="collapse navbar-collapse scrollbar" id="navbarStandard">
               <ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
 				<?php
-				$menus = PublicPage::get_public_menu();
+				$menu_data = $this->get_menu_data();
+				$menus = $menu_data['main_menu'];
 				foreach ($menus as $menu) {
 					if ($menu['parent'] === true) {
 						$submenus = $menu['submenu'];
