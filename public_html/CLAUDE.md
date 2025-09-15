@@ -63,7 +63,7 @@ PathHelper::requireOnce('migrations/migrations.php');
 - `/logic/` - Business logic layer (`[page]_logic.php`) 
 - `/views/` - Base presentation templates
 - `/adm/` - Complete admin interface (currently uses Falcon theme)
-- `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterMaster, etc.)
+- `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterHTML5, etc.)
 - `/theme/` - Multi-theme system (falcon=Bootstrap, tailwind=legacy Tailwind CSS option) [symlinked]
 - `/plugins/` - Self-contained modules with own MVC structure [symlinked]
 - `/ajax/` - AJAX endpoints and webhook handlers
@@ -394,6 +394,8 @@ Located in `/home/user1/joinery/joinery/maintenance_scripts/`
 - **`/specs/implemented/`** - Completed specifications
 
 **Workflow:** Place new specs in `/specs/`, follow during development, move to `/specs/implemented/` when complete. This structure must be used unless explicitly specified otherwise.
+
+**🚨 CRITICAL RULE: NEVER MODIFY FILES IN `/specs/implemented/`**
 
 ### Database Schema Management
 

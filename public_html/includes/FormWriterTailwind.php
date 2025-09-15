@@ -44,18 +44,22 @@ class FormWriterTailwind extends FormWriterBase {
 		return '</form>';
 	}
 
-	function textinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
-		$type = isset($options['type']) ? $options['type'] : 'text';
-		$id = isset($options['id']) ? $options['id'] : $name;
-		$placeholder = isset($options['placeholder']) ? $options['placeholder'] : '';
-		$required = isset($options['required']) ? 'required' : '';
-		$readonly = isset($options['readonly']) ? 'readonly' : '';
-		$data_attributes = isset($options['data']) ? $options['data'] : array();
+	function textinput($label, $id, $class, $size, $value, $hint, $maxlength=255,
+					  $readonly='', $autocomplete=TRUE, $formhint=FALSE,
+					  $type='text', $layout='default') {
+		$name = $id; // Use id as name for compatibility
+		$placeholder = $hint ?: '';
+		$required = ''; // Could be derived from other parameters if needed
+		$data_attributes = array();
 
 		$output = '<div class="' . $class . ' mb-4">';
 		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
 		$output .= '<input type="' . $type . '" id="' . $id . '" name="' . $name . '" value="' . htmlspecialchars($value) . '"';
 		$output .= ' class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"';
+
+		if ($maxlength) {
+			$output .= ' maxlength="' . $maxlength . '"';
+		}
 
 		if ($size) {
 			$output .= ' size="' . $size . '"';
@@ -65,12 +69,12 @@ class FormWriterTailwind extends FormWriterBase {
 			$output .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
 		}
 
-		if ($required) {
-			$output .= ' ' . $required;
+		if ($readonly) {
+			$output .= ' readonly="readonly"';
 		}
 
-		if ($readonly) {
-			$output .= ' ' . $readonly;
+		if (!$autocomplete) {
+			$output .= ' autocomplete="off"';
 		}
 
 		foreach ($data_attributes as $key => $val) {
@@ -179,11 +183,11 @@ class FormWriterTailwind extends FormWriterBase {
 		return $output;
 	}
 
-	function fileinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
-		$id = isset($options['id']) ? $options['id'] : $name;
-		$accept = isset($options['accept']) ? $options['accept'] : '';
-		$multiple = isset($options['multiple']) ? 'multiple' : '';
-		$required = isset($options['required']) ? 'required' : '';
+	function fileinput($label, $id, $class, $size, $hint, $layout='default') {
+		$name = $id; // Use id as name for compatibility
+		$accept = '';
+		$multiple = '';
+		$required = '';
 
 		$output = '<div class="' . $class . ' mb-4">';
 		$output .= '<label for="' . $id . '" class="block text-sm font-medium text-gray-700 mb-1">' . $label . '</label>';
@@ -262,28 +266,34 @@ class FormWriterTailwind extends FormWriterBase {
 		return '</div>';
 	}
 
-	function new_form_button($label, $name = 'submit', $type = 'submit', $class = '') {
-		if ($type == 'submit') {
-			return $this->submit($label, $name, $class);
+	function new_form_button($label='Submit', $style='primary', $width='standard', $class='', $id=NULL) {
+		if ($style == 'submit' || $style == 'primary') {
+			return $this->submit($label, $id ?: 'submit', $class);
 		} else {
-			return $this->button($label, '', $class, array('type' => $type));
+			return $this->button($label, '', $class, array('type' => 'button', 'id' => $id));
 		}
 	}
 
 	// Date/Time inputs using Tailwind styling
-	function dateinput($label, $name, $class = '', $value = '', $options = array()) {
-		$options['type'] = 'date';
-		return $this->textinput($label, $name, $class, 0, $value, $options);
+	function dateinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $layout='default') {
+		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, $autocomplete, $formhint, 'date', $layout);
 	}
 
-	function timeinput($label, $name, $class = '', $value = '', $options = array()) {
-		$options['type'] = 'time';
-		return $this->textinput($label, $name, $class, 0, $value, $options);
+	function timeinput($label, $id, $class, $value, $hint, $layout='default') {
+		return $this->textinput($label, $id, $class, 0, $value, $hint, 255, '', TRUE, FALSE, 'time', $layout);
 	}
 
-	function datetimeinput($label, $name, $class = '', $value = '', $options = array()) {
-		$options['type'] = 'datetime-local';
-		return $this->textinput($label, $name, $class, 0, $value, $options);
+	function datetimeinput($label, $id, $class, $inputdatetime, $hint, $timehint, $datehint, $layout='default') {
+		// For Tailwind implementation, combine the hints
+		$combined_hint = $hint;
+		if ($timehint && $datehint) {
+			$combined_hint = $datehint . ' ' . $timehint;
+		} elseif ($timehint) {
+			$combined_hint = $timehint;
+		} elseif ($datehint) {
+			$combined_hint = $datehint;
+		}
+		return $this->textinput($label, $id, $class, 0, $inputdatetime, $combined_hint, 255, '', TRUE, FALSE, 'datetime-local', $layout);
 	}
 
 	// Email input with Tailwind styling
@@ -340,9 +350,9 @@ class FormWriterTailwind extends FormWriterBase {
 	}
 
 	// Password input with Tailwind styling
-	function passwordinput($label, $name, $class = '', $size = 30, $value = '', $options = array()) {
-		$options['type'] = 'password';
-		return $this->textinput($label, $name, $class, $size, $value, $options);
+	function passwordinput($label, $id, $class, $size, $value, $hint,
+						  $maxlength=255, $readonly="", $layout='default') {
+		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, true, false, 'password', $layout);
 	}
 
 	// URL input with Tailwind styling
@@ -572,6 +582,266 @@ class FormWriterTailwind extends FormWriterBase {
 
 			return $output;
 
+	}
+
+	// Additional methods for Bootstrap compatibility
+
+	/**
+	 * begin_form - Bootstrap-compatible form opening
+	 */
+	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
+		$output = '<form class="'.$class.'" id="'. $this->formid.'" name="'. $this->formid.'" method="'. $method.'" action="'. $action.'" accept-charset="'. $charset.'"';
+		if($onsubmit){
+			$output .= ' onsubmit="'.$onsubmit.'"';
+		}
+		$output .= '><fieldset>';
+		return $output;
+	}
+
+	/**
+	 * text - Read-only text display field
+	 */
+	function text($id, $label, $value, $class, $layout='default') {
+		if($layout == 'default'){
+			$output = '
+			<div id="'.$id.'_container" class="mb-4 errorplacement">
+			<label for="'.$id.'" class="block text-sm font-medium text-gray-700 mb-1">'.$label.'</label>
+			<input class="bg-gray-100 border border-gray-300 text-gray-900 text-sm rounded-lg block w-full p-2.5" id="'.$id.'" type="text" readonly="" value="'.$value.'" />
+			</div>';
+		}
+		else{
+			$output = '
+			<div class="grid grid-cols-12 gap-4 mb-4">
+			  <label for="'.$id.'" class="col-span-2 text-sm font-medium text-gray-700 pt-2">'.$label.'</label>
+			  <div class="col-span-10">
+				<input class="bg-gray-100 border border-gray-300 text-gray-900 text-sm rounded-lg block w-full p-2.5" id="'.$id.'" type="text" readonly="" value="'.$value.'" />
+			  </div>
+			</div>';
+		}
+		return $output;
+	}
+
+	/**
+	 * new_button - Bootstrap-compatible button
+	 */
+	function new_button($label='Submit', $link, $style='primary', $width='standard', $class='', $id=NULL) {
+		$output = '';
+
+		$btn_class = '';
+		if($style == 'primary'){
+			$btn_class = 'bg-blue-500 hover:bg-blue-700 text-white';
+		}
+		else{
+			$btn_class = 'bg-gray-500 hover:bg-gray-700 text-white';
+		}
+
+		if($width == 'full'){
+			$output .= '<div class="w-full">';
+			$btn_class .= ' w-full';
+		}
+
+		$output .= '<a href="'.$link.'"><button type="button" class="font-bold py-2 px-4 rounded '.$btn_class.' '.$class.'"';
+		if($id != '' && !is_null($id)){
+			$output .= ' id="'.$id.'"';
+		}
+		$output .= '>';
+		$output .= $label.'</button></a>';
+		if($width == 'full'){
+			$output .= '</div>';
+		}
+		return $output;
+	}
+
+	/**
+	 * textbox - Bootstrap-compatible textarea
+	 */
+	function textbox($label, $id, $class, $rows, $cols, $value, $hint, $htmlmode="no") {
+		$output = '<div id="'.$id.'_container" class="mb-4 errorplacement">';
+		$output .= '<label for="'.$id.'" class="block text-sm font-medium text-gray-700 mb-1">'.$label.'</label>';
+		$output .= '<textarea name="'.$id.'" id="'.$id.'" rows="'.$rows.'" cols="'.$cols.'" ';
+		$output .= 'class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 '.$class.'" ';
+		if($hint){
+			$output .= 'placeholder="'.$hint.'" ';
+		}
+		$output .= '>'.$value.'</textarea>';
+		$output .= '</div>';
+		return $output;
+	}
+
+	/**
+	 * checkboxinput - Bootstrap-compatible checkbox
+	 */
+	function checkboxinput($label, $id, $class, $align, $value, $truevalue, $hint, $layout='default'){
+		$checked = ($value == $truevalue) ? 'checked="checked"' : '';
+
+		if($layout == 'horizontal'){
+			return '<div class="grid grid-cols-12 gap-4 mb-4">
+						<div class="col-span-2 text-sm font-medium text-gray-700 pt-2">'.$label.'</div>
+						<div class="col-span-10">
+						  <div class="errorplacement">
+							<div id="'.$id.'_container" class="flex items-center">
+								<input class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2" type="checkbox" id="'.$id.'" name="'.$id.'" value="'.$truevalue.'" '.$checked.' />
+								<label for="'.$id.'" class="ml-2 text-sm font-medium text-gray-900"></label>
+							</div>
+						   </div>
+						</div>
+					</div>';
+		}
+		else{
+			return '<div class="errorplacement mb-4">
+					<div id="'.$id.'_container" class="flex items-center">
+						<input class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2" type="checkbox" id="'.$id.'" name="'.$id.'" value="'.$truevalue.'" '.$checked.' />
+						<label for="'.$id.'" class="ml-2 text-sm font-medium text-gray-900">'.$label.'</label>
+					</div>
+				   </div>';
+		}
+	}
+
+	/**
+	 * checkboxList - Bootstrap-compatible checkbox group
+	 */
+	function checkboxList($label, $id, $class, $optionvals, $checkedvals=array(), $disabledvals=array(), $readonlyvals=array(), $hint='', $type='checkbox') {
+		$output = '<div id="'.$id.'_container" class="mb-4 errorplacement">';
+		if($label){
+			$output .= '<label class="block text-sm font-medium text-gray-700 mb-2">'.$label.'</label>';
+		}
+
+		foreach($optionvals as $optionlabel => $optionvalue){
+			$checked = in_array($optionvalue, $checkedvals) ? 'checked="checked"' : '';
+			$disabled = in_array($optionvalue, $disabledvals) ? 'disabled="disabled"' : '';
+			$readonly = in_array($optionvalue, $readonlyvals) ? 'readonly="readonly"' : '';
+
+			$output .= '<div class="flex items-center mb-2">';
+			$output .= '<input type="'.$type.'" id="'.$id.'_'.$optionvalue.'" name="'.$id.'[]" value="'.$optionvalue.'" ';
+			$output .= 'class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2" ';
+			$output .= $checked.' '.$disabled.' '.$readonly.' />';
+			$output .= '<label for="'.$id.'_'.$optionvalue.'" class="ml-2 text-sm font-medium text-gray-900">'.$optionlabel.'</label>';
+			$output .= '</div>';
+		}
+
+		$output .= '</div>';
+		return $output;
+	}
+
+	/**
+	 * radioinput - Bootstrap-compatible radio group
+	 */
+	function radioinput($label, $id, $class, &$optionvals, $checkedval, $disabledvals, $readonlyvals, $hint) {
+		return $this->checkboxList($label, $id, $class, $optionvals, array($checkedval), $disabledvals, $readonlyvals, $hint, 'radio');
+	}
+
+	/**
+	 * dropinput - Bootstrap-compatible dropdown
+	 */
+	function dropinput($label, $id, $class, &$optionvals, $input, $hint, $showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE, $imagedropdown=FALSE, $layout='default') {
+		$output = '';
+
+		if($ajaxendpoint){
+			$output .= '<link href="/includes/select2.min.css" rel="stylesheet" />
+			<script src="/includes/select2.full.min.js"></script>';
+
+			$output .= '<script type="text/javascript">
+			$(document).ready(function() {
+			  $("#'.$id.'").select2({
+				placeholder: "None",
+				ajax: {
+				  url: "'.$ajaxendpoint.'",
+				  dataType: "json",
+				  delay: 250,
+				  processResults: function (data) {
+					return {
+					  results: data
+					};
+				  },
+				  minimumInputLength: 3,
+				  cache: true
+				}
+			  });
+			});
+				</script>';
+		}
+
+		if($layout == 'horizontal'){
+			$output .= '<div id="'.$id.'_container" class="errorplacement">
+							<div class="grid grid-cols-12 gap-4 mb-4">
+								<label for="'.$id.'" class="col-span-2 text-sm font-medium text-gray-700 pt-2">'.$label.'</label>
+								<div class="col-span-10">';
+		}
+		else{
+			$output .= '<div id="'.$id.'_container" class="mb-4 errorplacement">
+							<label for="'.$id.'" class="block text-sm font-medium text-gray-700 mb-1">'.$label.'</label>';
+		}
+
+		$output .= '<select name="'.$id.'" id="'.$id.'" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">';
+
+		if($showdefault){
+			$default_text = ($showdefault === true) ? 'Choose One' : $showdefault;
+			$selected = is_null($input) ? 'selected="selected"' : '';
+			$output .=  '<option value="" '.$selected.'>'.$default_text.'</option>';
+		}
+
+		foreach ($optionvals as $key => $value) {
+			$selected = '';
+			if($forcestrict){
+				if ($input === $value) {
+					$selected = 'selected="selected"';
+				}
+			}
+			else{
+				if ($input == $value) {
+					$selected = 'selected="selected"';
+				}
+			}
+			$output .= '<option value="'. $value .'" '.$selected.'>' . $key . '</option>';
+		}
+		$output .= '</select>';
+
+		if($layout == 'horizontal'){
+			$output .= '</div></div>';
+		}
+
+		$output .= '</div>';
+		return $output;
+	}
+
+	/**
+	 * datetimeinput2 - Bootstrap-compatible datetime input
+	 */
+	function datetimeinput2($label, $id, $class, $value, $hint, $readonly=false, $formhint=FALSE, $layout='default'){
+		$readonly_attr = $readonly ? 'readonly="readonly"' : '';
+
+		$output = '<div id="'.$id.'_container" class="mb-4 errorplacement">';
+		if($label){
+			$output .= '<label for="'.$id.'" class="block text-sm font-medium text-gray-700 mb-1">'.$label.'</label>';
+		}
+
+		if($formhint){
+			$output .= '<div class="flex">';
+			$output .= '<span class="inline-flex items-center px-3 text-sm text-gray-900 bg-gray-200 border border-r-0 border-gray-300 rounded-l-md">'.$formhint.'</span>';
+		}
+
+		$output .= '<input type="datetime-local" name="'.$id.'" id="'.$id.'" value="'.$value.'" ';
+		$output .= 'class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" ';
+		if($hint){
+			$output .= 'placeholder="'.$hint.'" ';
+		}
+		$output .= $readonly_attr.' />';
+
+		if($formhint){
+			$output .= '</div>';
+		}
+
+		$output .= '</div>';
+		return $output;
+	}
+
+	/**
+	 * imageinput - Bootstrap-compatible image selector
+	 */
+	function imageinput($label, $id, $class, &$optionvals, $input, $hint, $showdefault=TRUE, $forcestrict=TRUE, $ajaxendpoint=FALSE) {
+		// For now, use regular dropdown for image selection
+		// Could be enhanced with image preview functionality
+		return $this->dropinput($label, $id, $class, $optionvals, $input, $hint, $showdefault, $forcestrict, $ajaxendpoint, true);
 	}
 
 }

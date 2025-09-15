@@ -458,7 +458,7 @@ All themes should include a `theme.json` file for proper system integration:
     "joinery": ">=1.0.0"
   },
   "cssFramework": "bootstrap",
-  "formWriterBase": "FormWriterMasterBootstrap",
+  "formWriterBase": "FormWriterBootstrap",
   "publicPageBase": "PublicPageBase"
 }
 ```
@@ -478,7 +478,7 @@ All themes should include a `theme.json` file for proper system integration:
   },
   "supports_plugins": ["controld", "items"],
   "cssFramework": "uikit",
-  "formWriterBase": "FormWriterMasterDefault",
+  "formWriterBase": "FormWriterHTML5",
   "publicPageBase": "PublicPageBase",
   "features": {
     "responsive": true,
@@ -552,9 +552,9 @@ The `$page->getFormWriter()` method automatically:
 - Handles all the complexity internally
 
 #### FormWriter Framework Mapping
-- **Bootstrap themes**: Uses `FormWriterMasterBootstrap`
-- **Tailwind themes**: Uses `FormWriterMasterTailwind`  
-- **UIKit themes**: Uses `FormWriterMasterUIkit`
+- **Bootstrap themes**: Uses `FormWriterBootstrap`
+- **Tailwind themes**: Uses `FormWriterTailwind`  
+- **UIKit themes**: Uses `FormWriterUIKit`
 - **Custom themes**: Can provide their own `FormWriterPublic` class
 
 ### Example: ControlD Plugin Migration
@@ -742,25 +742,25 @@ The system supports multiple CSS frameworks through theme-specific implementatio
 
 **Bootstrap Themes:**
 - CSS Framework: `bootstrap`  
-- FormWriter Base: `FormWriterMasterBootstrap`
+- FormWriter Base: `FormWriterBootstrap`
 - Table Classes: `table`, `table-striped`, `table-hover`
 - Container Classes: `container`, `container-fluid`
 
 **UIKit Themes:**
 - CSS Framework: `uikit`
-- FormWriter Base: `FormWriterMasterDefault` 
+- FormWriter Base: `FormWriterHTML5` 
 - Table Classes: `uk-table`, `uk-table-striped`
 - Container Classes: `uk-container`
 
 **WordPress CSS Themes:**
 - CSS Framework: `wordpress`
-- FormWriter Base: `FormWriterMasterDefault`
+- FormWriter Base: `FormWriterHTML5`
 - Table Classes: `wp-list-table`, `widefat`, `fixed`, `striped`
 - Container Classes: `wrap`
 
 **Tailwind CSS Themes:**
 - CSS Framework: `tailwind`
-- FormWriter Base: `FormWriterMasterDefault`
+- FormWriter Base: `FormWriterHTML5`
 - Utility-first approach with custom classes
 
 ### Framework-Specific Implementations

@@ -75,7 +75,7 @@ abstract class PublicPageBase {
 	 * Wrapper around LibraryFunctions::get_formwriter_object() for cleaner view code
 	 * 
 	 * @param string $form_id The form identifier (default: 'form1')
-	 * @return FormWriter|FormWriterMaster The appropriate FormWriter instance
+	 * @return FormWriter The appropriate FormWriter instance
 	 */
 	public function getFormWriter($form_id = 'form1') {
 		PathHelper::requireOnce('includes/LibraryFunctions.php');

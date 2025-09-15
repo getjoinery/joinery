@@ -22,8 +22,8 @@
 	$page->admin_header($hoptions);
 	
 	
-	PathHelper::requireOnce('/includes/FormWriterMasterUIkit.php');
-	$formwriter = new FormWriterMasterUIkit('form1');
+	PathHelper::requireOnce('/includes/FormWriterUIkit.php');
+	$formwriter = new FormWriterUIkit('form1');
 	
 	$validation_rules = array();
 	$validation_rules['ccd_code']['required']['value'] = 'true';

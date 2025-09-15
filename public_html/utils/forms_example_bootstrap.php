@@ -20,8 +20,8 @@
 	
 	
 	//$formwriter = LibraryFunctions::get_formwriter_object('form1');
-				PathHelper::requireOnce('/includes/FormWriterMasterBootstrap.php');
-			$formwriter = new FormWriterMasterBootstrap('form1');
+				PathHelper::requireOnce('/includes/FormWriterBootstrap.php');
+			$formwriter = new FormWriterBootstrap('form1');
 	
 	$validation_rules = array();
 	$validation_rules['ccd_code']['required']['value'] = 'true';
