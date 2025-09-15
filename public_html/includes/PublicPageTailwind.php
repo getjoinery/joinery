@@ -155,37 +155,9 @@ class PublicPageTailwind extends PublicPageBase {
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
 		$options = parent::public_header_common($options);
-	
-	
-		$profile_menu = array();
-		$logged_out_menu = array();
-		if ($session->get_user_id()){ 
-			$profile_menu['My Profile'] = '/profile/profile';
-			if($_SESSION['permission'] >= 5){ 
-				$profile_menu['Admin'] = '/admin/admin_users';
-			}
-			$profile_menu['Settings'] = '/profile/account_edit';
-			$profile_menu['Sign out'] = '/logout';
-		}
-		else{ 		
-			$logged_out_menu['Sign in'] = '/login';			
-			if($settings->get_setting('register_active')){
-				$logged_out_menu['Sign up'] = '/register';	
-			}
-		}	
 
-		$cart = $session->get_shopping_cart();
-		$numitems = $cart->count_items();
-		if($numitems > 0){
-			$cart_menu = array('Cart' => '/cart');
-		}
-		else{
-			$cart_menu = NULL;
-		}
-		
-		$notification_menu = NULL;
-
-		$menus = PublicPage::get_public_menu();
+		// Get menu data from PublicPageBase
+		$menu_data = $this->get_menu_data();
 			
 
 		?>
@@ -307,19 +279,13 @@ class PublicPageTailwind extends PublicPageBase {
         </div>
         <nav class="hidden md:flex space-x-10">
 		<?php
-			foreach ($menus as $menu){
-				if($menu['parent'] == true){
-					$submenus = $menu['submenu'];
-					
-					if(empty($submenus)){	
-						echo '          <a href="'.$menu['link'].'" class="text-base font-medium text-gray-500 hover:text-gray-900">'.$menu['name'].'</a>';
-					}
-					else{	
-						?>
-					  <div class="relative">
-						<!-- Item active: "text-gray-900", Item inactive: "text-gray-500" -->
-						<button type="button" class="js-clickable-menu text-gray-500 group bg-white rounded-md inline-flex items-center text-base font-medium hover:text-gray-900 " aria-expanded="false">
-						  <span><?php echo $menu['name']; ?></span>
+			foreach ($menu_data['main_menu'] as $menu_item){
+				if(!empty($menu_item['submenu'])){
+					?>
+				  <div class="relative">
+					<!-- Item active: "text-gray-900", Item inactive: "text-gray-500" -->
+					<button type="button" class="js-clickable-menu text-gray-500 group bg-white rounded-md inline-flex items-center text-base font-medium hover:text-gray-900<?php echo $menu_item['is_active'] ? ' text-gray-900' : ''; ?>" aria-expanded="false">
+					  <span><?php echo htmlspecialchars($menu_item['name']); ?></span>
 						  <!--
 							Heroicon name: solid/chevron-down
 
@@ -342,26 +308,28 @@ class PublicPageTailwind extends PublicPageBase {
 						<div class="js-clicked-menu invisible absolute -ml-4 mt-3 transform z-10 px-2 w-screen max-w-md sm:px-0 lg:ml-0 lg:left-1/2 lg:-translate-x-1/2">
 						  <div class="rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 overflow-hidden">
 							<div class="relative grid gap-6 bg-white px-5 py-6 sm:gap-8 sm:p-8">
-							<?php foreach ($submenus as $submenu){ ?>
-							
-								<a href="<?php echo $submenu['link']; ?>" class="-m-3 p-3 flex items-start rounded-lg hover:bg-gray-50">
+							<?php foreach ($menu_item['submenu'] as $submenu_item){ ?>
+
+								<a href="<?php echo htmlspecialchars($submenu_item['link']); ?>" class="-m-3 p-3 flex items-start rounded-lg hover:bg-gray-50<?php echo $submenu_item['is_active'] ? ' bg-gray-50' : ''; ?>">
 									<!-- Heroicon name: outline/chart-bar -->
 									<!--<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 									  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
 									</svg>-->
 									<div class="ml-4">
 									  <p class="text-base font-medium text-gray-900">
-										<?php echo $submenu['name']; ?>
+										<?php echo htmlspecialchars($submenu_item['name']); ?>
 									  </p>
 									  <!--<p class="mt-1 text-sm text-gray-500">
 										Get a better understanding of where your traffic is coming from.
 									  </p>-->
 									</div>
-								  </a>			
+								  </a>
 							<?php }
 						echo '</div></div></div></div>';
-						
+
 					}
+				else{
+					echo '          <a href="' . htmlspecialchars($menu_item['link']) . '" class="text-base font-medium text-gray-500 hover:text-gray-900' . ($menu_item['is_active'] ? ' text-gray-900' : '') . '">' . htmlspecialchars($menu_item['name']) . '</a>';
 				}
 			}		
 		?>
@@ -379,7 +347,7 @@ class PublicPageTailwind extends PublicPageBase {
 			</a>
 			-->
 			
-			<?php if(!empty($notification_menu)){ ?>
+			<?php if($menu_data['notifications']['enabled']){ ?>
 			<a href="#" class="ml-5 flex-shrink-0 bg-white rounded-full p-1 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500">
             <span class="sr-only">View notifications</span>
             <!-- Heroicon name: outline/bell -->
@@ -389,8 +357,8 @@ class PublicPageTailwind extends PublicPageBase {
 			</a>
 			<?php } ?>
 
-			<?php if(!empty($cart_menu)){ ?>
-			<a href="<?php echo $cart_menu['Cart']; ?>" class="ml-5 flex-shrink-0 bg-white rounded-full p-1 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500">
+			<?php if($menu_data['cart']['has_items']){ ?>
+			<a href="<?php echo htmlspecialchars($menu_data['cart']['link']); ?>" class="ml-5 flex-shrink-0 bg-white rounded-full p-1 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500">
             <span class="sr-only">Cart</span>
             <!-- Heroicon name: outline/bell -->
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -399,7 +367,7 @@ class PublicPageTailwind extends PublicPageBase {
 			</a>
 			<?php } ?>
 
-			<?php if(!empty($profile_menu)){ ?>
+			<?php if($menu_data['user_menu']['is_logged_in']){ ?>
 			  <!-- Profile dropdown -->
 			<div class="flex-shrink-0 relative ml-5">
 				<div>
@@ -425,8 +393,8 @@ class PublicPageTailwind extends PublicPageBase {
 				<div id="user-menu" class="js-clicked-menu invisible origin-top-right absolute z-10 right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 py-1 focus:outline-none" role="menu" aria-orientation="vertical" aria-labelledby="user-menu-button" tabindex="-1">
 				  <!-- Active: "bg-gray-100", Not Active: "" -->
 				  <?php
-				  foreach($profile_menu as $name=>$link){
-					  echo '<a href="'.$link.'" class="block py-2 px-4 text-sm text-gray-700" role="menuitem" tabindex="-1" id="user-menu-item-0">'.$name.'</a>';
+				  foreach($menu_data['user_menu']['items'] as $menu_item){
+					  echo '<a href="' . htmlspecialchars($menu_item['link']) . '" class="block py-2 px-4 text-sm text-gray-700" role="menuitem" tabindex="-1">' . htmlspecialchars($menu_item['label']) . '</a>';
 				  }
 				  ?>
 				  <!--
@@ -445,13 +413,11 @@ class PublicPageTailwind extends PublicPageBase {
 				New Post
 			</a>-->
 		
-		<?php if(!empty($logged_out_menu)){ ?>
+		<?php } else { // User is not logged in ?>
           <a href="/login" class="whitespace-nowrap text-base font-medium text-gray-500 hover:text-gray-900">
             Sign in
           </a>
-		  <?php
-		  if($settings->get_setting('register_active')){
-			?>
+		  <?php if($menu_data['site_info']['register_enabled']){ ?>
           <a href="/register" class="whitespace-nowrap bg-blue-100 border border-transparent rounded-md py-2 px-4 inline-flex items-center justify-center text-base font-medium text-blue-700 hover:bg-blue-200">
             Sign up
           </a>
@@ -501,44 +467,44 @@ class PublicPageTailwind extends PublicPageBase {
             <nav class="grid gap-y-8">
 			
 		<?php
-			foreach ($menus as $menu){
-				if($menu['parent'] == true){
-					$submenus = $menu['submenu'];
-					
-					if(empty($submenus)){
-						?>
-					  <a href="<?php echo $menu['link']; ?>" class="-m-3 p-3 flex items-center rounded-md hover:bg-gray-50">
-						<!-- Heroicon name: outline/chart-bar -->
-						<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-						  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+			foreach ($menu_data['main_menu'] as $menu_item){
+				if(empty($menu_item['submenu'])){
+					?>
+				  <a href="<?php echo htmlspecialchars($menu_item['link']); ?>" class="-m-3 p-3 flex items-center rounded-md hover:bg-gray-50<?php echo $menu_item['is_active'] ? ' bg-gray-50' : ''; ?>">
+					<!-- Heroicon name: outline/chart-bar -->
+					<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+					</svg>
+					<span class="ml-3 text-base font-medium text-gray-900">
+					  <?php echo htmlspecialchars($menu_item['name']); ?>
+					</span>
+				  </a>
+				  <?php
+				}
+				else{
+					// Menu item with submenus
+					?>
+					<div>
+					  <button type="button" class="js-clickable-menu -m-3 p-3 flex items-center justify-between rounded-md hover:bg-gray-50<?php echo $menu_item['is_active'] ? ' bg-gray-50' : ''; ?> w-full text-left">
+						<div class="flex items-center">
+						  <svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+						  </svg>
+						  <span class="ml-3 text-base font-medium text-gray-900"><?php echo htmlspecialchars($menu_item['name']); ?></span>
+						</div>
+						<svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+						  <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
 						</svg>
-						<span class="ml-3 text-base font-medium text-gray-900">
-						  <?php echo $menu['name']; ?>
-						</span>
-					  </a>
-					  <?php
-					}
-					else{	
-						?>
-					  <a href="<?php echo $menu['link']; ?>" class="-m-3 p-3 flex items-center rounded-md hover:bg-gray-50">
-						<!-- Heroicon name: outline/chart-bar -->
-						<svg class="flex-shrink-0 h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-						  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-						</svg>
-						<span class="ml-3 text-base font-medium text-gray-900">
-						  <?php echo $menu['name']; ?>
-						</span>
-					  </a>
-					  
-						<div class="py-6 px-5 space-y-6">
-							<div class="grid grid-cols-2 gap-y-4 gap-x-8">
-								<?php 
-								foreach ($submenus as $submenu){ 
-									echo '<a href="'.$submenu['link'].'" class="text-base font-medium text-gray-900 hover:text-gray-700">'.$submenu['name'].'</a>'; 
-								}
-							echo '</div>
-						</div>';
-					}
+					  </button>
+					  <div class="js-clicked-menu invisible ml-8 mt-2 space-y-2">
+						<?php foreach ($menu_item['submenu'] as $submenu_item): ?>
+						  <a href="<?php echo htmlspecialchars($submenu_item['link']); ?>" class="block p-2 text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-md<?php echo $submenu_item['is_active'] ? ' bg-gray-50 text-gray-900' : ''; ?>">
+							<?php echo htmlspecialchars($submenu_item['name']); ?>
+						  </a>
+						<?php endforeach; ?>
+					  </div>
+					</div>
+					<?php
 				}
 			}		
 			?>			
@@ -550,21 +516,21 @@ class PublicPageTailwind extends PublicPageBase {
         <div class="py-6 px-5 space-y-6">
           <div class="grid grid-cols-2 gap-y-4 gap-x-8">
 			<?php 
-			if(!empty($profile_menu)){
-				foreach($profile_menu as $name=>$link){
-					echo ' <a href="'.$link.'" class="text-base font-medium text-gray-900 hover:text-gray-700">'.$name.'</a>';
+			if($menu_data['user_menu']['is_logged_in']){
+				foreach($menu_data['user_menu']['items'] as $menu_item){
+					echo ' <a href="' . htmlspecialchars($menu_item['link']) . '" class="text-base font-medium text-gray-900 hover:text-gray-700">' . htmlspecialchars($menu_item['label']) . '</a>';
 				}
 			}
 			?>
 
-			<?php 
-			if(!empty($cart_menu)){
-				echo ' <a href="/cart" class="text-base font-medium text-gray-900 hover:text-gray-700">Cart</a>';
+			<?php
+			if($menu_data['cart']['has_items']){
+				echo ' <a href="' . htmlspecialchars($menu_data['cart']['link']) . '" class="text-base font-medium text-gray-900 hover:text-gray-700">Cart (' . $menu_data['cart']['item_count'] . ')</a>';
 			}
 			?>
 
 			<?php 
-			if(!empty($notification_menu)){
+			if($menu_data['notifications']['enabled']){
 				echo ' <a href="#" class="text-base font-medium text-gray-900 hover:text-gray-700">Notifications</a>';
 			}
 			?>
@@ -611,13 +577,8 @@ class PublicPageTailwind extends PublicPageBase {
 
 
 
-		
-	<?php } //end if noheader ?>
 
-		
-	
-		<?php
-	}
+		<?php } //end if noheader and public_header method
 
 	public function public_footer($options=array()) {
 		$session = SessionControl::get_instance();

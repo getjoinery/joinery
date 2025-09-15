@@ -110,7 +110,16 @@ abstract class PublicPageBase {
 		// 1. Process main navigation menu from database
 		try {
 			$menus = PublicPage::get_public_menu();
-			$menu_data['main_menu'] = $menus;
+
+			// Filter out invalid menu items - only show parent menu items that are properly configured
+			$filtered_menus = [];
+			foreach ($menus as $menu_item) {
+				if (isset($menu_item['parent']) && $menu_item['parent'] === true) {
+					$filtered_menus[] = $menu_item;
+				}
+			}
+
+			$menu_data['main_menu'] = $filtered_menus;
 
 			// Add current page detection
 			$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
