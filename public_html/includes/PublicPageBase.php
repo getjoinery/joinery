@@ -297,6 +297,7 @@ abstract class PublicPageBase {
 
 		$menu_data['cart'] = [
 			'enabled' => true, // Cart is always enabled in the system
+			'count' => $item_count, // Primary count field for themes
 			'item_count' => $item_count,
 			'total_items' => $item_count, // Could be different if we track quantity
 			'subtotal' => null, // Future: calculate subtotal
