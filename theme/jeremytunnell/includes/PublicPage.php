@@ -62,6 +62,9 @@ class PublicPage extends PublicPageBase {
 		$session = SessionControl::get_instance();
 		$options = parent::public_header_common($options);
 
+		// Get menu data from PublicPageBase
+		$menu_data = $this->get_menu_data();
+
 		?>
 <!DOCTYPE html>
 <html lang="en-US" class="no-js no-svg" xmlns="http://www.w3.org/1999/xhtml" xmlns:fb="http://ogp.me/ns/fb#">
@@ -125,10 +128,21 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 <div class="slot-r">
 				<ul id="menu-main-menu" class="typology-nav typology-main-navigation">
 <?php
-	$menu_items = self::get_public_menu();
-	foreach($menu_items as $menu_item) {
-		// Only display parent menu items (not submenu placeholders)
-		if (isset($menu_item['parent']) && $menu_item['parent'] === true) {
+	foreach($menu_data['main_menu'] as $menu_item) {
+		if (!empty($menu_item['submenu'])) {
+			// Parent menu item with dropdown
+			echo '<li class="menu-item menu-item-has-children menu-item-type-post_type menu-item-object-page">';
+			echo '<a href="' . htmlspecialchars($menu_item['link']) . '">' . htmlspecialchars($menu_item['name']) . '</a>';
+			echo '<ul class="sub-menu">';
+			foreach($menu_item['submenu'] as $submenu_item) {
+				echo '<li class="menu-item menu-item-type-post_type menu-item-object-page">';
+				echo '<a href="' . htmlspecialchars($submenu_item['link']) . '">' . htmlspecialchars($submenu_item['name']) . '</a>';
+				echo '</li>';
+			}
+			echo '</ul>';
+			echo '</li>';
+		} else {
+			// Regular menu item
 			echo '<li class="menu-item menu-item-type-post_type menu-item-object-page">';
 			echo '<a href="' . htmlspecialchars($menu_item['link']) . '">' . htmlspecialchars($menu_item['name']) . '</a>';
 			echo '</li>';
@@ -315,10 +329,21 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 	<div class="widget typology-responsive-menu">
 					<ul id="menu-main-menu-1" class="typology-nav typology-main-navigation">
 <?php
-	$menu_items = self::get_public_menu();
-	foreach($menu_items as $menu_item) {
-		// Only display parent menu items (not submenu placeholders)
-		if (isset($menu_item['parent']) && $menu_item['parent'] === true) {
+	foreach($menu_data['main_menu'] as $menu_item) {
+		if (!empty($menu_item['submenu'])) {
+			// Parent menu item with dropdown
+			echo '<li class="menu-item menu-item-has-children menu-item-type-post_type menu-item-object-page">';
+			echo '<a href="' . htmlspecialchars($menu_item['link']) . '">' . htmlspecialchars($menu_item['name']) . '</a>';
+			echo '<ul class="sub-menu">';
+			foreach($menu_item['submenu'] as $submenu_item) {
+				echo '<li class="menu-item menu-item-type-post_type menu-item-object-page">';
+				echo '<a href="' . htmlspecialchars($submenu_item['link']) . '">' . htmlspecialchars($submenu_item['name']) . '</a>';
+				echo '</li>';
+			}
+			echo '</ul>';
+			echo '</li>';
+		} else {
+			// Regular menu item
 			echo '<li class="menu-item menu-item-type-post_type menu-item-object-page">';
 			echo '<a href="' . htmlspecialchars($menu_item['link']) . '">' . htmlspecialchars($menu_item['name']) . '</a>';
 			echo '</li>';
