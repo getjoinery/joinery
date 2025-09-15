@@ -829,7 +829,7 @@
 		// Show live hCaptcha preview if both keys are configured
 		if($settings->get_setting('hcaptcha_public') && $settings->get_setting('hcaptcha_private')) {
 			echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ hCaptcha is configured</strong></div>';
-			// Use the same captcha rendering method from FormWriterMaster
+			// Use the same captcha rendering method from FormWriter
 			echo "<script src='https://www.hCaptcha.com/1/api.js' async defer></script>";
 			echo '<div class="h-captcha" data-sitekey="'.$settings->get_setting('hcaptcha_public').'"></div>';
 		} else if($settings->get_setting('hcaptcha_public')) {
@@ -858,7 +858,7 @@
 		// Show live Google Captcha preview if both keys are configured
 		if($settings->get_setting('captcha_public') && $settings->get_setting('captcha_private')) {
 			echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Google reCAPTCHA is configured</strong></div>';
-			// Use the same captcha rendering method from FormWriterMaster
+			// Use the same captcha rendering method from FormWriter
 			echo '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
 			echo '<div class="g-recaptcha" data-sitekey="'.$settings->get_setting('captcha_public').'"></div>';
 		} else if($settings->get_setting('captcha_public')) {

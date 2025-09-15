@@ -346,11 +346,11 @@ class LibraryFunctions {
 		}
 
 		// Final default - Bootstrap
-		PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
+		PathHelper::requireOnce('includes/FormWriterBootstrap.php');
 		try {
-			return new FormWriterMasterBootstrap($form_id);
+			return new FormWriterBootstrap($form_id);
 		} catch (Error $e) {
-			throw new Exception("Failed to instantiate default FormWriterMasterBootstrap: " . $e->getMessage());
+			throw new Exception("Failed to instantiate default FormWriterBootstrap: " . $e->getMessage());
 		}	
 							
 	}

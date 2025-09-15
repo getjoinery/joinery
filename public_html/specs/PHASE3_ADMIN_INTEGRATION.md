@@ -16,7 +16,7 @@ Phase 3 explores integrating the admin section (`/adm/`) into the unified compon
 
 ### Admin System Characteristics
 - **68 files** using `get_formwriter_object()` with `'admin'` override
-- **Bootstrap-based styling** (FormWriterMasterBootstrap)
+- **Bootstrap-based styling** (FormWriterBootstrap)
 - **Dedicated AdminPage.php** class for consistent layout
 - **Permission-based access control** via SessionControl
 - **Theme-independent** - works with any active theme
@@ -70,7 +70,7 @@ class AdminHelper extends ComponentBase {
     }
     
     public function getFormWriterBase() {
-        return 'FormWriterMasterBootstrap'; // Always Bootstrap for admin
+        return 'FormWriterBootstrap'; // Always Bootstrap for admin
     }
     
     public function getCssFramework() {
@@ -102,7 +102,7 @@ class AdminHelper extends ComponentBase {
     "joinery": ">=1.0.0"
   },
   "cssFramework": "bootstrap",
-  "formWriterBase": "FormWriterMasterBootstrap",
+  "formWriterBase": "FormWriterBootstrap",
   "adminPageBase": "AdminPage",
   "alwaysActive": true,
   "permissionRequired": 5
@@ -130,8 +130,8 @@ static function get_formwriter_object($form_id = 'form1', $override_name = NULL,
     
     // Handle other overrides (tailwind, etc.)
     if ($override_name == 'tailwind') {
-        PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
-        return new FormWriterMasterTailwind($form_id);
+        PathHelper::requireOnce('includes/FormWriterTailwind.php');
+        return new FormWriterTailwind($form_id);
     }
     
     // Use ThemeHelper for theme-based selection
@@ -171,7 +171,7 @@ static function get_formwriter_object($form_id = 'form1', $override_name = NULL,
             $baseClass = $admin->getFormWriterBase();
         } else {
             // Fallback to current behavior (Phase 2 compatibility)
-            $baseClass = 'FormWriterMasterBootstrap';
+            $baseClass = 'FormWriterBootstrap';
         }
         
         PathHelper::requireOnce("includes/{$baseClass}.php");
@@ -285,7 +285,7 @@ Treat admin as a special theme that's always available:
     "joinery": ">=1.0.0"
   },
   "cssFramework": "bootstrap",
-  "formWriterBase": "FormWriterMasterBootstrap",
+  "formWriterBase": "FormWriterBootstrap",
   "publicPageBase": "AdminPage",
   "systemTheme": true,
   "alwaysActive": true,

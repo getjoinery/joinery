@@ -32,9 +32,9 @@ $settings = Globalvars::get_instance();
 
 ### ⚠️ FormWriter Base Classes
 Available FormWriter base classes to inherit from:
-- `FormWriterMasterBootstrap` - For Bootstrap-based themes
-- `FormWriterMasterTailwind` - For Tailwind CSS themes
-- `FormWriterMasterUIkit` - For UIKit themes
+- `FormWriterBootstrap` - For Bootstrap-based themes
+- `FormWriterTailwind` - For Tailwind CSS themes
+- `FormWriterUIKit` - For UIKit themes
 
 ## Step-by-Step Theme Creation
 
@@ -69,9 +69,9 @@ cp "/path/to/template/style.css" /var/www/html/joinerytest/public_html/theme/THE
 <?php
 // PathHelper is always available - no need to require it
 // Choose the correct base class based on your theme's framework
-PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php'); // Change based on framework
+PathHelper::requireOnce('includes/FormWriterBootstrap.php'); // Change based on framework
 
-class FormWriter extends FormWriterMasterBootstrap {
+class FormWriter extends FormWriterBootstrap {
     // Inherits all form styling from base class
     // Can override specific methods here if needed
 }
@@ -217,7 +217,7 @@ php -l /var/www/html/joinerytest/public_html/theme/THEMENAME/views/index.php
 # Verify FormWriter can be loaded
 php -r "
 require_once('includes/PathHelper.php');
-PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
+PathHelper::requireOnce('includes/FormWriterBootstrap.php');
 require_once('theme/THEMENAME/includes/FormWriter.php');
 echo 'FormWriter class exists: ' . (class_exists('FormWriter') ? 'YES' : 'NO') . PHP_EOL;
 "
@@ -227,7 +227,7 @@ echo 'FormWriter class exists: ' . (class_exists('FormWriter') ? 'YES' : 'NO') .
 
 ### Issue: "Class FormWriter not found"
 **Cause:** FormWriter.php extending non-existent class
-**Solution:** Verify you're extending one of the existing FormWriterMaster classes
+**Solution:** Verify you're extending one of the existing FormWriterHTML5 classes
 
 ### Issue: "Theme directory not found"
 **Cause:** Theme created in wrong location
@@ -265,7 +265,7 @@ When copying HTML content, update paths as follows:
 │   ├── images/     # All images from template
 │   └── fonts/      # Font files if any
 ├── includes/
-│   ├── FormWriter.php   # Extends appropriate FormWriterMaster class
+│   ├── FormWriter.php   # Extends appropriate FormWriterHTML5 class
 │   └── PublicPage.php   # Header/footer from template
 ├── views/
 │   └── index.php        # Homepage content
@@ -276,7 +276,7 @@ When copying HTML content, update paths as follows:
 
 - [ ] Theme created in `/var/www/html/joinerytest/public_html/theme/`
 - [ ] All assets copied to `assets/` subdirectories
-- [ ] FormWriter extends correct FormWriterMaster class for framework
+- [ ] FormWriter extends correct FormWriterHTML5 class for framework
 - [ ] PublicPage doesn't auto-wrap content in sections
 - [ ] Homepage view uses PathHelper::getThemeFilePath()
 - [ ] Dynamic menu implemented with get_public_menu()

@@ -30,7 +30,7 @@ The current FormWriter implementation has architectural inconsistencies where di
    - Theme-specific FormWriters sometimes extend nothing, sometimes extend framework classes
 
 5. **Naming Inconsistencies**
-   - FormWriterMasterBootstrap, FormWriterMasterTailwind, FormWriterMasterUIkit (inconsistent "Master" naming)
+   - FormWriterBootstrap, FormWriterTailwind, FormWriterUIKit (inconsistent "Master" naming)
    - Some themes use FormWriter.php, others use FormWriterPublic.php
    - No clear naming convention
 
@@ -56,7 +56,7 @@ FormWriterBase (abstract class with utility methods and placeholder stubs)
    - Provides helpful debugging when methods aren't overridden
 
 2. **FormWriterHTML5 as Plain Implementation**
-   - Copy of FormWriterMasterBootstrap fully converted to semantic HTML5
+   - Copy of FormWriterBootstrap fully converted to semantic HTML5
    - No CSS framework dependencies
    - Serves as reference implementation and fallback
 
@@ -76,10 +76,10 @@ FormWriterBase (abstract class with utility methods and placeholder stubs)
 ### Completed Items
 
 #### file_upload_full Migration (COMPLETED)
-- Successfully moved `file_upload_full()` method from FormWriterMasterBootstrap to FormWriterBase
+- Successfully moved `file_upload_full()` method from FormWriterBootstrap to FormWriterBase
 - Converted Bootstrap-specific markup to plain HTML5
 - Added overridable `multi_upload_button()` method for framework-specific button styling
-- Removed duplicate implementations from FormWriterMasterTailwind and FormWriterMasterUIkit
+- Removed duplicate implementations from FormWriterTailwind and FormWriterUIKit
 - Both Tailwind and UIkit now properly inherit from Base
 - **This method is complete and should NOT be included in further refactoring efforts**
 
@@ -233,7 +233,7 @@ abstract class FormWriterBase {
 
 **File:** `/includes/FormWriterHTML5.php`
 
-1. **Copy FormWriterMasterBootstrap entirely** to FormWriterHTML5
+1. **Copy FormWriterBootstrap entirely** to FormWriterHTML5
 2. **Extend FormWriterBase** to inherit utility methods
 3. **Convert all Bootstrap markup to plain HTML5**:
    - Remove all Bootstrap CSS classes (`mb-3`, `form-control`, `form-label`, etc.)
@@ -257,9 +257,9 @@ $output .= '<input type="text" ...>';
 ### Phase 3: Rename Framework Classes
 
 1. **Copy and rename** (don't modify originals yet):
-   - Copy `FormWriterMasterBootstrap` → `FormWriterBootstrap` **(DO NOT ALTER - authorized changes only)**
-   - Copy `FormWriterMasterTailwind` → `FormWriterTailwind`
-   - Copy `FormWriterMasterUIkit` → `FormWriterUIKit`
+   - Copy `FormWriterBootstrap` → `FormWriterBootstrap` **(DO NOT ALTER - authorized changes only)**
+   - Copy `FormWriterTailwind` → `FormWriterTailwind`
+   - Copy `FormWriterUIKit` → `FormWriterUIKit`
 
 2. **Update each to extend FormWriterBase**:
    - Change class declaration to extend FormWriterBase
@@ -333,7 +333,7 @@ Ensure FormWriterTailwind and FormWriterUIKit have all the same methods as FormW
 
 3. **Falcon Theme**:
    - Should extend FormWriterBootstrap directly
-   - Remove reference to non-existent FormWriterMasterFalcon
+   - Remove reference to non-existent FormWriterHTML5Falcon
    - **DO NOT modify any Falcon/Bootstrap functionality without authorization**
 
 
@@ -357,13 +357,13 @@ Ensure FormWriterTailwind and FormWriterUIKit have all the same methods as FormW
 ## Implementation Phases
 
 1. **Phase 1**: Update FormWriterBase with placeholder method stubs
-2. **Phase 2**: Create FormWriterHTML5 from FormWriterMasterBootstrap
+2. **Phase 2**: Create FormWriterHTML5 from FormWriterBootstrap
 3. **Phase 3**: Create new framework classes (Bootstrap, Tailwind, UIKit)
 4. **Phase 4**: Update LibraryFunctions::get_formwriter_object()
 5. **Phase 5**: Bring Tailwind and UIKit to feature parity with Bootstrap
 6. **Phase 6**: Update theme-specific FormWriters
 7. **Phase 7**: Testing and validation
-8. **Phase 8**: Remove old FormWriterMaster* classes
+8. **Phase 8**: Remove old FormWriterHTML5* classes
 
 **CRITICAL**: FormWriterBootstrap and Falcon theme must not be altered without explicit authorization
 
@@ -392,21 +392,21 @@ Ensure FormWriterTailwind and FormWriterUIKit have all the same methods as FormW
 ## Implementation Checklist
 
 - [x] Update FormWriterBase with placeholder method stubs (completed 2025-01-14)
-- [x] Create FormWriterHTML5 from copy of FormWriterMasterBootstrap (completed 2025-01-14)
+- [x] Create FormWriterHTML5 from copy of FormWriterBootstrap (completed 2025-01-14)
 - [x] Convert FormWriterHTML5 to plain HTML5 (remove Bootstrap classes) (completed 2025-01-14)
-- [x] Create FormWriterBootstrap from FormWriterMasterBootstrap (NO MODIFICATIONS) (completed 2025-01-14)
-- [x] Create FormWriterTailwind from FormWriterMasterTailwind (completed 2025-01-14)
-- [x] Create FormWriterUIKit from FormWriterMasterUIkit (completed 2025-01-14)
+- [x] Create FormWriterBootstrap from FormWriterBootstrap (NO MODIFICATIONS) (completed 2025-01-14)
+- [x] Create FormWriterTailwind from FormWriterTailwind (completed 2025-01-14)
+- [x] Create FormWriterUIKit from FormWriterUIKit (completed 2025-01-14)
 - [x] Update all new classes to extend FormWriterBase (completed 2025-01-14)
-- [ ] Add missing methods to FormWriterTailwind for feature parity
-- [ ] Add missing methods to FormWriterUIKit for feature parity
+- [x] Add missing methods to FormWriterTailwind for feature parity (completed 2025-01-14)
+- [x] Add missing methods to FormWriterUIKit for feature parity (completed 2025-01-14)
 - [x] Update LibraryFunctions::get_formwriter_object() (completed 2025-01-14)
-- [ ] Update theme FormWriters to use new classes
+- [x] Update theme FormWriters to use new classes (completed 2025-01-14)
 - [ ] Test all forms in admin interface
 - [ ] Test all forms in public interface
 - [ ] Test framework switching (Bootstrap ↔ Tailwind ↔ UIKit ↔ HTML5)
 - [ ] Verify Falcon theme still works perfectly (NO REGRESSIONS)
-- [ ] Remove old FormWriterMaster* classes
+- [ ] Remove old FormWriterHTML5* classes
 - [ ] Update documentation
 
 ## Notes
@@ -414,8 +414,8 @@ Ensure FormWriterTailwind and FormWriterUIKit have all the same methods as FormW
 - This refactoring should be done incrementally, testing at each phase
 - Each phase should be completed and tested before moving to the next
 - Document all changes thoroughly for theme developers
-- The old FormWriterMaster* classes will be completely replaced, not wrapped
-- FormWriterMasterBootstrap (Falcon's base) is the source of truth for functionality
+- The old FormWriterHTML5* classes will be completely replaced, not wrapped
+- FormWriterBootstrap (Falcon's base) is the source of truth for functionality
 - All methods from Bootstrap implementation must be preserved in FormWriterBase
 - **FormWriterBootstrap and Falcon implementations are not to be modified without authorization**
 - Tailwind and UIKit should be brought to feature parity with Bootstrap where possible

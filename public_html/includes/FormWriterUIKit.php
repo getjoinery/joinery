@@ -73,13 +73,25 @@ class FormWriterUIKit extends FormWriterBase {
 		return '<div class="row '.$class.'">';
 	}
 
-	function new_form_button($label='Submit', $class='uk-button uk-button-primary', $id=NULL) {
-		
-		$output = '<button type="submit" class="'.$class.'"';
+	function new_form_button($label='Submit', $style='primary', $width='standard', $class='', $id=NULL) {
+
+		$btn_class = 'uk-button';
+		if($style == 'primary'){
+			$btn_class .= ' uk-button-primary';
+		}
+		else{
+			$btn_class .= ' uk-button-default';
+		}
+
+		if($width == 'full'){
+			$btn_class .= ' uk-width-1-1';
+		}
+
+		$output = '<button type="submit" class="'.$btn_class.' '.$class.'"';
 		if($id != '' && !is_null($id)){
 			$output .= ' id="'.$id.'"';
 		}
-		$output .= ' primaryAction">';
+		$output .= '>';
 		$output .= '<span>'. $label.'</span></button>';
 		return $output;
 	}
@@ -92,7 +104,7 @@ class FormWriterUIKit extends FormWriterBase {
 	
 
 
-	function fileinput($label, $id, $class, $size, $hint) {
+	function fileinput($label, $id, $class, $size, $hint, $layout='default') {
 		$output = '
 		<div id="'.$id.'_container" class="'.$this->fileinput_container_class.' errorplacement">
 		<label for="'.$id.'">'.$label.'</label>
@@ -102,12 +114,12 @@ class FormWriterUIKit extends FormWriterBase {
 	}
 
 
-	function passwordinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly="") {
+	function passwordinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly="", $layout='default') {
 		
-		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, TRUE, FALSE, 'password');
+		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, TRUE, FALSE, 'password', $layout);
 	}
 
-	function text($id, $label, $value, $class) {
+	function text($id, $label, $value, $class, $layout = 'default') {
 		$output = '
 		<div id="'.$id.'_container" class="'.$this->text_container_class.' errorplacement">
 		<label for="'.$id.'" class="'.$this->text_label_class.'">'.$label.'</label>
@@ -119,10 +131,9 @@ class FormWriterUIKit extends FormWriterBase {
 
 
 
-	function textinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='text') {
+	function textinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='text', $layout='default') {
 
 		//FORMS ARE EITHER HORIZONTAL OR REGULAR
-		$layout = '';
 		if($layout == 'horizontal'){
 			$labelclass = $this->textintput_label_class_horizontal;
 			$containerclass = $this->textintput_container_class_horizontal;
@@ -260,7 +271,7 @@ class FormWriterUIKit extends FormWriterBase {
 	
 
 	
-	function checkboxinput($label, $id, $class, $align, $value, $truevalue, $hint){
+	function checkboxinput($label, $id, $class, $align, $value, $truevalue, $hint, $layout='default'){
 		
 		if($value == $truevalue){
 			$checked = 'checked="checked"'; 
@@ -386,25 +397,25 @@ class FormWriterUIKit extends FormWriterBase {
 		
 	}
 
-	function dateinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='date'){
-	
-		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, $autocomplete, $formhint, $type);
+	function dateinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $layout='default'){
+
+		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, $autocomplete, $formhint, 'date', $layout);
 		
 	}
 
-	function datetimeinput2($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly='', $autocomplete=TRUE, $formhint=FALSE, $type='datetime-local'){
+	function datetimeinput2($label, $id, $class, $value, $hint, $readonly=false, $formhint=FALSE, $layout='default'){
 	
 		$value = trim($value);
 		$value = str_replace(' ', 'T', $value);
-			
+
 		$formhint = 'MM/DD/YYYY HH:MM AM/PM';
 
-		return $this->textinput($label, $id, $class, $size, $value, $hint, $maxlength, $readonly, $autocomplete, $formhint, $type);
+		return $this->textinput($label, $id, $class, 30, $value, $hint, 255, $readonly ? 'readonly' : '', TRUE, $formhint, 'datetime-local', $layout);
 		
 	}	
 	
 	//FORMAT 'HH:MM PM'
-	function timeinput($label, $id, $class, $value, $hint) {
+	function timeinput($label, $id, $class, $value, $hint, $layout='default') {
 
 		return '
 		<link rel="stylesheet" href="/adm/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.css"/>
@@ -436,7 +447,7 @@ class FormWriterUIKit extends FormWriterBase {
 
 
 	//DOES NOT CONVERT FOR TIMEZONES
-	function datetimeinput($label, $id, $class, $inputdatetime, $hint, $timehint, $datehint) {
+	function datetimeinput($label, $id, $class, $inputdatetime, $hint, $timehint, $datehint, $layout='default') {
 
 			if(!is_null($inputdatetime) && $inputdatetime != ''){
 				$session = SessionControl::get_instance();
@@ -456,7 +467,7 @@ class FormWriterUIKit extends FormWriterBase {
 
 	}
 
-	function dropinput($label, $id, $class, &$optionvals, $input, $hint,$showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE, $imagedropdown=FALSE) {
+	function dropinput($label, $id, $class, &$optionvals, $input, $hint, $showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE, $imagedropdown=FALSE, $layout='default') {
 		
 		$output = '';
 		
@@ -625,6 +636,60 @@ class FormWriterUIKit extends FormWriterBase {
 				 
 	}
 
+	/**
+	 * multi_upload_button - Override for UIKit styling
+	 */
+	protected function multi_upload_button($context, $id, $label, $disabled = false) {
+		$disabled_attr = $disabled ? ' disabled' : '';
+		$style_class = '';
+
+		switch($context) {
+			case 'browse':
+				$style_class = 'uk-button uk-button-primary';
+				break;
+			case 'upload':
+				$style_class = 'uk-button uk-button-primary';
+				break;
+			case 'clear':
+				$style_class = 'uk-button uk-button-default';
+				break;
+			default:
+				$style_class = 'uk-button uk-button-secondary';
+		}
+
+		return '<button type="button" id="' . $id . '" class="' . $style_class . '"' . $disabled_attr . '>' . $label . '</button>';
+	}
+
+	/**
+	 * new_button - Bootstrap-compatible button with UIKit styling
+	 */
+	function new_button($label='Submit', $link, $style='primary', $width='standard', $class='', $id=NULL) {
+		$output = '';
+
+		$btn_class = '';
+		if($style == 'primary'){
+			$btn_class = 'uk-button-primary';
+		}
+		else{
+			$btn_class = 'uk-button-default';
+		}
+
+		if($width == 'full'){
+			$output .= '<div class="uk-width-1-1">';
+			$btn_class .= ' uk-width-1-1';
+		}
+
+		$output .= '<a href="'.$link.'"><button type="button" class="uk-button '.$btn_class.' '.$class.'"';
+		if($id != '' && !is_null($id)){
+			$output .= ' id="'.$id.'"';
+		}
+		$output .= '>';
+		$output .= $label.'</button></a>';
+		if($width == 'full'){
+			$output .= '</div>';
+		}
+		return $output;
+	}
 
 
 }
