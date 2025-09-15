@@ -51,7 +51,7 @@
 						  <p>
 						  <?php
 							foreach ($post_tags as $tag){
-								echo '<a href="/blog/tag/'.urlencode($tag).'"><button class="btn btn-sm btn-falcon-default rounded-pill me-1 mb-1 mt-1" type="button">'.$tag.'</button></a>';		
+								echo '<a href="/blog/tag/'.urlencode($tag).'"><button class="btn btn-sm btn-falcon-default rounded-pill me-1 mb-1 mt-1" type="button">'.$tag.'</button></a>';
 							}
 							?></p>
 					</div>
@@ -90,7 +90,7 @@
           <div class="card-body">
 			<?php
 			foreach ($page_vars['tags'] as $tag){
-				echo '<a href="/blog/tag/'.urlencode($tag).'"><button class="btn btn-falcon-default rounded-pill me-1 mb-1 mt-1" type="button">'.$tag.'</button></a>';			
+				echo '<a href="/blog/tag/'.urlencode($tag).'"><button class="btn btn-falcon-default rounded-pill me-1 mb-1 mt-1" type="button">'.$tag.'</button></a>';
 			}
 			?>		
           </div>

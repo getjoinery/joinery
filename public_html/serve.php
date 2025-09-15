@@ -241,11 +241,10 @@ $routes = [
         },
         
         
-        // Posts with special condition
-        '/posts/*' => function($params, $settings, $session, $template_directory) {
+        // Blog with tag support
+        '/blog/*' => function($params, $settings, $session, $template_directory) {
             if(!$settings->get_setting('blog_active')) return false;
-            if($params[1] && $params[1] != 'tag') return false;
-            
+
             $is_valid_page = true; // Already in scope from earlier
             // $params already in scope
             require_once(PathHelper::getThemeFilePath('blog.php', 'views'));

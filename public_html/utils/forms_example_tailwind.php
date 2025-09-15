@@ -20,8 +20,8 @@
 	echo PublicPage::BeginPage('Tailwind forms example');
 	
 	
-	PathHelper::requireOnce('/includes/FormWriterMasterTailwind.php');
-	$formwriter = new FormWriterMasterTailwind('form1');
+	PathHelper::requireOnce('/includes/FormWriterTailwind.php');
+	$formwriter = new FormWriterTailwind('form1');
 	
 	$validation_rules = array();
 	$validation_rules['ccd_code']['required']['value'] = 'true';
