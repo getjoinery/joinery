@@ -10,6 +10,6 @@
     "joinery": ">=1.0.0"
   },
   "cssFramework": "bootstrap",
-  "formWriterBase": "FormWriterMasterBootstrap",
+  "formWriterBase": "FormWriterBootstrap",
   "publicPageBase": "PublicPageFalcon"
 }

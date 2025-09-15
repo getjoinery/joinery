@@ -1,9 +1,9 @@
 <?php
-PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
+PathHelper::requireOnce('includes/FormWriterTailwind.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriter extends FormWriterMasterTailwind {
+class FormWriter extends FormWriterTailwind {
 
 	protected $validate_style_info = 'errorElement: "p",
 							errorClass: "form-container",

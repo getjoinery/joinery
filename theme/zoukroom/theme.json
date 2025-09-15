@@ -10,6 +10,6 @@
     "joinery": ">=1.0.0"
   },
   "cssFramework": "uikit",
-  "formWriterBase": "FormWriterMasterDefault",
+  "formWriterBase": "FormWriterHTML5",
   "publicPageBase": "PublicPageBase"
 }

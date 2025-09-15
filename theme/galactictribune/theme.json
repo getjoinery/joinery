@@ -10,6 +10,6 @@
     "joinery": ">=1.0.0"
   },
   "cssFramework": "custom",
-  "formWriterBase": "FormWriterMasterTailwind",
+  "formWriterBase": "FormWriterTailwind",
   "publicPageBase": "PublicPageBase"
 }

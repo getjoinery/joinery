@@ -1,12 +1,9 @@
 <?php
-// DbConnector is now guaranteed available - line removed
-// Globalvars is now guaranteed available - line removed
-PathHelper::requireOnce('includes/FormWriterMasterTailwind.php');
+// Load the Tailwind FormWriter implementation
+PathHelper::requireOnce('includes/FormWriterTailwind.php');
 
-
-// THESE FUNCTIONS GENERATE FORM INPUTS
-
-class FormWriter extends FormWriterMasterTailwind {
+// Tailwind theme uses FormWriterTailwind
+class FormWriter extends FormWriterTailwind {
 
 	public $validate_style_info = 'errorElement: "p",
 							errorClass: "form-container",

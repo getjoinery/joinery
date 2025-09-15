@@ -1,7 +1,7 @@
 <?php
-PathHelper::requireOnce('includes/FormWriterMasterDefault.php');
+PathHelper::requireOnce('includes/FormWriterHTML5.php');
 
-class FormWriter extends FormWriterMasterDefault {
+class FormWriter extends FormWriterHTML5 {
     // Fallback FormWriter for plugin theme delegation
 }
 ?>

@@ -1,12 +1,11 @@
 <?php
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/DbConnector.php');
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
-require_once( __DIR__ . '/../../../includes/FormWriterMaster.php');
+// PathHelper, Globalvars, DbConnector and other core files are always available - no need to require them
+PathHelper::requireOnce('includes/FormWriterHTML5.php');
 
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriter extends FormWriterMaster {
+class FormWriter extends FormWriterHTML5 {
 
 	public $validate_style_info = 'errorElement: "p",
 							errorClass: "form-container",

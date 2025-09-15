@@ -1,9 +1,9 @@
 <?php
-PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
+PathHelper::requireOnce('includes/FormWriterBootstrap.php');
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 
-class FormWriter extends FormWriterMasterBootstrap {
+class FormWriter extends FormWriterBootstrap {
 
 	function passwordinput($label, $id, $class, $size, $value, $hint, $maxlength=255, $readonly="") {
 	?>
