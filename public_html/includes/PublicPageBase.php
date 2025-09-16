@@ -109,7 +109,7 @@ abstract class PublicPageBase {
 
 		// 1. Process main navigation menu from database
 		try {
-			$menus = PublicPage::get_public_menu();
+			$menus = self::get_public_menu();
 
 			// Filter out invalid menu items - only show parent menu items that are properly configured
 			$filtered_menus = [];
