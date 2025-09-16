@@ -77,6 +77,22 @@ if ($action || $_POST) {
                         $error = "Upload failed. Please check the file and try again.";
                     }
                     break;
+
+                case 'delete':
+                    $theme_name = $_POST['theme_name'];
+                    $theme = Theme::get_by_theme_name($theme_name);
+                    if ($theme) {
+                        // Only allow deletion if theme files are missing or it's not active
+                        if (!$theme->theme_files_exist() || !$theme->get('thm_is_active')) {
+                            $theme->permanent_delete();
+                            $message = "Theme '$theme_name' has been deleted from the database.";
+                        } else {
+                            $error = "Cannot delete an active theme with existing files.";
+                        }
+                    } else {
+                        $error = "Theme not found.";
+                    }
+                    break;
             }
         }
     } catch (Exception $e) {
@@ -199,15 +215,20 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 
                                 // Build actions array
                                 $actions = array();
-                                
+
                                 if (!$is_active && $files_exist) {
                                     $actions['Activate'] = "javascript:submitAction('activate', '$theme_name')";
                                 }
-                                
+
                                 if ($is_stock) {
                                     $actions['Mark as Custom'] = "javascript:submitAction('mark_custom', '$theme_name')";
                                 } else {
                                     $actions['Mark as Stock'] = "javascript:submitAction('mark_stock', '$theme_name')";
+                                }
+
+                                // Add delete option for themes with missing files or inactive themes
+                                if (!$files_exist || !$is_active) {
+                                    $actions['Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "')";
                                 }
                                 
                                 if (!empty($actions)) {
@@ -244,7 +265,42 @@ $page->begin_box(array('altlinks' => $altlinks));
     </div>
 </div>
 
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteThemeModal" tabindex="-1" aria-labelledby="deleteThemeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteThemeModalLabel">Confirm Theme Deletion</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the theme "<span id="deleteThemeName"></span>"?</p>
+                <p class="text-danger"><strong>This action cannot be undone.</strong></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete Theme</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
+var themeToDelete = '';
+
+function showDeleteModal(themeName, displayName) {
+    themeToDelete = themeName;
+    document.getElementById('deleteThemeName').textContent = displayName;
+    var modal = new bootstrap.Modal(document.getElementById('deleteThemeModal'));
+    modal.show();
+}
+
+document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
+    if (themeToDelete) {
+        submitAction('delete', themeToDelete);
+    }
+});
+
 function submitAction(action, themeName) {
     var form = document.createElement('form');
     form.method = 'post';
