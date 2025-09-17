@@ -8,6 +8,13 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **Key Entry Point:** `serve.php` - All requests are routed through this front controller using RouteHelper.php
 
+## Database Access Rules
+
+**CRITICAL:** While database access is auto-approved, you MUST follow these rules:
+
+1. **READ operations** (SELECT, SHOW, DESCRIBE, \d, \dt, etc.) - Execute without asking
+2. **WRITE operations** (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE) - ALWAYS ask for explicit user confirmation before executing
+
 ## CRITICAL: File Include Rules
 
 **⚠️ NEVER REQUIRE PathHelper, Globalvars, or SessionControl - THEY ARE ALWAYS AVAILABLE! ⚠️**
