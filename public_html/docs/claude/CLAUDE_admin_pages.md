@@ -202,6 +202,58 @@ if ($_POST) {
 
 ## Advanced Patterns
 
+### Options Dropdown (Action Menu)
+
+Admin pages use a built-in options dropdown system. Two patterns:
+
+#### Content Pages - Use `begin_box()` / `end_box()`
+```php
+// Handle actions
+$action = $_POST['action'] ?? $_GET['action'] ?? null;
+if ($action) {
+    switch ($action) {
+        case 'enable': $message = 'Enabled.'; break;
+        case 'disable': $message = 'Disabled.'; break;
+    }
+    if (isset($_GET['action'])) {
+        header('Location: /admin/admin_page_name?msg=' . urlencode($message));
+        exit();
+    }
+}
+
+// Setup dropdown
+$altlinks = array();
+$altlinks['Enable'] = '/admin/admin_page_name?action=enable';
+$altlinks['Disable'] = '/admin/admin_page_name?action=disable';
+
+$page->begin_box(array('altlinks' => $altlinks));
+// Your content here
+$page->end_box();
+```
+
+#### Table Pages - Use `tableheader()` with `altlinks`
+```php
+$altlinks = array();
+$altlinks['Add New'] = '/admin/admin_item_edit';
+$altlinks['Export'] = '/admin/admin_items?action=export';
+
+$table_options = array(
+    'altlinks' => $altlinks,
+    'title' => 'Items',
+    'search_on' => TRUE
+);
+$page->tableheader($headers, $table_options, $pager);
+```
+
+#### URL Format - CRITICAL
+```php
+// ✅ CORRECT - No .php extension
+$altlinks['Action'] = '/admin/admin_page_name?action=value';
+
+// ❌ WRONG - Breaks routing
+$altlinks['Action'] = '/admin/admin_page_name.php?action=value';
+```
+
 ### Modal/AJAX Integration
 ```php
 // For pages that need JavaScript interaction

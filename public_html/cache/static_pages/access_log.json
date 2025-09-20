@@ -1,0 +1,12 @@
+[
+    {
+        "url": "\/events?path=events",
+        "status": "hit",
+        "time": 1758390080
+    },
+    {
+        "url": "\/robots.txt?path=robots.txt",
+        "status": "nostatic",
+        "time": 1758390048
+    }
+]

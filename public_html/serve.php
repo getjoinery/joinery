@@ -254,4 +254,4 @@ $routes = [
 ];
 
 // ROUTE PROCESSING - All logic moved to RouteHelper::processRoutes()
-RouteHelper::processRoutes($routes, $_REQUEST['path'] ?? '');
+RouteHelper::processRoutes($routes, $_REQUEST['__route'] ?? '');
