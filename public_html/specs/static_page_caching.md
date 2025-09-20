@@ -72,8 +72,8 @@ $cache_key = substr(hash('sha256', $cache_string), 0, 16);
 RouteHelper handles all caching logic in `processRoutes()`:
 
 ```php
-// Early in processRoutes(), for non-authenticated users only
-if (!SessionControl::get_instance()->is_logged_in()) {
+// Early in processRoutes(), for non-authenticated GET requests only
+if (!SessionControl::get_instance()->is_logged_in() && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $cache_status = StaticPageCache::checkCache($request_path, $_GET);
 
     if ($cache_status === 'cached') {
@@ -91,8 +91,8 @@ if (!SessionControl::get_instance()->is_logged_in()) {
         // ... normal route processing ...
 
         // At the end, check if we should cache
-        if (StaticPageCache::shouldCache()) {
-            $content = ob_get_contents();
+        $content = ob_get_contents();
+        if (StaticPageCache::shouldCache($request_path, $_GET, $content)) {
             StaticPageCache::createCache($request_path, $_GET, $content);
         }
         ob_end_flush();
@@ -188,7 +188,16 @@ class StaticPageCache {
 
             // Create cache directory if it doesn't exist
             if (!is_dir(self::$cache_dir)) {
-                mkdir(self::$cache_dir, 0755, true);
+                if (!@mkdir(self::$cache_dir, 0755, true)) {
+                    throw new Exception("Failed to create cache directory: " . self::$cache_dir .
+                                      " - Please create manually and ensure web server can write to it.");
+                }
+            }
+
+            // Verify directory is writable
+            if (!is_writable(self::$cache_dir)) {
+                throw new Exception("Cache directory is not writable: " . self::$cache_dir .
+                                  " - Please run: chmod 755 " . self::$cache_dir);
             }
         }
     }
@@ -216,8 +225,19 @@ class StaticPageCache {
         self::init();
         if (self::$index !== null) {
             $temp = self::$index_path . '.tmp';
-            file_put_contents($temp, json_encode(self::$index, JSON_PRETTY_PRINT), LOCK_EX);
-            rename($temp, self::$index_path);
+            $json = json_encode(self::$index, JSON_PRETTY_PRINT);
+            if ($json === false) {
+                throw new Exception("Failed to encode cache index to JSON");
+            }
+
+            if (@file_put_contents($temp, $json, LOCK_EX) === false) {
+                throw new Exception("Failed to write cache index to temp file: " . $temp);
+            }
+
+            if (!@rename($temp, self::$index_path)) {
+                @unlink($temp); // Clean up temp file
+                throw new Exception("Failed to update cache index file: " . self::$index_path);
+            }
         }
     }
 
@@ -290,13 +310,27 @@ class StaticPageCache {
 
         // Atomic write
         $temp = $file . '.tmp';
-        file_put_contents($temp, $content_with_comment, LOCK_EX);
-        rename($temp, $file);
+        if (@file_put_contents($temp, $content_with_comment, LOCK_EX) === false) {
+            // Non-fatal - just log and continue without caching
+            error_log("StaticPageCache: Failed to write cache file: " . $temp);
+            return false;
+        }
+
+        if (!@rename($temp, $file)) {
+            @unlink($temp); // Clean up temp file
+            error_log("StaticPageCache: Failed to rename cache file: " . $temp . " to " . $file);
+            return false;
+        }
 
         // Update index
-        $index = self::loadIndex();
-        $index[$hash] = 'cached';
-        self::saveIndex();
+        try {
+            $index = self::loadIndex();
+            $index[$hash] = 'cached';
+            self::saveIndex();
+        } catch (Exception $e) {
+            // Index update failed, but cache file exists - non-fatal
+            error_log("StaticPageCache: Index update failed: " . $e->getMessage());
+        }
 
         return true;
     }
@@ -304,7 +338,7 @@ class StaticPageCache {
     /**
      * Check if current response should be cached
      */
-    public static function shouldCache($request_path = '', $params = []) {
+    public static function shouldCache($request_path = '', $params = [], $content = '') {
         // 1. Check HTTP status - only cache successful responses
         if (http_response_code() !== 200) return false;
 
@@ -358,6 +392,17 @@ class StaticPageCache {
 
         // 4. Must be HTML
         if (!$is_html) return false;
+
+        // 5. Check for CSRF tokens in forms (don't cache protected forms)
+        if (!empty($content) && strpos($content, '<form') !== false) {
+            // Check for common CSRF token patterns
+            if (strpos($content, 'csrf_token') !== false ||
+                strpos($content, '_token') !== false ||
+                strpos($content, 'authenticity_token') !== false ||
+                strpos($content, 'form_token') !== false) {
+                return false; // Don't cache pages with CSRF-protected forms
+            }
+        }
 
         // All checks passed - this is cacheable
         return true;
@@ -504,7 +549,7 @@ if (class_exists('StaticPageCache')) {
     PathHelper::requireOnce('includes/StaticPageCache.php');
 }
 
-if (!SessionControl::get_instance()->is_logged_in()) {
+if (!SessionControl::get_instance()->is_logged_in() && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $cache_result = StaticPageCache::checkCache($request_path, $_GET);
 
     if ($cache_result === 'nostatic') {
@@ -522,12 +567,16 @@ if (!SessionControl::get_instance()->is_logged_in()) {
         } else {
             // Serve the cached version
             header('Content-Type: text/html; charset=utf-8');
+            header('Content-Length: ' . filesize($cache_result));
             header('X-Cache: HIT');
             readfile($cache_result);
             exit();
         }
     } else {
         // Not cached yet - start buffering for potential caching
+        // Note: This works fine with FormWriter's ob_start/ob_get_clean pairs
+        // since those are self-contained and return strings. Nested output
+        // buffering is handled correctly by PHP.
         ob_start();
         $cache_buffer_started = true;
     }
@@ -539,8 +588,8 @@ if (!SessionControl::get_instance()->is_logged_in()) {
 // STATIC PAGE CACHE CREATION - Save cache if appropriate
 if ($cache_buffer_started && $cache_result === false) {
     // Check if we should cache this response
-    if (StaticPageCache::shouldCache($request_path, $_GET)) {
-        $content = ob_get_contents();
+    $content = ob_get_contents();
+    if (StaticPageCache::shouldCache($request_path, $_GET, $content)) {
         StaticPageCache::createCache($request_path, $_GET, $content);
     } else {
         // Mark as non-cacheable to avoid rechecking
@@ -827,6 +876,68 @@ if ($error) {
 <?php $page->admin_footer(); ?>
 ```
 
+### Visitor Tracking Method (add to /data/visitor_events_class.php)
+
+```php
+// Add this static method to the VisitorEvent class
+public static function recordPageVisit($page) {
+    try {
+        // Don't track admin pages or Ajax requests
+        if (strpos($page, '/admin/') === 0 || strpos($page, '/ajax/') === 0) {
+            return;
+        }
+
+        $visitor_event = new VisitorEvent(NULL);
+
+        // Set visitor ID from cookie or generate new one
+        $visitor_id = $_COOKIE['visitor_id'] ?? null;
+        if (!$visitor_id) {
+            $visitor_id = substr(md5(uniqid(mt_rand(), true)), 0, 20);
+            setcookie('visitor_id', $visitor_id, time() + (365 * 24 * 60 * 60), '/');
+        }
+
+        $visitor_event->set('vse_visitor_id', $visitor_id);
+
+        // Set user ID if logged in
+        $session = SessionControl::get_instance();
+        if ($session->is_logged_in()) {
+            $visitor_event->set('vse_usr_user_id', $_SESSION['user_id']);
+        }
+
+        // Set tracking data
+        $visitor_event->set('vse_type', 1); // 1 = page view
+        $visitor_event->set('vse_ip', $_SERVER['REMOTE_ADDR'] ?? '');
+        $visitor_event->set('vse_page', $page);
+        $visitor_event->set('vse_referrer', $_SERVER['HTTP_REFERER'] ?? '');
+
+        // Parse UTM parameters if present
+        if (!empty($_GET['utm_source'])) {
+            $visitor_event->set('vse_source', $_GET['utm_source']);
+        }
+        if (!empty($_GET['utm_campaign'])) {
+            $visitor_event->set('vse_campaign', $_GET['utm_campaign']);
+        }
+        if (!empty($_GET['utm_medium'])) {
+            $visitor_event->set('vse_medium', $_GET['utm_medium']);
+        }
+        if (!empty($_GET['utm_content'])) {
+            $visitor_event->set('vse_content', $_GET['utm_content']);
+        }
+
+        // Check if 404
+        if (http_response_code() === 404) {
+            $visitor_event->set('vse_is_404', true);
+        }
+
+        $visitor_event->save();
+
+    } catch (Exception $e) {
+        // Silently fail - don't break page for tracking errors
+        error_log("Visitor tracking error: " . $e->getMessage());
+    }
+}
+```
+
 ### Visitor Tracking Endpoint (/ajax/vs.php)
 
 ```php
@@ -836,7 +947,7 @@ if ($error) {
  * Named 'vs.php' to avoid ad blockers
  */
 
-PathHelper::requireOnce('includes/VisitorTracking.php');
+PathHelper::requireOnce('data/visitor_events_class.php');
 
 // Security: Verify request is from our domain
 $allowed_origins = [
@@ -866,13 +977,8 @@ if (!preg_match('/^\/[a-zA-Z0-9\/_\-\?&=]*$/', $page)) {
     exit();
 }
 
-// Record the visit
-try {
-    VisitorTracking::recordVisit($page);
-} catch (Exception $e) {
-    // Log but don't expose errors
-    error_log("Visitor tracking error: " . $e->getMessage());
-}
+// Record the visit using VisitorEvent class method
+VisitorEvent::recordPageVisit($page);
 
 // Return 204 No Content (optimal for sendBeacon)
 http_response_code(204);
@@ -950,12 +1056,8 @@ if ($should_track):
     const trackUrl = '/ajax/vs.php?p=' + encodeURIComponent(window.location.pathname);
     if (navigator.sendBeacon) {
         navigator.sendBeacon(trackUrl);
-    } else {
-        // Fallback for older browsers
-        fetch(trackUrl).catch(function() {
-            // Silently fail if tracking fails
-        });
     }
+    // No fallback - only ~1% of users on ancient browsers (IE, Safari <11) won't be tracked
 })();
 </script>
 <?php endif; ?>
