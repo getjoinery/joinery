@@ -340,8 +340,6 @@ if (!empty($display_messages)) {
 <div class="row mt-4">
     <div class="col-12">
         <h5 class="mb-3">Cache Diagnostic Tool</h5>
-        <div class="card">
-            <div class="card-body">
                 <?php
                 $formwriter = LibraryFunctions::get_formwriter_object('diagnose_form', 'admin');
 
@@ -358,7 +356,7 @@ if (!empty($display_messages)) {
                                                 'Enable to perform full content analysis (may take a few seconds)');
                 echo $formwriter->hiddeninput('action', 'diagnose_url');
                 echo $formwriter->start_buttons();
-                echo $formwriter->new_form_button('Diagnose URL', 'btn btn-info');
+                echo $formwriter->new_form_button('Diagnose URL', 'btn btn-secondary');
                 echo $formwriter->end_buttons();
                 echo $formwriter->end_form();
 
@@ -412,8 +410,6 @@ if (!empty($display_messages)) {
                     <?php
                 }
                 ?>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -421,8 +417,6 @@ if (!empty($display_messages)) {
 <div class="row mt-4">
     <div class="col-md-6">
         <h5 class="mb-3">Invalidate Specific URL</h5>
-        <div class="card">
-            <div class="card-body">
                 <?php
                 $formwriter = LibraryFunctions::get_formwriter_object('invalidate_form', 'admin');
 
@@ -435,18 +429,14 @@ if (!empty($display_messages)) {
                                           '/page/about?param=value', 255, 'Enter the URL path to remove from cache');
                 echo $formwriter->hiddeninput('action', 'invalidate_url');
                 echo $formwriter->start_buttons();
-                echo $formwriter->new_form_button('Invalidate Cache', 'btn btn-primary');
+                echo $formwriter->new_form_button('Invalidate Cache', 'btn btn-secondary');
                 echo $formwriter->end_buttons();
                 echo $formwriter->end_form();
                 ?>
-            </div>
-        </div>
     </div>
 
     <div class="col-md-6">
         <h5 class="mb-3">Mark URL as Non-Cacheable</h5>
-        <div class="card">
-            <div class="card-body">
                 <?php
                 $formwriter = LibraryFunctions::get_formwriter_object('nostatic_form', 'admin');
 
@@ -459,12 +449,10 @@ if (!empty($display_messages)) {
                                           '/page/dynamic', 255, 'Enter the URL path to exclude from caching');
                 echo $formwriter->hiddeninput('action', 'mark_nostatic');
                 echo $formwriter->start_buttons();
-                echo $formwriter->new_form_button('Mark as Non-Cacheable', 'btn btn-info');
+                echo $formwriter->new_form_button('Mark as Non-Cacheable', 'btn btn-secondary');
                 echo $formwriter->end_buttons();
                 echo $formwriter->end_form();
                 ?>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -524,7 +512,7 @@ if (!empty($display_messages)) {
                 $action_form = '<form method="post" style="display: inline;">
                                <input type="hidden" name="url" value="' . htmlspecialchars($item['url']) . '">
                                <button type="submit" name="action" value="invalidate_url"
-                                       class="btn btn-sm btn-warning">Invalidate</button>
+                                       class="btn btn-sm btn-secondary">Invalidate</button>
                                </form>';
                 array_push($rowvalues, $action_form);
             } else {
