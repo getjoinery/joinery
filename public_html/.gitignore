@@ -10,3 +10,4 @@ Globalvars_site.php
 /plugins
 .claude/
 *.bak
+/cache
