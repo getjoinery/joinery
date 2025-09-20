@@ -5,7 +5,7 @@
 # Usage: ./virtualhost_update_script.sh <filename> [site_name] [domain_name] [server_ip]
 
 # Version info
-VERSION="2.0.2"
+VERSION="2.1.0"
 echo "Virtual Host Template Script v${VERSION}"
 echo "=========================================="
 
@@ -65,13 +65,63 @@ SITE_NAME=$(extract_or_use_param "$2" "DocumentRoot" "s/.*\/\([^/]*\)\/public_ht
 DOMAIN_NAME=$(extract_or_use_param "$3" "^[[:space:]]*ServerName" "s/^[[:space:]]*ServerName[[:space:]]\+\([^[:space:]]*\).*/\1/" "example.com")
 SERVER_IP=$(extract_or_use_param "$4" "<VirtualHost" "s/.*<VirtualHost[[:space:]]*\([^:]*\):.*/\1/" "127.0.0.1")
 
+# Validate extracted values - don't use defaults if we have an existing config
+if [ -f "$CONFIG_FILE" ]; then
+    # If we extracted default values from an existing config, something went wrong
+    if [ "$SITE_NAME" = "mysite" ] || [ "$DOMAIN_NAME" = "example.com" ] || [ "$SERVER_IP" = "127.0.0.1" ]; then
+        echo "ERROR: Failed to extract configuration from existing file: $CONFIG_FILE"
+        echo ""
+        echo "Extracted values:"
+        echo "  Site Name: $SITE_NAME"
+        echo "  Domain Name: $DOMAIN_NAME"
+        echo "  Server IP: $SERVER_IP"
+        echo ""
+        echo "These appear to be default values, not actual configuration."
+        echo ""
+        echo "Please provide the parameters explicitly:"
+        echo "  $0 $FILENAME <site_name> <domain_name> <server_ip>"
+        echo ""
+        echo "Example:"
+        echo "  $0 joinerytest.conf joinerytest joinerytest.site 69.164.209.253"
+        echo ""
+        echo "Or check that the existing config file has the expected format."
+        exit 1
+    fi
+
+    # Additional validation - site name should match filename
+    EXPECTED_SITE="${FILENAME%.conf}"
+    if [ "$SITE_NAME" != "$EXPECTED_SITE" ]; then
+        echo "WARNING: Site name '$SITE_NAME' doesn't match filename '$EXPECTED_SITE'"
+        echo "This might indicate incorrect parameter extraction."
+        echo ""
+        read -p "Do you want to continue? (y/N): " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Aborting. Please run with explicit parameters:"
+            echo "  $0 $FILENAME <site_name> <domain_name> <server_ip>"
+            exit 1
+        fi
+    fi
+fi
+
 echo "Configuration:"
 echo "  Site Name: $SITE_NAME"
-echo "  Domain Name: $DOMAIN_NAME" 
+echo "  Domain Name: $DOMAIN_NAME"
 echo "  Server IP: $SERVER_IP"
 echo "  Config File: $CONFIG_FILE"
 echo "  Template: $TEMPLATE_FILE"
 echo ""
+
+# Confirm before proceeding if updating existing config
+if [ -f "$CONFIG_FILE" ]; then
+    echo "This will UPDATE the existing configuration file."
+    read -p "Do you want to proceed? (y/N): " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Aborting."
+        exit 1
+    fi
+fi
 
 # Create a backup of the original file if it exists
 if [ -f "$CONFIG_FILE" ]; then
