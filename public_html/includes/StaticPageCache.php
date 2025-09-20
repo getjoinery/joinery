@@ -98,19 +98,44 @@ class StaticPageCache {
 
     /**
      * Generate a cache key from URL and parameters
+     * Uses simple, Apache-friendly filenames instead of hashes
      */
     private static function generateCacheKey($url, $params) {
-        // Sort parameters for consistent hashing
-        ksort($params);
-
-        // Build cache key from full URL including parameters
-        $cache_string = $url;
-        if (!empty($params)) {
-            $cache_string .= '?' . http_build_query($params);
+        // Handle root path
+        if ($url === '/' || $url === '') {
+            $safe_name = 'index';
+        } else {
+            // Remove leading/trailing slashes and replace path separators
+            $safe_name = trim($url, '/');
+            // Replace slashes with underscores for filesystem safety
+            $safe_name = str_replace('/', '_', $safe_name);
+            // Replace other problematic characters
+            $safe_name = preg_replace('/[^a-zA-Z0-9_\-]/', '-', $safe_name);
         }
 
-        // Return first 16 chars of SHA-256 hash
-        return substr(hash('sha256', $cache_string), 0, 16);
+        // Handle query parameters if present
+        if (!empty($params)) {
+            // Sort for consistency
+            ksort($params);
+            // Build parameter string
+            $param_parts = [];
+            foreach ($params as $key => $value) {
+                // Sanitize parameter names and values
+                $safe_key = preg_replace('/[^a-zA-Z0-9]/', '', $key);
+                $safe_value = preg_replace('/[^a-zA-Z0-9]/', '', $value);
+                $param_parts[] = $safe_key . '-' . $safe_value;
+            }
+            $safe_name .= '__' . implode('_', $param_parts);
+        }
+
+        // Truncate if too long (filesystem limit is usually 255 chars)
+        // Leave room for .html extension
+        if (strlen($safe_name) > 200) {
+            // For very long URLs, fall back to hash just for those
+            $safe_name = substr($safe_name, 0, 150) . '_' . substr(hash('sha256', $url . '?' . http_build_query($params)), 0, 16);
+        }
+
+        return $safe_name;
     }
 
     /**
@@ -168,6 +193,9 @@ class StaticPageCache {
             return false;
         }
 
+        // Trim any leading whitespace/newlines before the DOCTYPE
+        $content = ltrim($content);
+
         $hash = self::generateCacheKey($url, $params);
         $file = self::$cache_dir . $hash . '.html';
 
@@ -177,14 +205,17 @@ class StaticPageCache {
             $url_with_params .= '?' . http_build_query($params);
         }
 
-        // Insert comment after DOCTYPE if present, otherwise at the beginning
-        $comment = "<!-- Cached: {$url_with_params} -->";
-        if (preg_match('/^(<!DOCTYPE[^>]*>)/i', $content, $matches)) {
-            // Insert comment after DOCTYPE
-            $content_with_comment = $matches[1] . "\n" . $comment . "\n" . substr($content, strlen($matches[1]));
+        // Insert comment after <head> tag for best compatibility
+        $comment = "\n    <!-- Cached: {$url_with_params} -->";
+
+        // Try to insert after <head> tag
+        if (preg_match('/(<head[^>]*>)/i', $content, $matches, PREG_OFFSET_CAPTURE)) {
+            // Insert comment right after <head> tag
+            $head_pos = $matches[0][1] + strlen($matches[0][0]);
+            $content_with_comment = substr($content, 0, $head_pos) . $comment . substr($content, $head_pos);
         } else {
-            // No DOCTYPE found, just prepend the comment
-            $content_with_comment = $comment . "\n" . $content;
+            // Fallback: if no <head> found, don't add comment at all to avoid breaking HTML
+            $content_with_comment = $content;
         }
 
         // Atomic write
