@@ -1084,8 +1084,20 @@ abstract class SystemBase {
 		}
 
 		$this->key = $p_keys_return[static::$pkey_column];
-			
-		
+
+		// AUTO CACHE INVALIDATION - Simple approach
+		// Only invalidate the model's own URL if it has one
+		if (class_exists('StaticPageCache')) {
+			if (method_exists($this, 'get_url')) {
+				$url = $this->get_url();
+				if ($url) {
+					PathHelper::requireOnce('includes/StaticPageCache.php');
+					StaticPageCache::invalidateUrl($url);
+				}
+			}
+		}
+
+
 	}
 
 	function authenticate_read($data) {}

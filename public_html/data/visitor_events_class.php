@@ -49,6 +49,68 @@ class VisitorEvent extends SystemBase {	public static $prefix = 'vse';
 
 	public static $field_constraints = array();
 
+	/**
+	 * Record a page visit for tracking purposes
+	 * This method creates a visitor event record for JavaScript-based tracking
+	 * @param string $page The page URL being visited
+	 */
+	public static function recordPageVisit($page) {
+		try {
+			// Don't track admin pages or Ajax requests
+			if (strpos($page, '/admin/') === 0 || strpos($page, '/ajax/') === 0) {
+				return;
+			}
+
+			$visitor_event = new VisitorEvent(NULL);
+
+			// Set visitor ID from cookie or generate new one
+			$visitor_id = $_COOKIE['visitor_id'] ?? null;
+			if (!$visitor_id) {
+				$visitor_id = substr(md5(uniqid(mt_rand(), true)), 0, 20);
+				setcookie('visitor_id', $visitor_id, time() + (365 * 24 * 60 * 60), '/');
+			}
+
+			$visitor_event->set('vse_visitor_id', $visitor_id);
+
+			// Set user ID if logged in
+			$session = SessionControl::get_instance();
+			if ($session->is_logged_in()) {
+				$visitor_event->set('vse_usr_user_id', $_SESSION['user_id']);
+			}
+
+			// Set tracking data
+			$visitor_event->set('vse_type', 1); // 1 = page view
+			$visitor_event->set('vse_ip', $_SERVER['REMOTE_ADDR'] ?? '');
+			$visitor_event->set('vse_page', $page);
+			$visitor_event->set('vse_referrer', $_SERVER['HTTP_REFERER'] ?? '');
+
+			// Parse UTM parameters if present
+			if (!empty($_GET['utm_source'])) {
+				$visitor_event->set('vse_source', $_GET['utm_source']);
+			}
+			if (!empty($_GET['utm_campaign'])) {
+				$visitor_event->set('vse_campaign', $_GET['utm_campaign']);
+			}
+			if (!empty($_GET['utm_medium'])) {
+				$visitor_event->set('vse_medium', $_GET['utm_medium']);
+			}
+			if (!empty($_GET['utm_content'])) {
+				$visitor_event->set('vse_content', $_GET['utm_content']);
+			}
+
+			// Check if 404
+			if (http_response_code() === 404) {
+				$visitor_event->set('vse_is_404', true);
+			}
+
+			$visitor_event->save();
+
+		} catch (Exception $e) {
+			// Silently fail - don't break page for tracking errors
+			error_log("Visitor tracking error: " . $e->getMessage());
+		}
+	}
+
 }
 
 class MultiVisitorEvent extends SystemMultiBase {
