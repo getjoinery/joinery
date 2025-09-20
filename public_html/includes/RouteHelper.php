@@ -1056,11 +1056,65 @@ class RouteHelper {
         $errorManager->register();
         error_log("  ✓ ErrorManager registered for fatal error handling");
 
+        // Load StaticPageCache for caching functionality
+        PathHelper::requireOnce('includes/StaticPageCache.php');
+
         // CORE GUARANTEES: These are now available for all subsequent code
         // - PathHelper: File path resolution and loading
         // - Globalvars: Configuration and settings access
         // - SessionControl: Session management and authentication
-        
+
+        // STATIC PAGE CACHE CHECK - For non-authenticated users only
+        $cache_status = null;
+        $cache_buffer_started = false;
+
+        // Filter out the '__route' parameter from $_GET as it's just routing metadata
+        $cache_params = $_GET;
+        unset($cache_params['__route']);
+
+        if (!SessionControl::get_instance()->is_logged_in() && $_SERVER['REQUEST_METHOD'] === 'GET') {
+            $cache_result = StaticPageCache::checkCache($request_path, $cache_params);
+
+            if ($cache_result === 'nostatic') {
+                // This URL is marked as non-cacheable
+                // Re-evaluate occasionally (1% chance) to see if it has become cacheable
+                // This handles cases where a page was temporarily uncacheable (e.g., error state)
+                if (rand(1, 100) === 1) {
+                    // Clear the nostatic marking and try to cache it again
+                    StaticPageCache::invalidateUrl($request_path, $cache_params);
+                    ob_start();
+                    $cache_buffer_started = true;
+                }
+                // Otherwise continue normal processing without caching
+            } elseif ($cache_result !== false) {
+                // Random invalidation to keep all pages fresh
+                // 1% chance = ~100 page views average before refresh
+                // Adjust the 100 to change freshness (50 = more fresh, 200 = less fresh)
+                if (rand(1, 100) === 1) {
+                    // Invalidate this cache and regenerate
+                    StaticPageCache::invalidateUrl($request_path, $cache_params);
+                    // Continue with normal processing to regenerate
+                    ob_start();
+                    $cache_buffer_started = true;
+                } else {
+                    // Serve the cached version
+                    header('Content-Type: text/html; charset=utf-8');
+                    header('Content-Length: ' . filesize($cache_result));
+                    header('X-Cache: HIT');
+                    readfile($cache_result);
+                    exit();
+                }
+            } else {
+                // Not cached yet - start buffering for potential caching
+                // Note: This works fine with FormWriter's ob_start/ob_get_clean pairs
+                // since those are self-contained and return strings. Nested output
+                // buffering is handled correctly by PHP.
+                ob_start();
+                $cache_buffer_started = true;
+            }
+
+        }
+
         // Detect current plugin based on route (now that PathHelper is available)
         self::$current_plugin = self::detectPluginByRoute($request_path);
         
@@ -1208,6 +1262,15 @@ class RouteHelper {
                     if ($handler($params, $settings, $session, $template_directory)) {
                         error_log("Custom route handler succeeded - exiting");
                         self::debugLog('handler_execution', "Handler succeeded, exiting");
+                        // Save cache before exiting
+                        if ($cache_buffer_started && $cache_result === false) {
+                            $content = ob_get_contents();
+                            if (StaticPageCache::shouldCache($request_path, $cache_params, $content)) {
+                                StaticPageCache::createCache($request_path, $cache_params, $content);
+                            } else {
+                                StaticPageCache::markAsNostatic($request_path, $cache_params);
+                            }
+                        }
                         exit();
                     } else {
                         self::show404('Custom route handler failed', [
@@ -1227,6 +1290,15 @@ class RouteHelper {
         // 5. Check dynamic routes (unified content + simple)
         if ($route = self::matchRoute($full_path, $routes['dynamic'] ?? [])) {
             if (self::handleDynamicRoute($route, $params, $template_directory)) {
+                // Save cache before exiting
+                if ($cache_buffer_started && $cache_result === false) {
+                    $content = ob_get_contents();
+                    if (StaticPageCache::shouldCache($request_path, $cache_params, $content)) {
+                        StaticPageCache::createCache($request_path, $cache_params, $content);
+                    } else {
+                        StaticPageCache::markAsNostatic($request_path, $cache_params);
+                    }
+                }
                 exit();
             } else {
                 self::show404('Dynamic route matched but handler failed', [
@@ -1247,6 +1319,15 @@ class RouteHelper {
             if (file_exists(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)))) {
                 require_once(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)));
                 error_log("View fallback succeeded - exiting");
+                // Save cache before exiting
+                if ($cache_buffer_started && $cache_result === false) {
+                    $content = ob_get_contents();
+                    if (StaticPageCache::shouldCache($request_path, $cache_params, $content)) {
+                        StaticPageCache::createCache($request_path, $cache_params, $content);
+                    } else {
+                        StaticPageCache::markAsNostatic($request_path, $cache_params);
+                    }
+                }
                 exit();
             }
             error_log("View fallback failed");
@@ -1264,7 +1345,10 @@ class RouteHelper {
         } else {
             error_log("No legacy handlePluginRoutes function found");
         }
-        
+
+        // Note: Cache saving is now handled by register_shutdown_function above
+        // This ensures caching works even when exit() is called during route handling
+
         // 8. Final fallback - 404
         self::show404('No matching route found', ['path' => $request_path]);
     }
