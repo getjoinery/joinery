@@ -158,7 +158,6 @@ class StaticPageCache {
         }
 
         $hash = self::generateCacheKey($url, $params);
-        $file = self::$cache_dir . $hash . '.html';
 
         // Check index status
         if (isset($index[$hash]) && is_array($index[$hash])) {
@@ -168,9 +167,13 @@ class StaticPageCache {
                 return 'nostatic';
             }
             if ($entry['status'] === 'cached') {
+                // Determine file extension from index or guess from URL
+                $extension = isset($entry['extension']) ? $entry['extension'] : '.html';
+                $cache_file = self::$cache_dir . $hash . $extension;
+
                 // Verify file still exists and return path
-                if (file_exists($file)) {
-                    return $file;  // Return the actual file path
+                if (file_exists($cache_file)) {
+                    return $cache_file;
                 }
                 // File missing, update index
                 unset($index[$hash]);
@@ -193,28 +196,49 @@ class StaticPageCache {
             return false;
         }
 
-        // Trim any leading whitespace/newlines before the DOCTYPE
-        $content = ltrim($content);
-
         $hash = self::generateCacheKey($url, $params);
-        $file = self::$cache_dir . $hash . '.html';
-
-        // Add URL comment after DOCTYPE for debugging
         $url_with_params = $url;
         if (!empty($params)) {
             $url_with_params .= '?' . http_build_query($params);
         }
 
-        // Insert comment after <head> tag for best compatibility
-        $comment = "\n    <!-- Cached: {$url_with_params} -->";
+        // Determine appropriate file extension based on URL
+        $extension = '.html'; // Default to HTML
+        if (preg_match('/\.([a-z0-9]+)$/i', $url, $matches)) {
+            $url_extension = strtolower($matches[1]);
+            // Only use specific extensions we want to cache
+            if (in_array($url_extension, ['txt', 'xml', 'json'])) {
+                $extension = '.' . $url_extension;
+            }
+        }
 
-        // Try to insert after <head> tag
-        if (preg_match('/(<head[^>]*>)/i', $content, $matches, PREG_OFFSET_CAPTURE)) {
-            // Insert comment right after <head> tag
-            $head_pos = $matches[0][1] + strlen($matches[0][0]);
-            $content_with_comment = substr($content, 0, $head_pos) . $comment . substr($content, $head_pos);
+        $file = self::$cache_dir . $hash . $extension;
+
+        // Determine if this is HTML content that should get debug comments
+        $is_html = ($extension === '.html' &&
+                   (stripos(trim($content), '<!DOCTYPE') === 0 ||
+                    stripos(trim($content), '<html') === 0 ||
+                    (stripos(trim($content), '<!--') === 0 && stripos($content, '<html') !== false)));
+
+        if ($is_html) {
+            // HTML content - add debug comment
+            // Trim any leading whitespace/newlines before the DOCTYPE
+            $content = ltrim($content);
+
+            // Insert comment after <head> tag for best compatibility
+            $comment = "\n    <!-- Cached: {$url_with_params} -->";
+
+            // Try to insert after <head> tag
+            if (preg_match('/(<head[^>]*>)/i', $content, $matches, PREG_OFFSET_CAPTURE)) {
+                // Insert comment right after <head> tag
+                $head_pos = $matches[0][1] + strlen($matches[0][0]);
+                $content_with_comment = substr($content, 0, $head_pos) . $comment . substr($content, $head_pos);
+            } else {
+                // Fallback: if no <head> found, don't add comment at all to avoid breaking HTML
+                $content_with_comment = $content;
+            }
         } else {
-            // Fallback: if no <head> found, don't add comment at all to avoid breaking HTML
+            // Non-HTML content - preserve exactly as-is
             $content_with_comment = $content;
         }
 
@@ -236,11 +260,12 @@ class StaticPageCache {
         try {
             $index = self::loadIndex();
 
-            // Store both status and URL info
+            // Store with hash as key
             $index[$hash] = [
                 'status' => 'cached',
                 'url' => $url_with_params,
-                'time' => time()
+                'time' => time(),
+                'extension' => $extension
             ];
 
             self::$index = $index;  // Update the static property
@@ -254,9 +279,78 @@ class StaticPageCache {
     }
 
     /**
-     * Check if current response should be cached
+     * Check if URL should be completely ignored (spam/malicious)
+     * Returns true for URLs that should not be cached OR tracked
      */
-    public static function shouldCache($request_path = '', $params = [], $content = '') {
+    public static function shouldIgnore($request_path = '', $params = []) {
+        // Check User-Agent for obvious spam/bots
+        $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        if (empty($user_agent)) {
+            return true; // No User-Agent = likely automated spam
+        }
+
+        $blocked_user_agents = [
+            'phpstorm', 'xdebug', 'postman', 'insomnia',
+            'nmap', 'nikto', 'sqlmap', 'dirb', 'gobuster', 'wfuzz',
+            'bot', 'crawler', 'spider', 'scraper',
+            'curl', 'wget', 'python-requests', 'libwww-perl'
+        ];
+
+        $user_agent_lower = strtolower($user_agent);
+        foreach ($blocked_user_agents as $blocked) {
+            if (strpos($user_agent_lower, $blocked) !== false) {
+                return true;
+            }
+        }
+
+        // Check for sensitive keywords in path
+        $sensitive_keywords = ['phpinfo', 'phpmyadmin', 'adminer', 'wp-admin', 'wp-includes'];
+        foreach ($sensitive_keywords as $keyword) {
+            if (strpos(strtolower($request_path), $keyword) !== false) {
+                return true;
+            }
+        }
+
+        // Check for spam/malicious query parameters
+        if (!empty($params)) {
+            $spam_params = [
+                'xdebug_session_start', 'xdebug_session_stop', 'xdebug_profile',
+                'phpinfo', 'phpmyadmin', 'adminer', 'wp-admin', 'wp-includes',
+                'union', 'select', 'insert', 'delete', 'drop', 'exec',
+                'test', 'debug', 'admin', 'login', 'pass', 'passwd', 'password',
+                'bot', 'crawler', 'spider', 'scan',
+                '%3c', '%3e', '%22', '%27', 'script', 'alert', 'onload'
+            ];
+
+            foreach ($params as $key => $value) {
+                $key_lower = strtolower($key);
+                $value_lower = strtolower($value);
+
+                foreach ($spam_params as $spam) {
+                    if (strpos($key_lower, $spam) !== false || strpos($value_lower, $spam) !== false) {
+                        return true;
+                    }
+                }
+
+                // Check for suspicious values
+                if (strlen($value) > 100 ||
+                    preg_match('/[<>"\']/', $value) ||
+                    preg_match('/%[0-9a-f]{2}/i', $value)) {
+                    return true;
+                }
+            }
+        }
+
+        return false; // Not spam - process normally
+    }
+
+    /**
+     * Check if current response should be cached
+     * @param bool $detailed If true, returns array with detailed results instead of boolean
+     */
+    public static function shouldCache($request_path = '', $params = [], $content = '', $detailed = false) {
+        $reasons = [];
+        $passed = true;
         // 1. Check HTTP status - only cache successful responses
         $response_code = http_response_code();
         // If no response code has been set, assume 200 (PHP's default)
@@ -264,7 +358,14 @@ class StaticPageCache {
             $response_code = 200;
         }
         if ($response_code !== 200) {
-            return false;
+            if ($detailed) {
+                $reasons[] = "❌ HTTP status code is $response_code (must be 200)";
+                $passed = false;
+            } else {
+                return false;
+            }
+        } else if ($detailed) {
+            $reasons[] = '✅ HTTP status code is 200';
         }
 
         // 2. Check excluded URL patterns (truly dynamic/personalized pages)
@@ -284,13 +385,43 @@ class StaticPageCache {
             '/cart/'
         ];
 
+        $path_excluded = false;
         foreach ($excluded_patterns as $pattern) {
             if (strpos($request_path, $pattern) === 0) {
-                return false;
+                if ($detailed) {
+                    $reasons[] = "❌ Path matches excluded pattern: $pattern";
+                    $passed = false;
+                    $path_excluded = true;
+                    break;
+                } else {
+                    return false;
+                }
             }
         }
+        if ($detailed && !$path_excluded) {
+            $reasons[] = '✅ Path does not match any excluded patterns';
+        }
 
-        // 3. Check User-Agent for bots and development tools
+        // 3. Check for sensitive keywords anywhere in the URL path
+        $sensitive_keywords = ['phpinfo', 'phpmyadmin', 'adminer', 'wp-admin', 'wp-includes'];
+        $keyword_found = false;
+        foreach ($sensitive_keywords as $keyword) {
+            if (strpos(strtolower($request_path), $keyword) !== false) {
+                if ($detailed) {
+                    $reasons[] = "❌ Path contains sensitive keyword: $keyword";
+                    $passed = false;
+                    $keyword_found = true;
+                    break;
+                } else {
+                    return false;
+                }
+            }
+        }
+        if ($detailed && !$keyword_found) {
+            $reasons[] = '✅ Path does not contain sensitive keywords';
+        }
+
+        // 4. Check User-Agent for bots and development tools
         $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
         // Don't cache requests from suspicious/development User-Agents
@@ -306,22 +437,44 @@ class StaticPageCache {
         ];
 
         $user_agent_lower = strtolower($user_agent);
+        $user_agent_blocked = false;
         foreach ($blocked_user_agents as $blocked) {
             if (strpos($user_agent_lower, $blocked) !== false) {
-                return false;
+                if ($detailed) {
+                    $reasons[] = "❌ User-Agent contains blocked pattern: $blocked";
+                    $passed = false;
+                    $user_agent_blocked = true;
+                    break;
+                } else {
+                    return false;
+                }
             }
         }
 
         // Don't cache requests with no User-Agent (often automated)
         if (empty($user_agent)) {
-            return false;
+            if ($detailed) {
+                $reasons[] = '❌ User-Agent is empty (often automated requests)';
+                $passed = false;
+                $user_agent_blocked = true;
+            } else {
+                return false;
+            }
         }
 
-        // 4. Check for known spam/malicious query parameters
+        if ($detailed && !$user_agent_blocked) {
+            $reasons[] = '✅ User-Agent is acceptable';
+        }
+
+        // 5. Check for known spam/malicious query parameters
         if (!empty($params)) {
             $spam_params = [
                 // XDebug and development
                 'xdebug_session_start', 'xdebug_session_stop', 'xdebug_profile',
+                // Sensitive system info
+                'phpinfo', 'phpmyadmin', 'adminer',
+                // WordPress admin areas
+                'wp-admin', 'wp-includes',
                 // Common injection attempts
                 'union', 'select', 'insert', 'delete', 'drop', 'exec',
                 // Security scanning
@@ -332,6 +485,7 @@ class StaticPageCache {
                 '%3c', '%3e', '%22', '%27', 'script', 'alert', 'onload'
             ];
 
+            $spam_detected = false;
             foreach ($params as $key => $value) {
                 $key_lower = strtolower($key);
                 $value_lower = strtolower($value);
@@ -339,41 +493,108 @@ class StaticPageCache {
                 // Check parameter names
                 foreach ($spam_params as $spam) {
                     if (strpos($key_lower, $spam) !== false || strpos($value_lower, $spam) !== false) {
-                        return false;
+                        if ($detailed) {
+                            $reasons[] = "❌ Query parameter contains spam/malicious pattern: $spam (in $key=$value)";
+                            $passed = false;
+                            $spam_detected = true;
+                            break 2;
+                        } else {
+                            return false;
+                        }
                     }
                 }
 
                 // Check for obviously encoded/suspicious values
-                if (strlen($value) > 100 ||
-                    preg_match('/[<>"\']/', $value) ||
-                    preg_match('/%[0-9a-f]{2}/i', $value)) {
-                    return false;
+                if (strlen($value) > 100) {
+                    if ($detailed) {
+                        $reasons[] = "❌ Query parameter value too long: $key (length: " . strlen($value) . ")";
+                        $passed = false;
+                        $spam_detected = true;
+                        break;
+                    } else {
+                        return false;
+                    }
+                }
+
+                if (preg_match('/[<>"\']/', $value)) {
+                    if ($detailed) {
+                        $reasons[] = "❌ Query parameter contains suspicious characters: $key=$value";
+                        $passed = false;
+                        $spam_detected = true;
+                        break;
+                    } else {
+                        return false;
+                    }
+                }
+
+                if (preg_match('/%[0-9a-f]{2}/i', $value)) {
+                    if ($detailed) {
+                        $reasons[] = "❌ Query parameter contains URL encoding: $key=$value";
+                        $passed = false;
+                        $spam_detected = true;
+                        break;
+                    } else {
+                        return false;
+                    }
                 }
             }
+
+            if ($detailed && !$spam_detected) {
+                $reasons[] = '✅ Query parameters are acceptable';
+            }
+        } else if ($detailed) {
+            $reasons[] = '✅ No query parameters to check';
         }
 
-        // 5. Check headers for disqualifiers
+        // 6. Check headers for disqualifiers
         $headers = headers_list();
 
         foreach ($headers as $header) {
             // Don't cache redirects
-            if (stripos($header, 'Location:') === 0) return false;
+            if (stripos($header, 'Location:') === 0) {
+                if ($detailed) {
+                    $reasons[] = '❌ Response contains a redirect';
+                    $passed = false;
+                } else {
+                    return false;
+                }
+            }
 
             // Check if setting NEW cookies (not just passing existing session)
             if (stripos($header, 'Set-Cookie:') === 0) {
                 // Check if it's just refreshing existing session vs creating new data
                 if (strpos($header, 'PHPSESSID') === false) {
                     // Non-session cookie being set - don't cache
-                    return false;
+                    if ($detailed) {
+                        $cookie_name = trim(substr($header, 11)); // Remove 'Set-Cookie: '
+                        $reasons[] = "❌ Response sets non-session cookie: $cookie_name";
+                        $passed = false;
+                    } else {
+                        return false;
+                    }
                 }
             }
 
             // Don't cache JSON/XML API responses
-            if (stripos($header, 'Content-Type: application/json') === 0) return false;
-            if (stripos($header, 'Content-Type: application/xml') === 0) return false;
+            if (stripos($header, 'Content-Type: application/json') === 0) {
+                if ($detailed) {
+                    $reasons[] = '❌ Content-Type is application/json';
+                    $passed = false;
+                } else {
+                    return false;
+                }
+            }
+            if (stripos($header, 'Content-Type: application/xml') === 0) {
+                if ($detailed) {
+                    $reasons[] = '❌ Content-Type is application/xml';
+                    $passed = false;
+                } else {
+                    return false;
+                }
+            }
         }
 
-        // 6. Check if content looks like HTML (headers may not be set yet)
+        // 7. Check if content looks like HTML (headers may not be set yet)
         $is_html = false;
 
         // Check headers first
@@ -394,19 +615,64 @@ class StaticPageCache {
             }
         }
 
+        // Check if this is a cacheable file type based on URL extension
+        $is_cacheable_file = $is_html; // HTML is always cacheable
+
         if (!$is_html) {
-            return false;
+            // Allow specific file extensions to be cached
+            $cacheable_extensions = ['txt', 'xml', 'json'];
+            if (preg_match('/\.([a-z0-9]+)$/i', $request_path, $matches)) {
+                $url_extension = strtolower($matches[1]);
+                if (in_array($url_extension, $cacheable_extensions)) {
+                    $is_cacheable_file = true;
+                }
+            }
         }
 
-        // 7. Check for CSRF tokens in forms (don't cache protected forms)
+        if (!$is_cacheable_file) {
+            if ($detailed) {
+                $reasons[] = '❌ Content is not HTML and not a cacheable file type (.txt, .xml, .json)';
+                $passed = false;
+            } else {
+                return false;
+            }
+        } else if ($detailed) {
+            if ($is_html) {
+                $reasons[] = '✅ Content is HTML';
+            } else {
+                $reasons[] = '✅ Non-HTML content but cacheable file type';
+            }
+        }
+
+        // 8. Check for CSRF tokens in forms (don't cache protected forms)
         if (!empty($content) && strpos($content, '<form') !== false) {
             // Check for common CSRF token patterns
             if (strpos($content, 'csrf_token') !== false ||
                 strpos($content, '_token') !== false ||
                 strpos($content, 'authenticity_token') !== false ||
                 strpos($content, 'form_token') !== false) {
-                return false; // Don't cache pages with CSRF-protected forms
+                if ($detailed) {
+                    $reasons[] = '❌ Page contains forms with CSRF tokens';
+                    $passed = false;
+                } else {
+                    return false; // Don't cache pages with CSRF-protected forms
+                }
+            } else if ($detailed) {
+                $reasons[] = '✅ Page contains forms but no CSRF tokens detected';
             }
+        } else if ($detailed) {
+            $reasons[] = '✅ No forms detected on page';
+        }
+
+        // Return results
+        if ($detailed) {
+            if ($passed) {
+                $reasons[] = '✅ All caching criteria met';
+            }
+            return [
+                'cacheable' => $passed,
+                'reasons' => $reasons
+            ];
         }
 
         // All checks passed - this is cacheable
@@ -456,14 +722,22 @@ class StaticPageCache {
         }
 
         $hash = self::generateCacheKey($url, $params);
-        $file = self::$cache_dir . $hash . '.html';
+        $index = self::loadIndex();
 
-        if (file_exists($file)) {
-            unlink($file);
+        // Get the file extension from index if available
+        $extension = '.html'; // Default
+        if (isset($index[$hash]['extension'])) {
+            $extension = $index[$hash]['extension'];
         }
 
-        // Update index
-        $index = self::loadIndex();
+        $cache_file = self::$cache_dir . $hash . $extension;
+
+        // Delete cache file if it exists
+        if (file_exists($cache_file)) {
+            unlink($cache_file);
+        }
+
+        // Remove from index
         unset($index[$hash]);
         self::$index = $index;  // Update the static property
         self::saveIndex();
@@ -482,10 +756,16 @@ class StaticPageCache {
             return 0;
         }
 
-        $files = glob(self::$cache_dir . '*.html');
-        $count = 0;
+        // Get all cached files (any extension)
+        $cache_files = glob(self::$cache_dir . '*.*');
+        // Filter out temp files and index
+        $cache_files = array_filter($cache_files, function($file) {
+            $basename = basename($file);
+            return $basename !== 'index.json' && !str_ends_with($basename, '.tmp');
+        });
 
-        foreach ($files as $file) {
+        $count = 0;
+        foreach ($cache_files as $file) {
             if (unlink($file)) {
                 $count++;
             }
@@ -630,184 +910,24 @@ class StaticPageCache {
             // Set response code for shouldCache() to read
             http_response_code($http_code);
 
-            // Now test using the actual shouldCache() logic
-            $should_cache = self::shouldCache($path, $params, $content);
+            // Now test using the actual shouldCache() logic with detailed results
+            $detailed_result = self::shouldCache($path, $params, $content, true);
 
             // Restore original User-Agent
             $_SERVER['HTTP_USER_AGENT'] = $original_user_agent;
 
-            if ($should_cache) {
-                $result['reasons'][] = '✅ All caching criteria met (tested with actual shouldCache() logic)';
-                $result['is_cacheable'] = true;
-                $result['status'] = 'cacheable';
-            } else {
-                $result['reasons'][] = '❌ Failed shouldCache() validation';
-                $result['status'] = 'not_cacheable';
-
-                // Add specific failure reasons by testing individual conditions
-                if ($http_code !== 200) {
-                    $result['reasons'][] = "❌ HTTP status code is $http_code (must be 200)";
-                } else {
-                    $result['reasons'][] = '✅ HTTP status code is 200';
-                }
-
-                // Check if it's a path exclusion
-                $excluded_patterns = [
-                    '/login', '/logout', '/register', '/reset-password',
-                    '/ajax/', '/api/', '/admin/', '/utils/', '/test/',
-                    '/account/', '/profile/', '/checkout/', '/cart/'
-                ];
-
-                $path_excluded = false;
-                foreach ($excluded_patterns as $pattern) {
-                    if (strpos($path, $pattern) === 0) {
-                        $result['reasons'][] = "❌ Path matches excluded pattern: $pattern";
-                        $path_excluded = true;
-                        break;
-                    }
-                }
-                if (!$path_excluded) {
-                    $result['reasons'][] = '✅ Path does not match any excluded patterns';
-                }
-
-                // Check User-Agent filtering
-                $blocked_user_agents = [
-                    'phpstorm', 'xdebug', 'postman', 'insomnia',
-                    'nmap', 'nikto', 'sqlmap', 'dirb', 'gobuster', 'wfuzz',
-                    'bot', 'crawler', 'spider', 'scraper',
-                    'curl', 'wget', 'python-requests', 'libwww-perl'
-                ];
-
-                $user_agent_blocked = false;
-                $diagnostic_ua = 'StaticPageCache/1.0 Diagnostic';
-                foreach ($blocked_user_agents as $blocked) {
-                    if (strpos(strtolower($diagnostic_ua), $blocked) !== false) {
-                        $result['reasons'][] = "❌ User-Agent contains blocked pattern: $blocked";
-                        $user_agent_blocked = true;
-                        break;
-                    }
-                }
-                if (!$user_agent_blocked) {
-                    $result['reasons'][] = '✅ User-Agent is acceptable';
-                }
-
-                // Check for spam parameters
-                if (!empty($params)) {
-                    $spam_params = [
-                        'xdebug_session_start', 'xdebug_session_stop', 'xdebug_profile',
-                        'union', 'select', 'insert', 'delete', 'drop', 'exec',
-                        'test', 'debug', 'admin', 'login', 'pass', 'passwd', 'password',
-                        'bot', 'crawler', 'spider', 'scan',
-                        '%3c', '%3e', '%22', '%27', 'script', 'alert', 'onload'
-                    ];
-
-                    $spam_detected = false;
-                    foreach ($params as $key => $value) {
-                        $key_lower = strtolower($key);
-                        $value_lower = strtolower($value);
-
-                        foreach ($spam_params as $spam) {
-                            if (strpos($key_lower, $spam) !== false || strpos($value_lower, $spam) !== false) {
-                                $result['reasons'][] = "❌ Query parameter contains spam/malicious pattern: $spam (in $key=$value)";
-                                $spam_detected = true;
-                                break 2;
-                            }
-                        }
-
-                        if (strlen($value) > 100) {
-                            $result['reasons'][] = "❌ Query parameter value too long: $key (length: " . strlen($value) . ")";
-                            $spam_detected = true;
-                            break;
-                        }
-
-                        if (preg_match('/[<>"\']/', $value)) {
-                            $result['reasons'][] = "❌ Query parameter contains suspicious characters: $key=$value";
-                            $spam_detected = true;
-                            break;
-                        }
-
-                        if (preg_match('/%[0-9a-f]{2}/i', $value)) {
-                            $result['reasons'][] = "❌ Query parameter contains URL encoding: $key=$value";
-                            $spam_detected = true;
-                            break;
-                        }
-                    }
-
-                    if (!$spam_detected) {
-                        $result['reasons'][] = '✅ Query parameters are acceptable';
-                    }
-                } else {
-                    $result['reasons'][] = '✅ No query parameters to check';
-                }
-            }
+            $result['is_cacheable'] = $detailed_result['cacheable'];
+            $result['reasons'] = $detailed_result['reasons'];
+            $result['status'] = $detailed_result['cacheable'] ? 'cacheable' : 'not_cacheable';
         } else {
-            // For partial check without fetching content, still test what we can
-            $should_cache_partial = true;
+            // For partial check without fetching content, test what we can with detailed mode
+            // We can't test headers/content, but we can test path and parameters
+            $partial_result = self::shouldCache($path, $params, '', true);
 
-            // Check excluded patterns
-            $excluded_patterns = [
-                '/login', '/logout', '/register', '/reset-password',
-                '/ajax/', '/api/', '/admin/', '/utils/', '/test/',
-                '/account/', '/profile/', '/checkout/', '/cart/'
-            ];
-
-            foreach ($excluded_patterns as $pattern) {
-                if (strpos($path, $pattern) === 0) {
-                    $result['reasons'][] = "❌ Path matches excluded pattern: $pattern";
-                    $should_cache_partial = false;
-                    break;
-                }
-            }
-
-            if ($should_cache_partial) {
-                $result['reasons'][] = '✅ Path does not match any excluded patterns';
-
-                // Check for spam parameters
-                if (!empty($params)) {
-                    $spam_params = [
-                        'xdebug_session_start', 'xdebug_session_stop', 'xdebug_profile',
-                        'union', 'select', 'insert', 'delete', 'drop', 'exec',
-                        'test', 'debug', 'admin', 'login', 'pass', 'passwd', 'password',
-                        'bot', 'crawler', 'spider', 'scan',
-                        '%3c', '%3e', '%22', '%27', 'script', 'alert', 'onload'
-                    ];
-
-                    foreach ($params as $key => $value) {
-                        $key_lower = strtolower($key);
-                        $value_lower = strtolower($value);
-
-                        foreach ($spam_params as $spam) {
-                            if (strpos($key_lower, $spam) !== false || strpos($value_lower, $spam) !== false) {
-                                $result['reasons'][] = "❌ Query parameter contains spam/malicious pattern: $spam (in $key=$value)";
-                                $should_cache_partial = false;
-                                break 2;
-                            }
-                        }
-
-                        if (strlen($value) > 100 ||
-                            preg_match('/[<>"\']/', $value) ||
-                            preg_match('/%[0-9a-f]{2}/i', $value)) {
-                            $result['reasons'][] = "❌ Query parameter has suspicious content: $key=$value";
-                            $should_cache_partial = false;
-                            break;
-                        }
-                    }
-
-                    if ($should_cache_partial) {
-                        $result['reasons'][] = '✅ Query parameters are acceptable';
-                    }
-                } else {
-                    $result['reasons'][] = '✅ No query parameters to check';
-                }
-            }
-
-            if ($should_cache_partial) {
-                $result['reasons'][] = 'ℹ️ Partial check passed - would likely be cacheable (fetch_content = false)';
-                $result['status'] = 'partial_check';
-                $result['is_cacheable'] = true;
-            } else {
-                $result['status'] = 'not_cacheable';
-            }
+            $result['is_cacheable'] = $partial_result['cacheable'];
+            $result['reasons'] = $partial_result['reasons'];
+            $result['reasons'][] = 'ℹ️ Partial check only - some criteria require fetching content';
+            $result['status'] = $partial_result['cacheable'] ? 'partial_check' : 'not_cacheable';
         }
 
         return $result;
