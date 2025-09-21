@@ -194,10 +194,9 @@ After implementing the `get_menu_data()` function, consolidate existing menu fun
    - Use `get_menu_data()['user_menu']['items']` instead
    - Location: `/includes/PublicPageTailwind.php:160-175`
 
-3. **Standardize `tab_menu()` implementation**
-   - Currently duplicated in PublicPageFalcon and PublicPageTailwind
-   - Keep only the PublicPageBase version
-   - Remove duplicates from theme-specific classes
+3. **Keep theme-specific `tab_menu()` implementations**
+   - Each theme uses fundamentally different UI patterns (Bootstrap vs Tailwind vs generic)
+   - No consolidation needed - theme-specific implementations are appropriate
 
 ### Migration Steps
 
@@ -226,14 +225,13 @@ After implementing the `get_menu_data()` function, consolidate existing menu fun
    $user_items = $menu_data['user_menu']['items'];
    ```
 
-3. **Remove duplicate tab_menu() functions**
-   - Delete `tab_menu()` from PublicPageFalcon (line 723)
-   - Delete `tab_menu()` from PublicPageTailwind (line 1004)
-   - Keep only the PublicPageBase version (line 137)
+3. **No tab_menu() consolidation needed**
+   - Theme-specific implementations use different UI paradigms (Bootstrap vs Tailwind vs generic)
+   - Each implementation should remain as-is to maintain proper theme functionality
 
 ### Benefits
 
-- **Eliminates code duplication** across theme implementations
+- **Eliminates code duplication** for cart and user menu processing
 - **Centralizes menu logic** in PublicPageBase
 - **Consistent menu behavior** across all themes
 - **Easier maintenance** - menu logic changes only need to be made in one place
@@ -243,9 +241,8 @@ After implementing the `get_menu_data()` function, consolidate existing menu fun
 
 1. Verify cart display works correctly in Falcon theme after migration
 2. Verify user menu displays correctly in Tailwind theme after migration
-3. Verify tab menus work consistently across all themes
-4. Test with different permission levels and login states
-5. Ensure no PHP errors after removing duplicate functions
+3. Test with different permission levels and login states
+4. Ensure no PHP errors after removing duplicate functions
 
 ## Future Enhancements
 
