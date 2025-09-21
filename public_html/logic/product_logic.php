@@ -96,15 +96,15 @@ function product_logic($get_vars, $post_vars, $product){
 
 		try {
 			$cart = $session->get_shopping_cart();
-	
+
 			//IF USER ENTERED AN EXTRA DONATION CREATE THAT ITEM
 			if($post_vars['user_price']){
 				$extra_donation = new Product(Product::PRODUCT_ID_OPTIONAL_DONATION, TRUE);
 				$cart->add_item($extra_donation, $form_data);
-			}	
-			
+			}
+
 			$cart->add_item($product, $form_data);
-		} 
+		}
 		catch (ShoppingCartException $e) {
 			throw new SystemDisplayableError($e->getMessage());
 		}
@@ -114,7 +114,7 @@ function product_logic($get_vars, $post_vars, $product){
 		$page_vars['display_empty_form'] = FALSE;  
 
 		LibraryFunctions::redirect('/cart');
-		return;	
+		exit();	
 	}
 
 
