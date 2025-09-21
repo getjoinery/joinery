@@ -768,11 +768,43 @@
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
-		// Migration 2: Add active_theme_plugin setting  
+		// Migration 2: Add active_theme_plugin setting
 		$migration = array();
 		$migration['database_version'] = '0.57';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'active_theme_plugin'";
 		$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('active_theme_plugin', '');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add System parent menu item
+		$migration = array();
+		$migration['database_version'] = '0.58';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'system'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('System', NULL, '', 80, 9, 0, 'settings', 'system');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add Plugins menu item under System
+		$migration = array();
+		$migration['database_version'] = '0.59';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'system-plugins'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('Plugins', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'system'), 'admin_plugins', 1, 9, 0, '', 'system-plugins');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add Themes menu item under System
+		$migration = array();
+		$migration['database_version'] = '0.60';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'system-themes'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('Themes', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'system'), 'admin_themes', 2, 9, 0, '', 'system-themes');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add Static Cache menu item under System
+		$migration = array();
+		$migration['database_version'] = '0.61';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'system-cache'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('Static Cache', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'system'), 'admin_static_cache', 3, 9, 0, '', 'system-cache');";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 

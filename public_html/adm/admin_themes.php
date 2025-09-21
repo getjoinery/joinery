@@ -113,7 +113,7 @@ $altlinks['Sync with Filesystem'] = '/admin/admin_themes?action=sync';
 $altlinks['Check for Updates'] = '/admin/admin_themes?action=check_updates';
 
 $page->admin_header(array(
-    'menu-id' => 'themes',
+    'menu-id' => 'system-themes',
     'page_title' => 'Theme Management',
     'readable_title' => 'Theme Management',
     'breadcrumbs' => array(

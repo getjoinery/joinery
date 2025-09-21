@@ -13,6 +13,7 @@ class MigrationNotSentException extends MigrationException {};
 class Migration extends SystemBase {	public static $prefix = 'mig';
 	public static $tablename = 'mig_migrations';
 	public static $pkey_column = 'mig_migration_id';
+	public static $url_namespace = 'migrations';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
 		/**
