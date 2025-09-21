@@ -6,7 +6,7 @@ PathHelper::requireOnce('includes/SingleRowAccessor.php');
 PathHelper::requireOnce('includes/SystemBase.php');
 PathHelper::requireOnce('includes/Validator.php');
 
-require_once(LibraryFunctions::get_plugin_file_path('item_relations_class.php', 'items', '/data', 'system'));
+require_once(PathHelper::getIncludePath('plugins/items/data/item_relations_class.php'));
 
 class ItemException extends SystemBaseException {}
 

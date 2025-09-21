@@ -2,7 +2,7 @@
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
-	require_once(LibraryFunctions::get_plugin_file_path('items_logic.php', 'items', '/logic', 'system'));
+	require_once(PathHelper::getIncludePath('plugins/items/logic/items_logic.php'));
  
 	$page_vars = items_logic($_GET, $_POST);
 

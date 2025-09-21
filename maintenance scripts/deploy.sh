@@ -1110,33 +1110,42 @@ while IFS= read -r -d '' file; do
     ((plugin_file_count++))
     # Test if the file can be included without errors
     # CRITICAL: Set working directory and document root so PathHelper works correctly
-    if ! php -r "
+    plugin_test_output=$(php -r "
         \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
         chdir('/var/www/html/$TARGET_SITE/public_html_stage');
-        
+
         error_reporting(E_ALL);
-        set_error_handler(function(\$errno, \$errstr) {
+        set_error_handler(function(\$errno, \$errstr, \$errfile, \$errline) {
             // Only treat actual errors and warnings as failures, ignore deprecation notices
             if (\$errno & (E_ERROR | E_WARNING | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR)) {
-                echo \"INCLUDE ERROR: \$errstr\n\";
+                echo \"PHP Error (\$errno): \$errstr in \$errfile on line \$errline\n\";
                 exit(1);
             }
             // Ignore E_DEPRECATED, E_USER_DEPRECATED, E_NOTICE, E_STRICT
             return true;
         });
-        
+
         try {
             // Bootstrap PathHelper first so plugin files can use it
             require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
-            
+
             // Now test the plugin file
             include_once '$file';
+            echo 'SUCCESS';
         } catch (Exception \$e) {
-            echo 'EXCEPTION in $file: ' . \$e->getMessage() . \"\n\";
+            echo 'EXCEPTION: ' . \$e->getMessage() . ' in ' . \$e->getFile() . ' on line ' . \$e->getLine() . \"\n\";
+            exit(1);
+        } catch (Error \$e) {
+            echo 'FATAL ERROR: ' . \$e->getMessage() . ' in ' . \$e->getFile() . ' on line ' . \$e->getLine() . \"\n\";
             exit(1);
         }
-    " >/dev/null 2>&1; then
+    " 2>&1)
+
+    plugin_test_exit_code=$?
+
+    if [[ $plugin_test_exit_code -ne 0 ]] || [[ "$plugin_test_output" != "SUCCESS" ]]; then
         echo "PLUGIN LOADING ERROR in: $file"
+        echo "  Error details: $plugin_test_output"
         ((plugin_error_count++))
     else
         verbose_echo "  ✓ $(basename $file)"
@@ -1144,8 +1153,22 @@ while IFS= read -r -d '' file; do
 done < <(find "/var/www/html/$TARGET_SITE/public_html_stage/plugins" -name "*_class.php" -print0 2>/dev/null)
 
 if [[ $plugin_error_count -gt 0 ]]; then
+    echo ""
+    echo "========================================="
+    echo "PLUGIN LOADING FAILURES DETECTED"
+    echo "========================================="
     echo "ERROR: $plugin_error_count plugin loading errors found in staging."
+    echo ""
+    echo "Common causes:"
+    echo "  - Improper includes of guaranteed files (PathHelper, Globalvars, DbConnector, etc.)"
+    echo "  - Syntax errors in plugin class files"
+    echo "  - Missing dependencies or class definitions"
+    echo ""
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    echo "You can manually test plugin files with:"
+    echo "  cd /var/www/html/$TARGET_SITE/public_html_stage"
+    echo "  php -l plugins/path/to/problematic_file.php"
+    echo "========================================="
     exit 1
 fi
 verbose_echo "✓ Plugin loading test passed ($plugin_file_count files checked)"

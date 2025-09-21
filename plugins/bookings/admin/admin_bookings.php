@@ -7,7 +7,7 @@
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	
-	require_once(LibraryFunctions::get_plugin_file_path('bookings_class.php', 'bookings', 'data'));
+	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
