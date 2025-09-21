@@ -130,8 +130,7 @@ if ($action) {
                     if (!preg_match('/^https?:\/\//', $url)) {
                         $url = 'http://' . $_SERVER['HTTP_HOST'] . '/' . ltrim($url, '/');
                     }
-                    $fetch_content = LibraryFunctions::fetch_variable('fetch_content', 0, 0, '');
-                    $diagnosis = StaticPageCache::diagnoseCacheability($url, (bool)$fetch_content);
+                    $diagnosis = StaticPageCache::diagnoseCacheability($url, true);
                     // Store in session for display
                     $_SESSION['cache_diagnosis'] = $diagnosis;
                     $redirect_needed = isset($_GET['action']);
@@ -170,6 +169,40 @@ if ($action) {
                 } else {
                     $message = new DisplayMessage(
                         'Please provide a URL to mark as non-cacheable.',
+                        'Error',
+                        '/\/admin\/admin_static_cache.*/',
+                        DisplayMessage::MESSAGE_ERROR,
+                        DisplayMessage::MESSAGE_DISPLAY_IN_PAGE,
+                        'cache_action',
+                        true
+                    );
+                    $session->save_message($message);
+                }
+                $redirect_needed = isset($_GET['action']);
+                break;
+
+            case 'delete_from_index':
+                $url = LibraryFunctions::fetch_variable('url', '', 1, '');
+                if ($url) {
+                    $url_parts = parse_url($url);
+                    $path = $url_parts['path'] ?? '/';
+                    parse_str($url_parts['query'] ?? '', $params);
+
+                    // Remove from index (this also deletes cache file if it exists)
+                    StaticPageCache::invalidateUrl($path, $params);
+                    $message = new DisplayMessage(
+                        "Deleted from index: {$url}",
+                        'Success',
+                        '/\/admin\/admin_static_cache.*/',
+                        DisplayMessage::MESSAGE_ANNOUNCEMENT,
+                        DisplayMessage::MESSAGE_DISPLAY_IN_PAGE,
+                        'cache_action',
+                        true
+                    );
+                    $session->save_message($message);
+                } else {
+                    $message = new DisplayMessage(
+                        'Please provide a URL to delete.',
                         'Error',
                         '/\/admin\/admin_static_cache.*/',
                         DisplayMessage::MESSAGE_ERROR,
@@ -297,11 +330,11 @@ if (!empty($display_messages)) {
                 <div class="card">
                     <div class="card-body text-center">
                         <h6>Status</h6>
-                        <p class="h4">
+                        <p class="h4 text-dark">
                             <?php if ($stats['enabled']): ?>
-                                <span class="badge badge-success">Enabled</span>
+                                <span class="badge bg-success text-white">Enabled</span>
                             <?php else: ?>
-                                <span class="badge badge-danger">Disabled</span>
+                                <span class="badge bg-danger text-white">Disabled</span>
                             <?php endif; ?>
                         </p>
                     </div>
@@ -351,9 +384,6 @@ if (!empty($display_messages)) {
                 echo $formwriter->textinput('URL to diagnose', 'diagnose_url', 'form-control', 100, '',
                                           '/page/about or https://example.com/page', 255,
                                           'Enter a URL to check if it will be cached and why or why not');
-                echo $formwriter->checkboxinput('Fetch and analyze content', 'fetch_content', 'form-check-input',
-                                                'left', 0, 1,
-                                                'Enable to perform full content analysis (may take a few seconds)');
                 echo $formwriter->hiddeninput('action', 'diagnose_url');
                 echo $formwriter->start_buttons();
                 echo $formwriter->new_form_button('Diagnose URL', 'btn btn-secondary');
@@ -489,11 +519,11 @@ if (!empty($display_messages)) {
             // Status column
             $status_badge = '';
             if ($item['status'] === 'cached') {
-                $status_badge = '<span class="badge badge-success">Cached</span>';
+                $status_badge = '<span class="badge bg-success text-white">Cached</span>';
             } elseif ($item['status'] === 'nostatic') {
-                $status_badge = '<span class="badge badge-warning">Not Cacheable</span>';
+                $status_badge = '<span class="badge bg-warning text-dark">Not Cacheable</span>';
             } else {
-                $status_badge = '<span class="badge badge-secondary">' . htmlspecialchars($item['status']) . '</span>';
+                $status_badge = '<span class="badge bg-secondary text-white">' . htmlspecialchars($item['status']) . '</span>';
             }
             array_push($rowvalues, $status_badge);
 
@@ -509,10 +539,24 @@ if (!empty($display_messages)) {
 
             // Actions column
             if ($item['status'] === 'cached') {
+                $action_form = '<div class="btn-group" role="group">
+                               <form method="post" style="display: inline;">
+                                   <input type="hidden" name="url" value="' . htmlspecialchars($item['url']) . '">
+                                   <button type="submit" name="action" value="invalidate_url"
+                                           class="btn btn-sm btn-secondary">Invalidate</button>
+                               </form>
+                               <form method="post" style="display: inline;">
+                                   <input type="hidden" name="url" value="' . htmlspecialchars($item['url']) . '">
+                                   <button type="submit" name="action" value="delete_from_index"
+                                           class="btn btn-sm btn-secondary ms-1">Delete</button>
+                               </form>
+                               </div>';
+                array_push($rowvalues, $action_form);
+            } elseif ($item['status'] === 'nostatic') {
                 $action_form = '<form method="post" style="display: inline;">
                                <input type="hidden" name="url" value="' . htmlspecialchars($item['url']) . '">
-                               <button type="submit" name="action" value="invalidate_url"
-                                       class="btn btn-sm btn-secondary">Invalidate</button>
+                               <button type="submit" name="action" value="delete_from_index"
+                                       class="btn btn-sm btn-secondary">Delete</button>
                                </form>';
                 array_push($rowvalues, $action_form);
             } else {

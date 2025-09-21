@@ -290,7 +290,69 @@ class StaticPageCache {
             }
         }
 
-        // 3. Check headers for disqualifiers
+        // 3. Check User-Agent for bots and development tools
+        $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+
+        // Don't cache requests from suspicious/development User-Agents
+        $blocked_user_agents = [
+            // Development tools
+            'phpstorm', 'xdebug', 'postman', 'insomnia',
+            // Security scanners
+            'nmap', 'nikto', 'sqlmap', 'dirb', 'gobuster', 'wfuzz',
+            // Generic bots (legitimate crawlers usually identify themselves properly)
+            'bot', 'crawler', 'spider', 'scraper',
+            // Suspicious patterns
+            'curl', 'wget', 'python-requests', 'libwww-perl'
+        ];
+
+        $user_agent_lower = strtolower($user_agent);
+        foreach ($blocked_user_agents as $blocked) {
+            if (strpos($user_agent_lower, $blocked) !== false) {
+                return false;
+            }
+        }
+
+        // Don't cache requests with no User-Agent (often automated)
+        if (empty($user_agent)) {
+            return false;
+        }
+
+        // 4. Check for known spam/malicious query parameters
+        if (!empty($params)) {
+            $spam_params = [
+                // XDebug and development
+                'xdebug_session_start', 'xdebug_session_stop', 'xdebug_profile',
+                // Common injection attempts
+                'union', 'select', 'insert', 'delete', 'drop', 'exec',
+                // Security scanning
+                'test', 'debug', 'admin', 'login', 'pass', 'passwd', 'password',
+                // Bot fingerprinting
+                'bot', 'crawler', 'spider', 'scan',
+                // Suspicious encoded content
+                '%3c', '%3e', '%22', '%27', 'script', 'alert', 'onload'
+            ];
+
+            foreach ($params as $key => $value) {
+                $key_lower = strtolower($key);
+                $value_lower = strtolower($value);
+
+                // Check parameter names
+                foreach ($spam_params as $spam) {
+                    if (strpos($key_lower, $spam) !== false || strpos($value_lower, $spam) !== false) {
+                        return false;
+                    }
+                }
+
+                // Check for obviously encoded/suspicious values
+                if (strlen($value) > 100 ||
+                    preg_match('/[<>"\']/', $value) ||
+                    preg_match('/%[0-9a-f]{2}/i', $value)) {
+                    return false;
+                }
+            }
+        }
+
+        // 5. Check headers for disqualifiers
         $headers = headers_list();
 
         foreach ($headers as $header) {
@@ -311,7 +373,7 @@ class StaticPageCache {
             if (stripos($header, 'Content-Type: application/xml') === 0) return false;
         }
 
-        // 4. Check if content looks like HTML (headers may not be set yet)
+        // 6. Check if content looks like HTML (headers may not be set yet)
         $is_html = false;
 
         // Check headers first
@@ -336,7 +398,7 @@ class StaticPageCache {
             return false;
         }
 
-        // 5. Check for CSRF tokens in forms (don't cache protected forms)
+        // 7. Check for CSRF tokens in forms (don't cache protected forms)
         if (!empty($content) && strpos($content, '<form') !== false) {
             // Check for common CSRF token patterns
             if (strpos($content, 'csrf_token') !== false ||
@@ -521,37 +583,26 @@ class StaticPageCache {
         $hash = self::generateCacheKey($path, $params);
         $index = self::loadIndex();
 
-        if (isset($index[$hash])) {
-            if ($index[$hash] === 'cached') {
+        if (isset($index[$hash]) && is_array($index[$hash])) {
+            $entry = $index[$hash];
+            if ($entry['status'] === 'cached') {
                 $result['status'] = 'already_cached';
                 $result['cache_file'] = self::$cache_dir . $hash . '.html';
                 $result['reasons'][] = '✅ URL is already cached';
                 $result['is_cacheable'] = true;
                 return $result;
-            } elseif ($index[$hash] === 'nostatic') {
+            } elseif ($entry['status'] === 'nostatic') {
                 $result['status'] = 'marked_nostatic';
                 $result['reasons'][] = '❌ URL is marked as non-cacheable (nostatic)';
                 return $result;
             }
         }
 
-        // Check excluded patterns
-        $excluded_patterns = [
-            '/login', '/logout', '/register', '/reset-password',
-            '/ajax/', '/api/', '/admin/', '/utils/', '/test/',
-            '/account/', '/profile/', '/checkout/', '/cart/'
-        ];
-
-        foreach ($excluded_patterns as $pattern) {
-            if (strpos($path, $pattern) === 0) {
-                $result['reasons'][] = "❌ Path matches excluded pattern: $pattern";
-                return $result;
-            }
-        }
-        $result['reasons'][] = '✅ Path does not match any excluded patterns';
-
         // If requested, fetch the content and do full analysis
         if ($fetch_content) {
+            // Temporarily store original User-Agent
+            $original_user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -573,70 +624,190 @@ class StaticPageCache {
             $headers = substr($response, 0, $header_size);
             $content = substr($response, $header_size);
 
-            // Check HTTP status
-            if ($http_code !== 200) {
-                $result['reasons'][] = "❌ HTTP status code is $http_code (must be 200)";
-                return $result;
-            }
-            $result['reasons'][] = '✅ HTTP status code is 200';
+            // Set up environment to simulate the actual request
+            $_SERVER['HTTP_USER_AGENT'] = 'StaticPageCache/1.0 Diagnostic';
 
-            // Check Content-Type
-            $is_html = false;
-            if (preg_match('/Content-Type:\s*text\/html/i', $headers)) {
-                $is_html = true;
-                $result['reasons'][] = '✅ Content-Type is text/html';
-            } elseif (!empty($content)) {
-                $trimmed = trim($content);
-                if (stripos($trimmed, '<!DOCTYPE') === 0 ||
-                    stripos($trimmed, '<html') === 0) {
-                    $is_html = true;
-                    $result['reasons'][] = '✅ Content appears to be HTML based on structure';
+            // Set response code for shouldCache() to read
+            http_response_code($http_code);
+
+            // Now test using the actual shouldCache() logic
+            $should_cache = self::shouldCache($path, $params, $content);
+
+            // Restore original User-Agent
+            $_SERVER['HTTP_USER_AGENT'] = $original_user_agent;
+
+            if ($should_cache) {
+                $result['reasons'][] = '✅ All caching criteria met (tested with actual shouldCache() logic)';
+                $result['is_cacheable'] = true;
+                $result['status'] = 'cacheable';
+            } else {
+                $result['reasons'][] = '❌ Failed shouldCache() validation';
+                $result['status'] = 'not_cacheable';
+
+                // Add specific failure reasons by testing individual conditions
+                if ($http_code !== 200) {
+                    $result['reasons'][] = "❌ HTTP status code is $http_code (must be 200)";
+                } else {
+                    $result['reasons'][] = '✅ HTTP status code is 200';
                 }
-            }
 
-            if (!$is_html) {
-                $result['reasons'][] = '❌ Content is not HTML';
-                return $result;
-            }
+                // Check if it's a path exclusion
+                $excluded_patterns = [
+                    '/login', '/logout', '/register', '/reset-password',
+                    '/ajax/', '/api/', '/admin/', '/utils/', '/test/',
+                    '/account/', '/profile/', '/checkout/', '/cart/'
+                ];
 
-            // Check for redirects
-            if (preg_match('/Location:/i', $headers)) {
-                $result['reasons'][] = '❌ Response contains a redirect';
-                return $result;
-            }
-
-            // Check for cookies (other than session)
-            if (preg_match_all('/Set-Cookie:\s*([^;]+)/i', $headers, $matches)) {
-                $non_session_cookies = [];
-                foreach ($matches[1] as $cookie) {
-                    if (strpos($cookie, 'PHPSESSID') === false) {
-                        $non_session_cookies[] = $cookie;
+                $path_excluded = false;
+                foreach ($excluded_patterns as $pattern) {
+                    if (strpos($path, $pattern) === 0) {
+                        $result['reasons'][] = "❌ Path matches excluded pattern: $pattern";
+                        $path_excluded = true;
+                        break;
                     }
                 }
-                if (!empty($non_session_cookies)) {
-                    $result['reasons'][] = '❌ Response sets non-session cookies: ' . implode(', ', $non_session_cookies);
-                    return $result;
+                if (!$path_excluded) {
+                    $result['reasons'][] = '✅ Path does not match any excluded patterns';
+                }
+
+                // Check User-Agent filtering
+                $blocked_user_agents = [
+                    'phpstorm', 'xdebug', 'postman', 'insomnia',
+                    'nmap', 'nikto', 'sqlmap', 'dirb', 'gobuster', 'wfuzz',
+                    'bot', 'crawler', 'spider', 'scraper',
+                    'curl', 'wget', 'python-requests', 'libwww-perl'
+                ];
+
+                $user_agent_blocked = false;
+                $diagnostic_ua = 'StaticPageCache/1.0 Diagnostic';
+                foreach ($blocked_user_agents as $blocked) {
+                    if (strpos(strtolower($diagnostic_ua), $blocked) !== false) {
+                        $result['reasons'][] = "❌ User-Agent contains blocked pattern: $blocked";
+                        $user_agent_blocked = true;
+                        break;
+                    }
+                }
+                if (!$user_agent_blocked) {
+                    $result['reasons'][] = '✅ User-Agent is acceptable';
+                }
+
+                // Check for spam parameters
+                if (!empty($params)) {
+                    $spam_params = [
+                        'xdebug_session_start', 'xdebug_session_stop', 'xdebug_profile',
+                        'union', 'select', 'insert', 'delete', 'drop', 'exec',
+                        'test', 'debug', 'admin', 'login', 'pass', 'passwd', 'password',
+                        'bot', 'crawler', 'spider', 'scan',
+                        '%3c', '%3e', '%22', '%27', 'script', 'alert', 'onload'
+                    ];
+
+                    $spam_detected = false;
+                    foreach ($params as $key => $value) {
+                        $key_lower = strtolower($key);
+                        $value_lower = strtolower($value);
+
+                        foreach ($spam_params as $spam) {
+                            if (strpos($key_lower, $spam) !== false || strpos($value_lower, $spam) !== false) {
+                                $result['reasons'][] = "❌ Query parameter contains spam/malicious pattern: $spam (in $key=$value)";
+                                $spam_detected = true;
+                                break 2;
+                            }
+                        }
+
+                        if (strlen($value) > 100) {
+                            $result['reasons'][] = "❌ Query parameter value too long: $key (length: " . strlen($value) . ")";
+                            $spam_detected = true;
+                            break;
+                        }
+
+                        if (preg_match('/[<>"\']/', $value)) {
+                            $result['reasons'][] = "❌ Query parameter contains suspicious characters: $key=$value";
+                            $spam_detected = true;
+                            break;
+                        }
+
+                        if (preg_match('/%[0-9a-f]{2}/i', $value)) {
+                            $result['reasons'][] = "❌ Query parameter contains URL encoding: $key=$value";
+                            $spam_detected = true;
+                            break;
+                        }
+                    }
+
+                    if (!$spam_detected) {
+                        $result['reasons'][] = '✅ Query parameters are acceptable';
+                    }
+                } else {
+                    $result['reasons'][] = '✅ No query parameters to check';
                 }
             }
-
-            // Check for CSRF tokens
-            if (strpos($content, '<form') !== false) {
-                if (strpos($content, 'csrf_token') !== false ||
-                    strpos($content, '_token') !== false ||
-                    strpos($content, 'authenticity_token') !== false ||
-                    strpos($content, 'form_token') !== false) {
-                    $result['reasons'][] = '❌ Page contains forms with CSRF tokens';
-                    return $result;
-                }
-                $result['reasons'][] = '⚠️ Page contains forms but no CSRF tokens detected';
-            }
-
-            $result['reasons'][] = '✅ All caching criteria met';
-            $result['is_cacheable'] = true;
-            $result['status'] = 'cacheable';
         } else {
-            $result['reasons'][] = 'ℹ️ Full content analysis not performed (fetch_content = false)';
-            $result['status'] = 'partial_check';
+            // For partial check without fetching content, still test what we can
+            $should_cache_partial = true;
+
+            // Check excluded patterns
+            $excluded_patterns = [
+                '/login', '/logout', '/register', '/reset-password',
+                '/ajax/', '/api/', '/admin/', '/utils/', '/test/',
+                '/account/', '/profile/', '/checkout/', '/cart/'
+            ];
+
+            foreach ($excluded_patterns as $pattern) {
+                if (strpos($path, $pattern) === 0) {
+                    $result['reasons'][] = "❌ Path matches excluded pattern: $pattern";
+                    $should_cache_partial = false;
+                    break;
+                }
+            }
+
+            if ($should_cache_partial) {
+                $result['reasons'][] = '✅ Path does not match any excluded patterns';
+
+                // Check for spam parameters
+                if (!empty($params)) {
+                    $spam_params = [
+                        'xdebug_session_start', 'xdebug_session_stop', 'xdebug_profile',
+                        'union', 'select', 'insert', 'delete', 'drop', 'exec',
+                        'test', 'debug', 'admin', 'login', 'pass', 'passwd', 'password',
+                        'bot', 'crawler', 'spider', 'scan',
+                        '%3c', '%3e', '%22', '%27', 'script', 'alert', 'onload'
+                    ];
+
+                    foreach ($params as $key => $value) {
+                        $key_lower = strtolower($key);
+                        $value_lower = strtolower($value);
+
+                        foreach ($spam_params as $spam) {
+                            if (strpos($key_lower, $spam) !== false || strpos($value_lower, $spam) !== false) {
+                                $result['reasons'][] = "❌ Query parameter contains spam/malicious pattern: $spam (in $key=$value)";
+                                $should_cache_partial = false;
+                                break 2;
+                            }
+                        }
+
+                        if (strlen($value) > 100 ||
+                            preg_match('/[<>"\']/', $value) ||
+                            preg_match('/%[0-9a-f]{2}/i', $value)) {
+                            $result['reasons'][] = "❌ Query parameter has suspicious content: $key=$value";
+                            $should_cache_partial = false;
+                            break;
+                        }
+                    }
+
+                    if ($should_cache_partial) {
+                        $result['reasons'][] = '✅ Query parameters are acceptable';
+                    }
+                } else {
+                    $result['reasons'][] = '✅ No query parameters to check';
+                }
+            }
+
+            if ($should_cache_partial) {
+                $result['reasons'][] = 'ℹ️ Partial check passed - would likely be cacheable (fetch_content = false)';
+                $result['status'] = 'partial_check';
+                $result['is_cacheable'] = true;
+            } else {
+                $result['status'] = 'not_cacheable';
+            }
         }
 
         return $result;
