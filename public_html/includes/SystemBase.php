@@ -167,7 +167,8 @@ abstract class SystemBase {
 
 	function get_url($format='short') {
 		if(!isset(static::$url_namespace)){
-			throw new SystemBaseException('URL namespace is not set in object '.get_called_class().'.');
+			error_log('URL namespace is not set in object '.get_called_class().'. get_url() returning false.');
+			return false;
 		}
 		
 		if($format == 'full'){
