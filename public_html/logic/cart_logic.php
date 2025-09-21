@@ -22,12 +22,8 @@ function cart_logic($get_vars, $post_vars){
 	$page_vars['settings'] = $settings;
 
 	$cart = $session->get_shopping_cart();
-	
-	if (count($cart->get_items()) === 0) {
-		// Cart is empty, can't checkout!
-		LibraryFunctions::Redirect('/page/cart-empty');
-		exit();
-	} 	
+
+	// Cart can be empty - the cart view will handle displaying appropriate message 	
 
 	if (isset($_REQUEST['r']) && is_numeric($_REQUEST['r'])) {
 		$cart->remove_item(intval($_REQUEST['r']));
