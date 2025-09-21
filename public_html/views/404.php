@@ -33,7 +33,31 @@
                 <div class="fw-black lh-1 text-300 fs-error">404</div>
                 <p class="lead mt-4 text-800 font-sans-serif fw-semi-bold w-md-75 w-xl-100 mx-auto">The page you're looking for is not found.</p>
                 <hr />
-                <p>Make sure the address is correct and that the page hasn't moved.</p><a class="btn btn-primary btn-sm mt-3" href="/"><span class="fas fa-home me-2"></span>Take me home</a>
+                <p>Make sure the address is correct and that the page hasn't moved.</p>
+                <?php
+                // DEBUG: Show detailed routing information
+                $debug_info = $GLOBALS['route_debug_info'] ?? null;
+                $requested_path = $debug_info['requested_path'] ?? $_REQUEST['__route'] ?? $_SERVER['REQUEST_URI'] ?? 'unknown';
+
+                echo '<div class="alert alert-warning mt-3"><strong>ROUTING DEBUG INFO:</strong><br>';
+                echo 'Requested path: <code>' . htmlspecialchars($requested_path) . '</code><br>';
+                echo 'Request method: <strong>' . ($debug_info['request_method'] ?? $_SERVER['REQUEST_METHOD'] ?? 'unknown') . '</strong><br>';
+
+                if ($debug_info) {
+                    echo 'Attempted view file: <code>' . htmlspecialchars($debug_info['attempted_view_file']) . '</code><br>';
+                    echo 'Full file path tried: <code>' . htmlspecialchars($debug_info['attempted_full_path']) . '</code><br>';
+                    echo 'File exists: <strong>' . (file_exists($debug_info['attempted_full_path']) ? 'YES' : 'NO') . '</strong><br>';
+                }
+
+                if ($requested_path === '/product') {
+                    echo '<hr><strong>SPECIFIC ISSUE:</strong> No route defined for "/product" path.<br>';
+                    echo '• Available routes: "/product/{slug}" for viewing specific products<br>';
+                    echo '• Form submissions to "/product" need a dedicated route or should redirect to cart handling.<br>';
+                    echo '• This form is trying to POST to a non-existent route.';
+                }
+                echo '</div>';
+                ?>
+                <a class="btn btn-primary btn-sm mt-3" href="/"><span class="fas fa-home me-2"></span>Take me home</a>
               </div>
             </div>
           </div>
