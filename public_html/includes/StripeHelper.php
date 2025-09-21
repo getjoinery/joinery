@@ -461,12 +461,13 @@ class StripeHelper {
 	}
 	
 	public function build_checkout_item_array($cart, $existing_billing_user){
-		
+
 		$settings = Globalvars::get_instance();
 		$currency_code = $settings->get_setting('site_currency');
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
-	
+
 		$contains_subscription = 0;
+		$max_trial_period_days = 0;  // Track the maximum trial period across all items
 		$stripe_item_list = array();
 		
 		foreach($cart->get_detailed_items() as $cart_item) {
@@ -508,20 +509,20 @@ class StripeHelper {
 					throw new SystemDisplayablePermanentError("This product (".$product->get('pro_name').") is not a subscription.");
 				}	
 				
-				if($cart_item['recurring'] && $cart_item['trial_period_days']){
-					$recurring['trial_period_days'] = $cart_item['trial_period_days'];
-				}
-				else{
-					$recurring['trial_period_days'] = null;
-				}
+				// Note: trial_period_days cannot be set in price_data[recurring] for Checkout sessions
+				// It must be set in subscription_data instead
 
-				
 				$price_data = array(
 					'currency' => $currency_code,
 					'product_data' => $product_data,
 					'unit_amount' => $final_price * 100,
 					'recurring' => $recurring,
 				);
+
+				// Store trial period for later use in subscription_data
+				if($cart_item['recurring'] && $cart_item['trial_period_days']){
+					$max_trial_period_days = max($max_trial_period_days, $cart_item['trial_period_days']);
+				}
 				
 				$stripe_current_item = array(
 					'price_data' => $price_data,
@@ -581,6 +582,13 @@ class StripeHelper {
 		
 		if($contains_subscription){
 			$create_list['mode'] = 'subscription';
+
+			// Add trial period if any subscription items have it
+			if($max_trial_period_days > 0){
+				$create_list['subscription_data'] = array(
+					'trial_period_days' => $max_trial_period_days
+				);
+			}
 		}
 		else{
 			$create_list['mode'] = 'payment';
@@ -590,10 +598,8 @@ class StripeHelper {
 			$create_list['line_items'] = $stripe_item_list;
 		}
 		
-		if($stripe_subscription_item){
-			$create_list['subscription_data'] = $stripe_subscription_item;
-			$create_list['mode'] = 'subscription';
-		}			
+		// Note: $stripe_subscription_item is not currently defined anywhere
+		// The subscription_data is now set above when contains_subscription is true			
 
 		
 
@@ -611,7 +617,7 @@ class StripeHelper {
 			}				
 		}
 		else{
-			$create_list['customer_email'] = $cart->billing_user['billing_email'];
+			$create_list['customer_email'] = $cart->billing_user['email'];
 		}		
 		
 		return $create_list;
