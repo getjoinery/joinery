@@ -415,7 +415,7 @@ class RouteHelper {
             
             // Extract parameters from route pattern
             $route_params = self::extractRouteParams($pattern, $path);
-            
+
             // Create model instance based on available parameters
             if (isset($route_params['slug'])) {
                 $model_instance = call_user_func([$model_name, 'get_by_link'], $route_params['slug']);
@@ -568,6 +568,7 @@ class RouteHelper {
         
         // Include view with explicit variables
         if (file_exists(PathHelper::getThemeFilePath(basename($view_path), dirname($view_path)))) {
+            extract($viewVariables);
             require_once(PathHelper::getThemeFilePath(basename($view_path), dirname($view_path)));
             return true;
         }
@@ -1317,6 +1318,14 @@ class RouteHelper {
         // Try to find view file for any remaining paths
         $view_file = 'views/' . trim($request_path, '/') . '.php';
         error_log("Trying view fallback file: " . var_export($view_file, true));
+
+        // Store debug info for 404 page
+        $GLOBALS['route_debug_info'] = [
+            'requested_path' => $request_path,
+            'attempted_view_file' => $view_file,
+            'attempted_full_path' => PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)),
+            'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'unknown'
+        ];
         $is_valid_page = true; // Set before include
 
         try {
