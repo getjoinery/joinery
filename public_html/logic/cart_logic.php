@@ -132,7 +132,7 @@ function cart_logic($get_vars, $post_vars){
 	$require_login = 0;
 	if(!$session->get_user_id()){
 		//IF NOT LOGGED IN, CHECK TO SEE IF EMAIL EXISTS AND IF SO ASK TO LOG IN
-		$user = User::GetByEmail($cart->billing_user['billing_email']);
+		$user = User::GetByEmail($cart->billing_user['email']);
 		if($user){
 			$require_login = 1;
 		}
