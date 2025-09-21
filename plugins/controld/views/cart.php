@@ -101,7 +101,7 @@ Contact Area
 							$formwriter = $page->getFormWriter('form_billing_user');
 							
 							//echo $formwriter->start_buttons();
-							echo $formwriter->new_button('Change billing user', '/cart?newbilling=1', 'secondary');
+							echo $formwriter->new_button('Change billing user', '/cart?newbilling=1', 'secondary', '', 'th-btn');
 							//echo $formwriter->end_buttons();
 							echo '<br><br>';
 						}
