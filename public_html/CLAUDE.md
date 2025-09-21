@@ -23,15 +23,24 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 ### Core File Guarantees
 **These files are ALWAYS pre-loaded - NEVER use require/require_once for them:**
-- **PathHelper** - Always available in ALL PHP files (views, logic, includes, themes, plugins)
-- **Globalvars** - Always available in ALL PHP files  
+- **PathHelper** - Always available in ALL PHP files (loaded by serve.php)
+- **Globalvars** - Always available in ALL PHP files (loaded by PathHelper)
 - **SessionControl** - Always available in ALL PHP files
+- **ThemeHelper** - Always available in ALL PHP files (loaded by PathHelper)
+- **PluginHelper** - Always available in ALL PHP files (loaded by PathHelper)
+- **DbConnector** - Always available in ALL PHP files (loaded by Globalvars)
 
 ```php
 // ❌ WRONG - NEVER DO THIS
 require_once('PathHelper.php');
 require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(__DIR__ . '/../includes/Globalvars.php');
+require_once(__DIR__ . '/../includes/ThemeHelper.php');
+require_once(__DIR__ . '/../includes/PluginHelper.php');
+require_once(__DIR__ . '/../includes/DbConnector.php');
 PathHelper::requireOnce('includes/PathHelper.php');
+PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/DbConnector.php');
 
 // ✅ CORRECT - Just use them directly
 PathHelper::requireOnce('includes/LibraryFunctions.php');
