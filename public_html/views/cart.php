@@ -109,7 +109,7 @@
 		<?php									
 		if($cart->billing_user){	
 			echo '<h2 class="text-lg font-medium text-gray-900">Billing User</h2>';
-			echo '<p>'.htmlspecialchars($cart->billing_user['billing_first_name'], ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars($cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8') . ' ('. htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8').')</p>';
+			echo '<p>'.htmlspecialchars($cart->billing_user['first_name'], ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars($cart->billing_user['last_name'], ENT_QUOTES, 'UTF-8') . ' ('. htmlspecialchars($cart->billing_user['email'], ENT_QUOTES, 'UTF-8').')</p>';
 			$formwriter = $page->getFormWriter('form_billing_user');
 			
 			//echo $formwriter->start_buttons();
@@ -170,7 +170,7 @@
 			echo '</div>';
 			echo $formwriter->start_buttons();
 			//echo $formwriter->new_button('Cancel', 'secondary');
-			echo $formwriter->new_form_button('Submit Billing User');
+			echo $formwriter->new_form_button('Submit Billing User', 'primary', '', 'th-btn');
 			echo $formwriter->end_buttons();
 			echo $formwriter->end_form();
 			echo '<br><br>';
@@ -235,11 +235,11 @@
 		
 		if($require_login){
 				echo '<div class="alert alert-warning" role="alert">
-				  The email ('.htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8').') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
+				  The email ('.htmlspecialchars($cart->billing_user['email'], ENT_QUOTES, 'UTF-8').') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
 				</div>';
 		}
 		else{
-			if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
+			if($cart->get_total() > 0 && $cart->billing_user['email']){			
 
 
 				if($settings->get_setting('checkout_type') == 'stripe_checkout'){	
