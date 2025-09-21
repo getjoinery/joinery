@@ -2,12 +2,16 @@
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 // PathHelper is already loaded
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic', 'system', null, 'controld'));
+require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 
+	// Always call product_logic - it contains essential business logic
 	$page_vars = product_logic($_GET, $_POST, $product);
 	$product = $page_vars['product'];
 	$product_version = $page_vars['product_version'];
 	$cart = $page_vars['cart'];
+
+	// Set product_id for the form
+	$product_id = $product ? $product->key : null;
 
 	$page = new PublicPage();
 	$page->public_header(array(
@@ -88,7 +92,9 @@ Career Area
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT 
 				if(!$product->is_sold_out()){
 					$formwriter = $page->getFormWriter('product_form');
-					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
+					// Post back to the same product URL (with slug)
+					$product_url = '/product/' . $product->get('pro_link');
+					echo $formwriter->begin_form("product-quantity", "POST", $product_url, true); 
 					echo $formwriter->hiddeninput('product_id', $product_id);
 
 					if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {

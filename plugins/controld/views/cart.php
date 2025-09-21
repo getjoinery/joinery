@@ -43,7 +43,7 @@ Contact Area
 								$formwriter = $page->getFormWriter('form_test_coupon');
 								echo $formwriter->begin_form("mt-6", "get", '/cart');
 								echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
-								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary');
+								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary', '', 'th-btn');
 								echo $formwriter->end_form();
 							}
 							echo '</div>';
@@ -60,7 +60,7 @@ Contact Area
 							echo '<p>'.$page_vars['coupon_error'].'</p>';
 						}
 						//echo $formwriter->start_buttons();
-						echo $formwriter->new_form_button('Add', 'secondary', 'standard',' ms-3');
+						echo $formwriter->new_form_button('Add', 'secondary', 'standard', 'th-btn ms-3');
 						//echo $formwriter->end_buttons();
 						echo $formwriter->end_form();
 						echo '</div>';
@@ -170,7 +170,7 @@ Contact Area
 							echo '</div>';
 							echo $formwriter->start_buttons();
 							//echo $formwriter->new_button('Cancel', 'secondary');
-							echo $formwriter->new_form_button('Submit Billing User');
+							echo $formwriter->new_form_button('Submit Billing User', 'primary', '', 'th-btn');
 							echo $formwriter->end_buttons();
 							echo $formwriter->end_form();
 							echo '<br><br>';
