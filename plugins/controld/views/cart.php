@@ -1,8 +1,7 @@
 <?php
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	// PathHelper is already loaded
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('cart_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = cart_logic($_GET, $_POST);
@@ -12,7 +11,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$session = $page_vars['session'];
 	$require_login = $page_vars['require_login'];
 	$prefill_billing_user = $page_vars['prefill_billing_user'];
-
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
@@ -233,7 +231,6 @@ Contact Area
 								$itemcount++;
 							}	
 
-
 							
 							if($total_discount){
 								
@@ -268,9 +265,7 @@ Contact Area
         </div>
     </div>
 
-
            
-
 
 					
 	<?php

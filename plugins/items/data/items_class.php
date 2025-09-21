@@ -1,8 +1,5 @@
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');

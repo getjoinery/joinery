@@ -40,7 +40,6 @@ function ctldprofile_delete_logic($get_vars, $post_vars){
 	$profile->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 	
 
-
 	if(isset($_POST['confirm'])){	
 		$profile->permanent_delete();			
 

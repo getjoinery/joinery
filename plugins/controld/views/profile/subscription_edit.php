@@ -2,8 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('subscription_edit_logic.php', 'logic', 'system', null, 'controld'));	
 	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic', 'system', null, 'controld'));
 	
@@ -48,10 +47,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo PublicPage::tab_menu($tab_menus, 'Change Subscription');
 	
 
-
-
-
-
 if($_GET['new_version']){
 	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form("product-quantity", "POST", "/profile/subscription_edit", true); 
@@ -87,8 +82,6 @@ Price Area
                 <div class="pricing-tabs">
                     <div class="switch-area">
                         <label class="toggler toggler--is-active ms-0" id="filt-monthly">Monthly</label>
-
-
 
 						<div class="toggle">
 							<?php

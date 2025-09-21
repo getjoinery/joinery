@@ -2,8 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('subscription_cancel_logic.php', 'logic', 'system', null, 'controld'));	
 	
 	$page_vars = subscription_cancel_logic($_GET, $_POST);
@@ -39,7 +38,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	
 	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form("", "post", "/profile/subscription_cancel");
-
 
 	echo 'You are about to cancel your subscription.  If cancelled, you will have access to our service until the last day of your subscription.';
 	echo $formwriter->hiddeninput('order_item_id', $current_order_item->key);

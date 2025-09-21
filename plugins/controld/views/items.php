@@ -1,5 +1,4 @@
 <?php
-	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
@@ -16,8 +15,6 @@
 	
 	echo PublicPage::BeginPage($page_vars['title']);		
 ?>
-
-
 
    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
       <h1 class="sr-only">Blog</h1>
@@ -87,8 +84,6 @@
 				
       </div>
    
-
-
 
 			
 		<?php	

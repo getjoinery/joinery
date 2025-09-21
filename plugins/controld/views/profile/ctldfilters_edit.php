@@ -2,8 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctldfilters_edit_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = ctldfilters_edit_logic($_GET, $_POST);
@@ -15,7 +14,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$services = $page_vars['services'];
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();
-
 
 	$page = new PublicPage();
 	$hoptions = array(
@@ -41,8 +39,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$formwriter = $page->getFormWriter();
 	
 
-
-
 	if($profile_choice == 'secondary'){
 		$validation_rules = array();
 		$validation_rules['start_time']['required']['value'] = 'true';
@@ -52,7 +48,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 		echo $formwriter->set_validate($validation_rules);	
 	}	
-
 
 	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctldfilters_edit', true);
 	

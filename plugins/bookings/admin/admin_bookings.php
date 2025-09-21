@@ -48,7 +48,6 @@
 	);	
 	
 
-
 	$headers = array("Booking", "Booking Time", "Status");
 	$altlinks = array('Sync with Calendly'=>'/utils/calendly_synchronize');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
@@ -59,7 +58,6 @@
 		//'search_on' => TRUE
 	);
 	$page->tableheader($headers, $table_options, $pager);
-
 
 	foreach ($bookings as $booking){
 		if($booking->get('bkn_usr_user_id_booked')){
@@ -99,9 +97,7 @@
 		$page->disprow($rowvalues);
 	}
 
-
 	$page->endtable($pager);	
 	$page->admin_footer();
 ?>
-
 

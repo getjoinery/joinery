@@ -1,9 +1,7 @@
 <?php
-	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	// PathHelper is already loaded
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	PathHelper::requireOnce('data/page_contents_class.php');
 
@@ -272,8 +270,6 @@ Price Area
                 <div class="pricing-tabs">
                     <div class="switch-area">
                         <label class="toggler toggler--is-active ms-0" id="filt-monthly">Monthly</label>
-
-
 
 						<div class="toggle">
 							<?php

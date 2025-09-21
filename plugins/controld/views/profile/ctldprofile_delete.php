@@ -2,15 +2,13 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctldprofile_delete_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = ctldprofile_delete_logic($_GET, $_POST);
 	$profile = $page_vars['profile'];
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();
-
 
 	$page = new PublicPage();
 	$hoptions = array(
@@ -30,7 +28,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 	echo $formwriter->set_validate($validation_rules);	
 
-
 	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctldprofile_delete', true);
 	
 		?>
@@ -49,7 +46,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo '<p>You are about to delete this scheduled profile. After your scheduled profile is deleted, your default profile will always be active.</p>';
 	
 
-
 		
 	
 	echo $formwriter->checkboxinput("Confirm deletion", "confirm", "checkbox", "left", 0, 1, "");
@@ -60,9 +56,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo $formwriter->new_form_button('Delete', 'primary');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);	
-
-
-
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

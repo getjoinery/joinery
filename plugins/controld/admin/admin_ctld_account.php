@@ -1,19 +1,13 @@
 <?php
-	require_once(__DIR__ . '/../../../includes/PathHelper.php');
-	
 	PathHelper::requireOnce('includes/Activation.php');
 	PathHelper::requireOnce('includes/ErrorHandler.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
 	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
 	PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
 	PathHelper::requireOnce('plugins/controld/data/ctldfilters_class.php');
 	PathHelper::requireOnce('plugins/controld/data/ctldprofiles_class.php');
 	PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
 	PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
-
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -69,7 +63,6 @@
 	}
 	$page_vars['num_blocks_always'] = $num_blocks_always;
 
-
 	//COUNT THE SCHEDULED BLOCKS
 	$num_blocks_scheduled = array();
 	
@@ -90,7 +83,6 @@
 	$page_vars['scheduled_string'] = $scheduled_string;
 	$page_vars['num_blocks_scheduled'] = $num_blocks_scheduled;
 
-
 	$wpager = new Pager(array('numrecords'=>$numwaitinglist, 'numperpage'=> $wnumperpage), 'w');
 	
 	$page = new AdminPage();
@@ -110,7 +102,6 @@
 
 	$settings = Globalvars::get_instance();
 	$webDir = $settings->get_setting('webDir');
-
 
 /*
 		$options['title'] = $event->get('evt_name');
@@ -182,11 +173,7 @@
 				?>
 				</p>
 
-
-
 <?php $page->end_box();
-
-
 
 	$headers = array("Device Name", "Status", "Default blocklist", "Scheduled blocklist",  "Schedule", "Active profile", "Editable");
 	$altlinks = array();
@@ -309,8 +296,6 @@
 			$secondary_array[] = '<a href="/plugins/controld/admin/admin_ctld_account?account_id='.$account->key.'&remotestatus='.$device->key.'">Check</a>';			
 		}
 
-
-
 		$rowvalues=array();
 		array_push($rowvalues, $device->get_readable_name());
 
@@ -349,7 +334,6 @@
 			}
 		}
 		array_push($rowvalues, $num_blocks_always[$device->key]. ' ('.implode(', ', $primary_out).')' . ' <br>(Remote: '.implode(', ', $primary_array).')' );
-
 
 		$secondary_out = array();
 		foreach($filters_secondary as $filter){
@@ -393,15 +377,10 @@
 
 		
 
-
-
-
         $page->disprow($rowvalues);
 	}
 
 	$page->endtable($rpager);
-
-
 
 	$page->admin_footer();
 

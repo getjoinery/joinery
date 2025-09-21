@@ -1,8 +1,6 @@
 <?php
 // PathHelper is already loaded by the time this file is included
 
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/FieldConstraints.php');
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/SingleRowAccessor.php');

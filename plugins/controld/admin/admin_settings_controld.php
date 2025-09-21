@@ -1,6 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../../../includes/PathHelper.php');
-	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/settings_class.php');
@@ -53,8 +51,6 @@
 	);	
 	
 
-
-
 	$pageoptions['altlinks'] = array();
 
 	$pageoptions['title'] = "Controld Settings";
@@ -66,8 +62,6 @@
 	$validation_rules['stg_value']['required']['value'] = 'true';
 	$validation_rules['stg_name']['required']['value'] = 'true';	
 	echo $formwriter->set_validate($validation_rules);	
-
-
 
 	echo $formwriter->begin_form('form', 'POST', '/plugins/controld/admin/admin_settings_controld');
 	
@@ -86,7 +80,6 @@
 
 	
 	$page->end_box();
-
 
 	$page->admin_footer();
 

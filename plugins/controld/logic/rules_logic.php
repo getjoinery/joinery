@@ -77,9 +77,7 @@ function rules_logic($get_vars, $post_vars){
 		}		
 		$page_vars['profile'] = $profile;
 
-
 		$result = $profile->add_rule($_POST['cdr_rule_hostname'], $_POST['cdr_rule_action']);
-
 
 		LibraryFunctions::redirect('/profile/rules?device_id='.$device->key.'&profile_choice='.$profile_choice);
 		exit;

@@ -144,7 +144,6 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		}
 		
 
-
 		//DROPDOWN FORMATTING
 		if($filter_out['ads']){
 			$filter_out['ads'] = 'ads';
@@ -168,7 +167,6 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		}
 		
 		$page_vars['filters'] = $filter_out;
-
 
 		$services = new MultiCtldService(
 				array(

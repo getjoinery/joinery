@@ -1,9 +1,7 @@
 <?php
-	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	// PathHelper is already loaded
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('login_logic.php', 'logic', 'system', null, 'controld'));
 	
 	$page_vars = login_logic($_GET, $_POST);

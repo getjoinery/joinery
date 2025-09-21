@@ -112,8 +112,6 @@
 	}	
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_item_edit');
 
 	$tags = '';

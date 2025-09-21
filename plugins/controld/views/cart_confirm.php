@@ -2,8 +2,7 @@
 	PathHelper::requireOnce('includes/ShoppingCart.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	// PathHelper is already loaded
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	if($receipts){
 		LibraryFunctions::redirect('/profile/devices');
@@ -25,8 +24,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	));
 	echo PublicPage::BeginPage('Checkout confirmation');
 	//echo PublicPage::BeginPanel();	
-
-
 
 	$settings = Globalvars::get_instance();
 	$defaultemail = $settings->get_setting('defaultemail');
@@ -57,7 +54,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 		<?php
 	}
 	
-
 
 	//echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();

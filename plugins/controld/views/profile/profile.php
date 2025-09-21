@@ -2,8 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = profile_logic($_GET, $_POST);
@@ -45,7 +44,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	*/
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'My Profile');
 	?>
-
 
 <!--==============================
 Team Area  
@@ -159,15 +157,7 @@ Team Area
             </div>
         </div>
 
-
-
-
-
-
-
-
 		<?php
-
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

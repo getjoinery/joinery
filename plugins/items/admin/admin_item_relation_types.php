@@ -8,7 +8,6 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(7);
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(

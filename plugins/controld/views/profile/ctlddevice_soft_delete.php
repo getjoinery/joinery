@@ -2,8 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctlddevice_soft_delete_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = ctlddevice_soft_delete_logic($_GET, $_POST);
@@ -11,7 +10,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();
 	$name = $device->get_readable_name();
-
 
 	$page = new PublicPage();
 	$hoptions = array(
@@ -26,8 +24,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo PublicPage::BeginPage('Delete Device', $hoptions);
 	
 
-
-
 	
 	$formwriter = $page->getFormWriter();
 	
@@ -38,7 +34,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	//$validation_rules['confirm']['required']['value'] = 'true';
 
 	//echo $formwriter->set_validate($validation_rules);	
-
 
 	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctlddevice_soft_delete', true);
 	
@@ -58,7 +53,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo '<p>You are about to delete this device. </p>';
 	
 
-
 		
 	
 	
@@ -67,9 +61,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo $formwriter->new_form_button('Confirm Delete', 'th-btn');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);	
-
-
-
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

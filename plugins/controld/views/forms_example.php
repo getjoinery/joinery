@@ -1,10 +1,7 @@
 <?php
-	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	// PathHelper is already loaded
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -32,13 +29,11 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$validation_rules['single_checkbox']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 
-
 	echo $formwriter->begin_form('contact-form style2', 'POST', '/admin/admin', true);
 	
 
 	
 	echo $formwriter->text('Text only field', 'To:', 'something something here is some text to test out columns', NULL);
-
 
 	echo $formwriter->textinput('', 'ccd_code', NULL, 100, NULL, 'Coupon code', 255, '');	
 	

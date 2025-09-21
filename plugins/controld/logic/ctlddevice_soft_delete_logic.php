@@ -40,7 +40,6 @@ function ctlddevice_soft_delete_logic($get_vars, $post_vars){
 	$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 	$page_vars['device'] = $device;
 
-
 	if(isset($_POST['device_id'])){
 		$cd = new ControlDHelper();
 		
@@ -56,8 +55,6 @@ function ctlddevice_soft_delete_logic($get_vars, $post_vars){
 		$device->set('cdd_is_active', false);
 		$device->set('cdd_delete_time', 'now()'); 
 		$device->save();
-
-
 
 		LibraryFunctions::redirect('/profile/devices');
 		exit;

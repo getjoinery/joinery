@@ -1,8 +1,5 @@
 <?php
-//require_once('Globalvars.php');
-//require_once('SessionControl.php');
-
-class ControlDHelper{
+////class ControlDHelper{
 	
 	private $api_key;
 	private $debug;
@@ -1056,7 +1053,6 @@ class ControlDHelper{
 		*/
 
 	}
-
 
 	//USERS
 	public function listUsers(){

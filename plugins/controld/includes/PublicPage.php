@@ -176,9 +176,6 @@ Career Area
 		return $output;
 	}	
 
-
-
-
 	public function public_header($options=array()) {
 		$_GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
@@ -239,8 +236,6 @@ Career Area
     <!--<meta name="author" content="Themeholy">-->
     <meta name="robots" content="INDEX,FOLLOW">
 
-
-
     <!-- Favicons - Place favicon.ico in the root directory -->
 	<!--
     <link rel="apple-touch-icon" sizes="57x57" href="/plugins/controld/assets/img/favicons/apple-icon-57x57.png">
@@ -269,7 +264,6 @@ Career Area
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
-
 
     <!-- Jquery -->
 	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script> 
@@ -303,19 +297,13 @@ Career Area
     <meta property="og:locale" content="en_US">
     <!--<meta property="fb:app_id" content="YOUR_FACEBOOK_APP_ID">--> <!-- Optional -->
 
-
 </head>
 
 <body>
 
-
-
-
     <!--[if lte IE 9]>
     	<p class="browserupgrade">You are using an <strong>outdated</strong> browser. Please <a href="https://browsehappy.com/">upgrade your browser</a> to improve your experience and security.</p>
   <![endif]-->
-
-
 
     <!--********************************
    		Code Start From Here 
@@ -485,7 +473,6 @@ Career Area
 			}		
 			?>
 
-
                 </ul>
             </div>
         </div>
@@ -578,8 +565,6 @@ Career Area
 		
 		/*
 		?>
-
-
 
 	
 	<!--==============================

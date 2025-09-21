@@ -101,7 +101,6 @@
 	$pageoptions['title'] = "Edit Booking";
 	$page->begin_box($pageoptions);
 
-
 	// Editing an existing booking
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
@@ -157,7 +156,6 @@
 	echo $formwriter->end_buttons();
 
 	echo $formwriter->end_form();
-
 
 	$page->end_box();
 

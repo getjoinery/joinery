@@ -48,7 +48,6 @@
 	);	
 	
 
-
 	$headers = array("Item",  "Created", "Published", "By", "Item Status");
 	$altlinks = array('New Item'=>'/admin/admin_item_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
@@ -59,7 +58,6 @@
 		//'search_on' => TRUE
 	);
 	$page->tableheader($headers, $table_options, $pager);
-
 
 	foreach ($items as $item){
 		
@@ -91,9 +89,7 @@
 		$page->disprow($rowvalues);
 	}
 
-
 	$page->endtable($pager);	
 	$page->admin_footer();
 ?>
-
 

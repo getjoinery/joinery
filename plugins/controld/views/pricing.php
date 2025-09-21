@@ -2,14 +2,12 @@
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic', 'system', null, 'controld'));
 	// PathHelper is already loaded
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = pricing_logic($_GET, $_POST);
 	$page_choice = $page_vars['page_choice'];
 	$products = $page_vars['products'];
 	$product_versions = $page_vars['product_versions'];
-
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
@@ -34,8 +32,6 @@ Price Area
                 <div class="pricing-tabs">
                     <div class="switch-area">
                         <label class="toggler toggler--is-active ms-0" id="filt-monthly">Monthly</label>
-
-
 
 						<div class="toggle">
 							<?php
@@ -209,16 +205,6 @@ Price Area
 			-->
         </div>
     </section>
-
-
-
-
-
-
-
-
-
-
 
 		<?php
  

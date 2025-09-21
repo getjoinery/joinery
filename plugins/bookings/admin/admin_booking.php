@@ -95,13 +95,10 @@
 	
 	//echo '<strong>Link:</strong> <a href="'.$booking->get_url().'">'.$settings->get_setting('webDir').$booking->get_url().'</a><br />';	
 
-
-
 	//echo '<iframe src="'.$booking->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
 
 	$page->end_box();		
 	
 	$page->admin_footer();
 ?>
-
 

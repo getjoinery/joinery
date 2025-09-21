@@ -2,8 +2,6 @@
 // PathHelper is already loaded by the time this file is included
 // We just need the dependencies
 if (!class_exists('FormWriterMasterBootstrap')) {
-    PathHelper::requireOnce('includes/Globalvars.php');
-    PathHelper::requireOnce('includes/DbConnector.php');
     PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
 }
 

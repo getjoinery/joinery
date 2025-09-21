@@ -76,7 +76,6 @@
 	
 	echo '<strong>Link:</strong> <a href="'.$booking_type->get('bkt_schedule_link').'">'.$booking_type->get('bkt_schedule_link').'</a><br />';	
 
-
 	if($booking_type->get('bkt_description_plain')){
 		echo '<iframe src="'.$booking_type->get('bkt_description_plain').'" width="600%" height="300" style="border:1px solid black;"></iframe>';
 	}
@@ -84,5 +83,4 @@
 	
 	$page->admin_footer();
 ?>
-
 

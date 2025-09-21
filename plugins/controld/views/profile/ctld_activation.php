@@ -2,8 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctld_activation_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = ctld_activation_logic($_GET, $_POST);
@@ -15,7 +14,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$link2 = $page_vars['link2'];
 	$linkname2 = $page_vars['linkname2'];
 	$command = $page_vars['command'];
-
 
 	$page = new PublicPage();
 	$hoptions = array(
@@ -46,8 +44,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	}
 	else{
 	
-
-
 
 		echo '
 	            <div class="col-lg-6 col-xxl-4">

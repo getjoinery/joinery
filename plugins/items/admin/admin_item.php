@@ -15,7 +15,6 @@
 
 	$item = new Item($_GET['itm_item_id'], TRUE);
 
-
 	if($_REQUEST['action'] == 'delete'){
 		$item->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$item->soft_delete();
@@ -83,5 +82,4 @@
 	
 	$page->admin_footer();
 ?>
-
 

@@ -34,7 +34,6 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 	}
 	$page_vars['account'] = $account;
 
-
 	$devices = new MultiCtldAccount(
 		array(
 		'user_id' => $user->key, 
@@ -87,10 +86,6 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 			$device->set('cdd_allow_device_edits', $_POST['cdd_allow_device_edits']);
 			$device->prepare();
 			$device->save();
-
-
-
-
 
 			LibraryFunctions::redirect('/profile/devices');
 			

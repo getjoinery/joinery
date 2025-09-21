@@ -2,8 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('rules_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = rules_logic($_GET, $_POST);
@@ -14,7 +13,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$rules = $page_vars['rules'];
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();
-
 
 	$page = new PublicPage();
 	$hoptions = array(
@@ -109,7 +107,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo '		  </tbody>
 		</table>	';	
 	
-
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

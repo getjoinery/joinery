@@ -15,8 +15,6 @@ function devices_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldfilters_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldprofiles_class.php');
 
-
-
 	
 	$page_vars = array();
 	
@@ -26,7 +24,6 @@ function devices_logic($get_vars, $post_vars){
 	
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
-
 
 	if(!$session->is_logged_in()){
 		LibraryFunctions::redirect('/login');
@@ -41,9 +38,7 @@ function devices_logic($get_vars, $post_vars){
 	
 	$account = CtldAccount::GetByColumn('cda_usr_user_id', $user->key);
 
-
 	$page_vars['account'] = $account;
-
 
 	$devices = new MultiCtldDevice(
 		array(
@@ -129,7 +124,6 @@ function devices_logic($get_vars, $post_vars){
 	return $page_vars;	
 	
 }
-
 
 	
 ?>

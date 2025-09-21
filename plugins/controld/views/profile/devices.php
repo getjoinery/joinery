@@ -2,8 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('devices_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = devices_logic($_GET, $_POST);
@@ -132,7 +131,6 @@ else{
 							</div>
 						</div>';
 
-
 		}
 	}
 	
@@ -216,7 +214,6 @@ else{
 						</div>
 					</div>';
 
-
 		}
 		else{
 			echo '
@@ -249,7 +246,6 @@ else{
 					</div>';
 		}
 	}
-
 
 	if($account->can_add_device() && $account->is_active()){
 		?>
