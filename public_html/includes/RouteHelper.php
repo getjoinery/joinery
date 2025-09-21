@@ -1267,9 +1267,11 @@ class RouteHelper {
                             $content = ob_get_contents();
                             if (StaticPageCache::shouldCache($request_path, $cache_params, $content)) {
                                 StaticPageCache::createCache($request_path, $cache_params, $content);
-                            } else {
+                            } else if (!StaticPageCache::shouldIgnore($request_path, $cache_params)) {
+                                // Only mark as nostatic if it's not spam/malicious
                                 StaticPageCache::markAsNostatic($request_path, $cache_params);
                             }
+                            // If shouldIgnore() returns true, do nothing (ignore completely)
                         }
                         exit();
                     } else {
@@ -1295,9 +1297,11 @@ class RouteHelper {
                     $content = ob_get_contents();
                     if (StaticPageCache::shouldCache($request_path, $cache_params, $content)) {
                         StaticPageCache::createCache($request_path, $cache_params, $content);
-                    } else {
+                    } else if (!StaticPageCache::shouldIgnore($request_path, $cache_params)) {
+                        // Only mark as nostatic if it's not spam/malicious
                         StaticPageCache::markAsNostatic($request_path, $cache_params);
                     }
+                    // If shouldIgnore() returns true, do nothing (ignore completely)
                 }
                 exit();
             } else {
@@ -1324,9 +1328,11 @@ class RouteHelper {
                     $content = ob_get_contents();
                     if (StaticPageCache::shouldCache($request_path, $cache_params, $content)) {
                         StaticPageCache::createCache($request_path, $cache_params, $content);
-                    } else {
+                    } else if (!StaticPageCache::shouldIgnore($request_path, $cache_params)) {
+                        // Only mark as nostatic if it's not spam/malicious
                         StaticPageCache::markAsNostatic($request_path, $cache_params);
                     }
+                    // If shouldIgnore() returns true, do nothing (ignore completely)
                 }
                 exit();
             }
