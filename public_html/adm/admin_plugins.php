@@ -237,7 +237,7 @@ $altlinks['Sync with Filesystem'] = '/admin/admin_plugins?action=sync';
 $altlinks['Check for Updates'] = '/admin/admin_plugins?action=check_updates';
 
 $page->admin_header(array(
-    'menu-id' => 'plugins',
+    'menu-id' => 'system-plugins',
     'page_title' => 'Plugin Management',
     'readable_title' => 'Plugin Management',
     'breadcrumbs' => array(
