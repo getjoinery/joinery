@@ -1,6 +1,7 @@
 <?php
-////class ControlDHelper{
-	
+
+class ControlDHelper{
+
 	private $api_key;
 	private $debug;
 	public $test_mode;
