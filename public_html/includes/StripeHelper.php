@@ -529,7 +529,7 @@ class StripeHelper {
 					//'metadata' => 
 				);
 				
-				$stripe_price = $stripe_helper->get_or_create_price($cart_item['product_version'], $final_price);	
+				$stripe_price = $this->get_or_create_price($cart_item['product_version'], $final_price);	
 
 				
 				//TODO add description "metadata" => 
