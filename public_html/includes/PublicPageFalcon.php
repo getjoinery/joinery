@@ -76,196 +76,134 @@ class PublicPageFalcon extends PublicPageBase {
 	}
 	
 	public function top_right_menu(){
-		$session = SessionControl::get_instance();
-		$settings = Globalvars::get_instance();
-
+		// Get all menu data from centralized function
 		$menu_data = $this->get_menu_data();
-		$cart_info = $menu_data['cart'];
-		$numitems = $cart_info['count'];
-		if($numitems > 0){
-			$cart_menu = array('Cart' => '/cart');
-		} else {
-			$cart_menu = NULL;
+		$cart = $menu_data['cart'];
+		$user_menu = $menu_data['user_menu'];
+		$notifications = $menu_data['notifications'];
+
+		// SHOPPING CART MENU ITEM - Falcon theme specific styling
+		if($cart['has_items']){
+			echo '<li class="nav-item d-none d-sm-block">
+			  <a class="nav-link px-0 notification-indicator notification-indicator-warning notification-indicator-fill fa-icon-wait" href="' . $cart['link'] . '">
+			    <span class="fas fa-shopping-cart" data-fa-transform="shrink-7" style="font-size: 33px;"></span>
+			    <span class="notification-indicator-number">' . $cart['item_count'] . '</span>
+			  </a>
+			</li>';
 		}
-			
-			
-			//SHOPPING CART MENU ITEM
-			if($cart_menu){
-				echo '<li class="nav-item d-none d-sm-block">
-				  <a class="nav-link px-0 notification-indicator notification-indicator-warning notification-indicator-fill fa-icon-wait" href="#"><span class="fas fa-shopping-cart" data-fa-transform="shrink-7" style="font-size: 33px;"></span><span class="notification-indicator-number">$numitems</span></a>
 
-				</li>';
-			}
-			
-			//NOTIFICATION MENU ITEM
+		// NOTIFICATION MENU ITEM - Falcon theme specific styling (future implementation)
+		if($notifications['enabled'] && $notifications['count'] > 0){
 			?>
-			<!--
-            <li class="nav-item dropdown">
-              <a class="nav-link notification-indicator notification-indicator-primary px-0 fa-icon-wait" id="navbarDropdownNotification" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" data-hide-on-body-scroll="data-hide-on-body-scroll"><span class="fas fa-bell" data-fa-transform="shrink-6" style="font-size: 33px;"></span></a>
-              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end dropdown-menu-card dropdown-menu-notification dropdown-caret-bg" aria-labelledby="navbarDropdownNotification">
-                <div class="card card-notification shadow-none">
-                  <div class="card-header">
-                    <div class="row justify-content-between align-items-center">
-                      <div class="col-auto">
-                        <h6 class="card-header-title mb-0">Notifications</h6>
-                      </div>
-                      <div class="col-auto ps-0 ps-sm-3"><a class="card-link fw-normal" href="#">Mark all as read</a></div>
-                    </div>
-                  </div>
-                  <div class="scrollbar-overlay" style="max-height:19rem">
-                    <div class="list-group list-group-flush fw-normal fs-10">
-                      <div class="list-group-title border-bottom">NEW</div>
-                      <div class="list-group-item">
-                        <a class="notification notification-flush notification-unread" href="#!">
-                          <div class="notification-avatar">
-                            <div class="avatar avatar-2xl me-3">
-                              <img class="rounded-circle" src="../assets/img/team/1-thumb.png" alt="" />
-
-                            </div>
-                          </div>
-                          <div class="notification-body">
-                            <p class="mb-1"><strong>Emma Watson</strong> replied to your comment : "Hello world 😍"</p>
-                            <span class="notification-time"><span class="me-2" role="img" aria-label="Emoji">💬</span>Just now</span>
-
-                          </div>
-                        </a>
-
-                      </div>
-
-
-                    </div>
-                  </div>
-                  <div class="card-footer text-center border-top"><a class="card-link d-block" href="../app/social/notifications.html">View all</a></div>
-                </div>
-              </div>
-
-            </li>
-			-->
-			
-			
-			<?php  
-			//ADMIN MENU NAVIGATION ITEM
-			 if($session->get_permission() >= 5){ ?>
-            <li class="nav-item dropdown px-1">
-              <a class="nav-link fa-icon-wait nine-dots p-1" id="navbarDropdownMenu" role="button" data-hide-on-body-scroll="data-hide-on-body-scroll" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="43" viewBox="0 0 16 16" fill="none">
-                  <circle cx="2" cy="2" r="2" fill="#6C6E71"></circle>
-                  <circle cx="2" cy="8" r="2" fill="#6C6E71"></circle>
-                  <circle cx="2" cy="14" r="2" fill="#6C6E71"></circle>
-                  <circle cx="8" cy="8" r="2" fill="#6C6E71"></circle>
-                  <circle cx="8" cy="14" r="2" fill="#6C6E71"></circle>
-                  <circle cx="14" cy="8" r="2" fill="#6C6E71"></circle>
-                  <circle cx="14" cy="14" r="2" fill="#6C6E71"></circle>
-                  <circle cx="8" cy="2" r="2" fill="#6C6E71"></circle>
-                  <circle cx="14" cy="2" r="2" fill="#6C6E71"></circle>
-                </svg></a>
-              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end dropdown-menu-card dropdown-caret-bg" aria-labelledby="navbarDropdownMenu">
-                <div class="card shadow-none">
-                  <div class="scrollbar-overlay nine-dots-dropdown">
-                    <div class="card-body px-3">
-                      <div class="row text-center gx-0 gy-0">
-						<div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/">
-                            <div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-							  <path d="M3 9.5L12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z"/>
-							</svg>
-
-														</div>
-														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Home</p> 
-													  </a></div>
-													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/profile">
-														<div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-							  <circle cx="12" cy="8" r="4"/>
-							  <path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>
-							</svg>
-							</div>
-														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Profile</p>
-													  </a></div>
-													<?php if($session->get_permission() > 5) { ?>
-													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_users">
-														<div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-							  <path d="M3 4h18v4H3zM3 10h18v10H3z"/>
-							</svg>
-							</div>
-														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Admin</p>
-													  </a></div>
-													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_settings">
-														<div class="avatar avatar-2xl"> <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
-							  <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
-							  <path d="M19.4 15a1.7 1.7 0 0 0 .33 1.82l.05.05a2 2 0 1 1-2.82 2.83l-.06-.06a1.7 1.7 0 0 0-1.83-.33 1.7 1.7 0 0 0-1 1.51v.09a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.51 1.7 1.7 0 0 0-1.83.33l-.06.06a2 2 0 1 1-2.82-2.83l.05-.05a1.7 1.7 0 0 0 .33-1.82 1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.51-1 1.7 1.7 0 0 0-.33-1.82l-.05-.05a2 2 0 1 1 2.82-2.83l.06.06a1.7 1.7 0 0 0 1.83.33h.09A1.7 1.7 0 0 0 9 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51h.09a1.7 1.7 0 0 0 1.83-.33l.06-.06a2 2 0 1 1 2.82 2.83l-.05.05a1.7 1.7 0 0 0-.33 1.82 1.7 1.7 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/>
-							</svg>
-
-
-							</div>
-														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Settings</p>
-													  </a></div>
-													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_utilities" >
-														<div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-							  <path d="M3 3h6v6H3zM15 3h6v6h-6zM15 15h6v6h-6zM3 15h6v6H3z"/>
-							</svg>
-							</div>
-														<p class="mb-0 fw-medium text-800 text-truncate fs-11">Utilities</p>
-													  </a></div>
-													 <div class="col-4"><a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="/admin/admin_help" >
-														<div class="avatar avatar-2xl"> <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-							  <circle cx="12" cy="12" r="10"/>
-							  <path d="M9.09 9a3 3 0 1 1 5.83 1c-.26 1.2-1.5 2-2.92 2v1"/>
-							  <circle cx="12" cy="17" r="1"/>
-							</svg>
-							</div>
-                            <p class="mb-0 fw-medium text-800 text-truncate fs-11">Help</p>
-                          </a></div>
-                        <?php } ?>
-                        <!--<div class="col-12"><a class="btn btn-outline-primary btn-sm mt-4" href="#!">Show more</a></div>-->
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </li>
-			<?php } ?>
-			
-			
+			<li class="nav-item dropdown">
+			  <a class="nav-link notification-indicator notification-indicator-primary px-0 fa-icon-wait" id="navbarDropdownNotification" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" data-hide-on-body-scroll="data-hide-on-body-scroll">
+			    <span class="fas fa-bell" data-fa-transform="shrink-6" style="font-size: 33px;"></span>
+			    <span class="notification-indicator-number"><?php echo $notifications['unread_count']; ?></span>
+			  </a>
+			  <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end dropdown-menu-card dropdown-menu-notification dropdown-caret-bg" aria-labelledby="navbarDropdownNotification">
+			    <!-- Notification dropdown content will be rendered here when implemented -->
+			  </div>
+			</li>
 			<?php
-			$user_menu = $menu_data['user_menu'];
-			if(!$user_menu['is_logged_in']){ ?>
-			<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="<?php echo $user_menu['login_link']; ?>">Login</a></li></ul>
+		}
 
-				<?php if(!empty($user_menu['register_link'])){ ?>
-				<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns"><li class="nav-item"><a class="nav-link" href="<?php echo $user_menu['register_link']; ?>">Register</a></li></ul>
-				<?php } ?>
-			<?php } ?>
+		// ADMIN MENU NAVIGATION ITEM - Falcon theme nine-dots design
+		if($user_menu['permission_level'] >= 5){ ?>
+		<li class="nav-item dropdown px-1">
+		  <a class="nav-link fa-icon-wait nine-dots p-1" id="navbarDropdownMenu" role="button" data-hide-on-body-scroll="data-hide-on-body-scroll" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+		    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="43" viewBox="0 0 16 16" fill="none">
+		      <circle cx="2" cy="2" r="2" fill="#6C6E71"></circle>
+		      <circle cx="2" cy="8" r="2" fill="#6C6E71"></circle>
+		      <circle cx="2" cy="14" r="2" fill="#6C6E71"></circle>
+		      <circle cx="8" cy="8" r="2" fill="#6C6E71"></circle>
+		      <circle cx="8" cy="14" r="2" fill="#6C6E71"></circle>
+		      <circle cx="14" cy="8" r="2" fill="#6C6E71"></circle>
+		      <circle cx="14" cy="14" r="2" fill="#6C6E71"></circle>
+		      <circle cx="8" cy="2" r="2" fill="#6C6E71"></circle>
+		      <circle cx="14" cy="2" r="2" fill="#6C6E71"></circle>
+		    </svg>
+		  </a>
+		  <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end dropdown-menu-card dropdown-caret-bg" aria-labelledby="navbarDropdownMenu">
+		    <div class="card shadow-none">
+		      <div class="scrollbar-overlay nine-dots-dropdown">
+		        <div class="card-body px-3">
+		          <div class="row text-center gx-0 gy-0">
+		            <?php
+		            // Render admin menu items from menu data
+		            foreach($user_menu['items'] as $item) {
+		              // Only show admin items
+		              if(in_array($item['label'], ['Home', 'My Profile', 'Admin Dashboard', 'Admin Settings', 'Admin Utilities', 'Admin Help'])) {
+		                $icon_svg = $this->get_admin_icon_svg($item['icon']);
+		                echo '<div class="col-4">
+		                  <a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="' . $item['link'] . '">
+		                    <div class="avatar avatar-2xl">' . $icon_svg . '</div>
+		                    <p class="mb-0 fw-medium text-800 text-truncate fs-11">' . $item['label'] . '</p>
+		                  </a>
+		                </div>';
+		              }
+		            }
+		            ?>
+		          </div>
+		        </div>
+		      </div>
+		    </div>
+		  </div>
+		</li>
+		<?php }
 
-			<?php if($user_menu['is_logged_in']){ ?>
-			<li class="nav-item dropdown"><a class="nav-link pe-0 ps-2" id="navbarDropdownUser" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                <div class="avatar avatar-xl">
-                  <img class="rounded-circle" src="<?php echo PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web', 'falcon'); ?>" alt="" />
+		// USER LOGIN/LOGOUT MENU - Falcon theme specific styling
+		if(!$user_menu['is_logged_in']){ ?>
+		<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
+		  <li class="nav-item"><a class="nav-link" href="<?php echo $user_menu['login_link']; ?>">Login</a></li>
+		</ul>
+		<?php if($user_menu['register_link']){ ?>
+		<ul class="navbar-nav" data-top-nav-dropdowns="data-top-nav-dropdowns">
+		  <li class="nav-item"><a class="nav-link" href="<?php echo $user_menu['register_link']; ?>">Register</a></li>
+		</ul>
+		<?php } ?>
+		<?php } ?>
 
-                </div>
-              </a>
-              <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end py-0" aria-labelledby="navbarDropdownUser">
-                <div class="bg-white dark__bg-1000 rounded-2 py-2">
+		<?php if($user_menu['is_logged_in']){ ?>
+		<li class="nav-item dropdown">
+		  <a class="nav-link pe-0 ps-2" id="navbarDropdownUser" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+		    <div class="avatar avatar-xl">
+		      <img class="rounded-circle" src="<?php echo $user_menu['avatar_url'] ?: PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web', 'falcon'); ?>" alt="" />
+		    </div>
+		  </a>
+		  <div class="dropdown-menu dropdown-caret dropdown-caret dropdown-menu-end py-0" aria-labelledby="navbarDropdownUser">
+		    <div class="bg-white dark__bg-1000 rounded-2 py-2">
+		      <?php
+		      // Render user menu items from menu data
+		      foreach($user_menu['items'] as $item) {
+		        // Only show user profile items (not admin items)
+		        if(!in_array($item['label'], ['Admin Dashboard', 'Admin Settings', 'Admin Utilities', 'Admin Help'])) {
+		          echo '<a class="dropdown-item" href="' . $item['link'] . '">' . $item['label'] . '</a>';
+		        }
+		      }
+		      ?>
+		    </div>
+		  </div>
+		</li>
+		<?php }
 
-
-                  <!--<div class="dropdown-divider"></div>-->
-                  <?php
-                  if (!empty($user_menu['profile_links'])) {
-                      foreach ($user_menu['profile_links'] as $link_name => $link_url) {
-                          echo '<a class="dropdown-item" href="'.$link_url.'">'.$link_name.'</a>';
-                      }
-                  } else {
-                      // Fallback to hardcoded links if profile_links not available
-                      echo '<a class="dropdown-item" href="/profile">Profile</a>';
-                      echo '<a class="dropdown-item" href="/logout">Logout</a>';
-                  }
-                  ?>
-                </div>
-              </div>
-            </li>
-			<?php } 		
-		
 	}
-	
+
+	/**
+	 * Get SVG icon for admin menu items - Falcon theme specific
+	 */
+	private function get_admin_icon_svg($icon_name) {
+		$icons = [
+			'home' => '<svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9.5L12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z"/></svg>',
+			'user' => '<svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>',
+			'dashboard' => '<svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 4h18v4H3zM3 10h18v10H3z"/></svg>',
+			'wrench' => '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .33 1.82l.05.05a2 2 0 1 1-2.82 2.83l-.06-.06a1.7 1.7 0 0 0-1.83-.33 1.7 1.7 0 0 0-1 1.51v.09a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.51 1.7 1.7 0 0 0-1.83.33l-.06.06a2 2 0 1 1-2.82-2.83l.05-.05a1.7 1.7 0 0 0 .33-1.82 1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.51-1 1.7 1.7 0 0 0-.33-1.82l-.05-.05a2 2 0 1 1 2.82-2.83l.06.06a1.7 1.7 0 0 0 1.83.33h.09A1.7 1.7 0 0 0 9 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51h.09a1.7 1.7 0 0 0 1.83-.33l.06-.06a2 2 0 1 1 2.82 2.83l-.05.05a1.7 1.7 0 0 0-.33 1.82 1.7 1.7 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>',
+			'tools' => '<svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3h6v6H3zM15 3h6v6h-6zM15 15h6v6h-6zM3 15h6v6H3z"/></svg>',
+			'question-circle' => '<svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 1 1 5.83 1c-.26 1.2-1.5 2-2.92 2v1"/><circle cx="12" cy="17" r="1"/></svg>'
+		];
+
+		return $icons[$icon_name] ?? $icons['dashboard']; // Default to dashboard icon
+	}
+
 	public function vertical_menu($menu){
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();						

@@ -147,6 +147,8 @@ abstract class PublicPageBase {
 			'display_name' => null,
 			'permission_level' => $session->get_permission(),
 			'avatar_url' => null,
+			'login_link' => '/login',
+			'register_link' => $settings->get_setting('register_active', false, true) ? '/register' : null,
 			'items' => []
 		];
 
