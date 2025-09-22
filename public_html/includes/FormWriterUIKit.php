@@ -186,11 +186,11 @@ class FormWriterUIKit extends FormWriterBase {
 		if($htmlmode == 'yes'){
 			$output .= '
 			
-			<script src="/adm/includes/Trumbowyg-2-26/dist/trumbowyg.min.js"></script>
-			<link rel="stylesheet" href="/adm/includes/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">
-			<script src="/adm/includes/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
-			<script src="/adm/includes/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js"></script>
-			<script src="/adm/includes/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
+			<script src="/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js"></script>
+			<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">
+			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
+			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js"></script>
+			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
 			<script type="text/javascript">';
 			$output .= "
 				$(document).ready(function() {
@@ -418,8 +418,8 @@ class FormWriterUIKit extends FormWriterBase {
 	function timeinput($label, $id, $class, $value, $hint, $layout='default') {
 
 		return '
-		<link rel="stylesheet" href="/adm/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.css"/>
-		<script type="text/javascript" src="/adm/includes/jquery-timepicker-1.3.5/jquery.timepicker.min.js"></script>
+		<link rel="stylesheet" href="/assets/vendor/jquery-timepicker-1.3.5/jquery.timepicker.min.css"/>
+		<script type="text/javascript" src="/assets/vendor/jquery-timepicker-1.3.5/jquery.timepicker.min.js"></script>
 		<script type="text/javascript">
 		$(document).ready(function(){
 			$("input.timepicker").timepicker({
@@ -472,8 +472,8 @@ class FormWriterUIKit extends FormWriterBase {
 		$output = '';
 		
 		if($ajaxendpoint){
-			$output .= '<link href="/includes/select2.min.css" rel="stylesheet" />
-			<script src="/includes/select2.full.min.js"></script>';
+			$output .= '<link href="/assets/vendor/select2/select2.min.css" rel="stylesheet" />
+			<script src="/assets/vendor/select2/select2.full.min.js"></script>';
 		
 			$output .= '<script type="text/javascript">
 			$(document).ready(function() {
@@ -607,10 +607,10 @@ class FormWriterUIKit extends FormWriterBase {
 
 			if($showdefault){
 				if(is_null($input)){
-					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/adm/includes/images/image_placeholder_thumbnail.png"></span> No Image</label>';
+					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/assets/images/image_placeholder_thumbnail.png"></span> No Image</label>';
 				}
 				else{
-					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/adm/includes/images/image_placeholder_thumbnail.png"></span> No Image</label>';
+					$output .= '<input type="radio" id="default_id" name="'.$id.'" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/assets/images/image_placeholder_thumbnail.png"></span> No Image</label>';
 				}
 			}
 

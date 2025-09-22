@@ -737,8 +737,8 @@ class FormWriterTailwind extends FormWriterBase {
 		$output = '';
 
 		if($ajaxendpoint){
-			$output .= '<link href="/includes/select2.min.css" rel="stylesheet" />
-			<script src="/includes/select2.full.min.js"></script>';
+			$output .= '<link href="/assets/vendor/select2/select2.min.css" rel="stylesheet" />
+			<script src="/assets/vendor/select2/select2.full.min.js"></script>';
 
 			$output .= '<script type="text/javascript">
 			$(document).ready(function() {
