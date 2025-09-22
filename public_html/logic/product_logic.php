@@ -111,7 +111,14 @@ function product_logic($get_vars, $post_vars, $product){
 
 		$form_key = md5(serialize($form_data) . time());
 		$session->save_session_item($form_key, $form_data);
-		$page_vars['display_empty_form'] = FALSE;  
+		$page_vars['display_empty_form'] = FALSE;
+
+		// In test mode, return instead of redirecting
+		if (isset($_SESSION['test_mode']) && $_SESSION['test_mode'] && !isset($_SESSION['allow_redirect'])) {
+			$page_vars['redirect_to'] = '/cart';
+			$page_vars['cart_action_completed'] = true;
+			return $page_vars;
+		}
 
 		LibraryFunctions::redirect('/cart');
 		exit();	
