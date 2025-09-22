@@ -567,9 +567,10 @@ class RouteHelper {
         }
         
         // Include view with explicit variables
-        if (file_exists(PathHelper::getThemeFilePath(basename($view_path), dirname($view_path)))) {
+        $full_path = PathHelper::getThemeFilePath(basename($view_path), dirname($view_path), 'system', null, null, false, false);
+        if ($full_path) {
             extract($viewVariables);
-            require_once(PathHelper::getThemeFilePath(basename($view_path), dirname($view_path)));
+            require_once($full_path);
             return true;
         }
 
@@ -580,8 +581,9 @@ class RouteHelper {
             if (substr($default_view, -4) !== '.php') {
                 $default_view .= '.php';
             }
-            if (file_exists(PathHelper::getThemeFilePath(basename($default_view), dirname($default_view)))) {
-                require_once(PathHelper::getThemeFilePath(basename($default_view), dirname($default_view)));
+            $default_path = PathHelper::getThemeFilePath(basename($default_view), dirname($default_view), 'system', null, null, false, false);
+            if ($default_path) {
+                require_once($default_path);
                 return true;
             }
         }
@@ -1320,17 +1322,19 @@ class RouteHelper {
         error_log("Trying view fallback file: " . var_export($view_file, true));
 
         // Store debug info for 404 page
+        $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
+
         $GLOBALS['route_debug_info'] = [
             'requested_path' => $request_path,
             'attempted_view_file' => $view_file,
-            'attempted_full_path' => PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)),
+            'attempted_full_path' => $view_full_path ?: ('views/' . trim($request_path, '/') . '.php'),
             'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'unknown'
         ];
         $is_valid_page = true; // Set before include
 
         try {
-            if (file_exists(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)))) {
-                require_once(PathHelper::getThemeFilePath(basename($view_file), dirname($view_file)));
+            if ($view_full_path) {
+                require_once($view_full_path);
                 error_log("View fallback succeeded - exiting");
                 // Save cache before exiting
                 if ($cache_buffer_started && $cache_result === false) {
