@@ -162,10 +162,11 @@ class PathHelper {
      * @param string|null $theme_name Theme to use (null = current theme)
      * @param string|null $plugin_name Plugin name (null = auto-detect from RouteHelper)
      * @param bool $debug Enable debug output
-     * @return string|false Path to file or false if not found
-     * @throws Exception If file not found and required
+     * @param bool $throw_on_fail If true, throws exception when file not found; if false, returns false
+     * @return string|false Path to file, or false if not found and $throw_on_fail is false
+     * @throws Exception If file not found and $throw_on_fail is true
      */
-    public static function getThemeFilePath($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $plugin_name=NULL, $debug = false) {
+    public static function getThemeFilePath($filename, $subdirectory='', $path_format='system', $theme_name=NULL, $plugin_name=NULL, $debug = false, $throw_on_fail = true) {
 
         // STRICT INPUT VALIDATION - Enforce consistent format across codebase
 
@@ -275,7 +276,15 @@ class PathHelper {
             return $base_return_path;
         }
 
-        // File not found - throw exception with helpful error message
+        // File not found - return false or throw based on $throw_on_fail
+        if (!$throw_on_fail) {
+            if ($debug) {
+                error_log("getThemeFilePath: File not found (returning false): $relative_path");
+            }
+            return false;
+        }
+
+        // Build error message for exception
         $error_msg = "File not found: $relative_path\n";
         $error_msg .= "Searched locations:\n";
         if ($theme_name) {
