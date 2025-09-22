@@ -353,10 +353,11 @@
 	//PRODUCT SCRIPTS
 	$optionvals = array();
 	$optionvals = array_merge($optionvals, LibraryFunctions::getFunctionNamesFromFile(PathHelper::getRootDir() . '/logic/product_scripts_logic.php'));
-	
+
 	$plugins = LibraryFunctions::list_plugins();
 	foreach($plugins as $plugin){
-		$product_script_file = PathHelper::getRootDir().'/plugins/'.$plugin.'/logic/product_scripts_logic.php';
+		// Check for hooks in the correct location: hooks/product_purchase.php
+		$product_script_file = PathHelper::getRootDir().'/plugins/'.$plugin.'/hooks/product_purchase.php';
 		if(file_exists($product_script_file)){
 			$optionvals = array_merge($optionvals, LibraryFunctions::getFunctionNamesFromFile($product_script_file));
 		}
