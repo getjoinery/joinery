@@ -95,6 +95,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
 $routes = [
     // Static file routes - ONLY for actual assets (CSS, JS, images, fonts, etc.)
     'static' => [
+        '/assets/*' => ['cache' => 43200],  // Global system assets
         // Semantic placeholders for clear segment control
         '/plugins/{plugin}/assets/*' => ['cache' => 43200],
         '/theme/{theme}/assets/*' => ['cache' => 43200],

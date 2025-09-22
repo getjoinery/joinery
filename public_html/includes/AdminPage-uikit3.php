@@ -67,8 +67,8 @@ class AdminPage{
 			<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"	/>
 
 			<!-- CSS FILES -->
-			<link rel="stylesheet" type="text/css" href="/adm/includes/uikit-3.6.14/css/uikit.min.css">
-			<link rel="stylesheet" type="text/css" href="/adm/includes/uikit-3.6.14/css/main_admin.css">
+			<link rel="stylesheet" type="text/css" href="/assets/vendor/uikit-3.6.14/css/uikit.min.css">
+			<link rel="stylesheet" type="text/css" href="/assets/vendor/uikit-3.6.14/css/main_admin.css">
 		
 			<!-- jQuery 3 -->
 			<!-- jQuery 3.2.1 <script src="/adm/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
@@ -76,7 +76,7 @@ class AdminPage{
 			<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 			
 			<!-- jQuery validate -->
-			<script type="text/javascript" src="/adm/includes/scripts/jquery.validate-1.9.1.js"></script>
+			<script type="text/javascript" src="/assets/js/jquery.validate-1.9.1.js"></script>
 
 
 			<!-- jQuery UI removed - was only needed for old file uploader -->
@@ -88,8 +88,8 @@ class AdminPage{
 		else{
 			?>
 			<!-- CSS FILES -->
-			<link rel="stylesheet" type="text/css" href="/adm/includes/uikit-3.6.14/css/uikit.min.css">
-			<link rel="stylesheet" type="text/css" href="/adm/includes/uikit-3.6.14/css/main_admin.css">
+			<link rel="stylesheet" type="text/css" href="/assets/vendor/uikit-3.6.14/css/uikit.min.css">
+			<link rel="stylesheet" type="text/css" href="/assets/vendor/uikit-3.6.14/css/main_admin.css">
 		
 			<!-- jQuery 3 -->
 			<!-- jQuery 3.2.1 <script src="/adm/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
@@ -97,7 +97,7 @@ class AdminPage{
 			<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 			
 			<!-- jQuery validate -->
-			<script type="text/javascript" src="/adm/includes/scripts/jquery.validate-1.9.1.js"></script>			
+			<script type="text/javascript" src="/assets/js/jquery.validate-1.9.1.js"></script>			
 			
 			<?php
 		}
@@ -483,8 +483,8 @@ class AdminPage{
 		<!-- /OFFCANVAS -->
 		
 		<!-- JS FILES -->
-		<script src="/adm/includes/uikit-3.6.14/js/uikit.min.js"></script>
-		<script src="/adm/includes/uikit-3.6.14/js/uikit-icons.min.js"></script>
+		<script src="/assets/vendor/uikit-3.6.14/js/uikit.min.js"></script>
+		<script src="/assets/vendor/uikit-3.6.14/js/uikit-icons.min.js"></script>
 
 	</body>
 </html>
