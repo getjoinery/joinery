@@ -155,11 +155,18 @@ class ProductTester {
         echo "Starting product creation and verification tests...<br><br>\n";
         echo "Starting tests (using hardcoded admin user for testing)...<br><br>\n";
 
-        // Set up admin session for testing
+        /**
+         * Set up admin session for testing
+         *
+         * Note: test_mode is set to enable testing of logic files that normally
+         * call exit(). Currently only product_logic.php checks for this flag.
+         *
+         * @see /logic/product_logic.php lines 116-143 for the test mode handling
+         */
         $_SESSION['loggedin'] = 1;
         $_SESSION['usr_user_id'] = 1;
         $_SESSION['permission'] = 10;  // Admin permission
-        $_SESSION['test_mode'] = true;
+        $_SESSION['test_mode'] = true;  // Enables test mode in product_logic
 
         try {
             // Load JSON specifications
@@ -931,6 +938,12 @@ class ProductTester {
     
     /**
      * Add a product to the shopping cart by calling product logic
+     *
+     * This method relies on the test mode handling in product_logic.php
+     * which returns control instead of calling exit() when $_SESSION['test_mode'] is set.
+     * This allows us to test the actual cart addition logic without subprocess workarounds.
+     *
+     * @see /logic/product_logic.php lines 116-143 for the test mode implementation
      */
     private function addProductToCart($product_id, $product_spec) {
         // Ensure we have a session for cart functionality
@@ -985,6 +998,9 @@ class ProductTester {
             $page_vars = product_logic(array(), $post_data, null);
 
             // Check if the cart action was completed
+            // The 'cart_action_completed' flag is set by product_logic in test mode
+            // to indicate that the cart addition was successful and a redirect would
+            // normally occur in production
             if (isset($page_vars['cart_action_completed']) && $page_vars['cart_action_completed']) {
                 echo "✓ Product added to cart successfully<br>\n";
             } else {
