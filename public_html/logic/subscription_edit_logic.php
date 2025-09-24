@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function subscription_edit_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/Pager.php');
 
@@ -101,9 +102,8 @@ function subscription_edit_logic($get_vars, $post_vars){
 		//RUN THE PRODUCT SCRIPTS
 		$product->run_product_scripts($user, $order_item);
 
-			
-		LibraryFunctions::redirect('/profile');
-		return;
+
+		return LogicResult::redirect('/profile');
 
 	}
 
@@ -125,7 +125,7 @@ function subscription_edit_logic($get_vars, $post_vars){
 	
 	//$page_vars['pager'] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>
 

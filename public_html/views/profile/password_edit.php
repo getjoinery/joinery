@@ -6,6 +6,12 @@
 	require_once(PathHelper::getThemeFilePath('password_edit_logic.php', 'logic'));
 
 	$page_vars = password_edit_logic($_GET, $_POST);
+// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 
 	$page = new PublicPage();
 	$hoptions=array(

@@ -2,6 +2,7 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	
 	PathHelper::requireOnce('data/users_class.php');
@@ -43,8 +44,7 @@ if ($_POST){
 		}
 		
 
-		header("Location: /profile");
-		exit();		
+		return LogicResult::redirect('/profile');		
 
 	}
 

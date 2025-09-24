@@ -6,6 +6,7 @@ function register_logic($get_vars, $post_vars){
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
 	PathHelper::requireOnce('includes/Activation.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SessionControl.php');
@@ -31,7 +32,7 @@ function register_logic($get_vars, $post_vars){
 	);
 
 	if ($session->get_user_id()) {
-		LibraryFunctions::Redirect('/profile/profile');
+		return LogicResult::redirect('/profile/profile');
 	}
 
 	if ($post_vars) {
@@ -152,7 +153,7 @@ function register_logic($get_vars, $post_vars){
 
 		$session->set_formfields_save("register");
 	}
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 
 ?>

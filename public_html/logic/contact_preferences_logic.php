@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function contact_preferences_logic($get_vars, $post_vars){
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 
 	
@@ -77,6 +78,6 @@ function contact_preferences_logic($get_vars, $post_vars){
 		'Change Contact Preferences' => '/profile/contact_preferences',
 	);
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

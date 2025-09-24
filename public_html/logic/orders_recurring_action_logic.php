@@ -2,6 +2,7 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
 	PathHelper::requireOnce('includes/StripeHelper.php');
 	PathHelper::requireOnce('data/address_class.php');
@@ -28,7 +29,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	//NOW REDIRECT
 	$session = SessionControl::get_instance();
 	$returnurl = $session->get_return();
-	header("Location: $returnurl");
-	exit();
+	return LogicResult::redirect($returnurl);
 
 ?>

@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function lists_logic($get_vars, $post_vars, $params){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
 
@@ -93,7 +94,7 @@ function lists_logic($get_vars, $post_vars, $params){
 	}
 	$page_vars['user_subscribed_list'] = $user_subscribed_list;
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 
 ?>

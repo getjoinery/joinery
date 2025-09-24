@@ -76,10 +76,10 @@ PathHelper::requireOnce('migrations/migrations.php');
 
 ### Directory Structure & Responsibilities
 - `/data/` - Database model classes using Active Record pattern (`[table]_class.php`)
-- `/logic/` - Business logic layer (`[page]_logic.php`) 
+- `/logic/` - Business logic layer using LogicResult pattern (`[page]_logic.php`) [📖 See Logic Architecture Guide](docs/claude/CLAUDE_logic_architecture.md)
 - `/views/` - Base presentation templates
 - `/adm/` - Complete admin interface (currently uses Falcon theme)
-- `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterHTML5, etc.)
+- `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterHTML5, LogicResult, etc.)
 - `/theme/` - Multi-theme system (falcon=Bootstrap, tailwind=legacy Tailwind CSS option) [symlinked]
 - `/plugins/` - Self-contained modules with own MVC structure [symlinked]
 - `/ajax/` - AJAX endpoints and webhook handlers

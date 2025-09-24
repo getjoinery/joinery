@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function cart_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/ShoppingCart.php');
 	PathHelper::requireOnce('includes/StripeHelper.php');
@@ -27,12 +28,12 @@ function cart_logic($get_vars, $post_vars){
 
 	if (isset($_REQUEST['r']) && is_numeric($_REQUEST['r'])) {
 		$cart->remove_item(intval($_REQUEST['r']));
-		LibraryFunctions::redirect('/cart');
+		return LogicResult::redirect('/cart');
 	}
 	
 	if (isset($_REQUEST['rc'])) {
 		$cart->remove_coupon($_REQUEST['rc']);
-		LibraryFunctions::redirect('/cart');
+		return LogicResult::redirect('/cart');
 	}
 	
 	$currency_code = $settings->get_setting('site_currency');
@@ -54,7 +55,7 @@ function cart_logic($get_vars, $post_vars){
 		
 		if($_GET['clear_coupon_code']){
 			$cart->remove_coupon($_GET['clear_coupon_code']);
-			LibraryFunctions::Redirect('/cart');
+			return LogicResult::redirect('/cart');
 		}
 		else if($_GET['coupon_code']){
 			//CHECK IF VALID
@@ -69,7 +70,7 @@ function cart_logic($get_vars, $post_vars){
 
 	if($_GET['newbilling'] == 1){
 		$cart->determine_billing_user($_POST, true);
-		LibraryFunctions::Redirect('/cart');
+		return LogicResult::redirect('/cart');
 	}
 	else{
 		$cart->determine_billing_user($_POST, false);
@@ -143,7 +144,7 @@ function cart_logic($get_vars, $post_vars){
 	$page_vars['cart'] = $cart;
 	
 
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 
 ?>

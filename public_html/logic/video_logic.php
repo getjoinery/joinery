@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function video_logic($get_vars, $post_vars, $video, $params){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/videos_class.php');
@@ -34,7 +35,7 @@ function video_logic($get_vars, $post_vars, $video, $params){
 		}
 	}	
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>
 

@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function event_logic($get_vars, $post_vars, $event){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/events_class.php');
@@ -160,7 +161,7 @@ function event_logic($get_vars, $post_vars, $event){
 	}
 	
 
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>
 
