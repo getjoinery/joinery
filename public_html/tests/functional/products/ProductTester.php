@@ -157,16 +157,11 @@ class ProductTester {
 
         /**
          * Set up admin session for testing
-         *
-         * Note: test_mode is set to enable testing of logic files that normally
-         * call exit(). Currently only product_logic.php checks for this flag.
-         *
-         * @see /logic/product_logic.php lines 116-143 for the test mode handling
          */
         $_SESSION['loggedin'] = 1;
         $_SESSION['usr_user_id'] = 1;
         $_SESSION['permission'] = 10;  // Admin permission
-        $_SESSION['test_mode'] = true;  // Enables test mode in product_logic
+        $_SESSION['test_mode'] = true;  // Enables Stripe test mode
 
         try {
             // Load JSON specifications
@@ -939,11 +934,8 @@ class ProductTester {
     /**
      * Add a product to the shopping cart by calling product logic
      *
-     * This method relies on the test mode handling in product_logic.php
-     * which returns control instead of calling exit() when $_SESSION['test_mode'] is set.
-     * This allows us to test the actual cart addition logic without subprocess workarounds.
-     *
-     * @see /logic/product_logic.php lines 116-143 for the test mode implementation
+     * This method calls product_logic directly to add items to the cart.
+     * It uses LogicResult pattern to handle redirects properly.
      */
     private function addProductToCart($product_id, $product_spec) {
         // Ensure we have a session for cart functionality
@@ -994,17 +986,12 @@ class ProductTester {
             require_once(PathHelper::getRootDir() . '/logic/product_logic.php');
 
             // Call product logic which will add to cart
-            // In test mode, it will return instead of exiting
-            $page_vars = product_logic(array(), $post_data, null);
+            $result = product_logic(array(), $post_data, null);
 
-            // Check if the cart action was completed
-            // The 'cart_action_completed' flag is set by product_logic in test mode
-            // to indicate that the cart addition was successful and a redirect would
-            // normally occur in production
-            if (isset($page_vars['cart_action_completed']) && $page_vars['cart_action_completed']) {
-                echo "✓ Product added to cart successfully<br>\n";
+            // Check if we got a redirect result (indicating successful cart addition)
+            if ($result instanceof LogicResult && $result->isRedirect() && $result->getRedirectUrl() === '/cart') {
+                echo "✓ Product added to cart successfully (redirect to cart)<br>\n";
             } else {
-                // This shouldn't happen with the test mode changes
                 echo "⚠ Product logic completed but cart action status unclear<br>\n";
             }
 

@@ -114,32 +114,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		$session->save_session_item($form_key, $form_data);
 		$page_vars['display_empty_form'] = FALSE;
 
-		/**
-		 * TEST MODE HANDLING
-		 *
-		 * This section allows product_logic to be tested without the exit() call
-		 * that normally occurs after redirect. When test_mode is set in the session,
-		 * the function returns data about what would happen instead of actually
-		 * redirecting and exiting.
-		 *
-		 * This pattern is a pragmatic compromise that:
-		 * - Allows automated testing of cart functionality
-		 * - Avoids complex refactoring of the routing system
-		 * - Is contained to just this file where exit() causes testing issues
-		 *
-		 * DO NOT copy this pattern to other files unless absolutely necessary.
-		 * If multiple files need this, consider implementing LogicResult pattern instead.
-		 *
-		 * @see /tests/functional/products/ProductTester.php for usage
-		 */
-		if (isset($_SESSION['test_mode']) && $_SESSION['test_mode'] && !isset($_SESSION['allow_redirect'])) {
-			$page_vars['redirect_to'] = '/cart';
-			$page_vars['cart_action_completed'] = true;
-			// Return what would happen without actually doing it
-			return LogicResult::render($page_vars);
-		}
-
-		// Normal production flow - redirect and exit
+		// Redirect to cart after successful addition
 		return LogicResult::redirect('/cart');	
 	}
 
