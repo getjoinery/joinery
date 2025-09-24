@@ -3,6 +3,7 @@
 function event_sessions_logic($get_vars, $post_vars){
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Activation.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
@@ -46,8 +47,7 @@ function event_sessions_logic($get_vars, $post_vars){
 	$page_vars['event'] = $event;
 	if($event->get('evt_session_display_type') == 2){
 		//REDIRECT
-		LibraryFunctions::redirect('/profile/event_sessions_course?event_id='.$event->key);						
-		return;
+		return LogicResult::redirect('/profile/event_sessions_course?event_id='.$event->key);
 	}
 
 	if ($event && $session->get_user_id() && $session->get_permission() > 4) {
@@ -130,6 +130,6 @@ function event_sessions_logic($get_vars, $post_vars){
 	
 	$page_vars['pager'] = new Pager(array('numrecords'=>$num_sessions, 'numperpage'=> $numperpage));
 		
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

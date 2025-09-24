@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function survey_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/surveys_class.php');
@@ -97,7 +98,7 @@ function survey_logic($get_vars, $post_vars){
 			}
 		}
 		if(empty($invalid_messages)){
-			LibraryFunctions::Redirect('/survey_finish?survey_id='.LibraryFunctions::encode($survey->key));
+			return LogicResult::redirect('/survey_finish?survey_id='.LibraryFunctions::encode($survey->key));
 		}
 	}
 	$page_vars['invalid_messages'] = $invalid_messages;
@@ -109,7 +110,7 @@ function survey_logic($get_vars, $post_vars){
 	$survey_answers->load();
 	$page_vars['survey_answers'] = $survey_answers;
 
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>
 

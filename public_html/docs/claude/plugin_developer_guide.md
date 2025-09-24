@@ -106,8 +106,8 @@ require_once(__DIR__ . '/../../includes/Globalvars.php');
 ├── plugin.json                 # Plugin metadata
 ├── data/                       # Data model classes
 │   └── my_data_class.php
-├── logic/                      # Business logic files
-│   └── my_feature_logic.php
+├── logic/                      # Business logic files using LogicResult pattern
+│   └── my_feature_logic.php       # See [Logic Architecture Guide](CLAUDE_logic_architecture.md)
 ├── views/                      # Plugin view templates (if needed)
 │   └── my_view.php
 ├── admin/                      # Admin interface files
@@ -173,6 +173,39 @@ class MyData extends SystemBase {
     ];
 }
 ```
+
+### Business Logic Files
+
+Plugin logic files follow the same LogicResult pattern as core logic files. For comprehensive documentation on logic file architecture and best practices, see the [Logic Architecture Guide](CLAUDE_logic_architecture.md).
+
+```php
+// plugins/my-plugin/logic/my_feature_logic.php
+<?php
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
+
+function my_feature_logic($get_vars, $post_vars) {
+    PathHelper::requireOnce('includes/LogicResult.php');
+    PathHelper::requireOnce('plugins/my-plugin/data/my_data_class.php');
+
+    // Business logic processing
+    $data = new MyData($get_vars['id'], TRUE);
+
+    // Use LogicResult for consistent returns
+    if ($post_vars['action'] === 'delete') {
+        $data->soft_delete();
+        return LogicResult::redirect('/plugins/my-plugin/admin/list');
+    }
+
+    return LogicResult::render(['data' => $data]);
+}
+?>
+```
+
+Key points for plugin logic files:
+- Always use `LogicResult::render()`, `LogicResult::redirect()`, or `LogicResult::error()`
+- Follow the naming convention: `[feature]_logic.php` with matching function name
+- Include paths are relative to the plugin directory when using `__DIR__`
+- Can be called from views, admin pages, or the router
 
 ### Admin Interface
 

@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function subscriptions_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/Activation.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
@@ -84,7 +85,7 @@ function subscriptions_logic($get_vars, $post_vars){
 	
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 	
 ?>

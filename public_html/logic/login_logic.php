@@ -5,6 +5,7 @@ function login_logic($get_vars, $post_vars){
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/Globalvars.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/Activation.php');
 	PathHelper::requireOnce('data/users_class.php');
@@ -38,13 +39,11 @@ function login_logic($get_vars, $post_vars){
 
 			// IF LOGGED IN, REDIRECT
 			if ($user) {
-				if (!$activated_user->get('usr_password')) { 
-					LibraryFunctions::Redirect('/password-set');
-					exit;
+				if (!$activated_user->get('usr_password')) {
+					return LogicResult::redirect('/password-set');
 				}
 				else{
-					LibraryFunctions::Redirect('/page/verify-email-confirm');
-					exit;
+					return LogicResult::redirect('/page/verify-email-confirm');
 				}
 					
 			} else {
@@ -58,19 +57,16 @@ function login_logic($get_vars, $post_vars){
 						LoginClass::StoreUserLogin($activated_user->key, LoginClass::LOGIN_FORM);
 					}
 
-					LibraryFunctions::Redirect('/password-set');
-					exit;
+					return LogicResult::redirect('/password-set');
 				} 
 				else {
-					LibraryFunctions::Redirect('/page/verify-email-confirm');
-					exit;
+					return LogicResult::redirect('/page/verify-email-confirm');
 				}
 			}
 		}
 		else {
 			require_once(__DIR__ . '/../includes/Exceptions/BusinessLogicException.php');
 			throw new BusinessLogicException('You cannot activate a user while being logged in as another user.');
-			exit();
 		}
 	}
 	
@@ -195,6 +191,6 @@ function login_logic($get_vars, $post_vars){
 	
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 	$session->clear_clearable_messages();
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

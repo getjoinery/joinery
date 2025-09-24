@@ -5,6 +5,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		$page_vars = array();
 		
 		PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 		PathHelper::requireOnce('includes/Pager.php');
 		require_once(PathHelper::getIncludePath('plugins/items/data/items_class.php'));  	
 		
@@ -50,7 +51,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 		$page_vars['pager'] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 		
-		return $page_vars;
+		return LogicResult::render($page_vars);
 	}
 	
 ?>
