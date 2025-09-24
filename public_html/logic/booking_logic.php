@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function booking_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 
 	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
@@ -36,7 +37,7 @@ function booking_logic($get_vars, $post_vars){
 	}	
 
 
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>
 

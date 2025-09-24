@@ -2,6 +2,7 @@
 function products_logic($get_vars, $post_vars){
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/Pager.php');
 
@@ -95,7 +96,7 @@ function products_logic($get_vars, $post_vars){
 	
 	$page_vars['pager'] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>
 

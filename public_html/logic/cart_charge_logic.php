@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function cart_charge_logic($get_vars, $post_vars){
 
 	PathHelper::requireOnce('includes/ShoppingCart.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
 	PathHelper::requireOnce('includes/EmailSender.php');
 	PathHelper::requireOnce('includes/StripeHelper.php');
@@ -64,8 +65,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	
 	
 	if(!$cart->items){
-		LibraryFunctions::Redirect('/cart_confirm'); 
-		exit();		
+		return LogicResult::redirect('/cart_confirm');		
 	}
 	
 	//DEBUG
@@ -539,7 +539,7 @@ function cart_charge_logic($get_vars, $post_vars){
 	$cart->clear_cart();
 	
 	 
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 
 ?>

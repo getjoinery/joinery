@@ -6,6 +6,12 @@
 	require_once(PathHelper::getThemeFilePath('event_sessions_course_logic.php', 'logic'));
 	
 	$page_vars = event_sessions_course_logic($_GET, $_POST);
+// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	
 	if($page_vars['error_message']){
 		PublicPage::OutputGenericPublicPage('Not Registered', 'Not Registered', $page_vars['error_message']);

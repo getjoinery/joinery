@@ -2,6 +2,7 @@
 function product_logic($get_vars, $post_vars, $product){
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/ShoppingCart.php');
@@ -135,12 +136,11 @@ function product_logic($get_vars, $post_vars, $product){
 			$page_vars['redirect_to'] = '/cart';
 			$page_vars['cart_action_completed'] = true;
 			// Return what would happen without actually doing it
-			return $page_vars;
+			return LogicResult::render($page_vars);
 		}
 
 		// Normal production flow - redirect and exit
-		LibraryFunctions::redirect('/cart');
-		exit();	
+		return LogicResult::redirect('/cart');	
 	}
 
 
@@ -148,6 +148,6 @@ function product_logic($get_vars, $post_vars, $product){
 	$page_vars['cart'] = $session->get_shopping_cart();
 	
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

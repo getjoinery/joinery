@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function address_edit_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SystemBase.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -73,6 +74,6 @@ function address_edit_logic($get_vars, $post_vars){
 	else{
 		$page_vars['address'] = new Address(NULL);
 	}
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function page_logic($get_vars, $post_vars, $page, $params){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/page_contents_class.php');
@@ -44,7 +45,7 @@ function page_logic($get_vars, $post_vars, $page, $params){
 		exit();
 	}	
 	*/
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>
 

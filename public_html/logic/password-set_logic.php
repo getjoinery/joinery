@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function password_set_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/Activation.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -53,6 +54,6 @@ function password_set_logic($get_vars, $post_vars){
 		$page_vars['message_title'] = 'Reset code sent';
 		$page_vars['message'] = 'Your password has been set. <a href="/login">Click here to log in</a>.';
 	} 
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

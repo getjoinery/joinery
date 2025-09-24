@@ -5,6 +5,7 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 	
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/event_waiting_lists_class.php');
@@ -104,6 +105,6 @@ function event_waiting_list_logic($get_vars, $post_vars, $event_id){
 				
 	}
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function list_logic($get_vars, $post_vars, $mailing_list, $params){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
 
@@ -74,6 +75,6 @@ function list_logic($get_vars, $post_vars, $mailing_list, $params){
 		$page_vars['member_of_list'] = $mailing_list->is_user_in_list($session->get_user_id());
 	}	
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

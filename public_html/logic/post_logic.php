@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function post_logic($get_vars, $post_vars, $post){
 	PathHelper::requireOnce('includes/SessionControl.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
 	PathHelper::requireOnce('includes/EmailSender.php');
 	PathHelper::requireOnce('data/posts_class.php');
@@ -93,6 +94,6 @@ function post_logic($get_vars, $post_vars, $post){
 	$page_vars['numcomments'] = $numcomments;	
 	
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 ?>

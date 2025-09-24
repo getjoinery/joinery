@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function cart_clear_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/ShoppingCart.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	
 	$page_vars = array();
 
@@ -20,7 +21,7 @@ function cart_clear_logic($get_vars, $post_vars){
 	$cart = $session->get_shopping_cart();
 	$cart->clear_cart();
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 
 ?>

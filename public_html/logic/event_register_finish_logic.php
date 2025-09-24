@@ -2,6 +2,7 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	PathHelper::requireOnce('includes/Activation.php');
+PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/SessionControl.php');			
 	
@@ -105,8 +106,7 @@ if($_POST){
 	$session->save_message($message);	
 	//NOW REDIRECT
 	if($_SESSION['permission']){
-		header("Location: /profile");
-		exit();
+		return LogicResult::redirect('/profile');
 	}
 	else{
 		$message = '<h3>Thanks for submitting the extra info for this event.  We look forward to seeing you there!</h3>';	
