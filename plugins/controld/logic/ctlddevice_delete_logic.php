@@ -47,7 +47,7 @@ function ctlddevice_delete_logic($get_vars, $post_vars){
 		exit;
 	}
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 	
 ?>

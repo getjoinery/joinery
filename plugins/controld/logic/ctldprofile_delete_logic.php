@@ -51,7 +51,7 @@ function ctldprofile_delete_logic($get_vars, $post_vars){
 			throw new SystemDisplayablePermanentError("You cannot delete a default profile.");
 		}
 		$page_vars['profile'] = $profile;
-		return $page_vars;
+		return LogicResult::render($page_vars);
 	}
 }
 	

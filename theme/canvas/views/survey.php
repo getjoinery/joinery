@@ -5,6 +5,12 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = survey_logic($_GET, $_POST);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	$survey = $page_vars['survey'];
 
 	$page = new PublicPage();

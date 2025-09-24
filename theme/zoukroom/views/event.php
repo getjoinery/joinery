@@ -15,6 +15,12 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 
 
 	$page_vars = event_logic($_GET, $_POST, $event, NULL);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	$event = $page_vars['event'];
 	
 	$session = SessionControl::get_instance();

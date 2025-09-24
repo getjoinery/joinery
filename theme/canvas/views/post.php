@@ -5,6 +5,12 @@
 	require_once(PathHelper::getThemeFilePath('post_logic.php', 'logic'));
 
 	$page_vars = post_logic($_GET, $_POST, $post);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	$post = $page_vars['post'];
 
 	$page = new PublicPage();

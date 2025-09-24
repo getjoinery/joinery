@@ -189,7 +189,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 	
 	
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 	
 ?>

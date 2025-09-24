@@ -6,6 +6,12 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 
 	// Always call product_logic - it contains essential business logic
 	$page_vars = product_logic($_GET, $_POST, $product);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	$product = $page_vars['product'];
 	$product_version = $page_vars['product_version'];
 	$cart = $page_vars['cart'];

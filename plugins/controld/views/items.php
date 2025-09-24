@@ -3,8 +3,14 @@
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 	require_once(PathHelper::getIncludePath('plugins/items/logic/items_logic.php'));
- 
+
 	$page_vars = items_logic($_GET, $_POST);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 
 	$page = new PublicPage();
 	$hoptions = array(

@@ -80,7 +80,7 @@ function ctld_activation_logic($get_vars, $post_vars){
 	$page_vars['linkname2'] = $linkname2;
 	$page_vars['command'] = $command;
 	
-	return $page_vars;
+	return LogicResult::render($page_vars);
 }
 	
 ?>

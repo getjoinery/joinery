@@ -121,7 +121,7 @@ function devices_logic($get_vars, $post_vars){
 	}
 	$page_vars['scheduled_string'] = $scheduled_string;
 	
-	return $page_vars;	
+	return LogicResult::render($page_vars);	
 	
 }
 

@@ -4,6 +4,12 @@
 	require_once(PathHelper::getThemeFilePath('page_logic.php', 'logic'));
 
 	$page_vars = page_logic($_GET, $_POST, $page, $params);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	$page = $page_vars['page'];
 
 	$paget = new PublicPage();
