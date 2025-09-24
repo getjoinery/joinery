@@ -989,7 +989,7 @@ class ProductTester {
             $result = product_logic(array(), $post_data, null);
 
             // Check if we got a redirect result (indicating successful cart addition)
-            if ($result instanceof LogicResult && $result->isRedirect() && $result->getRedirectUrl() === '/cart') {
+            if ($result instanceof LogicResult && $result->redirect === '/cart') {
                 echo "✓ Product added to cart successfully (redirect to cart)<br>\n";
             } else {
                 echo "⚠ Product logic completed but cart action status unclear<br>\n";
