@@ -34,8 +34,10 @@ if ($action) {
                     );
                     $session->save_message($message);
                 } else {
+                    // Get the actual cache directory path for better error messaging
+                    $cache_dir = PathHelper::getAbsolutePath('cache/static_pages/');
                     $message = new DisplayMessage(
-                        'Failed to enable caching. Cache directory may not be writable. Check permissions on /cache/static_pages/',
+                        'Failed to enable caching. Cache directory may not be writable. Check permissions on: ' . $cache_dir,
                         'Error',
                         '/\/admin\/admin_static_cache.*/',
                         DisplayMessage::MESSAGE_ERROR,
