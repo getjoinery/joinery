@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #VERSION 1.05
-#Usage:  ./fix_permissions_staging.sh site_name
+#Usage:  ./fix_permissions.sh site_name
 # MODIFIED: Removed theme and plugin directory creation - now using symlinks 
 
 
@@ -31,7 +31,7 @@ fi
 
 chown -R www-data /var/www/html/$1
 chgrp -R user1 /var/www/html/$1
-chmod -R 777 /var/www/html/$1
+chmod -R 775 /var/www/html/$1
 chmod -R 777 /var/www/html/$1/uploads
 
 echo "All done."
