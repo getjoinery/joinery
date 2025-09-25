@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 1.30
+#VERSION 1.31
 #Usage:  ./new_account.sh site_name domain_name server_ip [database_restore_file]
 
 VIRTUALHOST_TEMPLATE=/home/user1/default_virtualhost.conf
@@ -102,8 +102,6 @@ fi
 echo "Creating main site directory structure..."
 mkdir -p /var/www/html/$1
 mkdir -p /var/www/html/$1/public_html
-mkdir -p /var/www/html/$1/theme
-mkdir -p /var/www/html/$1/plugins
 mkdir -p /var/www/html/$1/static_files
 mkdir -p /var/www/html/$1/config
 mkdir -p /var/www/html/$1/logs
@@ -115,7 +113,6 @@ mkdir -p /var/www/html/$1/uploads/thumbnail
 mkdir -p /var/www/html/$1/uploads/lthumbnail
 chown -R user1 /var/www/html/$1
 chgrp -R user1 /var/www/html/$1
-chmod -R 775 /var/www/html/$1/theme
 chmod -R 777 /var/www/html/$1/uploads
 chown -R www-data /var/www/html/$1/uploads
 
@@ -126,12 +123,10 @@ sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1/config/Globalvars_site.php
 sed -i -e "s/{{SITE_NAME}}/${1}/g" /var/www/html/$1/config/Globalvars_site.php
 echo "$NEW_SITE_ROOT created."
 
-# Create test site directories  
+# Create test site directories
 echo "Creating test site directory structure..."
 mkdir -p /var/www/html/$1_test
 mkdir -p /var/www/html/$1_test/public_html
-mkdir -p /var/www/html/$1_test/theme
-mkdir -p /var/www/html/$1_test/plugins
 mkdir -p /var/www/html/$1_test/static_files
 mkdir -p /var/www/html/$1_test/config
 mkdir -p /var/www/html/$1_test/logs
@@ -143,7 +138,6 @@ mkdir -p /var/www/html/$1_test/uploads/thumbnail
 mkdir -p /var/www/html/$1_test/uploads/lthumbnail
 chown -R user1 /var/www/html/$1_test
 chgrp -R user1 /var/www/html/$1_test
-chmod -R 775 /var/www/html/$1_test/theme
 chmod -R 777 /var/www/html/$1_test/uploads
 chown -R www-data /var/www/html/$1_test/uploads
 
