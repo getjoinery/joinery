@@ -85,7 +85,13 @@ class PathHelper {
             // During database updates when settings table might not be available
             $theme_template = 'falcon';
         }
-        
+
+        // Validate theme_template is not empty/blank - single validation point
+        if (empty(trim($theme_template))) {
+            error_log("WARNING: theme_template setting is empty/blank, using default 'falcon'");
+            $theme_template = 'falcon';
+        }
+
         if ($theme_template === 'plugin') {
             // Get the active plugin - this should always be set when plugin theme is active
             try {
