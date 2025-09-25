@@ -233,7 +233,7 @@ $stats = StaticPageCache::getCacheStats();
 $cached_urls = StaticPageCache::getCachedUrls(50);
 
 // Get the index to see all entries (cached and nostatic)
-$index_file = '/var/www/html/joinerytest/public_html/cache/static_pages/index.json';
+$index_file = PathHelper::getAbsolutePath('cache/static_pages/index.json');
 $all_urls = [];
 
 if (file_exists($index_file)) {
@@ -247,7 +247,7 @@ if (file_exists($index_file)) {
         if (is_array($entry) && isset($entry['status'])) {
             if ($entry['status'] === 'cached') {
                 // For cached entries, get file info
-                $cache_file = '/var/www/html/joinerytest/public_html/cache/static_pages/' . $hash . '.html';
+                $cache_file = PathHelper::getAbsolutePath('cache/static_pages/' . $hash . '.html');
                 if (file_exists($cache_file)) {
                     $all_urls[] = [
                         'url' => $entry['url'],
