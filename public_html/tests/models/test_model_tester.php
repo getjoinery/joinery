@@ -15,7 +15,7 @@ try {
     // Create an ActivationCode instance and run its automated test
     echo "<h3>Testing ActivationCode Model</h3>\n";
     
-    $activation_code = new ActivationCode();
+    $activation_code = new ActivationCode(NULL);
     $result = $activation_code->test(true); // true for debug output
     
     if ($result) {
