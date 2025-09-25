@@ -44,16 +44,19 @@ $output_format = $is_cli ? 'text' : 'html';
 if (!$is_cli) {
     require_once(__DIR__ . '/../includes/PathHelper.php');
     PathHelper::requireOnce('includes/SessionControl.php');
-    
+
+    $session = SessionControl::get_instance();
+
     // Check if user is logged in and has sufficient permissions
-    if (!SessionControl::requireLogin()) {
+    if (!$session->is_logged_in()) {
         http_response_code(403);
         echo "<h1>403 Forbidden</h1>";
-        echo "<p>Access denied. Please log in to continue.</p>";
+        echo "<p>Access denied. Please <a href='/login'>log in</a> to continue.</p>";
         exit;
     }
-    
-    if (!SessionControl::checkPermissionLevel(10)) {
+
+    // check_permission will redirect if permission denied, so we need to check manually
+    if ($session->get_permission() < 10) {
         http_response_code(403);
         echo "<h1>403 Forbidden</h1>";
         echo "<p>Access denied. Administrator permissions (level 10) required to access this utility.</p>";
