@@ -23,6 +23,15 @@ if [ $# -eq 0 ]; then
 fi
 
 FILENAME="$1"
+
+# Validate filename has .conf extension
+if [[ ! "$FILENAME" == *.conf ]]; then
+    echo "Error: Filename must end with .conf extension"
+    echo "You provided: $FILENAME"
+    echo "Example: $0 galactictribune.conf"
+    exit 1
+fi
+
 CONFIG_FILE="/etc/apache2/sites-available/${FILENAME}"
 TEMPLATE_FILE="$(dirname "$0")/default_virtualhost.conf"
 
@@ -65,10 +74,9 @@ SITE_NAME=$(extract_or_use_param "$2" "DocumentRoot" "s/.*\/\([^/]*\)\/public_ht
 DOMAIN_NAME=$(extract_or_use_param "$3" "^[[:space:]]*ServerName" "s/^[[:space:]]*ServerName[[:space:]]\+\([^[:space:]]*\).*/\1/" "example.com")
 SERVER_IP=$(extract_or_use_param "$4" "<VirtualHost" "s/.*<VirtualHost[[:space:]]*\([^:]*\):.*/\1/" "127.0.0.1")
 
-# Validate extracted values - don't use defaults if we have an existing config
-if [ -f "$CONFIG_FILE" ]; then
-    # If we extracted default values from an existing config, something went wrong
-    if [ "$SITE_NAME" = "mysite" ] || [ "$DOMAIN_NAME" = "example.com" ] || [ "$SERVER_IP" = "127.0.0.1" ]; then
+# Validate extracted values - don't use defaults!
+if [ "$SITE_NAME" = "mysite" ] || [ "$DOMAIN_NAME" = "example.com" ] || [ "$SERVER_IP" = "127.0.0.1" ]; then
+    if [ -f "$CONFIG_FILE" ]; then
         echo "ERROR: Failed to extract configuration from existing file: $CONFIG_FILE"
         echo ""
         echo "Extracted values:"
@@ -78,17 +86,25 @@ if [ -f "$CONFIG_FILE" ]; then
         echo ""
         echo "These appear to be default values, not actual configuration."
         echo ""
-        echo "Please provide the parameters explicitly:"
-        echo "  $0 $FILENAME <site_name> <domain_name> <server_ip>"
-        echo ""
-        echo "Example:"
-        echo "  $0 joinerytest.conf joinerytest joinerytest.site 69.164.209.253"
-        echo ""
         echo "Or check that the existing config file has the expected format."
-        exit 1
+    else
+        echo "ERROR: No existing configuration file found, and no parameters provided."
+        echo ""
+        echo "When creating a new virtualhost, you must provide all parameters:"
     fi
 
-    # Additional validation - site name should match filename
+    echo "Please provide the parameters explicitly:"
+    echo "  $0 $FILENAME <site_name> <domain_name> <server_ip>"
+    echo ""
+    echo "Example:"
+    echo "  $0 galactictribune.conf galactictribune galactictribune.net 69.164.209.253"
+    echo ""
+    exit 1
+fi
+
+# Additional validation for existing config files
+if [ -f "$CONFIG_FILE" ]; then
+    # Site name should match filename
     EXPECTED_SITE="${FILENAME%.conf}"
     if [ "$SITE_NAME" != "$EXPECTED_SITE" ]; then
         echo "WARNING: Site name '$SITE_NAME' doesn't match filename '$EXPECTED_SITE'"
