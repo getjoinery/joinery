@@ -258,6 +258,25 @@ fix_permissions() {
     fi
 }
 
+# Function to handle test failures with --norollback support
+handle_test_failure() {
+    local error_message="$1"
+    local staging_dir="$2"
+
+    echo "ERROR: $error_message"
+    echo "DEBUGGING: Staging directory preserved at: $staging_dir"
+
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo ""
+        echo "--norollback flag detected: Proceeding with deployment despite test failures."
+        echo "WARNING: Tests failed but deployment will continue. Manual intervention may be required."
+        echo ""
+        return 0  # Continue with deployment
+    else
+        exit 1    # Exit normally if rollback is enabled
+    fi
+}
+
 # Function to deploy themes and plugins from staging to public_html
 deploy_themes_plugins_from_stage() {
     local target_site="$1"
@@ -1096,9 +1115,10 @@ while IFS= read -r -d '' file; do
 done < <(find "/var/www/html/$TARGET_SITE/public_html_stage" -name "*.php" -print0)
 
 if [[ $php_error_count -gt 0 ]]; then
-    echo "ERROR: $php_error_count PHP syntax errors found in staging."
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
-    exit 1
+    handle_test_failure "$php_error_count PHP syntax errors found in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
+    if [ $? -eq 1 ]; then
+        exit 1
+    fi
 fi
 verbose_echo "✓ PHP syntax validation passed ($php_file_count files checked)"
 
@@ -1169,7 +1189,15 @@ if [[ $plugin_error_count -gt 0 ]]; then
     echo "  cd /var/www/html/$TARGET_SITE/public_html_stage"
     echo "  php -l plugins/path/to/problematic_file.php"
     echo "========================================="
-    exit 1
+
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo ""
+        echo "--norollback flag detected: Proceeding with deployment despite plugin loading failures."
+        echo "WARNING: Plugin tests failed but deployment will continue. Manual intervention may be required."
+        echo ""
+    else
+        exit 1
+    fi
 fi
 verbose_echo "✓ Plugin loading test passed ($plugin_file_count files checked)"
 
@@ -1201,9 +1229,10 @@ if ! php -r "
         exit(1);
     }
 " > /dev/null 2>&1; then
-    echo "ERROR: Model tests failed in staging."
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
-    exit 1
+    handle_test_failure "Model tests failed in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
+    if [ $? -eq 1 ]; then
+        exit 1
+    fi
 fi
 verbose_echo "✓ Model tests passed on staging"
 
@@ -1224,9 +1253,10 @@ if ! php -r "
         exit(1);
     }
 " >/dev/null 2>&1; then
-    echo "ERROR: Application bootstrap test failed in staging."
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
-    exit 1
+    handle_test_failure "Application bootstrap test failed in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
+    if [ $? -eq 1 ]; then
+        exit 1
+    fi
 fi
 verbose_echo "✓ Application bootstrap test passed on staging"
 
