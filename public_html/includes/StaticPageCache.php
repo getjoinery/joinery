@@ -21,6 +21,16 @@ class StaticPageCache {
 
             // Create cache directory if it doesn't exist
             if (!is_dir(self::$cache_dir)) {
+                // First ensure parent cache directory exists
+                $parent_dir = dirname(self::$cache_dir);
+                if (!is_dir($parent_dir)) {
+                    if (!@mkdir($parent_dir, 0755, true)) {
+                        error_log("StaticPageCache: Failed to create parent cache directory: " . $parent_dir);
+                        self::$cache_dir = null; // Disable caching
+                        return;
+                    }
+                }
+
                 // Create with 755 permissions (owner can write, others can read/execute)
                 // When created by www-data, this gives Apache full access
                 if (!@mkdir(self::$cache_dir, 0755, true)) {
