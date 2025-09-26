@@ -10,7 +10,7 @@
 # MODIFIED: Added trap-based automatic rollback system
 
 # Deploy script version
-DEPLOY_VERSION="3.01"
+DEPLOY_VERSION="3.05"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -1128,6 +1128,18 @@ plugin_error_count=0
 plugin_file_count=0
 while IFS= read -r -d '' file; do
     ((plugin_file_count++))
+
+    # OPTION 2: First check for parse/syntax errors
+    syntax_check=$(php -l "$file" 2>&1)
+    syntax_check_exit_code=$?
+
+    if [[ $syntax_check_exit_code -ne 0 ]]; then
+        echo "SYNTAX ERROR in: $file"
+        echo "  Error details: $syntax_check"
+        ((plugin_error_count++))
+        continue
+    fi
+
     # Test if the file can be included without errors
     # CRITICAL: Set working directory and document root so PathHelper works correctly
     plugin_test_output=$(php -r "
@@ -1135,7 +1147,20 @@ while IFS= read -r -d '' file; do
         chdir('/var/www/html/$TARGET_SITE/public_html_stage');
 
         error_reporting(E_ALL);
+
         \$has_error = false;
+        \$shutdown_error_captured = false;
+
+        // OPTION 5: Register shutdown function to catch fatal errors
+        register_shutdown_function(function() use (&\$has_error, &\$shutdown_error_captured) {
+            \$error = error_get_last();
+            if (\$error && (\$error['type'] & (E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR))) {
+                if (!\$shutdown_error_captured) {
+                    echo 'FATAL ERROR: ' . \$error['message'] . ' in ' . \$error['file'] . ' on line ' . \$error['line'] . \"\n\";
+                    \$has_error = true;
+                }
+            }
+        });
 
         set_error_handler(function(\$errno, \$errstr, \$errfile, \$errline) use (&\$has_error) {
             // Only treat actual errors and warnings as failures, ignore deprecation notices
@@ -1160,9 +1185,11 @@ while IFS= read -r -d '' file; do
                 echo 'SUCCESS';
             }
         } catch (Exception \$e) {
+            \$shutdown_error_captured = true;
             echo 'EXCEPTION: ' . \$e->getMessage() . ' in ' . \$e->getFile() . ' on line ' . \$e->getLine() . \"\n\";
             exit(1);
         } catch (Error \$e) {
+            \$shutdown_error_captured = true;
             echo 'FATAL ERROR: ' . \$e->getMessage() . ' in ' . \$e->getFile() . ' on line ' . \$e->getLine() . \"\n\";
             exit(1);
         }
@@ -1170,7 +1197,10 @@ while IFS= read -r -d '' file; do
 
     plugin_test_exit_code=$?
 
-    if [[ $plugin_test_exit_code -ne 0 ]] || [[ "$plugin_test_output" != "SUCCESS" ]]; then
+    # Trim whitespace and carriage returns from output for comparison
+    plugin_test_output_trimmed=$(echo "$plugin_test_output" | tr -d '\r' | xargs)
+
+    if [[ $plugin_test_exit_code -ne 0 ]] || [[ "$plugin_test_output_trimmed" != "SUCCESS" ]]; then
         echo "PLUGIN LOADING ERROR in: $file"
         echo "  Error details: $plugin_test_output"
         ((plugin_error_count++))
