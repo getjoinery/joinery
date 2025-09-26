@@ -269,6 +269,101 @@ try {
         echo ($output_format === 'html') ? "</pre></details>" : "";
     }
 
+    // Check for foreign key references to this table
+    output("Checking for foreign key references to table '$table_name'...", 'header');
+
+    $fk_check_sql = "
+        SELECT
+            tc.table_name AS referencing_table,
+            kcu.column_name AS referencing_column,
+            ccu.table_name AS referenced_table,
+            ccu.column_name AS referenced_column
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+            ON tc.constraint_name = kcu.constraint_name
+            AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage AS ccu
+            ON ccu.constraint_name = tc.constraint_name
+            AND ccu.table_schema = tc.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+            AND ccu.table_name = :table_name
+            AND ccu.column_name = :column_name
+    ";
+
+    $fk_check_q = $dblink->prepare($fk_check_sql);
+    $fk_check_q->execute(['table_name' => $table_name, 'column_name' => $pkey_column]);
+    $foreign_keys = $fk_check_q->fetchAll(PDO::FETCH_ASSOC);
+
+    $has_fk_issues = false;
+    $fk_conflicts = [];
+
+    if (!empty($foreign_keys)) {
+        output("Found " . count($foreign_keys) . " foreign key reference(s) to this table:", 'warning');
+
+        foreach ($foreign_keys as $fk) {
+            output("  - Table '{$fk['referencing_table']}' column '{$fk['referencing_column']}' references '{$fk['referenced_table']}.{$fk['referenced_column']}'", 'info');
+
+            // Check if any of the duplicate IDs are referenced
+            foreach ($duplicates as $dup) {
+                $ref_check_sql = "SELECT COUNT(*) FROM {$fk['referencing_table']} WHERE {$fk['referencing_column']} = :id";
+                $ref_check_q = $dblink->prepare($ref_check_sql);
+                $ref_check_q->execute(['id' => $dup[$pkey_column]]);
+                $ref_count = $ref_check_q->fetchColumn();
+
+                if ($ref_count > 0) {
+                    $has_fk_issues = true;
+                    $fk_conflicts[] = [
+                        'id' => $dup[$pkey_column],
+                        'table' => $fk['referencing_table'],
+                        'column' => $fk['referencing_column'],
+                        'count' => $ref_count
+                    ];
+                    output("    ⚠️ ID {$dup[$pkey_column]} is referenced by $ref_count record(s) in {$fk['referencing_table']}", 'error');
+                }
+            }
+        }
+
+        if ($has_fk_issues) {
+            output("", 'error'); // Empty line for spacing
+            output("CRITICAL: Cannot safely fix duplicates - foreign key references exist!", 'error');
+            output("The duplicate primary keys are being referenced by other tables.", 'error');
+            output("Changing these IDs would break referential integrity.", 'error');
+
+            if ($output_format === 'html') {
+                echo "<div style='background: #f8d7da; padding: 15px; margin: 20px 0; border-radius: 5px; border-left: 4px solid #dc3545;'>";
+                echo "<h3>🚫 Operation Blocked - Foreign Key Conflicts</h3>";
+                echo "<p>The following duplicate IDs have foreign key references that prevent safe modification:</p>";
+                echo "<ul>";
+                foreach ($fk_conflicts as $conflict) {
+                    echo "<li>ID <strong>{$conflict['id']}</strong> is referenced by <strong>{$conflict['count']}</strong> record(s) in <strong>{$conflict['table']}.{$conflict['column']}</strong></li>";
+                }
+                echo "</ul>";
+                echo "<h4>Recommended Solutions:</h4>";
+                echo "<ol>";
+                echo "<li><strong>Manual Resolution:</strong> Manually update or delete the referencing records first</li>";
+                echo "<li><strong>Cascade Update:</strong> Implement a cascade update strategy (requires careful planning)</li>";
+                echo "<li><strong>Data Merge:</strong> Merge the duplicate records' related data before fixing duplicates</li>";
+                echo "</ol>";
+                echo "</div>";
+            } else {
+                echo "\n" . str_repeat("=", 50) . "\n";
+                echo "FOREIGN KEY CONFLICTS DETECTED\n";
+                echo str_repeat("-", 50) . "\n";
+                foreach ($fk_conflicts as $conflict) {
+                    echo "  ID {$conflict['id']}: {$conflict['count']} references in {$conflict['table']}.{$conflict['column']}\n";
+                }
+                echo "\nRecommended Solutions:\n";
+                echo "1. Manual Resolution: Update/delete referencing records first\n";
+                echo "2. Cascade Update: Implement cascade update strategy\n";
+                echo "3. Data Merge: Merge related data before fixing duplicates\n";
+            }
+
+            exit(1);
+        }
+    } else {
+        output("No foreign key references found to this table - safe to proceed", 'success');
+    }
+
     // Get the current max ID to start assigning new IDs from
     $max_sql = "SELECT COALESCE(MAX($pkey_column), 0) as max_id FROM $table_name";
     $max_q = $dblink->prepare($max_sql);
