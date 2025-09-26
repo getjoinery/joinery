@@ -10,7 +10,7 @@
 # MODIFIED: Added trap-based automatic rollback system
 
 # Deploy script version
-DEPLOY_VERSION="3.0"
+DEPLOY_VERSION="3.01"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -1135,10 +1135,13 @@ while IFS= read -r -d '' file; do
         chdir('/var/www/html/$TARGET_SITE/public_html_stage');
 
         error_reporting(E_ALL);
-        set_error_handler(function(\$errno, \$errstr, \$errfile, \$errline) {
+        \$has_error = false;
+
+        set_error_handler(function(\$errno, \$errstr, \$errfile, \$errline) use (&\$has_error) {
             // Only treat actual errors and warnings as failures, ignore deprecation notices
             if (\$errno & (E_ERROR | E_WARNING | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR)) {
                 echo \"PHP Error (\$errno): \$errstr in \$errfile on line \$errline\n\";
+                \$has_error = true;
                 exit(1);
             }
             // Ignore E_DEPRECATED, E_USER_DEPRECATED, E_NOTICE, E_STRICT
@@ -1151,7 +1154,11 @@ while IFS= read -r -d '' file; do
 
             // Now test the plugin file
             include_once '$file';
-            echo 'SUCCESS';
+
+            // Only output SUCCESS if we got this far without errors
+            if (!\$has_error) {
+                echo 'SUCCESS';
+            }
         } catch (Exception \$e) {
             echo 'EXCEPTION: ' . \$e->getMessage() . ' in ' . \$e->getFile() . ' on line ' . \$e->getLine() . \"\n\";
             exit(1);
