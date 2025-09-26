@@ -3,19 +3,44 @@
 	
 	$_SERVER['DOCUMENT_ROOT'] = __DIR__ . '/..';
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
-	
+
+	// Determine if running from command line or web
+	$is_cli = (php_sapi_name() === 'cli');
+
+	// Permission check - require permission level 10 for web access
+	if (!$is_cli) {
+		PathHelper::requireOnce('includes/SessionControl.php');
+		$session = SessionControl::get_instance();
+
+		// Check if user is logged in and has sufficient permissions
+		if (!$session->is_logged_in()) {
+			http_response_code(403);
+			echo "<h1>403 Forbidden</h1>";
+			echo "<p>Access denied. Please <a href='/login'>log in</a> to continue.</p>";
+			exit;
+		}
+
+		// Check permission level
+		if ($session->get_permission() < 10) {
+			http_response_code(403);
+			echo "<h1>403 Forbidden</h1>";
+			echo "<p>Access denied. Administrator permissions (level 10) required to run database updates.</p>";
+			exit;
+		}
+	}
+
 	// Migrations are now loaded automatically by the Migration class
-	
+
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/DbConnector.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/DatabaseUpdater.php');
 	PathHelper::requireOnce('data/migrations_class.php');
-	
+
 	// Clear the stat cache to ensure we see file changes
 	clearstatcache();
-	
+
 	$globalvars = Globalvars::get_instance();
 	$session = SessionControl::get_instance();
 	
