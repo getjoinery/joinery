@@ -1,5 +1,6 @@
 <?php
 	require_once(PathHelper::getThemeFilePath('register_logic.php', 'logic'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = register_logic($_GET, $_POST);
 	// Handle LogicResult return format
@@ -27,11 +28,10 @@ $page_vars = $page_vars->data;
 		if (array_key_exists($_GET['msgtext'], $page_vars['LOGIN_MESSAGES'])) {
 			echo PublicPage::alert('Login warning', htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]), 'warn');
 		}
-	}		
-			
-	$nickname_display = $settings->get_setting('nickname_display_as');
+	}
 
 	$settings = Globalvars::get_instance();
+	$nickname_display = $settings->get_setting('nickname_display_as');
 	$formwriter = $page->getFormWriter('form1');
 
 	$validation_rules = array();
