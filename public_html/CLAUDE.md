@@ -52,6 +52,7 @@ $session = SessionControl::get_instance();
 - **Core files (PathHelper, Globalvars, SessionControl, ThemeHelper, PluginHelper, DbConnector)**: Already loaded - NEVER require them
 - **All other files**: Use `require_once(PathHelper::getIncludePath('path/to/file.php'))`
 - **Theme-overridable files**: Use `require_once(PathHelper::getThemeFilePath('filename.php', 'subdirectory'))`
+- **EXCEPTION**: In bootstrap tests or deployment scripts running outside the normal application flow, you may need to manually require core files using `require_once(PathHelper::getIncludePath('includes/Globalvars.php'))` after loading PathHelper
 
 ```php
 // ✅ CORRECT - Standard file inclusion
