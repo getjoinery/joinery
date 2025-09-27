@@ -110,6 +110,14 @@
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
+	// Tab menu for settings pages
+	$tab_menus = array(
+		'General Settings' => '/admin/admin_settings',
+		'Payment Settings' => '/admin/admin_settings_payments',
+		'Email Settings' => '/admin/admin_settings_email',
+	);
+	echo AdminPage::tab_menu($tab_menus, 'General Settings');
+
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	
