@@ -2,28 +2,27 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function login_logic($get_vars, $post_vars){
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/Globalvars.php');
 PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/Activation.php');
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/login_class.php');
-	
+
 	//HANDLE ACTIVATION FIRST IF PRESENT
 	if ($get_vars['act_code']) {
 		$act_code = $get_vars['act_code'];
 		$activated_user = NULL;
 		$activated = FALSE;
-	
+
 		$session = SessionControl::get_instance();
 		$page_vars['session'] = $session;
 		$settings = Globalvars::get_instance();
 		$page_vars['settings'] = $settings;
 
 		if(!$settings->get_setting('register_active')){
-			require_once(LibraryFunctions::display_404_page());	
+			require_once(LibraryFunctions::display_404_page());
 		}
 
 		if ($session->get_user_id()) {
@@ -31,7 +30,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		} else {
 			$user = NULL;
 		}
-		
+
 		// If we have an activate code and a logged in user, make sure the code matches the user
 		// and then activate them.  If we don't have a logged in user, just activate them!
 		if ($activated_user = Activation::ActivateUser($act_code, $user ? $user->key : NULL)) {
@@ -45,10 +44,10 @@ PathHelper::requireOnce('includes/LogicResult.php');
 				else{
 					return LogicResult::redirect('/page/verify-email-confirm');
 				}
-					
+
 			} else {
-				// Does this user need to create a password? 
-				if (!$activated_user->get('usr_password')) { 
+				// Does this user need to create a password?
+				if (!$activated_user->get('usr_password')) {
 
 					// Login the user and let them create a password
 					$session->store_session_variables($activated_user);
@@ -58,7 +57,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 					}
 
 					return LogicResult::redirect('/password-set');
-				} 
+				}
 				else {
 					return LogicResult::redirect('/page/verify-email-confirm');
 				}
@@ -69,16 +68,14 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			throw new BusinessLogicException('You cannot activate a user while being logged in as another user.');
 		}
 	}
-	
-	
+
 	//NOW PROCESS REGULAR LOGIN
-	
+
 	$page_vars = array();
 	// Check if the page was requested with jQuery, if so, we should process this page differently
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
 	// AJAX requests will be handled by the new ErrorManager system
-
 
 	if($post_vars){
 		if ((empty($post_vars['email']) && empty($post_vars['lbx_email'])) ||
@@ -95,7 +92,6 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			}
 		}
 
-
 		$email = empty($post_vars['email']) ? $post_vars['lbx_email'] : $post_vars['email'];
 		$password = empty($post_vars['password']) ? $post_vars['lbx_password'] : $post_vars['password'];
 		$user = User::GetByEmail($email);
@@ -110,7 +106,6 @@ PathHelper::requireOnce('includes/LogicResult.php');
 				exit;
 			}
 		}
-
 
 		// Here we know the user/password was good
 		$session = SessionControl::get_instance();
@@ -156,12 +151,12 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		}
 		exit();
 	}
-	
+
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
-		
+
 	$login_messages = array(
 		'email_verified'=>'Your email is now verified.  Please log in to improve your profile.',
 		'email_not_verified'=>'Your email address was unable to be verified because of an incorrect or expired verification code.  Please log in to resend your verification code',
@@ -179,8 +174,6 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		$session->save_message($message);
 	}
 
-
-
 	$email = '';
 	if (isset($get_vars['e'])) {
 		$e = rawurldecode($get_vars['e']);
@@ -188,7 +181,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			$page_vars['email'] = $e;
 		}
 	}
-	
+
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 	$session->clear_clearable_messages();
 	return LogicResult::render($page_vars);

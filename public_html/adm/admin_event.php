@@ -1,7 +1,7 @@
 <?php
-	
+
 	PathHelper::requireOnce('includes/Activation.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
 
 	PathHelper::requireOnce('data/events_class.php');
@@ -26,14 +26,14 @@
 		$event->soft_delete();
 
 		header("Location: /admin/admin_events");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event->undelete();
 
 		header("Location: /admin/admin_events");
-		exit();				
+		exit();
 	}
 
 	if($_POST['action'] == 'remove_from_event'){
@@ -43,7 +43,7 @@
 
 		$returnurl = $session->get_return();
 		header("Location: $returnurl");
-		exit();				
+		exit();
 	}
 
 	if($_POST['action'] == 'remove_from_waiting_list'){
@@ -53,7 +53,7 @@
 
 		$returnurl = $session->get_return();
 		header("Location: $returnurl");
-		exit();				
+		exit();
 	}
 /*
 	$form_errors = new MultiFormError(
@@ -82,7 +82,7 @@
 	$rsearchterm = LibraryFunctions::fetch_variable('rsearchterm', '', 0, '');
 	$rsearch_criteria = array();
 	$rsearch_criteria['event_id'] = $event->key;
-	
+
 	$event_registrants = new MultiEventRegistrant(
 		$rsearch_criteria,
 		array($rsort=>$rsdirection),
@@ -91,7 +91,7 @@
 		);
 	$numregistrants = $event_registrants->count_all();
 	$event_registrants->load();
-	
+
 	$rpager = new Pager(array('numrecords'=>$numregistrants, 'numperpage'=> $rnumperpage), 'r');
 
 	//WAITING LIST
@@ -102,7 +102,7 @@
 	$wsearchterm = LibraryFunctions::fetch_variable('wsearchterm', '', 0, '');
 	$wsearch_criteria = array();
 	$wsearch_criteria['event_id'] = $event->key;
-	$waiting_lists = new MultiWaitingList(		
+	$waiting_lists = new MultiWaitingList(
 		$wsearch_criteria,
 		array($wsort=>$wsdirection),
 		$wnumperpage,
@@ -110,21 +110,21 @@
 	$numwaitinglist = $waiting_lists->count_all();
 	$waiting_lists->load();
 	$wpager = new Pager(array('numrecords'=>$numwaitinglist, 'numperpage'=> $wnumperpage), 'w');
-	
+
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'events',
 		'page_title' => 'Event',
 		'readable_title' => 'Event',
 		'breadcrumbs' => array(
-			'Events'=>'/admin/admin_events', 
+			'Events'=>'/admin/admin_events',
 			$event->get('evt_name') => '/admin/admin_event?evt_event_id='.$event->key,
 			'Registrants'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$settings = Globalvars::get_instance();
 	$webDir = $settings->get_setting('webDir');
@@ -147,12 +147,12 @@
 			$options['altlinks']['Undelete'] = '/admin/admin_event?action=undelete&evt_event_id='.$event->key;
 		}
 		$options['altlinks']['Registrant Emails'] = '/admin/admin_event_emails?evt_event_id='.$event->key;
-			
+
 		$page->begin_box($options);
 	?>
 
               <p class="text-muted text-center"><?php echo $event->get_time_string('event', 'M j, Y'); ?></p>
-			  
+
 			  <p class="text-center">
 			  <?php
 				if($event->get('evt_delete_time')){
@@ -160,14 +160,14 @@
 				}
 				else if($event->get('evt_visibility') == 0) {
 					echo '<b>Private</b> <a href="' . $event->get_url() . '">'.$event->get_url('short').'</a><br />';
-				} 
+				}
 				else if($event->get('evt_visibility') == 1){
 					echo '<b>Public:</b> <a href="' . $event->get_url() . '">'.$event->get_url('short').'</a><br />';
 				}
 				else{
 					echo '<b>Public but unlisted:</b> <a href="' . $event->get_url() . '">'.$event->get_url('short').'</a><br />';
-				}		
-				
+				}
+
 				//echo '<b>Sessions page:</b> <a href="/profile/event_sessions_course?event_id='.$event->key.'">'.$settings->get_setting('webDir').'/profile/event_sessions_course?event_id='.$event->key.'</a><br />';
 				?>
 				</p>
@@ -175,10 +175,10 @@
 			  <?php
 				if($event->get('evt_is_accepting_signups')) {
 					echo '<b>Registration open</b><br />';
-				} 
+				}
 				else{
 					echo '<b>Registration closed</b><br />';
-				}		
+				}
 				?>
 				</p>
 
@@ -212,7 +212,7 @@
 	foreach($event_registrants as $event_registrant){
 
 		$registrant = new User($event_registrant->get('evr_usr_user_id'), TRUE);
-		
+
 		$registrant_emails .= $registrant->display_name() . ' &lt;'.$registrant->get('usr_email'). '&gt;, ';
 
 		$rowvalues=array();
@@ -227,23 +227,23 @@
 
 		$order_items = new MultiOrderItem(array('registrant_id' => $event_registrant->key));
 		$order_items->load();
-		
+
 		$row = '';
 		$total_paid = 0;
-		foreach ($order_items as $order_item){	
+		foreach ($order_items as $order_item){
 			$row .= '<a href="/admin/admin_order?ord_order_id=' . $order_item->get('odi_ord_order_id') . '">Order# '.$order_item->get('odi_ord_order_id').'</a> ($'. $order_item->get('odi_price'). ')';
 			//ADD AN ASTERISK IF THE ORDER HAS A REFUND
 			$order = $order_item->get_order();
 			if($order->get('ord_refund_amount')){
-				$row .= '*'; 
+				$row .= '*';
 			}
 			$row .= '<br>';
 		}
 		array_push($rowvalues, $row);
 
 		$evr_verified = LibraryFunctions::bool_to_english($registrant->get('usr_email_is_verified'),"Verified", "Unverified");
-		array_push($rowvalues, $evr_verified);	
-		
+		array_push($rowvalues, $evr_verified);
+
 		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
 			array_push($rowvalues, 'Expired: '.LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
 		}
@@ -254,17 +254,17 @@
 		$reginfo = '';
 		if($event_registrant->get('evr_recording_consent')){
 			$reginfo .= 'Recording consent: '.LibraryFunctions::bool_to_english($event_registrant->get('evr_recording_consent'),"Yes", "No"). '<br />';
-		}		
-		if(!is_null($event_registrant->get('evr_first_event'))){ 
+		}
+		if(!is_null($event_registrant->get('evr_first_event'))){
 			$reginfo .= '<br>First Event: '. LibraryFunctions::bool_to_english($event_registrant->get('evr_first_event'),"Yes", "No") . '<br />';
 		}
-		
+
 		if($event_registrant->get('evr_other_events')){
 			$reginfo .= '<br>Other events attended: '. $event_registrant->get('evr_other_events'). '<br />';
 		}
 		if($event_registrant->get('evr_health_notes')){
 			$reginfo .= '<br>Health notes: '. $event_registrant->get('evr_health_notes');
-		}		
+		}
 
 		if($event_registrant->get('evr_extra_info_completed') || !$event->get('evt_collect_extra_info')){
 			array_push($rowvalues, $reginfo);
@@ -275,26 +275,26 @@
 				$line = 'Not Answered <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$registrant->key.'&eventregistrantid='.$event_registrant->key.'">link</a>';
 			}
 			else{
-				$line = 'Not Answered';				
+				$line = 'Not Answered';
 			}
 			array_push($rowvalues, $line);
 		}
-	*/	
-		
+	*/
+
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
 		<input type="hidden" class="hidden" name="evr_event_registrant_id" id="evr_event_registrant_id" value="'.$event_registrant->key.'" />
 		'.$formwriter->new_form_button('Remove', 'secondary').'
 		</form>';
-		array_push($rowvalues, $delform);			
+		array_push($rowvalues, $delform);
 
         $page->disprow($rowvalues);
 	}
 
 	$page->endtable($rpager);
-	
+
 	if($numwaitinglist){
-		
+
 		$headers = array("User", "Registered on", "Action");
 		$altlinks = array();
 		if(!$event->get('evt_delete_time')) {
@@ -308,7 +308,7 @@
 			'title' => "Waiting List (".$numwaitinglist.')'
 		);
 		$page->tableheader($headers, $box_vars, $wpager);
-		
+
 		foreach($waiting_lists as $waiting_list){
 
 			$registrant = new User($waiting_list->get('ewl_usr_user_id'), TRUE);
@@ -322,12 +322,12 @@
 			<input type="hidden" class="hidden" name="ewl_waiting_list_id" id="ewl_waiting_list_id" value="'.$waiting_list->key.'" />
 			'.$formwriter->new_form_button('Remove', 'secondary').'
 			</form>';
-			array_push($rowvalues, $delform);			
+			array_push($rowvalues, $delform);
 
 			$page->disprow($rowvalues);
 		}
 
-		$page->endtable($wpager);	
+		$page->endtable($wpager);
 	}
 
 	//MESSAGES
@@ -338,7 +338,7 @@
 	$msearchterm = LibraryFunctions::fetch_variable('msearchterm', '', 0, '');
 	$msearch_criteria = array();
 	$msearch_criteria['event_id_only'] = $event->key;
-	$messages = new MultiMessage(		
+	$messages = new MultiMessage(
 		$msearch_criteria,
 		array($msort=>$msdirection),
 		$mnumperpage,
@@ -359,7 +359,7 @@
 		'altlinks' => $altlinks,
 		'title' => "Messages to registrants"
 	);
-	
+
 	$page->tableheader($headers, $box_vars, $mpager);
 
 	foreach($messages as $message){
@@ -372,12 +372,12 @@
         $page->disprow($rowvalues);
 	}
 
-	$page->endtable($mpager);	
-	
+	$page->endtable($mpager);
+
 	/*
 	$pageoptions['title'] = "Emails of all registrants";
 	$page->begin_box($pageoptions);
-	echo '<p>'.$registrant_emails. '';	
+	echo '<p>'.$registrant_emails. '';
 	$page->end_box();
 	*/
 /*
@@ -420,7 +420,7 @@
 	$page->endtable();
 
 	?>
-	
+
 	<h2>Contact Emails</h2>
 	<?php
 	$emails = new MultiEmail(

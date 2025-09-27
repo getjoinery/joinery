@@ -1,7 +1,5 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/files_class.php');
 	PathHelper::requireOnce('data/event_sessions_class.php');
@@ -9,9 +7,9 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
-	
+
 	$settings = Globalvars::get_instance();
-	
+
 	$options = array(
 		//'script_url' => $this->get_full_url().'/'.$this->basename($this->get_server_var('SCRIPT_NAME')),
 		'upload_dir' => $settings->get_setting('upload_dir').'/', /*dirname($this->get_server_var('SCRIPT_FILENAME')).'/files/',*/
@@ -68,7 +66,7 @@
 		// e.g. PHP scripts, nor executed by the browser when downloaded,
 		// e.g. HTML files with embedded JavaScript code.
 		// Please also read the SECURITY.md document in this repository.
-		
+
 		//'accept_file_types' => '/\.(gif|jpe?g|png|pdf|xls|doc|xlsx|docx|mp3|mp4|m4a)$/i',
 		'accept_file_types' => '/\.('.str_replace(',', '|', $settings->get_setting('allowed_upload_extensions')).')$/i',
 		// Replaces dots in filenames with the given string.
@@ -133,7 +131,7 @@
 			//'large' => array(
 			//	'max_width' => 1200,
 			//	'max_height' => 1000
-			//),			
+			//),
 			//'medium' => array(
 			//	'max_width' => 800,
 			//	'max_height' => 600
@@ -141,7 +139,7 @@
 			//'small' => array(
 			//	'max_width' => 500,
 			//	'max_height' => 300
-			//),			
+			//),
 			//'thumbnail' => array(
 				// Uncomment the following to use a defined directory for the thumbnails
 				// instead of a subdirectory based on the version identifier.
@@ -165,7 +163,7 @@
 	);
 
 	$upload_handler = new UploadHandler($options);
-	$response = $upload_handler->get_response(); 
+	$response = $upload_handler->get_response();
 	$files = $response['files'];
 	$file_count = count($files);
 
@@ -177,67 +175,67 @@
 
 		if($existing_id = File::get_by_name($thisfile->name)){
 			$file =	new File($existing_id, TRUE);
-			$file->set('fil_delete_time', NULL);			
+			$file->set('fil_delete_time', NULL);
 		}
 		else{
 			//RENAME THE FILE
 			$settings = Globalvars::get_instance();
 			$upload_dir = $settings->get_setting('upload_dir');
-			
+
 			$rand_string = '_'.LibraryFunctions::random_string(8).'.';
 			$new_name = str_replace('.', $rand_string, $thisfile->name);
 			$new_name = str_replace(' ', '_', $new_name);
-			// Removes special chars. 
-			$new_name = preg_replace('/[^A-Za-z0-9\.\-\_]/', '', $new_name); 
-			// Replaces multiple hyphens with single one. 
+			// Removes special chars.
+			$new_name = preg_replace('/[^A-Za-z0-9\.\-\_]/', '', $new_name);
+			// Replaces multiple hyphens with single one.
 			$new_name = preg_replace('/_+/', '_', $new_name);
-			
+
 			if(!rename($upload_dir.'/'.$thisfile->name, $upload_dir.'/'.$new_name)){
 				throw new SystemDisplayablePermanentError('Unable to save resized image.  Check file permissions.');
 			}
-			
+
 			$file =	new File(NULL);
 			$file->set('fil_name', $new_name);
 			$file->set('fil_title', $thisfile->name);
 			$file->set('fil_type', substr($thisfile->type,0,128));
 			$file->set('fil_usr_user_id', $session->get_user_id());
-					
+
 		}
 		$file->save();
 		$file->load();
 		$file->resize();
-		
+
 		// Add the file ID to the response object
 		$thisfile->file_id = $file->key;
-		
+
 		if($_REQUEST['evs_event_session_id']){
-			
+
 			//ATTACH THE FILE TO AN EVENT SESSION
 			$session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
-			$session->add_file($file->key);	
-		}		
+			$session->add_file($file->key);
+		}
 
 		/*
 		print_r($thisfile->name);
 		print_r($thisfile->size);
 		print_r($thisfile->type);
 		print_r($thisfile->url);
-		print_r($thisfile->thumbnailUrl); 
+		print_r($thisfile->thumbnailUrl);
 		*/
 	}
-	
+
 	// Output the modified response with file IDs
 	header('Content-Type: application/json; charset=utf-8');
 	echo json_encode($response);
-	
+
 	if(isset($_REQUEST['fallback'])){
 		$page = new AdminPage();
 		$page->admin_header(2);
-		
+
 		echo '<h3>File upload</h3>';
 		echo '<p>'.$file->get('fil_name'). ' uploaded successfully.</p>';
-		
-		$page->admin_footer();		
+
+		$page->admin_footer();
 	}
 
 ?>

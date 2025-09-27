@@ -1,9 +1,7 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 $session = SessionControl::get_instance();
 $session->check_permission(5);
 
@@ -11,15 +9,15 @@ $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'email-statistics',
 		'breadcrumbs' => array(
-			'Statistics'=>'', 
+			'Statistics'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 $today = date("m-d-Y");
 $startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 months")), 0, '');
@@ -78,8 +76,8 @@ echo '<br />';
 if($page_1 && $page_2 && $startdate && $enddate){
 	//CONTENT
 	$sql = "WITH step1 AS (
-	  SELECT 
-		vse_visitor_id, 
+	  SELECT
+		vse_visitor_id,
 		MIN(vse_timestamp) AS step1_ts
 	  FROM vse_visitor_events
 	  WHERE vse_page = '$page_1'
@@ -88,64 +86,64 @@ if($page_1 && $page_2 && $startdate && $enddate){
 	)";
 	if($page_2){
 		$sql .= ", step2 AS (
-		  SELECT 
-			v.vse_visitor_id, 
+		  SELECT
+			v.vse_visitor_id,
 			MIN(v.vse_timestamp) AS step2_ts
 		  FROM vse_visitor_events v
-		  JOIN step1 s 
+		  JOIN step1 s
 			ON v.vse_visitor_id = s.vse_visitor_id
 		  WHERE v.vse_page = '$page_2'
 			AND v.vse_timestamp > s.step1_ts
 			AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 		  GROUP BY v.vse_visitor_id
-		)";		
+		)";
 	}
 	if($page_3){
 		$sql .= ", step3 AS (
-		  SELECT 
-			v.vse_visitor_id, 
+		  SELECT
+			v.vse_visitor_id,
 			MIN(v.vse_timestamp) AS step2_ts
 		  FROM vse_visitor_events v
-		  JOIN step1 s 
+		  JOIN step1 s
 			ON v.vse_visitor_id = s.vse_visitor_id
 		  WHERE v.vse_page = '$page_3'
 			AND v.vse_timestamp > s.step1_ts
 			AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 		  GROUP BY v.vse_visitor_id
-		)";		
+		)";
 	}
 	if($page_4){
 		$sql .= ", step4 AS (
-		  SELECT 
-			v.vse_visitor_id, 
+		  SELECT
+			v.vse_visitor_id,
 			MIN(v.vse_timestamp) AS step2_ts
 		  FROM vse_visitor_events v
-		  JOIN step1 s 
+		  JOIN step1 s
 			ON v.vse_visitor_id = s.vse_visitor_id
 		  WHERE v.vse_page = '$page_4'
 			AND v.vse_timestamp > s.step1_ts
 			AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 		  GROUP BY v.vse_visitor_id
-		)";		
+		)";
 	}
 	if($page_5){
 		$sql .= ", step5 AS (
-		  SELECT 
-			v.vse_visitor_id, 
+		  SELECT
+			v.vse_visitor_id,
 			MIN(v.vse_timestamp) AS step2_ts
 		  FROM vse_visitor_events v
-		  JOIN step1 s 
+		  JOIN step1 s
 			ON v.vse_visitor_id = s.vse_visitor_id
 		  WHERE v.vse_page = '$page_5'
 			AND v.vse_timestamp > s.step1_ts
 			AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 		  GROUP BY v.vse_visitor_id
-		)";		
-	}	
-	
+		)";
+	}
+
 	$sql .= "SELECT '/' AS funnel_step, COUNT(*) AS visitors
 	FROM step1";
-	
+
 	if($page_2){
 		$sql .= " UNION ALL SELECT '$page_2' AS funnel_step, COUNT(*) AS visitors
 		FROM step2
@@ -157,13 +155,13 @@ if($page_1 && $page_2 && $startdate && $enddate){
 		FROM step3
 		";
 	}
-	
+
 	if($page_4){
 		$sql .= " UNION ALL SELECT '$page_4' AS funnel_step, COUNT(*) AS visitors
 		FROM step4
 		";
 	}
-	
+
 	if($page_5){
 		$sql .= " UNION ALL SELECT '$page_5' AS funnel_step, COUNT(*) AS visitors
 		FROM step5
@@ -192,7 +190,7 @@ if($page_1 && $page_2 && $startdate && $enddate){
 		'title' => 'Funnel',
 	);
 	$page->tableheader($headers, $box_vars);
-	
+
 	$prev_count = NULL;
 	$initial_count = 0;
 	foreach ($funnel_stats as $stat){

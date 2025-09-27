@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/page_contents_class.php');
@@ -14,8 +12,8 @@ if ($_POST['confirm']){
 	$session->check_permission(10);
 
 	$pac_page_content_id = LibraryFunctions::fetch_variable('pac_page_content_id', NULL, 1, 'You must provide a page_content to delete here.');
-	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');	
-	
+	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');
+
 	if ($confirm) {
 		$page_content = new PageContent($pac_page_content_id, TRUE);
 		$page_content->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -33,18 +31,18 @@ else{
 	$pac_page_content_id = LibraryFunctions::fetch_variable('pac_page_content_id', NULL, 1, 'You must provide a page_content to edit.');
 
 	$page_content = new PageContent($pac_page_content_id, TRUE);
-	
+
 	$session = SessionControl::get_instance();
 	$session->set_return("/admin/admin_page_contents");
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'pages',
 		'page_title' => 'Delete Page Content',
 		'readable_title' => 'Delete Page Content',
 		'breadcrumbs' => array(
-			'Page Contents'=>'/admin/admin_page_contents', 
+			'Page Contents'=>'/admin/admin_page_contents',
 			'Delete ' . $page_content->get('pac_location_name') => '',
 		),
 		'session' => $session,

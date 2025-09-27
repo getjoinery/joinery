@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -16,40 +14,40 @@
 	$email_template = new EmailTemplateStore($_GET['emt_email_template_id'], TRUE);
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'email-templates',
 		'breadcrumbs' => array(
-			'Email Templates'=>'/admin/admin_email_templates', 
+			'Email Templates'=>'/admin/admin_email_templates',
 			$email_template->get('emt_name')=>'',
 		),
 		'session' => $session,
 	)
-	);	
-	
+	);
+
 	$options['title'] = $email_template->get('emt_name');
 	$options['altlinks'] = array('Edit Template' => '/admin/admin_email_template_edit?emt_email_template_id='.$email_template->key,
 								'Delete Template' => '/admin/admin_email_template_permanent_delete?emt_email_template_id='.$email_template->key);
 	$page->begin_box($options);
-	
+
 	if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
 		echo '<strong>Type:</strong> Outer template<br />';
 	}
 	else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_INNER){
 		echo '<strong>Type:</strong> Inner template<br />';
-	} 	
+	}
 	else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_FOOTER){
 		echo '<strong>Type:</strong> Footer template<br />';
 	}
 
-	//echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';	
+	//echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($email_template->get('emt_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
 	echo '<iframe src="/ajax/email_template_preview_ajax?emt_email_template_id='.$email_template->key.'" width="100%" height="500" style="border:1px solid black;"></iframe>';
-	//echo '<strong>Content:</strong><br /> '.$email_template->get('emt_body').'<br />';	
+	//echo '<strong>Content:</strong><br /> '.$email_template->get('emt_body').'<br />';
 
-	$page->end_box();		
-	
+	$page->end_box();
+
 	$page->admin_footer();
 ?>
 

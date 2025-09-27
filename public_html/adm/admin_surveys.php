@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/surveys_class.php');
@@ -14,7 +12,7 @@
 	$session->check_permission(5);
 	$session->set_return();
 
-	$numperpage = 30; 
+	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'survey_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
@@ -37,7 +35,7 @@
 	$surveys->load();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'surveys',
 		'page_title' => 'Add User',
@@ -59,10 +57,10 @@
 		'title' => 'Surveys',
 		//'search_on' => TRUE
 	);
-	$page->tableheader($headers, $table_options, $pager);	
+	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($surveys as $survey){
-		
+
 		$survey_questions = new MultiSurveyQuestion(
 			array('survey_id' => $survey->key),  //SEARCH CRITERIA
 			array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
@@ -75,11 +73,11 @@
 		$rowvalues = array();
 
 		array_push($rowvalues, $survey->get('svy_name') ." <a href='/admin/admin_survey?svy_survey_id=$survey->key'>[edit]</a>");
-		
+
 		array_push($rowvalues, $num_questions." questions</a> ");
 
-		//array_push($rowvalues, LibraryFunctions::convert_time($survey->get('svy_update_time'), "UTC", $session->get_timezone(), 'M j, Y')); 
-		
+		//array_push($rowvalues, LibraryFunctions::convert_time($survey->get('svy_update_time'), "UTC", $session->get_timezone(), 'M j, Y'));
+
 		array_push($rowvalues, '<a href="/admin/admin_survey_users?svy_survey_id='.$survey->key.'">'.$survey->get_num_users_who_answered().' answers</a>');
 
 		if($survey->get('svy_delete_time')){

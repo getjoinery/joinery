@@ -1,13 +1,11 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
-	
+
 if ($_POST){
 
 	$session = SessionControl::get_instance();
@@ -16,8 +14,8 @@ if ($_POST){
 	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to undelete here.');
 	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');
 
-	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 0, '');	
-	
+	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 0, '');
+
 	if($confirm){
 		$user = new User($usr_user_id, TRUE);
 
@@ -45,19 +43,19 @@ else{
 	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to edit.');
 
 	$user = new User($usr_user_id, TRUE);
-	
+
 	$session = SessionControl::get_instance();
 	$session->set_return("/admin/admin_users");
 
 	$page = new AdminPage();
 
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'users-list',
 		'page_title' => 'Undelete',
 		'readable_title' => 'Undelete',
 		'breadcrumbs' => array(
-			'Users'=>'/admin/admin_users', 
+			'Users'=>'/admin/admin_users',
 			'User '.$user->display_name() => '/admin/admin_user?usr_user_id='.$user->key,
 			'Undelete'=>'',
 		),

@@ -1,8 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('/data/posts_class.php');
@@ -23,25 +22,25 @@
 	if($_SESSION['permission'] < 10){
 		$search_criteria['deleted'] = false;
 	}
-	
+
 	$posts = new MultiPost(
 		$search_criteria,
 		array($sort=>$sdirection),
 		$numperpage,
-		$offset);	
-	$numrecords = $posts->count_all();	
+		$offset);
+	$numrecords = $posts->count_all();
 	$posts->load();
-	
+
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'blog-posts',
 		'breadcrumbs' => array(
-			'Posts'=>'', 
+			'Posts'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$headers = array("Post",  "Created", "Published", "By", "Post Status");
 	$altlinks = array('New Post'=>'/admin/admin_post_edit');
@@ -55,21 +54,21 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($posts as $post){
-		
+
 		$deleted = '';
 		if($post->get('pst_delete_time')){
 			$deleted = ' DELETED ';
 		}
-		
+
 		$user = new User($post->get('pst_usr_user_id'), TRUE);
-		
+
 		$title = $post->get('pst_title');
 		if(!$title){
 			$title = 'Untitled';
 		}
-		
+
 		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_post?pst_post_id=$post->key'>".$title."</a>". $deleted);	
+		array_push($rowvalues, "<a href='/admin/admin_post?pst_post_id=$post->key'>".$title."</a>". $deleted);
 		array_push($rowvalues, LibraryFunctions::convert_time($post->get('pst_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
@@ -78,13 +77,13 @@
 			$status = 'Deleted';
 		} else {
 			$status = 'Active';
-		}		
+		}
 		array_push($rowvalues, $status);
 
 		$page->disprow($rowvalues);
 	}
 
-	$page->endtable($pager);	
+	$page->endtable($pager);
 	$page->admin_footer();
 ?>
 

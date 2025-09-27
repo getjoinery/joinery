@@ -1,8 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/groups_class.php');
@@ -16,9 +15,9 @@
 		$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
 		$groupmember->remove();
 		header("Location: /admin/admin_event_bundle?grp_group_id=".$_REQUEST['grp_group_id']);
-		exit();				
+		exit();
 	}
-	
+
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, 0, '');
 	$group = new Group($grp_group_id, TRUE);
 
@@ -40,13 +39,13 @@
 	$group_members->load();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'event-bundles',
 		'page_title' => 'Event Bundle',
 		'readable_title' => 'Event Bundle',
 		'breadcrumbs' => array(
-			'Events'=>'/admin/admin_events', 
+			'Events'=>'/admin/admin_events',
 			'Event Bundles'=>'/admin/admin_event_bundles',
 			'Events in bundle: '. $group->get('grp_name') => '',
 		),
@@ -59,7 +58,7 @@
 	if(!$group->get('grp_delete_time')) {
 		$altlinks +=  array('Edit bundle' => '/admin/admin_event_bundle_edit?grp_group_id='.$group->key);
 		//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';
-	}	
+	}
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
@@ -74,7 +73,7 @@
 
 		$rowvalues = array();
 		array_push($rowvalues, $event->get('evt_name'));
-		
+
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event_bundle?grp_group_id='. $group->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="remove" />
 		<input type="hidden" class="hidden" name="grm_group_member_id" value="'.$group_member->key.'" />

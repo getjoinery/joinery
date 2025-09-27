@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -17,8 +15,8 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
-	
-	$settings = Globalvars::get_instance(); 
+
+	$settings = Globalvars::get_instance();
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 	$product = new Product($_GET['pro_product_id'], TRUE);
@@ -29,16 +27,16 @@
 		$product->soft_delete();
 
 		header("Location: /admin/admin_products");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$product->undelete();
 
 		header("Location: /admin/admin_products");
-		exit();				
+		exit();
 	}
-	
+
 	if($_REQUEST['action'] == 'permanent_delete'){
 		if($orders->count_all()){
 			throw new SystemDisplayableError('You cannot delete a product with orders.');
@@ -48,34 +46,34 @@
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_products");
-		exit();		
-	}	
+		exit();
+	}
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'products-list',
 		'breadcrumbs' => array(
-			'Products'=>'/admin/admin_products', 
+			'Products'=>'/admin/admin_products',
 			$product->get('pro_name')=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 		$options['title'] = 'Product: '.$product->get('pro_name');
 		$options['altlinks'] = array();
 		if($_SESSION['permission'] > 7){
 			$options['altlinks'] += array('Edit Product'=> '/admin/admin_product_edit?p='.$product->key);
 		}
-		
+
 		if(!$orders->count_all()){
 			if($_SESSION['permission'] >= 5){
 				$options['altlinks'] += array('Delete'=> '/admin/admin_product?action=delete&pro_product_id='.$product->key);
 			}
 			if($_SESSION['permission'] == 10){
 				$options['altlinks'] += array('Permanent Delete'=> '/admin/admin_product?action=permanent_delete&pro_product_id='.$product->key);
-			}				
+			}
 		}
 		$page->begin_box($options);
 
@@ -87,7 +85,7 @@
 			$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
 			echo 'Total items available: <b>'. $product->get('pro_max_purchase_count').' ('. $remaining .' remaining)</b><br>';
 		}
-		
+
 		echo 'Max that can be added to cart: <b>'. $product->get('pro_max_cart_count').'</b><br>';
 		if($product->get('pro_expires')){
 			echo 'Purchases expire after: <b>'. $product->get('pro_expires').' days</b><br>';
@@ -103,22 +101,22 @@
 			}
 			echo 'Registration for: <b>'.$event_date.'<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$event->get('evt_name').'</a>'.'</b><br>';
 		}
-		
+
 		if($product->get('pro_prg_product_group_id')){
 			$pg = new ProductGroup($product->get('pro_prg_product_group_id'), TRUE);
 			echo 'Product group: <b>'. $pg->get('prg_name').'</b><br>';
 		}
-	
+
 		if($product->get('pro_digital_link')){
 			echo 'Digital link: <b>'.$product->get('pro_digital_link').'</b><br>';
 		}
 
 		$requirements = implode(', ', $product->get_requirement_info());
 		echo 'Product info collected at purchase: <b>'. $requirements.'</b><br>';
-	
+
 		$instances = $product->get_requirement_instances();
 		echo 'Additional product info collected at purchase: ';
-		
+
 		echo 'Product Description: <b>'. $product->get('pro_description').'</b><br>';
 
 		foreach($instances as $instance){
@@ -126,7 +124,7 @@
 			echo '<b>'.$requirement->get('prq_title').'</b>, ';
 		}
 		echo '<br>';
-		
+
 		//echo 'After purchase message: <b>'. $product->get('pro_after_purchase_message').'</b><br>';
 
 			echo '<h3>Prices</h3>';
@@ -135,12 +133,12 @@
 			foreach ($versions as $version) {
 
 				if ($version->get('prv_status')) {
-					echo '<li>' . $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') . 
+					echo '<li>' . $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') .
 						' <a href="/admin/admin_product_version_edit?product_id=' . $product->key . '&product_version_id=' . $version->key .
 						'&action=remove_version">[Make Inactive]</a>' .
 						'</li>';
 				} else {
-					echo '<li style="text-decoration: line-through;">' . $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') . 
+					echo '<li style="text-decoration: line-through;">' . $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') .
 						' <a href="/admin/admin_product_version_edit?product_id=' . $product->key . '&product_version_id=' . $version->key .
 						'&action=activate_version">[Make Active]</a>' .
 						'</li>';
@@ -149,8 +147,8 @@
 			echo '</ul>';
 			echo '<a href="/admin/admin_product_version_edit?product_id=' . $product->key.'">Add New Price</a>';
 
-		$page->end_box();	
-	
+		$page->end_box();
+
 	$page->admin_footer();
 ?>
 

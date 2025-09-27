@@ -2,39 +2,38 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/Activation.php');
 PathHelper::requireOnce('includes/LogicResult.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/StripeHelper.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	
+
 	PathHelper::requireOnce('data/users_class.php');
 
 	$settings = Globalvars::get_instance();
 
-	
 	$stripe_helper = new StripeHelper();
-	
-	$session = SessionControl::get_instance();	
+
+	$session = SessionControl::get_instance();
 	$session->check_permission(0);
-	
+
 	if(!$settings->get_setting('products_active')){
 		exit;
 	}
-	
+
 	$user = new User($session->get_user_id(), TRUE);
-	
+
 	$page = new PublicPage();
-	
+
 	$stripe_customer_id = $stripe_helper->get_or_create_stripe_customer($user);
-	
+
 	/*
 	$customer_ids = array();
-	try{	
-		
+	try{
+
 		if($user->get('usr_stripe_customer_id')){
 			$customer_ids[] = $user->get('usr_stripe_customer_id');
 		}
 
-		$stripe_customers = $stripe_helper->get_customers(["email" => $user->get('usr_email')]);	
+		$stripe_customers = $stripe_helper->get_customers(["email" => $user->get('usr_email')]);
 
 		foreach($stripe_customers['data'] as $stripe_customer){
 			if(!in_array($stripe_customer['id'], $customer_ids)){
@@ -53,7 +52,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 	<?php
 
 	$active = 0;
-	//foreach($customer_ids as $customer_id){	
+	//foreach($customer_ids as $customer_id){
 		try{
 			$subs = $stripe_helper->get_subscriptions(['limit' => 5, 'customer' => $stripe_customer_id, 'status' => 'all']);
 		}
@@ -61,10 +60,10 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			//TODO: DISPLAY ERROR NOTICE IN TABLE BELOW
 			$subs = array();
 		}
-		
+
 		foreach($subs as $sub) {
 			$gmtime = gmdate("Y-m-d\TH:i:s\Z", $sub['created']);
-			
+
 			if($sub['ended_at']){
 				$status = ' canceled on '. LibraryFunctions::convert_time(gmdate("Y-m-d", $sub['ended_at']), 'UTC', $session->get_timezone());
 			}

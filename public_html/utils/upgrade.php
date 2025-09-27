@@ -1,28 +1,26 @@
 <?php
 	require_once( __DIR__ . '/../includes/PathHelper.php');
-	
+
 	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
-	
+
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
 	$site_template = $settings->get_setting('site_template');
 	$full_site_dir = $baseDir.$site_template;
-	
+
 	if($baseDir == '' || !$baseDir){
 		echo '$baseDir is empty.  Aborting upgrade.<br>';
 		exit;
 	}
-	
+
 	if($site_template == '' || !$site_template){
 		echo '$site_template is empty.  Aborting upgrade.<br>';
 		exit;
 	}
-	
-	
+
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
 	$live_directory = $full_site_dir. '/public_html';
 	$backup_directory = $full_site_dir. '/public_html_last';
@@ -39,19 +37,14 @@
 	$plugin_directory_contents = $plugin_directory.'/*';
 	$location_of_plugins = $stage_directory.'/plugins';
 	$live_plugins = $live_directory.'/plugins';
-	
-
-
-
-
 
 	//THIS SECTION RELOADS THEMES AND PLUGINS ONLY
 	if(isset($_GET['theme-only']) && $_GET['theme-only']){
-		
+
 		function is_writable_by_www_data($directory) {
 			// Get file permissions
 			$perms = fileperms($directory);
-			
+
 			// Get file owner information
 			$ownerInfo = posix_getpwuid(fileowner($directory));
 			$ownerName = $ownerInfo['name'];
@@ -59,7 +52,7 @@
 			// Get group permissions (for `www-data` group access)
 			$group_read = ($perms & 0x0020) ? true : false;
 			$group_write = ($perms & 0x0010) ? true : false;
-			
+
 			// Check if owner is `www-data`
 			$isOwnedByWwwData = ($ownerName === 'www-data');
 
@@ -70,31 +63,28 @@
 			return $isWritableByWwwData;
 		}
 
-
 		if (!is_writable_by_www_data($theme_directory)) {
 			echo "$theme_directory must be writable by www-data. Aborting upgrade.<br>";
-			echo "Instead, it is owned by " . posix_getpwuid(fileowner($theme_directory))['name'] . 
+			echo "Instead, it is owned by " . posix_getpwuid(fileowner($theme_directory))['name'] .
 				 " and has permissions " . substr(sprintf('%o', fileperms($theme_directory)), -3) . "<br>";
 			exit;
-		} 
-	
+		}
+
 		if (!is_writable_by_www_data($plugin_directory)) {
 			echo "$plugin_directory must be writable by www-data. Aborting upgrade.<br>";
-			echo "Instead, it is owned by " . posix_getpwuid(fileowner($plugin_directory))['name'] . 
+			echo "Instead, it is owned by " . posix_getpwuid(fileowner($plugin_directory))['name'] .
 				 " and has permissions " . substr(sprintf('%o', fileperms($plugin_directory)), -3) . "<br>";
 			exit;
-		} 		
-		
-		
-		
+		}
+
 		//REMOVE OLD THEMES
 		//exec ("rm -rf $live_themes".'/*');
-		
-		//COPY THE THEME FILES 
+
+		//COPY THE THEME FILES
 		exec("cp -r $theme_directory_contents $live_themes");
 		if(!file_exists($live_themes)){
 			echo "Failed to move theme files ($theme_directory to $live_themes...aborting.<br>";
-			
+
 			if(substr(sprintf('%o', fileperms($live_themes)), -3) != '770' || substr(sprintf('%o', fileperms($live_themes)), -3) != '777'){
 				echo $live_themes . ' (live_themes) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
 				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_themes))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_themes)), -3).'<br>';
@@ -103,7 +93,7 @@
 			if(posix_getpwuid(fileowner($live_themes))['name'] != 'www-data'){
 				echo $live_themes . ' (live_themes) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
 				echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_themes))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_themes)), -3).'<br>';
-				exit;		
+				exit;
 			}
 			exit;
 		}
@@ -111,15 +101,14 @@
 			echo "Theme files copied from $theme_directory to $live_themes.<br>";
 		}
 
-
 		//REMOVE OLD PLUGINS
 		//exec ("rm -rf $live_plugins".'/*');
-		//COPY THE PLUGIN FILES 
+		//COPY THE PLUGIN FILES
 		if(file_exists($plugin_directory)){
 			exec("cp -r $plugin_directory_contents $live_plugins");
 			if(!file_exists($live_plugins)){
 				echo "Failed to move plugin files ($plugin_directory to $live_plugins...aborting.<br>";
-				
+
 				if(substr(sprintf('%o', fileperms($live_plugins)), -3) != '770' || substr(sprintf('%o', fileperms($live_plugins)), -3) != '777'){
 					echo $live_plugins . ' (live_plugins) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
 					echo 'Instead, it has permissions '.substr(sprintf('%o', fileperms($live_plugins)), -3).'<br>';
@@ -128,7 +117,7 @@
 				if(posix_getpwuid(fileowner($live_plugins))['name'] != 'www-data'){
 					echo $live_plugins . ' (live_plugins) must be owned by www-data and have permissions of 770.  Aborting upgrade.<br>';
 					echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_plugins))['name'].'<br>';
-					exit;		
+					exit;
 				}
 				exit;
 			}
@@ -142,7 +131,7 @@
 
 		exit;
 	}
-	
+
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
 	if($_GET['serve-upgrade'] && $settings->get_setting('upgrade_server_active')){
 		PathHelper::requireOnce('/data/upgrades_class.php');
@@ -161,11 +150,10 @@
 
 		$response = json_encode($response);
 		echo $response . PHP_EOL;
-		exit;		
+		exit;
 	}
-	
-	
-	//CHECK FOR EXISTENCE OF ALL NEEDED DIRECTORIES 
+
+	//CHECK FOR EXISTENCE OF ALL NEEDED DIRECTORIES
 	if(!file_exists($live_directory)){
 		echo $live_directory. ' (live_directory) does not exist or is not readable by www-data.';
 		exit;
@@ -178,7 +166,7 @@
 		echo $theme_directory. ' (theme_directory) is empty.';
 		exit;
 	}
-	
+
 	/*
 	if(!file_exists($plugin_directory)){
 		echo $plugin_directory. ' (plugin_directory) does not exist or is not readable by www-data.';
@@ -187,9 +175,9 @@
 	if (is_dir_empty($plugin_directory)) {
 		echo $plugin_directory. ' (plugin_directory) is empty.';
 		exit;
-	}	
+	}
 	*/
-	
+
 	/*
 	$perms = fileperms($stage_location);
 
@@ -217,8 +205,6 @@
 	echo $info;
 	*/
 
-
-		
 		$perms = fileperms($live_directory);
 	$user_read = (($perms & 0x0100) ? 'r' : '-');
 	$user_write = (($perms & 0x0080) ? 'w' : '-');
@@ -244,27 +230,22 @@
 		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
 		exit;
 	}
-	
-	
+
 	if(posix_getpwuid(fileowner($live_directory))['name'] != 'www-data'){
 		echo $live_directory . ' (live_directory) must be owned by www-data.  Aborting upgrade.<br>';
 		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
-		exit;		
-	}	
-	
-	
+		exit;
+	}
 
-	
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
-	
-	$dbhelper = DbConnector::get_instance();
-	$dblink = $dbhelper->get_db_link();	
 
+	$dbhelper = DbConnector::get_instance();
+	$dblink = $dbhelper->get_db_link();
 
 	//GET THE UPGRADE INFO
 	$upgrade_source = $settings->get_setting('upgrade_source').'/utils/upgrade?serve-upgrade=1';
-	$access_token = '';	
+	$access_token = '';
 	$curl=curl_init();
 	curl_setopt_array($curl, array(
 	  CURLOPT_URL => $upgrade_source,
@@ -275,15 +256,14 @@
 	  CURLOPT_FOLLOWLOCATION => true,
 	  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
 	  CURLOPT_CUSTOMREQUEST => 'GET',
-	));	
+	));
 	$response = curl_exec($curl);
 	curl_close($curl);
 	$decode_response = json_decode($response, true);
 	$sourceFile = $decode_response['upgrade_location'];
-		
-	
+
 	if ($_POST && $_POST['confirm']){
-	
+
 		if($decode_response['system_version']){
 			if($settings->get_setting('system_version') > $decode_response['system_version']){
 				echo 'Your system is up to date.  No upgrade needed.';
@@ -293,7 +273,7 @@
 				echo 'Upgrade available: '. $decode_response['system_version'] . '<br>';
 				echo 'Current local version: '.$settings->get_setting('system_version').'<br>';
 			}
-			
+
 			//TODO: SYSTEM VERSIONS ONLY INCREMENT WITH MIGRATIONS
 			/*
 			if($decode_response['system_version'] >= $settings->get_setting('system_version') && !$_GET['force-upgrade']){
@@ -301,28 +281,25 @@
 				exit;
 			}
 			*/
-		} 
+		}
 		else{
 			if(!$settings->get_setting('upgrade_source')){
 				echo 'Upgrade server not set.  Go to the settings and enter one.<br>';
-				exit;			
+				exit;
 			}
 			else{
 				echo 'Unable to reach upgrade server: '.$upgrade_source.'<br>';
 				exit;
 			}
 		}
-		
+
 		$sourceFile = $decode_response['upgrade_location'];
-		
-		
+
 		//$sourceFile     = 'https://jeremytunnell.com/static_files/current_upgrade.zip';
 		$file_download_location = $full_site_dir.'/uploads/'.basename($sourceFile);//$full_site_dir.'/uploads/current_upgrade.upg.zip';
-		
-		
+
 		//GET THE UPGRADE FILE
 		echo 'Getting: '. $sourceFile.'<br>';
-
 
 		$new_file = fopen($file_download_location, "w") or die("cannot open" . $file_download_location);
 
@@ -336,7 +313,7 @@
 		if (curl_errno($cd)) {
 		  echo "the cURL error is : " . curl_error($cd);
 		  exit;
-		} 
+		}
 		else {
 			$status = curl_getinfo($cd);
 			if($status["http_code"] == 200){
@@ -345,13 +322,13 @@
 			else{
 				echo "The error code is : " . $status["http_code"];
 				exit;
-			}	
+			}
 		  // the http status 200 means everything is going well. the error codes can be 401, 403 or 404.
 		}
 
 		// close and finalize the operations.
 		curl_close($cd);
-		fclose($new_file);	
+		fclose($new_file);
 
 		if(file_exists($file_download_location)){
 			echo "The upgrade is downloaded...<br>";
@@ -360,10 +337,10 @@
 			echo "The upgrade failed to download...aborting.<br>";
 			exit;
 		}
-		
+
 		//chmod($file_download_location, 0777);
-		
-		//CLEAR OLD STAGED FILES 
+
+		//CLEAR OLD STAGED FILES
 		echo 'Clearing staging area: '.$stage_location.'<br>';
 		exec("chmod -R 770 $stage_location");
 		exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
@@ -378,29 +355,27 @@
 			else{
 				echo 'Staging area cleared<br>';
 			}
-		}	
-		
+		}
+
 		//UNZIP THE FILE
 		$zip = new ZipArchive;
 		if ($zip->open($file_download_location)){
 		  $zip->extractTo($stage_location);
 		  $zip->close();
 		  echo 'Upgrade at '.$file_download_location. ' unzipped to '.$stage_location.'<br>';
-		} 
+		}
 		else {
 		  echo 'Unable to unzip upgrade from '.$file_download_location.' <br>';
 		  exit;
-		}			
-		
+		}
 
 		//TODO: DO BACKUPS
 
-		
-		//COPY THE THEME FILES 
+		//COPY THE THEME FILES
 		//$location_of_themes = $stage_directory.'/theme';
 		//print_r($location_of_themes);
 		//echo 'copying '. $theme_directory. ' to ' .$stage_directory ;
-		
+
 		//CHECK PERMISSION OF DESTINATION THEME FOLDER
 		/*
 		$perms = fileperms($live_directory);
@@ -439,7 +414,6 @@
 			exit;
 		}
 
-
 		exec("cp -r $theme_directory $stage_directory");
 		if (is_dir_empty($location_of_themes)) {
 			echo $location_of_themes. ' (theme_directory) failed to copy.';
@@ -448,8 +422,6 @@
 		else{
 			echo "Theme files copied from $theme_directory to $stage_directory.<br>";
 		}
-
-
 
 		if(file_exists($location_of_plugins)){
 			exec("cp -r $plugin_directory $stage_directory");
@@ -462,8 +434,6 @@
 			}
 		}
 
-
-
 		//RUN THE DEPLOY
 		echo 'Clearing backup area: '.$backup_directory.'<br>';
 		exec ("rm -rf $backup_directory".'/*');
@@ -473,7 +443,7 @@
 			echo 'Backup area cleared<br>';
 		}
 		else{
-			
+
 			echo "Failed to remove old backup files...aborting.<br>";
 			echo 'Permissions of '.$backup_directory.': '.substr(sprintf('%o', fileperms($backup_directory)), -4).'<br>';
 			$x=1;
@@ -487,9 +457,8 @@
 			}
 			exit;
 		}
-		
 
-		//SET PERMISSIONS FOR NEW FILES 
+		//SET PERMISSIONS FOR NEW FILES
 		echo 'Setting '.$stage_location.' to 770<br>';
 		exec("chmod -R 770 $stage_location");
 		echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
@@ -513,13 +482,13 @@
 			echo 'Copied upgrade files.<br>';
 		}
 		else if(!file_exists($live_directory)){
-			//FAILED, LETS LOAD FROM BACKUP 
+			//FAILED, LETS LOAD FROM BACKUP
 			echo 'Upgrade failed, loading from backup.<br>';
 			exec("mv $backup_directory_contents $live_directory");
 			exit;
 		}
-		
-		//CLEAR OLD STAGED FILES 
+
+		//CLEAR OLD STAGED FILES
 		echo 'Clearing staging area: '.$stage_location.'...<br>';
 		exec("chmod -R 770 $stage_location");
 		if(file_exists($stage_location)){
@@ -534,9 +503,7 @@
 			else{
 				echo 'Staging area cleared<br>';
 			}
-		}	
-		
-		
+		}
 
 		//DO THE MIGRATION
 		$noautorun = 1;  //DO NOT AUTORUN THE update_database include
@@ -545,22 +512,22 @@
 		if(!$migration_result){
 			echo 'Migration failed...reverting upgrade.<br>';
 			exec("mv $backup_directory_contents $live_directory");
-		
+
 		}
 		else{
 			echo 'Upgrade complete.<br>';
 		}
-		
-		//UNTAR IT 
+
+		//UNTAR IT
 		/*
 		try {
 			$phar = new PharData($targetLocation);
 			$phar->extractTo($stage_location); // extract all files
 		} catch (Exception $e) {
 			print_r($e);
-		}	
-		*/		
-		
+		}
+		*/
+
 		//UPDATE THE SYSTEM VERSION
 		$sql = "UPDATE stg_settings set stg_value='".$decode_response['system_version']."' WHERE stg_name='system_version'";
 		try{
@@ -569,44 +536,41 @@
 			if($verbose){
 				echo 'System version now '.$decode_response['system_version']."<br>\n";
 			}
-			
+
 		}
 		catch(PDOException $e){
 			echo $e->getMessage();
 			echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $decode_response['system_version'] ."<br>\n";
 			exit;
-		}	
+		}
 	}
 	else{
-		
+
 		$session = SessionControl::get_instance();
 		//$session->set_return("/admin/admin_users");
 
 		$page = new AdminPage();
-		$page->admin_header(	
+		$page->admin_header(
 		array(
 			'menu-id'=> 'users-list',
 			'page_title' => 'Upgrade',
 			'readable_title' => 'Upgrade',
 			'breadcrumbs' => array(
-				'Settings'=>'/admin/admin_settings', 
+				'Settings'=>'/admin/admin_settings',
 				'Upgrade' => '',
 			),
 			'session' => $session,
 		)
 		);
 
-		
 		$pageoptions['title'] = 'System Upgrades';
 		$page->begin_box($pageoptions);
-
 
 		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 		echo $formwriter->begin_form("form", "post", "/utils/upgrade");
 
 		echo 'Local system Version: '.$settings->get_setting('system_version').'<br>';
 		echo 'Database Version: '.$settings->get_setting('database_version').'<br>';
-
 
 		echo '<fieldset><h4>Confirm Upgrade</h4>';
 			echo '<div class="fields full">';
@@ -621,7 +585,7 @@
 
 				echo $formwriter->start_buttons();
 				echo $formwriter->new_form_button('Submit');
-				echo $formwriter->end_buttons();	
+				echo $formwriter->end_buttons();
 
 			}
 			else if($decode_response['system_version'] == $settings->get_setting('system_version')){
@@ -631,14 +595,12 @@
 
 				echo $formwriter->start_buttons();
 				echo $formwriter->new_form_button('Upgrade anyway');
-				echo $formwriter->end_buttons();	
+				echo $formwriter->end_buttons();
 
 			}
 			else{
 				echo 'Your version '. $decode_response['system_version']. ' is up to date.  ';
 			}
-
-
 
 			echo '</div>';
 		echo '</fieldset>';
@@ -648,8 +610,7 @@
 
 		$page->admin_footer();
 
-
-	}	
+	}
 
 	function is_dir_empty($dir) {
 		$numfiles = count(scandir($dir));
@@ -660,8 +621,5 @@
 			return false;
 		}
 	}
-
-	
-
 
 ?>

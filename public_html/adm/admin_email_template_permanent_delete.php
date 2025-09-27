@@ -1,20 +1,19 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/email_templates_class.php');
-	
+
 if ($_POST['confirm']){
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
 	$emt_email_template_id = LibraryFunctions::fetch_variable('emt_email_template_id', NULL, 1, 'You must provide a email_template to delete here.');
-	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');	
-	
+	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');
+
 	if ($confirm) {
 		$email_template = new EmailTemplateStore($emt_email_template_id, TRUE);
 		$email_template->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -32,18 +31,18 @@ else{
 	$emt_email_template_id = LibraryFunctions::fetch_variable('emt_email_template_id', NULL, 1, 'You must provide a email_template to edit.');
 
 	$email_template = new EmailTemplateStore($emt_email_template_id, TRUE);
-	
+
 	$session = SessionControl::get_instance();
 	$session->set_return("/admin/admin_email_templates");
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'email-templates',
 		'page_title' => 'EmailTemplate',
 		'readable_title' => 'Delete EmailTemplate',
 		'breadcrumbs' => array(
-			'EmailTemplates'=>'/admin/admin_email_templates', 
+			'EmailTemplates'=>'/admin/admin_email_templates',
 			'Delete ' . $email_template->get('emt_name') => '',
 		),
 		'session' => $session,

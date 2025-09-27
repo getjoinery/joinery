@@ -1,9 +1,7 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/api_keys_class.php');
@@ -13,14 +11,14 @@
 	$session->set_return();
 
 	$api_key = new ApiKey($_GET['apk_api_key_id'], TRUE);
-	
+
 	if($_REQUEST['action'] == 'soft_delete'){
 		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$api_key->soft_delete();
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_api_keys");
-		exit();		
+		exit();
 	}
 	if($_REQUEST['action'] == 'undelete'){
 		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -28,31 +26,31 @@
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_api_keys");
-		exit();		
-	}		
+		exit();
+	}
 	if($_REQUEST['action'] == 'permanent_delete'){
 		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$api_key->permanent_delete();
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_api_keys");
-		exit();		
+		exit();
 	}
-	
+
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'urls',
 		'page_title' => 'ApiKeys',
 		'readable_title' => 'ApiKeys',
 		'breadcrumbs' => array(
-			'ApiKeys'=>'/admin/admin_api_keys', 
+			'ApiKeys'=>'/admin/admin_api_keys',
 			'ApiKey' => '',
 		),
 		'session' => $session,
 	)
 	);
-	
+
 	$options['title'] = 'ApiKey';
 	$options['altlinks'] = array('Edit'=>'/admin/admin_api_key_edit?apk_api_key_id='.$api_key->key);
 	if(!$api_key->get('apk_delete_time')){
@@ -61,7 +59,7 @@
 	else{
 		$options['altlinks']['Undelete'] = '/admin/admin_api_key?action=undelete&apk_api_key_id='.$api_key->key;
 	}
-	
+
 	if($_SESSION['permission'] >= 8) {
 		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_api_key?action=permanent_delete&apk_api_key_id='.$api_key->key);
 	}
@@ -69,7 +67,7 @@
 	$page->begin_box($options);
 
 	echo '<h3>'.$api_key->get('apk_name').'</h3>';
-	
+
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($api_key->get('apk_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
 	$owner = new User($api_key->get('apk_usr_user_id'), TRUE);
@@ -83,11 +81,11 @@
 	if($api_key->get('apk_start_time')){
 		echo '<strong>Starts:</strong> '. LibraryFunctions::convert_time($api_key->get('apk_start_time'), "UTC", $session->get_timezone(), 'M j, Y').'<br>';
 	}
-	
+
 	if($api_key->get('apk_expires_time')){
 		echo '<strong>Expires:</strong> '. LibraryFunctions::convert_time($api_key->get('apk_expires_time'), "UTC", $session->get_timezone(), 'M j, Y').'<br>';
-	}	 		
-	
+	}
+
 	if($api_key->get('apk_delete_time')){
 		echo '<strong>Status:</strong> <b>Deleted</b>';
 	}

@@ -1,9 +1,7 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/admin_menus_class.php');
@@ -17,20 +15,20 @@
 		$admin_menu = new AdminMenu($_POST['amu_admin_menu_id'], TRUE);
 		$admin_menu->permanent_delete();
 		header("Location: /admin/admin_admin_menu");
-		exit();				
+		exit();
 	}
 
-	$admin_menu = MultiAdminMenu::getadminmenu(10, NULL, TRUE); 
+	$admin_menu = MultiAdminMenu::getadminmenu(10, NULL, TRUE);
 	$iterate_menu = $admin_menu;
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> NULL,
 		'page_title' => 'Admin Menu',
 		'readable_title' => 'Admin Menu',
 		'breadcrumbs' => array(
-			'Settings'=>'/admin/admin_settings', 
+			'Settings'=>'/admin/admin_settings',
 			'Admin Menus' => '',
 		),
 		'session' => $session,
@@ -47,18 +45,18 @@
 		'title' => 'Admin Menus',
 		//'search_on' => TRUE
 	);
-	$page->tableheader($headers, $table_options, $pager);	
-				
-	foreach ($admin_menu as $menu_id=>$menu_info){	
+	$page->tableheader($headers, $table_options, $pager);
+
+	foreach ($admin_menu as $menu_id=>$menu_info){
 		$menu_obj = new AdminMenu($menu_id, TRUE);
-		
+
 		if(!$menu_info['parent']){
-			
+
 			$disablednote = '';
 			if($menu_obj->get('amu_disable')){
 				$disablednote = '<b>disabled</b>';
 			}
-			
+
 			$rowvalues = array();
 			array_push($rowvalues, $menu_info['display'] . ' ' . $disablednote);
 			array_push($rowvalues, $menu_info['defaultpage']);
@@ -66,20 +64,20 @@
 			array_push($rowvalues, $menu_obj->get('amu_order'));
 			$delform = '<a href="/admin/admin_admin_menu_edit?amu_admin_menu_id='.$menu_id.'">edit</a>';
 			array_push($rowvalues, $delform);
-			$page->disprow($rowvalues);	
+			$page->disprow($rowvalues);
 		}
-		
-		if($menu_info['has_subs']){	
+
+		if($menu_info['has_subs']){
 			$rowvalues = array();
 			foreach ($iterate_menu as $iterate_menu_id=>$iterate_menu_info){
 				if($iterate_menu_info['parent'] == $menu_id){
 					$menu_obj = new AdminMenu($iterate_menu_id, TRUE);
-					
+
 					$disablednote = '';
 					if($menu_obj->get('amu_disable')){
 						$disablednote = '<b>disabled</b>';
 					}
-					
+
 					$rowvalues = array();
 					array_push($rowvalues, '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'.$iterate_menu_info['display']. ' ' .$disablednote);
 					array_push($rowvalues, $iterate_menu_info['defaultpage']);
@@ -87,7 +85,7 @@
 					array_push($rowvalues, $menu_obj->get('amu_order'));
 					$delform = '<a href="/admin/admin_admin_menu_edit?amu_admin_menu_id='.$iterate_menu_id.'">edit</a>';
 					array_push($rowvalues, $delform);
-					$page->disprow($rowvalues);	
+					$page->disprow($rowvalues);
 				}
 			}
 		}

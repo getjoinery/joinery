@@ -1,8 +1,7 @@
 <?php
-	
+
 	PathHelper::requireOnce('includes/Activation.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
 
 	PathHelper::requireOnce('data/emails_class.php');
@@ -20,45 +19,45 @@
 	}
 
 	$email = new Email($_REQUEST['eml_email_id'], TRUE);
-	
-	$recipient_groups = $email->get_recipient_groups(); 
+
+	$recipient_groups = $email->get_recipient_groups();
 
 	if($_REQUEST['action'] == 'addgroup'){
 		//ADD GROUP TO EMAIL
 		$email->add_recipient_group(NULL, $_POST['grp_group_id'], $op);
 		$returnurl = $session->get_return();
 		header("Location: /admin/admin_email_recipients_modify?eml_email_id=".$email->key);
-		exit();			
+		exit();
 	}
 	else if($_REQUEST['action'] == 'remove'){
 		$email_recipient_group = new EmailRecipientGroup($_POST['erg_email_recipient_group_id'], TRUE);
 		$email_recipient_group->permanent_delete();
-		$returnurl = $session->get_return();		
+		$returnurl = $session->get_return();
 		header("Location: /admin/admin_email_recipients_modify?eml_email_id=".$email->key);
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'addevent'){
 		//ADD GROUP TO EMAIL
 		$email->add_recipient_group($_POST['evt_event_id'], NULL, $op);
 		$returnurl = $session->get_return();
 		header("Location: /admin/admin_email_recipients_modify?eml_email_id=".$email->key);
-		exit();			
-	}	
+		exit();
+	}
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'emails-list',
 		'breadcrumbs' => array(
-			'Emails'=>'/admin/admin_emails', 
-			$email->get('eml_description')=>'/admin/admin_email?eml_email_id='.$email->key, 
+			'Emails'=>'/admin/admin_emails',
+			$email->get('eml_description')=>'/admin/admin_email?eml_email_id='.$email->key,
 			$email->get('eml_subject') => '',
 		),
 		'session' => $session,
 	)
-	);		
+	);
 
-	if($email->get('eml_status') != Email::EMAIL_SENT && $email->get('eml_status') != Email::EMAIL_QUEUED){ 
+	if($email->get('eml_status') != Email::EMAIL_SENT && $email->get('eml_status') != Email::EMAIL_QUEUED){
 
 		$headers = array("Recipients", "Count", "Action");
 
@@ -68,13 +67,13 @@
 			'title' => 'Recipients for "'. $email->get('eml_description'). '"'
 		);
 		$page->tableheader($headers, $box_vars);
-		
+
 		$total = 0;
 		$total_unsubscribed = 0;
 		$total_duplicates = 0;
 		$recipient_list = array();
 		foreach($recipient_groups as $recipient_group){
-			
+
 			$group_total = 0;
 			$group_unsubscribed = 0;
 			$rowvalues=array();
@@ -98,7 +97,7 @@
 				}
 				$label = $event->get('evt_name');
 			}
-			
+
 			$num_total = 0;
 			foreach($add_user_list as $user_id){
 				$user= new User($user_id, TRUE);
@@ -125,13 +124,13 @@
 			<input type="hidden" class="hidden" name="action" id="action" value="remove" />
 			<input type="hidden" class="hidden" name="erg_email_recipient_group_id" id="erg_email_recipient_group_id" value="'.$recipient_group->key.'" />
 			<button type="submit">Delete</button>
-			</form>';	
-			array_push($rowvalues, $delform);			
-			
+			</form>';
+			array_push($rowvalues, $delform);
+
 			$page->disprow($rowvalues);
 
 		}
-		
+
 		echo '<tr><td colspan="3">';
 		$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
 		echo $formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
@@ -142,23 +141,23 @@
 			NULL,  //NUM PER PAGE
 			NULL);  //OFFSET
 		$groups->load();
-		
+
 		$optionvals = $groups->get_dropdown_array();
 		echo $formwriter->hiddeninput('action', 'addgroup');
 		echo $formwriter->hiddeninput('eml_email_id', $email->key);
 		echo $formwriter->hiddeninput('op', $op);
 		if($op == 'add'){
 			echo $formwriter->dropinput("Add group members", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-			echo $formwriter->new_form_button('Add group members');			
+			echo $formwriter->new_form_button('Add group members');
 		}
 		else{
 			echo $formwriter->dropinput("Exclude group members", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-			echo $formwriter->new_form_button('Exclude group members');					
+			echo $formwriter->new_form_button('Exclude group members');
 		}
 		echo $formwriter->end_form();
 
 		$events = new MultiEvent(
-			array(),  //SEARCH 
+			array(),  //SEARCH
 			array('start_time' => 'DESC'),		//SORT BY => DIRECTION
 			NULL,  //NUM PER PAGE
 			NULL);  //OFFSET
@@ -177,18 +176,18 @@
 		}
 		else{
 			echo $formwriter->dropinput("Exclude event attendees", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE, TRUE);
-			echo $formwriter->new_form_button('Exclude event attendees');			
+			echo $formwriter->new_form_button('Exclude event attendees');
 		}
 		echo $formwriter->end_form();
 		echo '</td></tr>';
-		
+
 		$page->endtable();
-				
+
 	}
 	else{
 		throw new SystemDisplayableError('This email has already been sent.  You cannot add or remove recipients.');
-		exit();	
-		
+		exit();
+
 	}
 
 	$page->admin_footer();

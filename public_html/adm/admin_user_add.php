@@ -1,7 +1,5 @@
 <?php
 
-// ErrorHandler.php no longer needed - using new ErrorManager system
-
 PathHelper::requireOnce('includes/AdminPage.php');
 
 PathHelper::requireOnce('includes/Activation.php');
@@ -25,24 +23,24 @@ if ($_POST){
 else{
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'users-list',
 		'page_title' => 'Add User',
 		'readable_title' => 'Add User',
 		'breadcrumbs' => array(
-			'Users'=>'/admin/admin_users', 
+			'Users'=>'/admin/admin_users',
 			'Add User'=>'',
 		),
 		'session' => $session,
 	)
 	);
-	
+
 	$pageoptions['title'] = 'Add User';
 	$page->begin_box($pageoptions);
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
-	
+
 	$validation_rules = array();
 	$validation_rules['usr_first_name']['required']['value'] = 'true';
 	$validation_rules['usr_first_name']['minlength']['value'] = 1;
@@ -54,13 +52,13 @@ else{
 	$validation_rules['usr_email']['required']['value'] = 'true';
 	$validation_rules['usr_email']['email']['value'] = 'true';
 	$validation_rules['usr_email']['maxlength']['value'] = 64;
-	$validation_rules['usr_email']['remote']['value'] = "'/ajax/email_check_ajax'";	
+	$validation_rules['usr_email']['remote']['value'] = "'/ajax/email_check_ajax'";
 	$validation_rules['usr_email']['remote']['message'] = "'This email already exists.'";
 	if($nickname_display){
 		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
 	}
-	echo $formwriter->set_validate($validation_rules);		
-	
+	echo $formwriter->set_validate($validation_rules);
+
 	echo $formwriter->begin_form("form1", "post", "/admin/admin_user_add");
 
 	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, NULL, "",32, "");
@@ -73,9 +71,9 @@ else{
 	echo $formwriter->textinput("Password ", "password", "ctrlHolder", 20, NULL, "" , 255, "");
 	$optionvals = Address::get_timezone_drop_array();
 	$default_timezone = $settings->get_setting('default_timezone');
-	echo $formwriter->dropinput("Time Zone", "usr_timezone", "ctrlHolder", $optionvals, $default_timezone, '', FALSE);	
-	
-	echo $formwriter->checkboxinput("Add to the mailing list", "newsletter", "ctrlHolder", "normal", NULL, "yes", '');	
+	echo $formwriter->dropinput("Time Zone", "usr_timezone", "ctrlHolder", $optionvals, $default_timezone, '', FALSE);
+
+	echo $formwriter->checkboxinput("Add to the mailing list", "newsletter", "ctrlHolder", "normal", NULL, "yes", '');
 	echo $formwriter->checkboxinput("Send an activation email", "send_activation_email", "ctrlHolder", "normal", "yes", "yes", '');
 
 	echo $formwriter->start_buttons();

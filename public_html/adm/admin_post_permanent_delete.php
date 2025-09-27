@@ -1,21 +1,19 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/posts_class.php');
-	
+
 if ($_POST['confirm']){
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
 	$pst_post_id = LibraryFunctions::fetch_variable('pst_post_id', NULL, 1, 'You must provide a post to delete here.');
-	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');	
-	
+	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');
+
 	if ($confirm) {
 		$post = new Post($pst_post_id, TRUE);
 		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -33,18 +31,18 @@ else{
 	$pst_post_id = LibraryFunctions::fetch_variable('pst_post_id', NULL, 1, 'You must provide a post to edit.');
 
 	$post = new Post($pst_post_id, TRUE);
-	
+
 	$session = SessionControl::get_instance();
 	$session->set_return("/admin/admin_posts");
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'blog-posts',
 		'page_title' => 'Post',
 		'readable_title' => 'Delete Post',
 		'breadcrumbs' => array(
-			'Posts'=>'/admin/admin_posts', 
+			'Posts'=>'/admin/admin_posts',
 			'Delete ' . $post->get('pst_title') => '',
 		),
 		'session' => $session,

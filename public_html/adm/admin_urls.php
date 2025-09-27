@@ -1,8 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/urls_class.php');
 
@@ -12,7 +11,7 @@
 
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'url_id', 0, '');	
+	$sort = LibraryFunctions::fetch_variable('sort', 'url_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 
 	$search_criteria = array();
@@ -21,18 +20,18 @@
 	//ONLY SHOW DELETED TO SUPER ADMINS
 	if($_SESSION['permission'] < 10){
 		$search_criteria['deleted'] = false;
-	}	
+	}
 
 	$urls = new MultiUrl(
 		$search_criteria,
 		array($sort=>$sdirection),
 		$numperpage,
-		$offset);	
-	$numrecords = $urls->count_all();	
+		$offset);
+	$numrecords = $urls->count_all();
 	$urls->load();
-	
+
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'urls',
 		'page_title' => 'Urls',
@@ -57,21 +56,21 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($urls as $url){
-		
+
 		$deleted = '';
 		if($url->get('url_delete_time')){
 			$deleted = 'DELETED';
 		}
-		
+
 		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_url?url_url_id=$url->key'>".$url->get('url_incoming')."</a>". $deleted);	
+		array_push($rowvalues, "<a href='/admin/admin_url?url_url_id=$url->key'>".$url->get('url_incoming')."</a>". $deleted);
 		if($url->get('url_redirect_url')){
 			array_push($rowvalues, $url->get('url_redirect_url'));
 		}
 		else{
 			array_push($rowvalues, $url->get('url_redirect_file'));
 		}
-		
+
 		if($url->get('url_type') == 301){
 			array_push($rowvalues, 'Permanent');
 		}
