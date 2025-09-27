@@ -116,7 +116,7 @@
 		'Payment Settings' => '/admin/admin_settings_payments',
 		'Email Settings' => '/admin/admin_settings_email',
 	);
-	echo AdminPage::tab_menu($tab_menus, 'General Settings');
+	echo AdminPage::tab_menu($tab_menus, 'Email Settings');
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
