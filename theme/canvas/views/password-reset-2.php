@@ -12,46 +12,45 @@ if ($page_vars->redirect) {
 }
 $page_vars = $page_vars->data;
 	$settings = Globalvars::get_instance();
-	
+
 	$page = new PublicPage();
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
-		'title'=>'Password Reset', 
+		'title'=>'Password Reset',
 		'header_only' => true,
 	);
 	$page->public_header($hoptions,NULL);
-		
+
 	if($page_vars['message']){
 		?>
-		<!-- Canvas Success Section -->
+		<!-- Content
+		============================================= -->
 		<section id="content">
-			<div class="content-wrap">
-				<div class="container">
-					<div class="row justify-content-center">
-						<div class="col-sm-10 col-md-8 col-lg-6 col-xl-5 col-xxl-4">
-							
-							<!-- Logo -->
-							<div class="text-center mb-4">
-								<a href="/" class="d-flex align-items-center justify-content-center text-decoration-none">
-									<?php if($settings->get_setting('logo_link')): ?>
-										<img src="<?php echo $settings->get_setting('logo_link'); ?>" alt="" width="40" class="me-2" />
-									<?php endif; ?>
-									<span class="h4 mb-0 text-primary fw-bold"><?php echo $settings->get_setting('site_name'); ?></span>
+			<div class="content-wrap py-0">
+
+				<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
+
+				<div class="section bg-transparent min-vh-100 p-0 m-0">
+					<div class="vertical-middle">
+						<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
+
+							<div class="center mb-4">
+								<a href="/">
+									<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
 								</a>
 							</div>
 
-							<!-- Success Card -->
-							<div class="card shadow-sm rounded-4 border-0">
-								<div class="card-body p-4 p-sm-5 text-center">
+							<div class="card mb-0">
+								<div class="card-body text-center" style="padding: 40px;">
 									<div class="mb-4">
 										<div class="text-success mb-3">
-											<i class="icon-check-circle display-4"></i>
+											<i class="icon-check-circle" style="font-size: 4rem;"></i>
 										</div>
-										<h4 class="mb-2">Password successfully reset.</h4>
-										<p class="text-muted">Continue to log in.</p>
+										<h3 class="mb-2">Password Successfully Reset</h3>
+										<p class="text-muted">Continue to log in with your new password.</p>
 									</div>
-									<a href="/login" class="btn btn-primary btn-lg rounded-pill">
-										<i class="icon-chevron-left me-1"></i>Continue to login
+									<a href="/login" class="button button-3d button-black m-0">
+										<i class="icon-chevron-left me-1"></i>Continue to Login
 									</a>
 								</div>
 							</div>
@@ -59,32 +58,34 @@ $page_vars = $page_vars->data;
 						</div>
 					</div>
 				</div>
+
 			</div>
-		</section>
+		</section><!-- #content end -->
 		<?php
 	}
 	else{
 		?>
-		<!-- Canvas Password Reset Form Section -->
+		<!-- Content
+		============================================= -->
 		<section id="content">
-			<div class="content-wrap">
-				<div class="container">
-					<div class="row justify-content-center">
-						<div class="col-sm-10 col-md-8 col-lg-6 col-xl-5 col-xxl-4">
-							
-							<!-- Logo -->
-							<div class="text-center mb-4">
-								<a href="/" class="d-flex align-items-center justify-content-center text-decoration-none">
-									<?php if($settings->get_setting('logo_link')): ?>
-										<img src="<?php echo $settings->get_setting('logo_link'); ?>" alt="" width="40" class="me-2" />
-									<?php endif; ?>
-									<span class="h4 mb-0 text-primary fw-bold"><?php echo $settings->get_setting('site_name'); ?></span>
+			<div class="content-wrap py-0">
+
+				<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
+
+				<div class="section bg-transparent min-vh-100 p-0 m-0">
+					<div class="vertical-middle">
+						<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
+
+							<div class="center mb-4">
+								<a href="/">
+									<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
 								</a>
 							</div>
 
-							<!-- Form Card -->
-							<div class="card shadow-sm rounded-4 border-0">
-								<div class="card-body p-4 p-sm-5">
+							<div class="card mb-0">
+								<div class="card-body" style="padding: 40px;">
+									<h3>Set New Password</h3>
+
 									<?php
 									$formwriter = $page->getFormWriter('form1');
 									$validation_rules = array();
@@ -94,39 +95,37 @@ $page_vars = $page_vars->data;
 									$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
 									$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
 									$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-									echo $formwriter->set_validate($validation_rules);		
-									echo $formwriter->begin_form("", "post", "/password-reset-2", true);
+									echo $formwriter->set_validate($validation_rules);
+									echo $formwriter->begin_form("", "post", "/password-reset-2", true, 'class="mb-0"');
 									echo $formwriter->hiddeninput('act_code',$page_vars['act_code']);
 									?>
-									
-									<div class="text-center mb-4">
-										<h5 class="mb-0">Set New Password</h5>
+
+									<div class="row">
+										<div class="col-12 form-group">
+											<label for="usr_password">New Password:</label>
+											<input type="password"
+												   name="usr_password"
+												   id="usr_password"
+												   class="form-control"
+												   autocomplete="new-password" />
+										</div>
+
+										<div class="col-12 form-group">
+											<label for="usr_password_again">Confirm Password:</label>
+											<input type="password"
+												   name="usr_password_again"
+												   id="usr_password_again"
+												   class="form-control"
+												   autocomplete="new-password" />
+										</div>
+
+										<div class="col-12 form-group">
+											<button type="submit" name="submit" class="button button-3d button-black m-0">
+												Set Password
+											</button>
+										</div>
 									</div>
 
-									<div class="mb-3">
-										<label for="usr_password" class="form-label">New Password</label>
-										<input type="password" 
-											   name="usr_password" 
-											   id="usr_password" 
-											   class="form-control form-control-lg rounded-pill" 
-											   placeholder="Enter new password" 
-											   autocomplete="new-password" />
-									</div>
-
-									<div class="mb-3">
-										<label for="usr_password_again" class="form-label">Confirm Password</label>
-										<input type="password" 
-											   name="usr_password_again" 
-											   id="usr_password_again" 
-											   class="form-control form-control-lg rounded-pill" 
-											   placeholder="Confirm password" 
-											   autocomplete="new-password" />
-									</div>
-
-									<button type="submit" name="submit" class="btn btn-primary btn-lg w-100 rounded-pill mt-3">
-										Set Password
-									</button>
-									
 									<?php echo $formwriter->end_form(); ?>
 								</div>
 							</div>
@@ -134,8 +133,9 @@ $page_vars = $page_vars->data;
 						</div>
 					</div>
 				</div>
+
 			</div>
-		</section>
+		</section><!-- #content end -->
 		<?php
 	}
 
