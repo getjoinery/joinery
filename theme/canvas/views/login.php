@@ -32,64 +32,53 @@ $page_vars = $page_vars->data;
 	<section id="content">
 		<div class="content-wrap py-0">
 
-			<div class="section dark p-0 m-0 h-100 position-absolute"></div>
+			<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
 
-			<div class="section bg-transparent min-vh-100 p-0 m-0 d-flex">
+			<div class="section bg-transparent min-vh-100 p-0 m-0">
 				<div class="vertical-middle">
-					<div class="container py-5">
+					<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
 
-						<div class="text-center">
+						<div class="center mb-4">
 							<a href="/">
-								<?php if($settings->get_setting('logo_link')){ ?>
-									<img src="<?php echo $settings->get_setting('logo_link'); ?>" alt="<?php echo $settings->get_setting('site_name'); ?>" style="height: 100px;">
-								<?php } else { ?>
-									<h2><?php echo $settings->get_setting('site_name'); ?></h2>
-								<?php } ?>
+								<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
 							</a>
 						</div>
 
-						<div class="card mx-auto rounded-0 border-0" style="max-width: 400px;">
+						<div class="card mb-0">
 							<div class="card-body" style="padding: 40px;">
 								
-								<?php 
+								<h3>Login to your Account</h3>
+
+								<?php
 								foreach($page_vars['display_messages'] AS $display_message) {
-									if($display_message->identifier == 'loginbox') {	
+									if($display_message->identifier == 'loginbox') {
 										echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 									}
-								}   		
+								}
 
 								$formwriter = $page->getFormWriter('form1');
 
 								$validation_rules = array();
 								$validation_rules['email']['required']['value'] = 'true';
 								$validation_rules['password']['required']['value'] = 'true';
-								echo $formwriter->set_validate($validation_rules);	
-								echo $formwriter->begin_form('form1', 'POST', '/login');
+								echo $formwriter->set_validate($validation_rules);
+								echo $formwriter->begin_form('form1', 'POST', '/login', TRUE, 'class="mb-0"');
 								?>
 								
-								<h3>Login to your Account</h3>
-
 								<div class="row">
 									<div class="col-12 form-group">
-										<label for="email">Email Address:</label>
-										<input type="email" id="email" name="email" value="" class="form-control not-dark" placeholder="Email address">
+										<label for="email">Username:</label>
+										<input type="email" id="email" name="email" value="" class="form-control">
 									</div>
 
 									<div class="col-12 form-group">
 										<label for="password">Password:</label>
-										<input type="password" id="password" name="password" value="" class="form-control not-dark" placeholder="Password">
+										<input type="password" id="password" name="password" value="" class="form-control">
 									</div>
 
 									<div class="col-12 form-group">
-										<div class="form-check">
-											<input class="form-check-input" type="checkbox" id="setcookie" name="setcookie" checked="checked" value="yes">
-											<label class="form-check-label" for="setcookie">Remember me</label>
-										</div>
-									</div>
-
-									<div class="col-12 form-group mb-0">
 										<div class="d-flex justify-content-between">
-											<button class="button button-3d button-black m-0" type="submit" name="submit">Login</button>
+											<button class="button button-3d button-black m-0" id="login-form-submit" name="login-form-submit" value="login">Login</button>
 											<a href="<?php echo $forgot_link; ?>">Forgot Password?</a>
 										</div>
 									</div>
@@ -97,15 +86,13 @@ $page_vars = $page_vars->data;
 								
 								<?php echo $formwriter->end_form(); ?>
 
-								<div class="line line-sm"></div>
+								<div class="w-100"></div>
 
-								<div class="text-center">
-									<p class="mb-0">Don't have an account? <a href="/register<?php if(isset($_GET['m'])){ echo '?m='.htmlspecialchars($_GET['m']); } ?>">Create one</a></p>
+								<div class="text-center w-100">
+									<p style="line-height: 1.6">Don't have an account yet? <a href="/register<?php if(isset($_GET['m'])){ echo '?m='.htmlspecialchars($_GET['m']); } ?>">Register for an Account</a></p>
 								</div>
 							</div>
 						</div>
-
-						<div class="text-center text-muted mt-3"><small>Copyrights &copy; All Rights Reserved by <?php echo $settings->get_setting('site_name'); ?>.</small></div>
 
 					</div>
 				</div>

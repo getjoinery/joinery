@@ -61,88 +61,80 @@ $page_vars = $page_vars->data;
 	echo $formwriter->set_validate($validation_rules);
 ?>
 
-<!-- Canvas Registration Section -->
+<!-- Content
+============================================= -->
 <section id="content">
-	<div class="content-wrap">
-		<div class="container">
-			<div class="row justify-content-center">
-				<div class="col-lg-6 col-md-8">
-					<div class="card shadow-sm rounded-4">
-						<div class="card-header text-center bg-primary text-white rounded-top-4">
-							<h3 class="mb-0">Create Your Account</h3>
-							<p class="mb-0 mt-2 opacity-75">Join our community today</p>
-						</div>
-						<div class="card-body p-4">
+	<div class="content-wrap py-0">
+
+		<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
+
+		<div class="section bg-transparent min-vh-100 p-0 m-0">
+			<div class="vertical-middle">
+				<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
+
+					<div class="center mb-4">
+						<a href="/">
+							<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
+						</a>
+					</div>
+
+					<div class="card mb-0">
+						<div class="card-body" style="padding: 40px;">
+							<h3>Register for an Account</h3>
 							<?php
-							echo $formwriter->begin_form("form1", "post", "/register", TRUE);
+							echo $formwriter->begin_form("form1", "post", "/register", TRUE, 'class="row mb-0"');
 							echo $formwriter->hiddeninput("prevformname", "register");
 							?>
-
-							<div class="row g-3">
-								<div class="col-md-6">
-									<div class="form-group">
-										<label for="usr_first_name" class="form-label">First Name <span class="text-danger">*</span></label>
-										<?php echo $formwriter->textinput("", "usr_first_name", 'form-control', 20, @$form_fields->usr_first_name , "",32, ""); ?>
-									</div>
+								<div class="col-md-6 form-group">
+									<label for="usr_first_name">First Name:</label>
+									<?php echo $formwriter->textinput("", "usr_first_name", 'form-control', 20, @$form_fields->usr_first_name , "",32, ""); ?>
 								</div>
-								<div class="col-md-6">
-									<div class="form-group">
-										<label for="usr_last_name" class="form-label">Last Name <span class="text-danger">*</span></label>
-										<?php echo $formwriter->textinput("", "usr_last_name", 'form-control', 20, @$form_fields->usr_last_name, "" , 32, ""); ?>
-									</div>
+
+								<div class="col-md-6 form-group">
+									<label for="usr_last_name">Last Name:</label>
+									<?php echo $formwriter->textinput("", "usr_last_name", 'form-control', 20, @$form_fields->usr_last_name, "" , 32, ""); ?>
 								</div>
 								
 								<?php if($nickname_display){ ?>
-								<div class="col-12">
-									<div class="form-group">
-										<label for="usr_nickname" class="form-label"><?php echo htmlspecialchars($nickname_display); ?></label>
-										<?php echo $formwriter->textinput("", "usr_nickname", 'form-control', 20, @$form_fields->usr_nickname, "" , 32, ""); ?>
-									</div>
+								<div class="col-12 form-group">
+									<label for="usr_nickname"><?php echo htmlspecialchars($nickname_display); ?>:</label>
+									<?php echo $formwriter->textinput("", "usr_nickname", 'form-control', 20, @$form_fields->usr_nickname, "" , 32, ""); ?>
 								</div>
 								<?php } ?>
 								
-								<div class="col-12">
-									<div class="form-group">
-										<label for="usr_email" class="form-label">Email Address <span class="text-danger">*</span></label>
-										<?php echo $formwriter->textinput("", "usr_email", 'form-control', 20, '', "" , 64, ""); ?>
-									</div>
+								<div class="col-12 form-group">
+									<label for="usr_email">Email Address:</label>
+									<?php echo $formwriter->textinput("", "usr_email", 'form-control', 20, '', "" , 64, ""); ?>
 								</div>
 
-								<div class="col-12">
-									<div class="form-group">
-										<label for="password" class="form-label">Create Password <span class="text-danger">*</span></label>
-										<?php echo $formwriter->passwordinput("", "password", 'form-control', 20, "" , "", 255,""); ?>
-										<small class="form-text text-muted">Password must be at least 5 characters long</small>
-									</div>
+								<div class="col-12 form-group">
+									<label for="password">Choose Password:</label>
+									<?php echo $formwriter->passwordinput("", "password", 'form-control', 20, "" , "", 255,""); ?>
 								</div>
 
-								<div class="col-12">
-									<div class="form-group">
-										<label for="usr_timezone" class="form-label">Timezone</label>
-										<?php 
-										$optionvals = Address::get_timezone_drop_array();
-										$default_timezone = $settings->get_setting('default_timezone');
-										echo $formwriter->dropinput("", "usr_timezone", 'form-select', $optionvals, $default_timezone, '', FALSE);
-										?>
-									</div>
+								<div class="col-12 form-group">
+									<label for="usr_timezone">Timezone:</label>
+									<?php
+									$optionvals = Address::get_timezone_drop_array();
+									$default_timezone = $settings->get_setting('default_timezone');
+									echo $formwriter->dropinput("", "usr_timezone", 'form-control', $optionvals, $default_timezone, '', FALSE);
+									?>
 								</div>
 
 								<!-- Anti-spam Question -->
-								<div class="col-12">
+								<div class="col-12 form-group">
 									<?php echo $formwriter->antispam_question_input(); ?>
 								</div>
 
 								<!-- Checkboxes -->
-								<div class="col-12">
-									<div class="form-check mb-3">
-										<?php echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy' target='_blank'>privacy policy</a>", "privacy", "form-check-input", "normal", NULL, "yes", ''); ?>
-									</div>
-									<div class="form-check mb-3">
-										<?php echo $formwriter->checkboxinput("Please add me to the mailing list", "newsletter", "form-check-input", "normal", NULL, "yes", ''); ?>
-									</div>
-									<div class="form-check mb-3">
-										<?php echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "form-check-input", "normal", 'yes', "yes", ''); ?>
-									</div>
+								<div class="col-12 form-group">
+									<?php echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy' target='_blank'>privacy policy</a>", "privacy", "form-check-input", "normal", NULL, "yes", ''); ?>
+								</div>
+								<div class="col-12 form-group">
+									<?php echo $formwriter->checkboxinput("Please add me to the mailing list", "newsletter", "form-check-input", "normal", NULL, "yes", ''); ?>
+								</div>
+								<div class="col-12 form-group">
+									<?php echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "form-check-input", "normal", 'yes', "yes", ''); ?>
 								</div>
 
 								<!-- Security fields -->
@@ -152,25 +144,26 @@ $page_vars = $page_vars->data;
 								?>
 
 								<!-- Submit Button -->
-								<div class="col-12">
-									<div class="d-grid">
-										<?php echo $formwriter->new_form_button('Create Account', 'btn btn-primary btn-lg', 'full'); ?>
-									</div>
+								<div class="col-12 form-group">
+									<?php echo $formwriter->new_form_button('Register Now', 'button button-3d button-black m-0', 'full'); ?>
 								</div>
-							</div>
 
 							<?php echo $formwriter->end_form(true); ?>
 
-							<div class="text-center mt-4">
-								<p class="mb-0">Already have an account? <a href="/login<?php echo $extra; ?>" class="text-primary fw-semibold">Sign in here</a></p>
+							<div class="w-100"></div>
+
+							<div class="text-center w-100">
+								<p style="line-height: 1.6">Already have an account? <a href="/login<?php echo $extra; ?>">Login to your Account</a></p>
 							</div>
 						</div>
 					</div>
+
 				</div>
 			</div>
 		</div>
+
 	</div>
-</section>
+</section><!-- #content end -->
 
 <?php
 echo PublicPage::EndPage();
