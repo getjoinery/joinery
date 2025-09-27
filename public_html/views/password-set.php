@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password-set_logic.php', 'logic'));
@@ -45,7 +45,6 @@ $page_vars = $page_vars->data;
 		echo $formwriter->start_buttons();
 		echo $formwriter->new_form_button('Submit');
 		echo $formwriter->end_buttons(); 
-
 
 		echo $formwriter->end_form();
 	}

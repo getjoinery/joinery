@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/groups_class.php');
@@ -52,10 +51,8 @@ else{
 	)
 	);
 
-	
 	$pageoptions['title'] = 'Delete Group '.$group->get('grp_name');
 	$page->begin_box($pageoptions);
-
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	echo $formwriter->begin_form("form", "post", "/admin/admin_group_permanent_delete");
@@ -78,7 +75,6 @@ else{
 	$page->end_box();
 
 	$page->admin_footer();
-
 
 }
 ?>

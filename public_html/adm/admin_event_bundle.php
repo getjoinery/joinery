@@ -1,9 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/groups_class.php');
@@ -30,8 +29,6 @@
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
-
-
 	$group_members = new MultiGroupMember(
 		array('group_id' => $group->key),  //SEARCH CRITERIA
 		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
@@ -41,9 +38,6 @@
 	);
 	$numrecords = $group_members->count_all();
 	$group_members->load();
-
-
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -59,8 +53,6 @@
 		'session' => $session,
 	)
 	);
-
-
 
 	$headers = array('Event', 'Action');
 	$altlinks = array();
@@ -96,5 +88,4 @@
 
 	$page->admin_footer();
 ?>
-
 

@@ -1,19 +1,14 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	PathHelper::requireOnce('data/address_class.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/SystemBase.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
-
-
-	
 
 	$address_id = $_REQUEST['usa_address_id'];
 	$address = NULL;
@@ -39,7 +34,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	} 
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -57,7 +51,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 			<section class="contact-page-area section-gap">
 				<div class="container"> 
-			
 
 				<?php
 				
@@ -71,8 +64,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 				echo $formwriter->set_validate($validation_rules);					
 				
 				echo $formwriter->begin_form("", "post", "/admin/admin_address_edit");
-					
-			
+
 				echo '<div id="newaddressblock">';
 				echo $formwriter->hiddeninput('usr_user_id', $user_id);
 				Address::PlainForm($formwriter, $address);

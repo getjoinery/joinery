@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('subscriptions_logic.php', 'logic'));
@@ -24,13 +23,8 @@ $page_vars = $page_vars->data;
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('My Profile', $hoptions);
-	
 
 	?>
-
-
-
-
 
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
       <h1 class="sr-only">Profile</h1>
@@ -40,11 +34,7 @@ $page_vars = $page_vars->data;
         <div class="grid grid-cols-1 gap-4 lg:col-span-2">
           <!-- Welcome panel -->
           <section aria-labelledby="profile-overview-title">
-            
-			
-			
-			
-			
+
 			<div class="rounded-lg bg-white overflow-hidden shadow">
               <h2 class="sr-only" id="profile-overview-title">Profile Overview</h2>
               <div class="bg-white p-6">
@@ -55,14 +45,10 @@ $page_vars = $page_vars->data;
                       <img class="mx-auto h-20 w-20 rounded-full" src="https://images.unsplash.com/photo-1550525811-e5869dd03032?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
                     </div>
 					-->
-	
 
-	
-					
                     <div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
                       <p class="text-xl font-bold text-gray-900 sm:text-2xl"><?php echo htmlspecialchars($page_vars['user']->display_name()); ?></p>
                       <!--<p class="text-sm font-medium text-gray-600"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>-->
-					  
 
                     </div>
                   </div>
@@ -73,8 +59,6 @@ $page_vars = $page_vars->data;
                   </div>
                 </div>
               </div>
-
-
 
   <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
     <dl class="grid grid-cols-1 gap-4 gap-y-8 sm:grid-cols-2">
@@ -110,7 +94,6 @@ $page_vars = $page_vars->data;
     </dl>
   </div>
 
- 
 			  <!--
               <div class="border-t border-gray-200 bg-gray-50 grid grid-cols-1 divide-y divide-gray-200 sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
                 <div class="px-6 py-5 text-sm font-medium text-center">
@@ -165,7 +148,6 @@ $page_vars = $page_vars->data;
 </div>
 */
 ?>
-
 
         </div>
 
@@ -299,7 +281,6 @@ $page_vars = $page_vars->data;
 
 						?>				  
 
-				  
                   </ul>
                 </div>
                 <div class="mt-6">
@@ -319,9 +300,7 @@ $page_vars = $page_vars->data;
 		  <?php
 			}
 			?>
-			
-			
-			
+
           <!-- Order History -->
 		  <?php
 			if($page_vars['settings']->get_setting('products_active')){
@@ -333,8 +312,7 @@ $page_vars = $page_vars->data;
 						<div class="flow-root mt-6">
 						  <ul role="list" class="-my-5 divide-y divide-gray-200">
 						  <?php
-				
-				
+
 				foreach($page_vars['orders'] as $order) {
 					?>
 					<li class="py-4">
@@ -391,10 +369,6 @@ $page_vars = $page_vars->data;
       </div>
     </div>
 
-
-
-
-
 		<?php
 
 		/*
@@ -437,7 +411,6 @@ $page_vars = $page_vars->data;
 		<?php
 		}
 		*/
-		
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

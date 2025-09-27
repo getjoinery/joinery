@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -22,7 +22,6 @@
 		else{
 			$group = Group::add_group(strip_tags(trim($_POST['grp_name'])), $session->get_user_id(), 'event');
 		}
-	
 
 		foreach ($_REQUEST['event_list'] as $event_id){
 			$group->add_member($event_id);	
@@ -49,7 +48,6 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "Edit Bundle";
 	$page->begin_box($pageoptions);
 
@@ -60,8 +58,6 @@
 	$validation_rules['grp_name']['required']['value'] = 'true';	 
 	$validation_rules['"event_list[]"']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
-
-
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_event_bundle_edit');
 
@@ -97,7 +93,6 @@
 	$disabledvals = array();
 	$readonlyvals = array(); 
 	echo $formwriter->checkboxList("Events to include in bundle", 'event_list', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);	
-
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

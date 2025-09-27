@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
@@ -31,7 +30,6 @@
 		return;
 	}
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -44,7 +42,6 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "New/Edit Survey";
 	$page->begin_box($pageoptions);
 
@@ -55,8 +52,6 @@
 	$validation_rules['svy_name']['required']['value'] = 'true';	
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_survey_edit');
 
 	if($survey->key){
@@ -65,8 +60,6 @@
 	}
 	
 	echo $formwriter->textinput('Survey name', 'svy_name', NULL, 100, $survey->get('svy_name'), '', 255, '');	
-	
-
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

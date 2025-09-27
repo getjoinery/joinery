@@ -1,16 +1,12 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
-
 
 	PathHelper::requireOnce('data/emails_class.php');
 	PathHelper::requireOnce('data/groups_class.php');
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -27,8 +23,6 @@
 	
 	$recipient_groups = $email->get_recipient_groups(); 
 
-
- 
 	if($_REQUEST['action'] == 'addgroup'){
 		//ADD GROUP TO EMAIL
 		$email->add_recipient_group(NULL, $_POST['grp_group_id'], $op);
@@ -51,7 +45,6 @@
 		exit();			
 	}	
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -65,12 +58,9 @@
 	)
 	);		
 
-
-
 	if($email->get('eml_status') != Email::EMAIL_SENT && $email->get('eml_status') != Email::EMAIL_QUEUED){ 
 
 		$headers = array("Recipients", "Count", "Action");
-
 
 		$altlinks = array();
 		 $box_vars =	array(
@@ -131,10 +121,6 @@
 				array_push($rowvalues, 'Users to exclude: '. $num_total);
 			}
 
-			
-			
-
-			
 			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_email_recipients_modify?eml_email_id='.$email->key.'">
 			<input type="hidden" class="hidden" name="action" id="action" value="remove" />
 			<input type="hidden" class="hidden" name="erg_email_recipient_group_id" id="erg_email_recipient_group_id" value="'.$recipient_group->key.'" />
@@ -150,7 +136,6 @@
 		$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
 		echo $formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
 
-		
 		$groups = new MultiGroup(
 			array('category'=>'user', 'deleted'=>false),
 			array('group_name' => 'ASC'),		//SORT BY => DIRECTION

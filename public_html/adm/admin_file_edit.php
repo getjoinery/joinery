@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
@@ -19,8 +18,6 @@
 
 	if($_POST){
 
-		
-		
 		if($_POST['fil_description']){
 				$_POST['fil_description'] = $_POST['fil_description'];
 		}
@@ -46,16 +43,12 @@
 			$file->set('fil_evt_event_id', $_POST['fil_evt_event_id']);
 		}
 
-
-
 		$editable_fields = array('fil_description', 'fil_title','fil_gal_gallery_id');
 
 		foreach($editable_fields as $field) {
 			$file->set($field, $_POST[$field]);
 		}
-		
-		
-		
+
 		$file->prepare();
 		$file->save();
 		$file->load();
@@ -63,7 +56,6 @@
 		LibraryFunctions::redirect('/admin/admin_file?fil_file_id='.$file->key);
 		return;
 	}
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -75,21 +67,16 @@
 		'session' => $session,
 	)
 	);
-	
 
 	$pageoptions['title'] = 'File Edit: '.$file->get('fil_title');
 	$page->begin_box($pageoptions);
-
-
 
 	// Editing an existing file
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_file_edit');
 	echo $formwriter->hiddeninput('fil_file_id', $file->key);
-	 
 
 	echo $formwriter->textinput('File title', 'fil_title', NULL, 100, $file->get('fil_title'), '', 255, '');
-
 
 	echo $formwriter->textbox('File Description', 'fil_description', 'ctrlHolder', 10, 80, $file->get('fil_description'), '', 'no');
 	
@@ -119,9 +106,7 @@
 	$optionvals2 = $events->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
 	echo $formwriter->dropinput("Event can access", "fil_evt_event_id", "ctrlHolder", $optionvals, $file->get('fil_evt_event_id'), '', FALSE, TRUE);
-	
 
-	
 	if($file->is_image()){ 
 	/*
 		echo $formwriter->checkboxinput("Include this image in the gallery", "fil_gal_gallery_id", "checkbox", "left", $file->get('fil_gal_gallery_id'), 1, "");
@@ -133,9 +118,6 @@
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
 
-
-
-	
 $page->end_box();
 	$page->admin_footer();
 

@@ -1,10 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/ThemeHelper.php');
-	PathHelper::requireOnce('includes/PluginHelper.php');
+
 	PathHelper::requireOnce('data/settings_class.php');
 	PathHelper::requireOnce('data/email_templates_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
@@ -64,8 +62,6 @@
 		}				
 		LibraryFunctions::redirect('/admin/admin_settings');
 	}
-	
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -79,9 +75,6 @@
 		'session' => $session,
 	)
 	);	
-	
- 
-
 
 	$pageoptions['altlinks'] = array('New Setting'=>'/admin/admin_setting_edit');
 	$pageoptions['altlinks'] += array('Public Menu'=>'/admin/admin_public_menu');
@@ -105,8 +98,6 @@
 		}
 	}	
 
-	
-	
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
@@ -119,11 +110,9 @@
 	echo AdminPage::tab_menu($tab_menus, 'General Settings');
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
-	
-	
+
 		?>
 		<script type="text/javascript">
-	
 
 		function set_booking_choices(){
 			var value = $("#bookings_active").val();
@@ -266,14 +255,11 @@
 			}		
 		}
 
-
 		function isValidEmail(email) {
 			var re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 			return re.test(email);
 		}
-		
-		
-	
+
 		$(document).ready(function() {
 			
 			set_booking_choices();
@@ -299,10 +285,8 @@
 				set_plugin_theme_choices();
 			});
 
-			
 		});
-		
-		
+
 		</script>
 		<?php
 	
@@ -324,11 +308,8 @@
 	// Add validation for logo link using remote validation
 	$validation_rules['logo_link']['remote']['value'] = "'/ajax/validate_file_ajax'";
 	$validation_rules['logo_link']['remote']['message'] = "'Must start with / and file must exist'";
-	
-	
+
 	echo $formwriter->set_validate($validation_rules);	
-
-
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings');
 	
@@ -340,7 +321,6 @@
 		}		
 		
 		echo '<h3>System Settings</h3>';
-
 
 		// Path Configuration Section
 		echo '<h5>Path Configuration</h5>';
@@ -366,8 +346,7 @@
 				}
 			}
 		}
-		
-		
+
 		// Base path - check if hardcoded in Globalvars_site.php
 		if (isset($globalvars_hardcoded['baseDir'])) {
 			echo $formwriter->textinput("Base path (Loaded from Globalvars_site.php)", 'baseDir_readonly', '', 20, $settings->get_setting('baseDir'), '', 255, 'readonly');
@@ -458,8 +437,6 @@
 		}
 		echo $formwriter->dropinput("Protocol Mode", "protocol_mode", '', $optionvals, $protocol_mode_value, 'Controls protocol for generated URLs and redirect behavior', FALSE);	
 
-
-		
 		$optionvals = array("Yes"=>1, 'No' => 0);
 		echo $formwriter->dropinput("CSS Debug Mode (tailwind themes only)", "debug_css", '', $optionvals, $settings->get_setting('debug_css'), '', FALSE);
 		
@@ -477,8 +454,7 @@
 			$display_name = $theme_helper->get('display_name', $theme_name);
 			$optionvals[$display_name] = $theme_name;  // Fixed: display_name as key, theme_name as value
 		}
-		
-		
+
 		//echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
 		echo $formwriter->dropinput("Active theme", "theme_template", '', $optionvals, $settings->get_setting('theme_template'), '', FALSE);
 		
@@ -508,18 +484,12 @@
 		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', '', 20, $settings->get_setting('webmaster_email'), "" , 255, "");
 		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");
 		echo $formwriter->textinput("Default Email Name", 'defaultemailname', '', 20, $settings->get_setting('defaultemailname'), "" , 255, "");
-		
 
-		
-		
-		
 		echo $formwriter->textinput("Site Name", 'site_name', '', 20, $settings->get_setting('site_name'), "" , 255, "");
 		echo $formwriter->textinput("Site Description", 'site_description', '', 20, $settings->get_setting('site_description'), "" , 255, "");
-		
-		
+
 		echo $formwriter->textinput("Link to Logo", 'logo_link', '', 20, $settings->get_setting('logo_link'), "" , 255, "");
-		
-		
+
 		echo $formwriter->textinput("Node Path (Example: /var/www/html/test/node)", 'node_dir', '', 20, $settings->get_setting('node_dir'), "" , 255, "");
 		
 		// Composer section with two-column layout and package validation
@@ -747,7 +717,6 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
-
 		// Acuity API Key and User ID with validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
@@ -810,23 +779,18 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
-
 	}
-	
-	
-	
+
 	echo '<h3>General Settings</h3>';
 	
 	echo $formwriter->textbox('Custom CSS', 'custom_css', 'ctrlHolder', 10, 80, $settings->get_setting('custom_css'), '', 'no');
 
 	echo $formwriter->textinput("Preview image (for facebook, google, etc)", 'preview_image', '', 20, $settings->get_setting('preview_image'), "" , 255, "");
 
-
 	$optionvals = array("Use built in tracking"=>'internal', 'Use custom tracking' => 'custom');
 	echo $formwriter->dropinput("Visit tracking", "tracking", '', $optionvals, $settings->get_setting('tracking'), '', FALSE);	
 	echo $formwriter->textinput("Tracking code", "tracking_code", '', 20, $settings->get_setting('tracking_code'), "" , 255, "");	
-	
-	
+
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Registration active", "register_active", '', $optionvals, $settings->get_setting('register_active'), '', FALSE);
 
@@ -852,8 +816,7 @@
 
 	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur'); 
 	echo $formwriter->dropinput("Site Currency", "site_currency", '', $optionvals, $settings->get_setting('site_currency'), '', FALSE);	
-	
-	
+
 	echo $formwriter->textbox('Robots.txt entry', 'robots_text', 'ctrlHolder', 10, 80, $settings->get_setting('robots_text'), '', 'no');
 
 	echo '<h3>Survey Settings</h3>';
@@ -952,18 +915,15 @@
 	echo $formwriter->textinput("Calendly API Key (Example: INEEMNBGGN53553SDFGBESNICRDW74)", 'calendly_api_key', '', 20, $settings->get_setting('calendly_api_key'), "" , 255, "");
 	echo $formwriter->textbox('Calendly API Token (Example: eyJraWQiOiIxY2UxZT...ZWJjY)', 'calendly_api_token', 'ctrlHolder', 10, 80, $settings->get_setting('calendly_api_token'), '', 'no');
 
-
  	echo '<h3>Events Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Event module active", "events_active", '', $optionvals, $settings->get_setting('events_active'), '', FALSE);
 
 	echo $formwriter->textinput("Events label", 'events_label', '', 20, $settings->get_setting('events_label'), "" , 255, "");
 
-	
  	echo '<h3>Product Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Product module active", "products_active", '', $optionvals, $settings->get_setting('products_active'), '', FALSE);
-
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("List regular products on product index", "products_list_items_active", '', $optionvals, $settings->get_setting('products_list_items_active'), '', FALSE);	
@@ -1003,7 +963,6 @@
 	echo '<h3>CMS Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("CMS module active", "page_contents_active", '', $optionvals, $settings->get_setting('page_contents_active'), '', FALSE);
-	
 
 	$pages = new MultiPage(
 		array('deleted' => false, 'published' => true),
@@ -1021,9 +980,6 @@
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Url rewrite module active", "urls_active", '', $optionvals, $settings->get_setting('urls_active'), '', FALSE);
 
-
-
-	
 	//$optionvals = array("General"=>'general', 'Emails' => 'emails');
 	//echo $formwriter->dropinput("Setting group", "stg_group_name", '', $optionvals, $setting->get('stg_group_name'), '', FALSE);
 
@@ -1039,11 +995,8 @@
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
-	
 
-	
 	$page->end_box();
-
 
 	$page->admin_footer();
 

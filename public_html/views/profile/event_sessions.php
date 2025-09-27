@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('event_sessions_logic.php', 'logic'));	
@@ -30,13 +30,10 @@ $page_vars = $page_vars->data;
 	$page->public_header($hoptions,NULL);
 	
 	echo PublicPage::BeginPage('&nbsp;', $hoptions);	
-	
 
 	?>
  <main class="-mt-24 pb-8">
- 
- 
- 
+
  <header class="relative z-20 flex items-center justify-between pb-4 px-4 sm:px-6 lg:flex-none">
 	<div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
 		<h1 class="text-xl font-bold text-gray-900 sm:text-2xl">
@@ -57,12 +54,9 @@ $page_vars = $page_vars->data;
 
 			?>
 		</p>		
-		
-		
+
 		<?php } ?>
-		
-		
-		
+
 		<?php
 		$calendar_text = '';
 		if($page_vars['event']->get('evt_status') != 2 && $page_vars['event']->get('evt_status') != 3){
@@ -77,8 +71,7 @@ $page_vars = $page_vars->data;
 		echo '<div class="mt-4 text-sm font-medium text-gray-600 sm:mt-0 sm:pt-1 sm:text-left">'.$calendar_text.'</div>';
 		?>
 	</div>
-	
-	
+
 	<?php 
 	if(!$page_vars['event']->get('evt_end_time') || $page_vars['event']->get('evt_end_time') > date('Y-m-d H:i:s')){
 		echo ' <div class="btn-group" role="group">
@@ -91,8 +84,7 @@ $page_vars = $page_vars->data;
 
 	?>
 	</header>
- 
- 
+
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
       <h1 class="sr-only">Profile</h1>
       <!-- Main 3 column grid -->
@@ -101,11 +93,7 @@ $page_vars = $page_vars->data;
         <div class="grid grid-cols-1 gap-4 lg:col-span-2">
           <!-- Welcome panel -->
           <section aria-labelledby="profile-overview-title">
-            
-			
-			
-			
-			
+
 			<div class="rounded-lg bg-white overflow-hidden shadow">
               <h2 class="sr-only" id="profile-overview-title">Sessions Overview</h2>
               <!--<div class="bg-white p-6">
@@ -115,9 +103,6 @@ $page_vars = $page_vars->data;
                     <div class="flex-shrink-0">
                       <img class="mx-auto h-20 w-20 rounded-full" src="https://images.unsplash.com/photo-1550525811-e5869dd03032?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" alt="">
                     </div>
-					
-	
-
 
                   </div> 
 				  
@@ -131,7 +116,6 @@ $page_vars = $page_vars->data;
                 </div>
               </div>-->
 
-
   <div class="px-4 py-5 sm:px-6">
     <?php echo $page_vars['event']->get('evt_short_description'); ?>
   </div>
@@ -143,8 +127,7 @@ $page_vars = $page_vars->data;
 			<h2 class="text-base font-medium text-gray-900" id="description-title">Location: <?php echo $page_vars['location_object']->get('loc_name'); ?></h2>
 			<?php if($page_vars['location_object']->get('loc_address')){ echo 'Address:  '. $page_vars['location_object']->get('loc_address'). '<br>'; } ?>
 			<?php if($page_vars['location_object']->get('loc_website')){ echo 'Website:  <a href="'. $page_vars['location_object']->get('loc_website'). '">'.$page_vars['location_object']->get('loc_website').'</a><br>'; } ?>
-              
-				
+
 				<?php if($page_vars['location_picture']){ ?>
 					<div class="mb-5">
 					<img src="<?php echo $page_vars['location_picture']; ?>">
@@ -153,10 +136,8 @@ $page_vars = $page_vars->data;
 			
               <?php echo '<div class="prose">'.$page_vars['location_object']->get('loc_description').'</div>'; ?>
 
-
             </div>
           </section>
-
 
 	<?php } ?>	
 
@@ -206,11 +187,9 @@ $page_vars = $page_vars->data;
 		else{
 			$session_name = 'Session '.$page_vars['next_session']->get('evs_session_number');
 		}
-		
-		
+
 		$time_string = $page_vars['next_session']->get_time_string($page_vars['session']->get_timezone());
-		
-		
+
 		$calendar_text = '';
 		$calendar_links = $page_vars['next_session']->get_add_to_calendar_links();
 		if($calendar_links){
@@ -275,7 +254,6 @@ $page_vars = $page_vars->data;
 										  </div>
 										  <p class="prose"><?php echo $page_vars['next_session']->get('evs_content'); ?></p>
 										</div>		
-		
 
 		<?php
 	}	
@@ -340,16 +318,10 @@ $page_vars = $page_vars->data;
             <div class="rounded-lg bg-gray-200 overflow-hidden shadow divide-y divide-gray-200 sm:divide-y-0 sm:grid  sm:gap-px">
               <h2 class="sr-only" id="quick-links-title">Sessions</h2>
 
-
-                
-
 <div class="bg-white shadow overflow-hidden sm:rounded-md">
   <ul role="list" class="divide-y divide-gray-200">
-    
-
 
 	<?php
-
 
 								foreach($page_vars['event_sessions'] as $event_session){
 									if($event_session->get('evs_vid_video_id')){
@@ -427,7 +399,6 @@ $page_vars = $page_vars->data;
 											  </p>
 											  </div>
 
-											
 											<div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
 											
 											  <!-- Heroicon name: solid/calendar -->
@@ -442,8 +413,7 @@ $page_vars = $page_vars->data;
 											  </p>
 											</div>
 										  </div>
-										  
-										  
+
 									<?php echo $video->get_embed(); ?>
 												<p class="mt-3"><?php echo $event_session->get('evs_content'); ?></p>
 												<?php
@@ -467,23 +437,14 @@ $page_vars = $page_vars->data;
 												<?php
 												}
 												?>										  
-										  
-										  
-										  
-										  
-										  
-										  
-										  
-										  
+
 										</div>
 									  <!--</a>-->
 									</li>			
 									<?php
 									
 								}
-								
 
-	
 								if($pager->num_records() > 5){
 									if($page_number = $pager->is_valid_page('+1')){
 										echo '<div>
@@ -495,20 +456,14 @@ $page_vars = $page_vars->data;
 									  <a href="#" class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg">Final '.$pager->num_per_page(). ' of '.$pager->num_records().' sessions</a>
 									</div>';
 									}
-									
-									
+
 								}								
-								
-								
-							
+
 	?>
 
   </ul>
 </div>
 
-
-             
-           
           </section>
         </div>
 
@@ -580,8 +535,6 @@ $page_vars = $page_vars->data;
 		  
 		  <?php */ ?>
 
-			
-			
           <!-- Private Info -->
 		  <?php
 			if($page_vars['event']->get('evt_private_info')){
@@ -605,15 +558,9 @@ $page_vars = $page_vars->data;
       </div>
     </div>
 </main>	
-	
-	
 
 				<?php
-				
 
-	
-
-	
 	//DISPLAY REGISTER FINISH LINKS FOR ANY EVENTS
 	/*
 	if($page_vars['event']->get('evt_collect_extra_info')){
@@ -628,7 +575,6 @@ $page_vars = $page_vars->data;
 		}
 	}		
 	*/
-
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

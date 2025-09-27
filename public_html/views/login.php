@@ -1,7 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('login_logic.php', 'logic'));
@@ -64,10 +62,7 @@ $page_vars = $page_vars->data;
 					echo $formwriter->set_validate($validation_rules);	
 					echo $formwriter->begin_form('form1', 'POST', '/login');
 				?>			  
-			  
-			  
-			  
-			  
+
                 <div class="row flex-between-center mb-2">
                   <div class="col-auto">
                     <h5>Log in</h5>
@@ -104,8 +99,7 @@ $page_vars = $page_vars->data;
                 </div>
 				-->
 				<?php echo $formwriter->end_form();	 ?>				
-				
-				
+
               </div>
             </div>
           </div>

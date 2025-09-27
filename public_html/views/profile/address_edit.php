@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('address_edit_logic.php', 'logic'));
@@ -25,7 +24,6 @@ $page_vars = $page_vars->data;
 	$page->public_header($hoptions);
 	echo PublicPage::BeginPage('Edit Address', $hoptions);
 
-
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Edit Address');
 	
 	$settings = Globalvars::get_instance();
@@ -39,7 +37,6 @@ $page_vars = $page_vars->data;
 	echo $formwriter->set_validate($validation_rules);					
 	
 	echo $formwriter->begin_form("", "post", "/profile/address_edit");
-
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'addressbox') {	

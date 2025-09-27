@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -19,8 +18,7 @@
 	$sort = LibraryFunctions::fetch_variable('sort', 'question_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-	
-	
+
 	$search_criteria = array();
 
 	//ONLY SHOW DELETED TO SUPER ADMINS
@@ -47,8 +45,6 @@
 		'session' => $session,
 	)
 	);	
-	
-
 
 	$headers = array("Question",  "Type", "Created", "Published", "Active");
 	$altlinks = array('New Question'=>'/admin/admin_question_edit');
@@ -61,10 +57,8 @@
 	);
 	$page->tableheader($headers, $table_options, $pager);
 
-
 	foreach ($questions as $question){
-		
-		
+
 		$rowvalues = array();
 		array_push($rowvalues, "Question ".$question->key.": ".$question->get('qst_question')." <a href='/admin/admin_question?qst_question_id=$question->key'> [edit]</a>");	
 		array_push($rowvalues, $question->get('qst_type'));
@@ -81,9 +75,7 @@
 		$page->disprow($rowvalues);
 	}
 
-
 	$page->endtable($pager);	
 	$page->admin_footer();
 ?>
-
 

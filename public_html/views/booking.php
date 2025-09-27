@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('booking_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -22,13 +22,10 @@ $page_vars = $page_vars->data;
 		'submenu' => 'Book',
 	);
 	$page->public_header($hoptions);
-	
 
-	
 	echo PublicPage::BeginPage('Book an appointment');
 	echo PublicPage::BeginPanel();
 
-					
 	/*
 	echo '<!-- Calendly inline widget begin -->
 	<div class="calendly-inline-widget" data-url="'.$booking_type->get('bkt_schedule_link').'?primary_color=69be00&name='.str_replace(' ', '%20', $client_user->display_name()).'&email='.$client_user->get('usr_email').'&salesforce_uuid='.$booking_type->key.'" style="min-width:320px;height:630px;"></div>
@@ -40,7 +37,6 @@ $page_vars = $page_vars->data;
 
 	echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();	
-
 
 	$page->public_footer(array('track'=>TRUE));
 ?>

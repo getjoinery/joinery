@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
@@ -23,7 +22,6 @@
 		return;
 	}
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -36,7 +34,6 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "New Group";
 	$page->begin_box($pageoptions);
 
@@ -47,8 +44,6 @@
 	$validation_rules['grp_name']['required']['value'] = 'true';	
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_group_edit');
 
 	if($group->key){
@@ -57,8 +52,6 @@
 	}
 	
 	echo $formwriter->textinput('Group name', 'grp_name', NULL, 100, $group->get('grp_name'), '', 255, '');	
-	
-
 
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_form();

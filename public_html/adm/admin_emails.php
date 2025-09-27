@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -39,9 +38,7 @@
 		$aoffset,
 		'OR');
 	$numqueued = $emails->count_all();
-	
-	
-	
+
 	$search_criteria = array();
 	//$search_criteria['email_like'] = $searchterm;
 
@@ -59,7 +56,6 @@
 	$numrecords = $emails->count_all();
 	$emails->load();	
 
-		
 	$headers = array('Email', 'Subject', 'Author', 'Status', 'Details');
 	$altlinks = array('New Email'=>'/admin/admin_email_edit');
 	if($numqueued){
@@ -109,7 +105,6 @@
 	}
 		
 	$page->endtable($pager);		
-		
 
 	$page->admin_footer();
 

@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -16,8 +15,7 @@
 	else{
 		$video = new Video(NULL);
 	}
-		
-	
+
 	if($_POST){
 
 		if($_POST['vid_url']){
@@ -33,7 +31,6 @@
 				throw new ValidationException('We could not verify that the link you entered is valid.  Please check the link again and if you continue to have difficulty <a href="/contact">contact us</a> to help.');		
 			}
 
-			
 			$video->set('vid_usr_user_id', $session->get_user_id());
 			$video->set('vid_source', $source);
 			$video->set('vid_video_number', $vid_video_number);
@@ -96,8 +93,7 @@
 		else{
 			$breadcrumbs += array('New Video' => '');
 		}
-				
-		
+
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(
@@ -174,8 +170,7 @@
 	$optionvals2 = $events->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
 	echo $formwriter->dropinput("Event can access", "vid_evt_event_id", "ctrlHolder", $optionvals, $video->get('vid_evt_event_id'), '', FALSE, TRUE);
-	
-			
+
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();

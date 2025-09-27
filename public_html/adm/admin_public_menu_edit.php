@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
@@ -45,7 +44,6 @@
 		return;
 	}
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -70,16 +68,14 @@
 				$("#pmu_link_container").hide();				
 			}		
 		}
-		
-	
+
 		$(document).ready(function() {
 			set_pricing_choices();
 			$("#pmu_link_choose").change(function() {	
 				set_pricing_choices();
 			});	
 		});
-	
-		
+
 	</script>
 	<?php
 	
@@ -94,8 +90,6 @@
 	//$validation_rules['pmu_link']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_public_menu_edit');
 
 	if($public_menu->key){
@@ -104,7 +98,6 @@
 	}
 	
 	echo $formwriter->textinput('Menu name', 'pmu_name', NULL, 100, $public_menu->get('pmu_name'), '', 255, '');
-
 
 	$search_criteria = array('deleted' => false);
 	$pages = new MultiPage(

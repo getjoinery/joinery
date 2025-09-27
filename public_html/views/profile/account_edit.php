@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('account_edit_logic.php', 'logic'));	
@@ -12,7 +11,6 @@ if ($page_vars->redirect) {
     exit();
 }
 $page_vars = $page_vars->data;
-	
 
 	$page = new PublicPage();
 	$hoptions=array(
@@ -25,7 +23,6 @@ $page_vars = $page_vars->data;
 	$page->public_header($hoptions); 
 
 	echo PublicPage::BeginPage('Edit Account', $hoptions);
-	
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'userbox') {	
@@ -34,8 +31,7 @@ $page_vars = $page_vars->data;
 	}		
 
 	echo PublicPage::tab_menu($page_vars['tab_menus'],'Edit Account');
-	
-	
+
 	$settings = Globalvars::get_instance();
 	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("", "post", "/profile/account_edit");
@@ -55,8 +51,6 @@ $page_vars = $page_vars->data;
 
 	echo $formwriter->end_form();
 
-	
-		
 	echo PublicPage::EndPage();	
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>

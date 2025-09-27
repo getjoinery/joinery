@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -24,7 +24,6 @@ if ($_POST){
 		$user->set('usr_is_admin_disabled', FALSE);
 		$user->set('usr_is_disabled', FALSE);
 
-
 		try {
 			$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			$user->save();
@@ -33,7 +32,6 @@ if ($_POST){
 			throw new AuthorizationException($e->getMessage());
 		}
 
-		
 	}
 
 	//NOW REDIRECT
@@ -70,7 +68,6 @@ else{
 	$pageoptions['title'] = 'Undelete User '.$user->display_name();
 	$page->begin_box($pageoptions);
 
-
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	echo $formwriter->begin_form("form", "post", "/admin/admin_users_undelete");
 
@@ -90,7 +87,6 @@ else{
 	echo $formwriter->end_form();
 
 	$page->admin_footer();
-
 
 }
 ?>

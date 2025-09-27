@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -11,7 +10,6 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return(); 
-	
 
 	if (isset($_REQUEST['prq_product_requirement_id'])) {
 		$product_requirement = new ProductRequirement($_REQUEST['prq_product_requirement_id'], TRUE);
@@ -19,16 +17,13 @@
 		$product_requirement = new ProductRequirement(NULL);
 	}
 
-
 	if ($_POST || $_POST['action']) {
 		
 		if ($_POST['action'] == 'add' || $_POST['action'] == 'edit') {
-			
-			
+
 			//MUST BE INTEGER
 			//$product_requirement->set('pro_prg_product_group_id', (int)$_POST['pro_prg_product_group_id']);
-			
-			
+
 			$editable_fields = array('prq_title', 'prq_text', 'prq_link', 'prq_is_default_checked', 'prq_is_required', 'prq_fil_file_id', 'prq_qst_question_id');
 
 			foreach($editable_fields as $field) {
@@ -38,11 +33,9 @@
 			$product_requirement->prepare();
 			$product_requirement->save();
 			$product_requirement->load();
-			
-		
+
 		} 
-		
-		
+
 		LibraryFunctions::redirect('/admin/admin_product_requirements?pro_product_requirement_id='. $product_requirement->key);
 		return;		
 	} 
@@ -83,7 +76,6 @@
 
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_requirement_edit');
 
-
 	if($product_requirement->key){
 		$action = 'edit';
 		echo $formwriter->hiddeninput('prq_product_requirement_id', $product_requirement->key);
@@ -93,9 +85,7 @@
 		$action = 'add';
 		echo $formwriter->hiddeninput('action', 'add');
 	}
-	
 
-	
 	echo $formwriter->textinput('Name for this requirement', 'prq_title', NULL, 100, $product_requirement->get('prq_title'), '', 255, '');
 
 	$questions = new MultiQuestion(
@@ -106,14 +96,12 @@
 	$questions->load();
 	$optionvals = $questions->get_dropdown_array();
 	echo $formwriter->dropinput("Question", "prq_qst_question_id", "ctrlHolder", $optionvals, $product_requirement->get('prq_qst_question_id'), '', TRUE);		
-	
-	
+
 	echo $formwriter->textinput('Link (optional):', 'prq_link', NULL, 100, $product_requirement->get('prq_link'), '', 255, '');	
 
 	/*
 	echo $formwriter->textbox('Product Requirement Text', 'prq_text', 'ctrlHolder', 5, 80, $product_requirement->get('prq_text'), '', 'no');
-	
-	
+
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	if($product_requirement->get('prq_is_required')){
 		$recurring=1;
@@ -155,7 +143,6 @@
 		echo $formwriter->dropinput("Event Bundle", "pro_grp_group_id", "ctrlHolder", $optionvals, $product_requirement->get('pro_grp_group_id'), '', TRUE);
 
 */
-
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

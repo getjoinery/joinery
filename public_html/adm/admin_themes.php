@@ -1,8 +1,7 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/AdminPage.php');
-PathHelper::requireOnce('includes/SessionControl.php');
+
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('data/themes_class.php');
 PathHelper::requireOnce('includes/ThemeManager.php');

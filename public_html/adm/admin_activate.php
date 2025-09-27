@@ -1,9 +1,8 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/Activation.php');
 // ErrorHandler.php no longer needed - using new ErrorManager system
-PathHelper::requireOnce('includes/SessionControl.php');
+
 PathHelper::requireOnce('includes/SystemBase.php');
 
 PathHelper::requireOnce('data/users_class.php');

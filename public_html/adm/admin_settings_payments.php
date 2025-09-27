@@ -1,10 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/ThemeHelper.php');
-	PathHelper::requireOnce('includes/PluginHelper.php');
+
 	PathHelper::requireOnce('data/settings_class.php');
 	PathHelper::requireOnce('data/email_templates_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
@@ -41,8 +39,6 @@
 		}
 		LibraryFunctions::redirect('/admin/admin_settings');
 	}
-	
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -56,9 +52,6 @@
 		'session' => $session,
 	)
 	);	
-	
- 
-
 
 	$pageoptions['altlinks'] = array('New Setting'=>'/admin/admin_setting_edit');
 	$pageoptions['altlinks'] += array('Public Menu'=>'/admin/admin_public_menu');
@@ -69,10 +62,7 @@
 	if($settings->get_setting('upgrade_server_active')){
 		$pageoptions['altlinks'] += array('Publish Upgrade'=>'/utils/publish_upgrade');
 	}
-	
 
-	
-	
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
@@ -85,8 +75,7 @@
 	echo AdminPage::tab_menu($tab_menus, 'Payment Settings');
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
-	
-	
+
 		?>
 		<script type="text/javascript">
 	
@@ -107,10 +96,6 @@
 			}		
 		}
 
-		
-
-		
-	
 		$(document).ready(function() {
 			set_choices();
 			
@@ -155,9 +140,7 @@
 	$validation_rules = array();
 	$validation_rules['stg_value']['required']['value'] = 'true';
 	$validation_rules['stg_name']['required']['value'] = 'true';
-	
-	
-	
+
 	// Add Stripe key validation rules using custom validation methods
 	$validation_rules['stripe_api_key']['stripePublishableKey']['value'] = 'true';
 	
@@ -167,24 +150,16 @@
 	
 	$validation_rules['stripe_api_pkey_test']['stripeTestSecretKey']['value'] = 'true';
 
-	
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings_payments');
-	
-	
-		
+
 		if(StripeHelper::isTestMode()){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
 		}		
-		
 
 		$optionvals = array("Yes"=>1, 'No' => 0);
 		echo $formwriter->dropinput("Payment Debug Mode ", "debug", '', $optionvals, $settings->get_setting('debug'), '', FALSE);
-
-
 
 		// Stripe Configuration Section
 		echo '<h4>Stripe Configuration</h4>';
@@ -589,8 +564,7 @@
 				// Step 1: Get OAuth2 access token
 				$basic_auth_test = base64_encode($paypal_api_key_test . ':' . $paypal_api_secret_test);
 				$endpoint_test = 'https://api-m.sandbox.paypal.com';
-				
-				
+
 				// Get access token first
 				$curl = curl_init();
 				curl_setopt_array($curl, array(
@@ -615,8 +589,7 @@
 				$token_http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
 				$curl_error = curl_error($curl);
 				curl_close($curl);
-				
-				
+
 				// If we got an access token, that means credentials are valid
 				if ($token_http_code === 200) {
 					$token_data = json_decode($token_response, true);
@@ -715,22 +688,15 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
-
-
 	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur'); 
 	echo $formwriter->dropinput("Site Currency", "site_currency", '', $optionvals, $settings->get_setting('site_currency'), '', FALSE);	
-	
-	
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
-	
 
-	
 	$page->end_box();
-
 
 	$page->admin_footer();
 

@@ -1,9 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('survey_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-
 
 	$page_vars = survey_logic($_GET, $_POST);
 // Handle LogicResult return format
@@ -21,7 +20,6 @@ $page_vars = $page_vars->data;
 	));
 	echo PublicPage::BeginPage($survey->get('svy_name'));
 	echo PublicPage::BeginPanel();
-
 
 	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form('form1', 'POST', '/survey', true);

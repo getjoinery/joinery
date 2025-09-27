@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('password_edit_logic.php', 'logic'));
@@ -26,8 +25,7 @@ $page_vars = $page_vars->data;
 	echo PublicPage::BeginPage($page_vars['page_title'], $hoptions);
 
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Change Password');
-	
-	
+
 	$settings = Globalvars::get_instance();
 	$formwriter = $page->getFormWriter('form1');
 				
@@ -60,7 +58,6 @@ $page_vars = $page_vars->data;
 	echo $formwriter->new_form_button('Submit');
 
 	echo $formwriter->end_form();		
-	
 
 	echo PublicPage::EndPage();
 	

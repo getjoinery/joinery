@@ -1,14 +1,13 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/page_contents_class.php');
-	
-	
+
 if ($_POST['confirm']){
 
 	$session = SessionControl::get_instance();
@@ -52,10 +51,8 @@ else{
 	)
 	);
 
-	
 	$pageoptions['title'] = 'Delete Page Content '.$page_content->get('pac_location_name');
 	$page->begin_box($pageoptions);
-
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	echo $formwriter->begin_form("form", "post", "/admin/admin_page_content_permanent_delete");
@@ -78,7 +75,6 @@ else{
 	$page->end_box();
 
 	$page->admin_footer();
-
 
 }
 ?>

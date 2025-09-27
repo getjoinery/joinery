@@ -1,14 +1,9 @@
 <?php
 
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	
 	PathHelper::requireOnce('/includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
-	PathHelper::requireOnce('/includes/DbConnector.php');
-
 
 	PathHelper::requireOnce('/data/users_class.php');
 	PathHelper::requireOnce('/data/phone_number_class.php');
@@ -30,12 +25,10 @@
 	$settings = Globalvars::get_instance();
 	$composer_dir = $settings->get_setting('composerAutoLoad');	
 	require_once $composer_dir.'autoload.php';	
-	
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
-
 
 	$user = new User($_GET['usr_user_id'], TRUE);
 	include(PathHelper::getAbsolutePath('/utils/registrant_maintenance.php')); 
@@ -85,9 +78,7 @@
 			exit();					
 		}	
 
-	
 	}
-
 
 	$phone_numbers = new MultiPhoneNumber(
 		array('user_id'=>$user->key),
@@ -113,7 +104,6 @@
 		0);
 	$form_errors->load();
 	*/
-	
 
 	$search_criteria = array();
 	$search_criteria['user_id'] = $user->key;
@@ -126,11 +116,7 @@
 		NULL);
 	$orders->load();
 	$numorders = $orders->count_all();	
-	
-	
-	
 
-	
 	$searches['user_id'] = $user->key;
 	$event_registrations = new MultiEventRegistrant(
 		$searches,
@@ -148,7 +134,6 @@
 	NULL //OFFSET
 	);
 	$active_subscriptions->load();	
-
 
 	//SUBSCRIPTIONS
 	$cancelled_subscriptions = new MultiOrderItem(
@@ -170,8 +155,6 @@
 	$numrecords = $details->count_all();
 	$details->load();
 	*/
-	
-	
 
 /*
 	$phonereveals = new MultiEventLog(
@@ -184,7 +167,6 @@
 		);
 	$numwebsiteclick = $websiteclick->count_all();
 */
-
 
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
@@ -207,8 +189,6 @@
 	$activations = $q->fetchAll();
 
 	*/
-	
-
 
 	$sql = 'SELECT * FROM log_logins WHERE log_usr_user_id='.$user->key.' ORDER BY log_login_time DESC LIMIT 10';
 
@@ -221,8 +201,6 @@
 		$dbhelper->handle_query_error($e);
 	}
 	$logins = $q->fetchAll();
-
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -241,7 +219,6 @@
 	$settings = Globalvars::get_instance();
 	$webDir = $settings->get_setting('webDir');
 
-
 		$options['title'] = $user->display_name() . ' (' . $user->key . ')';
 		
 		if(!$user->get('usr_delete_time')) {
@@ -257,7 +234,6 @@
 
 				$options['altlinks']['Change password'] = '/admin/admin_users_password_edit?usr_user_id='.$user->key;
 				$options['altlinks']['Soft Delete'] = '/admin/admin_user?action=delete&usr_user_id='.$user->key;
-
 
 				if(!$user->get('usr_is_activated')) {
 					$options['altlinks']['Activate User'] = '/admin/admin_activate?usr_user_id='.$user->key;
@@ -278,9 +254,6 @@
 		$page->begin_box($options);
 	?>
 
-	
-
-
           <!-- Profile Image -->
               <!--<img class="profile-user-img rounded-circle img-fluid mx-auto d-block" src="../../../images/5.jpg" alt="User profile picture">-->
 			<?php
@@ -298,8 +271,6 @@
 				else{
 					echo ' <b>Unverified</b>';
 				}	
-
-
 
 				$user_subscribed_list = array();
 				$search_criteria = array('deleted' => false, 'user_id' => $user->key);
@@ -339,7 +310,6 @@
 				}
 				else {	
 
-						
 					echo '<h4>Active Subscriptions</h4>';
 					foreach($active_subscriptions as $subscription){
 						$stripe_helper = new StripeHelper();						
@@ -350,8 +320,6 @@
 						}
 						
 						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month, Status: '.$status_words;
-						
-						
 
 						if($subscription->get('odi_subscription_period_end')){
 							$status .= ' period ends on '.LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone());
@@ -379,10 +347,6 @@
 				?>
 				</p>
 
-  
-             
-
-
 						<p class="text-center">
 						<?php
 						if($numphonerecords){
@@ -403,7 +367,6 @@
 
 								echo 'Address: '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit?usa_address_id='. $address->key .'">edit</a>]<br />' ;
 
-
 								$page->disprow($rowvalues);
 							}
 						}
@@ -415,13 +378,6 @@
 						?>
 						</p>
 
-  
-              
-
-
-
-	
-	
 	<?php $page->end_box(); ?>
 <?php
 
@@ -483,7 +439,6 @@
 	
 	$page->endtable(); 
 
-
 	$groups = Group::get_groups_for_member($user->key, 'user', false, 'objects');
 
 	$headers = array("Group", "Action");
@@ -537,11 +492,8 @@
 	echo $formwriter->new_form_button('Add');
 	echo $formwriter->end_form();	
 	echo '</td></tr>';	
-	
-	
+
 	$page->endtable();
-
-
 
 	//VIEW STATS
 
@@ -580,13 +532,8 @@
 			$page->disprow($rowvalues);
 		}
 	}
-	
-	
+
 	$page->endtable(); 
-
-
-
-
 
 	$PRODUCT_ID_TO_NAME_CACHE = array();
 
@@ -598,7 +545,6 @@
 	);
 	$page->tableheader($headers, $box_vars);
 
-	
 	foreach($orders as $order) {
 		$rowvalues = array();
 		
@@ -608,8 +554,7 @@
 		else{
 			$order_user = new User(NULL);
 		}
-		
-		
+
 		$min_status = NULL;
 
 		$order_items = $order->get_order_items();
@@ -623,8 +568,7 @@
 				$title = $product->get('pro_name');
 				$PRODUCT_ID_TO_NAME_CACHE[$product->key] = $title;
 			}
-			
-			
+
 			$this_out = $title . ' ($'. $order_item->get('odi_price') .')';
 
 			if($order_item->get('odi_subscription_cancelled_time')){
@@ -644,7 +588,6 @@
 
 		array_push($rowvalues, '<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>');
 
-	
 		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone()));
 		array_push($rowvalues, implode('<br>', $order_items_out));
 		array_push($rowvalues, '$'.$order->get('ord_total_cost'));
@@ -654,9 +597,6 @@
 	}
 	$page->endtable();			
 
-
-	
-	
 	/*
 	?>	
 
@@ -675,7 +615,6 @@
             $setdefault = '(<a class="sortlink" href="/profile/users_addrs_setdefault?a=' . LibraryFunctions::encode($address->key) . '&u=' . LibraryFunctions::encode($user->key) . '">Set Default</a>)';
         }
 
-
 		array_push($rowvalues, '('.$address->key.') '.$address->get_address_string(' '));
 
 		$page->disprow($rowvalues);
@@ -685,11 +624,8 @@
 	/*
 	?>
 
-
-
      <h2>Phone Numbers</h2>
 	<?php
-
 
 	$phone_headers = array("Phone");
 	$page->tableheader($phone_headers, "admin_table");
@@ -712,7 +648,6 @@
 		0);
 	$received_emails->load();
 
-
 	$headers = array("Subject", "Status", "Sent Date", "Recipients");
 	$altlinks = array();
 	$box_vars =	array(
@@ -720,7 +655,6 @@
 		'title' => "Received Emails"
 	);
 	$page->tableheader($headers, $box_vars);		
-		
 
 	foreach ($received_emails as $received_email) {
 		$email = new Email($received_email->get('erc_eml_email_id'), TRUE);
@@ -739,10 +673,8 @@
 		$page->disprow($rowvalues);
 	}
 	$page->endtable();	
-		
-	
+
 	if($user->get('usr_permission') > 0){
-		
 
 		$emails = new MultiEmail(
 			array('user_id' => $user->key),
@@ -777,8 +709,6 @@
 		$page->endtable();	
 		
 	}
-	
-	
 
 /*
 ?>
@@ -799,8 +729,6 @@
 
 	$page->endtable();
 */
-
-
 
 	$headers = array("Time");
 	$altlinks = array();
@@ -839,13 +767,8 @@
 		$page->endtable();
 		*/
 	}
-	
-
-
-
 
 	$page->admin_footer();
 
 ?>
-
 

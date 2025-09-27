@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -30,13 +29,9 @@
 	$product = new Product($_REQUEST['product_id'], TRUE);
 
 	if ($_POST || $_REQUEST['action']) {
-	
-		
 
-		
 		if ($_REQUEST['action'] == 'new_version') {
 
-			
 			$product_version = new ProductVersion(NULL);
 			$product_version->set('prv_pro_product_id', $product->key);
 			$product_version->set('prv_version_name', $_REQUEST['version_name']);
@@ -106,15 +101,11 @@
 
 	$page->begin_box($options);
 
-
-	
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 
 	?>
 	<script type="text/javascript">
-	
 
-		
 		function set_subscription_choices(){
 			var value = $("#prv_price_type").val();
 			if(value == 'single' || value == 'user'){  	
@@ -125,8 +116,7 @@
 			}
 			
 		}
-		
-	
+
 		$(document).ready(function() {
 
 			set_subscription_choices();
@@ -134,12 +124,10 @@
 				set_subscription_choices();
 			});
 		});
-	
-		
+
 	</script>
 	<?php
 
-			
 			$validation_rules = array();
 			$validation_rules['version_name']['required']['value'] = 'true';
 			if(!$product_version->key){
@@ -149,7 +137,6 @@
 			
 			echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_version_edit');
 
-			
 			echo $formwriter->textinput('Label', 'version_name', NULL, 100, $product_version->get('prv_plan_order_year'), '', 255, '');
 			echo $formwriter->hiddeninput('product_id', $_REQUEST['product_id']);
 			if(!$product_version->key){

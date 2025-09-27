@@ -1,24 +1,19 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
+
 	PathHelper::requireOnce('data/emails_class.php');
 	PathHelper::requireOnce('data/email_recipient_groups_class.php');
 	PathHelper::requireOnce('data/groups_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
 
 	$email = new Email($_REQUEST['eml_email_id'], TRUE);
-
-	
 
 	if($_REQUEST['action'] == 'delete'){
 		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -69,7 +64,6 @@
 		exit();			
 	}	
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -81,8 +75,6 @@
 		'session' => $session,
 	)
 	);		
-
-
 
 	if($email->get('eml_status') != Email::EMAIL_SENT && $email->get('eml_status') != Email::EMAIL_QUEUED){
 
@@ -106,9 +98,6 @@
 
 		$headers = array("Recipients", "Count", "Action");
 
-
-
-		
 		if($email->get('eml_mlt_mailing_list_id')){
 			//IF IT IS A MAILING LIST EMAIL.  DO NOT ALLOW CHANGING OF RECIPIENTS (BECAUSE OF UNSUBSCRIBE)
 			$mailing_list = new MailingList($email->get('eml_mlt_mailing_list_id'), TRUE);
@@ -127,8 +116,7 @@
 			$page->disprow($rowvalues);
 
 			$page->endtable(); 
-			
-		
+
 		}
 		else{
 			$altlinks = array('Add Groups'=>'/admin/admin_email_recipients_modify?eml_email_id='.$email->key,
@@ -191,7 +179,6 @@
 					array_push($rowvalues, 'Excluded: '. $label);
 					array_push($rowvalues, 'Users to exclude: '. $num_total);
 				}
-				
 
 				$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_email?eml_email_id='.$email->key.'">
 				<input type="hidden" class="hidden" name="action" id="action" value="remove" />
@@ -206,16 +193,12 @@
 			$page->endtable();
 		}
 
-		
-
-				
 	}
 	else{
 		$numperpage = 50;
 		$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 		$sort = LibraryFunctions::fetch_variable('sort', 'email', 0, '');	
 		$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-
 
 		$search_criteria = array('email_id' => $email->key);
 
@@ -232,8 +215,7 @@
 				'Remove From Queue'=>'/admin/admin_email?action=unqueue&eml_email_id='.$email->key
 				);
 		}
-			 
-		
+
 		$pageoptions['title'] = 'Email: '.$email->get('eml_subject');
 		$page->begin_box($pageoptions);
 		$time= '';
@@ -279,8 +261,7 @@
 			array_push($rowvalues, $status);
 			$page->disprow($rowvalues);
 		}
-		
-			
+
 		$page->endtable($pager);
 		
 	}

@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -7,7 +6,6 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(7);
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -23,7 +21,6 @@
 	)
 	);
 
-		
 	$event_types = new MultiEventType();
 	$event_types->load();
 
@@ -45,7 +42,6 @@
 	}
 
 	$page->endtable();
-		
 
 	$page->admin_footer();
 

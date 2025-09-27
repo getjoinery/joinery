@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -12,7 +11,6 @@ if ($page_vars->redirect) {
     exit();
 }
 $page_vars = $page_vars->data;
-
 
 	$page = new PublicPage();
 	$hoptions=array(
@@ -28,7 +26,6 @@ $page_vars = $page_vars->data;
 	$options['subtitle'] = '<a href="/login'.$extra.'">Already a member? Log in</a>';
 	echo PublicPage::BeginPage('Register', $options);
 
-			
 	if(isset($_GET['msgtext'])){
 		if (array_key_exists($_GET['msgtext'], $page_vars['LOGIN_MESSAGES'])) {
 			echo PublicPage::alert('Login warning', htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]), 'warn');
@@ -85,7 +82,6 @@ $page_vars = $page_vars->data;
 	
 	echo $formwriter->antispam_question_input();
 	//echo $formwriter->textinput("Zip Code", "usa_zip_code_id", NULL, 20, @$form_fields->usa_zip_code_id, "", 255,"");
-
 
 	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy'>privacy policy</a>", "privacy", "", "normal", NULL, "yes", '');
 	echo $formwriter->checkboxinput("Please add me to the mailing list", "newsletter", "", "normal", NULL, "yes", '');	

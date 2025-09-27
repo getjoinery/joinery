@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/surveys_class.php');
@@ -35,7 +35,6 @@
 	$svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, '');
 	$survey = new Survey($svy_survey_id, TRUE);
 
-
 	if($_REQUEST['action'] == 'delete'){
 		$survey->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$survey->soft_delete();
@@ -51,16 +50,12 @@
 		exit();				
 	}
 
-
-
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'survey_question_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-
-
 
 	$survey_questions = new MultiSurveyQuestion(
 		array('survey_id' => $survey->key),  //SEARCH CRITERIA
@@ -71,9 +66,6 @@
 	);
 	$numrecords = $survey_questions->count_all();
 	$survey_questions->load();
-
-
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -88,8 +80,6 @@
 		'session' => $session,
 	)
 	);
-
-
 
 	$headers = array('Question',  'Action');
 	$altlinks = array();
@@ -114,7 +104,6 @@
 		echo '<p>Link: <a href="/survey?survey_id='.LibraryFunctions::encode($survey->key).'">/survey?survey_id='.LibraryFunctions::encode($survey->key).'</a></p><br />';
 	}
 
-
 	foreach ($survey_questions as $survey_question){
 		$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 
@@ -122,8 +111,7 @@
 		array_push($rowvalues, '<a href="/admin/admin_question?qst_question_id='.$survey_question->get('srq_qst_question_id').'">'.$question->get('qst_question').'</a>');
 
 		//array_push($rowvalues, '<a href="/admin/admin_survey_answers?survey_id='.$survey->key.'&question_id='.$survey_question->key.'">answers</a>');
-		
-		
+
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_survey">
 		<input type="hidden" class="hidden" name="action" id="action" value="removequestion" />
 		<input type="hidden" class="hidden" name="svy_survey_id" id="action" value="'.$survey->key.'"  />
@@ -149,9 +137,7 @@
 		//$validation_rules['evt_event_id']['required']['value'] = 'true';
 		//echo $formwriter->set_validate($validation_rules);
 		echo $formwriter->begin_form('form2', 'POST', '/admin/admin_survey?svy_survey_id='. $survey->key);
-		
 
-		
 		$optionvals = $questions->get_dropdown_array();
 		echo $formwriter->hiddeninput('action', 'addquestion');
 		echo $formwriter->dropinput("Add question to survey", "qst_question_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
@@ -166,5 +152,4 @@
 
 	$page->admin_footer();
 ?>
-
 

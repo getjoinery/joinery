@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -15,8 +15,7 @@
 	else{
 		$url = new Url(NULL);
 	}
-		
-	
+
 	if($_POST){
 
 		$url_incoming = trim($_POST['url_incoming']);
@@ -62,8 +61,7 @@
 		else{
 			$breadcrumbs += array('New Url' => '');
 		}
-				
-		
+
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(

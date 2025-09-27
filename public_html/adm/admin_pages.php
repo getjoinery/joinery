@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -18,8 +18,7 @@
 	$sort = LibraryFunctions::fetch_variable('sort', 'page_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-	
-	
+
 	$search_criteria = array();
 	
 	//ONLY SHOW DELETED TO SUPER ADMINS
@@ -45,8 +44,6 @@
 		'session' => $session,
 	)
 	);	
-	
-
 
 	$headers = array("Content",  "Created", "Published", "By", "Status");
 	$altlinks = array('New Page'=>'/admin/admin_page_edit');
@@ -95,9 +92,7 @@
 		$paget->disprow($rowvalues);
 	}
 
-
 	$paget->endtable($pager);	
 	$paget->admin_footer();
 ?>
-
 

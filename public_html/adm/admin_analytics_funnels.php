@@ -1,14 +1,9 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
-	PathHelper::requireOnce('includes/SessionControl.php');
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
-
-
-
+	
 $session = SessionControl::get_instance();
 $session->check_permission(5);
 
@@ -26,9 +21,6 @@ $dblink = $dbhelper->get_db_link();
 	)
 	);	
 
-
-
-
 $today = date("m-d-Y");
 $startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 months")), 0, '');
 $enddate = LibraryFunctions::fetch_variable('enddate', $today, 0, '');
@@ -40,7 +32,6 @@ $page_5 = LibraryFunctions::fetch_variable('page_5', NULL, 0, '');
 
 $sql = "SELECT DISTINCT vse_page FROM vse_visitor_events GROUP BY vse_page HAVING COUNT(*) > 5 ORDER BY vse_page ASC;
 ";
-
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -60,15 +51,11 @@ catch(PDOException $e)
 }
 $results = $q->fetchAll();
 
-
-
 $optionvals = array();
 foreach ($results as $row) {
 	$optionvals[$row->vse_page] = $row->vse_page;
 }
 unset($results);
-
-
 
 $formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 echo $formwriter->begin_form("uniForm", "get", "/admin/admin_analytics_funnels");
@@ -87,9 +74,6 @@ echo $formwriter->end_buttons();
 echo $formwriter->end_form();
 
 echo '<br />';
-
-
-
 
 if($page_1 && $page_2 && $startdate && $enddate){
 	//CONTENT
@@ -186,7 +170,6 @@ if($page_1 && $page_2 && $startdate && $enddate){
 		";
 	}
 
-
 	try
 	{
 		$q = $dblink->prepare($sql);
@@ -202,7 +185,6 @@ if($page_1 && $page_2 && $startdate && $enddate){
 	}
 
 	$funnel_stats = $q->fetchAll();
-
 
 	$headers = array("Page", "Visits", "Conversion from prev", "Total conversion");
 	$box_vars =	array(
@@ -236,12 +218,10 @@ if($page_1 && $page_2 && $startdate && $enddate){
 			array_push($rowvalues, $pct.'%');
 		}
 
-		
 		$page->disprow($rowvalues);
 	}
 	$page->endtable();
 }
-
 
 $page->admin_footer();
 

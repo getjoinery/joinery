@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -10,7 +9,6 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -141,8 +139,6 @@
 		//$page->disprow(array(
 		//	'Totals', '', $total_orders, '$' . $total_revenue));
 		$page->endtable($pager);		
-		
-
 
 	$page->admin_footer();
 

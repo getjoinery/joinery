@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -18,7 +18,6 @@
 		$location = new Location(NULL);
 	}
 
-	
 	if($_POST){
 
 		if(empty($_POST['loc_fil_file_id'])){
@@ -27,7 +26,6 @@
 
 		$editable_fields = array('loc_name','loc_description','loc_short_description', 'loc_is_published', 'loc_fil_file_id', 'loc_address', 'loc_website');
 
-		
 		foreach($editable_fields as $field) {
 			$location->set($field, $_POST[$field]);
 		}
@@ -51,8 +49,7 @@
 
 	$title = $location->get('loc_name');
 	$content = $location->get('loc_description');
-	
-	
+
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if($_GET['cnv_content_version_id']){
 		$content_version = new ContentVersion($_GET['cnv_content_version_id'], TRUE);
@@ -72,10 +69,8 @@
 	)
 	);	
 
-	
 	$locationoptions['title'] = "Edit Location";
 	$locationt->begin_box($locationoptions);
-
 
 	echo '<div class="row">
     <div class="col-md-8">
@@ -88,8 +83,6 @@
 	$validation_rules['loc_name']['required']['value'] = 'true';
 	$validation_rules['loc_link']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
-
-
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_location_edit');
 
@@ -128,8 +121,6 @@
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
 
-
-
 	echo '    </div>
     </div>
     <div class="col-md-4">
@@ -146,7 +137,6 @@
 	
 	if(count($optionvals)){
 
-		
 		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
 		
 		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_location_edit');
@@ -164,7 +154,6 @@
 </div>	';
 
 	$locationt->end_box();
-	
 
 	$locationt->admin_footer();
 

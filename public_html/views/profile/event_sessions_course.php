@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('event_sessions_course_logic.php', 'logic'));
@@ -30,7 +29,6 @@ $page_vars = $page_vars->data;
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('&nbsp;', $hoptions);
-	
 
 	$session_name = 'Session ' . $page_vars['event_session']->get('evs_session_number') . ' - '.$page_vars['event_session']->get('evs_title');
 
@@ -38,8 +36,6 @@ $page_vars = $page_vars->data;
 	
  <main class="-mt-24 pb-8">
 
-	
-	
 <header class="relative z-20 flex items-center justify-between pb-4 px-4 sm:px-6 lg:flex-none">
 	<div class="mt-4 sm:mt-0 sm:pt-1 sm:text-left">
 		<h1 class="text-xl font-bold text-gray-900 sm:text-2xl">
@@ -74,9 +70,7 @@ $page_vars = $page_vars->data;
 	}
 	?>
 	</header>
-	
-	
-	
+
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">	
       <h1 class="sr-only">Profile</h1>
       <!-- Main 3 column grid -->
@@ -85,15 +79,9 @@ $page_vars = $page_vars->data;
         <div class="grid grid-cols-1 gap-4 lg:col-span-2">
           <!-- Welcome panel -->
           <section aria-labelledby="profile-overview-title">
-            
-			
-			
-			
-			
+
 			<div class="rounded-lg bg-white overflow-hidden shadow">
               <h2 class="sr-only" id="profile-overview-title">Sessions Overview</h2>
-              
-
 
   <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
     <?php echo $page_vars['event']->get('evt_short_description'); ?>
@@ -198,13 +186,9 @@ $page_vars = $page_vars->data;
             <div class="rounded-lg bg-gray-200 overflow-hidden shadow divide-y divide-gray-200 sm:divide-y-0 sm:grid  sm:gap-px">
               <h2 class="sr-only" id="quick-links-title">Sessions</h2>
 
-
-                
-
 <div class="bg-white shadow overflow-hidden sm:rounded-md">
   <ul role="list" class="divide-y divide-gray-200">
-    
-		
+
 									<li>
 									  <!--<a href="<?php echo $course_link; ?>" class="block hover:bg-gray-50">-->
 										<div class="px-4 py-4 sm:px-6">
@@ -257,8 +241,7 @@ $page_vars = $page_vars->data;
 											  </p>
 											</div>
 										  </div>
-										  
-										  
+
 									<?php 
 						if($page_vars['video']->key && !$page_vars['video']->get('vid_delete_time')){
 							echo $page_vars['video']->get_embed(784,441);
@@ -290,14 +273,7 @@ $page_vars = $page_vars->data;
 						<?php
 						}
 						?>									  
-										  
-										  
-										  
-										  
-										  
-										  
-										  
-										  
+
 										</div>
 									  <!--</a>-->
 									</li>			
@@ -315,20 +291,12 @@ $page_vars = $page_vars->data;
 									if($exists){
 										echo '<div><a class="block bg-gray-50 text-sm font-medium text-gray-500 text-center px-4 py-4 hover:text-gray-700 sm:rounded-b-lg" href="/profile/event_sessions_course?session_number='.$next_session.'&event_id='.$page_vars['event']->key.'">Next Session</a></div>';
 									}								
-								
 
-						
-								
-								
-							
 	?>
 
   </ul>
 </div>
 
-
-             
-           
           </section>
         </div>
 
@@ -400,8 +368,6 @@ $page_vars = $page_vars->data;
 		  
 		  <?php */ ?>
 
-
-
           <!-- Sessions List -->
 
 				<section aria-labelledby="recent-hires-title">
@@ -419,8 +385,7 @@ $page_vars = $page_vars->data;
               </div>
             </div>
           </section>
-				
-			
+
           <!-- Private Info -->
 		  <?php
 			if($page_vars['event']->get('evt_private_info')){

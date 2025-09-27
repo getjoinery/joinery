@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -45,7 +45,6 @@
 
 	echo '<h1>Shadow Sessions Orders</h1>';
 
-
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
@@ -55,7 +54,6 @@
 	);
 	$page->tableheader($headers, $table_options, $pager);
 
-	
 	foreach($details as $detail) {
 		$rowvalues = array();
 		
@@ -65,13 +63,10 @@
 		else{
 			$detail_user = new User(NULL);
 		}
-		
 
 		//array_push($rowvalues, $detail->key);
 
-		
 		array_push($rowvalues, '('.$detail_user->key . ')  <a href="/admin/admin_user?usr_user_id=' . $detail_user->key . '">' . $detail_user->display_name() . '</a>');
-
 
 		//array_push($rowvalues,  LibraryFunctions::convert_time($detail->get('ord_timestamp'), "UTC", $session->get_timezone()));
 		array_push($rowvalues, $detail->get('prd_num_sessions'));
@@ -82,7 +77,6 @@
 		$page->disprow($rowvalues);
 	}
 	$page->endtable($pager);
-
 
 	$page->admin_footer();	
 

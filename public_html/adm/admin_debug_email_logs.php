@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -29,8 +29,7 @@
 		'session' => $session,
 	)
 	);	
-	
-	
+
 	$search_criteria = array();
 	//$search_criteria['debug_email_log_like'] = $searchterm;
 
@@ -43,7 +42,6 @@
 	$numrecords = $debug_email_logs->count_all();
 	$debug_email_logs->load();	
 
-		
 	$headers = array('Debug Email', 'Time');
 	$altlinks = array('Delete All' => '/admin/admin_debug_email_logs?action=delete_all');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
@@ -54,7 +52,6 @@
 		//'search_on' => TRUE
 	);
 	$page->tableheader($headers, $table_options, $pager);
-
 
 	foreach($debug_email_logs as $debug_email_log) {
 		

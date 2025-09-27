@@ -1,6 +1,6 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-	PathHelper::requireOnce('includes/ThemeHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('blog_logic.php', 'logic'));
@@ -24,16 +24,11 @@ $page_vars = $page_vars->data;
 
 ?>
 
-
-
-
-
   <div class="container">
     <div class="row">
       <!-- Left column: posts -->
       <section class="col-md-8 pt-0">
-	  
-	  
+
 		<?php
 		if(!$page_vars['posts']){
 			?>
@@ -48,7 +43,6 @@ $page_vars = $page_vars->data;
 				$author = new User($post->get('pst_usr_user_id'), TRUE);
 				$post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
 				?>							
-				
 
 				<div class="card mb-4">
 					<div class="card-header bg-white border-bottom-0">
@@ -76,15 +70,10 @@ $page_vars = $page_vars->data;
 					  <a href="<?php echo $post->get_url(); ?>" class="btn btn-sm btn-primary">Read more</a>
 				  </div>
 				</div>
-	
-
-
-				
 
 			<?php }
 		}			
 		?>	  
-	  
 
       </section>
 
@@ -119,9 +108,6 @@ $page_vars = $page_vars->data;
     </div>
   </div>
 
-
-
-		
 		<?php
 		if($page_vars['pager']->is_valid_page('-1') || $page_vars['pager']->is_valid_page('+1')){
 		?>

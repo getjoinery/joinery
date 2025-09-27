@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -131,9 +130,7 @@
 		if(!$_POST['evs_vid_video_id']){
 			$_POST['evs_vid_video_id'] = NULL; 
 		}
-		
-		
-		
+
 		if (isset($_POST['evs_session_number'])){
 			if(is_null($_POST['evs_session_number']) || $_POST['evs_session_number'] === ''){
 				$event_session->set('evs_session_number', NULL);
@@ -165,15 +162,11 @@
 			}
 		}
 
-		
-
-	
 		$editable_fields = array('evs_evt_event_id', 'evs_content', 'evs_links', 'evs_picture_link', 'evs_is_public', 'evs_title', 'evs_vid_video_id');
 
 		foreach($editable_fields as $field) {
 			$event_session->set($field, $_POST[$field]);
 		}
-
 
 		if($_POST['evs_start_time_date'] && $_POST['evs_start_time_time']){
 			$time_combined = $_POST['evs_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evs_start_time_time']);
@@ -189,16 +182,12 @@
 			$event_session->set('evs_end_time_local', $time_combined);			
 		}
 
-
-
 		$event_session->prepare();
 		$event_session->save();
-		
-		
+
 		LibraryFunctions::redirect('/admin/admin_event_sessions?evt_event_id='.$event_session->get('evs_evt_event_id'));
 		return;
 	}
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -237,8 +226,7 @@
 		echo $formwriter->hiddeninput('evs_evt_event_id', $event->key);
 	}	
 	echo $formwriter->textinput('Title', 'evs_title', NULL, 100, @$event_session->get('evs_title'), '', 255, '');
-	
-	
+
 	//FILL IN A SESSION NUMBER IF IT'S BLANK
 	/*
 	$event_session_fill = $event_session->get('evs_session_number');
@@ -263,8 +251,7 @@
 		$event_sessions_search->load();
 		$event_session_fill = $event_sessions_search->get(0)->get('evs_session_number') + 1;
 	}
-	
-	
+
 	//echo $formwriter->textinput('Session number (number, for ordering)', 'evs_session_number', NULL, 100, @$event_session_fill, '', 255, '');
 	*/
 
@@ -273,20 +260,15 @@
 	if($event_session->get('evs_session_number')){
 		$optionvals[$event_session->get('evs_session_number')] = $event_session->get('evs_session_number');
 	}
-	
-	
+
 	echo $formwriter->dropinput("Session number (number, for ordering)", "evs_session_number", "ctrlHolder", $optionvals, $event_session->get('evs_session_number'), '', false);	
 	echo $formwriter->datetimeinput('Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_start_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
 	echo $formwriter->datetimeinput('Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_end_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
-	
-	 
+
 	//$optionvals = array("Hidden"=>0, "Live"=>1);
 	//echo $formwriter->dropinput("Published", "evs_is_public", "ctrlHolder", $optionvals, $event_session->get('evs_is_public'), '', FALSE);
 
-
-
-	
 	//echo $formwriter->textinput('Order', 'evs_order', NULL, 100, $event_session->get('evs_order'), '', 255, '');
 	
 	/*
@@ -302,14 +284,12 @@
 	
 	echo $formwriter->textbox('Session description', 'evs_content', 'ctrlHolder', 5, 80, @$event_session->get('evs_content'), '', 'yes');
 	//echo $formwriter->textbox('Session location', 'evs_location', 'ctrlHolder', 5, 80, $event_session->get('evs_location'), '', 'no');
-	
-	
+
 	//echo $formwriter->textbox('Event links', 'evs_links', 'ctrlHolder', 5, 80, $event_session->get('evs_links'), '', 'no');
 	
 	//echo $formwriter->textinput('Picture link', 'evs_picture_link', NULL, 100, $event_session->get('evs_picture_link'), '', 255, '');
 	//echo $formwriter->textbox('Session video embed', 'evs_video_link', 'ctrlHolder', 5, 80, $event_session->get('evs_video_link'), '', 'no');
-	
-	
+
 	$videos = new MultiVideo(
 		array('deleted'=>false),
 		array('video_id' => 'DESC'),		//SORT BY => DIRECTION
@@ -318,8 +298,7 @@
 	$videos->load();
 	$optionvals = $videos->get_video_dropdown_array();
 	echo $formwriter->dropinput("Video", "evs_vid_video_id", "ctrlHolder", $optionvals, @$event_session->get('evs_vid_video_id'), '', TRUE);
-	
-	
+
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
@@ -338,8 +317,6 @@
 		echo $formwriter->hiddeninput('action', 'addfile');
 		echo $formwriter->hiddeninput('evs_event_session_id', $event_session->key);
 		echo $formwriter->hiddeninput('evs_evt_event_id', $event_session->get('evs_evt_event_id'));
-		
-		
 
 		$session_files = $event_session->get_files();
 		$rowcontent = '<ul>';
@@ -349,7 +326,6 @@
 		$rowcontent .= '</ul>';
 		echo $rowcontent;
 
-		
 		$files = new MultiFile(
 			array('deleted'=>false),
 			array('file_id' => 'DESC'),		//SORT BY => DIRECTION
@@ -358,14 +334,11 @@
 		$files->load();
 		$optionvals = $files->get_file_dropdown_array();
 		echo $formwriter->dropinput("Add file", "fil_file_id", "ctrlHolder", $optionvals, NULL, '', TRUE, TRUE, FALSE, TRUE);
-		
-		
+
 		echo $formwriter->start_buttons();
 		echo $formwriter->new_form_button('Add file');
 		echo $formwriter->end_buttons();
 		echo $formwriter->end_form();
-
-
 
 		//$page->begin_box();
 		echo '<hr><div style="margin-left:20px"><h4>Bulk upload</h4>';
@@ -375,7 +348,6 @@
 		echo $formwriter->end_form();
 		echo '</div>';
 		//$page->end_box();
-		
 
 		$page->end_box();	
 	}

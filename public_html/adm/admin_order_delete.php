@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/orders_class.php');
@@ -16,9 +16,7 @@ if ($_POST){
 
 	$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to delete here.');
 	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');
-	
 
-	
 	if ($confirm) {
 
 		$order = new Order($ord_order_id, TRUE);
@@ -79,7 +77,6 @@ else{
 
 	$page->end_box();
 	$page->admin_footer();
-
 
 }
 ?>
