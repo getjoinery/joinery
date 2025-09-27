@@ -441,7 +441,7 @@ class PluginHelper extends ComponentBase {
         $service_file = "plugins/{$plugin_name}/services/{$service_name}.php";
         
         if (file_exists(PathHelper::getIncludePath($service_file))) {
-            PathHelper::requireOnce($service_file);
+            require_once(PathHelper::getIncludePath($service_file));
             $class_name = ucfirst($plugin_name) . $service_name;
             if (class_exists($class_name)) {
                 return new $class_name();

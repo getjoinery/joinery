@@ -1,6 +1,6 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('includes/SystemBase.php');
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 class Theme extends SystemBase {    public static $prefix = 'thm';
     public static $tablename = 'thm_themes';
@@ -95,7 +95,7 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
         $this->save();
         
         // Update global theme setting
-        PathHelper::requireOnce('data/settings_class.php');
+        require_once(PathHelper::getIncludePath('data/settings_class.php'));
         
         // Try to find existing theme_template setting
         $existing_setting = Setting::GetByColumn('stg_name', 'theme_template');

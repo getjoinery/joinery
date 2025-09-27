@@ -8,7 +8,7 @@ require_once ('DbConnector.php');
 require_once ('LibraryFunctions.php');
 require_once ('ShoppingCart.php');
 
-PathHelper::requireOnce('data/login_class.php');
+require_once(PathHelper::getIncludePath('data/login_class.php'));
 
 class DisplayMessage {
 
@@ -407,7 +407,7 @@ class SessionControl{
 					return FALSE;
 				}
 
-				PathHelper::requireOnce('data/users_class.php');
+				require_once(PathHelper::getIncludePath('data/users_class.php'));
 				// Now one last check to make sure this is a valid user
 				try {
 					$user_obj = new User($user, TRUE);
@@ -451,7 +451,7 @@ class SessionControl{
 					return FALSE;
 				}
 
-				PathHelper::requireOnce('data/users_class.php');
+				require_once(PathHelper::getIncludePath('data/users_class.php'));
 				// Now one last check to make sure this is a valid user
 				try {
 					$user_obj = new User($user, TRUE);

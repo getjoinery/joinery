@@ -1,12 +1,12 @@
 <?php
 	
-	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('data/settings_class.php');
-	PathHelper::requireOnce('data/email_templates_class.php');
-	PathHelper::requireOnce('data/mailing_lists_class.php');
-	PathHelper::requireOnce('data/pages_class.php');
+	require_once(PathHelper::getIncludePath('data/settings_class.php'));
+	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
+	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
+	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -190,7 +190,7 @@
 					$original_test_mode = $_SESSION['test_mode'] ?? null;
 					$_SESSION['test_mode'] = false; // Force live mode
 					
-					PathHelper::requireOnce('/includes/StripeHelper.php');
+					require_once(PathHelper::getIncludePath('/includes/StripeHelper.php'));
 					$stripe_helper = new StripeHelper();
 					
 					if ($stripe_helper->is_initialized()) {
@@ -274,7 +274,7 @@
 					$original_test_mode = $_SESSION['test_mode'] ?? null;
 					$_SESSION['test_mode'] = true; // Force test mode
 					
-					PathHelper::requireOnce('/includes/StripeHelper.php');
+					require_once(PathHelper::getIncludePath('/includes/StripeHelper.php'));
 					$stripe_helper_test = new StripeHelper();
 					
 					if ($stripe_helper_test->is_initialized()) {
@@ -417,7 +417,7 @@
 				$original_test_mode = $_SESSION['test_mode'] ?? null;
 				$_SESSION['test_mode'] = false; // Force live mode
 				
-				PathHelper::requireOnce('/includes/PaypalHelper.php');
+				require_once(PathHelper::getIncludePath('/includes/PaypalHelper.php'));
 				
 				// Step 1: Get OAuth2 access token
 				$basic_auth = base64_encode($paypal_api_key . ':' . $paypal_api_secret);
@@ -559,7 +559,7 @@
 				$original_test_mode = $_SESSION['test_mode'] ?? null;
 				$_SESSION['test_mode'] = true; // Force test mode
 				
-				PathHelper::requireOnce('/includes/PaypalHelper.php');
+				require_once(PathHelper::getIncludePath('/includes/PaypalHelper.php'));
 				
 				// Step 1: Get OAuth2 access token
 				$basic_auth_test = base64_encode($paypal_api_key_test . ':' . $paypal_api_secret_test);

@@ -1,6 +1,6 @@
 <?php
 // Simple cache performance benchmarking tool
-PathHelper::requireOnce('includes/StaticPageCache.php');
+require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 
 $session = SessionControl::get_instance();
 // Check for admin permission (level 9)

@@ -2,11 +2,11 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function events_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/event_types_class.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_types_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

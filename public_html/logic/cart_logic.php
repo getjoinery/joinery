@@ -2,17 +2,17 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function cart_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/ShoppingCart.php');
-	PathHelper::requireOnce('includes/StripeHelper.php');
-	PathHelper::requireOnce('includes/PaypalHelper.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
+	require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
+	require_once(PathHelper::getIncludePath('includes/PaypalHelper.php'));
 
-	PathHelper::requireOnce('data/products_class.php');
-	PathHelper::requireOnce('data/address_class.php');
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/coupon_codes_class.php');
+	require_once(PathHelper::getIncludePath('data/products_class.php'));
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/coupon_codes_class.php'));
 	
 	$page_vars = array();
 

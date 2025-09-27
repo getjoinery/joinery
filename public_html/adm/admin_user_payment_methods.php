@@ -1,11 +1,11 @@
 <?php
 	
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/StripeHelper.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$settings = Globalvars::get_instance();
 

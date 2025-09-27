@@ -5,7 +5,7 @@
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('data/visitor_events_class.php');
+require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
 
 // Security: Verify request is from our domain
 $allowed_origins = [

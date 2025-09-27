@@ -8,12 +8,11 @@ Every admin page must include these basic requirements:
 
 ```php
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
+// PathHelper, Globalvars, SessionControl, DbConnector, ThemeHelper, PluginHelper are guaranteed available
 
-PathHelper::requireOnce('includes/AdminPage.php');
-PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/Pager.php');
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(9); // Adjust permission level as needed (5=basic admin, 9=super admin)

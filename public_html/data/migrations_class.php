@@ -1,11 +1,11 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 $settings = Globalvars::get_instance();
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemBase.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 class MigrationException extends SystemBaseException {}
 class MigrationNotSentException extends MigrationException {};

@@ -1081,7 +1081,7 @@ class DatabaseUpdater {
         
         try {
             // Load existing migration logic
-            PathHelper::requireOnce('data/migrations_class.php');
+            require_once(PathHelper::getIncludePath('data/migrations_class.php'));
             
             $migration_obj = new Migration();
             

@@ -38,38 +38,42 @@ require_once(__DIR__ . '/../includes/Globalvars.php');
 require_once(__DIR__ . '/../includes/ThemeHelper.php');
 require_once(__DIR__ . '/../includes/PluginHelper.php');
 require_once(__DIR__ . '/../includes/DbConnector.php');
-PathHelper::requireOnce('includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/DbConnector.php');
+require_once(PathHelper::getIncludePath('includes/PathHelper.php'));
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 
 // ✅ CORRECT - Just use them directly
-PathHelper::requireOnce('includes/LibraryFunctions.php');
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 $settings = Globalvars::get_instance();
 $session = SessionControl::get_instance();
 ```
 
 ### Include Path Rules:
-- **Files in `/includes/`**: Use `PathHelper::requireOnce('includes/filename.php')`
-- **All other files**: Use `PathHelper::requireOnce('path/to/file.php')`
-- **Core files (PathHelper, Globalvars, SessionControl)**: Already loaded - NEVER require them
+- **Core files (PathHelper, Globalvars, SessionControl, ThemeHelper, PluginHelper, DbConnector)**: Already loaded - NEVER require them
+- **All other files**: Use `require_once(PathHelper::getIncludePath('path/to/file.php'))`
+- **Theme-overridable files**: Use `require_once(PathHelper::getThemeFilePath('filename.php', 'subdirectory'))`
 
 ```php
-// ✅ CORRECT for non-core files
-PathHelper::requireOnce('includes/LibraryFunctions.php');
+// ✅ CORRECT - Standard file inclusion
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
+
+// ✅ CORRECT - Theme-overridable files
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic'));
 
 // ❌ WRONG - NEVER do this
 require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/filename.php');
 ```
 
-### Variable Scope with PathHelper
-**CRITICAL:** `PathHelper::requireOnce()` includes files in method scope, isolating variables. When you need global scope access to variables defined in the included file (like `$migrations`), use:
+### Variable Scope Note
+When including files that define variables you need to access (like `$migrations`), the standard `require_once(PathHelper::getIncludePath())` pattern works perfectly as it maintains proper scope:
 
 ```php
-// ✅ For shared variables - maintains global scope
+// ✅ Standard pattern - variables are accessible
 require_once(PathHelper::getIncludePath('migrations/migrations.php'));
-
-// ❌ Variables not accessible - method scope isolation  
-PathHelper::requireOnce('migrations/migrations.php');
+// Now $migrations array is available
 ```
 
 ## Architecture Patterns
@@ -320,12 +324,14 @@ For complete guidance on creating admin interface pages, including required setu
 
 ### File Loading Methods
 
-**Two methods for including files:**
+**Two primary methods for including files:**
 
-1. **`PathHelper::requireOnce()`** - Direct file loading, no overrides
+1. **`PathHelper::getIncludePath()`** - Direct file loading, no overrides
    ```php
-   PathHelper::requireOnce('includes/LibraryFunctions.php');  // System files
-   PathHelper::requireOnce('data/user_class.php');           // Data models
+   // Standard pattern for all non-overridable files
+   require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));  // System files
+   require_once(PathHelper::getIncludePath('data/users_class.php'));          // Data models
+   require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php')); // Plugin files
    ```
 
 2. **`PathHelper::getThemeFilePath()`** - Theme-aware file resolution with override chain
@@ -345,20 +351,19 @@ For complete guidance on creating admin interface pages, including required setu
    **Format:** Always use two parameters - filename and subdirectory separately
 
 **When to use each:**
-- `PathHelper::requireOnce()`: System files, data models (wrapper around require_once)
-- `PathHelper::getIncludePath()`: Direct file access, no theme overrides needed (plugins, data files)
-- `PathHelper::getThemeFilePath()`: Files that themes/plugins can override (views, logic, includes)
+- `PathHelper::getIncludePath()`: All standard files - system includes, data models, plugin files (no override capability)
+- `PathHelper::getThemeFilePath()`: Files that themes/plugins should be able to override (views, logic, customizable includes)
 
 **Examples:**
 ```php
-// System file - never overridden
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-
-// Plugin file - direct access
+// Standard files - use getIncludePath
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
-// Theme-overridable file
+// Theme-overridable files - use getThemeFilePath
 require_once(PathHelper::getThemeFilePath('profile.php', 'views'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 ```
 
 ### Getting FormWriter Instances

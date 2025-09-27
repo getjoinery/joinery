@@ -1,6 +1,6 @@
 <?php
 
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(5);

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('includes/AbstractExtensionManager.php');
-PathHelper::requireOnce('data/themes_class.php');
+require_once(PathHelper::getIncludePath('includes/AbstractExtensionManager.php'));
+require_once(PathHelper::getIncludePath('data/themes_class.php'));
 
 /**
  * ThemeManager - Manages theme installation, activation, and configuration

@@ -1,23 +1,23 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 $settings = Globalvars::get_instance();
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemBase.php');
-PathHelper::requireOnce('includes/Validator.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-PathHelper::requireOnce('data/order_items_class.php');
-PathHelper::requireOnce('data/questions_class.php');
-PathHelper::requireOnce('data/coupon_codes_class.php');
-PathHelper::requireOnce('data/coupon_code_products_class.php');
-PathHelper::requireOnce('data/product_versions_class.php');
-PathHelper::requireOnce('data/product_requirements_class.php');
-PathHelper::requireOnce('data/product_requirement_instances_class.php');
+require_once(PathHelper::getIncludePath('data/order_items_class.php'));
+require_once(PathHelper::getIncludePath('data/questions_class.php'));
+require_once(PathHelper::getIncludePath('data/coupon_codes_class.php'));
+require_once(PathHelper::getIncludePath('data/coupon_code_products_class.php'));
+require_once(PathHelper::getIncludePath('data/product_versions_class.php'));
+require_once(PathHelper::getIncludePath('data/product_requirements_class.php'));
+require_once(PathHelper::getIncludePath('data/product_requirement_instances_class.php'));
 
 class ProductException extends SystemBaseException {}
 
@@ -688,7 +688,7 @@ class Product extends SystemBase {
 	
 	function run_product_scripts($user, $order_item){
 		//REQUIRE ALL OF THE PRODUCT SCRIPTS, THE MAIN ONE AND ALL OF THE PLUGINS
-		PathHelper::requireOnce('logic/product_scripts_logic.php');
+		require_once(PathHelper::getIncludePath('logic/product_scripts_logic.php'));
 
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){

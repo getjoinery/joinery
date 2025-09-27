@@ -1,10 +1,10 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('data/videos_class.php');
-PathHelper::requireOnce('data/users_class.php');
-PathHelper::requireOnce('data/queued_email_class.php');
-PathHelper::requireOnce('includes/EmailMessage.php');
+require_once(PathHelper::getIncludePath('data/videos_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
+require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 
 class RecurringMailerException extends SystemBaseException {}
 

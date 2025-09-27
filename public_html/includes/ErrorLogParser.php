@@ -1,6 +1,6 @@
 <?php
 require_once(__DIR__ . '/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 
 class ErrorLogParser {
     private $logFile;

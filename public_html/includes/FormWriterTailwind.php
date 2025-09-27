@@ -1,5 +1,5 @@
 <?php
-PathHelper::requireOnce('includes/FormWriterBase.php');
+require_once(PathHelper::getIncludePath('includes/FormWriterBase.php'));
 
 class FormWriterTailwind extends FormWriterBase {
 

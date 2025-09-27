@@ -3,12 +3,12 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function contact_preferences_logic($get_vars, $post_vars){
 
-	PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/mailing_lists_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 	$session = SessionControl::get_instance();
 

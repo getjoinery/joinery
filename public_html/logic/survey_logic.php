@@ -2,16 +2,16 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function survey_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('data/surveys_class.php');
-	PathHelper::requireOnce('data/survey_questions_class.php');
-	PathHelper::requireOnce('data/questions_class.php');
-	PathHelper::requireOnce('data/question_options_class.php');
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/survey_answers_class.php');
+	require_once(PathHelper::getIncludePath('data/surveys_class.php'));
+	require_once(PathHelper::getIncludePath('data/survey_questions_class.php'));
+	require_once(PathHelper::getIncludePath('data/questions_class.php'));
+	require_once(PathHelper::getIncludePath('data/question_options_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/survey_answers_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

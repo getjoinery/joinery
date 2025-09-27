@@ -6,8 +6,8 @@
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/SessionControl.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 ?>
 <!DOCTYPE html>
 <html>

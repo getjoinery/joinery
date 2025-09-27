@@ -1,7 +1,7 @@
 <?php
 	
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getThemeFilePath('phone_numbers_edit_logic.php', 'logic'));
 
 	$page_vars = phone_numbers_edit_logic($_GET, $_POST);

@@ -1,12 +1,12 @@
 <?php
 
-	PathHelper::requireOnce('/includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
-	PathHelper::requireOnce('/includes/Activation.php');
+	require_once(PathHelper::getIncludePath('/includes/Activation.php'));
 
-	PathHelper::requireOnce('/data/users_class.php');
-	PathHelper::requireOnce('/data/mailing_lists_class.php');
-	PathHelper::requireOnce('/data/mailing_list_registrants_class.php');
+	require_once(PathHelper::getIncludePath('/data/users_class.php'));
+	require_once(PathHelper::getIncludePath('/data/mailing_lists_class.php'));
+	require_once(PathHelper::getIncludePath('/data/mailing_list_registrants_class.php'));
 
 	$settings = Globalvars::get_instance();
 	$user = new User($_REQUEST['usr_user_id'], TRUE);

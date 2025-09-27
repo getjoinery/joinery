@@ -1,23 +1,23 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemBase.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
-PathHelper::requireOnce('data/event_registrants_class.php');
-PathHelper::requireOnce('data/event_session_files_class.php');
-PathHelper::requireOnce('data/session_analytics_class.php');
+require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
+require_once(PathHelper::getIncludePath('data/event_session_files_class.php'));
+require_once(PathHelper::getIncludePath('data/session_analytics_class.php'));
 
-PathHelper::requireOnce('includes/calendar-links/Link.php');
-PathHelper::requireOnce('includes/calendar-links/Generator.php');
-PathHelper::requireOnce('includes/calendar-links/Generators/Google.php');
-PathHelper::requireOnce('includes/calendar-links/Generators/Ics.php');
-PathHelper::requireOnce('includes/calendar-links/Generators/Yahoo.php');
-PathHelper::requireOnce('includes/calendar-links/Generators/WebOutlook.php');
+require_once(PathHelper::getIncludePath('includes/calendar-links/Link.php'));
+require_once(PathHelper::getIncludePath('includes/calendar-links/Generator.php'));
+require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Google.php'));
+require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Ics.php'));
+require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Yahoo.php'));
+require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/WebOutlook.php'));
 use Spatie\CalendarLinks\Link;
 
 class EventSessionsException extends SystemBaseException {}

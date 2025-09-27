@@ -1,9 +1,9 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemBase.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 class PluginException extends SystemBaseException {}
 class PluginNotSentException extends PluginException {};
@@ -291,7 +291,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 			}
 			
 			// Check dependencies
-			PathHelper::requireOnce('includes/PluginManager.php');
+			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 			$plugin_manager = new PluginManager();
 			$dependency_result = $plugin_manager->validatePlugin($plugin_name);
 			
@@ -301,7 +301,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 			}
 			
 			// Create plugin tables first
-			PathHelper::requireOnce('includes/DatabaseUpdater.php');
+			require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
 			$database_updater = new DatabaseUpdater();
 			$table_result = $database_updater->runPluginTablesOnly($plugin_name);
 			
@@ -317,7 +317,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 			$results['messages'] = array_merge($results['messages'], $table_result['messages']);
 			
 			// Run migrations
-			PathHelper::requireOnce('includes/PluginManager.php');
+			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 			$plugin_manager = new PluginManager();
 			$migration_result = $plugin_manager->runPendingMigrations($plugin_name);
 			
@@ -343,7 +343,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 			$this->save();
 			
 			// Mark version as installed
-			PathHelper::requireOnce('includes/PluginManager.php');
+			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 			$version_detector = new PluginVersionDetector();
 			$version = $metadata['version'] ?? '0.0.0';
 			$version_detector->markAsUpdated($plugin_name, $version);
@@ -386,7 +386,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 			}
 			
 			// Check dependencies
-			PathHelper::requireOnce('includes/PluginManager.php');
+			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 			$plugin_manager = new PluginManager();
 			$dependents = $plugin_manager->getDependents($plugin_name);
 			$deactivation_check = array(
@@ -417,7 +417,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 			}
 			
 			// Rollback migrations
-			PathHelper::requireOnce('includes/PluginManager.php');
+			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 			$plugin_manager = new PluginManager();
 			// Note: Rollback not implemented in consolidated PluginManager
 			// For now, just skip rollback
@@ -436,7 +436,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 			$this->save();
 			
 			// Clear version tracking using model class
-			PathHelper::requireOnce('data/plugin_versions_class.php');
+			require_once(PathHelper::getIncludePath('data/plugin_versions_class.php'));
 			$plugin_versions = new MultiPluginVersion(['plv_plugin_name' => $plugin_name]);
 			$plugin_versions->load();
 			
@@ -463,7 +463,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 	 */
 	public function activate() {
 		// Check dependencies before activation
-		PathHelper::requireOnce('includes/PluginManager.php');
+		require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 		$plugin_manager = new PluginManager();
 		$dependency_result = $plugin_manager->validatePlugin($this->get('plg_name'));
 		
@@ -488,7 +488,7 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 	 */
 	public function deactivate() {
 		// Check if other plugins depend on this one
-		PathHelper::requireOnce('includes/PluginManager.php');
+		require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 		$plugin_manager = new PluginManager();
 		$plugin_name = $this->get('plg_name');
 		$dependents = $plugin_manager->getDependents($plugin_name);

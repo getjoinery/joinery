@@ -1,9 +1,9 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/SessionControl.php');	
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));	
 	
 	$settings = Globalvars::get_instance();
 	
@@ -20,7 +20,7 @@
 
 error_reporting(E_ALL | E_STRICT);
 
-PathHelper::requireOnce('includes/PasswordHash.php');
+require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 
 header("Content-type: text/plain");
 

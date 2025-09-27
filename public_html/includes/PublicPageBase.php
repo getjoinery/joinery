@@ -1,14 +1,14 @@
 <?php
 require_once(__DIR__ . '/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/ShoppingCart.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-PathHelper::requireOnce('includes/PluginHelper.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
+require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
+require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 
-PathHelper::requireOnce('data/users_class.php');
-PathHelper::requireOnce('data/public_menus_class.php');
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/public_menus_class.php'));
 
 abstract class PublicPageBase {
 
@@ -78,12 +78,12 @@ abstract class PublicPageBase {
 	 * @return FormWriter The appropriate FormWriter instance
 	 */
 	public function getFormWriter($form_id = 'form1') {
-		PathHelper::requireOnce('includes/LibraryFunctions.php');
+		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 		return LibraryFunctions::get_formwriter_object($form_id);
 	}
 	
 	public static function get_public_menu(){
-		PathHelper::requireOnce('data/public_menus_class.php');
+		require_once(PathHelper::getIncludePath('data/public_menus_class.php'));
 		return MultiPublicMenu::get_sorted_array();
 	}
 
@@ -680,7 +680,7 @@ abstract class PublicPageBase {
 
 		if($search_on){
 			echo '<div class="col-sm-auto">';
-			PathHelper::requireOnce('includes/LibraryFunctions.php');
+			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 			$formwriter = LibraryFunctions::get_formwriter_object('search_form', 'admin');
 
 			echo $formwriter->begin_form("search_form", "get", $pager->base_url());

@@ -1,10 +1,10 @@
 <?php
 	require_once( __DIR__ . '/../includes/PathHelper.php');
 
-	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
@@ -134,7 +134,7 @@
 
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
 	if($_GET['serve-upgrade'] && $settings->get_setting('upgrade_server_active')){
-		PathHelper::requireOnce('/data/upgrades_class.php');
+		require_once(PathHelper::getIncludePath('/data/upgrades_class.php'));
 		$response = array();
 		$response['system_version'] = $settings->get_setting('system_version');
 		$major = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'));

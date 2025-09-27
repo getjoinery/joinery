@@ -1,13 +1,13 @@
 <?php
 
-	PathHelper::requireOnce('includes/Activation.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-	PathHelper::requireOnce('data/emails_class.php');
-	PathHelper::requireOnce('data/email_recipient_groups_class.php');
-	PathHelper::requireOnce('data/groups_class.php');
-	PathHelper::requireOnce('data/mailing_lists_class.php');
+	require_once(PathHelper::getIncludePath('data/emails_class.php'));
+	require_once(PathHelper::getIncludePath('data/email_recipient_groups_class.php'));
+	require_once(PathHelper::getIncludePath('data/groups_class.php'));
+	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

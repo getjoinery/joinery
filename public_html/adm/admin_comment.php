@@ -1,11 +1,11 @@
 <?php
 
-	PathHelper::requireOnce('includes/Activation.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-	PathHelper::requireOnce('data/comments_class.php');
-	PathHelper::requireOnce('data/posts_class.php');
+	require_once(PathHelper::getIncludePath('data/comments_class.php'));
+	require_once(PathHelper::getIncludePath('data/posts_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

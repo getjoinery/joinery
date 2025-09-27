@@ -1,8 +1,8 @@
 <?php
 	
-	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('data/emails_class.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

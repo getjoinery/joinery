@@ -1,7 +1,7 @@
 <?php
 // tests/email/index.php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(__DIR__ . '/EmailTestRunner.php');
 require_once(__DIR__ . '/suites/ServiceTests.php');
 require_once(__DIR__ . '/suites/TemplateTests.php');

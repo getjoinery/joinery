@@ -1,12 +1,12 @@
 <?php
 
-PathHelper::requireOnce('includes/AdminPage.php');
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/ErrorLogParser.php');
-PathHelper::requireOnce('includes/Pager.php');
-PathHelper::requireOnce('data/users_class.php');
-PathHelper::requireOnce('data/phone_number_class.php');
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/ErrorLogParser.php'));
+require_once(PathHelper::getIncludePath('includes/Pager.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(9); // Admin permission level 9

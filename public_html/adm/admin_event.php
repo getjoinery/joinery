@@ -1,19 +1,19 @@
 <?php
 
-	PathHelper::requireOnce('includes/Activation.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/event_registrants_class.php');
-	PathHelper::requireOnce('data/address_class.php');
-	PathHelper::requireOnce('data/log_form_errors_class.php');
-	PathHelper::requireOnce('data/emails_class.php');
-	PathHelper::requireOnce('data/email_recipients_class.php');
-	PathHelper::requireOnce('data/event_logs_class.php');
-	PathHelper::requireOnce('data/orders_class.php');
-	PathHelper::requireOnce('data/messages_class.php');
-	PathHelper::requireOnce('data/event_waiting_lists_class.php');
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/log_form_errors_class.php'));
+	require_once(PathHelper::getIncludePath('data/emails_class.php'));
+	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
+	require_once(PathHelper::getIncludePath('data/orders_class.php'));
+	require_once(PathHelper::getIncludePath('data/messages_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_waiting_lists_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

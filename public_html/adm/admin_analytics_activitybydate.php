@@ -1,8 +1,8 @@
 <?php
 
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-	PathHelper::requireOnce('data/admin_analytics_activitybydate_data.php');
+	require_once(PathHelper::getIncludePath('data/admin_analytics_activitybydate_data.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);

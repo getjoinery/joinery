@@ -3,12 +3,12 @@
 // Comprehensive email pattern test - sends one email for each pattern found in the codebase
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/EmailMessage.php');  
-PathHelper::requireOnce('includes/EmailSender.php');
-PathHelper::requireOnce('data/users_class.php');
-PathHelper::requireOnce('data/emails_class.php');
-PathHelper::requireOnce('includes/Activation.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));  
+require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/emails_class.php'));
+require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
 class EmailPatternTest {
     private array $config;

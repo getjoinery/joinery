@@ -1,16 +1,16 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 $settings = Globalvars::get_instance();
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemBase.php');
-PathHelper::requireOnce('includes/Validator.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-PathHelper::requireOnce('data/event_sessions_class.php');
+require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
 
 class FileException extends SystemBaseException {}
 
@@ -386,7 +386,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 		}	
 	
 		if ($group_id = $this->get('fil_grp_group_id')){
-			PathHelper::requireOnce('data/groups_class.php');
+			require_once(PathHelper::getIncludePath('data/groups_class.php'));
 			//CHECK TO SEE IF USER IS IN AUTHORIZED GROUP
 			$group = new Group($group_id, TRUE);
 			if(!$group->is_member_in_group($session->get_user_id())){
@@ -395,7 +395,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 		}
 		
 		if ($event_id = $this->get('fil_evt_event_id')){
-			PathHelper::requireOnce('data/event_registrants_class.php');
+			require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 			//CHECK TO SEE IF USER IS IN AUTHORIZED EVENT
 			$searches['user_id'] = $session->get_user_id();
 			$searches['event_id'] = $event_id;

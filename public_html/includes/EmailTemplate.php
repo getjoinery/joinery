@@ -5,8 +5,8 @@ require_once('LibraryFunctions.php');
 require_once('EmailMessage.php');
 require_once('EmailSender.php');
 
-PathHelper::requireOnce('data/email_templates_class.php');
-PathHelper::requireOnce('data/users_class.php');
+require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class EmailTemplateError extends Exception {}
 

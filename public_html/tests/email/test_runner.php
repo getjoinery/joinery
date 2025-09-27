@@ -1,7 +1,7 @@
 <?php
 // Simple test runner to verify email test fixes
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(__DIR__ . '/EmailTestRunner.php');
 
 echo "=== Email Template Test Fixes Verification ===\n\n";
