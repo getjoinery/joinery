@@ -1,7 +1,7 @@
 <?php
 	error_reporting(E_ERROR | E_PARSE);
-	require_once( __DIR__ . '/../includes/Globalvars.php');	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+	require_once( __DIR__ . '/../includes/Globalvars.php');
+
 	require_once( __DIR__ . '/../includes/SessionControl.php');
 	require_once( __DIR__ . '/../includes/PathHelper.php');
 
@@ -25,14 +25,13 @@
 	exit;
 */
 
-
 	//HANDLE THE EVENT TYPES
 	$event_types = get_event_types_info();
 	foreach($event_types as $event_type){
 		//print_r($event_type);
 		echo $event_type->name.'<br>';
 		echo $event_type->uri.'<br>';
-		
+
 		if(!$new_booking = BookingType::GetByCalendlyUri($event_type->uri)){
 			$new_booking = new BookingType(NULL);
 			$new_booking->set('bkt_calendly_event_type_uri', $event_type->uri);
@@ -48,7 +47,7 @@
 		$new_booking->set('bkt_description_plain', $event_type->description_plain);
 		$new_booking->set('bkt_schedule_link', $event_type->scheduling_url);
 		$new_booking->set('bkt_slug', $event_type->slug);
-		
+
 		if($event_type->active == 1){
 			$new_booking->set('bkt_status', BookingType::BOOKING_STATUS_ACTIVE);
 		}
@@ -56,7 +55,7 @@
 			$new_booking->set('bkt_status', BookingType::BOOKING_STATUS_INACTIVE);
 		}
 		echo $event_type->status.'<br>';
-		
+
 		//OWNER
 		if(!$user = User::GetByCalendlyUri($event_type->profile->owner)){
 			echo "Error: There is no user in the system with the calendly uri of ". $event_type->profile->owner;
@@ -68,15 +67,14 @@
 
 		$new_booking->prepare();
 		$new_booking->save();
-		
-	}
 
+	}
 
 	//NOW HANDLE THE EVENTS
 	if($event_uri){
 		$results = get_booking_info($event_uri, $min_start_time, NULL);
 		print_r($results);
-		
+
 		$results = get_booking_invitees($event_uri, NULL);
 		print_r($results);
 	}
@@ -86,7 +84,7 @@
 			//print_r($booking);
 			echo $booking->name.'<br>';
 			echo $booking->uri.'<br>';
-			
+
 			if(!$new_booking = Booking::GetByCalendlyUri($booking->uri)){
 				$new_booking = new Booking(NULL);
 				$new_booking->set('bkn_calendly_event_uri', $booking->uri);
@@ -102,7 +100,7 @@
 			$new_booking->set('bkn_update_time', $booking->updated_at);
 			echo $booking->event_memberships[0]->user.'<br>';
 			$new_booking->set('bkn_location', $booking->location->location);
-			
+
 			$new_booking->set('bkn_type', $booking->event_type);
 			$booking_type = BookingType::GetByCalendlyUri($booking->event_type);
 			$new_booking->set('bkn_bkt_booking_type_id', $booking_type->key);
@@ -110,9 +108,7 @@
 			if($user = User::GetByCalendlyUri($booking->event_memberships[0]->user)){
 				$new_booking->set('bkn_usr_user_id_booked', $user->key);
 			}
-		
-			
-			
+
 			if($booking->status == 'canceled'){
 				$new_booking->set('bkn_status', Booking::BOOKING_STATUS_CANCELED);
 			}
@@ -127,7 +123,7 @@
 			else{
 				$invitees = get_booking_invitees(basename($booking->uri), 'canceled');
 			}
-		
+
 			//TODO: HANDLE MORE THAN ONE INVITEE
 			foreach($invitees as $invitee){
 				echo $invitee->name.'<br>';
@@ -150,38 +146,36 @@
 						'password' => NULL,
 						'send_emails' => false
 					);
-					$user = User::CreateNew($data);	
+					$user = User::CreateNew($data);
 				}
 			}
 			$new_booking->prepare();
 			$new_booking->save();
-			
+
 		}
 	}
 
-
 	function get_event_types_info($event_uri=NULL, $min_start_time=NULL, $status='active'){
 		$settings = Globalvars::get_instance();
-			
+
 		if($event_uri){
 			$extra_params = '/'.$event_uri;
 		}
 		else{
 			$extra_params = '';
 		}
-		
+
 		$min_start_time_parameter = '';
 		if($min_start_time){
 			$min_start_time_parameter = '&min_start_time='.$min_start_time;
 		}
-		
+
 		if($status){
 			$url = 'https://api.calendly.com/event_types'.$extra_params.'?organization='.$settings->get_setting('calendly_organization_uri').'&status='.$status.'&count=100'.$min_start_time_parameter;
 		}
 		else{
 			$url = 'https://api.calendly.com/event_types'.$extra_params.'?organization='.$settings->get_setting('calendly_organization_uri').'&count=100'.$min_start_time_parameter;
 		}
-
 
 		$ch = curl_init();
 
@@ -192,7 +186,7 @@
 		);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 		curl_setopt($ch, CURLOPT_HEADER, 0);
-		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET"); 
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
 		// Timeout in seconds
@@ -211,8 +205,7 @@
 
 	function get_organization_for_user($user_uri){
 		$settings = Globalvars::get_instance();
-		
-		
+
 		$url = 'https://api.calendly.com/organization_memberships'.$extra_params.'?user='.$user_uri;
 
 		$ch = curl_init();
@@ -224,7 +217,7 @@
 		);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 		curl_setopt($ch, CURLOPT_HEADER, 0);
-		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET"); 
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
 		// Timeout in seconds
@@ -233,34 +226,30 @@
 		$result = json_decode(curl_exec($ch));
 
 		return $result->collection;
-		
 
-	} 
+	}
 
-	
 	function get_booking_info($event_uri=NULL, $min_start_time=NULL, $status='active'){
 		$settings = Globalvars::get_instance();
-			
+
 		if($event_uri){
 			$extra_params = '/'.$event_uri;
 		}
 		else{
 			$extra_params = '';
 		}
-		
+
 		$min_start_time_parameter = '';
 		if($min_start_time){
 			$min_start_time_parameter = '&min_start_time='.$min_start_time;
 		}
-	
-	
+
 		if($status){
 			$url = 'https://api.calendly.com/scheduled_events'.$extra_params.'?organization='.$settings->get_setting('calendly_organization_uri').'&status='.$status.'&count=100'.$min_start_time_parameter;
 		}
 		else{
 			$url = 'https://api.calendly.com/scheduled_events'.$extra_params.'?organization='.$settings->get_setting('calendly_organization_uri').'&count=100'.$min_start_time_parameter;
 		}
-
 
 		$ch = curl_init();
 
@@ -271,7 +260,7 @@
 		);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 		curl_setopt($ch, CURLOPT_HEADER, 0);
-		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET"); 
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
 		// Timeout in seconds
@@ -287,17 +276,16 @@
 		}
 
 	}
-	
+
 	function get_booking_invitees($event_uri, $status='active'){
 		$settings = Globalvars::get_instance();
-			
+
 		if($event_uri){
 			$extra_params = '/'.$event_uri.'/invitees/';
 		}
 		else{
 			$extra_params = '';
 		}
-
 
 		if($status){
 			$url = 'https://api.calendly.com/scheduled_events'.$extra_params.'?organization='.$settings->get_setting('calendly_organization_uri').'&status='.$status.'&count=100';
@@ -315,7 +303,7 @@
 		);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 		curl_setopt($ch, CURLOPT_HEADER, 0);
-		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET"); 
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
 		// Timeout in seconds
@@ -324,9 +312,9 @@
 		$result = json_decode(curl_exec($ch));
 
 		return $result->collection;
-		
+
 	}
-	
+
 	exit;
 
 ?>

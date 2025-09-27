@@ -1,7 +1,7 @@
 <?php
-	
+
 	PathHelper::requireOnce('includes/Activation.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
 
 	PathHelper::requireOnce('data/events_class.php');
@@ -18,7 +18,7 @@
 
 	$rsearch_criteria = array();
 	$rsearch_criteria['event_id'] = $event->key;
-	
+
 	$event_registrants = new MultiEventRegistrant(
 		$rsearch_criteria,
 		);
@@ -29,25 +29,25 @@
 
 	$wsearch_criteria = array();
 	$wsearch_criteria['event_id'] = $event->key;
-	$waiting_lists = new MultiWaitingList(		
+	$waiting_lists = new MultiWaitingList(
 		$wsearch_criteria,);
 	$numwaitinglist = $waiting_lists->count_all();
 	$waiting_lists->load();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'events',
 		'page_title' => 'Event',
 		'readable_title' => 'Event',
 		'breadcrumbs' => array(
-			'Events'=>'/admin/admin_events', 
+			'Events'=>'/admin/admin_events',
 			$event->get('evt_name') => '/admin/admin_event?evt_event_id='.$event->key,
 			'Registrants'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$settings = Globalvars::get_instance();
 	$webDir = $settings->get_setting('webDir');
@@ -61,10 +61,10 @@
 	foreach($event_registrants as $event_registrant){
 
 		$registrant = new User($event_registrant->get('evr_usr_user_id'), TRUE);
-		
+
 		$registrant_emails .= $registrant->display_name() . ' &lt;'.$registrant->get('usr_email'). '&gt;, ';
 	}
-	echo '<p>'.$registrant_emails. '</p>';	
+	echo '<p>'.$registrant_emails. '</p>';
 	$page->end_box();
 
 	$pageoptions['title'] = "Emails of waiting list";
@@ -72,11 +72,11 @@
 	foreach($waiting_lists as $waiting_list){
 
 		$registrant = new User($waiting_list->get('ewl_usr_user_id'), TRUE);
-		
+
 		$registrant_emails .= $registrant->display_name() . ' &lt;'.$registrant->get('usr_email'). '&gt;, ';
 	}
 	$page->begin_box($pageoptions);
-	echo '<p>'.$registrant_emails. '</p>';	
+	echo '<p>'.$registrant_emails. '</p>';
 	$page->end_box();
 
 	$page->admin_footer();

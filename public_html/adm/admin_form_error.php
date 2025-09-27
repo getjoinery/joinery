@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('data/log_form_errors_class.php');
 	PathHelper::requireOnce('data/users_class.php');
 
@@ -13,10 +11,10 @@
 
 	$form_error = new FormError($_GET['lfe_log_form_error_id'], TRUE);
 	$user = new User($form_error->get('lfe_usr_user_id'), TRUE);
-	
+
 	$page = new AdminPage();
 
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> null,
 		'page_title' => 'Error',
@@ -32,5 +30,5 @@
 
 	echo '<pre>'. $form_error->display_time($session) . "\n\n" . 'Errors:<br>-------------------<br>' . htmlspecialchars($form_error->get('lfe_error')).'<br><br>';
 	echo 'All formfields:<br>-------------------<br><br>' . htmlspecialchars($form_error->get('lfe_form')).'</pre>';
-	
+
 	$page->admin_footer();

@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -20,28 +18,28 @@
 		$page_content->soft_delete();
 
 		header("Location: /admin/admin_page_contents");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$page_content->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_content->undelete();
 
 		header("Location: /admin/admin_page_contents");
-		exit();				
+		exit();
 	}
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'pages',
 		'breadcrumbs' => array(
-			'Page Contents'=>'/admin/admin_page_contents', 
+			'Page Contents'=>'/admin/admin_page_contents',
 			$page_content->get('pac_location_name')=>'',
 		),
 		'session' => $session,
 	)
-	);	
-	
+	);
+
 	$options['title'] = $page_content->get('pac_location_name');
 	$options['altlinks'] = array('Edit Content' => '/admin/admin_page_content_edit?pac_page_content_id='.$page_content->key);
 	$options['altlinks'] += array('Delete Content' => '/admin/admin_page_content_permanent_delete?pac_page_content_id='.$page_content->key);
@@ -53,7 +51,7 @@
 	}
 
 	$page->begin_box($options);
-	echo '<strong>Label:</strong> '.$page_content->get('pac_location_name').'<br />';	
+	echo '<strong>Label:</strong> '.$page_content->get('pac_location_name').'<br />';
 	echo '<strong>Content Slug:</strong> '.$page_content->get('pac_link').' (*!**' . $page_content->get('pac_link') . '**!*) <br />';
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($page_content->get('pac_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 	if($page_content->get('pac_delete_time')){
@@ -69,8 +67,8 @@
 	//echo '<iframe src="'.$page_content->get('pac_body').'" width="100%" height="500" style="border:1px solid black;"></iframe>';
 	echo $page_content->get('pac_body');
 
-	$page->end_box();		
-	
+	$page->end_box();
+
 	$page->admin_footer();
 ?>
 

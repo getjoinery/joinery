@@ -1,8 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
@@ -11,7 +10,7 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
-	$session->set_return();	
+	$session->set_return();
 
 	$searches = array();
 	$numperpage = 30;
@@ -54,11 +53,11 @@
 		array($sort=>$sdirection),
 		$numperpage,
 		$offset);
-	$events->load();	
-	$numrecords = $events->count_all();	
+	$events->load();
+	$numrecords = $events->count_all();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'events-list',
 		'page_title' => 'Events',
@@ -66,21 +65,21 @@
 		'breadcrumbs' => $breadcrumb_array,
 		'session' => $session,
 	)
-	);	
+	);
 
 	$headers = array("Start time", "Event",  "Published", "Registration", "Registrants", "Waiting List");
 	$altlinks = array('New Event'=>'/admin/admin_event_edit');
-	
+
 	$pager = new Pager(
 		array(
-			'numrecords'=>$numrecords, 
-			'numperpage'=> $numperpage, 
+			'numrecords'=>$numrecords,
+			'numperpage'=> $numperpage,
 			'offset'=>$offset,
-			'sort'=>$sort,  
-			'sdirection'=>$sdirection, 
+			'sort'=>$sort,
+			'sdirection'=>$sdirection,
 			'filter' => $filter
 		)
-	);	
+	);
 
 	$table_options = array(
 		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name", 'Start Time'=>'start_time'),
@@ -93,8 +92,8 @@
 
 	foreach ($events as $event){
 		$searches = array();
-		$searches['event_id'] = $event->key;			
-		
+		$searches['event_id'] = $event->key;
+
 		$registrants = new MultiEventRegistrant(
 			array('event_id'=>$event->key, 'expired' => false)
 		);
@@ -109,7 +108,7 @@
 		$rowvalues = array();
 
 		array_push($rowvalues, LibraryFunctions::convert_time($event->get('evt_start_time_local'), $session->get_timezone(), $session->get_timezone(), 'M j, Y'));
-		 
+
 		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->get('evt_name'). '</strong></a>');
 
 		if($event->get('evt_delete_time')){
@@ -117,14 +116,14 @@
 		}
 		else if($event->get('evt_visibility') == 0) {
 			array_push($rowvalues, '<b>Private</b>');
-		} 
+		}
 		else if($event->get('evt_visibility') == 1){
 			array_push($rowvalues, '<a href="' . $event->get_url() . '">Public</a>');
 		}
 		else{
 			array_push($rowvalues, '<a href="' . $event->get_url() . '">Unlisted</a>');
-		}			
-		
+		}
+
 		array_push($rowvalues, $event->get('evt_is_accepting_signups') ? 'Open' : 'Closed');
 		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numregistrants.' registered</a>');
 		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numwaitinglists.' on waiting list</a>');

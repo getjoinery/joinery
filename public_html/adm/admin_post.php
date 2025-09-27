@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -12,7 +10,7 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
-	$settings = Globalvars::get_instance(); 
+	$settings = Globalvars::get_instance();
 
 	$post = new Post($_GET['pst_post_id'], TRUE);
 
@@ -21,28 +19,28 @@
 		$post->soft_delete();
 
 		header("Location: /admin/admin_posts");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$post->undelete();
 
 		header("Location: /admin/admin_posts");
-		exit();				
+		exit();
 	}
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'blog-posts',
 		'breadcrumbs' => array(
-			'Posts'=>'/admin/admin_posts', 
+			'Posts'=>'/admin/admin_posts',
 			$post->get('pst_title')=>'',
 		),
 		'session' => $session,
 	)
-	);	
-	
+	);
+
 	$options['title'] = $post->get('pst_title');
 	$options['altlinks'] = array('Edit Post' => '/admin/admin_post_edit?pst_post_id='.$post->key);
 	if(!$post->get('pst_delete_time')){
@@ -51,7 +49,7 @@
 	else{
 		$options['altlinks']['Undelete'] = '/admin/admin_post?action=undelete&pst_post_id='.$post->key;
 	}
-	
+
 	if($_SESSION['permission'] >= 8) {
 		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_post_permanent_delete?pst_post_id='.$post->key);
 	}
@@ -69,8 +67,8 @@
 	else{
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
-	
-	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$post->get_url('short').'</a><br />';	
+
+	echo '<strong>Link:</strong> <a href="'.$post->get_url().'">'.$post->get_url('short').'</a><br />';
 
 	if($post->get('pst_short_description')){
 		echo '<strong>Short description:</strong> <p>'.$post->get('pst_short_description').'</p><br />';
@@ -78,8 +76,8 @@
 
 	echo '<iframe src="'.$post->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
 
-	$page->end_box();		
-	
+	$page->end_box();
+
 	$page->admin_footer();
 ?>
 

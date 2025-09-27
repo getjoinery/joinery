@@ -4,7 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function phone_numbers_edit_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/Activation.php');
 PathHelper::requireOnce('includes/LogicResult.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 
@@ -12,7 +12,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
-	
+
 	$phn_phone_number_id = LibraryFunctions::fetch_variable('phn_phone_number_id', NULL, 0, '');
 
 	if($post_vars){
@@ -24,16 +24,15 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		else{
 			$phone_number = NULL;
 		}
-		
+
 		$phone_number = PhoneNumber::CreateFromForm($post_vars, $session->get_user_id(), $phone_number, FALSE);
-		
+
 		if($phone_number){
 			$msgtxt = 'Addresses have been edited.';
 			$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/phone_numbers_edit.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "phonebox", TRUE);
-			$session->save_message($message);	
+			$session->save_message($message);
 		}
 	}
-
 
 	$user = new User($session->get_user_id(), TRUE);
 	$phone_numbers = new MultiPhoneNumber(
@@ -50,7 +49,6 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		$page_vars['phone_number'] = new PhoneNumber(NULL);
 	}
 
-
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
 	$page_vars['tab_menus'] = array(
@@ -62,7 +60,6 @@ PathHelper::requireOnce('includes/LogicResult.php');
 	);
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-		
 
 	return LogicResult::render($page_vars);
 }

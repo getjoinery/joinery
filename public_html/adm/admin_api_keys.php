@@ -1,9 +1,7 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/api_keys_class.php');
@@ -12,7 +10,7 @@
 	$session->check_permission(5);
 	$session->set_return();
 
-	$numperpage = 30; 
+	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'api_key_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
@@ -35,7 +33,7 @@
 	$api_keys->load();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'api_keys',
 		'page_title' => 'Add User',
@@ -57,7 +55,7 @@
 		'title' => 'ApiKeys',
 		//'search_on' => TRUE
 	);
-	$page->tableheader($headers, $table_options, $pager);	
+	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($api_keys as $api_key){
 		$owner = new User($api_key->get('apk_usr_user_id'), TRUE);
@@ -65,13 +63,13 @@
 		$rowvalues = array();
 
 		array_push($rowvalues,  " <a href='/admin/admin_api_key?apk_api_key_id=$api_key->key'>".$api_key->get('apk_name')."</a>");
-		
+
 		array_push($rowvalues, $api_key->get('apk_public_key'));
 		array_push($rowvalues, $owner->display_name());
 
 		array_push($rowvalues, LibraryFunctions::convert_time($api_key->get('apk_start_time'), "UTC", $session->get_timezone(), 'M j, Y'));
-		array_push($rowvalues, LibraryFunctions::convert_time($api_key->get('apk_expires_time'), "UTC", $session->get_timezone(), 'M j, Y')); 		
-		
+		array_push($rowvalues, LibraryFunctions::convert_time($api_key->get('apk_expires_time'), "UTC", $session->get_timezone(), 'M j, Y'));
+
 		if($api_key->get('apk_delete_time')){
 			array_push($rowvalues, '<b>Deleted</b>');
 		}
@@ -87,7 +85,7 @@
 		else{
 			array_push($rowvalues, '<b>Active</b>');
 		}
-/*		
+/*
 		else{
 			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_api_key_permanent_delete?apk_api_key_id='. $api_key->key.'">
 			<input type="hidden" class="hidden" name="action" value="removeapi_key" />

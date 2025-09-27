@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -25,20 +23,20 @@
 		$search_criteria,
 		array($sort=>$sdirection),
 		$numperpage,
-		$offset);	
-	$numrecords = $page_contents->count_all();	
+		$offset);
+	$numrecords = $page_contents->count_all();
 	$page_contents->load();
-	
+
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'pages',
 		'breadcrumbs' => array(
-			'Page Contents'=>'', 
+			'Page Contents'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$headers = array("Content",  "Created", "Published", "By", "Status");
 	$altlinks = array('New Content'=>'/admin/admin_page_content_edit');
@@ -53,21 +51,21 @@
 
 	foreach ($page_contents as $page_content){
 		$user = new User($page_content->get('pac_usr_user_id'), TRUE);
-		
+
 		$title = $page_content->get('pac_location_name');
 		if(!$title){
 			$title = 'Untitled';
 		}
-		
+
 		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_page_content?pac_page_content_id=$page_content->key'>".$title."</a>");	
+		array_push($rowvalues, "<a href='/admin/admin_page_content?pac_page_content_id=$page_content->key'>".$title."</a>");
 		array_push($rowvalues, LibraryFunctions::convert_time($page_content->get('pac_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($page_content->get('pac_published_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
 		if($page_content->get('pac_delete_time')) {
 			$status = 'Deleted';
-		} 
+		}
 		else {
 			if($page_content->get('pac_published_time')) {
 				$status = 'Published';
@@ -75,13 +73,13 @@
 			else{
 				$status = 'Unpublished';
 			}
-		}		
+		}
 		array_push($rowvalues, $status);
 
 		$page->disprow($rowvalues);
 	}
 
-	$page->endtable($pager);	
+	$page->endtable($pager);
 	$page->admin_footer();
 ?>
 

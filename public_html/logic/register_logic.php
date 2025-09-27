@@ -8,7 +8,7 @@ function register_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/Activation.php');
 PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/SingleRowAccessor.php');
 
@@ -26,7 +26,6 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		exit();
 	}
 
-
 	$page_vars['LOGIN_MESSAGES'] = array(
 		'phone_reveal' => 'Before you can view this phone number, please log in or register with us.',
 	);
@@ -36,27 +35,22 @@ PathHelper::requireOnce('includes/LogicResult.php');
 	}
 
 	if ($post_vars) {
-		
+
 		$formwriter = LibraryFunctions::get_formwriter_object();
 		if(!$formwriter->honeypot_check($post_vars)){
-			LibraryFunctions::display_404_page();		
+			LibraryFunctions::display_404_page();
 		}
-		
 
 		if(!$formwriter->antispam_question_check($post_vars)){
 			throw new SystemDisplayableError(
-				'Please type the correct value into the anti-spam field.');			
+				'Please type the correct value into the anti-spam field.');
 		}
-				
-		
-		
+
 		$captcha_success = $formwriter->captcha_check($post_vars);
 		if (!$captcha_success) {
 			$errormsg = 'Sorry, '.strip_tags($post_vars['usr_first_name']).' '.strip_tags($post_vars['usr_last_name']).', you must click the CAPTCHA to submit the form.';
-			throw new SystemDisplayableError($errormsg);	
-		}		
-		
-		
+			throw new SystemDisplayableError($errormsg);
+		}
 
 		if(isset($post_vars['prevformname'])){
 			$session->save_formfields($post_vars['prevformname']);
@@ -69,7 +63,6 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			//'usa_zip_code_id' => 'Zip Code',
 			'password' => 'Password'
 		);
-		
 
 		$fixed_fields = array();
 		$error_fields = array();
@@ -112,7 +105,6 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		}
 		*/
 
-
 		if (User::GetByEmail($fixed_fields['usr_email'])) {
 			throw new SystemDisplayableError(
 				'An account has already been registered with this email address.  Please go back and double
@@ -123,14 +115,14 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			$user = User::CreateCompleteNew($fixed_fields, true, true, $fixed_fields['setcookie']);
 		}
 
-		if ($ajax) { 
-			echo json_encode(array('success' => 1));	
-		} 
-		else { 
+		if ($ajax) {
+			echo json_encode(array('success' => 1));
+		}
+		else {
 
 			$returnurl = $session->get_return();
 			$session->set_return(NULL);
-			
+
 			// NOW REDIRECT
 			if ($returnurl) {
 				header("Location: $returnurl");
@@ -139,14 +131,12 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			}
 		}
 
-	} 
+	}
 	else {
-
 
 		$form_fields = $session->get_formfields('register');
 
-
-		if ($ajax) { 
+		if ($ajax) {
 			// AJAX calls should never get here.
 			exit;
 		}

@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/surveys_class.php');
@@ -13,11 +11,11 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
-	
+
 	if($_POST['action'] == 'addquestion'){
 		$survey_question = new SurveyQuestion(NULL);
 		$survey_question->set('srq_svy_survey_id', $_REQUEST['svy_survey_id']);
-		$survey_question->set('srq_qst_question_id', $_REQUEST['qst_question_id']); 
+		$survey_question->set('srq_qst_question_id', $_REQUEST['qst_question_id']);
 		$survey_question->prepare();
 		$survey_question->save();
 	}
@@ -31,7 +29,7 @@
 		$survey->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$survey->permanent_delete();
 	}
-	
+
 	$svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, '');
 	$survey = new Survey($svy_survey_id, TRUE);
 
@@ -40,14 +38,14 @@
 		$survey->soft_delete();
 
 		header("Location: /admin/admin_surveys");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$survey->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$survey->soft_delete();
 
 		header("Location: /admin/admin_surveys");
-		exit();				
+		exit();
 	}
 
 	$numperpage = 30;
@@ -68,13 +66,13 @@
 	$survey_questions->load();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'surveys',
 		'page_title' => 'Users in Survey',
 		'readable_title' => 'Users in Survey',
 		'breadcrumbs' => array(
-			'Surveys'=>'/admin/admin_surveys', 
+			'Surveys'=>'/admin/admin_surveys',
 			$survey->get('svy_name') => '',
 		),
 		'session' => $session,
@@ -129,7 +127,7 @@
 		NULL);  //OFFSET
 	$questions->load();
 	$numquestions = $questions->count_all();
-	
+
 	if($numquestions){
 		echo '<tr><td colspan="3">';
 		$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
@@ -142,8 +140,8 @@
 		echo $formwriter->hiddeninput('action', 'addquestion');
 		echo $formwriter->dropinput("Add question to survey", "qst_question_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
 		echo $formwriter->new_form_button('Add');
-		echo $formwriter->end_form();	
-		echo '</td></tr>';			
+		echo $formwriter->end_form();
+		echo '</td></tr>';
 	}
 	else{
 		echo 'There are no questions.  <a href="/admin/admin_questions">Add one</a>.';

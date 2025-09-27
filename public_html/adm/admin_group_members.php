@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/groups_class.php');
@@ -18,15 +16,15 @@
 		$group = new Group($_POST['grp_group_id'], TRUE);
 		$group->add_member($user->key);
 		header("Location: /admin/admin_group_members?grp_group_id=".$group->key);
-		exit();			
+		exit();
 	}
 	else if($_POST['action'] == 'remove_from_group'){
 		$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
 		$groupmember->remove();
 		header("Location: /admin/admin_group_members?grp_group_id=".$groupmember->get('grm_grp_group_id'));
-		exit();				
-	}	
-	
+		exit();
+	}
+
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, 0, '');
 	$group = new Group($grp_group_id, TRUE);
 
@@ -48,13 +46,13 @@
 	$group_members->load();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'groups',
 		'page_title' => 'Users in Group',
 		'readable_title' => 'Users in Group',
 		'breadcrumbs' => array(
-			'Groups'=>'/admin/admin_groups', 
+			'Groups'=>'/admin/admin_groups',
 			'Users in '. $group->get('grp_name') => '',
 		),
 		'session' => $session,
@@ -67,8 +65,8 @@
 		if($group->get_member_count() > 0){
 			$altlinks +=  array('Email group' => '/admin/admin_users_message?grp_group_id='.$group->key);
 			//echo '<a class="dropdown-item" href="/admin/admin_users_message?evt_event_id='.$event->key.'">Send email to all</a>';
-		} 
-	}	
+		}
+	}
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),

@@ -1,21 +1,19 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/groups_class.php');
-	
+
 if ($_POST['confirm']){
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', NULL, 1, 'You must provide a group to delete here.');
-	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');	
-	
+	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');
+
 	if ($confirm) {
 		$group = new Group($grp_group_id, TRUE);
 		$group->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -33,18 +31,18 @@ else{
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', NULL, 1, 'You must provide a group to edit.');
 
 	$group = new Group($grp_group_id, TRUE);
-	
+
 	$session = SessionControl::get_instance();
 	$session->set_return("/admin/admin_groups");
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'groups',
 		'page_title' => 'Group',
 		'readable_title' => 'Delete Group',
 		'breadcrumbs' => array(
-			'Groups'=>'/admin/admin_groups', 
+			'Groups'=>'/admin/admin_groups',
 			'Delete ' . $group->get('grp_name') => '',
 		),
 		'session' => $session,

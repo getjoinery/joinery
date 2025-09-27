@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -18,7 +16,7 @@
 
 	$page = new AdminPage();
 
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'users',
 		'page_title' => 'Soft Delete',

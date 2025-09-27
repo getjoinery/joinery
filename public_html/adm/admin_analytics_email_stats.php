@@ -1,9 +1,7 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 $session = SessionControl::get_instance();
 $session->check_permission(5);
 
@@ -11,21 +9,21 @@ $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'email-statistics',
 		'breadcrumbs' => array(
-			'Statistics'=>'', 
+			'Statistics'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 	/*
 ?>
 <script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
 <script type="text/javascript">
 
-		$(document).ready(function() 
+		$(document).ready(function()
 		{
 			$("#sqlbtn").toggle
 			(
@@ -38,10 +36,10 @@ $dblink = $dbhelper->get_db_link();
 					$("#sql").hide();
 				}
 			);
-			
+
 			$("#sql").hide();
 		});
-		
+
 </script>
 
 <?php
@@ -92,10 +90,10 @@ echo $formwriter->end_form();
 echo '<br />';
 
 //CONTENT
-$sql = "SELECT 
+$sql = "SELECT
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_content as content
-FROM vse_visitor_events 
+FROM vse_visitor_events
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_content IS NOT NULL GROUP BY vse_visitor_events.vse_content ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
@@ -123,7 +121,7 @@ $box_vars =	array(
 );
 $page->tableheader($headers, $box_vars);
 $rowtotals = array("<b>Totals</b>", 0);
-foreach ($email_content_stats as $email_stats => $values){		
+foreach ($email_content_stats as $email_stats => $values){
 
 	$rowvalues = array();
 	array_push($rowvalues, $values->content);
@@ -135,10 +133,10 @@ $page->disprow($rowtotals);
 $page->endtable();
 
 //MEDIUM
-$sql = "SELECT 
+$sql = "SELECT
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_medium as content
-FROM vse_visitor_events 
+FROM vse_visitor_events
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_medium IS NOT NULL GROUP BY vse_visitor_events.vse_medium ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
@@ -166,7 +164,7 @@ $box_vars =	array(
 );
 $page->tableheader($headers, $box_vars);
 $rowtotals = array("<b>Totals</b>", 0);
-foreach ($email_medium_stats as $email_stats => $values){		
+foreach ($email_medium_stats as $email_stats => $values){
 
 	$rowvalues = array();
 	array_push($rowvalues, $values->content);
@@ -179,10 +177,10 @@ $page->endtable();
 
 //CAMPAIGN
 
-$sql = "SELECT 
+$sql = "SELECT
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_campaign as content
-FROM vse_visitor_events 
+FROM vse_visitor_events
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_campaign IS NOT NULL GROUP BY vse_visitor_events.vse_campaign ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
@@ -210,7 +208,7 @@ $box_vars =	array(
 );
 $page->tableheader($headers, $box_vars);
 $rowtotals = array("<b>Totals</b>", 0);
-foreach ($email_campaign_stats as $email_stats => $values){		
+foreach ($email_campaign_stats as $email_stats => $values){
 
 	$rowvalues = array();
 	array_push($rowvalues, $values->content);
@@ -222,10 +220,10 @@ $page->disprow($rowtotals);
 $page->endtable();
 //SOURCE
 
-$sql = "SELECT 
+$sql = "SELECT
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_source as content
-FROM vse_visitor_events 
+FROM vse_visitor_events
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_source IS NOT NULL GROUP BY vse_visitor_events.vse_source ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
@@ -253,7 +251,7 @@ $box_vars =	array(
 );
 $page->tableheader($headers, $box_vars);
 $rowtotals = array("<b>Totals</b>", 0);
-foreach ($email_source_stats as $email_stats => $values){		
+foreach ($email_source_stats as $email_stats => $values){
 
 	$rowvalues = array();
 	array_push($rowvalues, $values->content);

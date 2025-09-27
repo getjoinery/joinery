@@ -1,8 +1,7 @@
 <?php
-	
+
 	PathHelper::requireOnce('includes/Activation.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
 
 	PathHelper::requireOnce('data/comments_class.php');
@@ -20,61 +19,61 @@
 		$comment->save();
 
 		header("Location: /admin/admin_comments");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'unapprove'){
 
 		$comment->set('cmt_is_approved', false);
-		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
+		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$comment->save();
 
 		header("Location: /admin/admin_comments");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'delete'){
-		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
+		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$comment->soft_delete();
 
 		header("Location: /admin/admin_comments");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));		
+		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$comment->undelete();
 
 		header("Location: /admin/admin_comments");
-		exit();				
+		exit();
 	}
 
 	$session->set_return();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'comments',
 		'page_title' => 'Comment',
 		'readable_title' => 'Comment',
 		'breadcrumbs' => array(
-			'Posts'=>'/admin/admin_posts', 
+			'Posts'=>'/admin/admin_posts',
 			$post->get('pst_title') => '/admin/admin_post?pst_post_id='.$post->key,
 			'Comment'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$options['title'] = substr($comment->get('cmt_body'), 0, 40). '...';
 	$options['altlinks'] = array();
 	if(!$comment->get('cmt_delete_time')) {
 		$options['altlinks'] += array('Edit Comment' => '/admin/admin_comment_edit?cmt_comment_id='.$comment->key);
 	}
-	
+
 	if(!$comment->get('cmt_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = '/admin/admin_comment?action=delete&cmt_comment_id='.$comment->key;
 	}
-		
+
 	$page->begin_box($options);
-	
+
 	echo '<p>By: '.$comment->get('cmt_author_name').' at '.LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', $session->get_timezone()).'<br>';
 	echo 'On: <a href="'.$post->get_url().'">'.$post->get('pst_title').'</a><br>';
 	if($comment->get('cmt_delete_time')){
@@ -89,7 +88,7 @@
 	echo '<br><br>';
 	?><p><?php echo $comment->get('cmt_body'); ?></p>
 
-<?php 
+<?php
 	$page->end_box();
 
 	$page->admin_footer();

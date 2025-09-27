@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/orders_class.php');
@@ -11,7 +9,7 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
-	
+
 if ($_POST){
 
 	$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to delete here.');
@@ -22,7 +20,7 @@ if ($_POST){
 		$order = new Order($ord_order_id, TRUE);
 		$order->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$order->permanent_delete();
-					
+
 	}
 
 	//NOW REDIRECT
@@ -36,23 +34,23 @@ else{
 	$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to edit.');
 
 	$order = new Order($ord_order_id, TRUE);
-	
+
 	$session = SessionControl::get_instance();
 	$session->set_return("/admin/admin_orders");
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'orders-list',
 		'breadcrumbs' => array(
-			'Orders'=>'/admin/admin_orders', 
+			'Orders'=>'/admin/admin_orders',
 			'Order '.$order->key => '',
 		),
 		//'page_title' => 'Event Sessions',
 		//'readable_title' => 'Event Sessions',
 		'session' => $session,
 	)
-	);	
+	);
 	$options['title'] = 'Delete Order';
 	//$options['altlinks'] = array('Edit Url'=>'/admin/admin_url_edit?url_url_id='.$url->key);
 	$page->begin_box($options);

@@ -1,10 +1,8 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	$session = SessionControl::get_instance();
 	$session->check_permission(9);
-	
+
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
 
@@ -20,7 +18,7 @@
 	catch(PDOException $e){
 		$dbhelper->handle_query_error($e);
 	}
-	
+
 	//NOW REDIRECT
 	$session = SessionControl::get_instance();
 	$returnurl = $session->get_return();

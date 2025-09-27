@@ -1,8 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/groups_class.php');
 
@@ -10,7 +9,7 @@
 	$session->check_permission(5);
 	$session->set_return();
 
-	$numperpage = 30; 
+	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'group_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
@@ -27,7 +26,7 @@
 	$groups->load();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'event-bundles',
 		'page_title' => 'Event Bundles',
@@ -50,18 +49,18 @@
 		'title' => 'Groups',
 		//'search_on' => TRUE
 	);
-	$page->tableheader($headers, $table_options, $pager);	
+	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($groups as $group){
 
 		$rowvalues = array();
 
 		array_push($rowvalues, "<a href='/admin/admin_event_bundle?grp_group_id=$group->key'>".$group->get('grp_name')."</a> ");
-		
+
 		$num = (string)$group->get_member_count();
 		array_push($rowvalues, $num);
 
-		array_push($rowvalues, LibraryFunctions::convert_time($group->get('grp_update_time'), "UTC", $session->get_timezone(), 'M j, Y')); 
+		array_push($rowvalues, LibraryFunctions::convert_time($group->get('grp_update_time'), "UTC", $session->get_timezone(), 'M j, Y'));
 
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_group_permanent_delete?grp_group_id='. $group->key.'">
 		<input type="hidden" class="hidden" name="action" value="remove" />
@@ -70,7 +69,7 @@
 		</form>';
 
 		array_push($rowvalues, $delform);
-		
+
 		$page->disprow($rowvalues);
 	}
 	$page->endtable($pager);
