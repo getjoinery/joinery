@@ -1,7 +1,7 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
-	PathHelper::requireOnce('includes/Globalvars.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 	
 	$file_path = NULL;
 	if (!empty($_GET['apache_error_log'])) {

@@ -1,9 +1,9 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('includes/AbstractExtensionManager.php');
-PathHelper::requireOnce('data/plugins_class.php');
-PathHelper::requireOnce('data/plugin_dependencies_class.php');
-PathHelper::requireOnce('data/plugin_migrations_class.php');
+require_once(PathHelper::getIncludePath('includes/AbstractExtensionManager.php'));
+require_once(PathHelper::getIncludePath('data/plugins_class.php'));
+require_once(PathHelper::getIncludePath('data/plugin_dependencies_class.php'));
+require_once(PathHelper::getIncludePath('data/plugin_migrations_class.php'));
 
 /**
  * PluginManager - Comprehensive plugin management including installation, 

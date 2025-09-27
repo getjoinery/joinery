@@ -5,8 +5,8 @@
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('data/activation_codes_class.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('data/activation_codes_class.php'));
 
 echo "<h2>Testing ModelTester Implementation</h2>\n";
 echo "<p>This will test the automated testing system using the ActivationCode model.</p>\n";

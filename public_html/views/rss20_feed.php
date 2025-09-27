@@ -1,6 +1,6 @@
 <?php
 	
-	PathHelper::requireOnce('/includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('blog_logic.php', 'logic'));
 
 	$page_vars = blog_logic($_GET, $_POST);

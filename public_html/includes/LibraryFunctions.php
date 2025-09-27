@@ -214,7 +214,7 @@ class LibraryFunctions {
 		}	
 		
 		if($override_name == 'admin' || $override_name == 'bootstrap'){
-			PathHelper::requireOnce('includes/FormWriterBootstrap.php');
+			require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
 			try {
 				return new FormWriterBootstrap($form_id);
 			} catch (Error $e) {
@@ -222,7 +222,7 @@ class LibraryFunctions {
 			}
 		}
 		else if($override_name == 'tailwind'){
-			PathHelper::requireOnce('includes/FormWriterTailwind.php');
+			require_once(PathHelper::getIncludePath('includes/FormWriterTailwind.php'));
 			try {
 				return new FormWriterTailwind($form_id);
 			} catch (Error $e) {
@@ -230,7 +230,7 @@ class LibraryFunctions {
 			}
 		}
 		else if($override_name == 'uikit'){
-			PathHelper::requireOnce('includes/FormWriterUIKit.php');
+			require_once(PathHelper::getIncludePath('includes/FormWriterUIKit.php'));
 			try {
 				return new FormWriterUIKit($form_id);
 			} catch (Error $e) {
@@ -238,7 +238,7 @@ class LibraryFunctions {
 			}
 		}
 		else if($override_name == 'plain' || $override_name == 'html5'){
-			PathHelper::requireOnce('includes/FormWriterHTML5.php');
+			require_once(PathHelper::getIncludePath('includes/FormWriterHTML5.php'));
 			try {
 				return new FormWriterHTML5($form_id);
 			} catch (Error $e) {
@@ -248,7 +248,7 @@ class LibraryFunctions {
 		
 		// Use ThemeHelper for theme-based selection
 		try {
-			PathHelper::requireOnce('includes/ThemeHelper.php');
+			require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
 			$theme = ThemeHelper::getInstance(); // Gets current theme
 
 			// First check if theme has custom FormWriter
@@ -293,7 +293,7 @@ class LibraryFunctions {
 			$cssFramework = $theme->getCssFramework();
 			switch($cssFramework) {
 				case 'bootstrap':
-					PathHelper::requireOnce('includes/FormWriterBootstrap.php');
+					require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
 					try {
 						return new FormWriterBootstrap($form_id);
 					} catch (Error $e) {
@@ -301,7 +301,7 @@ class LibraryFunctions {
 					}
 
 				case 'tailwind':
-					PathHelper::requireOnce('includes/FormWriterTailwind.php');
+					require_once(PathHelper::getIncludePath('includes/FormWriterTailwind.php'));
 					try {
 						return new FormWriterTailwind($form_id);
 					} catch (Error $e) {
@@ -309,7 +309,7 @@ class LibraryFunctions {
 					}
 
 				case 'uikit':
-					PathHelper::requireOnce('includes/FormWriterUIKit.php');
+					require_once(PathHelper::getIncludePath('includes/FormWriterUIKit.php'));
 					try {
 						return new FormWriterUIKit($form_id);
 					} catch (Error $e) {
@@ -346,7 +346,7 @@ class LibraryFunctions {
 		}
 
 		// Final default - Bootstrap
-		PathHelper::requireOnce('includes/FormWriterBootstrap.php');
+		require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
 		try {
 			return new FormWriterBootstrap($form_id);
 		} catch (Error $e) {
@@ -694,7 +694,7 @@ class LibraryFunctions {
 	}
 
 	static function state_to_abbr($fullstate) {
-		PathHelper::requireOnce('data/address_class.php');
+		require_once(PathHelper::getIncludePath('data/address_class.php'));
 		$abbrev = array_search($fullstate, Address::$states);
 		return $abbrev;
 	}

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/ComposerValidator.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/ComposerValidator.php'));
 
 $validator = new ComposerValidator();
 if (!$validator->installIfNeeded()) {

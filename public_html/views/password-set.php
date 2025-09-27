@@ -1,6 +1,6 @@
 <?php
 	
-	PathHelper::requireOnce('/includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password-set_logic.php', 'logic'));
 

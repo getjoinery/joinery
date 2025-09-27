@@ -1,14 +1,14 @@
 <?php
 require_once(__DIR__ . '/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/StripeHelper.php');
-PathHelper::requireOnce('data/products_class.php');
-PathHelper::requireOnce('data/product_groups_class.php');
-PathHelper::requireOnce('data/users_class.php');
-PathHelper::requireOnce('data/orders_class.php');
-PathHelper::requireOnce('data/order_items_class.php');
-PathHelper::requireOnce('data/event_registrants_class.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
+require_once(PathHelper::getIncludePath('data/products_class.php'));
+require_once(PathHelper::getIncludePath('data/product_groups_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/orders_class.php'));
+require_once(PathHelper::getIncludePath('data/order_items_class.php'));
+require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 
 class ShoppingCartException extends Exception {}
 

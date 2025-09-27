@@ -2,13 +2,13 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function phone_numbers_edit_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/Activation.php');
-PathHelper::requireOnce('includes/LogicResult.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
-	PathHelper::requireOnce('data/phone_number_class.php');
+	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);

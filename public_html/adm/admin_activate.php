@@ -1,10 +1,10 @@
 <?php
 
-PathHelper::requireOnce('includes/Activation.php');
+require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
-PathHelper::requireOnce('includes/SystemBase.php');
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
-PathHelper::requireOnce('data/users_class.php');
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(9);

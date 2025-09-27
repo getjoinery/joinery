@@ -7,9 +7,9 @@
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 // Security check - require admin permissions  
 $session = SessionControl::get_instance();

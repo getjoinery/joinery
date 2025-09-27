@@ -73,8 +73,8 @@ echo '</div>';
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
 try {
-    PathHelper::requireOnce('includes/Globalvars.php');
-    PathHelper::requireOnce('includes/DbConnector.php');
+    require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+    require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
     $settings = Globalvars::get_instance();
     $dbconnector = DbConnector::get_instance();
     $dblink = $dbconnector->get_db_link();
@@ -345,7 +345,7 @@ class HttpRoutingTestRunner {
         // Get current theme using ThemeHelper
         $current_theme = 'falcon'; // Default fallback
         try {
-            PathHelper::requireOnce('includes/ThemeHelper.php'); 
+            require_once(PathHelper::getIncludePath('includes/ThemeHelper.php')); 
             $themeHelper = ThemeHelper::getInstance(); // Gets current theme
             $current_theme = $themeHelper->getName();
         } catch (Exception $e) {
@@ -413,7 +413,7 @@ class HttpRoutingTestRunner {
         // Get current theme using ThemeHelper
         $current_theme = 'falcon';
         try {
-            PathHelper::requireOnce('includes/ThemeHelper.php'); 
+            require_once(PathHelper::getIncludePath('includes/ThemeHelper.php')); 
             $themeHelper = ThemeHelper::getInstance();
             $current_theme = $themeHelper->getName();
         } catch (Exception $e) {
@@ -461,7 +461,7 @@ class HttpRoutingTestRunner {
         
         // Test actual event page with real slug from database
         try {
-            PathHelper::requireOnce('data/events_class.php');
+            require_once(PathHelper::getIncludePath('data/events_class.php'));
             $events = new MultiEvent(['deleted' => false], ['evt_event_id' => 'DESC'], 1);
             if ($events->count_all() > 0) {
                 $events->load();
@@ -600,7 +600,7 @@ class HttpRoutingTestRunner {
         
         // Test real event URLs from database
         try {
-            PathHelper::requireOnce('data/events_class.php');
+            require_once(PathHelper::getIncludePath('data/events_class.php'));
             $events = new MultiEvent(['deleted' => false], ['evt_event_id' => 'DESC'], 2);
             if ($events->count_all() > 0) {
                 $events->load();
@@ -618,7 +618,7 @@ class HttpRoutingTestRunner {
         
         // Test real page URLs from database
         try {
-            PathHelper::requireOnce('data/pages_class.php');
+            require_once(PathHelper::getIncludePath('data/pages_class.php'));
             $pages = new MultiPage(['deleted' => false], ['pag_page_id' => 'DESC'], 2);
             if ($pages->count_all() > 0) {
                 $pages->load();
@@ -636,7 +636,7 @@ class HttpRoutingTestRunner {
         
         // Test real product URLs from database
         try {
-            PathHelper::requireOnce('data/products_class.php');
+            require_once(PathHelper::getIncludePath('data/products_class.php'));
             $products = new MultiProduct(['deleted' => false], ['pro_product_id' => 'DESC'], 2);
             if ($products->count_all() > 0) {
                 $products->load();
@@ -710,7 +710,7 @@ class HttpRoutingTestRunner {
         
         // Test a random redirect URL from database
         try {
-            PathHelper::requireOnce('data/urls_class.php');
+            require_once(PathHelper::getIncludePath('data/urls_class.php'));
             // Get any URL record - we'll check for redirect_url after loading
             $urls = new MultiUrl([], ['url_url_id' => 'DESC'], 10);
             $count = $urls->count_all();

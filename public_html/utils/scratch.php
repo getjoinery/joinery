@@ -1,28 +1,28 @@
 <?php
 	/* Old require pattern - converted to PathHelper:
-	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('includes/Activation.php');
-	PathHelper::requireOnce('includes/ShoppingCart.php');
-	PathHelper::requireOnce('data/files_class.php');
-	PathHelper::requireOnce('data/orders_class.php');
-	PathHelper::requireOnce('data/products_class.php');
-	PathHelper::requireOnce('data/posts_class.php');
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/groups_class.php');
-	PathHelper::requireOnce('data/product_details_class.php');
-	PathHelper::requireOnce('data/event_registrants_class.php');
-	PathHelper::requireOnce('includes/EmailTemplate.php');
-	PathHelper::requireOnce('includes/EmailMessage.php');
-	PathHelper::requireOnce('includes/EmailSender.php');
-	PathHelper::requireOnce('data/email_templates_class.php');
-	PathHelper::requireOnce('includes/calendar-links/Link.php');
-	PathHelper::requireOnce('includes/calendar-links/Generator.php');
-	PathHelper::requireOnce('includes/calendar-links/Generators/Google.php');
-	PathHelper::requireOnce('includes/calendar-links/Generators/Ics.php');
-	PathHelper::requireOnce('includes/AcuityScheduling.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
+	require_once(PathHelper::getIncludePath('data/files_class.php'));
+	require_once(PathHelper::getIncludePath('data/orders_class.php'));
+	require_once(PathHelper::getIncludePath('data/products_class.php'));
+	require_once(PathHelper::getIncludePath('data/posts_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/groups_class.php'));
+	require_once(PathHelper::getIncludePath('data/product_details_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
+	require_once(PathHelper::getIncludePath('includes/calendar-links/Link.php'));
+	require_once(PathHelper::getIncludePath('includes/calendar-links/Generator.php'));
+	require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Google.php'));
+	require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Ics.php'));
+	require_once(PathHelper::getIncludePath('includes/AcuityScheduling.php'));
 */
 require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/ControlDHelper.php');
+	require_once(PathHelper::getIncludePath('includes/ControlDHelper.php'));
 
 
 
@@ -145,10 +145,10 @@ div();
 	print_r($ext);
 	
 	exit();
-	PathHelper::requireOnce('includes/calendar-links/Link.php');
-	PathHelper::requireOnce('includes/calendar-links/Generator.php');
-	PathHelper::requireOnce('includes/calendar-links/Generators/Google.php');
-	PathHelper::requireOnce('includes/calendar-links/Generators/Ics.php');
+	require_once(PathHelper::getIncludePath('includes/calendar-links/Link.php'));
+	require_once(PathHelper::getIncludePath('includes/calendar-links/Generator.php'));
+	require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Google.php'));
+	require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Ics.php'));
 	use Spatie\CalendarLinks\Link;
 	$from = DateTime::createFromFormat('Y-m-d H:i', '2018-02-01 09:00');
 $to = DateTime::createFromFormat('Y-m-d H:i', '2018-02-01 18:00');
@@ -215,7 +215,7 @@ exit();
 	
 	$settings = Globalvars::get_instance();
 
-	PathHelper::requireOnce('includes/AcuityScheduling.php');
+	require_once(PathHelper::getIncludePath('includes/AcuityScheduling.php'));
 exit();
 
 	$settings = Globalvars::get_instance();

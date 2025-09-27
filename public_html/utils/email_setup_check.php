@@ -1,8 +1,8 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('/includes/AdminPage.php');
-PathHelper::requireOnce('/includes/SessionControl.php');
-PathHelper::requireOnce('/includes/LibraryFunctions.php');
+require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('/includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(5);

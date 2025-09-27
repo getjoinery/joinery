@@ -1,12 +1,12 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Activation.php');
-PathHelper::requireOnce('includes/LogicResult.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-	PathHelper::requireOnce('includes/StripeHelper.php');
+	require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-	PathHelper::requireOnce('data/users_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$settings = Globalvars::get_instance();
 

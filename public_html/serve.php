@@ -174,7 +174,7 @@ $routes = [
                     $template_file = $template_directory.'/views/blog.php';
                     $base_file = PathHelper::getIncludePath('views/blog.php');
                 } else if($page_pieces[1] == 'page'){
-                    PathHelper::requireOnce('data/pages_class.php');
+                    require_once(PathHelper::getIncludePath('data/pages_class.php'));
                     $page = Page::get_by_link($page_pieces[2], true);
                     $template_file = $template_directory.'/views/page.php';
                     $base_file = PathHelper::getIncludePath('views/page.php');
@@ -190,7 +190,7 @@ $routes = [
                     $base_file = PathHelper::getIncludePath('views/blog.php');
                 } else if($page_pieces[1] == 'page'){
                     if($settings->get_setting('page_contents_active')){
-                        PathHelper::requireOnce('data/pages_class.php');
+                        require_once(PathHelper::getIncludePath('data/pages_class.php'));
                         $page = Page::get_by_link($page_pieces[2], true);
                         $template_file = $template_directory.'/views/page.php';
                         $base_file = PathHelper::getIncludePath('views/page.php');
@@ -226,14 +226,14 @@ $routes = [
             $file = $upload_dir . '/' . $subpath;
 
             if(file_exists($file)){
-                PathHelper::requireOnce('data/files_class.php');
+                require_once(PathHelper::getIncludePath('data/files_class.php'));
                 $file_obj = File::get_by_name(basename($file));
 
                 if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){
                     RouteHelper::serveStaticFile($file, 43200);
                     return true;
                 } else {
-                    PathHelper::requireOnce('includes/LibraryFunctions.php');
+                    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
                     LibraryFunctions::display_404_page();
                     return true;
                 }

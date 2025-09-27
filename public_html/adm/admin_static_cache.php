@@ -1,9 +1,9 @@
 <?php
 
-PathHelper::requireOnce('includes/AdminPage.php');
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/StaticPageCache.php');
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(9); // Super admin only for cache management

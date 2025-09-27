@@ -1,8 +1,8 @@
 <?php
 require_once(__DIR__ . '/PathHelper.php');
 
-PathHelper::requireOnce('includes/PublicPageBase.php');
-PathHelper::requireOnce('includes/Pager.php');
+require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
+require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 class PublicPageFalcon extends PublicPageBase {
 	

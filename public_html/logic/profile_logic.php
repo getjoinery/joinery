@@ -2,23 +2,23 @@
 
 function profile_logic($get_vars, $post_vars){
 	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Activation.php');
-PathHelper::requireOnce('includes/LogicResult.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/address_class.php');
-	PathHelper::requireOnce('data/phone_number_class.php');
-	PathHelper::requireOnce('data/messages_class.php');
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/event_registrants_class.php');
-	PathHelper::requireOnce('data/event_sessions_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('data/messages_class.php'));
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
 
 	$page_vars = array();
 
-	//PathHelper::requireOnce('includes/stripe-php/init.php');
+	//require_once(PathHelper::getIncludePath('includes/stripe-php/init.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	$composer_dir = $settings->get_setting('composerAutoLoad');

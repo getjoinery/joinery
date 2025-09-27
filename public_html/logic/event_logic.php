@@ -2,15 +2,15 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function event_logic($get_vars, $post_vars, $event){
-	PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/event_sessions_class.php');
-	PathHelper::requireOnce('data/event_registrants_class.php');
-	PathHelper::requireOnce('data/event_waiting_lists_class.php');
-	PathHelper::requireOnce('data/locations_class.php');
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_waiting_lists_class.php'));
+	require_once(PathHelper::getIncludePath('data/locations_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

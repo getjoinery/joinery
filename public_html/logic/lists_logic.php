@@ -2,10 +2,10 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function lists_logic($get_vars, $post_vars, $params){
-	PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/mailing_lists_class.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;

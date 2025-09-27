@@ -8,7 +8,7 @@ require_once('EmailMessage.php');
 // Composer autoload is already loaded by SmtpMailer.php
 use Mailgun\Mailgun;
 
-PathHelper::requireOnce('data/debug_email_logs_class.php');
+require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
 
 class EmailSender {
     private $settings;
@@ -309,7 +309,7 @@ class EmailSender {
      */
     private function queueFailedEmail(EmailMessage $message, $error = null) {
         try {
-            PathHelper::requireOnce('data/queued_email_class.php');
+            require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
             
             // Set defaults if not specified
             if (!$message->getFrom()) {
@@ -436,7 +436,7 @@ class EmailSender {
         }
         
         try {
-            PathHelper::requireOnce('data/debug_email_logs_class.php');
+            require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
             
             $log = new DebugEmailLog(null);
             $log->set('del_timestamp', date('Y-m-d H:i:s'));

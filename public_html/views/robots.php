@@ -1,6 +1,6 @@
 <?php
 	
-	PathHelper::requireOnce('/data/settings_class.php');
+	require_once(PathHelper::getIncludePath('/data/settings_class.php'));
 	$settings = Globalvars::get_instance();
 	
 header('Content-Type: text/plain');

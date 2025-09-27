@@ -1,10 +1,10 @@
 <?php
 
-PathHelper::requireOnce('includes/AdminPage.php');
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('data/themes_class.php');
-PathHelper::requireOnce('includes/ThemeManager.php');
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('data/themes_class.php'));
+require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10); // System admin only

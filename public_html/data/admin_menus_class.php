@@ -1,14 +1,14 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 $settings = Globalvars::get_instance();
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemBase.php');
-PathHelper::requireOnce('includes/Validator.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 class AdminMenuException extends SystemBaseException {}
 
@@ -77,7 +77,7 @@ class MultiAdminMenu extends SystemMultiBase {
 	}
 	
 	static function getadminmenu($user_permission, $current_menu_slug, $get_all=false){
-		PathHelper::requireOnce('includes/Globalvars.php');
+		require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 		$settings = Globalvars::get_instance();
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();

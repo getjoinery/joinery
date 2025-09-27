@@ -106,7 +106,7 @@ class DatabaseErrorLogger implements ErrorLoggerInterface {
     
     public function log(\Throwable $exception, ErrorContext $context): void {
         try {
-            PathHelper::requireOnce('data/general_errors_class.php');
+            require_once(PathHelper::getIncludePath('data/general_errors_class.php'));
             
             // Create new instance using standard pattern
             $errorLog = new GeneralError(NULL);
@@ -355,7 +355,7 @@ class ErrorManager {
     }
     
     private function initializeHandlers(): void {
-        PathHelper::requireOnce('includes/ErrorClasses.php');
+        require_once(PathHelper::getIncludePath('includes/ErrorClasses.php'));
         
         $this->handlers = [
             'web' => new WebErrorHandler(),

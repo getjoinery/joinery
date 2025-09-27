@@ -2,19 +2,19 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function event_sessions_course_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/Activation.php');
-PathHelper::requireOnce('includes/LogicResult.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/videos_class.php');
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/event_registrants_class.php');
-	PathHelper::requireOnce('data/event_sessions_class.php');
-	PathHelper::requireOnce('data/files_class.php');
-	PathHelper::requireOnce('data/locations_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/videos_class.php'));
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
+	require_once(PathHelper::getIncludePath('data/files_class.php'));
+	require_once(PathHelper::getIncludePath('data/locations_class.php'));
 
 	$settings = Globalvars::get_instance();
 	$session = SessionControl::get_instance();

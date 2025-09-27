@@ -2,10 +2,10 @@
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	require_once('../includes/Globalvars.php');
 	$settings = Globalvars::get_instance();
-PathHelper::requireOnce('/includes/DbConnector.php');
+require_once(PathHelper::getIncludePath('/includes/DbConnector.php'));
 
-PathHelper::requireOnce('/data/users_class.php');
-PathHelper::requireOnce('/data/address_class.php');
+require_once(PathHelper::getIncludePath('/data/users_class.php'));
+require_once(PathHelper::getIncludePath('/data/address_class.php'));
 
 echo 'feature turned off';
 exit();

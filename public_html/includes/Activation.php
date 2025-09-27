@@ -1,17 +1,17 @@
 <?php
 
 require_once('PathHelper.php');
-PathHelper::requireOnce('includes/SystemBase.php');
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/SmtpMailer.php');
-PathHelper::requireOnce('includes/EmailTemplate.php');
-PathHelper::requireOnce('includes/EmailSender.php');
-PathHelper::requireOnce('includes/EmailMessage.php');
-PathHelper::requireOnce('includes/Activation.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
+require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
-PathHelper::requireOnce('data/users_class.php');
-PathHelper::requireOnce('data/phone_number_class.php');
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
 
 class ActivationError extends SystemBaseException {}
 

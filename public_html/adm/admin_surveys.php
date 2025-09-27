@@ -1,12 +1,12 @@
 <?php
 
-	PathHelper::requireOnce('/includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
-	PathHelper::requireOnce('/includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('/data/surveys_class.php');
-	PathHelper::requireOnce('/data/survey_answers_class.php');
-	PathHelper::requireOnce('/data/survey_questions_class.php');
+	require_once(PathHelper::getIncludePath('/data/surveys_class.php'));
+	require_once(PathHelper::getIncludePath('/data/survey_answers_class.php'));
+	require_once(PathHelper::getIncludePath('/data/survey_questions_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

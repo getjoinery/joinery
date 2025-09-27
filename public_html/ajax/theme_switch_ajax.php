@@ -4,13 +4,13 @@
 	
 	try {
 		require_once(__DIR__ . '/../includes/PathHelper.php');
-		PathHelper::requireOnce('includes/SessionControl.php');
-		PathHelper::requireOnce('includes/Globalvars.php');
-		PathHelper::requireOnce('includes/LibraryFunctions.php');
-		PathHelper::requireOnce('includes/DbConnector.php');
-		PathHelper::requireOnce('includes/ThemeHelper.php');
-		PathHelper::requireOnce('includes/PluginHelper.php');
-		PathHelper::requireOnce('data/settings_class.php');
+		require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+		require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+		require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+		require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
+		require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+		require_once(PathHelper::getIncludePath('data/settings_class.php'));
 	} catch (Exception $e) {
 		echo json_encode(array('success' => false, 'message' => 'Failed to load dependencies: ' . $e->getMessage()));
 		exit;
