@@ -7,8 +7,8 @@ ALL FUNCTIONS MUST TAKE USER/ORDER_ITEM
 
 function controld_subscription_product_script($user, $order_item){
 	
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
 
 	$ctld_account = CtldAccount::GetByColumn('cda_usr_user_id', $user->key);
 	if(!$ctld_account){

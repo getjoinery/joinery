@@ -2,15 +2,15 @@
 
 function rules_logic($get_vars, $post_vars){
 	
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	
-	PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
+	require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldprofiles_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldrules_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldprofiles_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldrules_class.php'));
 
 	$page_vars = array();	
 

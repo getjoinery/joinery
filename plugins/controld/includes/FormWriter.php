@@ -2,7 +2,7 @@
 // PathHelper is already loaded by the time this file is included
 // We just need the dependencies
 if (!class_exists('FormWriterMasterBootstrap')) {
-    PathHelper::requireOnce('includes/FormWriterMasterBootstrap.php');
+    require_once(PathHelper::getIncludePath('includes/FormWriterMasterBootstrap.php'));
 }
 
 // FormWriter class for ControlD plugin theme

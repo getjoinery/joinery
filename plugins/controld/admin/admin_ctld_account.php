@@ -1,13 +1,13 @@
 <?php
-	PathHelper::requireOnce('includes/Activation.php');
-	PathHelper::requireOnce('includes/ErrorHandler.php');
-	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldfilters_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldprofiles_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
-	PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+	require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldfilters_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldprofiles_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldservices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

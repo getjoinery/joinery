@@ -1,9 +1,9 @@
 <?php
-	PathHelper::requireOnce('includes/ErrorHandler.php');
-	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
-	PathHelper::requireOnce('data/users_class.php');
+	require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

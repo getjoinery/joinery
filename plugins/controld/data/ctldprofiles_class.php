@@ -1,16 +1,16 @@
 <?php
 // PathHelper is already loaded by the time this file is included
 
-PathHelper::requireOnce('includes/FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemBase.php');
-PathHelper::requireOnce('includes/Validator.php');
-PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
-PathHelper::requireOnce('plugins/controld/data/ctldfilters_class.php');
-PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
-PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
-PathHelper::requireOnce('plugins/controld/data/ctldrules_class.php');
+require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/Validator.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctldfilters_class.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevices_class.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctldservices_class.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctldrules_class.php'));
 
 class CtldProfileException extends SystemBaseException {}
 
@@ -414,7 +414,7 @@ class CtldProfile extends SystemBase {
 		}
 /*
 $result = $cd->modifyProfileFilter('689209jfkncn', 'ai_malware', 1);
-PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
+require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
 	$cd = new ControlDHelper();
 	print_r($cached_filters);
 	print_r( $cd->listNativeFilters('689209jfkncn'));

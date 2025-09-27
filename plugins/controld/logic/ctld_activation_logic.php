@@ -1,16 +1,16 @@
 <?php
 
 function ctld_activation_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/Activation.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	
-	PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
+	require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
-	PathHelper::requireOnce('plugins/controld/data/ctldfilters_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldfilters_class.php'));
 	
 	$page_vars = array();
 	

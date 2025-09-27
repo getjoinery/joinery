@@ -1,18 +1,18 @@
 <?php
 // PathHelper is already loaded by the time this file is included
 
-PathHelper::requireOnce('includes/FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemBase.php');
-PathHelper::requireOnce('includes/Validator.php');
+require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
-PathHelper::requireOnce('plugins/controld/data/ctldprofiles_class.php');
-PathHelper::requireOnce('plugins/controld/data/ctldfilters_class.php');
-PathHelper::requireOnce('plugins/controld/data/ctldservices_class.php');
-PathHelper::requireOnce('plugins/controld/data/ctldrules_class.php');
-PathHelper::requireOnce('plugins/controld/data/ctlddevice_backups_class.php');
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctldprofiles_class.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctldfilters_class.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctldservices_class.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctldrules_class.php'));
+require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevice_backups_class.php'));
 
 class CtldDeviceException extends SystemBaseException {}
 

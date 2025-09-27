@@ -1,5 +1,5 @@
 <?php
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(LibraryFunctions::get_theme_file_path('PublicPage.php', '/includes'));
 
 	require_once(PathHelper::getIncludePath('plugins/items/logic/items_logic.php'));

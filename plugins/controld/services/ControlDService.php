@@ -8,7 +8,7 @@ class ControlDService {
     private static $instance;
     
     private function __construct() {
-        PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
+        require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
         $this->helper = new ControlDHelper();
     }
     
@@ -39,7 +39,7 @@ class ControlDService {
      * Get user's ControlD account
      */
     public function getUserAccount($user_id) {
-        PathHelper::requireOnce('plugins/controld/data/ctldaccount_class.php');
+        require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccount_class.php'));
         $accounts = new MultiCtldAccount(['cta_usr_user_id' => $user_id]);
         if ($accounts->count_all() > 0) {
             $accounts->load();
@@ -60,7 +60,7 @@ class ControlDService {
      * Get user's devices
      */
     public function getUserDevices($user_id) {
-        PathHelper::requireOnce('plugins/controld/data/ctlddevice_class.php');
+        require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevice_class.php'));
         $devices = new MultiCtldDevice(['ctd_usr_user_id' => $user_id]);
         if ($devices->count_all() > 0) {
             $devices->load();
@@ -73,7 +73,7 @@ class ControlDService {
      * Get user's profiles
      */
     public function getUserProfiles($user_id) {
-        PathHelper::requireOnce('plugins/controld/data/ctldprofile_class.php');
+        require_once(PathHelper::getIncludePath('plugins/controld/data/ctldprofile_class.php'));
         $profiles = new MultiCtldProfile(['ctp_usr_user_id' => $user_id]);
         if ($profiles->count_all() > 0) {
             $profiles->load();
@@ -86,7 +86,7 @@ class ControlDService {
      * Create new device for user
      */
     public function createDevice($user_id, $device_data) {
-        PathHelper::requireOnce('plugins/controld/data/ctlddevice_class.php');
+        require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevice_class.php'));
         $device = new CtldDevice(NULL);
         $device->set('ctd_usr_user_id', $user_id);
         foreach ($device_data as $key => $value) {
