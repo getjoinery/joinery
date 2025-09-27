@@ -4,13 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password-set_logic.php', 'logic'));
 
-	$page_vars = password_set_logic($_GET, $_POST);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(password_set_logic($_GET, $_POST));
 
 	$page = new PublicPage();
 	$hoptions=array(

@@ -1834,4 +1834,37 @@ class LibraryFunctions {
 		return $functions;
 	}
 }
+
+/**
+ * Global helper function to process logic function results
+ * Handles LogicResult objects by processing redirects, errors, and extracting data
+ *
+ * Usage in views:
+ *   $page_vars = process_logic(devices_logic($_GET, $_POST));
+ *   // Now $page_vars contains the data array directly, with redirects and errors handled
+ *
+ * @param mixed $result The result from a logic function (LogicResult object or array for backward compatibility)
+ * @return array The data array from the LogicResult, or the original value if not a LogicResult
+ * @throws Exception If the LogicResult contains an error
+ */
+function process_logic($result) {
+    // Handle backward compatibility - if logic function returns array directly
+    if (!($result instanceof LogicResult)) {
+        return $result;
+    }
+
+    // Handle redirects
+    if ($result->redirect) {
+        LibraryFunctions::redirect($result->redirect);
+        exit();
+    }
+
+    // Handle errors
+    if ($result->error) {
+        throw new Exception($result->error);
+    }
+
+    // Return the data array
+    return $result->data;
+}
 ?>

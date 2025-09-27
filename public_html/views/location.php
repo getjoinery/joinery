@@ -2,13 +2,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('location_logic.php', 'logic'));
 
-	$page_vars = location_logic($_GET, $_POST, $location, $params);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(location_logic($_GET, $_POST, $location, $params));
 	$location = $page_vars['location'];
 
 	$page = new PublicPage();

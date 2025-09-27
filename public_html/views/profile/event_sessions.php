@@ -4,13 +4,7 @@
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getThemeFilePath('event_sessions_logic.php', 'logic'));	
 
-	$page_vars = event_sessions_logic($_GET, $_POST);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(event_sessions_logic($_GET, $_POST));
 	$pager = $page_vars['pager'];
 
 	if($page_vars['error_message']){
