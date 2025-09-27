@@ -1,6 +1,6 @@
 <?php
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemBase.php');
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 	
 class BookingTypeException extends SystemBaseException {}
 
