@@ -205,7 +205,8 @@ class MultiEventRegistrant extends SystemMultiBase {
                 $filters['evr_expires_time'] = "< now()";
             }
             else{
-                $filters['evr_expires_time'] = ">= now() OR evr_expires_time IS NULL";
+                // Need parentheses to ensure proper precedence when combined with AND
+                $filters['(evr_expires_time'] = ">= now() OR evr_expires_time IS NULL)";
             }
         }
 
