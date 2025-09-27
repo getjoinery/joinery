@@ -1,9 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/urls_class.php');
@@ -68,9 +67,6 @@
 
 	$page->begin_box($options);
 
-
-	
-	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($url->get('url_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
 	echo '<br /><strong>Incoming:</strong> <a href="'.$url->get('url_incoming') .'">'.$url->get('url_incoming').'</a><br />';	
@@ -95,5 +91,4 @@
 
 	$page->admin_footer();
 ?>
-
 

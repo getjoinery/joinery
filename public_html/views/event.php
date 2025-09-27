@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -13,8 +13,7 @@ if ($page_vars->redirect) {
 $page_vars = $page_vars->data;
 	$event = $page_vars['event'];
 	$settings = Globalvars::get_instance();
-	
-	
+
 	$page = new PublicPage();
 	$page_options = array(
 		'is_valid_page' => $is_valid_page,
@@ -29,10 +28,6 @@ $page_vars = $page_vars->data;
 	$page->public_header($page_options);
 	
 	echo PublicPage::BeginPage('&nbsp;', $pageoptions);
-	
-
-
-	
 
 	?>
 	<!--
@@ -44,7 +39,6 @@ $page_vars = $page_vars->data;
                 display: none;
             }
 
-             
             details[open] summary {
                 background: blue;
                 color: white
@@ -162,8 +156,7 @@ $page_vars = $page_vars->data;
           <!-- Actions panel -->
           <section aria-labelledby="quick-links-title">
             <div class="rounded-lg bg-white overflow-hidden shadow p-6">
-              
-				
+
 				<?php if($picture_link = $event->get_picture_link('medium')){ ?>
 					<div class="mb-5">
 					<img src="<?php echo $picture_link; ?>">
@@ -172,11 +165,9 @@ $page_vars = $page_vars->data;
 			<h2 class="text-base font-medium text-gray-900" id="description-title">Description</h2>
               <?php echo '<div class="prose">'.$event->get('evt_description').'</div>'; ?>
 
-
             </div>
           </section>
-		  
-		  
+
 	<?php if($page_vars['location_object']){ ?>
 
           <section aria-labelledby="quick-links-title">
@@ -184,8 +175,7 @@ $page_vars = $page_vars->data;
 			<h2 class="text-base font-medium text-gray-900" id="description-title">Location: <?php echo $page_vars['location_object']->get('loc_name'); ?></h2>
 			<?php if($page_vars['location_object']->get('loc_address')){ echo 'Address:  '. $page_vars['location_object']->get('loc_address'). '<br>'; } ?>
 			<?php if($page_vars['location_object']->get('loc_website')){ echo 'Website:  <a href="'. $page_vars['location_object']->get('loc_website'). '">'.$page_vars['location_object']->get('loc_website').'</a><br>'; } ?>
-              
-				
+
 				<?php if($page_vars['location_picture']){ ?>
 					<div class="mb-5">
 					<img src="<?php echo $page_vars['location_picture']; ?>">
@@ -194,23 +184,16 @@ $page_vars = $page_vars->data;
 			
               <?php echo '<div class="prose">'.$page_vars['location_object']->get('loc_description').'</div>'; ?>
 
-
             </div>
           </section>
 
-
 	<?php } ?>		
-		  
-		  
-		  
-		  
-		  
+
         </div>
 
         <!-- Right column -->
         <div class="grid grid-cols-1 gap-4">
-		
-		
+
 		<!-- Register Info -->
           <section aria-labelledby="registration-title">
             <div class="rounded-lg bg-white overflow-hidden shadow">
@@ -235,16 +218,13 @@ $page_vars = $page_vars->data;
 								echo '<p>'.$page_vars['registration_message'].'</p>';
 							}
 
-
 							foreach($page_vars['register_urls'] as $register_url){
 								
 								$formwriter = $page->getFormWriter('form1');
 								echo $formwriter->new_button($register_url['label'], $register_url['link'], 'primary', 'full');	
 								echo $formwriter->end_form();
 							}			
-							
 
-							
 							if($page_vars['if_registered_message']){
 								echo '<p>'.$page_vars['if_registered_message'].'</p>';
 							}
@@ -254,7 +234,6 @@ $page_vars = $page_vars->data;
                       </div>
                    
                 </div>
-
 
 				<!--				
                 <div class="mt-6">
@@ -266,8 +245,7 @@ $page_vars = $page_vars->data;
               </div>
             </div>
           </section>		
-		
-		
+
 		<?php
 		if($page_vars['show_sessions_block']){
 		?>
@@ -280,7 +258,6 @@ $page_vars = $page_vars->data;
 		<?php
 		}
 		?>
-	
 
 <?php
 	//CHECK FOR SESSIONS
@@ -332,7 +309,6 @@ $page_vars = $page_vars->data;
 				<?php							
 			}	
 		}
-
 
 		if($page_vars['past_numsessions'] > 0){
 			echo '<h3>Past Sessions</h3>';
@@ -481,12 +457,8 @@ $page_vars = $page_vars->data;
       </div>
     </div>
   </main>	
-	
-	
-		
 
 		<?php
-
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));

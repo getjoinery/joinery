@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -44,8 +44,7 @@
 		'session' => $session,
 	)
 	);	
-	
-	
+
 	$pageoptions['title'] = 'Edit Contact Type: '.$contact_type->get('ctt_name');
 	$page->begin_box($pageoptions);
 
@@ -70,8 +69,6 @@
 	echo $formwriter->end_form();
 
 	$page->end_box();
-
-	
 
 	$page->admin_footer();
 

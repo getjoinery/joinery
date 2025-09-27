@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -51,7 +51,6 @@
 		exit();		
 	}	
 
-	
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -79,16 +78,11 @@
 			}				
 		}
 		$page->begin_box($options);
-		
-			
-		
+
 		echo '<p>Product Link - <a href="'.$product->get_url('short') . '">' . $product->get_url('short') . '</a><br />';
 
-		
 		echo 'Price: <b>'.$currency_symbol. $product->get_readable_price().'</b><br>';
-		
 
-		
 		if($product->get('pro_max_purchase_count') > 0){
 			$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
 			echo 'Total items available: <b>'. $product->get('pro_max_purchase_count').' ('. $remaining .' remaining)</b><br>';
@@ -135,7 +129,6 @@
 		
 		//echo 'After purchase message: <b>'. $product->get('pro_after_purchase_message').'</b><br>';
 
-
 			echo '<h3>Prices</h3>';
 			$versions = $product->get_product_versions(false);
 			echo '<ul>';
@@ -156,10 +149,8 @@
 			echo '</ul>';
 			echo '<a href="/admin/admin_product_version_edit?product_id=' . $product->key.'">Add New Price</a>';
 
-		
 		$page->end_box();	
 	
 	$page->admin_footer();
 ?>
-
 

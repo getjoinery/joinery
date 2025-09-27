@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -10,7 +9,6 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -59,12 +57,9 @@
 		$page->tableheader($headers, $table_options, $pager);
 
 		foreach($product_requirements as $product_requirement) {
-			
-			
 
 			$editlink = $product_requirement->get('prq_title').'<a href="/admin/admin_product_requirement_edit?prq_product_requirement_id=' . $product_requirement->key . '">[edit]</a>';
 
-			
 			$page->disprow(array(
 				$editlink ,
 
@@ -73,8 +68,6 @@
 		}
 
 		$page->endtable($pager);		
-		
-
 
 	$page->admin_footer();
 

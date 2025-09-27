@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password-reset-1_logic.php', 'logic'));
@@ -99,6 +99,5 @@ $page_vars = $page_vars->data;
 	//echo PublicPage::EndPanel();
 	//echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'header_only' => true));
-
 
 ?>

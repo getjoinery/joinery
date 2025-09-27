@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/urls_class.php');
@@ -12,7 +11,6 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 
-	
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -92,7 +90,6 @@
 	<li><b>Settings: </b>This section contains various settings for the website like whether to turn on comments or what email templates to use for certain purchases or events.</li>	
 	</ul>
 
-
 	<h4>Events</h4>
 	<p>A description of the various fields on an event.</p>
 	<ul>
@@ -155,5 +152,4 @@
 
 	$page->admin_footer();
 ?>
-
 

@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -61,8 +61,7 @@
 		'session' => $session,
 	)
 	);	
-	
-	
+
 	$pageoptions['title'] = "New Email";
 	$page->begin_box($pageoptions);
 
@@ -85,8 +84,7 @@
 
 	echo $formwriter->textinput('Description', 'eml_description', NULL, 100, $email->get('eml_description'), '', 255, '');
 	echo $formwriter->textinput('Subject', 'eml_subject', NULL, 100, $email->get('eml_subject'), '', 255, '');	
-	
-	
+
 	$contact_types = new MultiContactType(
 		array('deleted'=>false),
 		NULL,		//SORT BY => DIRECTION
@@ -97,7 +95,6 @@
 	if($contact_types->count()){
 		echo $formwriter->dropinput("Email content type (for unsubscribes)", "eml_ctt_contact_type_id", "ctrlHolder", $optionvals, $email->get('eml_ctt_contact_type_id'), '', TRUE);	
 	}
-	
 
 	$mailing_lists = new MultiMailingList(
 		array('deleted'=>false, 'active'=> true),
@@ -119,12 +116,8 @@
 	
 	$optionvals = array("Blank HTML Template"=>"blank_template", "Standard HTML Template"=>"newsletter-1");
 	echo $formwriter->dropinput("Template", "eml_message_template_html", "ctrlHolder", $optionvals, $email->get('eml_message_template_html'), '', FALSE);		
-	
-	
-
 
 	echo $formwriter->textbox('Email Body', 'eml_message_html', 'ctrlHolder', 5, 80, $email->get('eml_message_html'), '', 'yes');
-
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
@@ -132,8 +125,6 @@
 	echo $formwriter->end_form();
 
 	$page->end_box();
-
-	
 
 	$page->admin_footer();
 

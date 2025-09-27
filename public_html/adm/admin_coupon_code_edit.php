@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -65,7 +65,6 @@
 			$_POST['ccd_usr_user_id_affiliate'] = null;
 		}
 
-
 		$editable_fields = array('ccd_code', 'ccd_is_active', 'ccd_usr_user_id_affiliate', 'ccd_is_stackable', 'ccd_max_num_uses', 'ccd_applies_to');
 
 		foreach($editable_fields as $field) {
@@ -98,7 +97,6 @@
 		return;
 	}
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -112,7 +110,6 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "Edit Coupon Code";
 	$page->begin_box($pageoptions);
 
@@ -136,8 +133,7 @@
 				$("#products_list_container").hide();				
 			}			
 		}
-		
-	
+
 		$(document).ready(function() {
 			
 			set_applies_choices();
@@ -146,8 +142,7 @@
 			});	
 			
 		});
-	
-		
+
 	</script>
 	<?php
 
@@ -207,7 +202,6 @@
 	
 	echo $formwriter->datetimeinput('Start time', 'ccd_start_time', 'ctrlHolder', LibraryFunctions::convert_time($coupon_code->get('ccd_start_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
 
-	 
 	echo $formwriter->datetimeinput('End time', 'ccd_end_time', 'ctrlHolder', LibraryFunctions::convert_time($coupon_code->get('ccd_end_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
 	
 	$max_display = '';

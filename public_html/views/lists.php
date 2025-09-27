@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('lists_logic.php', 'logic'));
@@ -23,13 +22,11 @@ $page_vars = $page_vars->data;
 		'title' => 'Newsletter',
 	);
 	$page->public_header($hoptions);
-	
 
 	$options['subtitle'] = 'Get updates from us.';
 	echo PublicPage::BeginPage('Lists', $options);
 	echo PublicPage::BeginPanel();
 
-	
 	if(!empty($messages)){
 		foreach ($messages as $message){
 			echo PublicPage::alert($message['message_title'], $message['message'], $message['message_type']);
@@ -90,8 +87,7 @@ $page_vars = $page_vars->data;
 			echo $formwriter->honeypot_hidden_input();
 			echo $formwriter->captcha_hidden_input();
 		}
-		
-		
+
 		echo '<div>';
 		echo $formwriter->new_form_button('Submit');
 		echo '</div>';

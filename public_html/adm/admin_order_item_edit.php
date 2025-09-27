@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -23,9 +23,7 @@
 		$order_item = new OrderItem(NULL);
 		$order = new Order($order_id, TRUE);
 	}
-	
-	
-	
+
 	if($_POST){
 		
 		if($order_item->key){
@@ -42,8 +40,7 @@
 		$user = new User($_POST['odi_usr_user_id'], TRUE);
 		
 		$order_item->set('odi_pro_product_id', $_POST['odi_pro_product_id']);
-		
-		
+
 		$product = new Product($_POST['odi_pro_product_id'], TRUE);
 		//IF PRODUCT IS AN EVENT
 		if($product->get('pro_evt_event_id')){
@@ -76,7 +73,6 @@
 	$breadcrumbs = array('Orders'=>'/admin/admin_orders');
 	$breadcrumbs += array('Order Item Edit'=>'');
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -90,7 +86,6 @@
 	
 	$pageoptions['title'] = "Edit Order Item";
 	$page->begin_box($pageoptions);
-	
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 
@@ -112,7 +107,6 @@
 		echo $formwriter->hiddeninput('ord_order_id', $_GET['ord_order_id']);
 	}
 
-
 	echo $formwriter->textinput('Price', 'odi_price', NULL, 100, $order_item->get('odi_price'), '', 255, '');
 	
 	if($order_item->get('odi_usr_user_id')){
@@ -122,13 +116,11 @@
 	$users->load();
 	$optionvals = $users->get_dropdown_array();
 	echo $formwriter->dropinput("User", "odi_usr_user_id", "ctrlHolder", $optionvals, $order_item->get('odi_usr_user_id'), '', TRUE, FALSE, '/ajax/user_search_ajax');	 
- 	
 
 	$products = new MultiProduct(array('user_id'=> $user->key));
 	$products->load();
 	$optionvals = $products->get_dropdown_array();
 	echo $formwriter->dropinput("Product purchased", "odi_pro_product_id", "ctrlHolder", $optionvals, $order_item->get('odi_pro_product_id'), '', TRUE);	
-
 
 	$event_registrants = new MultiEventRegistrant(array('user_id' => $order_item->get('odi_usr_user_id')), array('event_id'=> 'DESC'));
 	$num_events = $event_registrants->count_all();
@@ -137,18 +129,14 @@
 		$optionvals = $event_registrants->get_dropdown_array();
 		echo $formwriter->dropinput("Event registration", "odi_evr_event_registrant_id", "ctrlHolder", $optionvals, $order_item->get('odi_evr_event_registrant_id'), '', TRUE);			
 	}
-			
 
-	
 	echo $formwriter->textinput('Comment/note', 'odi_comment', NULL, 100, $order_item->get('odi_comment'), '', 255, '');
 
- 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 
 	echo $formwriter->end_form();
-
 
 	$page->end_box();
 

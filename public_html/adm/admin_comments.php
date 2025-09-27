@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -17,9 +17,7 @@
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'comment_id', 0, '');	
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-	
 
-	
 	$search_criteria = array();
 	
 	//ONLY SHOW DELETED TO SUPER ADMINS
@@ -47,7 +45,6 @@
 		'session' => $session,
 	)
 	);
-		
 
 	$headers = array("Comment",  "By", "Created", "Status");
 	$altlinks = array();
@@ -59,7 +56,6 @@
 		//'search_on' => TRUE
 	);
 	$page->tableheader($headers, $table_options, $pager);
-
 
 	foreach ($comments as $comment){
 		//$user = new User($comment->get('cmt_usr_user_id'), TRUE);
@@ -127,9 +123,7 @@
 		$page->disprow($rowvalues);
 	}
 
-
 	$page->endtable($pager);
 	$page->admin_footer();
 ?>
-
 

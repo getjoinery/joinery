@@ -1,10 +1,9 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/api_keys_class.php');
@@ -69,7 +68,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	$page->begin_box($options);
 
-
 	echo '<h3>'.$api_key->get('apk_name').'</h3>';
 	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($api_key->get('apk_create_time'), 'UTC', $session->get_timezone()) .'<br />';
@@ -78,7 +76,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	$now = LibraryFunctions::get_current_time_obj('UTC');
 	$rowvalues = array();
 
-	
 	echo '<strong>Public key:</strong> '. $api_key->get('apk_public_key').'<br>';
 	echo '<strong>Secret key:</strong> '. $api_key->get('apk_secret_key').'<br>';
 	echo '<strong>Owner:</strong> '. $owner->display_name().'<br>';
@@ -107,11 +104,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		echo '<strong>Status:</strong> <b>Active</b>';
 	}
 
-
 	echo '<br />';
 	$page->end_box();
 
 	$page->admin_footer();
 ?>
-
 

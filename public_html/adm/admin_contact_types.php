@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -18,9 +17,7 @@
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'contact_type_id', 0, '');	
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-	
 
-	
 	$search_criteria = array();
 
 	//ONLY SHOW DELETED TO SUPER ADMINS
@@ -47,7 +44,6 @@
 		'session' => $session,
 	)
 	);
-		
 
 	$headers = array("Contact Type",  "Description", "Deleted");
 	$altlinks = array('New Contact Type' => '/admin/admin_contact_type_edit');
@@ -59,7 +55,6 @@
 		//'search_on' => TRUE
 	);
 	$page->tableheader($headers, $table_options, $pager);
-
 
 	foreach ($contact_types as $contact_type){
 		
@@ -75,14 +70,10 @@
 		} 		
 		array_push($rowvalues, $status);
 
-
-
 		$page->disprow($rowvalues);
 	}
-
 
 	$page->endtable($pager);
 	$page->admin_footer();
 ?>
-
 

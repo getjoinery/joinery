@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
@@ -44,9 +43,7 @@
 		'session' => $session,
 	)
 	);
-	
 
-	
 	$options['title'] = 'Edit Event Type';
 	$page->begin_box($options);
 
@@ -56,8 +53,7 @@
 	$validation_rules = array();
 	$validation_rules['ety_name']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);				
-	
-	
+
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_event_type_edit');
 	if($event_type->key){
 		echo $formwriter->hiddeninput('ety_event_type_id', $event_type->key);
@@ -70,7 +66,6 @@
 	echo $formwriter->end_form();
 	
 	$page->end_box();
-
 
 	$page->admin_footer();
 

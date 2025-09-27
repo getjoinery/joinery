@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -15,7 +15,6 @@
 
 	$email_template = new EmailTemplateStore($_GET['emt_email_template_id'], TRUE);
 
-	
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -45,10 +44,7 @@
 
 	//echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($email_template->get('emt_create_time'), 'UTC', $session->get_timezone()) .'<br />';
-	
-	
-	
-	
+
 	echo '<iframe src="/ajax/email_template_preview_ajax?emt_email_template_id='.$email_template->key.'" width="100%" height="500" style="border:1px solid black;"></iframe>';
 	//echo '<strong>Content:</strong><br /> '.$email_template->get('emt_body').'<br />';	
 
@@ -56,5 +52,4 @@
 	
 	$page->admin_footer();
 ?>
-
 

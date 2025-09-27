@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -8,7 +8,6 @@
 	PathHelper::requireOnce('data/users_class.php');
 
 	$settings = Globalvars::get_instance();
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -19,7 +18,6 @@
 	$user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must pass a user id');
 	$user = new User($user_id, TRUE);
 
-
 	$stripe_helper = new StripeHelper();
 	
 	if($stripe_helper->test_mode){
@@ -28,9 +26,6 @@
 	else{
 		$methods = $stripe_helper->get_payment_methods($user->get('usr_stripe_customer_id'));
 	}
-	
-	
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -47,10 +42,6 @@
 	)
 	);	
 
-
-
-
-
 	$headers = array('Stripe ID','Payment Method', 'Address', 'Info');
 	$altlinks = array();
 	$title= 'Payment Methods';
@@ -66,9 +57,7 @@
 	if($settings->get_setting('checkout_type')){
 		$stripe_helper = new StripeHelper();
 		$stripe_customer = $stripe_helper->get_customer($user);
-		
 
-		
 		if($stripe_customer['invoice_settings']['default_payment_method']){
 			echo '<p>Default payment method:</p>'.$stripe_customer['invoice_settings']['default_payment_method'];
 		}
@@ -79,7 +68,6 @@
 		else{
 			echo 'No default payment method.';
 		}
-	
 
 	}
 
@@ -97,7 +85,6 @@
 	}
 	
 	$page->endtable($pager);	
-
 
 	$page->admin_footer();
 

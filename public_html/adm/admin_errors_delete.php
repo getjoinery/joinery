@@ -1,9 +1,7 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	PathHelper::requireOnce('includes/SessionControl.php');
-
+	
 	$session = SessionControl::get_instance();
 	$session->check_permission(9);
 	

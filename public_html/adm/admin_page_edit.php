@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -17,10 +17,8 @@
 		$page = new Page(NULL);
 	}
 
-	
 	if($_POST){
 
-		
 		$editable_fields = array('pag_title');
 
 		foreach($editable_fields as $field) {
@@ -46,13 +44,10 @@
 		} 
 		
 		$page->set('pag_body', $_POST['pag_body']);
-		
-		
+
 		if(!$page->key){
 			$page->set('pag_usr_user_id',$session->get_user_id());
 		}	
-		
-				
 
 		$page->prepare();
 		$page->save();
@@ -64,8 +59,7 @@
 
 	$title = $page->get('pag_title');
 	$content = $page->get('pag_body');
-	
-	
+
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if($_GET['cnv_content_version_id']){
 		$content_version = new ContentVersion($_GET['cnv_content_version_id'], TRUE);
@@ -92,10 +86,8 @@
 		$is_published = 0;
 	}
 
-	
 	$pageoptions['title'] = "Edit Page";
 	$paget->begin_box($pageoptions);
-
 
 	echo '<div class="row">
     <div class="col-md-8"><div class="p-3">';
@@ -107,8 +99,6 @@
 	$validation_rules['pag_title']['required']['value'] = 'true';
 	$validation_rules['pag_link']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
-
-
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_page_edit');
 
@@ -132,8 +122,6 @@
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
-
-
 
 	echo '  </div>
     </div>
@@ -167,7 +155,6 @@
 </div>	';
 
 	$paget->end_box();
-	
 
 	$paget->admin_footer();
 

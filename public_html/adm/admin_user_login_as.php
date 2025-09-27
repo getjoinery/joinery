@@ -1,10 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('data/users_class.php');
 
-	
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
@@ -13,8 +11,7 @@
 	
 	$_SESSION['usr_user_id'] = $usr_user_id;
 	$_SESSION['permission'] = $user->get('usr_permission');
-	
-	
+
 	//NOW REDIRECT
 	$returnurl = $session->get_return();
 	header("Location: /");

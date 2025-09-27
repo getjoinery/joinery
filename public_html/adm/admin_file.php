@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -59,8 +58,7 @@
 		header("Location: /admin/admin_files");
 		exit();				
 	}
-	
-	
+
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -88,8 +86,7 @@
 	if($session->get_user_id() == 1){
 		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_file_delete?fil_file_id='.$file->key);
 	}
-		
-	
+
 	$page->begin_box($options);
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
@@ -133,7 +130,6 @@
 	echo '<strong>User:</strong> ('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a><br />';	
 	echo '<strong>Uploaded:</strong> '.LibraryFunctions::convert_time($file->get('fil_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
-	
 	echo '<br />';
 	if($file->is_image()){
 		echo '<div class="padding10px">Full size:  <pre><a href="'.$file->get_url('standard','short').'">'.$file->get_url('standard','short').'</a></pre></div>';
@@ -176,8 +172,7 @@
 		</form>';
 		
 		array_push($rowvalues, $delform);
-	
-		
+
 		$page->disprow($rowvalues);	
 		
 	}
@@ -185,7 +180,6 @@
 	$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
 	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_file?fil_file_id='. $file->key);
 
-	
 	$sessions = new MultiEventSessions(
 		array('deleted'=>true),
 		NULL,		//SORT BY => DIRECTION
@@ -203,17 +197,12 @@
 	
 	echo $formwriter->new_form_button('Submit');
 
-		
 	echo '</td></tr>';
 	$page->endtable();
 	*/
 
-	
-
 	$page->end_box();
-	
-	
+
 	$page->admin_footer();
 ?>
-
 

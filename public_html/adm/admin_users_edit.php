@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/Activation.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -51,7 +50,6 @@ if ($_POST){
 		}
 	}
 
-	
 	if($_SESSION['permission'] == 10){
 		$user->set('usr_permission', $_POST['usr_permission']);
 	}
@@ -61,9 +59,6 @@ if ($_POST){
 	
 	//HANDLE THE USERS'S MAILING LISTS
 	$messages = $user->add_user_to_mailing_lists($_POST['new_list_subscribes']);
-
-
-
 
 	//NOW REDIRECT
 	$session = SessionControl::get_instance();
@@ -118,8 +113,6 @@ else{
 		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, $user->get('usr_nickname'), "" , 255, "");
 	}
 
-
-
 	$user_subscribed_list = array();
 	$search_criteria = array('deleted' => false, 'user_id' => $user->key);
 	$user_lists = new MultiMailingListRegistrant(
@@ -155,7 +148,6 @@ else{
 	echo $formwriter->textinput("Calendly User URI (for calendly integration)", "usr_calendly_uri", "ctrlHolder", 20, $user->get('usr_calendly_uri'), "" , 255, "");
 	
 	echo $formwriter->hiddeninput("usr_user_id", $user->key);
-
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

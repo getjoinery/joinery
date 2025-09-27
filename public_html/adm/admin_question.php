@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -66,7 +65,6 @@
 		
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($question->get('qst_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
-	
 	if($_POST){
 		$valid = $question->validate_answers($_REQUEST['question_'.$question->key]);
 		echo '<b>'.$valid.'</b>';
@@ -86,10 +84,8 @@
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
 
-
 	$page->end_box();		
 	
 	$page->admin_footer();
 ?>
-
 

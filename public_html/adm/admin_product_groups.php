@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
@@ -9,7 +8,6 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(7);
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -25,7 +23,6 @@
 	)
 	);
 
-		
 	$product_groups = new MultiProductGroup();
 	$product_groups->load();
 
@@ -44,12 +41,10 @@
 		$rowvalues=array();
 		array_push($rowvalues, $product_group->get('prg_name'));
 
-		
 		$page->disprow($rowvalues);
 	}
 
 	$page->endtable();
-		
 
 	$page->admin_footer();
 

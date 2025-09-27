@@ -1,17 +1,14 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('event_withdraw_logic.php', 'logic'));
-
 
 	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Withdraw from Event/Course'
 		);
 	$page->public_header($hoptions);
-
 
 	echo PublicPage::BeginPage('Withdraw from Event/Course', $hoptions);
 

@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic'));	
@@ -14,8 +13,6 @@ if ($page_vars->redirect) {
 $page_vars = $page_vars->data;
 	$messages = $page_vars['messages'];
 
-
-	
 	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Contact Preferences',
@@ -27,10 +24,8 @@ $page_vars = $page_vars->data;
 	$page->public_header($hoptions);
 	echo PublicPage::BeginPage('Change Contact Preferences', $hoptions);
 
-	
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Change Contact Preferences');
-	
-             
+
 	echo '<p>If you want to stop receiving event or course emails, <a href="/profile">withdraw from the event</a></p><br>';
 
 	/*
@@ -41,13 +36,9 @@ $page_vars = $page_vars->data;
 	}
 	*/
 
-
-
 	foreach ($messages as $message){
 		echo PublicPage::alert($message['message_title'], $message['message'], $message['message_type']);
 	}
-	  
-
 
 	$settings = Globalvars::get_instance();
 	$formwriter = $page->getFormWriter('form1');
@@ -59,14 +50,12 @@ $page_vars = $page_vars->data;
 	else{
 
 		echo $formwriter->checkboxList("Check the box to subscribe:", 'new_list_subscribes', "ctrlHolder", $page_vars['optionvals'], $page_vars['checkedvals'], $page_vars['disabledvals'], $page_vars['readonlyvals']);	
-		
 
 		echo $formwriter->hiddeninput('zone', 'optional');
 		echo '<a href="/profile/account_edit">Cancel</a> ';
 		echo $formwriter->new_form_button('Submit');
 	}
 	echo $formwriter->end_form();
-	
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array());

@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -15,7 +15,6 @@
 	} else {
 		$product_detail = new ProductDetail(NULL);
 	}
-	
 
 	if($_POST){
 
@@ -23,7 +22,6 @@
 			$product_detail = new ProductDetail(NULL);
 		}
 
-	
 		$editable_fields = array('prd_num_used', 'prd_notes');
 
 		foreach($editable_fields as $field) {
@@ -32,12 +30,10 @@
 
 		$product_detail->prepare();
 		$product_detail->save();
-		
-		
+
 		LibraryFunctions::redirect('/admin/admin_shadow_sessions');
 		return;
 	}
-
 
 	$page = new AdminPage();
 	$page->admin_header(31);
@@ -45,7 +41,6 @@
 	$user = new User($product_detail->get('prd_usr_user_id'), TRUE);
 
 	echo '<h2>Edit sessions for '.$user->display_name() .'</h2>';
-
 
 	// Editing an existing event
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
@@ -60,17 +55,12 @@
 
 	echo $formwriter->textinput('Sessions used', 'prd_num_used', NULL, 100, $product_detail->get('prd_num_used'), '', 255, '');
 	echo $formwriter->textbox('Notes (dates when used, etc)', 'prd_notes', 'ctrlHolder', 5, 80, $product_detail->get('prd_notes'), '', 'no');
-	
-	
+
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo '</div></fieldset>';
 	echo $formwriter->end_form();
-
-
-
-	
 
 	$page->admin_footer();
 

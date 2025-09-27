@@ -1,12 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
 
 	PathHelper::requireOnce('data/locations_class.php');
 
@@ -34,7 +31,6 @@
 
 	$session->set_return();
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -47,8 +43,6 @@
 		'session' => $session,
 	)
 	);	
-
-
 
 	$options['title'] = 'Location: '.$location->get('loc_name');
 	$options['altlinks'] = array();
@@ -86,12 +80,10 @@
 		echo '<img src="'.LibraryFunctions::get_absolute_url('/uploads/small/'.$file->get('fil_name')).'">';
 	}	
 
-	
 	echo '<br><br>';
 	?><p><?php echo $location->get('loc_short_description'); ?></p><?php
 	echo '<br><br>';
 	?><p><?php echo $location->get('loc_description'); ?></p>
-
 
 <?php 
 	$page->end_box();

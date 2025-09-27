@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('post_logic.php', 'logic'));
@@ -23,7 +23,6 @@ $page_vars = $page_vars->data;
 	echo PublicPage::BeginPage();	
 	echo PublicPage::BeginPanel();
 ?>
-
 
     <div class="text-lg max-w-prose mx-auto">
       <h1>
@@ -69,7 +68,6 @@ $page_vars = $page_vars->data;
 		
 		?>
 
-							
 								<?php
 								$settings = Globalvars::get_instance();
 								$formwriter = $page->getFormWriter('form1');
@@ -81,7 +79,6 @@ $page_vars = $page_vars->data;
 								$validation_rules['name']['minlength']['value'] = 2;
 								$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
 								echo $formwriter->set_validate($validation_rules);			
-								
 
 								echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
 
@@ -97,7 +94,6 @@ $page_vars = $page_vars->data;
 									echo $formwriter->captcha_hidden_input('blog');
 								}
 
-
 								echo $formwriter->start_buttons('flex justify-end sm:col-span-6');
 								echo $formwriter->new_form_button('Comment', 'secondary');
 								echo $formwriter->end_buttons();
@@ -108,9 +104,7 @@ $page_vars = $page_vars->data;
 		
 		}
 
-
 		if($page_vars['settings']->get_setting('show_comments')){			
-						
 
 			if($page_vars['numcomments']){
 				?>
@@ -156,8 +150,7 @@ $page_vars = $page_vars->data;
 								<div class="mt-2 text-sm text-gray-700">
 								  <div>'.$comment->get_sanitized_comment().'
 								  <br /><br /><button id="comment'.$comment->key.'" class="commentbutton">Reply to this comment >></button>';
-								  
-							
+
 									if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
 											echo '<div id="comment'.$comment->key.'container" style="display:none;">';
 											$settings = Globalvars::get_instance();
@@ -171,7 +164,6 @@ $page_vars = $page_vars->data;
 											$validation_rules['name']['minlength']['value'] = 2;
 											$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
 											echo $formwriter->set_validate($validation_rules);			
-											
 
 											echo $formwriter->begin_form('form'.$comment->key, "post", $_SERVER['REQUEST_URI'], true);
 											echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
@@ -187,15 +179,12 @@ $page_vars = $page_vars->data;
 												echo $formwriter->captcha_hidden_input('blog');
 											}
 
-
 											echo $formwriter->start_buttons('flex justify-end sm:col-span-6');
 											echo $formwriter->new_form_button('Comment', 'secondary');
 											echo $formwriter->end_buttons();
 											echo $formwriter->end_form(true);
 											echo '</div>';
 										}
-									 
-
 
 									$replies = new MultiComment(
 										array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'parent_id'=>$comment->key),
@@ -203,7 +192,6 @@ $page_vars = $page_vars->data;
 										NULL,
 										NULL);	 
 									$numreplies = $replies->count_all();
-									
 
 									if($numreplies){
 										$replies->load();

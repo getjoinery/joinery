@@ -1,10 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/ThemeHelper.php');
-	PathHelper::requireOnce('includes/PluginHelper.php');
+
 	PathHelper::requireOnce('data/settings_class.php');
 	PathHelper::requireOnce('data/email_templates_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
@@ -19,8 +17,6 @@
 	$run_validation = isset($_GET['run_validation']) && $_GET['run_validation'] == '1';
 
 	if($_POST){
-		
-
 
 		$search_criteria = array();
 		//$search_criteria['setting_like'] = $searchterm;
@@ -43,8 +39,6 @@
 		}				
 		LibraryFunctions::redirect('/admin/admin_settings');
 	}
-	
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -58,9 +52,6 @@
 		'session' => $session,
 	)
 	);	
-	
- 
-
 
 	$pageoptions['altlinks'] = array('New Setting'=>'/admin/admin_setting_edit');
 	$pageoptions['altlinks'] += array('Public Menu'=>'/admin/admin_public_menu');
@@ -72,9 +63,6 @@
 		$pageoptions['altlinks'] += array('Publish Upgrade'=>'/utils/publish_upgrade');
 	}
 
-
-	
-	
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
@@ -87,12 +75,9 @@
 	echo AdminPage::tab_menu($tab_menus, 'Email Settings');
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
-	
-	
+
 		?>
 		<script type="text/javascript">
-	
-
 
 		function set_smtp_auth_choices(){
 			var value = $("#smtp_auth").val();
@@ -116,11 +101,8 @@
 			var re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 			return re.test(email);
 		}
-		
-		
-	
+
 		$(document).ready(function() {
-			
 
 			// SMTP Authentication toggle
 			$("#smtp_auth").on('change', function(){
@@ -162,15 +144,12 @@
 				}
 			});
 		});
-		
-		
-		
+
 		</script>
 		<?php
 	
 	$validation_rules = array();
 
-	
 	// Add email SMTP validation rules
 	$validation_rules['smtp_host']['maxlength']['value'] = '255';
 	$validation_rules['smtp_host']['maxlength']['message'] = "'SMTP host too long (max 255 characters)'";
@@ -194,8 +173,6 @@
 	
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings_email');
 	
 	if($_SESSION['permission'] == 10){
@@ -203,15 +180,10 @@
 		if(StripeHelper::isTestMode()){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
 		}		
-		
 
-		
 		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', '', 20, $settings->get_setting('webmaster_email'), "" , 255, "");
 		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");
 		echo $formwriter->textinput("Default Email Name", 'defaultemailname', '', 20, $settings->get_setting('defaultemailname'), "" , 255, "");
-		
-
-		
 
 		// Mailchimp section with two-column layout and API validation
 		echo '<div class="row">';
@@ -285,9 +257,6 @@
 		echo '</div>';
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
-
-
-
 
 		// Email Settings Section
 		echo '<div class="row">';
@@ -583,9 +552,6 @@
 		echo '<div style="margin: 50px 0;"></div>';
 
 	}
-	
-	
-
 
 	echo '<h3>Email Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);
@@ -646,20 +612,15 @@
 	echo $formwriter->dropinput("Event email outer template", "event_email_outer_template", '', $outer_optionvals, $settings->get_setting('event_email_outer_template'), '', FALSE);
 	echo $formwriter->dropinput("Event email inner template", "event_email_inner_template", '', $inner_optionvals, $settings->get_setting('event_email_inner_template'), '', FALSE);
 
-	
 	//$optionvals = array("General"=>'general', 'Emails' => 'emails');
 	//echo $formwriter->dropinput("Setting group", "stg_group_name", '', $optionvals, $setting->get('stg_group_name'), '', FALSE);
-
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
-	
 
-	
 	$page->end_box();
-
 
 	$page->admin_footer();
 

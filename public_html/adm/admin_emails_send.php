@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('data/emails_class.php');
 	PathHelper::requireOnce('data/email_recipients_class.php');
@@ -45,7 +44,6 @@
 	
 	$pageoptions['title'] = "Send Emails";
 	$page->begin_box($pageoptions);
-	 
 
 	$settings = Globalvars::get_instance();
 
@@ -60,8 +58,6 @@
 			$mailing_list_string = NULL;			
 		}
 
-
-
 		if(!$send_test){
 			$recipients = new MultiEmailRecipient(
 			array('email_id' => $email->key, 'sent' => FALSE));
@@ -70,8 +66,6 @@
 			echo $numrecipients . ' recipients queued<br>';
 			echo 'Sending email: '. $email->get('eml_subject').' to '.$numrecipients.' recipients.<br>';
 
-
-			
 			$count = 0;
 			foreach ($recipients as $recipient){
 				$user = new User($recipient->get('erc_usr_user_id'), TRUE);
@@ -84,8 +78,7 @@
 					continue;
 				}
 				*/
-				
-						
+
 				$message = EmailMessage::fromTemplate($email->get('eml_message_template_html'), [
 					'subject' => $email->get('eml_subject'),
 					'preview_text' => $email->get('eml_preview_text'),
@@ -125,8 +118,6 @@
 						echo '<b>Failed to send to : '. $user->display_name().'</b><br>';
 					}				
 				}
-				
-
 
 			}
 			echo 'Sent to '.$count.' recipients<br>';
@@ -135,7 +126,6 @@
 			$email->set('eml_status', Email::EMAIL_SENT);
 			$email->save();
 		}
-	
 
 		$sender = new User($email->get('eml_usr_user_id'), TRUE);		
 		//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
@@ -196,6 +186,5 @@
 	$page->end_box();
 	$page->admin_footer();
 	exit();		
-	
-	
+
 ?>

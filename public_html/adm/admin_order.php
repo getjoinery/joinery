@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -13,7 +13,6 @@
 
 	$settings = Globalvars::get_instance();
 
-
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
@@ -24,11 +23,8 @@
 	$order_id = LibraryFunctions::fetch_variable('ord_order_id', 0, 0, TRUE);
 	$order = new Order($order_id, TRUE);
 
-
 	$stripe_helper = new StripeHelper();
 	$charge = $stripe_helper->update_order_refund_amount_from_stripe($order);
-	
-
 
 	if($order->get('ord_usr_user_id')){
 		$order_user = new User($order->get('ord_usr_user_id'), TRUE);
@@ -50,9 +46,6 @@
 		'session' => $session,
 	)
 	);	
-
-
-	
 
 		$options['title'] = 'Order (' . $order->key . ')';
 		if ($_SESSION['permission'] == 10) {
@@ -84,7 +77,6 @@
 		}
 	}
 
-
 	echo '<h2>Items in Order</h2>';
 	echo '<a href="/admin/admin_order_item_edit?ord_order_id='.$order->key.'">Add Order Item</a><br />';
 	$PRODUCT_ID_TO_NAME_CACHE = array();
@@ -97,8 +89,7 @@
 		if($order_item->get('odi_is_subscription')){
 			$result = $stripe_helper->update_subscription_in_order_item($order_item);
 		}
-		
-		
+
 		if($order_item->get('odi_usr_user_id')){
 			$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 		}
@@ -136,16 +127,12 @@
 		else if($order_item->get('odi_subscription_status')){
 			$this_out .=  ' STATUS: '. $order_item->get('odi_subscription_status');
 		}
-	
-		
-			
+
 		if($_SESSION['permission'] >= 8){
 			if(($order->get('ord_stripe_payment_intent_id') || $order->get('ord_stripe_charge_id')) && ($order->get('ord_refund_amount') < $order->get('ord_total_cost'))){
 				$this_out .= ' | <a href="/admin/admin_order_refund?oi=' . $order_item->key . '">[refund]</a>';
 			}
 		}
-		
-
 
 		$this_out .= ' | <a href="/admin/admin_order_item_edit?odi_order_item_id=' . $order_item->key . '">[edit]</a><br>';
 		
@@ -163,14 +150,12 @@
 
 	}
 	echo implode('<br />', $order_items_out);
-	
 
 	if($_SESSION['permission'] == 10){
 		
 		echo "<h2>Raw Cart:</h2><br><pre>";
 		echo $order->get('ord_raw_cart'). '</pre>';		
 	}
-
 
 	$page->end_box();
 	$page->admin_footer();

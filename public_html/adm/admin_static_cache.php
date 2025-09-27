@@ -1,8 +1,7 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/AdminPage.php');
-PathHelper::requireOnce('includes/SessionControl.php');
+
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/StaticPageCache.php');
 
@@ -369,7 +368,6 @@ if (!empty($display_messages)) {
         </div>
     </div>
 </div>
-
 
 <!-- Cache Diagnostic Tool -->
 <div class="row mt-4">

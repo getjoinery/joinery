@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
@@ -25,7 +24,6 @@
 	if($settings->get_setting('page_contents_active')){
 		echo '<h2>Pages</h2>';
 
-
 		$search_criteria = array('published' => TRUE, 'deleted' => false, 'has_link' => TRUE);
 		$pages = new MultiPage(
 			$search_criteria);	
@@ -37,7 +35,6 @@
 		}
 		echo '</ul>';
 	}
-
 
 	if($settings->get_setting('events_active')){   
 		echo '<h2>Events</h2>';
@@ -63,7 +60,6 @@
 		}
 		echo '</ul>';
 
-
 		echo '<h2>Locations</h2>';
 		
 		$sort = 'location_id';
@@ -86,8 +82,6 @@
 		}
 		echo '</ul>';
 	}
-
-	
 
 	if($settings->get_setting('blog_active')){
 	

@@ -1,12 +1,11 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
-
+	
 	PathHelper::requireOnce('/data/phone_number_class.php');
 
 	$session = SessionControl::get_instance();
@@ -23,17 +22,13 @@
 		$user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must pass a user id');
 	}
 
-
 if($_POST){
 
 	$phone_number = PhoneNumber::CreateFromForm($_POST, $user_id, $phone_number, FALSE);
 
-
-	
 	//NOW REDIRECT
 	LibraryFunctions::redirect('/admin/admin_user?usr_user_id='. $user_id );
 	return;
-
 
 }
 else{
@@ -49,10 +44,8 @@ else{
 	)
 	);
 
-
 	//PhoneNumber::ValidateJS();
 ?>
-
 
 			<section class="contact-page-area section-gap">
 				<div class="container"> 
@@ -70,7 +63,6 @@ else{
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
-
 
 	echo $formwriter->end_form();
 

@@ -1,10 +1,9 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/api_keys_class.php');
@@ -34,7 +33,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		'OR');
 	$numrecords = $api_keys->count_all();
 	$api_keys->load();
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -48,8 +46,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		'session' => $session,
 	)
 	);
-
-
 
 	$headers = array("Name", "Public Key", 'Owner', "Start Time", "Expires Time", 'Status');
 	$altlinks = array();
@@ -67,7 +63,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		$owner = new User($api_key->get('apk_usr_user_id'), TRUE);
 		$now = LibraryFunctions::get_current_time_obj('UTC');
 		$rowvalues = array();
-
 
 		array_push($rowvalues,  " <a href='/admin/admin_api_key?apk_api_key_id=$api_key->key'>".$api_key->get('apk_name')."</a>");
 		
@@ -103,12 +98,10 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		}
 */
 
-		
 		$page->disprow($rowvalues);
 	}
 	$page->endtable($pager);
 
 	$page->admin_footer();
 ?>
-
 

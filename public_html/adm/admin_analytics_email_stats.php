@@ -1,14 +1,9 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
-	PathHelper::requireOnce('includes/SessionControl.php');
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
-
-
-
+	
 $session = SessionControl::get_instance();
 $session->check_permission(5);
 
@@ -29,7 +24,6 @@ $dblink = $dbhelper->get_db_link();
 ?>
 <script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
 <script type="text/javascript">
-
 
 		$(document).ready(function() 
 		{
@@ -53,15 +47,11 @@ $dblink = $dbhelper->get_db_link();
 <?php
 */
 
-
-
-
 $today = date("m-d-Y");
 $startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 months")), 0, '');
 $enddate = LibraryFunctions::fetch_variable('enddate', $today, 0, '');
 $interval = LibraryFunctions::fetch_variable('interval', 0, 0, ''); // 0 = daily, 1 = weekly, 2 = monthly (default), 3 = quarterly, 4 = yearly
 $usrdisabled = LibraryFunctions::fetch_variable("usr_is_disabled", 0, 0, '');
-
 
 switch ($interval)
 {
@@ -101,17 +91,12 @@ echo $formwriter->end_form();
 
 echo '<br />';
 
-
-
-
-
 //CONTENT
 $sql = "SELECT 
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_content as content
 FROM vse_visitor_events 
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_content IS NOT NULL GROUP BY vse_visitor_events.vse_content ORDER BY visitorcount DESC";
-
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -155,7 +140,6 @@ count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_medium as content
 FROM vse_visitor_events 
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_medium IS NOT NULL GROUP BY vse_visitor_events.vse_medium ORDER BY visitorcount DESC";
-
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -201,7 +185,6 @@ vse_visitor_events.vse_campaign as content
 FROM vse_visitor_events 
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_campaign IS NOT NULL GROUP BY vse_visitor_events.vse_campaign ORDER BY visitorcount DESC";
 
-
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
 
@@ -245,7 +228,6 @@ vse_visitor_events.vse_source as content
 FROM vse_visitor_events 
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_source IS NOT NULL GROUP BY vse_visitor_events.vse_source ORDER BY visitorcount DESC";
 
-
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
 
@@ -281,10 +263,6 @@ foreach ($email_source_stats as $email_stats => $values){
 }
 $page->disprow($rowtotals);
 $page->endtable();
-
-
-
-
 
 $page->admin_footer();
 

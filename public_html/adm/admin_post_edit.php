@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -46,8 +46,7 @@
 		if(!$post->key){
 			$post->set('pst_usr_user_id',$session->get_user_id());
 		}	
-				
-		
+
 		$post->prepare();
 		$post->save();
 		$post->load();
@@ -89,11 +88,8 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "Edit Post";
 	$page->begin_box($pageoptions);
-	
-	
 
 	echo '<div class="row">
     <div class="col-md-8">
@@ -111,8 +107,6 @@
 		$validation_rules['pst_link']['required']['value'] = 'true';
 	}	
 	echo $formwriter->set_validate($validation_rules);	
-
-
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_post_edit');
 
@@ -139,8 +133,7 @@
 	if(!$post->get('pst_link') || $_SESSION['permission'] == 10){
 		echo $formwriter->textinput('Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir').'/blog/', 'pst_link', NULL, 100, $post->get('pst_link'), '', 255, '');	
 	}	
-	
-	
+
 	$optionvals = array("No"=>0, "Yes"=>1);
 	echo $formwriter->dropinput("Published", "pst_is_published", "ctrlHolder", $optionvals, $post->get('pst_is_published'), '', FALSE);
 
@@ -150,7 +143,6 @@
 	$optionvals = array("Yes"=>1, "No"=>0);
 	echo $formwriter->dropinput("Is listed and searchable?", "pst_is_on_homepage", "ctrlHolder", $optionvals, $pst_is_on_homepage, '', FALSE);
 
-	
 	echo $formwriter->textbox('Post content', 'pst_body', 'ctrlHolder', 5, 80, $content, '', 'yes');
 
 	echo $formwriter->start_buttons();
@@ -189,7 +181,6 @@
 	</div>
 </div>	';
 	$page->end_box();
-	
 
 	$page->admin_footer();
 

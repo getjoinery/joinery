@@ -1,14 +1,11 @@
 <?php
 
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	PathHelper::requireOnce('includes/SessionControl.php');
-
+	
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/files_class.php');
 	PathHelper::requireOnce('data/event_sessions_class.php');
 	PathHelper::requireOnce('includes/UploadHandler.php');
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -166,21 +163,18 @@
 		),
 		'print_response' => false
 	);
-	
 
 	$upload_handler = new UploadHandler($options);
 	$response = $upload_handler->get_response(); 
 	$files = $response['files'];
 	$file_count = count($files);
 
-	
 	foreach ($files as $thisfile){
 		if (isset($thisfile->error)){
 			//print_r($thisfile->error);
 			continue;
 		}
-		 
-		
+
 		if($existing_id = File::get_by_name($thisfile->name)){
 			$file =	new File($existing_id, TRUE);
 			$file->set('fil_delete_time', NULL);			
@@ -222,8 +216,7 @@
 			$session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
 			$session->add_file($file->key);	
 		}		
-		
-		
+
 		/*
 		print_r($thisfile->name);
 		print_r($thisfile->size);
@@ -246,7 +239,5 @@
 		
 		$page->admin_footer();		
 	}
-
-
 
 ?>

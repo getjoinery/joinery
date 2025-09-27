@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -26,7 +26,6 @@ $page_vars = $page_vars->data;
 
 	<?php foreach ($page_vars['products'] as $product){ ?>
 
-    
       <div class="group relative bg-white border border-gray-200 rounded-lg flex flex-col overflow-hidden">
         <div class="aspect-w-3 aspect-h-4 bg-gray-200 group-hover:opacity-75 sm:aspect-none sm:h-96">
 			<?php
@@ -54,13 +53,10 @@ $page_vars = $page_vars->data;
         </div>
       </div>
 
-
 	<?php } ?>
 	</div>
 
-    
   </div>	
-	
 
 		<?php
   

@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -34,7 +33,6 @@
 		$search_criteria['created_after'] = $utc_time;
 	}
 
-	
 	if($enddate){
 		$display_enddate = $enddate;
 		$time_combined = $enddate . ' ' . LibraryFunctions::toDBTime('12:59:59 pm');
@@ -42,7 +40,6 @@
 		$search_criteria['created_before'] = $utc_time;		
 	}	
 
-	
 	if($user_id){
 		if($user_id){
 			$search_criteria['user_id'] = $user_id;
@@ -54,7 +51,6 @@
 		//$search_criteria['deleted'] = false;
 		$search_criteria['test_mode'] = false;
 	}
-
 
 	$orders = new MultiOrder(
 		$search_criteria,
@@ -107,8 +103,7 @@
 		else{
 			$order_user = new User(NULL);
 		}
-		
-		
+
 		$min_status = NULL;
 
 		$order_items = $order->get_order_items();
@@ -145,7 +140,6 @@
 				$this_out .= '<br /><b> (Note: '.$product_data['comment'].')</b>';
 			}
 
-			
 			$order_items_out[] = $this_out;
 
 		}
@@ -159,7 +153,6 @@
 
 		array_push($rowvalues,'<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>');
 
-		
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id=' . $order_user->key . '">' . $order_user->display_name() . '</a>');
 
 		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone(), 'M j, Y'));

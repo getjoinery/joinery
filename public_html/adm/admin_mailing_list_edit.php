@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -48,8 +48,7 @@
 				$mailing_list->set('mlt_link', $mailing_list->create_url($mailing_list->get('mlt_name'))); 
 			}
 		}
-		
-		
+
 		$mailing_list->prepare();
 		$mailing_list->save();
 		$mailing_list->load();
@@ -71,8 +70,7 @@
 		'session' => $session,
 	)
 	);	
-	
-	
+
 	$pageoptions['title'] = 'Edit Mailing List: '.$mailing_list->get('mlt_name');
 	$page->begin_box($pageoptions);
 
@@ -95,7 +93,6 @@
 	echo $formwriter->dropinput("Active?", "mlt_is_active", "ctrlHolder", $optionvals, $mailing_list->get('mlt_is_active'), '', FALSE);
 	$optionvals = array("Hidden (Only admins can add people)"=>0, "Public (Open for registration and listed)"=>1, "Public but unlisted (Can only register with the link)"=>2);
 	echo $formwriter->dropinput("Visibility", "mlt_visibility", "ctrlHolder", $optionvals, $mailing_list->get('mlt_visibility'), '', FALSE);
-
 
 	$contact_types = new MultiContactType(
 		array('deleted'=>false),
@@ -132,8 +129,6 @@
 	echo $formwriter->end_form();
 
 	$page->end_box();
-
-	
 
 	$page->admin_footer();
 

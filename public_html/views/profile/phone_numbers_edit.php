@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('phone_numbers_edit_logic.php', 'logic'));
@@ -23,7 +22,6 @@ $page_vars = $page_vars->data;
 			);
 	$page->public_header($hoptions);
 	echo PublicPage::BeginPage('Add/Edit Phone Number', $hoptions);
-
 
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Edit Phone Number');
 

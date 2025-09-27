@@ -1,14 +1,9 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
-	PathHelper::requireOnce('includes/SessionControl.php');
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
-
-
-
+	
 $session = SessionControl::get_instance();
 $session->check_permission(5);
 
@@ -29,7 +24,6 @@ $dblink = $dbhelper->get_db_link();
 ?>
 <script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
 <script type="text/javascript">
-
 
 		$(document).ready(function() 
 		{
@@ -53,15 +47,11 @@ $dblink = $dbhelper->get_db_link();
 <?php
 */
 
-
-
-
 $today = date("m-d-Y");
 $startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 months")), 0, '');
 $enddate = LibraryFunctions::fetch_variable('enddate', $today, 0, '');
 $interval = LibraryFunctions::fetch_variable('interval', 0, 0, ''); // 0 = daily, 1 = weekly, 2 = monthly (default), 3 = quarterly, 4 = yearly
 $usrdisabled = LibraryFunctions::fetch_variable("usr_is_disabled", 0, 0, '');
-
 
 switch ($interval)
 {
@@ -109,7 +99,6 @@ date_part('year', vse_visitor_events.vse_timestamp) as year,
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount
 FROM vse_visitor_events 
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate GROUP BY day, month, year ORDER BY year, month, day ASC";
-
 
 try
 {
@@ -190,7 +179,6 @@ var chart = new Chart(ctx, {
 
 <?php
 
-
 $sql = "SELECT 
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_page as page
@@ -200,7 +188,6 @@ vse_visitor_events.vse_timestamp >= :startdate AND
 vse_visitor_events.vse_timestamp <= :enddate AND 
 (vse_visitor_events.vse_is_404 != TRUE OR vse_visitor_events.vse_is_404 IS NULL)
 GROUP BY page ORDER BY visitorcount DESC";
-
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -221,7 +208,6 @@ catch(PDOException $e)
 
 $page_visitors = $q->fetchAll();
 
-
 $sql = "SELECT 
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_page as page
@@ -231,7 +217,6 @@ vse_visitor_events.vse_timestamp >= :startdate AND
 vse_visitor_events.vse_timestamp <= :enddate AND 
 vse_visitor_events.vse_is_404 = TRUE 
 GROUP BY page ORDER BY visitorcount DESC";
-
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -251,9 +236,6 @@ catch(PDOException $e)
 }
 
 $t404_pages = $q->fetchAll();
-
-
-
 
 /*
 $headers = array("Date Range: " . $grouping[$interval], "Unique Visitors");
@@ -281,14 +263,6 @@ $page->disprow($rowtotals);
 $page->endtable();
 */
 
-
-
-
-
-
-
-
-
 $headers = array("Page", "Visits");
 $box_vars =	array(
 	'altlinks' => $altlinks,
@@ -298,20 +272,17 @@ $page->tableheader($headers, $box_vars);
 
 $rowtotals = array("<b>Totals</b>", 0);
 
-
 foreach ($page_visitors as $page_visitor => $values)
 {		
 	if($values->visitorcount <= 10){
 		break;
 	}
 	$rowvalues = array();
-	
 
 	array_push($rowvalues, $values->page);
 	array_push($rowvalues, $values->visitorcount);
 	
 	$rowtotals[1] += $values->visitorcount;
-
 
 	$page->disprow($rowvalues);
 }
@@ -319,9 +290,6 @@ foreach ($page_visitors as $page_visitor => $values)
 $page->disprow($rowtotals);
 
 $page->endtable();
-
-
-
 
 $headers = array("404 Pages", "Tries");
 $box_vars =	array(
@@ -331,7 +299,6 @@ $box_vars =	array(
 $page->tableheader($headers, $box_vars);
 
 $rowtotals = array("<b>Totals</b>", 0);
-
 
 foreach ($t404_pages as $t404_page => $values)
 {		
@@ -345,15 +312,12 @@ foreach ($t404_pages as $t404_page => $values)
 	
 	$rowtotals[1] += $values->visitorcount;
 
-
 	$page->disprow($rowvalues);
 }
 
 $page->disprow($rowtotals);
 
 $page->endtable();
-
-
 
 $page->admin_footer();
 

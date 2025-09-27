@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password-reset-2_logic.php', 'logic'));
@@ -102,10 +102,7 @@ $page_vars = $page_vars->data;
 		  </div>
 		</main>
 		<?php
-		
 
-
-	
 	}
 
 	//echo PublicPage::EndPanel();

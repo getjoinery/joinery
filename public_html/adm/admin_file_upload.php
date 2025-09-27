@@ -1,23 +1,16 @@
 <?php
 
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-
+	
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('includes/UploadHandler.php');
-
-
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();	
 
-		
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -48,19 +41,12 @@
 	echo $formwriter->end_form();
 	echo '<hr>';
 	*/
-	
-	
+
 	$formwriter = LibraryFunctions::get_formwriter_object('fileupload', 'admin');
 	echo $formwriter->file_upload_full();
 	echo $formwriter->end_form();
 	
 	$page->end_box();
 	$page->admin_footer();
-
-		
-		
-		
-	
-
 
 ?>
