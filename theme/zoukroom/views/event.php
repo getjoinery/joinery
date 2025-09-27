@@ -6,9 +6,9 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/event_sessions_class.php');
-	PathHelper::requireOnce('data/event_registrants_class.php');
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 
 	require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
 

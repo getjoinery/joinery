@@ -1,7 +1,7 @@
 <?php
 // PathHelper is always available - no need to require it
 // FormWriterBootstrap is the Bootstrap-based FormWriter
-PathHelper::requireOnce('includes/FormWriterBootstrap.php');
+require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
 
 // Canvas theme FormWriter extends the Bootstrap FormWriter
 // No modifications for now - just inheriting all Bootstrap form functionality

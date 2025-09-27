@@ -414,7 +414,7 @@ class CtldProfile extends SystemBase {
 		}
 /*
 $result = $cd->modifyProfileFilter('689209jfkncn', 'ai_malware', 1);
-require_once($_SERVER['DOCUMENT_ROOT'].'/plugins/controld/includes/ControlDHelper.php');
+PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
 	$cd = new ControlDHelper();
 	print_r($cached_filters);
 	print_r( $cd->listNativeFilters('689209jfkncn'));

@@ -1,13 +1,13 @@
 <?php
 
-	PathHelper::requireOnce('includes/Pager.php');
+	require_once(PathHelper::getIncludePath('includes/Pager.php'));
 	// LibraryFunctions is now guaranteed available - line removed
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/address_class.php');
-	PathHelper::requireOnce('data/users_class.php');
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
 

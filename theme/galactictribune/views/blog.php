@@ -1,8 +1,8 @@
 <?php
     // SessionControl is now guaranteed available - line removed
     // LibraryFunctions is now guaranteed available - line removed
-    PathHelper::requireOnce('data/users_class.php');
-    PathHelper::requireOnce('data/groups_class.php');
+    require_once(PathHelper::getIncludePath('data/users_class.php'));
+    require_once(PathHelper::getIncludePath('data/groups_class.php'));
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('blog_logic.php', 'logic'));
      

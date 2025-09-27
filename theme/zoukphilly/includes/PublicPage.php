@@ -1,5 +1,5 @@
 <?php
-PathHelper::requireOnce('includes/PublicPageTailwind.php');
+require_once(PathHelper::getIncludePath('includes/PublicPageTailwind.php'));
 
 class PublicPage extends PublicPageTailwind {
     // Inherits full Tailwind PublicPage functionality

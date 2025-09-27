@@ -1,7 +1,7 @@
 <?php
 // PathHelper is always available - no need to require it
-PathHelper::requireOnce('includes/PublicPageFalcon.php');
-PathHelper::requireOnce('includes/Pager.php');
+require_once(PathHelper::getIncludePath('includes/PublicPageFalcon.php'));
+require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 class PublicPage extends PublicPageFalcon {
     

@@ -1,13 +1,13 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/pages_class.php');
-	PathHelper::requireOnce('data/posts_class.php');
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/locations_class.php');
-	PathHelper::requireOnce('data/videos_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/pages_class.php'));
+	require_once(PathHelper::getIncludePath('data/posts_class.php'));
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/locations_class.php'));
+	require_once(PathHelper::getIncludePath('data/videos_class.php'));
 
 	header("Content-Type: application/xml; charset=UTF-8");
 

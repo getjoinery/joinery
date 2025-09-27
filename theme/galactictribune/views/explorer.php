@@ -5,7 +5,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 	
-	PathHelper::requireOnce('data/points_class.php');
+	require_once(PathHelper::getIncludePath('data/points_class.php'));
 
 	echo 'turned off';
 	exit;

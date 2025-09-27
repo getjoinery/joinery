@@ -1,11 +1,11 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/products_class.php');
+	PathHelper::requireOnce('data/products_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -17,8 +17,7 @@
 	}
 
 	if($_POST){
-		
-			
+
 		if($_POST['bkn_usr_user_id_booked']){
 			$booking->set('bkn_usr_user_id_booked', $_POST['bkn_usr_user_id_booked']);
 		}
@@ -36,8 +35,7 @@
 		if($_POST['bkn_notes']){
 			$booking->set('bkn_notes', $_POST['bkn_notes']);		
 		}
-		
-		
+
 		$editable_fields = array();
 
 		foreach($editable_fields as $field) {
@@ -84,8 +82,6 @@
 		$content = $content_version->get('cnv_content');
 		$title = $content_version->get('cnv_title');
 	}	
-	
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -108,8 +104,7 @@
 	$validation_rules['bkn_name']['required']['value'] = 'true';
 	$validation_rules['bkn_external_register_link']['minlength']['value'] = '5';
 	echo $formwriter->set_validate($validation_rules);		
-	
-	
+
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_booking_edit');
 
 	if($booking->key){
@@ -119,7 +114,6 @@
 	
 	//echo $formwriter->textinput('Booking name', 'bkn_name', NULL, 100, $title, '', 255, '');
 
-	
 	/*
 	$optionvals = array("Created"=>1, "Completed"=>2, "Cancelled"=>3);
 	echo $formwriter->dropinput("Status", "bkn_status", "ctrlHolder", $optionvals, $booking->get('bkn_status'), '', FALSE);	
@@ -149,8 +143,7 @@
 	 */
 
 	echo $formwriter->textinput('Notes', 'bkn_notes', NULL, 100, $booking->get('bkn_notes'), '', 255, '');
-	
- 
+
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();

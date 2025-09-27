@@ -1,6 +1,6 @@
 <?php
 // Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-PathHelper::requireOnce('includes/FormWriterTailwind.php');
+require_once(PathHelper::getIncludePath('includes/FormWriterTailwind.php'));
 
 /**
  * FormWriter implementation for Galactic Tribune theme

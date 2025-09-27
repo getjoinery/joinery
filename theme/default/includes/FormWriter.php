@@ -1,6 +1,6 @@
 <?php
 // PathHelper, Globalvars, DbConnector and other core files are always available - no need to require them
-PathHelper::requireOnce('includes/FormWriterHTML5.php');
+require_once(PathHelper::getIncludePath('includes/FormWriterHTML5.php'));
 
 
 // THESE FUNCTIONS GENERATE FORM INPUTS

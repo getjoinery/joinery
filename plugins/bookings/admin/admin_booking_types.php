@@ -1,11 +1,10 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
+	
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+
+	PathHelper::requireOnce('data/users_class.php');
 	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
 

@@ -1,10 +1,10 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	
-	PathHelper::requireOnce('includes/Pager.php');
+	require_once(PathHelper::getIncludePath('includes/Pager.php'));
 	// LibraryFunctions is now guaranteed available - line removed
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	PathHelper::requireOnce('data/posts_class.php'); 	
+	require_once(PathHelper::getIncludePath('data/posts_class.php')); 	
 
 	$session = SessionControl::get_instance();
 	$session->set_return();

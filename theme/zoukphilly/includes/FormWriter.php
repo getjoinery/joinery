@@ -1,5 +1,5 @@
 <?php
-PathHelper::requireOnce('includes/FormWriterTailwind.php');
+require_once(PathHelper::getIncludePath('includes/FormWriterTailwind.php'));
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 

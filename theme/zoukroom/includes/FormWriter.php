@@ -1,5 +1,5 @@
 <?php
-PathHelper::requireOnce('includes/FormWriterBootstrap.php');
+require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
 
 // THESE FUNCTIONS GENERATE FORM INPUTS
 

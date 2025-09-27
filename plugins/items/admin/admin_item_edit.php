@@ -1,11 +1,11 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/items_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/groups_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/content_versions_class.php');
+	PathHelper::requireOnce('data/items_class.php');
+	PathHelper::requireOnce('data/groups_class.php');
+	PathHelper::requireOnce('data/content_versions_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -45,8 +45,7 @@
 		if(!$item->key){
 			$item->set('itm_usr_user_id',$session->get_user_id());
 		}	
-				
-		
+
 		$item->prepare();
 		$item->save();
 		$item->load();
@@ -89,11 +88,8 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "Edit Item";
 	$page->begin_box($pageoptions);
-	
-	
 
 	echo '<div class="row">
     <div class="col-md-8">
@@ -124,7 +120,6 @@
 		//$tags = implode(', ', $item_tags);
 	}
 
-	
 	echo $formwriter->textinput('Item name', 'itm_title', NULL, 100, $title, '', 255, '');	
 	
 	echo $formwriter->textinput('Short description (optional)', 'itm_short_description', NULL, 100, $item->get('itm_short_description'), '', 255, '');	
@@ -134,12 +129,10 @@
 	if(!$item->get('itm_link') || $_SESSION['permission'] == 10){
 		echo $formwriter->textinput('Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir').'/blog/', 'itm_link', NULL, 100, $item->get('itm_link'), '', 255, '');	
 	}	
-	
-	
+
 	$optionvals = array("No"=>0, "Yes"=>1);
 	echo $formwriter->dropinput("Published", "itm_is_published", "ctrlHolder", $optionvals, $item->get('itm_is_published'), '', FALSE);
 
-	
 	echo $formwriter->textbox('Item content', 'itm_body', 'ctrlHolder', 5, 80, $content, '', 'yes');
 
 	echo $formwriter->start_buttons();
@@ -177,7 +170,6 @@
 	</div>
 </div>	';
 	$page->end_box();
-	
 
 	$page->admin_footer();
 

@@ -5,7 +5,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
-	PathHelper::requireOnce('data/page_contents_class.php');
+	require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 	require_once(PathHelper::getThemeFilePath('events_logic.php', 'logic'));
 	$page_vars = events_logic($_GET, $_POST);
 	$events = $page_vars['events'];

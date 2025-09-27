@@ -1,6 +1,6 @@
 <?php
 	
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('subscription_cancel_logic.php', 'logic', 'system', null, 'controld'));	

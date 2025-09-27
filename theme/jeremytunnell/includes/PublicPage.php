@@ -1,6 +1,6 @@
 <?php
 // PathHelper is guaranteed to be available - loaded as core dependency by serve.php
-PathHelper::requireOnce('includes/PublicPageBase.php');
+require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 
 class PublicPage extends PublicPageBase {
 

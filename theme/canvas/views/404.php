@@ -1,6 +1,6 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page = new PublicPage();

@@ -1,9 +1,9 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
+	PathHelper::requireOnce('includes/AdminPage.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/item_relations_class.php');
+	PathHelper::requireOnce('data/item_relations_class.php');
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(7);
@@ -22,7 +22,6 @@
 	)
 	);
 
-		
 	$item_relations = new MultiProductGroup();
 	$item_relations->load();
 
@@ -44,7 +43,6 @@
 	}
 
 	$page->endtable();
-		
 
 	$page->admin_footer();
 

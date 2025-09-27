@@ -1,16 +1,16 @@
 <?php
 
 function rules_logic($get_vars, $post_vars){
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 	
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/includes/ControlDHelper.php');
+	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	
+	PathHelper::requireOnce('plugins/controld/includes/ControlDHelper.php');
 
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldaccounts_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctlddevices_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldprofiles_class.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldrules_class.php');
+	PathHelper::requireOnce('data/users_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctldaccounts_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctlddevices_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctldprofiles_class.php');
+	PathHelper::requireOnce('plugins/controld/data/ctldrules_class.php');
 
 	$page_vars = array();	
 
