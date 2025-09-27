@@ -1,9 +1,8 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 // ErrorHandler.php no longer needed - using new ErrorManager system
 PathHelper::requireOnce('includes/AdminPage.php');
-PathHelper::requireOnce('includes/SessionControl.php');
+
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('data/plugins_class.php');
 PathHelper::requireOnce('data/users_class.php');
@@ -145,7 +144,7 @@ if ($action || $_POST) {
                 
             } elseif ($action === 'uninstall') {
                 // Check if plugin is currently the active theme provider
-                PathHelper::requireOnce('includes/PluginHelper.php');
+                
                 try {
                     $plugin_helper = PluginHelper::getInstance($plugin_name);
                     if ($plugin_helper->isActiveThemeProvider()) {
@@ -369,7 +368,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     
                     // Check if this is the active theme provider
                     try {
-                        PathHelper::requireOnce('includes/PluginHelper.php');
+                        
                         $plugin_helper = PluginHelper::getInstance($plugin['name']);
                         if ($plugin_helper->isActiveThemeProvider()) {
                             $status_cell .= ' <span class="badge bg-primary">Active Theme Provider</span>';
@@ -402,7 +401,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // Check if this plugin is the active theme provider
                     $is_active_theme_provider = false;
                     try {
-                        PathHelper::requireOnce('includes/PluginHelper.php');
+                        
                         $plugin_helper = PluginHelper::getInstance($plugin['name']);
                         $is_active_theme_provider = $plugin_helper->isActiveThemeProvider();
                     } catch (Exception $e) {
@@ -440,8 +439,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                             $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
                         }
                     }
-                    
-                    
+
                     if (!empty($actions)) {
                         $action_cell = '<div class="dropdown">';
                         $action_cell .= '<button class="btn btn-falcon-default dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
@@ -558,8 +556,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     </div>
                 </div>
             </div>
-            
-            
+
         <?php endif; ?>
         
         <div class="card mt-4">

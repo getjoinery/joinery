@@ -1,9 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
@@ -25,8 +24,7 @@
 	if($_SESSION['permission'] < 10){
 		$searches['deleted'] = false;
 	}
-	
-	
+
 	if($searchterm) {
 		if(is_numeric($searchterm)) {
 			$searches['event_id'] = $searchterm;
@@ -35,9 +33,7 @@
 			$searches['name_like'] = $searchterm;
 		}
 	}
-	
 
-	
 	if($_REQUEST['filter'] == 'all'){
 		$breadcrumb_array = array('Events'=>'All Events');
 	}
@@ -52,8 +48,6 @@
 		$searches['user_id'] = $user_id;
 	}
 	*/
-	
-
 
 	$events = new MultiEvent(
 		$searches,
@@ -62,7 +56,6 @@
 		$offset);
 	$events->load();	
 	$numrecords = $events->count_all();	
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -74,9 +67,6 @@
 		'session' => $session,
 	)
 	);	
-	
-
-
 
 	$headers = array("Start time", "Event",  "Published", "Registration", "Registrants", "Waiting List");
 	$altlinks = array('New Event'=>'/admin/admin_event_edit');
@@ -91,8 +81,7 @@
 			'filter' => $filter
 		)
 	);	
-	
-	
+
 	$table_options = array(
 		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name", 'Start Time'=>'start_time'),
 		'filteroptions'=>array("Future Events"=>"future", "All Events"=>"all"),
@@ -140,15 +129,10 @@
 		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numregistrants.' registered</a>');
 		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numwaitinglists.' on waiting list</a>');
 
-
-		
-		
 		$page->disprow($rowvalues);
 	}
 
-
 	$page->endtable($pager);
 	$page->admin_footer();
-
 
 ?>

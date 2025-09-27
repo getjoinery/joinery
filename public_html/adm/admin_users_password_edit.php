@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -23,13 +22,9 @@
 			require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
 			throw new ValidationException($e->getMessage());
 		}
-		
-		
-	
-		
+
 	}
 
-	
 	$page = new AdminPage();
 
 	$session = SessionControl::get_instance();
@@ -55,7 +50,6 @@
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	echo $formwriter->begin_form("form1", "post", "/admin/admin_users_password_edit");
 	echo $formwriter->hiddeninput("usr_user_id", $user->key);
-
 
 	echo '<fieldset><h4>Change password for '.$user->display_name().'</h4>';
 		echo '<div class="fields full">';

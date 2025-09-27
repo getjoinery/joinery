@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -31,7 +30,6 @@
 		exit();				
 	}
 
-	
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -67,9 +65,6 @@
 	else{
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
-	
-	
-
 
 	//echo '<iframe src="'.$page_content->get('pac_body').'" width="100%" height="500" style="border:1px solid black;"></iframe>';
 	echo $page_content->get('pac_body');
@@ -78,5 +73,4 @@
 	
 	$page->admin_footer();
 ?>
-
 

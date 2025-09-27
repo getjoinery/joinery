@@ -1,5 +1,4 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
@@ -19,12 +18,10 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		$api_key = new ApiKey(NULL);
 	}
 
-	
 	if($_POST){
 
 		$editable_fields = array('apk_name','apk_is_active','apk_permission', 'apk_ip_restriction');
 
-		
 		foreach($editable_fields as $field) {
 			$api_key->set($field, $_POST[$field]);
 		}
@@ -58,11 +55,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		return;
 	}
 
-
-	
-	
-
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -75,19 +67,15 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	)
 	);	
 
-	
 	$pageoptions['title'] = "Edit ApiKey";
 	$page->begin_box($pageoptions);
 
-	
 	// Editing an existing email
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
 	$validation_rules = array();
 	$validation_rules['apk_name']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
-
-
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_api_key_edit');
 
@@ -108,7 +96,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	echo $formwriter->datetimeinput('Key start time (optional)', 'apk_start_time', 'ctrlHolder', LibraryFunctions::convert_time($api_key->get('apk_start_time'), 'UTC', $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
 
-	 
 	echo $formwriter->datetimeinput('Key expires time (optional)', 'apk_expires_time', 'ctrlHolder', LibraryFunctions::convert_time($api_key->get('apk_expires_time'), 'UTC', $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
 	
 	echo $formwriter->start_buttons();
@@ -116,11 +103,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
 
-
-
-
 	$page->end_box();
-	
 
 	$page->admin_footer();
 

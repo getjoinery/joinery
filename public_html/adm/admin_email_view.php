@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -12,7 +11,6 @@
 
 	$page = new AdminPage();
 	$page->admin_header(31);
-	
 
 	echo '<h2>Email</h2>';
 	echo '<a href="/admin/admin_user?usr_user_id='.$email->get('eml_usr_user_id').'">back to user</a><br /><br />';
@@ -24,7 +22,6 @@
 	echo '<p>Subject: '.$email->get('eml_subject').'</p>';
 	
 	echo '<p>'.$email->get('eml_message_html').'</p>';
-	
 
 	$page->admin_footer();
 

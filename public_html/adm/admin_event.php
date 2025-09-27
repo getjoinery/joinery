@@ -1,11 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
+
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
 	PathHelper::requireOnce('data/address_class.php');
@@ -76,7 +74,6 @@
 	$numwebsiteclick = $websiteclick->count_all();
 	*/
 
-
 	//REGISTRANTS
 	$rnumperpage = 50;
 	$roffset = LibraryFunctions::fetch_variable('roffset', 0, 0, '');
@@ -132,8 +129,6 @@
 	$settings = Globalvars::get_instance();
 	$webDir = $settings->get_setting('webDir');
 
-
-
 		$options['title'] = $event->get('evt_name');
 			$options['altlinks'] = array();
 			if(!$event->get('evt_delete_time')) {
@@ -155,7 +150,6 @@
 			
 		$page->begin_box($options);
 	?>
-	
 
               <p class="text-muted text-center"><?php echo $event->get_time_string('event', 'M j, Y'); ?></p>
 			  
@@ -188,7 +182,6 @@
 				?>
 				</p>
 
-
 <?php $page->end_box();
 
 	?>
@@ -197,8 +190,6 @@
 	  <li class="nav-item"><a class="nav-link" id="profile-tab" href="/admin/admin_event_sessions?evt_event_id=<?php echo $event->key; ?>" role="tab" aria-selected="false">Sessions</a></li>
 	</ul>
 	<?php
-
-
 
 	$headers = array("Registrant", "Registered on", "Order", "Email Verified",  "Expires", "Action");
 	$altlinks = array();
@@ -249,8 +240,7 @@
 			$row .= '<br>';
 		}
 		array_push($rowvalues, $row);
-		
-		
+
 		$evr_verified = LibraryFunctions::bool_to_english($registrant->get('usr_email_is_verified'),"Verified", "Unverified");
 		array_push($rowvalues, $evr_verified);	
 		
@@ -275,7 +265,6 @@
 		if($event_registrant->get('evr_health_notes')){
 			$reginfo .= '<br>Health notes: '. $event_registrant->get('evr_health_notes');
 		}		
-
 
 		if($event_registrant->get('evr_extra_info_completed') || !$event->get('evt_collect_extra_info')){
 			array_push($rowvalues, $reginfo);
@@ -328,7 +317,6 @@
 			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
 			array_push($rowvalues, LibraryFunctions::convert_time($waiting_list->get('ewl_create_time'), 'UTC', $session->get_timezone()));
 
-			
 			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
 			<input type="hidden" class="hidden" name="action" id="action" value="remove_from_waiting_list" />
 			<input type="hidden" class="hidden" name="ewl_waiting_list_id" id="ewl_waiting_list_id" value="'.$waiting_list->key.'" />
@@ -341,8 +329,7 @@
 
 		$page->endtable($wpager);	
 	}
-	
-	
+
 	//MESSAGES
 	$mnumperpage = 20;
 	$moffset = LibraryFunctions::fetch_variable('moffset', 0, 0, '');
@@ -359,8 +346,7 @@
 	$nummessages = $messages->count_all();
 	$messages->load();
 	$mpager = new Pager(array('numrecords'=>$nummessages, 'numperpage'=> $mnumperpage), 'w');
-	
-	
+
 	$headers = array("Sender", "Message", "Time");
 	$altlinks = array();
 	if(!$event->get('evt_delete_time')) {
@@ -396,9 +382,6 @@
 	*/
 /*
 	?>
-
-
-
 
 		<h2>Recurring Emails Sent</h2>
 
@@ -469,7 +452,6 @@
 	$page->endtable();
 
 */
-
 
 	$page->admin_footer();
 

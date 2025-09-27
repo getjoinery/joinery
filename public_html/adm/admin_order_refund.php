@@ -1,12 +1,10 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/StripeHelper.php');
 	PathHelper::requireOnce('/data/address_class.php');
 	PathHelper::requireOnce('/data/users_class.php');
-	
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -30,14 +28,11 @@
 	)
 	);
 
-	
 	if ($_POST['confirm']){
-		
-			
+
 		//HOW TO REFUND PART OF A CHARGE https://stripe.com/docs/refunds#issuing
 		$refund = $stripe_helper->refund_charge($_POST['charge_id'], $_POST['refund_amount']);
-		
-		
+
 		$charge = $stripe_helper->get_charge($_POST['charge_id']);
 		
 		$order_item = new OrderItem($_REQUEST['order_item_id'], TRUE); 
@@ -46,16 +41,13 @@
 		$order_item->set('odi_refund_amount', $_POST['refund_amount'] + $refund_amount_before);
 		$order_item->set('odi_refund_note', $_POST['odi_refund_note']);
 		$order_item->set('odi_refund_time', 'now()');
-		
-		
+
 		$order = $order_item->get_order();
 		$order->set('ord_refund_time', 'now()');
 		$order->set('ord_refund_amount', $charge->amount_refunded/100);	
 
 		$order_item->save();
 		$order->save();
-		
-
 
 		$pageoptions['title'] = 'Refund confirm';
 		$page->begin_box($pageoptions);
@@ -103,14 +95,10 @@ else{
 	$session = SessionControl::get_instance();
 	$session->set_return("/admin/admin_order_refund");
 
-
-
-	
 	$pageoptions['title'] = 'Refund charge';
 	$page->begin_box($pageoptions);
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
-	
 
 	$validation_rules = array();
 	$validation_rules['refund_amount']['required']['value'] = 'true';
@@ -137,23 +125,13 @@ else{
 	else{
 		echo '<p>You cannot refund any more.</p>';
 	}
-	
-
 
 		echo '</div>';
 	echo '</fieldset>';
 	echo $formwriter->end_form();
 
-
-
-	
-
-
 }
 	$page->end_box();
 $page->admin_footer();
 ?>
-
-
-
 

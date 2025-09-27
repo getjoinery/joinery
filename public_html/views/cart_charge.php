@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('cart_charge_logic.php', 'logic'));
 

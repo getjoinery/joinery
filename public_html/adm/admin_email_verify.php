@@ -1,8 +1,7 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/Activation.php');
 	PathHelper::requireOnce('data/users_class.php');
 
@@ -22,7 +21,6 @@
 		}
 		Activation::email_activate_send($user);
 
-
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(
@@ -40,8 +38,7 @@
 		$page->begin_box($pageoptions);
 		
 		echo '<p>Activation email sent.</p>';
-		
-		
+
 		$page->end_box();
 
 		$page->admin_footer();

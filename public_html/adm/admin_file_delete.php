@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -18,7 +17,6 @@
 
 	$file = new File($_GET['fil_file_id'], TRUE);
 	$user = new User($file->get('fil_usr_user_id'), TRUE);
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -61,11 +59,9 @@
 	echo '</div>';
 	
 	$formwriter->end_form();	
-	
 
 	$page->end_box();
 	
 	$page->admin_footer();
 ?>
-
 

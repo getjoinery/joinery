@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -20,8 +19,7 @@
 	}
 
 	if($_POST){
-		
-		
+
 		if($_POST['evt_short_description']){
 				$_POST['evt_short_description'] = $_POST['evt_short_description'];
 		}
@@ -68,8 +66,6 @@
 			$_POST['evt_loc_location_id'] = NULL;
 		}
 
-	
-		
 		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_survey_required','evt_loc_location_id');
 
 		foreach($editable_fields as $field) {
@@ -102,8 +98,7 @@
 		$event->prepare();
 		$event->save();
 		$event->load();
-				
-		
+
 		LibraryFunctions::redirect('/admin/admin_event?evt_event_id='.$event->key);
 		return;
 	}
@@ -125,8 +120,6 @@
 		$content = $content_version->get('cnv_content');
 		$title = $content_version->get('cnv_title');
 	}	
-	
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -146,7 +139,6 @@
     <div class="col-md-8">
       <div class="p-3">';
 
-
 	// Editing an existing event
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
@@ -154,8 +146,7 @@
 	$validation_rules['evt_name']['required']['value'] = 'true';
 	$validation_rules['evt_external_register_link']['minlength']['value'] = '5';
 	echo $formwriter->set_validate($validation_rules);		
-	
-	
+
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_event_edit');
 
 	if($event->key){
@@ -175,7 +166,6 @@
 	echo $formwriter->imageinput("Main image", "evt_fil_file_id", "ctrlHolder", $optionvals, $event->get('evt_fil_file_id'), '', TRUE, TRUE, FALSE, TRUE);	
 	
 	//echo $formwriter->textinput('Picture link', 'evt_picture_link', NULL, 100, $event->get('evt_picture_link'), '', 255, '');
-	
 
 	$locations = new MultiLocation(
 		array('deleted'=>false, 'published'=>true),
@@ -198,16 +188,14 @@
 				$("#evt_location").val('');				
 			}		
 		}
-		
-	
+
 		$(document).ready(function() {
 			set_choices();
 			$("#evt_loc_location_id").change(function() {	
 				set_choices();
 			});	
 		});
-	
-		
+
 		</script>
 		<?php
 		$optionvals = $locations->get_dropdown_array();
@@ -217,14 +205,12 @@
 	else{
 		echo $formwriter->textinput('Location', 'evt_location', NULL, 100, $event->get('evt_location'), '', 255, '');
 	}
-	
 
 	echo $formwriter->textinput('Max signups (number)', 'evt_max_signups', NULL, 100, $event->get('evt_max_signups'), '', 255, '');
 
 	echo $formwriter->textinput('Event short description (no html)', 'evt_short_description', NULL, 100, $event->get('evt_short_description'), '', 255, '');
 	echo $formwriter->textinput('External register link (if needed)', 'evt_external_register_link', NULL, 100, $event->get('evt_external_register_link'), '', 255, '');
 
-		
 	$users = new MultiGroupMember(
 		array(
 			'group_id' => 27,
@@ -236,8 +222,7 @@
 	$optionvals = $users->get_user_dropdown_array();
 
 	echo $formwriter->dropinput('Led by', 'evt_usr_user_id_leader', 'ctrlHolder', $optionvals, $event->get('evt_usr_user_id_leader'), '', 'None');
-	
-	
+
 	//HANDLE DEFAULT timezone
 	if($event->get('evt_timezone')){
 		$timezone = $event->get('evt_timezone');
@@ -251,8 +236,6 @@
 	$optionvals = Address::get_timezone_drop_array();
 	echo $formwriter->dropinput("Event Time Zone", "evt_timezone", "ctrlHolder", $optionvals, $timezone, '', FALSE);	
 
-	
-	
 	$optionvals = array("Active"=>1, "Completed"=>2, "Cancelled"=>3);
 	echo $formwriter->dropinput("Status", "evt_status", "ctrlHolder", $optionvals, $event->get('evt_status'), '', FALSE);	
 	
@@ -266,7 +249,6 @@
 	
 	$optionvals = array("Hidden"=>0, "Live"=>1, "Live but unlisted"=>2);
 	echo $formwriter->dropinput("Visibility", "evt_visibility", "ctrlHolder", $optionvals, $event->get('evt_visibility'), '', FALSE);
-
 
 	$optionvals = array("Closed"=>0, "Open"=>1);
 	echo $formwriter->dropinput("Registration", "evt_is_accepting_signups", "ctrlHolder", $optionvals, $event->get('evt_is_accepting_signups'), '', FALSE);
@@ -290,7 +272,6 @@
 	 ?>
 	<script type="text/javascript">
 
-
 		function set_survey_choices(){
 			var value = $("#evt_svy_survey_id").val();
 			if(value == ''){ 	
@@ -300,8 +281,7 @@
 				$("#evt_survey_required_container").show();				
 			}			
 		}
-		
-	
+
 		$(document).ready(function() {
 			set_survey_choices();
 			$("#evt_svy_survey_id").change(function() {	
@@ -317,11 +297,9 @@
 	
 	$optionvals = array("Condensed (all on one page)"=>1, "Separate (separate pages for each session)"=>2);
 	echo $formwriter->dropinput("Session display style", "evt_session_display_type", "ctrlHolder", $optionvals, $event->get('evt_session_display_type'), '', FALSE);
-		
 
 	echo $formwriter->datetimeinput('Event start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evt_start_time', 'ctrlHolder', LibraryFunctions::convert_time($event->get('evt_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
-	 
 	echo $formwriter->datetimeinput('Event end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local'). ' timezone)', 'evt_end_time', 'ctrlHolder', LibraryFunctions::convert_time($event->get('evt_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
 
 	//echo $formwriter->textinput('Max attendees:', 'evt_max_purchase_count', 'ctrlHolder', 100, $event->get('evt_max_purchase_count'), '', 255, '');
@@ -336,7 +314,6 @@
 	echo $formwriter->end_buttons();
 
 	echo $formwriter->end_form();
-
 
 	echo '    </div>
     </div>

@@ -1,10 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/ShoppingCart.php');
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-
-
 
 	$session = SessionControl::get_instance();
 	$session_id = $_GET['session_id']; 
@@ -35,8 +33,7 @@
 		foreach($receipts as $rkey => $receipt) {
 			$total += $receipt['price'];
 			$rowvalues = array();
-			
-			
+
 			//array_push($rowvalues, $rkey);
 			array_push($rowvalues, $receipt['pname'] . ' ('. $receipt['name']. ') ');
 			array_push($rowvalues, '$' . number_format($receipt['price'], 2, '.', ','));
@@ -63,7 +60,6 @@
 		<?php
 		
 	}
-
 
 	echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();

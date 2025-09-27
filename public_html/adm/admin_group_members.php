@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/groups_class.php');
@@ -13,8 +12,7 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
-	
-	
+
 	if($_POST['action'] == 'add_to_group'){
 		//ADD THE USER TO A GROUP
 		$group = new Group($_POST['grp_group_id'], TRUE);
@@ -39,8 +37,6 @@
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
-
-
 	$group_members = new MultiGroupMember(
 		array('group_id' => $group->key),  //SEARCH CRITERIA
 		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
@@ -50,9 +46,6 @@
 	);
 	$numrecords = $group_members->count_all();
 	$group_members->load();
-
-
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -67,8 +60,6 @@
 		'session' => $session,
 	)
 	);
-
-
 
 	$headers = array('User', 'Action');
 	$altlinks = array();
@@ -101,7 +92,6 @@
 */
 		array_push($rowvalues, $user->display_name());
 
-
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_group" />
 		<input type="hidden" class="hidden" name="grm_group_member_id" value="'.$group_member->key.'" />
@@ -116,5 +106,4 @@
 
 	$page->admin_footer();
 ?>
-
 

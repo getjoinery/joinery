@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/coupon_codes_class.php');
@@ -43,12 +43,10 @@
 	$options['altlinks'] += array('Delete Coupon Code' => '/admin/admin_coupon_code?action=remove&ccd_coupon_code_id='.$coupon_code->key);
 	$page->begin_box($options);
 
-
 	echo '<br /><strong>Code:</strong> '.$coupon_code->get('ccd_code') . ' (' . LibraryFunctions::bool_to_english($coupon_code->get('ccd_is_active'), "Active", "Inactive") . ')<br />';		
 	
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
-	
 	$settings = Globalvars::get_instance();
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 	
@@ -101,5 +99,4 @@
 
 	$page->admin_footer();
 ?>
-
 

@@ -1,10 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
-	PathHelper::requireOnce('/includes/DbConnector.php');
 
 	PathHelper::requireOnce('/data/phone_number_class.php');
 
@@ -54,7 +52,6 @@
 	echo $formwriter->new_form_button('Resend_gray');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();												
-
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form8', 'admin');
 

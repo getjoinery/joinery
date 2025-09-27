@@ -1,12 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
 
 	PathHelper::requireOnce('data/files_class.php');
 	PathHelper::requireOnce('data/mailing_lists_class.php');
@@ -38,7 +35,6 @@
 		exit();				
 	}
 
-
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'mailing_list_registrant_id', 0, '');
@@ -58,7 +54,6 @@
 
 	$session->set_return();
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -71,7 +66,6 @@
 		'session' => $session,
 	)
 	);	
-
 
 	$options['title'] = 'Mailing List: '.$mailing_list->get('mlt_name');
 	$options['altlinks'] = array();
@@ -98,8 +92,7 @@
 	}
 	else{
 		echo 'Status: Active'.'<br />';
-		
-		
+
 		if($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC_UNLISTED){
 			echo 'Visibility: Public, Unlisted (<a href="'. $mailing_list->get_url(). '">'. $mailing_list->get_url(). '</a>)<br />';
 		}
@@ -125,8 +118,7 @@
 	else{
 		echo 'Welcome emails are inactive.<br />';
 	}	
-	
-	
+
 	if($mailing_list->get('mlt_mailchimp_list_id')){
 		echo 'Mailchimp integration active.  Mailchimp ID: '.$mailing_list->get('mlt_mailchimp_list_id').'<br />';
 	}
@@ -139,7 +131,6 @@
 	
 	$headers = array("Users",  "Action");
 
-
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$altlinks = array();
 	 $box_vars =	array(
@@ -147,14 +138,12 @@
 		'title' => 'Users in '. $mailing_list->get('mlt_name')
 	);
 	$page->tableheader($headers, $box_vars, $pager);
-	
 
 	foreach($registrants as $registrant){
 		$user = new User($registrant->get('mlr_usr_user_id'), TRUE);
 		$rowvalues=array();
 		
 		array_push($rowvalues, $user->display_name());
-	
 
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_mailing_list?mlt_mailing_list_id='.$mailing_list->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="removeregistrant" />
@@ -166,9 +155,7 @@
 		$page->disprow($rowvalues);
 
 	}
-		
 
-		
 		$page->endtable($pager);
 
 	$page->admin_footer();

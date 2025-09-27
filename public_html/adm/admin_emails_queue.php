@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
 	
@@ -76,7 +75,6 @@
 				
 		}
 
-		
 		//NOW REMOVE THE RECIPIENTS WHO NEED TO BE REMOVED
 		$recipient_groups = $email->get_recipient_groups('remove');
 		
@@ -109,9 +107,7 @@
 		//SUBTRACT THE REMOVAL LIST AND REMOVE DUPLICATES
 		$final_recipients = array_diff($queued_recipients, $removal_list);
 	}
-	
 
-	
 	//LOAD THE RECIPIENTS INTO THE QUEUE
 	$total_num_queued = 0;
 	foreach($final_recipients as $final_recipient){
@@ -149,6 +145,5 @@
 $page->end_box();
 $page->admin_footer();
 exit();		
-	
-	
+
 ?>

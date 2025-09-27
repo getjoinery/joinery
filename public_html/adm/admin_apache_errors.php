@@ -1,29 +1,23 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
-	
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/phone_number_class.php');
-
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(9);
 	$session->set_return();
-	
-	
+
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'create_time', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -35,7 +29,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		'session' => $session,
 	)
 	);
-
 
 	$headers = array("Error");
 	$altlinks = array();
@@ -64,7 +57,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 				array_push($rowvalues, $line);
 			}
 
-
 			$page->disprow($rowvalues);
 			$linenum++;
 			if($linenum == 50){
@@ -81,5 +73,4 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	$page->admin_footer();
 ?>
-
 

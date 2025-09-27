@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
@@ -15,9 +14,7 @@
 
 	echo "<?xml version='1.0' encoding='UTF-8'?>\n";
 	echo "<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>\n";
-	
 
-	
 	$settings = Globalvars::get_instance();
 	
 	if($settings->get_setting('page_contents_active')){
@@ -40,7 +37,6 @@
 		}
 	}
 
-
 	if($settings->get_setting('events_active')){   
 		
 		$sort = 'start_time';
@@ -58,7 +54,6 @@
 			'AND');
 		$events->load();	
 
-
 		foreach ($events as $event){
 			echo "    <url>\n";
 			echo "        <loc>" . LibraryFunctions::get_absolute_url(htmlspecialchars($event->get_url(), ENT_XML1, 'UTF-8')) . "</loc>\n";
@@ -68,7 +63,6 @@
 			echo "    </url>\n";
 		}
 
-		
 		$sort = 'location_id';
 		$sdirection = 'ASC';
 
@@ -92,8 +86,6 @@
 			echo "    </url>\n";
 		}
 	}
-
-	
 
 	if($settings->get_setting('blog_active')){
 	

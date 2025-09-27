@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('cart_logic.php', 'logic'));
@@ -17,7 +17,6 @@ $page_vars = $page_vars->data;
 	$settings = Globalvars::get_instance();
 	$require_login = $page_vars['require_login'];
 
-
 	$page = new PublicPage();
 	$page->public_header(array(
 		'is_valid_page' => $is_valid_page,
@@ -27,7 +26,6 @@ $page_vars = $page_vars->data;
 	echo PublicPage::BeginPage('Checkout');
 
 	?>
-
 
 <div class="bg-white">
   <div class="max-w-7xl mx-auto px-4 pt-4 pb-16 sm:px-6 sm:pt-8 sm:pb-24 lg:px-8 xl:px-2 xl:pt-14">
@@ -79,7 +77,6 @@ $page_vars = $page_vars->data;
 			}	
 			?>
 
-
             <!-- More products... -->
           </ul>
         </div>
@@ -110,7 +107,6 @@ $page_vars = $page_vars->data;
       </div>
 
       <div class="max-w-lg mx-auto w-full">
-	  
 
 		<?php									
 		if($cart->billing_user){	
@@ -183,7 +179,6 @@ $page_vars = $page_vars->data;
 				
 		}
 
-		
 		if($settings->get_setting('coupons_active')){
 			echo '<h2 class="text-lg font-medium text-gray-900">Coupon Codes</h2>';
 
@@ -201,7 +196,6 @@ $page_vars = $page_vars->data;
 				echo 'Applied: '.$coupon_code.' <a href="/cart?clear_coupon_code='.$coupon_code.'">remove</a><br><br>';
 			}
 
-
 			//DEBUG LIST ALL COUPONS
 			if(StripeHelper::isTestMode()){
 				echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
@@ -213,7 +207,6 @@ $page_vars = $page_vars->data;
 					echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
 					
 					echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary');
-
 
 					echo $formwriter->end_form();
 				}
@@ -246,7 +239,6 @@ $page_vars = $page_vars->data;
 		}
 		else{
 			if($cart->get_total() > 0 && $cart->billing_user['email']){			
-
 
 				if($settings->get_setting('checkout_type') == 'stripe_checkout'){	
 					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Stripe</h5>';
@@ -307,7 +299,6 @@ $page_vars = $page_vars->data;
   </div>
 </div>
 
-					
 	<script>
 	$(document).ready(function() {
 		// Disable all submit buttons after first click to prevent duplicate submissions

@@ -1,11 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
+
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
 	PathHelper::requireOnce('data/event_waiting_lists_class.php');
@@ -26,7 +24,6 @@
 		);
 	$numregistrants = $event_registrants->count_all();
 	$event_registrants->load();
-	
 
 	//WAITING LIST
 
@@ -37,7 +34,6 @@
 	$numwaitinglist = $waiting_lists->count_all();
 	$waiting_lists->load();
 
-	
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -56,12 +52,8 @@
 	$settings = Globalvars::get_instance();
 	$webDir = $settings->get_setting('webDir');
 
-
-
 		$options['title'] = $event->get('evt_name');
 		$options['altlinks'] = array();
-
-			
 
 	$pageoptions['title'] = "Emails of all registrants";
 	$page->begin_box($pageoptions);

@@ -1,7 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
 	
-	PathHelper::requireOnce('includes/Globalvars.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic'));
@@ -25,7 +23,6 @@ $page_vars = $page_vars->data;
 	$page->public_header($hoptions,NULL);
 
 	//echo PublicPage::BeginPage('My Profile', $hoptions);
-	
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'profilebox') {	
@@ -49,11 +46,7 @@ $page_vars = $page_vars->data;
 	} 
 	*/
 	?>
-	
 
-      
-	
-	
 	<div class="row g-3">
 		<div class="card mb-3"><img class="card-img-top" src="../../assets/img/generic/13.jpg" alt="" />
             <div class="card-body">
@@ -81,10 +74,7 @@ $page_vars = $page_vars->data;
             </div>
           </div>
 	 </div>
-	
-	
-	
-	
+
 		<div class="row g-3">
             <div class="col-lg-8">
               
@@ -441,8 +431,7 @@ $page_vars = $page_vars->data;
               </div>
             </div>
             <div class="col-lg-4">
-			
-			
+
 			  <div class="card mb-3">
 				<div class="card-body">
 				  <div class="row">
@@ -468,20 +457,16 @@ $page_vars = $page_vars->data;
 				  </div>
 				</div>
 			  </div>			
-			
-			
+
 			<?php
 			?>
-			
-              
+
               <div class="card mb-3">
                 <div class="card-header bg-body-tertiary">
                   <h5 class="mb-0">Events and Courses</h5>
                 </div>
                 <div class="card-body fs-10">
-				
-				
-				
+
 						<?php
 
 							if(!$page_vars['num_events']){
@@ -525,20 +510,11 @@ $page_vars = $page_vars->data;
 										</div>
 									  </div>
 
-										
 									<?php
 									
 								}
 							}
 						?>				
-				
-				
-				
-				
-				
-				
-				
-				
 
                   <div class="d-flex btn-reveal-trigger">
                     <div class="calendar"><span class="calendar-month">Dec</span><span class="calendar-day">16</span></div>
@@ -554,15 +530,6 @@ $page_vars = $page_vars->data;
                 <div class="card-footer bg-body-tertiary p-0 border-top"><a class="btn btn-link d-block w-100" href="../../app/events/event-list.html">All Events<span class="fas fa-chevron-right ms-1 fs-11"></span></a></div>
               </div>
 
-
-
-
-
-
-
-
-
-
           <!-- Subscriptions -->
 		  <?php
 			if($page_vars['subscriptions']){
@@ -572,9 +539,7 @@ $page_vars = $page_vars->data;
                   <h5 class="mb-0">Subscriptions</h5>
                 </div>
                 <div class="card-body fs-10">
-				
-				
-				
+
 						<?php
 						foreach($page_vars['subscriptions'] as $subscription){	
 								
@@ -613,22 +578,14 @@ $page_vars = $page_vars->data;
 						}
 
 						?>				
-				
-				
-				
-				
-				
-				
-				
-				  
+
                 </div>
                 <div class="card-footer bg-body-tertiary p-0 border-top"><a class="btn btn-link d-block w-100" href="/product/recurring-donation">New Subscription<span class="fas fa-chevron-right ms-1 fs-11"></span></a></div>
               </div>
 			 <?php
 			}
 			?>
-			  
-			  
+
 			  <!-- Orders -->
 			  <?php if($page_vars['settings']->get_setting('products_active')){ ?>
               <div class="card mb-3 ">
@@ -647,46 +604,26 @@ $page_vars = $page_vars->data;
 										  <p class="mb-1">Organized by <a href="#!" class="text-700"><?php echo  LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?></a></p>
 
 										  <p class="text-1000 mb-0"></p>
-	
-										  	
+
 										  <p class="text-1000 mb-0">Duration: 6:00AM - 5:00PM</p>Place: Cambridge Boat Club, Cambridge
 										  <div class="border-bottom border-dashed my-3"></div>
 										</div>
 									  </div>
 
-	
 				<?php
 				}
 				?>				
-						
 
-				
-				
-				
-				
-				
-
-				  
                 </div>
                 <div class="card-footer bg-body-tertiary p-0 border-top"><a class="btn btn-link d-block w-100" href="../../app/events/event-list.html">All Events<span class="fas fa-chevron-right ms-1 fs-11"></span></a></div>
               </div>			  
 			  			 <?php
 			}
 			?>
-			  
-			  
-			  
 
-			  
             </div> <!-- end column -->
-			
-			
+
           </div>
-
-
-
-
-
 
 		<?php
 

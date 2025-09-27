@@ -1,9 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/phone_number_class.php');
@@ -18,7 +17,6 @@
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
-
 	$search_criteria = array();
 	if(strstr($searchterm, '@')){
 		$search_criteria['email_like'] = $searchterm;
@@ -28,7 +26,6 @@
 		$fsearch = str_replace(' ', ' | ', $fsearch);
 
 		$user_id_list = array();
-
 
 		$phonesearch = preg_replace('/[^0-9]/', '', $searchterm);
 		if(strlen($phonesearch) >= 7) {
@@ -43,8 +40,6 @@
 				}
 			}
 		}
-
-
 
 		$search_criteria['user_id_list'] = $user_id_list;
 		if(strstr($searchterm, ' ')) {
@@ -92,7 +87,6 @@
 	)
 	);	
 
-
 	$headers = array("User", "Email", "Signup Date", "Email Verified");
 	
 	$altlinks = array();
@@ -128,7 +122,6 @@
 		array_push($rowvalues, $user->get('usr_email'));
 		array_push($rowvalues, LibraryFunctions::convert_time($user->get('usr_signup_date'), "UTC", $session->get_timezone(), 'M j, Y')); 
 
-
 		if($user->get('usr_email_is_verified')) {
 			$status = 'Verified';
 		} 
@@ -136,16 +129,12 @@
 			$status = 'Unverified';
 		}
 
-
 		array_push($rowvalues, $status);
 
 		$page->disprow($rowvalues);
 	}
 	$page->endtable($pager);
 
-
-
 	$page->admin_footer();
 ?>
-
 

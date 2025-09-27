@@ -1,8 +1,7 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/AdminPage.php');
-PathHelper::requireOnce('includes/SessionControl.php');
+
 PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/ErrorLogParser.php');
 PathHelper::requireOnce('includes/Pager.php');
@@ -68,7 +67,6 @@ if ($view === 'database') {
     $numrecords = count($all_errors);
     $file_errors = array_slice($all_errors, $offset, $numperpage);
 }	
-	
 
 $page->admin_header([
     'menu-id' => 'errors',
@@ -95,7 +93,6 @@ $page->admin_header([
 </div>
 
 <?php
-
 
 // Set up table based on view type
 if ($view === 'database') {
@@ -316,5 +313,4 @@ if ($view === 'grouped') {
 
 $page->admin_footer();
 ?>
-
 

@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -27,14 +27,10 @@
 		$product = new Product(NULL);
 	}
 
-
-
 	if ($_POST || $_REQUEST['action']) {
-		
-		
+
 		if ($_POST['action'] == 'add' || $_POST['action'] == 'edit') {
-			
-		
+
 			if($_POST['pro_requirements']){
 				$total_value = 0;
 				foreach ($_POST['pro_requirements'] as $choice => $value){
@@ -43,12 +39,8 @@
 				$product->set('pro_requirements', $total_value);
 			}
 
-
-
 			$product->save_requirement_instances($_POST['additional_pro_requirements']);
-			
 
-			
 			if($_POST['pro_evt_event_id'] == '' || $_POST['pro_evt_event_id'] == 0){
 				$product->set('pro_evt_event_id', NULL);
 
@@ -60,9 +52,7 @@
 			//MUST BE INTEGER
 			$product->set('pro_expires', (int)$_POST['pro_expires']);
 			$product->set('pro_prg_product_group_id', (int)$_POST['pro_prg_product_group_id']);
-			
 
-	
 			//PRICE MUST BE INTEGER
 			if($_POST['pro_grp_group_id']){
 				$_POST['pro_grp_group_id'] = (int)$_POST['pro_grp_group_id'];
@@ -71,8 +61,6 @@
 				$_POST['pro_grp_group_id'] = NULL;
 			}
 
-	
-			
 			//STORE THE PRODUCT SCRIPTS
 			$product->set('pro_product_scripts', NULL);
 			if(is_array($_POST['product_scripts'])){
@@ -95,8 +83,7 @@
 			}
 		
 			$product->prepare();
-			
-			
+
 			//IF STRIPE IS ENABLED, CREATE A PRODUCT 
 			if($settings->get_setting('checkout_type') != 'none'){
 				$stripe_helper = new StripeHelper();
@@ -127,8 +114,7 @@
 			
 			$product->save();
 			$product->load();
-			
-		
+
 		} 
 		
 		if ($_REQUEST['action'] == 'new_version') {
@@ -154,7 +140,6 @@
 			$product_version->prepare();
 			$product_version->save(); 
 		}
-		
 
 		if($_POST['json_confirm']){
 			echo json_encode($product->key);
@@ -219,8 +204,7 @@
 				$("#pro_price_container").hide();				
 			}			
 		}
-		
-	
+
 		$(document).ready(function() {
 			set_pricing_choices();
 			$("#pro_price_type").change(function() {	
@@ -235,7 +219,6 @@
 	
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_edit');
 
-
 	if($product->key){
 		$action = 'edit';
 		echo $formwriter->hiddeninput('p', $product->key);
@@ -247,22 +230,16 @@
 		echo $formwriter->hiddeninput('action', 'add');
 		$product_status = 1;
 	}
-	
 
 	$optionvals = array("Active"=>1, "Disabled"=>0 );
 	echo $formwriter->dropinput("Active?", "pro_is_active", "ctrlHolder", $optionvals, $product_status, '', FALSE);
 	echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
 
-
-
 	echo $formwriter->textbox('Short Description', 'pro_short_description', 'ctrlHolder', 5, 80, $product->get('pro_short_description'), '', 'yes');
 	echo $formwriter->textbox('Description', 'pro_description', 'ctrlHolder', 5, 80, $product->get('pro_description'), '', 'yes');
-	
 
-	
 	echo $formwriter->textinput('Digital item link', 'pro_digital_link', NULL, 100, $product->get('pro_digital_link'), '', 255, '');
 
-	
 	$events = new MultiEvent(
 		array('deleted'=>false, 'past'=>false),
 		NULL,		//SORT BY => DIRECTION
@@ -274,7 +251,6 @@
 		$optionvals = $events->get_dropdown_array();
 		echo $formwriter->dropinput("Event registration", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);
 	}
-
 
 	$groups = new MultiGroup(
 		array('category'=>'event'),  //SEARCH CRITERIA
@@ -288,8 +264,7 @@
 		$optionvals = $groups->get_dropdown_array();
 		echo $formwriter->dropinput("Event Bundle", "pro_grp_group_id", "ctrlHolder", $optionvals, $product->get('pro_grp_group_id'), '', TRUE);
 	}
-	
-	
+
 	if(!$pro_max_purchase_count_fill = $product->get('pro_max_purchase_count')){
 		$pro_max_purchase_count_fill = 0;
 	}
@@ -308,9 +283,7 @@
 	if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
 		echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir').'/product/', 'pro_link', NULL, 100, $product->get('pro_link'), '', 255, '');	
 	}
-	
 
-	
 	$pgs = new MultiProductGroup(
 		array(),
 		NULL,		//SORT BY => DIRECTION
@@ -349,7 +322,6 @@
 	
 	echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 
-
 	//PRODUCT SCRIPTS
 	$optionvals = array();
 	$optionvals = array_merge($optionvals, LibraryFunctions::getFunctionNamesFromFile(PathHelper::getRootDir() . '/logic/product_scripts_logic.php'));
@@ -369,7 +341,6 @@
 		$disabledvals = array();
 		echo $formwriter->checkboxList("Run these scripts upon purchase", 'product_scripts', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 	}
-
 
 	$instances = $product->get_requirement_instances(false);
 
@@ -396,12 +367,9 @@
 				}
 			}
 		}
-		
-		
+
 		echo $formwriter->checkboxList("Additional Info to collect at purchase", 'additional_pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 	}
-
-
 
 	//echo $formwriter->textinput('After Purchase Message', 'pro_after_purchase_message', 'ctrlHolder', 100, $product->get('pro_after_purchase_message'), '', 255);
 
@@ -428,6 +396,5 @@
 	$page->end_box();
 
 	$page->admin_footer();
-
 
 ?>

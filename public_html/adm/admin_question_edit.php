@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
@@ -86,18 +85,10 @@
 		$question->prepare();
 		$question->save();
 		$question->load();
-		
-
-		
 
 		LibraryFunctions::redirect('/admin/admin_question?qst_question_id='. $question->key);
 		return;		
 	}
-
-
-
-
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -112,11 +103,9 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "Edit Question";
 	$page->begin_box($pageoptions);
-	
-	
+
 	?>
 	<script type="text/javascript">
 	
@@ -191,7 +180,6 @@
 		});
 </script>
 	<?php
-	
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
@@ -200,22 +188,17 @@
 	$validation_rules['qst_type']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_question_edit');
 
-		
 	if($question->key){
 		echo $formwriter->hiddeninput('qst_question_id', $question->key);
 		echo $formwriter->hiddeninput('action', 'edit');
 	}
 	
 	echo $formwriter->textinput('Question', 'qst_question', NULL, 100, $question->get('qst_question'), '', 255, '');	
-	
-	
+
 	$optionvals = array("Short text"=>Question::TYPE_SHORT_TEXT, "Long Text"=>Question::TYPE_LONG_TEXT, 'Dropdown'=>Question::TYPE_DROPDOWN, 'Radio'=>Question::TYPE_RADIO, 'Checkbox'=>Question::TYPE_CHECKBOX, 'Checkbox List'=>Question::TYPE_CHECKBOX_LIST);
 	echo $formwriter->dropinput("Type", "qst_type", "ctrlHolder", $optionvals, $question->get('qst_type'), '', FALSE);
-	
 
 	$optionvals = array('Required'=>'required', 'Integer (Example: 5)'=>'integer', 'Decimal (Example: 5.5)'=>'decimal');
 	
@@ -243,17 +226,12 @@
 	echo $formwriter->textinput('Validation Maximum Value', 'max_value', NULL, 100, $max_value, '', 10, '');	
 	echo $formwriter->textinput('Validation Minimum Value', 'min_value', NULL, 100, $min_value, '', 10, '');	
 
-
-
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
 
-	
 	$page->end_box();
-
-
 
 		?>
 		<script>
@@ -266,8 +244,7 @@
 					$('#answersbox').hide();
 				}
 				else $('#answersbox').show(); 
-			
-			
+
 			$('#qst_type').change(function () {
 				if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_SHORT_TEXT; ?>) {
 					$('#answersbox').hide();
@@ -323,8 +300,6 @@
 			echo '</span>';
 			$page->end_box(); 
 		}
-	
-	
 
 	$page->admin_footer();
 

@@ -1,5 +1,4 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
@@ -37,7 +36,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		return;
 	}
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -51,7 +49,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	)
 	);	
 
-	
 	$pageoptions['title'] = "New Admin Menu Item";
 	$page->begin_box($pageoptions);
 
@@ -62,8 +59,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	$validation_rules['amu_menudisplay']['required']['value'] = 'true';	
 	$validation_rules['amu_min_permission']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
-
-
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_admin_menu_edit');
 

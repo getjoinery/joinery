@@ -1,9 +1,9 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
+
 // ErrorHandler.php no longer needed - using new ErrorManager system
 
 PathHelper::requireOnce('includes/AdminPage.php');
-PathHelper::requireOnce('includes/SessionControl.php');
+
 PathHelper::requireOnce('includes/Activation.php');
 
 PathHelper::requireOnce('data/users_class.php');
@@ -13,10 +13,8 @@ $session = SessionControl::get_instance();
 $session->check_permission(8);
 
 if ($_POST){
-	
-	
-	$user = User::CreateCompleteNew($_POST, $_POST['send_activation_email'], false, false);
 
+	$user = User::CreateCompleteNew($_POST, $_POST['send_activation_email'], false, false);
 
 	//NOW REDIRECT
 	$session = SessionControl::get_instance();
@@ -64,7 +62,6 @@ else{
 	echo $formwriter->set_validate($validation_rules);		
 	
 	echo $formwriter->begin_form("form1", "post", "/admin/admin_user_add");
-
 
 	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, NULL, "",32, "");
 	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, NULL, "" , 32, "");

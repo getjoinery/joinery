@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -22,9 +22,7 @@
 		foreach($editable_fields as $field) {
 			$comment->set($field, $_POST[$field]);
 		}
-				
-		
-		
+
 		$comment->prepare();
 		$comment->save();
 		$comment->load();
@@ -32,7 +30,6 @@
 		LibraryFunctions::redirect('/admin/admin_comment?cmt_comment_id='. $comment->key);
 		return;
 	}
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -46,7 +43,6 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "Edit Comment";
 	$page->begin_box($pageoptions);
 
@@ -58,8 +54,6 @@
 	$validation_rules['cmt_body']['minlength']['value'] = 10;
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_comment_edit');
 
 	if($comment->key){
@@ -68,23 +62,18 @@
 	}
 	
 	echo $formwriter->textinput('Commenter Name', 'cmt_author_name', NULL, 100, $comment->get('cmt_author_name'), '', 255, '');		
-	
-	
+
 	$optionvals = array("No"=>0, "Yes"=>1);
 	echo $formwriter->dropinput("Approved", "cmt_is_approved", "ctrlHolder", $optionvals, $comment->get('cmt_is_approved'), '', FALSE);
-	
-	
-	echo $formwriter->textbox('Comment', 'cmt_body', 'ctrlHolder', 5, 80, $comment->get('cmt_body'), '', 'no');
 
+	echo $formwriter->textbox('Comment', 'cmt_body', 'ctrlHolder', 5, 80, $comment->get('cmt_body'), '', 'no');
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
 
-
 	$page->end_box();
-	
 
 	$page->admin_footer();
 

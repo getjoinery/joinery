@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -29,8 +29,7 @@
 		if(!$setting->key){
 			$setting->set('stg_usr_user_id',$session->get_user_id());
 		}	
-				
-		
+
 		$setting->prepare();
 		$setting->save();
 		$setting->load();
@@ -38,7 +37,6 @@
 		LibraryFunctions::redirect('/admin/admin_settings');
 		return;
 	}
-
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -52,7 +50,6 @@
 	)
 	);	
 
-	
 	$pageoptions['title'] = "New Setting";
 	$page->begin_box($pageoptions);
 
@@ -63,8 +60,6 @@
 	$validation_rules['stg_name']['required']['value'] = 'true';	
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_setting_edit');
 
 	if($setting->key){
@@ -74,11 +69,9 @@
 	
 	echo $formwriter->textinput('Setting name', 'stg_name', NULL, 100, $setting->get('stg_name'), '', 255, '');	
 	echo $formwriter->textinput('Setting value', 'stg_value', NULL, 100, $setting->get('stg_value'), '', 255, '');	
-	
-	
+
 	$optionvals = array("General"=>'general', 'Emails' => 'emails');
 	echo $formwriter->dropinput("Setting group", "stg_group_name", "ctrlHolder", $optionvals, $setting->get('stg_group_name'), '', FALSE);
-
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');

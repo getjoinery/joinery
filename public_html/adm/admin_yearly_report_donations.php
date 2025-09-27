@@ -1,11 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/orders_class.php');
 	PathHelper::requireOnce('data/products_class.php');
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
@@ -49,7 +47,6 @@
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();	
 
-	
 	$headers = array('Name', 'Product', 'Total');
 	$altlinks = array();
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));

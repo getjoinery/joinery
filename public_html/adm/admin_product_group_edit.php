@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
@@ -45,9 +44,7 @@
 		'session' => $session,
 	)
 	);
-	
 
-	
 	$options['title'] = 'Edit Product Group';
 	$page->begin_box($options);
 
@@ -59,8 +56,7 @@
 	$validation_rules['prg_max_items']['required']['value'] = 'true';
 	$validation_rules['prg_error']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);				
-	
-	
+
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_group_edit');
 	if($product_group->key){
 		echo $formwriter->hiddeninput('prg_product_group_id', $product_group->key);
@@ -82,7 +78,6 @@
 	echo $formwriter->end_form();
 	
 	$page->end_box();
-
 
 	$page->admin_footer();
 

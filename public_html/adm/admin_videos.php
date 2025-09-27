@@ -1,9 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/videos_class.php');
@@ -48,7 +47,6 @@
 		'session' => $session,
 	)
 	);
-		
 
 	$headers = array("Video",  "Source", "Uploaded", "By");
 	$altlinks = array('Add Video'=>'/admin/admin_video_edit');
@@ -76,13 +74,10 @@
 	
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
-
 		$page->disprow($rowvalues);
 	}
-
 
 	$page->endtable($pager);
 	$page->admin_footer();
 ?>
-
 

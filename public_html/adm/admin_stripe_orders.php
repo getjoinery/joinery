@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -9,7 +9,6 @@
 	PathHelper::requireOnce('/data/products_class.php');
 	PathHelper::requireOnce('/data/users_class.php');
 	PathHelper::requireOnce('/data/address_class.php');
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -35,7 +34,6 @@
 		$display_startdate = gmdate("Y-m-d", $startdate);
 	}
 
-	
 	if($enddate){
 		$display_enddate = $enddate;
 		$enddate = strtotime($enddate . '23:59:59');	
@@ -46,11 +44,6 @@
 		$display_enddate = gmdate("Y-m-d", $enddate);
 	}
 
-	
-
-
-
-	
 	$created = array();
 	$created['gte'] = $startdate;
 	$created['lte'] = $enddate;
@@ -64,8 +57,6 @@
 		//$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
 	}
 
-
-	
 	/*
 	$search_criteria = NULL;
 	if($user_id){
@@ -97,8 +88,7 @@
 			'session' => $session,
 		)
 		);	
-				
-		
+
 	}
 	
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
@@ -124,7 +114,6 @@
 		echo 'Multiple pages of results:  <a href="/admin/admin_stripe_orders?offset='.$last_charge->id.'&startdate='.$display_startdate.'&enddate='.$display_enddate.'&currpage='.$nextpage .'">Next page >></a> ';
 	}
 
-	
 	$headers = array('Date', 'Order #', 'Total Amount', 'Billing User', 'Billing Email', 'Address');
 	//$altlinks = array('Print format' => '/admin/admin_stripe_orders?print-format=true&startdate='.$display_startdate.'&enddate='.$display_enddate);
 	$altlinks = array();
@@ -197,15 +186,13 @@
 			else{
 				array_push($rowvalues, $description);
 			}
-			
-			
+
 			//array_push($rowvalues, $charge->payment_intent);
 			$refund = '';
 			if($charge->amount_refunded){
 				$refund = ' ($'.$charge->amount_refunded/100 . ' REFUNDED)';
 			}
 			array_push($rowvalues, '$'.$charge->amount/100 .'.00'. $refund);
-
 
 			if(strpos($charge->description, 'Integral Zen - Order') !== FALSE){
 				array_push($rowvalues, $charge['metadata']['customer_name']);
@@ -232,20 +219,14 @@
 
 			}				
 
-
 			//array_push($rowvalues, $charge->created);
-			
 
-			
-
-		
 			$page->disprow($rowvalues);
 		}
 	}
 	$page->endtable();	
 	
 	//echo '<a style="text-align:center" href="/admin/admin_stripe_orders?offset='.$offset .'">Next 100 >></a>';
-
 
 	if(!$_GET['print-format']){
 		$page->admin_footer();

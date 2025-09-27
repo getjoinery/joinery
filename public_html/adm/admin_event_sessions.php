@@ -1,10 +1,8 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-
+	
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/events_class.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
@@ -30,8 +28,7 @@
 	$event = new Event($event_id, TRUE);
 
 	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
-	
-	
+
 	$searches = array();
 	if($_REQUEST['showpast'] == 'all'){
 		//nothing
@@ -107,8 +104,6 @@
 	</ul>
 	<?php
 
-
-
 	//WAITING LIST
 	$wnumperpage = 10;
 	$woffset = LibraryFunctions::fetch_variable('woffset', 0, 0, '');
@@ -125,7 +120,6 @@
 	$numsessions = $event_sessions->count_all();
 	$event_sessions->load();
 	$wpager = new Pager(array('numrecords'=>$numsessions, 'numperpage'=> $wnumperpage), 'w');
-	
 
 	$headers = array("Title", "Time", "Links", "Picture/Video", "Edit");
 	$altlinks = array('Add Session'=>'/admin/admin_event_session_edit?evt_event_id='.$event->key);
@@ -148,8 +142,7 @@
 	foreach($event_sessions as $event_session){
 		
 		$rowvalues = array();		
-		
-		
+
 		$session_label = '';
 		if($event_session->get('evs_session_number')){
 			$session_label = 'Session '.$event_session->get('evs_session_number'). ' - ';
@@ -190,6 +183,5 @@
 	$page->endtable($wpager);
 
 	$page->admin_footer();
-
 
 ?>

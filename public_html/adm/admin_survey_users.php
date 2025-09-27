@@ -1,10 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/surveys_class.php');
@@ -23,11 +22,9 @@
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
-
 	$svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, '');
 	$survey = new Survey($svy_survey_id, TRUE);
 	$users = $survey->get_users_who_answered();
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -42,8 +39,6 @@
 		'session' => $session,
 	)
 	);
-
-
 
 	$headers = array("Survey", "# Answers", "Last Update");
 	$altlinks = array();
@@ -69,5 +64,4 @@
 
 	$page->admin_footer();
 ?>
-
 

@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -16,9 +15,7 @@
 	}
 
 	if($_POST){
-		
 
-		
 		$editable_fields = array('emt_body', 'emt_name', 'emt_type');
 
 		foreach($editable_fields as $field) {
@@ -32,7 +29,6 @@
 		LibraryFunctions::redirect('/admin/admin_email_template?emt_email_template_id='. $email_template->key);
 		return;
 	}
-
 
 	$title = $email_template->get('emt_name');
 	$content = $email_template->get('emt_body');
@@ -54,9 +50,7 @@
 		'session' => $session,
 	)
 	);	
-	
 
-	
 	$pageoptions['title'] = "Edit Email Template";
 	$page->begin_box($pageoptions);
 
@@ -77,8 +71,6 @@
 	$validation_rules['emt_body']['minlength']['value'] = 3;
 	echo $formwriter->set_validate($validation_rules);	
 
-
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_email_template_edit');
 
 	if($email_template->key){
@@ -90,19 +82,15 @@
 
 	echo $formwriter->textinput('Subject Line', 'emt_subject', NULL, 100, $email_template->get('emt_subject'), 'Email subject line (required)', 255, '');
 
-
 	$optionvals = array("Outer"=>EmailTemplateStore::TEMPLATE_TYPE_OUTER, "Inner"=>EmailTemplateStore::TEMPLATE_TYPE_INNER, "Footer"=>EmailTemplateStore::TEMPLATE_TYPE_FOOTER);
 	echo $formwriter->dropinput("Template Type", "emt_type", "ctrlHolder", $optionvals, $email_template->get('emt_type'), '', FALSE);
-	
-	
-	echo $formwriter->textbox('Template body', 'emt_body', 'ctrlHolder', 20, 80, $email_template->get('emt_body'), '', 'no');
 
+	echo $formwriter->textbox('Template body', 'emt_body', 'ctrlHolder', 20, 80, $email_template->get('emt_body'), '', 'no');
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
-
 
 	echo '    </div>
     </div>

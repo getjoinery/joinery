@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -44,7 +44,6 @@
 		exit();				
 	}
 
-	
 	$paget = new AdminPage();
 	$paget->admin_header(	
 	array(
@@ -79,10 +78,8 @@
 	else{
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
-	
 
 	echo '<strong>Link:</strong> <a href="'.$page->get_url().'">'.$page->get_url('short').'</a><br />';	
-
 
 	$headers = array("Content",  "Published", "Creator", "Status");
 	$altlinks = array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
@@ -94,7 +91,6 @@
 		//'search_on' => TRUE
 	);
 	$paget->tableheader($headers, $table_options, NULL);
-
 
 	foreach ($page_contents as $page_content){
 		
@@ -127,15 +123,11 @@
 	}
 	$paget->endtable($pager);
 
-
-
 	echo '<h3>Preview</h3>';
 	echo '<iframe src="'.$page->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
-
 
 	$paget->end_box();		
 	
 	$paget->admin_footer();
 ?>
-
 

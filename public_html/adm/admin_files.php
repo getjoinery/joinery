@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -69,7 +68,6 @@
 		//'search_on' => TRUE
 	);
 	$page->tableheader($headers, $table_options, $pager);
-	
 
 	foreach($files as $file) {
 		$deleted = '';

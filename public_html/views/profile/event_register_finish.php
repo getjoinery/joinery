@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/AdminPage.php');
 	require_once(PathHelper::getThemeFilePath('event_register_finish_logic.php', 'logic'));
@@ -14,7 +13,6 @@
 
 	echo PublicPage::BeginPage('Edit Registrant Info');
 
-			
 	echo '<h3>Please fill out this extra info for your registration in the <strong>'. $event->get('evt_name') . '</strong> event.</h3>';
 
 	$settings = Globalvars::get_instance();
@@ -24,10 +22,8 @@
 	$validation_rules['privacy_policy']['required']['value'] = 'true';
 	$validation_rules['evr_first_event']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);			
-	
-	
-	echo $formwriter->begin_form("", "post", "/profile/event_register_finish");
 
+	echo $formwriter->begin_form("", "post", "/profile/event_register_finish");
 
 	echo $formwriter->hiddeninput("eventregistrantid", $evr_event_registrant_id);
 	echo $formwriter->hiddeninput("userid", $user->key);
@@ -60,7 +56,6 @@
 	echo $formwriter->textinput("If no, what other events have you attended?", "evr_other_events", NULL, 20, ($event_registrant ? $event_registrant->get('evr_other_events') : ''), "", 255,"");
 	echo '<br />';		
 	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy-policy/'>privacy policy</a>", "privacy_policy", "checkbox", "left", NULL, 1, "");
-
 
 	echo $formwriter->new_form_button('Submit');
 

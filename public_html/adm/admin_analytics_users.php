@@ -1,5 +1,4 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/AdminPage.php');
 PathHelper::requireOnce('data/admin_analytics_users_data.php');
@@ -23,7 +22,6 @@ $mintotal = 2;
 ?>
 
 <script type="text/javascript">
-
 
 		$(document).ready(function() 
 		{
@@ -61,7 +59,6 @@ echo $formwriter->end_form();
 
 $startdate = "'".$startdate."'";
 $enddate = "'".$enddate."'";
-
 
 	$headers = array("Domain", "Total", "Total Verified", "% Email Verified");
 	$altlinks = array();
@@ -119,7 +116,6 @@ $page->endtable();
 
 <br>
 <br>
-
 
 	<div id="sql">
 		<p><b>Domains:</b> <?php echo $sql_domains; ?></p>

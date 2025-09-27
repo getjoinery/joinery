@@ -1,9 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
+	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -23,7 +23,6 @@
 		$event = new Event($message->get('msg_evt_event_id'), TRUE);
 	}
 
-
 	if($_REQUEST['action'] == 'delete'){
 		$message->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$message->soft_delete();
@@ -39,8 +38,6 @@
 		exit();				
 	}
 
-	
-	
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -61,7 +58,6 @@
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 
-
 	/*
  	echo '<div id="actionmenu"><div id="actiontitle">Page Actions</div><ul>'
 	echo '<li><a class="sortlink" href="/admin/admin_message_edit?msg_message_id='.$message->key.'">[Edit Message]</a></li>';
@@ -73,7 +69,6 @@
 		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Mailgun credentials are not in the db or settings.</div>';
 	}	
 
-	
 	echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';	
 	if($message->get('msg_usr_user_id_recipient')){
 		echo '<strong>To:</strong> ('.$recipient->key.') <a href="/admin/admin_user?usr_user_id='.$recipient->key.'">'.$recipient->display_name() .'</a><br />';
@@ -90,5 +85,4 @@
 	
 	$page->admin_footer();
 ?>
-
 

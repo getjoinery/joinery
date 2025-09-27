@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -41,7 +41,6 @@
 	$numrecords = $email_templates->count_all();
 	$email_templates->load();	
 
-		
 	$headers = array('Email Template', 'Subject', 'Type');
 	$altlinks = array('New Email Template'=>'/admin/admin_email_template_edit');
 	$title = 'Email Content Templates'; 
@@ -61,7 +60,6 @@
 		array_push($rowvalues, '<a href="/admin/admin_email_template?emt_email_template_id='.$email_template->key.'">'.$email_template->get('emt_name').'</a>');
 		array_push($rowvalues, htmlspecialchars($email_template->get('emt_subject')));
 
-
 		if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
 			array_push($rowvalues, 'Outer template');
 		}
@@ -71,19 +69,11 @@
 		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_FOOTER){
 			array_push($rowvalues, 'Footer template');
 		}
-			
-	
+
 		$page->disprow($rowvalues);
 	}
 		
 	$page->endtable($pager);		
-		
-
-
-
-
-
-
 
 	$search_criteria = array();
 	$search_criteria['template_type'] = EmailTemplateStore::TEMPLATE_TYPE_OUTER;
@@ -97,7 +87,6 @@
 	$numrecords = $email_templates->count_all();
 	$email_templates->load();	
 
-		
 	$headers = array('Email Template', 'Type');
 	$altlinks = array('New Email Template'=>'/admin/admin_email_template_edit');
 	$title = 'Email Outer Templates';
@@ -116,7 +105,6 @@
 		$rowvalues = array();
 		array_push($rowvalues, '<a href="/admin/admin_email_template?emt_email_template_id='.$email_template->key.'">'.$email_template->get('emt_name').'</a>');
 
-
 		if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
 			array_push($rowvalues, 'Outer template');
 		}
@@ -126,16 +114,11 @@
 		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_FOOTER){
 			array_push($rowvalues, 'Footer template');
 		}
-			
-	
+
 		$page->disprow($rowvalues);
 	}
 		
 	$page->endtable($pager);		
-
-
-
-
 
 	$search_criteria = array();
 	$search_criteria['template_type'] = EmailTemplateStore::TEMPLATE_TYPE_FOOTER;
@@ -149,7 +132,6 @@
 	$numrecords = $email_templates->count_all();
 	$email_templates->load();	
 
-		
 	$headers = array('Email Template', 'Type');
 	$altlinks = array('New Email Template'=>'/admin/admin_email_template_edit');
 	$title = 'Email Footer Templates';
@@ -168,7 +150,6 @@
 		$rowvalues = array();
 		array_push($rowvalues, '<a href="/admin/admin_email_template?emt_email_template_id='.$email_template->key.'">'.$email_template->get('emt_name').'</a>');
 
-
 		if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_OUTER){
 			array_push($rowvalues, 'Outer template');
 		}
@@ -178,14 +159,11 @@
 		else if($email_template->get('emt_type') == EmailTemplateStore::TEMPLATE_TYPE_FOOTER){
 			array_push($rowvalues, 'Footer template');
 		}
-			
-	
+
 		$page->disprow($rowvalues);
 	}
 		
 	$page->endtable($pager);		
-
-
 
 	$page->admin_footer();
 

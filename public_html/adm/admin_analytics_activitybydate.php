@@ -1,11 +1,8 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
-	PathHelper::requireOnce('includes/SessionControl.php');
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
 	
 	PathHelper::requireOnce('data/admin_analytics_activitybydate_data.php');
 
@@ -27,7 +24,6 @@ $session->check_permission(10);
 
 <script type="text/javascript">
 
-
 		$(document).ready(function() 
 		{
 			$("#sqlbtn").toggle
@@ -48,8 +44,6 @@ $session->check_permission(10);
 </script>
 
 <?php
-
-
 
 $formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_activitybydate");
@@ -111,7 +105,6 @@ Number of Logins is the total number of logins (after the initial account creati
 <br>
 <br>
 
-  
 	<div id="sql">
 		<p><b>SQL Query:</b> <?php echo $sql; ?></p>
 		<p><b>Dev Query:</b> <?php echo $sqldev; ?></p>

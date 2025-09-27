@@ -1,5 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('/includes/AdminPage.php');
 	
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
@@ -51,7 +51,6 @@
 	)
 	);	
 
-	
 	$headers = array('Invoice ID', 'User', 'Amount', 'Subscription ID', 'Description', 'Date');
 	$altlinks = array();
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
@@ -79,18 +78,9 @@
 		array_push($rowvalues, $stripe_invoice->get('siv_amount_paid'));
 		array_push($rowvalues, $stripe_invoice->get('siv_stripe_subscription_id'));
 		array_push($rowvalues, $stripe_invoice->get('siv_description'));	
-		
-
-		
-
-
-
 
 		array_push($rowvalues,  LibraryFunctions::convert_time($stripe_invoice->get('siv_timestamp'), "UTC", $session->get_timezone(), 'M j, Y'));
 
-
-		
-		
 		$page->disprow($rowvalues);
 
 	}

@@ -1,6 +1,5 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
+	
 	PathHelper::requireOnce('includes/AdminPage.php');
 	PathHelper::requireOnce('data/emails_class.php');
 	PathHelper::requireOnce('data/email_recipients_class.php');
@@ -32,7 +31,6 @@
 
 	$sender = new User($session->get_user_id(), TRUE);
 
-	
 	if($evt_event_id){
 		$event = new Event($evt_event_id, TRUE);
 	}
@@ -68,8 +66,7 @@
 		$sitename = $settings->get_setting('site_name');
 		$fromname = $settings->get_setting('defaultemailname');
 		$fromaddress = $settings->get_setting('defaultemail');	
-		
-			
+
 		$email_record = new Email(NULL);
 		$email_record->set('eml_usr_user_id', $sender->key);
 		$email_record->set('eml_from_address', $fromaddress);
@@ -85,7 +82,6 @@
 		$email_record->save();	
 		$email_record->load();	
 
-		
 		if($event){
 			$event_registrants = NULL;
 			//EVENT-ONLY ENTRY, THIS IS SO WE CAN KEEP A RECORD OF THE EVENT MESSAGE
@@ -119,8 +115,7 @@
 			
 			foreach ($event_registrants as $event_registrant){
 				// Using new EmailMessage system instead
-				
-				
+
 				if($_REQUEST['waiting_list']){
 					$recipient = new User($event_registrant->get('ewl_usr_user_id'), TRUE);
 					// Template variables handled in new system below
@@ -129,9 +124,7 @@
 					$recipient = new User($event_registrant->get('evr_usr_user_id'), TRUE);
 					// Template variables handled in new system below
 				}
-				
 
-						
 				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
 				// Recipient added in new system above
 
@@ -322,8 +315,7 @@
 			}			
 						
 		}
-		
-		
+
 		$email_record->set('eml_status', 10);
 		$email_record->save();		
 		$email_record->mark_all_recipients_sent();
@@ -343,9 +335,7 @@
 				'recipient' => $sender->export_as_array()
 			]
 		);		
-		
-		
-		
+
 		$page = new AdminPage();
 		$page->admin_header(	
 		array(
@@ -383,8 +373,7 @@
 		$title = 'Send email to "'. $recipient->display_name(). '"';
 		$to_field = $recipient->display_name();
 	}
-		
-		
+
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -398,9 +387,7 @@
 
 	$page->begin_box();
 
-
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
-
 
 	$validation_rules = array();
 	$validation_rules['eml_subject']['required']['value'] = 'true';

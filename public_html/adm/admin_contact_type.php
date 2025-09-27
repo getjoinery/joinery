@@ -1,11 +1,9 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
 
 	PathHelper::requireOnce('data/contact_types_class.php');
 
@@ -31,7 +29,6 @@
 
 	$session->set_return();
 
-
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -44,8 +41,6 @@
 		'session' => $session,
 	)
 	);	
-
-
 
 	$options['title'] = 'Contact Type: '.$contact_type->get('ctt_name');
 	$options['altlinks'] = array();
@@ -76,7 +71,6 @@
 	}
 	echo '<br><br>';
 	?><p><?php echo $contact_type->get('ctt_description'); ?></p>
-
 
 <?php 
 	$page->end_box();

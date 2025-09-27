@@ -1,20 +1,16 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+	
 	PathHelper::requireOnce('includes/Activation.php');
 	// ErrorHandler.php no longer needed - using new ErrorManager system
 	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
 
 	PathHelper::requireOnce('data/debug_email_logs_class.php');
-
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	
 	$debug_email_log = new DebugEmailLog($_REQUEST['del_debug_email_log_id'], TRUE);
-	
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -34,7 +30,6 @@
 	$page->begin_box($pageoptions);
 	echo '<iframe src="/ajax/debug_email_log_preview_ajax?del_debug_email_log_id='.$debug_email_log->key.'" width="100%" height="300" style="border:1px solid gray;"></iframe>';			 
 	$page->end_box(); 
-
 
 	$page->admin_footer();
 

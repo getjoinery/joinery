@@ -1,5 +1,4 @@
 <?php
-	require_once(__DIR__ . '/../includes/PathHelper.php');
 	
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	require_once(PathHelper::getThemeFilePath('events_logic.php', 'logic'));
@@ -20,11 +19,8 @@ $page_vars = $page_vars->data;
 	));
 	echo PublicPage::BeginPage($page_vars['events_label']);
 
-
-	
 	?>
 
-	
 	<script language="javascript">
 	 $(document).ready(function() {	
 		$('#tab_select').change(function() { 
@@ -76,14 +72,9 @@ $page_vars = $page_vars->data;
     </div>
   </div>
 </div>	
-	
-	
-			
 
 			<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4">
 			<?php
-
-
 
 	foreach ($page_vars['events'] as $event){
 		$now = LibraryFunctions::get_current_time_obj('UTC');
@@ -151,8 +142,7 @@ $page_vars = $page_vars->data;
 			</div>
 		  </div>
 		</div>		
-		
-		
+
 	<?php
 	}	
 	?>
