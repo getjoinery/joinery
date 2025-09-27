@@ -139,22 +139,11 @@ if ($result instanceof LogicResult) {
 
 ### View Integration
 
-Views that directly call logic functions must handle LogicResult:
+Views should use `process_logic()` helper:
 
 ```php
-// In a view file
-$page_vars = product_logic($_GET, $_POST, $product);
-
-// Handle LogicResult return format
-if ($page_vars instanceof LogicResult) {
-    if ($page_vars->redirect) {
-        LibraryFunctions::redirect($page_vars->redirect);
-        exit();
-    }
-    $page_vars = $page_vars->data;
-}
-
-// Now use $page_vars normally
+// Simple one-line pattern
+$page_vars = process_logic(product_logic($_GET, $_POST, $product));
 $product = $page_vars['product'];
 ```
 

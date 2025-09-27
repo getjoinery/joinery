@@ -4,13 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('list_logic.php', 'logic'));
 
-	$page_vars = list_logic($_GET, $_POST, $mailing_list, $params);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(list_logic($_GET, $_POST, $mailing_list, $params));
 	$messages = $page_vars['messages'];
 	$member_of_list = $page_vars['member_of_list'];
 	$session = $page_vars['session'];
