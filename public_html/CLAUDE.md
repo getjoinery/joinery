@@ -282,28 +282,28 @@ $product = new Product(NULL);         // Creates new object for insertion
 $product = new Product();
 ```
 
-### Usage Examples:
+### Multi-Object Filter Patterns
+
+**Filter Types in `getMultiResults()`:**
 ```php
-// Search criteria patterns
-$criteria = array('pro_is_active' => 1);
-$criteria = array('prv_status' => '> 0');
-$criteria = array('pro_evt_event_id' => null);
+// 1. Parameterized (safe from SQL injection)
+$filters['evr_evt_event_id'] = [$event_id, PDO::PARAM_INT];  // Becomes: evr_evt_event_id = ?
 
-// Order by patterns
-$order_by = array('pro_name' => 'ASC');
-$order_by = array('pro_name' => 'ASC', 'pro_created' => 'DESC');
+// 2. String conditions
+$filters['evr_delete_time'] = "IS NULL";                      // Becomes: evr_delete_time IS NULL
+$filters['evt_start_time'] = "> now()";                       // Becomes: evt_start_time > now()
 
-// Complete example
-$products = new MultiProduct(
-    array('pro_is_active' => 1),
-    array('pro_name' => 'ASC'),
-    10, 0
+// 3. Complex OR conditions (CRITICAL: split parentheses for precedence)
+$filters['(evr_expires_time'] = ">= now() OR evr_expires_time IS NULL)";
+// Becomes: (evr_expires_time >= now() OR evr_expires_time IS NULL)
+
+// Usage example
+$registrants = new MultiEventRegistrant(
+    array('event_id' => 123, 'deleted' => false, 'expired' => false),
+    array('evr_created_time' => 'DESC')
 );
-if ($products->count_all() > 0) {
-    $products->load();
-    foreach ($products as $product) {
-        echo $product->get('pro_name');
-    }
+if ($registrants->count_all() > 0) {
+    $registrants->load();
 }
 ```
 
@@ -375,11 +375,10 @@ $formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 
 ### Session Check (Admin Pages)
 ```php
-$session = new Session(Globalvars::get_instance());
-if (!$session->is_logged_in() || !$session->is_admin()) {
-    header("Location: /login");
-    exit();
-}
+$session = SessionControl::get_instance();
+$session->check_permission(5); // Requires permission level 5 (admin minimum)
+// Permission levels: 5 = admin, 10 = superadmin
+// check_permission() automatically redirects to login if not authorized
 ```
 
 ### Tests
