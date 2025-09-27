@@ -1,6 +1,5 @@
 <?php
 
-// ErrorHandler.php no longer needed - using new ErrorManager system
 PathHelper::requireOnce('includes/AdminPage.php');
 
 PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -42,7 +41,7 @@ try {
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 $plugin_name = $_POST['plugin_name'] ?? $_GET['plugin_name'] ?? '';
 if ($action || $_POST) {
-    
+
     // Handle upload action separately as it doesn't require plugin_name
     if ($action === 'upload') {
         try {
@@ -71,7 +70,7 @@ if ($action || $_POST) {
             if (!empty($sync_result['updated'])) {
                 $parts[] = count($sync_result['updated']) . " updated";
             }
-            
+
             if (empty($parts)) {
                 $message = "Filesystem sync completed. All plugins are already up to date.";
             } else {
@@ -99,7 +98,7 @@ if ($action || $_POST) {
                     $plugin = new Plugin(null);
                     $plugin->set('plg_name', $plugin_name);
                 }
-                
+
                 $result = $plugin->install();
                 if ($result['success']) {
                     $message = implode('<br>', $result['messages']);
@@ -108,7 +107,7 @@ if ($action || $_POST) {
                     $message = 'Installation failed:<br>' . implode('<br>', $result['errors']);
                     $message_type = 'danger';
                 }
-                
+
             } elseif ($action === 'activate') {
                 // Get plugin record
                 $plugin = Plugin::get_by_plugin_name($plugin_name);
@@ -125,7 +124,7 @@ if ($action || $_POST) {
                         $message_type = 'danger';
                     }
                 }
-                
+
             } elseif ($action === 'deactivate') {
                 $plugin = Plugin::get_by_plugin_name($plugin_name);
                 if ($plugin) {
@@ -141,10 +140,10 @@ if ($action || $_POST) {
                     $message = 'Plugin record not found.';
                     $message_type = 'warning';
                 }
-                
+
             } elseif ($action === 'uninstall') {
                 // Check if plugin is currently the active theme provider
-                
+
                 try {
                     $plugin_helper = PluginHelper::getInstance($plugin_name);
                     if ($plugin_helper->isActiveThemeProvider()) {
@@ -186,7 +185,7 @@ if ($action || $_POST) {
                         $message_type = 'warning';
                     }
                 }
-                
+
             } elseif ($action === 'repair_plugin') {
                 // Run repair for specific plugin
                 $plugin = Plugin::get_by_plugin_name($plugin_name);
@@ -198,7 +197,7 @@ if ($action || $_POST) {
                     $plugin->set('plg_install_error', null);
                     $plugin->set('plg_status', 'inactive');
                     $plugin->save();
-                    
+
                     // Run the installation process again
                     $result = $plugin->install();
                     if ($result['success']) {
@@ -209,7 +208,7 @@ if ($action || $_POST) {
                         $message_type = 'danger';
                     }
                 }
-                
+
             } else {
                 $message = 'Invalid action.';
                 $message_type = 'danger';
@@ -251,7 +250,7 @@ $page->begin_box(array('altlinks' => $altlinks));
 
 <div class="row">
     <div class="col-12">
-        
+
         <?php if ($system_health && ($system_health['overall_status'] === 'needs_repair' || $system_health['overall_status'] === 'error')): ?>
             <div class="alert alert-danger" role="alert">
                 <h6 class="alert-heading mb-2"><i class="fas fa-exclamation-triangle"></i> System Configuration Issue</h6>
@@ -269,14 +268,14 @@ $page->begin_box(array('altlinks' => $altlinks));
                 </ul>
             </div>
         <?php endif; ?>
-        
+
         <?php if ($message): ?>
             <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
                 <?php echo $message; ?>
                 <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
             </div>
         <?php endif; ?>
-        
+
         <?php if (isset($_GET['show_upload'])): ?>
         <!-- Upload Plugin Form -->
         <div class="card mb-4">
@@ -300,29 +299,29 @@ $page->begin_box(array('altlinks' => $altlinks));
             </div>
         </div>
         <?php endif; ?>
-        
+
         <?php if (empty($plugins)): ?>
             <div class="alert alert-warning">
                 <strong>No plugins found.</strong> Create plugin directories in <code>/plugins/</code> to manage them here.
             </div>
         <?php else: ?>
-            
+
             <?php
             // Set up table headers
             $headers = array('Plugin', 'Description', 'Version', 'Status', 'Actions');
-            
+
             // Set up table options
             $table_options = array(
                 'title' => 'Plugin Status Overview'
             );
-            
+
             // Start the table
             $page->tableheader($headers, $table_options);
-            
+
             // Display each plugin row
             foreach ($plugins as $plugin) {
                 $rowvalues = array();
-                
+
                 // Plugin name column
                 $plugin_cell = '<strong>' . htmlspecialchars($plugin['display_name']) . '</strong>';
                 if ($plugin['display_name'] !== $plugin['name']) {
@@ -332,14 +331,14 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $plugin_cell .= '<br><small class="text-muted">by ' . htmlspecialchars($plugin['author']) . '</small>';
                 }
                 array_push($rowvalues, $plugin_cell);
-                
+
                 // Description column
                 if ($plugin['description']) {
                     array_push($rowvalues, htmlspecialchars($plugin['description']));
                 } else {
                     array_push($rowvalues, '<em class="text-muted">No description available</em>');
                 }
-                
+
                 // Version column
                 $version_cell = '';
                 if ($plugin['version']) {
@@ -347,16 +346,16 @@ $page->begin_box(array('altlinks' => $altlinks));
                 } else {
                     $version_cell = '<em class="text-muted">Unknown</em>';
                 }
-                
+
                 // Show update available
                 if (isset($plugin['update_available']) && $plugin['update_available']) {
                     $version_cell .= '<br><span class="badge bg-warning">Update: ' . htmlspecialchars($plugin['available_version']) . '</span>';
                 }
                 array_push($rowvalues, $version_cell);
-                
+
                 // Status column
                 $status_cell = $plugin['status_badge'];
-                
+
                 // Add stock/custom badge
                 if ($plugin['plugin']) {
                     $is_stock = $plugin['plugin']->is_stock();
@@ -365,10 +364,10 @@ $page->begin_box(array('altlinks' => $altlinks));
                     } else {
                         $status_cell .= ' <span class="badge bg-warning">Custom</span>';
                     }
-                    
+
                     // Check if this is the active theme provider
                     try {
-                        
+
                         $plugin_helper = PluginHelper::getInstance($plugin['name']);
                         if ($plugin_helper->isActiveThemeProvider()) {
                             $status_cell .= ' <span class="badge bg-primary">Active Theme Provider</span>';
@@ -377,11 +376,11 @@ $page->begin_box(array('altlinks' => $altlinks));
                         // Plugin helper not available - skip theme provider check
                     }
                 }
-                
+
                 if (!$plugin['directory_exists']) {
                     $status_cell .= '<br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Directory missing</small>';
                 }
-                
+
                 // Show install error if any
                 if ($plugin['plugin'] && $plugin['plugin']->get('plg_install_error')) {
                     $error_msg = htmlspecialchars($plugin['plugin']->get('plg_install_error'));
@@ -390,27 +389,27 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $status_cell .= '<span class="text-wrap" style="word-break: break-word;">' . $error_msg . '</span>';
                     $status_cell .= '</div>';
                 }
-                
+
                 array_push($rowvalues, $status_cell);
-                
+
                 // Actions column
                 if ($plugin['directory_exists']) {
                     $plugin_name = htmlspecialchars($plugin['name']);
                     $plugin_status = $plugin['plugin'] ? $plugin['plugin']->get('plg_status') : null;
-                    
+
                     // Check if this plugin is the active theme provider
                     $is_active_theme_provider = false;
                     try {
-                        
+
                         $plugin_helper = PluginHelper::getInstance($plugin['name']);
                         $is_active_theme_provider = $plugin_helper->isActiveThemeProvider();
                     } catch (Exception $e) {
                         // Plugin helper not available
                     }
-                    
+
                     // Build actions array
                     $actions = array();
-                    
+
                     if (!$plugin['plugin'] || !$plugin_status) {
                         // Not installed
                         $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
@@ -458,20 +457,20 @@ $page->begin_box(array('altlinks' => $altlinks));
                     } else {
                         $action_cell = '<span class="text-muted">No actions</span>';
                     }
-                    
+
                     array_push($rowvalues, $action_cell);
                 } else {
                     array_push($rowvalues, '<em class="text-muted">N/A</em>');
                 }
-                
+
                 // Display the row
                 $page->disprow($rowvalues);
             }
-            
+
             // End the table
             $page->endtable();
             ?>
-            
+
             <?php
             // Count plugin statistics
             $active_count = 0;
@@ -480,7 +479,7 @@ $page->begin_box(array('altlinks' => $altlinks));
             $installed_count = 0;
             $not_installed_count = 0;
             $error_count = 0;
-            
+
             foreach ($plugins as $plugin) {
                 if (!$plugin['directory_exists']) {
                     $missing_count++;
@@ -488,7 +487,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     if ($plugin['plugin']) {
                         $installed_count++;
                         $status = $plugin['plugin']->get('plg_status');
-                        
+
                         // Check for install errors regardless of status
                         if ($plugin['plugin']->get('plg_install_error')) {
                             $error_count++;
@@ -503,7 +502,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                 }
             }
             ?>
-            
+
             <?php if (!empty($plugin_updates)): ?>
             <div class="alert alert-warning mt-4">
                 <h6 class="alert-heading"><i class="fas fa-download"></i> Updates Available</h6>
@@ -515,9 +514,9 @@ $page->begin_box(array('altlinks' => $altlinks));
                 </ul>
             </div>
             <?php endif; ?>
-            
+
             <h5 class="mb-3 mt-4">Plugin Statistics</h5>
-            
+
             <div class="row g-3">
                 <div class="col-md-2">
                     <div class="text-center p-3 bg-light rounded">
@@ -558,7 +557,7 @@ $page->begin_box(array('altlinks' => $altlinks));
             </div>
 
         <?php endif; ?>
-        
+
         <div class="card mt-4">
             <div class="card-header bg-body-tertiary">
                 <h6 class="mb-0">Plugin Development Guidelines</h6>
@@ -576,7 +575,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     <li><code>views/</code> - Template files</li>
                     <li><code>migrations/</code> - Database migrations</li>
                 </ul>
-                
+
                 <h6 class="mt-3">Plugin Lifecycle</h6>
                 <ol>
                     <li><strong>Install</strong> - Creates database tables and runs migrations</li>
@@ -584,7 +583,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     <li><strong>Deactivate</strong> - Disables plugin but keeps data</li>
                     <li><strong>Uninstall</strong> - Removes plugin data and tables</li>
                 </ol>
-                
+
                 <h6 class="mt-3">Plugin.json Example</h6>
                 <pre class="bg-light p-2 rounded"><code>{
     "name": "My Plugin",
@@ -603,7 +602,7 @@ $page->begin_box(array('altlinks' => $altlinks));
 }</code></pre>
             </div>
         </div>
-        
+
     </div>
 </div>
 
@@ -612,19 +611,19 @@ function submitPluginAction(action, pluginName) {
     var form = document.createElement('form');
     form.method = 'post';
     form.style.display = 'none';
-    
+
     var actionInput = document.createElement('input');
     actionInput.type = 'hidden';
     actionInput.name = 'action';
     actionInput.value = action;
     form.appendChild(actionInput);
-    
+
     var pluginInput = document.createElement('input');
     pluginInput.type = 'hidden';
     pluginInput.name = 'plugin_name';
     pluginInput.value = pluginName;
     form.appendChild(pluginInput);
-    
+
     document.body.appendChild(form);
     form.submit();
 }

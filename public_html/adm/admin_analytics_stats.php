@@ -1,9 +1,7 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 $session = SessionControl::get_instance();
 $session->check_permission(5);
 
@@ -11,21 +9,21 @@ $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'web-statistics',
 		'breadcrumbs' => array(
-			'Statistics'=>'', 
+			'Statistics'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 	/*
 ?>
 <script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
 <script type="text/javascript">
 
-		$(document).ready(function() 
+		$(document).ready(function()
 		{
 			$("#sqlbtn").toggle
 			(
@@ -38,10 +36,10 @@ $dblink = $dbhelper->get_db_link();
 					$("#sql").hide();
 				}
 			);
-			
+
 			$("#sql").hide();
 		});
-		
+
 </script>
 
 <?php
@@ -92,12 +90,12 @@ echo $formwriter->end_form();
 echo '<br />';
 
 //Get Data
-$sql = "SELECT 
+$sql = "SELECT
 date_part('day', vse_visitor_events.vse_timestamp) as day,
 date_part('month', vse_visitor_events.vse_timestamp) as month,
 date_part('year', vse_visitor_events.vse_timestamp) as year,
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount
-FROM vse_visitor_events 
+FROM vse_visitor_events
 WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate GROUP BY day, month, year ORDER BY year, month, day ASC";
 
 try
@@ -124,13 +122,13 @@ foreach($unique_visitors as $unique_visitor => $values){
 	$xvals[$c] = $datedisp;
 	$c++;
 }
- 
+
 /*
 ?>
 <div id="chartContainer" style="height: 370px; width: 100%;"></div>
 <script>
 window.onload = function () {
- 
+
 var chart = new CanvasJS.Chart("chartContainer", {
 	title: {
 		text: "Daily Unique Visitors"
@@ -144,7 +142,7 @@ var chart = new CanvasJS.Chart("chartContainer", {
 	}]
 });
 chart.render();
- 
+
 }
 </script>
 <?php
@@ -179,13 +177,13 @@ var chart = new Chart(ctx, {
 
 <?php
 
-$sql = "SELECT 
+$sql = "SELECT
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_page as page
-FROM vse_visitor_events 
-WHERE 
-vse_visitor_events.vse_timestamp >= :startdate AND 
-vse_visitor_events.vse_timestamp <= :enddate AND 
+FROM vse_visitor_events
+WHERE
+vse_visitor_events.vse_timestamp >= :startdate AND
+vse_visitor_events.vse_timestamp <= :enddate AND
 (vse_visitor_events.vse_is_404 != TRUE OR vse_visitor_events.vse_is_404 IS NULL)
 GROUP BY page ORDER BY visitorcount DESC";
 
@@ -208,14 +206,14 @@ catch(PDOException $e)
 
 $page_visitors = $q->fetchAll();
 
-$sql = "SELECT 
+$sql = "SELECT
 count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
 vse_visitor_events.vse_page as page
-FROM vse_visitor_events 
-WHERE 
-vse_visitor_events.vse_timestamp >= :startdate AND 
-vse_visitor_events.vse_timestamp <= :enddate AND 
-vse_visitor_events.vse_is_404 = TRUE 
+FROM vse_visitor_events
+WHERE
+vse_visitor_events.vse_timestamp >= :startdate AND
+vse_visitor_events.vse_timestamp <= :enddate AND
+vse_visitor_events.vse_is_404 = TRUE
 GROUP BY page ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
@@ -248,12 +246,12 @@ $page->tableheader($headers, $box_vars);
 $rowtotals = array("<b>Totals</b>", 0);
 
 foreach ($unique_visitors as $unique_visitor => $values)
-{		
+{
 	$rowvalues = array();
-	
+
 	array_push($rowvalues, $values->year. '-'.$values->month.'-'.$values->day);
 	array_push($rowvalues, $values->visitorcount);
-	
+
 	$rowtotals[1] += $values->visitorcount;
 
 	$page->disprow($rowvalues);
@@ -273,7 +271,7 @@ $page->tableheader($headers, $box_vars);
 $rowtotals = array("<b>Totals</b>", 0);
 
 foreach ($page_visitors as $page_visitor => $values)
-{		
+{
 	if($values->visitorcount <= 10){
 		break;
 	}
@@ -281,7 +279,7 @@ foreach ($page_visitors as $page_visitor => $values)
 
 	array_push($rowvalues, $values->page);
 	array_push($rowvalues, $values->visitorcount);
-	
+
 	$rowtotals[1] += $values->visitorcount;
 
 	$page->disprow($rowvalues);
@@ -301,7 +299,7 @@ $page->tableheader($headers, $box_vars);
 $rowtotals = array("<b>Totals</b>", 0);
 
 foreach ($t404_pages as $t404_page => $values)
-{		
+{
 	$rowvalues = array();
 	if($values->visitorcount <= 5){
 		break;
@@ -309,7 +307,7 @@ foreach ($t404_pages as $t404_page => $values)
 
 	array_push($rowvalues, $values->page);
 	array_push($rowvalues, $values->visitorcount);
-	
+
 	$rowtotals[1] += $values->visitorcount;
 
 	$page->disprow($rowvalues);

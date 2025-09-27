@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -15,45 +13,45 @@
 
 	$video = new Video($_GET['vid_video_id'], TRUE);
 	$user = new User($video->get('vid_usr_user_id'), TRUE);
-	
+
 	if($_REQUEST['action'] == 'remove'){
 		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->permanent_delete();
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_videos");
-		exit();		
-	}	
+		exit();
+	}
 
 	if($_REQUEST['action'] == 'delete'){
 		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->soft_delete();
 
 		header("Location: /admin/admin_videos");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->undelete();
 
 		header("Location: /admin/admin_videos");
-		exit();				
+		exit();
 	}
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'videos',
 		'page_title' => 'Videos',
 		'readable_title' => 'Videos',
 		'breadcrumbs' => array(
-			'Videos'=>'/admin/admin_videos', 
+			'Videos'=>'/admin/admin_videos',
 			'Video: ' . $video->get('vid_title') => '',
 		),
 		'session' => $session,
 	)
 	);
-	
+
 	$options['title'] = 'Video: ' . $video->get('vid_title');
 	$options['altlinks'] = array('Edit Video'=>'/admin/admin_video_edit?vid_video_id='.$video->key);
 	if($video->get('vid_delete_time')){
@@ -70,7 +68,7 @@
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 
-	echo '<strong>User:</strong> ('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a><br />';	
+	echo '<strong>User:</strong> ('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a><br />';
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($video->get('vid_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 	if($video->get('vid_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($video->get('vid_delete_time'), 'UTC', $session->get_timezone()).'<br />';
@@ -86,7 +84,7 @@
 	if($video->get('vid_evt_event_id')){
 		$event = new Event($video->get('vid_evt_event_id'), TRUE);
 		echo 'ONLY logged in users registered for the "'.$event->get('evt_name').'" event ';
-		$group_or_event=true;		
+		$group_or_event=true;
 	}
 	if($group_or_event){
 		if($video->get('vid_min_permission') > 0){
@@ -102,15 +100,15 @@
 		}
 		else{
 			echo 'Minimum permission ('.$video->get('vid_min_permission').') ';
-		}		
+		}
 	}
-	
-	echo '<br />';		
+
+	echo '<br />';
 	echo '<strong>Description:</strong> '.$video->get('vid_description') .'<br />';
-	echo '<strong>Link:</strong> <a href="'.$video->get_url().'">'.$video->get_url('short').'</a><br />';	
-	echo '<strong>Original:</strong> <a href="'.$video->get('vid_video_text').'">'.$video->get('vid_video_text').'</a><br />';	
-	
-	echo '<br /><br />';			
+	echo '<strong>Link:</strong> <a href="'.$video->get_url().'">'.$video->get_url('short').'</a><br />';
+	echo '<strong>Original:</strong> <a href="'.$video->get('vid_video_text').'">'.$video->get('vid_video_text').'</a><br />';
+
+	echo '<br /><br />';
 	echo '<div class="padding10px">'.$video->get_embed().'</div>';
 	echo '<div class="padding10px"><pre>'.htmlspecialchars($video->get_embed()).'</pre></div>';
 

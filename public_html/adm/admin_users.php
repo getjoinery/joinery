@@ -1,8 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/phone_number_class.php');
@@ -44,7 +43,7 @@
 		$search_criteria['user_id_list'] = $user_id_list;
 		if(strstr($searchterm, ' ')) {
 			$search_criteria['name_like'] = $fsearch;
-		} 
+		}
 		else {
 			$search_criteria['first_name_like'] = $fsearch;
 			$search_criteria['last_name_like'] = $fsearch;
@@ -64,7 +63,7 @@
 	if($_SESSION['permission'] < 10){
 		$search_criteria['deleted'] = false;
 	}
-	
+
 	$users = new MultiUser(
 		$search_criteria,
 		array($sort=>$sdirection),
@@ -75,7 +74,7 @@
 	$users->load();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'users-list',
 		'page_title' => 'Users',
@@ -85,15 +84,15 @@
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$headers = array("User", "Email", "Signup Date", "Email Verified");
-	
+
 	$altlinks = array();
 	if($_SESSION['permission'] == 10){
 		$altlinks = array('Add User'=>'/admin/admin_user_add');
 	}
-	
+
 	if($searchterm){
 		$title = 'Users matching "'.$searchterm.'"';
 	}
@@ -110,7 +109,7 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($users as $user){
-		
+
 		$deleted_status = '';
 		if($user->get('usr_delete_time')) {
 			$deleted_status = ' DELETED ';
@@ -120,11 +119,11 @@
 
 		array_push($rowvalues, "<a href='/admin/admin_user?usr_user_id=$user->key'>".$user->display_name()."</a> ".$deleted_status);
 		array_push($rowvalues, $user->get('usr_email'));
-		array_push($rowvalues, LibraryFunctions::convert_time($user->get('usr_signup_date'), "UTC", $session->get_timezone(), 'M j, Y')); 
+		array_push($rowvalues, LibraryFunctions::convert_time($user->get('usr_signup_date'), "UTC", $session->get_timezone(), 'M j, Y'));
 
 		if($user->get('usr_email_is_verified')) {
 			$status = 'Verified';
-		} 
+		}
 		else {
 			$status = 'Unverified';
 		}

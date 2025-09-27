@@ -1,37 +1,35 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
 	PathHelper::requireOnce('data/event_logs_class.php');
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(9);	
-	
+	$session->check_permission(9);
+
 	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to edit.');
-	$log_type = LibraryFunctions::fetch_variable('log_type', NULL, 1, 'You must provide a log_type.');	
+	$log_type = LibraryFunctions::fetch_variable('log_type', NULL, 1, 'You must provide a log_type.');
 	if($log_type != EventLog::SURVEY_COMPLETED && $log_type != EventLog::WEB_LINK_ADDED_1 && $log_type != EventLog::WEB_LINK_ADDED_2 ) {
 		require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
-		throw new ValidationException('Bad log type: ' . $log_type);		
+		throw new ValidationException('Bad log type: ' . $log_type);
 	}
-	
+
 if ($_POST){
-	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');	
-	
+	$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.');
+
 	if ($confirm) {
 		$log = new EventLog(NULL);
 		try {
 			$log->set('evl_event', $log_type);
 			$log->set('evl_usr_user_id', $usr_user_id);
 			$log->save();
-		
+
 		} catch (TTClassException $e) {
 			error_log($e->getMessage());
-		}	
+		}
 	}
 
 	//NOW REDIRECT
@@ -59,7 +57,7 @@ else{
 		echo $formwriter->hiddeninput("confirm", 1);
 		echo $formwriter->hiddeninput("usr_user_id", $usr_user_id);
 		echo $formwriter->hiddeninput("log_type", $log_type);
-		
+
 		echo $formwriter->start_buttons();
 		echo $formwriter->new_form_button('Submit');
 		echo $formwriter->end_buttons();

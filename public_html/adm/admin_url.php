@@ -1,8 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/urls_class.php');
@@ -12,14 +11,14 @@
 	$session->set_return();
 
 	$url = new Url($_GET['url_url_id'], TRUE);
-	
+
 	if($_REQUEST['action'] == 'soft_delete'){
 		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$url->soft_delete();
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_urls");
-		exit();		
+		exit();
 	}
 	if($_REQUEST['action'] == 'undelete'){
 		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -27,31 +26,31 @@
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_urls");
-		exit();		
-	}		
+		exit();
+	}
 	if($_REQUEST['action'] == 'permanent_delete'){
 		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$url->permanent_delete();
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_urls");
-		exit();		
+		exit();
 	}
-	
+
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'urls',
 		'page_title' => 'Urls',
 		'readable_title' => 'Urls',
 		'breadcrumbs' => array(
-			'Urls'=>'/admin/admin_urls', 
+			'Urls'=>'/admin/admin_urls',
 			'Url' => '',
 		),
 		'session' => $session,
 	)
 	);
-	
+
 	$options['title'] = 'Url';
 	$options['altlinks'] = array('Edit'=>'/admin/admin_url_edit?url_url_id='.$url->key);
 	if(!$url->get('url_delete_time')){
@@ -60,7 +59,7 @@
 	else{
 		$options['altlinks']['Undelete'] = '/admin/admin_url?action=undelete&url_url_id='.$url->key;
 	}
-	
+
 	if($_SESSION['permission'] >= 8) {
 		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_url?action=permanent_delete&url_url_id='.$url->key);
 	}
@@ -69,17 +68,17 @@
 
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($url->get('url_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
-	echo '<br /><strong>Incoming:</strong> <a href="'.$url->get('url_incoming') .'">'.$url->get('url_incoming').'</a><br />';	
+	echo '<br /><strong>Incoming:</strong> <a href="'.$url->get('url_incoming') .'">'.$url->get('url_incoming').'</a><br />';
 	echo '<strong>Redirect:</strong> ';
-	
+
 		if($url->get('url_redirect_url')){
 			echo '<a href="'.$url->get('url_redirect_url').'">'.$url->get('url_redirect_url').'</a>';
 		}
 		else{
 			echo '<a href="'.$url->get('url_redirect_file').'">'.$url->get('url_redirect_file').'</a>';
-		}	
+		}
 	echo '<br />';
-	
+
 	if($url->get('url_type') == 301){
 		echo '<strong>Type:</strong> Permanent';
 	}

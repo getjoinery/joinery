@@ -1,9 +1,7 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('data/users_class.php');
@@ -20,7 +18,7 @@
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'errors',
 		'page_title' => 'Errors',
@@ -32,7 +30,7 @@
 
 	$headers = array("Error");
 	$altlinks = array();
-	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));	
+	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
 		'altlinks' => $altlinks,
@@ -51,7 +49,7 @@
 		foreach ($file as $line) {
 			$rowvalues = array();
 			if(strpos($line, '[php7:error]')){
-				array_push($rowvalues, '<span style="color: #a80000">'.$line.'</span>');		
+				array_push($rowvalues, '<span style="color: #a80000">'.$line.'</span>');
 			}
 			else{
 				array_push($rowvalues, $line);
@@ -62,7 +60,7 @@
 			if($linenum == 50){
 				break;
 			}
-			
+
 		}
 	}
 	else{

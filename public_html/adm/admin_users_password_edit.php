@@ -1,7 +1,5 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('includes/AdminPage.php');
 
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
@@ -10,11 +8,11 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
-	
+
 	$user = new User($_REQUEST['usr_user_id'], TRUE);
-	
+
 	if($_POST){
-	
+
 		try {
 			$user->set('usr_password', User::GeneratePassword($_POST['usr_password']));
 			$user->save();
@@ -30,20 +28,20 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'users-list',
 		'page_title' => 'Change Password',
 		'readable_title' => 'Change Password',
 		'breadcrumbs' => array(
-			'Users'=>'/admin/admin_users', 
+			'Users'=>'/admin/admin_users',
 			'User '.$user->display_name() => '/admin/admin_user?usr_user_id='.$user->key,
 			'Change Password'=>'',
 		),
 		'session' => $session,
 	)
 	);
-	
+
 	$pageoptions['title'] = 'Change Password';
 	$page->begin_box($pageoptions);
 

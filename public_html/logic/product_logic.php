@@ -3,7 +3,7 @@ function product_logic($get_vars, $post_vars, $product){
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 PathHelper::requireOnce('includes/LogicResult.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/SessionControl.php');
 	PathHelper::requireOnce('includes/ShoppingCart.php');
 	PathHelper::requireOnce('includes/SystemBase.php');
@@ -18,15 +18,14 @@ PathHelper::requireOnce('includes/LogicResult.php');
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 
-
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('products_active')){
 		header("HTTP/1.0 404 Not Found");
 		echo 'This feature is turned off';
 		exit();
-	}	
-	
+	}
+
 	if($product){
 		$page_vars['product'] = $product;
 	}
@@ -39,9 +38,9 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		$product = new Product($product_id, TRUE);
 	}
 	else{
-		require_once(LibraryFunctions::display_404_page());	
+		require_once(LibraryFunctions::display_404_page());
 	}
-	
+
 	if($get_vars['product_version_id']){
 		$product_version_id = LibraryFunctions::fetch_variable_local($get_vars, 'product_version_id', NULL, FALSE, '', TRUE, 'int');
 		$product_version = new ProductVersion($product_version_id, TRUE);
@@ -56,25 +55,21 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			$page_vars['product_version'] = null;
 		}
 	}
-	
+
 	if ($product && $session->get_user_id() && $session->get_permission() > 4) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
 		if(!$product->get('pro_is_active') || $product->get('pro_delete_time')){
-			require_once(LibraryFunctions::display_404_page());		
+			require_once(LibraryFunctions::display_404_page());
 		}
 	}
 	$page_vars['product'] = $product;
-	
-	
 
-
-	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')]; 
-
+	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
 	$page_vars['display_empty_form'] = TRUE;
-	
+
 	if ($session->get_user_id()) {
 		$user = new User($session->get_user_id(), TRUE);
 	}
@@ -88,12 +83,10 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		try {
 			list($form_data, $display_data) = $product->validate_form($post_vars, $session);
 			$page_vars['display_data'] = $display_data;
-		}	
+		}
 		catch (BasicProductRequirementException $e) {
 			throw new SystemDisplayableErrorNoLog($e->getMessage());
 		}
-
-
 
 		try {
 			$cart = $session->get_shopping_cart();
@@ -115,14 +108,11 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		$page_vars['display_empty_form'] = FALSE;
 
 		// Redirect to cart after successful addition
-		return LogicResult::redirect('/cart');	
+		return LogicResult::redirect('/cart');
 	}
 
-
-	
 	$page_vars['cart'] = $session->get_shopping_cart();
-	
-	
+
 	return LogicResult::render($page_vars);
 }
 ?>

@@ -3,7 +3,6 @@
 require_once('PathHelper.php');
 PathHelper::requireOnce('includes/SystemBase.php');
 
-// ErrorHandler.php no longer needed - using new ErrorManager system
 PathHelper::requireOnce('includes/DbConnector.php');
 PathHelper::requireOnce('includes/SmtpMailer.php');
 PathHelper::requireOnce('includes/EmailTemplate.php');
@@ -38,7 +37,7 @@ class Activation {
 			return FALSE;
 		}
 
-		// Attempt to activate a user 
+		// Attempt to activate a user
 		if (!$user->get('usr_email_is_verified')) {
 			// The user is valid
 			$user->email_verify_user(TRUE, TRUE);
@@ -57,7 +56,7 @@ class Activation {
 		$user_id = $act_record->act_usr_user_id;
 		$new_email = $act_record->act_usr_email;
 		$user = new User($user_id, TRUE);
-		
+
 		$log = new EmailChange(NULL);
 		$log->set('ech_usr_user_id', $user_id);
 		$log->set('ech_old_email', $user->get('usr_email'));
@@ -77,7 +76,7 @@ class Activation {
 		Activation::deleteTempCode($act_code);
 		return $user;
 	}
-	
+
 	static function CheckForActiveCode($user_id, $purpose, $email=NULL) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -112,10 +111,10 @@ class Activation {
 
 		while(1) {
 			$act_code = trim(LibraryFunctions::str_rand($length));
-		
+
 			$sql = "SELECT COUNT(1) as count FROM act_activation_codes
 				WHERE act_code = '$act_code'";
-	
+
 			$q = DbConnector::GetPreparedStatement(
 				'SELECT 1 FROM act_activation_codes WHERE act_code = ?');
 			$q->bindValue(1, $act_code, PDO::PARAM_STR);
@@ -123,7 +122,7 @@ class Activation {
 			if ($q->fetch() === FALSE) {
 				break;
 			}
-		}	
+		}
 		$expires_time_formatted = $expires_time->format(DATE_ATOM);
 		$statement = DbConnector::GetPreparedStatement(
 			'INSERT INTO act_activation_codes (act_usr_email, act_usr_user_id,act_code,act_expires_time, act_purpose, act_phn_phone_number_id)
@@ -145,19 +144,19 @@ class Activation {
 		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
 		$statement->execute();
 	}
-	
+
 	static function deleteTempCodePhone($act_phn_phone_number_id) {
 		$statement = DbConnector::GetPreparedStatement(
 			'UPDATE act_activation_codes SET act_deleted=TRUE WHERE act_phn_phone_number_id=:act_phn_phone_number_id');
 		$statement->bindParam(':act_phn_phone_number_id', $act_phn_phone_number_id, PDO::PARAM_STR);
 		$statement->execute();
-	}	
+	}
 
 	static function getIdFromTempCode($act_code, $act_purpose){
 		$statement = DbConnector::GetPreparedStatement(
 			'SELECT act_usr_user_id FROM act_activation_codes WHERE
 			act_code = :act_code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
-			
+
 		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $act_purpose, PDO::PARAM_INT);
 		$statement->execute();
@@ -179,8 +178,7 @@ class Activation {
 		$statement->execute();
 		$statement->setFetchMode(PDO::FETCH_OBJ);
 		return $statement->fetch();
-	}	
-	
+	}
 
 	static function checkTempCode($code, $purpose){
 		$statement = DbConnector::GetPreparedStatement('
@@ -203,7 +201,7 @@ class Activation {
 		if ($result === FALSE) {
 			return FALSE;
 		}
-		
+
 		$phone = new PhoneNumber($result->act_phn_phone_number_id, TRUE);
 		if ($phone->get('phn_usr_user_id') === $user_id) {
 			$phone->set('phn_is_verified', TRUE);
@@ -234,7 +232,6 @@ class Activation {
 		return $success;
 	}
 
-
 	// Password reset
 	static function email_forgotpw_send($usr_email){
 		$user = User::GetByEmail(strtolower($usr_email));
@@ -257,7 +254,7 @@ class Activation {
 		return $success;
 	}
 
-	// Email change	
+	// Email change
 	static function email_change_send($usr_user_id, $new_email){
 		$user = new User($usr_user_id, TRUE);
 		$act_code = self::getTempCode($user->key, '30 days', Activation::EMAIL_CHANGE, NULL, $new_email);
@@ -272,7 +269,7 @@ class Activation {
 
 		$sender = new EmailSender();
 		$sender->send($message);
-	}	
+	}
 
 	// Phone verification
 	static function phone_verify_send($phn_phone_number_id){

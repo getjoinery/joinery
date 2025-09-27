@@ -1,16 +1,14 @@
 <?php
 
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-
 	PathHelper::requireOnce('includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('data/admin_analytics_activitybydate_data.php');
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'signups-by-date',
 		'breadcrumbs' => array(
@@ -19,12 +17,12 @@ $session->check_permission(10);
 		),
 		'session' => $session,
 	)
-	);	
+	);
 ?>
 
 <script type="text/javascript">
 
-		$(document).ready(function() 
+		$(document).ready(function()
 		{
 			$("#sqlbtn").toggle
 			(
@@ -37,10 +35,10 @@ $session->check_permission(10);
 					$("#sql").hide();
 				}
 			);
-			
+
 			$("#sql").hide();
 		});
-		
+
 </script>
 
 <?php
@@ -75,16 +73,16 @@ echo '<br />';
 $rowtotals = array("<b>Totals</b>", 0, 0, 0);
 
 foreach ($intervals as $interval => $values)
-{		
+{
 	$rowvalues = array();
-	
+
 	array_push($rowvalues, substr($interval, 0, 10));
 	array_push($rowvalues, $values['newusercount']);
 	array_push($rowvalues, $values['numemailed']);
 	//array_push($rowvalues, $values['numpicposters']);
 	//array_push($rowvalues, $values['numvideos']);
 	array_push($rowvalues, $values['numactiveusers']);
-	
+
 	$rowtotals[1] += $values['newusercount'];
 	$rowtotals[2] += $values['numemailed'];
 	//$rowtotals[5] += $values['numpicposters'];

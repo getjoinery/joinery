@@ -2,15 +2,15 @@
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
 PathHelper::requireOnce('includes/Globalvars.php');
-// ErrorHandler.php no longer needed - using new ErrorManager system
+
 PathHelper::requireOnce('includes/SessionControl.php');
 
 PathHelper::requireOnce('data/users_class.php');
 require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
 $settings = Globalvars::get_instance();
-$composer_dir = $settings->get_setting('composerAutoLoad');	
-require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));	
+$composer_dir = $settings->get_setting('composerAutoLoad');
+require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
@@ -27,11 +27,11 @@ require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));
     'authorization: Bearer '.$settings->get_setting('calendly_api_token'),
     );
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-	
+
     curl_setopt($ch, CURLOPT_HEADER, 0);
     $body = '{}';
 
-    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET"); 
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
     curl_setopt($ch, CURLOPT_POSTFIELDS,$body);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
@@ -39,7 +39,7 @@ require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
 
 	$response = curl_exec($ch);
-	
+
 	if (curl_errno($response)) {
 		echo 'Error:  ' . curl_errno($response);
 	}
@@ -50,7 +50,6 @@ require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));
 		$decoded = json_decode(curl_exec($ch));
 		echo 'Success: Retrieved info for user '.$decoded->resource->name . ', '. $decoded->resource->email;
 	}
-		
 
 	 exit;
 ?>

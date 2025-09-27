@@ -1,9 +1,7 @@
 <?php
-	
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
-	
+
 	PathHelper::requireOnce('/includes/LibraryFunctions.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -25,26 +23,26 @@
 	if($_SESSION['permission'] < 10){
 		$search_criteria['deleted'] = false;
 	}
-	
+
 	$questions = new MultiQuestion(
 		$search_criteria,
 		array($sort=>$sdirection),
 		$numperpage,
-		$offset);	
-	$numrecords = $questions->count_all();	
+		$offset);
+	$numrecords = $questions->count_all();
 	$questions->load();
-	
+
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'survey-questions',
 		'breadcrumbs' => array(
-			'Surveys'=>'/admin/admin_surveys', 
-			'Questions'=>'', 
+			'Surveys'=>'/admin/admin_surveys',
+			'Questions'=>'',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$headers = array("Question",  "Type", "Created", "Published", "Active");
 	$altlinks = array('New Question'=>'/admin/admin_question_edit');
@@ -60,7 +58,7 @@
 	foreach ($questions as $question){
 
 		$rowvalues = array();
-		array_push($rowvalues, "Question ".$question->key.": ".$question->get('qst_question')." <a href='/admin/admin_question?qst_question_id=$question->key'> [edit]</a>");	
+		array_push($rowvalues, "Question ".$question->key.": ".$question->get('qst_question')." <a href='/admin/admin_question?qst_question_id=$question->key'> [edit]</a>");
 		array_push($rowvalues, $question->get('qst_type'));
 		array_push($rowvalues, LibraryFunctions::convert_time($question->get('qst_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($question->get('qst_published_time'), 'UTC', $session->get_timezone()));
@@ -69,13 +67,13 @@
 			$status = 'Deleted';
 		} else {
 			$status = 'Active';
-		}		
+		}
 		array_push($rowvalues, $status);
 
 		$page->disprow($rowvalues);
 	}
 
-	$page->endtable($pager);	
+	$page->endtable($pager);
 	$page->admin_footer();
 ?>
 

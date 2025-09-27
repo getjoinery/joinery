@@ -1,8 +1,7 @@
 <?php
 
 	PathHelper::requireOnce('/includes/Activation.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
-	
+
 	PathHelper::requireOnce('/includes/AdminPage.php');
 
 	PathHelper::requireOnce('/data/users_class.php');
@@ -17,21 +16,21 @@
 	PathHelper::requireOnce('/data/orders_class.php');
 	PathHelper::requireOnce('/data/products_class.php');
 	PathHelper::requireOnce('/data/product_details_class.php');
-	
+
 	PathHelper::requireOnce('/data/groups_class.php');
 	PathHelper::requireOnce('/data/group_members_class.php');
 	PathHelper::requireOnce('/data/mailing_lists_class.php');
-	
+
 	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require_once $composer_dir.'autoload.php';	
+	$composer_dir = $settings->get_setting('composerAutoLoad');
+	require_once $composer_dir.'autoload.php';
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
 
 	$user = new User($_GET['usr_user_id'], TRUE);
-	include(PathHelper::getAbsolutePath('/utils/registrant_maintenance.php')); 
+	include(PathHelper::getAbsolutePath('/utils/registrant_maintenance.php'));
 	include(PathHelper::getAbsolutePath('/utils/order_maintenance.php'));
 
 	if($_REQUEST['action'] == 'delete'){
@@ -39,44 +38,44 @@
 		$user->soft_delete();
 
 		header("Location: /admin/admin_users");
-		exit();				
+		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
 		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$user->soft_delete();
 
 		header("Location: /admin/admin_user?usr_user_id=".$user->key);
-		exit();				
+		exit();
 	}
 
-	if($_POST){ 
+	if($_POST){
 
 		if($_POST['action'] == 'add_to_group'){
 			//ADD THE USER TO A GROUP
 			$group = new Group($_POST['grp_group_id'], TRUE);
 			$groupmember = $group->add_member($user->key);
 			header("Location: /admin/admin_user?usr_user_id=".$user->key);
-			exit();			
+			exit();
 		}
 		else if($_POST['action'] == 'remove_from_group'){
 			$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
 			$groupmember->remove();
 			header("Location: /admin/admin_user?usr_user_id=".$user->key);
-			exit();				
+			exit();
 		}
 		else if($_POST['action'] == 'add_to_event'){
 			//ADD THE USER TO AN EVENT
 			$event = new Event($_POST['evt_event_id'], TRUE);
 			$event->add_registrant($user->key);
 			header("Location: /admin/admin_user?usr_user_id=".$user->key);
-			exit();			
+			exit();
 		}
 		else if($_POST['action'] == 'remove_from_event'){
 			$event = new Event($_POST['evt_event_id'], TRUE);
 			$event->remove_registrant($user->key);
 			header("Location: /admin/admin_user?usr_user_id=".$user->key);
-			exit();					
-		}	
+			exit();
+		}
 
 	}
 
@@ -115,7 +114,7 @@
 		NULL,
 		NULL);
 	$orders->load();
-	$numorders = $orders->count_all();	
+	$numorders = $orders->count_all();
 
 	$searches['user_id'] = $user->key;
 	$event_registrations = new MultiEventRegistrant(
@@ -123,9 +122,9 @@
 		NULL, //array('event_id'=>'DESC'),
 		NULL,
 		NULL);
-	$event_registrations->load();	
-	$numeventsregistrations = $event_registrations->count_all();	
-	
+	$event_registrations->load();
+	$numeventsregistrations = $event_registrations->count_all();
+
 	//SUBSCRIPTIONS
 	$active_subscriptions = new MultiOrderItem(
 	array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
@@ -133,7 +132,7 @@
 	15, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
-	$active_subscriptions->load();	
+	$active_subscriptions->load();
 
 	//SUBSCRIPTIONS
 	$cancelled_subscriptions = new MultiOrderItem(
@@ -142,7 +141,7 @@
 	15, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
-	$cancelled_subscriptions->load();	
+	$cancelled_subscriptions->load();
 	/*
 	$search_criteria = NULL;
 	$search_criteria['user_id'] = $user->key;
@@ -203,13 +202,13 @@
 	$logins = $q->fetchAll();
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'users-list',
 		'page_title' => 'User',
 		'readable_title' => 'User',
 		'breadcrumbs' => array(
-			'Users'=>'/admin/admin_users', 
+			'Users'=>'/admin/admin_users',
 			$user->display_name() => '',
 		),
 		'session' => $session,
@@ -220,7 +219,7 @@
 	$webDir = $settings->get_setting('webDir');
 
 		$options['title'] = $user->display_name() . ' (' . $user->key . ')';
-		
+
 		if(!$user->get('usr_delete_time')) {
 			if($_SESSION['permission'] > 7){
 				$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
@@ -228,7 +227,7 @@
 					$options['altlinks']['Payment Methods'] = '/admin/admin_user_payment_methods?usr_user_id='.$user->key;
 				}
 				if(!$user->get('usr_email_is_verified')){
-					$options['altlinks']['Resend activation email'] = '/admin/admin_email_verify?usr_user_id='.$user->key; 
+					$options['altlinks']['Resend activation email'] = '/admin/admin_email_verify?usr_user_id='.$user->key;
 				}
 				$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
 
@@ -243,13 +242,13 @@
 				}
 
 			}
-		} 
+		}
 		else {
 			$options['altlinks']['Undelete'] = '/admin/admin_users_undelete?usr_user_id='.$user->key;
-		}	
+		}
 		if ($_SESSION['permission'] == 10) {
 			$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
-		}		
+		}
 
 		$page->begin_box($options);
 	?>
@@ -260,8 +259,8 @@
 			//if ($event->get('evt_picture_link')) {
 				//echo '<img src="' .  $event->get('evt_picture_link') . '" alt="' . htmlspecialchars($event->get('evt_name'), ENT_QUOTES) . '" width="450" />';
 			//}
-			?>	
-			
+			?>
+
 				<p class="text-center">
 				<?php
 				echo 'Email address:  <strong>'.$user->get('usr_email').'</strong> ';
@@ -270,18 +269,18 @@
 				}
 				else{
 					echo ' <b>Unverified</b>';
-				}	
+				}
 
 				$user_subscribed_list = array();
 				$search_criteria = array('deleted' => false, 'user_id' => $user->key);
 				$user_lists = new MultiMailingListRegistrant(
-					$search_criteria);	
+					$search_criteria);
 				$user_lists->load();
-				
+
 				foreach ($user_lists as $user_list){
 					$mailing_list = new MailingList($user_list->get('mlr_mlt_mailing_list_id'), TRUE);
 					$user_subscribed_list[] = $mailing_list->get('mlt_name');
-				}	
+				}
 
 				echo '<br>';
 				if(!empty($user_subscribed_list)){
@@ -291,13 +290,13 @@
 				/*
 				if($user->get('usr_contact_preferences_last_changed')) {
 					echo ', last change:  '. LibraryFunctions::convert_time($event_registration->get('usr_contact_preferences_last_changed'), 'UTC', $session->get_timezone());
-				}	
-				*/				
+				}
+				*/
 				?>
 				</p>
 
               <p class="text-center"><?php echo 'Signed up: '.LibraryFunctions::convert_time($user->get('usr_signup_date'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></p>
-			  
+
 			  <p class="text-center">
 			  <?php
 				if($user->get('usr_delete_time')){
@@ -308,42 +307,42 @@
 				} else if($user->get('usr_is_disabled')) {
 					echo 'Disabled';
 				}
-				else {	
+				else {
 
 					echo '<h4>Active Subscriptions</h4>';
 					foreach($active_subscriptions as $subscription){
-						$stripe_helper = new StripeHelper();						
+						$stripe_helper = new StripeHelper();
 						$stripe_helper->update_subscription_in_order_item($subscription);
 						$status_words = 'active';
 						if($subscription->get('odi_subscription_status')){
 							$status_words = $subscription->get('odi_subscription_status');
 						}
-						
+
 						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month, Status: '.$status_words;
 
 						if($subscription->get('odi_subscription_period_end')){
 							$status .= ' period ends on '.LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone());
 						}
-						
+
 						$status .= ' <a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
-						
+
 						?><span><?php echo $status; ?></span><br />
 						<?php
 					}
 
 					echo '<h4>Cancelled Subscriptions</h4>';
-					foreach($cancelled_subscriptions as $subscription){	
-							
+					foreach($cancelled_subscriptions as $subscription){
+
 						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
-						
+
 						if($subscription->get('odi_subscription_period_end')){
 							$status .= ' last day is '.LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone());
 						}
 						?><span><?php echo $status; ?></span><br />
 						<?php
 					}
-				
-				}		
+
+				}
 				?>
 				</p>
 
@@ -358,7 +357,7 @@
 							echo ' [<a class="sortlink" href="/admin/admin_phone_edit?usr_user_id='. $user->key . '">Add Phone Number</a>]<br />';
 						}
 						?>
-						</p> 
+						</p>
 
 						<p class="text-center">
 						<?php
@@ -373,7 +372,7 @@
 						else{
 							echo ' [<a class="sortlink" href="/admin/admin_address_edit?usr_user_id='. $user->key . '">Add address</a>]<br />';
 						}
-						
+
 						echo '<br />Timezone: '.$user->get('usr_timezone'). ' [<a href="/admin/admin_users_edit?usr_user_id='.$user->key.'">edit</a>]';
 						?>
 						</p>
@@ -391,7 +390,7 @@
 
 	$event_ids_for_user = array();
 	foreach ($event_registrations as $event_registration){
-		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);	 
+		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
 		$event_ids_for_user[] = $event->key;
 		$rowvalues = array();
 
@@ -404,40 +403,40 @@
 		<input type="hidden" class="hidden" name="evt_event_id" id="evt_event_id" value="'.$event->key.'" />
 		<button type="submit">Remove</button>
 		</form>';
-		array_push($rowvalues, $delform);			
-		
+		array_push($rowvalues, $delform);
+
 		$page->disprow($rowvalues);
 	}
-	
+
 	echo '<tr><td colspan="4">';
 	$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
 	$validation_rules = array();
 	$validation_rules['evt_event_id']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);
 	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
-	
+
 	$events = new MultiEvent(
 		array('deleted'=>false),
 		array('start_time'=>'DESC'),		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$events->load();
-	
+
 	foreach($event_ids_for_user as $event_id) {
 		if($events->contains_key($event_id)){
 			$events->remove_by_key($event_id);
 		}
 	}
-	
+
 	$optionvals = $events->get_dropdown_array();
 	echo $formwriter->hiddeninput('action', 'add_to_event');
 	echo $formwriter->hiddeninput('usr_user_id', $user->key);
 	echo $formwriter->dropinput("Add to event", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
 	echo $formwriter->new_form_button('Add');
-	echo $formwriter->end_form();	
-	echo '</td></tr>';		
-	
-	$page->endtable(); 
+	echo $formwriter->end_form();
+	echo '</td></tr>';
+
+	$page->endtable();
 
 	$groups = Group::get_groups_for_member($user->key, 'user', false, 'objects');
 
@@ -451,7 +450,7 @@
 
     foreach($groups as $group) {
 		$groupmember = $group->is_member_in_group($user->key);
-		
+
 		$rowvalues = array();
 		array_push($rowvalues, $group->get('grp_name'));
 		$delform = '<form id="form4" class="form4" name="form4" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
@@ -459,21 +458,21 @@
 		<input type="hidden" class="hidden" name="grm_group_member_id" id="grm_group_member_id" value="'.$groupmember->key.'" />
 		<button type="submit">Remove</button>
 		</form>';
-		array_push($rowvalues, $delform);	
-		
+		array_push($rowvalues, $delform);
+
 		$page->disprow($rowvalues);
 	}
-	
+
 	echo '<tr><td colspan="2">';
 	$formwriter = LibraryFunctions::get_formwriter_object('form5', 'admin');
 
 	$validation_rules = array();
 	$validation_rules['grp_group_id']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);	
+	echo $formwriter->set_validate($validation_rules);
 	echo $formwriter->begin_form('form5', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
-	
+
 	$group_drops = new MultiGroup(
-		array('category'=>'user'),  //SEARCH 
+		array('category'=>'user'),  //SEARCH
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
@@ -484,14 +483,14 @@
 			$group_drops->remove_by_key($group->key);
 		}
 	}
-	
+
 	$optionvals = $group_drops->get_dropdown_array();
 	echo $formwriter->hiddeninput('action', 'add_to_group');
 	echo $formwriter->hiddeninput('usr_user_id', $user->key);
 	echo $formwriter->dropinput("Add to group", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
 	echo $formwriter->new_form_button('Add');
-	echo $formwriter->end_form();	
-	echo '</td></tr>';	
+	echo $formwriter->end_form();
+	echo '</td></tr>';
 
 	$page->endtable();
 
@@ -506,17 +505,17 @@
 	$page->tableheader($headers, $box_vars);
 
 	foreach ($event_registrations as $event_registration){
-		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);	
+		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
 		$searches = array();
 		$searches['event_id'] = $event_registration->get('evr_evt_event_id');
 		$event_sessions = new MultiEventSessions(
 			$searches,
 			array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
 		$event_sessions->load();
-		
+
 		foreach ($event_sessions as $event_session){
 			$rowvalues = array();
-			
+
 			if($visit_time = $event_session->get_last_visited_time_for_user($user->key)){
 				if($event_session->get('evs_session_number')){
 					$session_num = 'Session '.$event_session->get('evs_session_number'). ' - ';
@@ -527,13 +526,13 @@
 				array_push($rowvalues, $event->get('evt_name') . ' - '. $session_num . $event_session->get('evs_title'));
 				array_push($rowvalues, LibraryFunctions::convert_time($visit_time, 'UTC', $session->get_timezone()));
 				array_push($rowvalues, $event_session->get_number_visits_for_user($user->key));
-			
+
 			}
 			$page->disprow($rowvalues);
 		}
 	}
 
-	$page->endtable(); 
+	$page->endtable();
 
 	$PRODUCT_ID_TO_NAME_CACHE = array();
 
@@ -547,7 +546,7 @@
 
 	foreach($orders as $order) {
 		$rowvalues = array();
-		
+
 		if($order->get('ord_usr_user_id')){
 			$order_user = new User($order->get('ord_usr_user_id'), TRUE);
 		}
@@ -576,12 +575,12 @@
 				if($order_item->get('odi_subscription_status')){
 					$status_words = $order_item->get('odi_subscription_status');
 				}
-				$this_out .= ' '. $status_words. ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());	
+				$this_out .= ' '. $status_words. ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
 			}
 			else if($order_item->get('odi_subscription_status')){
 				$this_out .=  ' STATUS: '. $order_item->get('odi_subscription_status');
-			}	
-			
+			}
+
 			$order_items_out[] = $this_out;
 
 		}
@@ -591,14 +590,14 @@
 		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone()));
 		array_push($rowvalues, implode('<br>', $order_items_out));
 		array_push($rowvalues, '$'.$order->get('ord_total_cost'));
-		
+
 		//array_push($rowvalues, $status_to_html[$min_status ?: 1]);
 		$page->disprow($rowvalues);
 	}
-	$page->endtable();			
+	$page->endtable();
 
 	/*
-	?>	
+	?>
 
      <h2>Addresses</h2>
 	<?php
@@ -632,9 +631,9 @@
 
 	foreach($phone_numbers as $phone_number)	 {
 		$rowvalues=array();
-		
+
 		array_push($rowvalues, $phone_number->get_phone_string() . '[<a class="sortlink" href="phone_numbers_edit?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]');
-		
+
         $page->disprow($rowvalues);
 	}
 
@@ -654,7 +653,7 @@
 		'altlinks' => $altlinks,
 		'title' => "Received Emails"
 	);
-	$page->tableheader($headers, $box_vars);		
+	$page->tableheader($headers, $box_vars);
 
 	foreach ($received_emails as $received_email) {
 		$email = new Email($received_email->get('erc_eml_email_id'), TRUE);
@@ -672,7 +671,7 @@
 		array_push($rowvalues, $numemails);
 		$page->disprow($rowvalues);
 	}
-	$page->endtable();	
+	$page->endtable();
 
 	if($user->get('usr_permission') > 0){
 
@@ -690,7 +689,7 @@
 			'title' => "Sent Emails"
 		);
 		$page->tableheader($headers, $box_vars);
-		
+
 		foreach ($emails as $email) {
 			$rowvalues = array();
 
@@ -706,8 +705,8 @@
 			array_push($rowvalues, $numemails);
 			$page->disprow($rowvalues);
 		}
-		$page->endtable();	
-		
+		$page->endtable();
+
 	}
 
 /*

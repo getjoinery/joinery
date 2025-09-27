@@ -4,7 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function event_sessions_course_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/Activation.php');
 PathHelper::requireOnce('includes/LogicResult.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/LibraryFunctions.php');
 	PathHelper::requireOnce('includes/SessionControl.php');
 
@@ -26,17 +26,16 @@ PathHelper::requireOnce('includes/LogicResult.php');
 	}
 
 	//ACCEPT EITHER VARIABLE
-	if($get_vars['evt_event_id']){	
+	if($get_vars['evt_event_id']){
 		$event_id = LibraryFunctions::fetch_variable_local($get_vars, 'evt_event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
 	else if ($get_vars['event_id']){
 		$event_id = LibraryFunctions::fetch_variable_local($get_vars, 'event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
 	else{
-		require_once(LibraryFunctions::display_404_page());	
+		require_once(LibraryFunctions::display_404_page());
 	}
-	
-			
+
 	$event = new Event($event_id, TRUE);
 	$page_vars['event'] = $event;
 	if($event->get('evt_session_display_type') != 2){
@@ -49,7 +48,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 	}
 	else {
 		if($event->get('evt_visibility') == Event::VISIBILITY_PRIVATE || $event->get('evt_delete_time')){
-			require_once(LibraryFunctions::display_404_page());		
+			require_once(LibraryFunctions::display_404_page());
 		}
 	}
 
@@ -58,7 +57,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 	}
 	else{
 		$session_number = $event->get_lowest_session_number();
-	}	
+	}
 
 	$page_vars['session_number'] = $session_number;
 
@@ -72,18 +71,14 @@ PathHelper::requireOnce('includes/LogicResult.php');
 		$page_vars['video'] = new Video(NULL);
 	}
 
-
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	$session->check_permission(0);
 	$session->set_return();
 
-		
-	
 	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
-		
-	
+
 	//ALL SESSIONS FOR THIS EVENT
 	$searches = array();
 	$searches['event_id'] = $event->key;
@@ -91,27 +86,25 @@ PathHelper::requireOnce('includes/LogicResult.php');
 	$event_sessions = new MultiEventSessions($searches,
 		array('session_number'=>'ASC'));
 	$event_sessions->load();
-	$page_vars['event_sessions'] = $event_sessions;	
-	$numsessions = $event_sessions->count_all();	
-	$page_vars['numsessions'] = $numsessions;	
-	
+	$page_vars['event_sessions'] = $event_sessions;
+	$numsessions = $event_sessions->count_all();
+	$page_vars['numsessions'] = $numsessions;
 
-	
 	$event_registrant = EventRegistrant::check_if_registrant_exists($user->key, $event->key);
-		
+
 	if($_SESSION['permission'] < 5 && !$event_registrant){
-		$error_message = '<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>	
+		$error_message = '<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>
 		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
 	}
 	else if($_SESSION['permission'] < 5 && $event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
 		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
-		<p><strong>Your registration has expired, so you cannot access the event materials.</strong></p>	
+		<p><strong>Your registration has expired, so you cannot access the event materials.</strong></p>
 		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
 	}
 	else{
 		$event_session->record_analytic($session->get_user_id());
 	}
-	
+
 	if($event->get('evt_loc_location_id')){
 		$location = new Location($event->get('evt_loc_location_id'), true);
 		$page_vars['location_object'] = $location;

@@ -5,14 +5,13 @@ function password_reset_1_logic($get_vars, $post_vars){
 	PathHelper::requireOnce('includes/Activation.php');
 PathHelper::requireOnce('includes/LogicResult.php');
 	PathHelper::requireOnce('includes/EmailTemplate.php');
-	// ErrorHandler.php no longer needed - using new ErrorManager system
+
 	PathHelper::requireOnce('includes/SessionControl.php');
 
 	PathHelper::requireOnce('data/users_class.php');
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
-
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
@@ -33,7 +32,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 					header("HTTP/1.0 404 Not Found");
 					echo 'This feature is turned off for this user.  Please email us to recover your password.';
 					exit();
-			}		
+			}
 
 			Activation::email_forgotpw_send($email);
 			$page_vars['message_type'] = 'success';
@@ -45,8 +44,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			$page_vars['message_title'] = 'Email not found';
 			$page_vars['message'] = '
 			We could not find that email address.  Please use your back button to go back and double check the one you entered.';
-		} 
-			
+		}
 
 	}
 	else{
@@ -59,7 +57,7 @@ PathHelper::requireOnce('includes/LogicResult.php');
 			}
 		}
 	}
-	
+
 	return LogicResult::render($page_vars);
 }
 ?>
