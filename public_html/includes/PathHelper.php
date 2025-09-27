@@ -21,20 +21,11 @@ class PathHelper {
     public static function getBasePath() {
         return self::getRootDir() . '/';
     }
-    
+
     public static function getAbsolutePath($relativePath) {
         return self::getRootDir() . '/' . ltrim($relativePath, '/');
     }
-    
-    public static function requireOnce($relativePath) {
-        $fullPath = self::getIncludePath($relativePath);
-        if (file_exists($fullPath)) {
-            require_once $fullPath;
-            return true;
-        }
-        throw new Exception("Required file not found: $relativePath (looked for: $fullPath)");
-    }
-    
+
     /**
      * Check if file exists at given path
      * 

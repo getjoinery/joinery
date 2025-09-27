@@ -2,8 +2,8 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function cart_clear_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/ShoppingCart.php');
-PathHelper::requireOnce('includes/LogicResult.php');
+	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	$page_vars = array();
 

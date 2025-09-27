@@ -1,11 +1,11 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 	$settings = Globalvars::get_instance();
 
-	PathHelper::requireOnce('includes/SessionControl.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
 	echo 'feature turned off';

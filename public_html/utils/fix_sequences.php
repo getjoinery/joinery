@@ -43,7 +43,7 @@ $output_format = $is_cli ? 'text' : 'html';
 // Permission check - require permission level 10 for web access
 if (!$is_cli) {
     require_once(__DIR__ . '/../includes/PathHelper.php');
-    PathHelper::requireOnce('includes/SessionControl.php');
+    require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
     $session = SessionControl::get_instance();
 
@@ -149,8 +149,8 @@ if ($output_format === 'html') {
 try {
     // Load required dependencies
     require_once(__DIR__ . '/../includes/PathHelper.php');
-    PathHelper::requireOnce('includes/DbConnector.php');
-    PathHelper::requireOnce('includes/LibraryFunctions.php');
+    require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
     // Initialize database connection
     $dbconnector = DbConnector::get_instance();

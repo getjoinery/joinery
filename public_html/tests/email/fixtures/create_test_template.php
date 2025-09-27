@@ -1,8 +1,8 @@
 <?php
 // Test fixture to create email template for testing
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('data/email_templates_class.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 
 try {
     // Create test template with known subject

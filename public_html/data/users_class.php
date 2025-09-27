@@ -1,22 +1,22 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 $settings = Globalvars::get_instance();
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemBase.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
-PathHelper::requireOnce('data/groups_class.php');
-PathHelper::requireOnce('data/address_class.php');
-PathHelper::requireOnce('data/phone_number_class.php');
-PathHelper::requireOnce('data/activation_codes_class.php');
-PathHelper::requireOnce('data/visitor_events_class.php');
-PathHelper::requireOnce('data/contact_types_class.php');
-PathHelper::requireOnce('data/mailing_lists_class.php');
+require_once(PathHelper::getIncludePath('data/groups_class.php'));
+require_once(PathHelper::getIncludePath('data/address_class.php'));
+require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+require_once(PathHelper::getIncludePath('data/activation_codes_class.php'));
+require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+require_once(PathHelper::getIncludePath('data/contact_types_class.php'));
+require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 class UserException extends SystemBaseException {}
 class DisplayableUserException extends UserException implements DisplayableErrorMessage {}
@@ -352,9 +352,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			
 			if($send_emails){
 				$settings = Globalvars::get_instance();
-				PathHelper::requireOnce('includes/EmailTemplate.php');
-				PathHelper::requireOnce('includes/EmailSender.php');
-				PathHelper::requireOnce('includes/Activation.php');
+				require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+				require_once(PathHelper::getIncludePath('includes/Activation.php'));
 				
 				//SEND NEW USER WELCOME EMAIL
 				EmailSender::sendTemplate('new_account_content',
@@ -605,7 +605,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		}
 		else{
 			$settings = Globalvars::get_instance();
-			PathHelper::requireOnce('includes/PasswordHash.php');
+			require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 			$hasher = new PasswordHash(8, TRUE);
 			return $hasher->CheckPassword($password, trim($this->get('usr_password')));			
 		}

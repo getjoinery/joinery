@@ -5,15 +5,15 @@ function register_logic($get_vars, $post_vars){
 	// Check if the page was requested with jQuery, if so, we should process this page differently
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
-	PathHelper::requireOnce('includes/Activation.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/EmailTemplate.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/SingleRowAccessor.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+	require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/address_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

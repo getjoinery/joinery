@@ -4,10 +4,10 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	function blog_logic ($get_vars, $post_vars) {
 		$page_vars = array();
 		
-		PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-		PathHelper::requireOnce('includes/Pager.php');
-		PathHelper::requireOnce('data/posts_class.php');   	
+		require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+		require_once(PathHelper::getIncludePath('includes/Pager.php'));
+		require_once(PathHelper::getIncludePath('data/posts_class.php'));   	
 		
 		$settings = Globalvars::get_instance();
 		$page_vars['settings'] = $settings;

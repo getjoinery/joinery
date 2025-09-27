@@ -176,7 +176,7 @@ class RouteHelper {
         
         // Load URL redirect system - only if needed
         try {
-            PathHelper::requireOnce('data/urls_class.php');
+            require_once(PathHelper::getIncludePath('data/urls_class.php'));
         } catch (Exception $e) {
             return false;
         }
@@ -208,7 +208,7 @@ class RouteHelper {
                 exit();
             } else {
                 // URL found but no redirect configured - show 404
-                PathHelper::requireOnce('includes/LibraryFunctions.php');
+                require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
                 LibraryFunctions::display_404_page();
                 exit();
             }
@@ -407,7 +407,7 @@ class RouteHelper {
             }
             
             try {
-                PathHelper::requireOnce($route['model_file'] . '.php');
+                require_once(PathHelper::getIncludePath($route['model_file'] . '.php'));
             } catch (Exception $e) {
                 error_log("RouteHelper: ERROR - Failed to load model file: " . $route['model_file'] . " - " . $e->getMessage());
                 return false;
@@ -504,7 +504,7 @@ class RouteHelper {
                 $file = $matches[1];
                 
                 if (!class_exists('PluginHelper')) {
-                    PathHelper::requireOnce('includes/PluginHelper.php');
+                    require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
                 }
                 
                 $activePlugins = PluginHelper::getActivePlugins();
@@ -708,7 +708,7 @@ class RouteHelper {
         self::debugLog('fallback_logic', "Showing 404: {$reason}", $debug_context);
         
         // Load LibraryFunctions if not already loaded
-        PathHelper::requireOnce('includes/LibraryFunctions.php');
+        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
         
         // Display the 404 page
         LibraryFunctions::display_404_page();
@@ -1054,13 +1054,13 @@ class RouteHelper {
         error_log("  ✓ Core files loaded (PathHelper, Globalvars, SessionControl)");
 
         // Register ErrorManager for comprehensive error handling (exceptions + fatal errors)
-        PathHelper::requireOnce('includes/ErrorHandler.php');
+        require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
         $errorManager = ErrorManager::getInstance();
         $errorManager->register();
         error_log("  ✓ ErrorManager registered for fatal error handling");
 
         // Load StaticPageCache for caching functionality
-        PathHelper::requireOnce('includes/StaticPageCache.php');
+        require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 
         // CORE GUARANTEES: These are now available for all subsequent code
         // - PathHelper: File path resolution and loading
@@ -1123,14 +1123,14 @@ class RouteHelper {
         
         // Now use PathHelper for other dependencies
         try {
-            PathHelper::requireOnce('includes/ThemeHelper.php');
+            require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
             error_log("  ✓ ThemeHelper loaded");
         } catch (Exception $e) {
             error_log("  ✗ Failed to load ThemeHelper: " . $e->getMessage());
         }
         
         try {
-            PathHelper::requireOnce('includes/PluginHelper.php');
+            require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
             error_log("  ✓ PluginHelper loaded");
         } catch (Exception $e) {
             error_log("  ✗ Failed to load PluginHelper: " . $e->getMessage());
@@ -1386,7 +1386,7 @@ class RouteHelper {
         
         // Get active plugins
         if (!class_exists('PluginHelper')) {
-            PathHelper::requireOnce('includes/PluginHelper.php');
+            require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
         }
         
         try {

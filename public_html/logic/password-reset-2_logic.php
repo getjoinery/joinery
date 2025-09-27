@@ -2,11 +2,11 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function password_reset_2_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/Activation.php');
-PathHelper::requireOnce('includes/LogicResult.php');
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

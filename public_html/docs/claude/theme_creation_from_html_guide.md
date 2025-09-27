@@ -26,7 +26,7 @@ require_once('PathHelper.php');
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 // ✅ CORRECT - Just use them directly
-PathHelper::requireOnce('includes/LibraryFunctions.php');
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 $settings = Globalvars::get_instance();
 ```
 
@@ -69,7 +69,7 @@ cp "/path/to/template/style.css" /var/www/html/joinerytest/public_html/theme/THE
 <?php
 // PathHelper is always available - no need to require it
 // Choose the correct base class based on your theme's framework
-PathHelper::requireOnce('includes/FormWriterBootstrap.php'); // Change based on framework
+require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php')); // Change based on framework
 
 class FormWriter extends FormWriterBootstrap {
     // Inherits all form styling from base class
@@ -85,8 +85,8 @@ class FormWriter extends FormWriterBootstrap {
 ```php
 <?php
 // PathHelper is always available - no need to require it
-PathHelper::requireOnce('includes/PublicPageFalcon.php');
-PathHelper::requireOnce('includes/Pager.php');
+require_once(PathHelper::getIncludePath('includes/PublicPageFalcon.php'));
+require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 class PublicPage extends PublicPageFalcon {
     
@@ -217,7 +217,7 @@ php -l /var/www/html/joinerytest/public_html/theme/THEMENAME/views/index.php
 # Verify FormWriter can be loaded
 php -r "
 require_once('includes/PathHelper.php');
-PathHelper::requireOnce('includes/FormWriterBootstrap.php');
+require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
 require_once('theme/THEMENAME/includes/FormWriter.php');
 echo 'FormWriter class exists: ' . (class_exists('FormWriter') ? 'YES' : 'NO') . PHP_EOL;
 "

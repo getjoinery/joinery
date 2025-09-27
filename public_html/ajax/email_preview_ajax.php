@@ -1,12 +1,12 @@
 <?php
 	require_once( __DIR__ . '/../includes/PathHelper.php');
 	
-	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
-	PathHelper::requireOnce('includes/EmailTemplate.php');
-	PathHelper::requireOnce('includes/EmailMessage.php');
-	PathHelper::requireOnce('data/emails_class.php');
-	PathHelper::requireOnce('data/mailing_lists_class.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+	require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
+	require_once(PathHelper::getIncludePath('data/emails_class.php'));
+	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 	header('Content-type: text/html');
 

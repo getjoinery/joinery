@@ -1,14 +1,14 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 $settings = Globalvars::get_instance();
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SystemBase.php');
-PathHelper::requireOnce('data/email_recipients_class.php');
-PathHelper::requireOnce('data/email_recipient_groups_class.php');
-PathHelper::requireOnce('data/users_class.php');	
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
+require_once(PathHelper::getIncludePath('data/email_recipient_groups_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));	
 
 class EmailException extends SystemBaseException {}
 class EmailNotSentException extends EmailException {};

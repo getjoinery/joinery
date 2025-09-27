@@ -1,15 +1,15 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-	PathHelper::requireOnce('includes/Activation.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('includes/SessionControl.php');			
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));			
 	
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/address_class.php');
-	PathHelper::requireOnce('data/event_registrants_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 
 	
 	$session = SessionControl::get_instance();

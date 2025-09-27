@@ -1,13 +1,13 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/DbConnector.php');
-PathHelper::requireOnce('includes/FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/SingleRowAccessor.php');
-PathHelper::requireOnce('includes/SystemBase.php');
-PathHelper::requireOnce('includes/Validator.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 class ApiKeyException extends SystemBaseException {}
 
@@ -54,13 +54,13 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	);	
 
 	public static function GenerateKey($key) {
-		PathHelper::requireOnce('includes/PasswordHash.php');
+		require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->HashPassword($key);
 	}
 	
 	function check_secret_key($key) {
-		PathHelper::requireOnce('includes/PasswordHash.php');
+		require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->CheckPassword($key, $this->get('apk_secret_key'));
 	}

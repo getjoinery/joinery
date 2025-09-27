@@ -6,8 +6,8 @@
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('includes/ThemeHelper.php');
-PathHelper::requireOnce('includes/PluginHelper.php');
+require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
+require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 
 echo "Phase 2 Pre-Deployment Validation & Component System Test\n";
 echo "=========================================================\n\n";

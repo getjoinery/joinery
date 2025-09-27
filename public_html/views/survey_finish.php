@@ -1,7 +1,7 @@
 <?php
 	
-	PathHelper::requireOnce('/includes/LibraryFunctions.php');
-	PathHelper::requireOnce('/data/surveys_class.php');
+	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('/data/surveys_class.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$survey_id = LibraryFunctions::decode(LibraryFunctions::fetch_variable('survey_id', NULL, 0, 'Survey id is required'));

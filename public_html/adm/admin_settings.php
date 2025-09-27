@@ -1,12 +1,12 @@
 <?php
 	
-	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('data/settings_class.php');
-	PathHelper::requireOnce('data/email_templates_class.php');
-	PathHelper::requireOnce('data/mailing_lists_class.php');
-	PathHelper::requireOnce('data/pages_class.php');
+	require_once(PathHelper::getIncludePath('data/settings_class.php'));
+	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
+	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
+	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -733,7 +733,7 @@
 			if (!empty($acuity_api_key) && !empty($acuity_user_id)) {
 			echo '<h5>API Status</h5>';
 			try {
-				PathHelper::requireOnce('/includes/AcuityScheduling.php');
+				require_once(PathHelper::getIncludePath('/includes/AcuityScheduling.php'));
 				
 				$acuity = new AcuityScheduling(array(
 					'userId' => $acuity_user_id,

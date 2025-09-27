@@ -28,11 +28,11 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function page_name_logic($get_vars, $post_vars) {
     // PathHelper, Globalvars, SessionControl are always available
-    PathHelper::requireOnce('includes/LogicResult.php');
-    PathHelper::requireOnce('includes/LibraryFunctions.php');
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
     // Include required data classes
-    PathHelper::requireOnce('data/users_class.php');
+    require_once(PathHelper::getIncludePath('data/users_class.php'));
 
     // Get singletons
     $settings = Globalvars::get_instance();
@@ -251,9 +251,9 @@ return LogicResult::redirect('/page');
 ```php
 function logic($get_vars, $post_vars) {
     // Include all requirements at the top
-    PathHelper::requireOnce('includes/LogicResult.php');
-    PathHelper::requireOnce('includes/LibraryFunctions.php');
-    PathHelper::requireOnce('data/users_class.php');
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+    require_once(PathHelper::getIncludePath('data/users_class.php'));
 
     // Then proceed with logic
     // ...
@@ -326,7 +326,7 @@ function old_logic($get_vars, $post_vars) {
 **After:**
 ```php
 function old_logic($get_vars, $post_vars) {
-    PathHelper::requireOnce('includes/LogicResult.php');
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
     $page_vars = array();
     $page_vars['data'] = 'value';
@@ -383,8 +383,8 @@ Plugins can provide their own logic files following the same patterns:
 ```php
 // plugins/bookings/logic/booking_logic.php
 function booking_logic($get_vars, $post_vars) {
-    PathHelper::requireOnce('includes/LogicResult.php');
-    PathHelper::requireOnce('plugins/bookings/data/bookings_class.php');
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
     // Plugin-specific logic
     $booking = new Booking($get_vars['id'], TRUE);
@@ -428,7 +428,7 @@ if ($page_vars instanceof LogicResult) {
 **Solution:** Ensure file follows `[name]_logic.php` pattern and use correct include:
 
 ```php
-PathHelper::requireOnce('logic/product_logic.php');  // Core
+require_once(PathHelper::getIncludePath('logic/product_logic.php'));  // Core
 require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic')); // Theme-aware
 ```
 

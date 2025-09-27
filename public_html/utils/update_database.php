@@ -9,7 +9,7 @@
 
 	// Permission check - require permission level 10 for web access
 	if (!$is_cli) {
-		PathHelper::requireOnce('includes/SessionControl.php');
+		require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 		$session = SessionControl::get_instance();
 
 		// Check if user is logged in and has sufficient permissions
@@ -31,12 +31,12 @@
 
 	// Migrations are now loaded automatically by the Migration class
 
-	PathHelper::requireOnce('includes/Globalvars.php');
-	PathHelper::requireOnce('includes/DbConnector.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('includes/DatabaseUpdater.php');
-	PathHelper::requireOnce('data/migrations_class.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+	require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+	require_once(PathHelper::getIncludePath('data/migrations_class.php'));
 
 	// Clear the stat cache to ensure we see file changes
 	clearstatcache();
@@ -70,7 +70,7 @@
 	
 	// Validate Composer setup before proceeding
 	echo "\n=== COMPOSER VALIDATION ===\n";
-	PathHelper::requireOnce('includes/ComposerValidator.php');
+	require_once(PathHelper::getIncludePath('includes/ComposerValidator.php'));
 	$composerValidator = new ComposerValidator();
 	
 	if (!$composerValidator->validate()) {

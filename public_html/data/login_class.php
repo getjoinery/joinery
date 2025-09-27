@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-PathHelper::requireOnce('includes/DbConnector.php');
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 
 class LoginClass {
 

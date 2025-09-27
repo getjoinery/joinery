@@ -13,22 +13,22 @@
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
-PathHelper::requireOnce('/includes/LibraryFunctions.php');
-PathHelper::requireOnce('/includes/StripeHelper.php');
-PathHelper::requireOnce('/includes/SessionControl.php');
-PathHelper::requireOnce('/includes/Globalvars.php');
-PathHelper::requireOnce('/includes/DbConnector.php');
-PathHelper::requireOnce('/includes/ShoppingCart.php');
+require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('/includes/StripeHelper.php'));
+require_once(PathHelper::getIncludePath('/includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('/includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('/includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('/includes/ShoppingCart.php'));
 
-PathHelper::requireOnce('/data/email_templates_class.php');
-PathHelper::requireOnce('/data/products_class.php');
-PathHelper::requireOnce('/data/product_versions_class.php');
-PathHelper::requireOnce('/data/product_groups_class.php');
-PathHelper::requireOnce('/data/product_requirements_class.php');
-PathHelper::requireOnce('/data/product_requirement_instances_class.php');
-PathHelper::requireOnce('/data/order_items_class.php');
-PathHelper::requireOnce('/data/events_class.php');
-PathHelper::requireOnce('/data/coupon_codes_class.php');
+require_once(PathHelper::getIncludePath('/data/email_templates_class.php'));
+require_once(PathHelper::getIncludePath('/data/products_class.php'));
+require_once(PathHelper::getIncludePath('/data/product_versions_class.php'));
+require_once(PathHelper::getIncludePath('/data/product_groups_class.php'));
+require_once(PathHelper::getIncludePath('/data/product_requirements_class.php'));
+require_once(PathHelper::getIncludePath('/data/product_requirement_instances_class.php'));
+require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
+require_once(PathHelper::getIncludePath('/data/events_class.php'));
+require_once(PathHelper::getIncludePath('/data/coupon_codes_class.php'));
 
 class ProductTester {
     private $settings;
@@ -1440,7 +1440,7 @@ class ProductTester {
         echo "Verifying order creation and payment...<br>\n";
         
         // Need to include the MultiOrder class
-        PathHelper::requireOnce('/data/orders_class.php');
+        require_once(PathHelper::getIncludePath('/data/orders_class.php'));
         
         
         // Since the cart is cleared after payment, find the most recent test order
@@ -1486,7 +1486,7 @@ class ProductTester {
         // Verify Stripe charge ID exists (for non-zero orders)
         if ($order->get('ord_total_cost') > 0 && !$order->get('ord_stripe_charge_id')) {
             // Check if this is a subscription-only order by examining order items
-            PathHelper::requireOnce('/data/order_items_class.php');
+            require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
             $order_items = new MultiOrderItem(
                 array('odi_ord_order_id' => $order->key),
                 array('odi_order_item_id' => 'ASC')
@@ -1529,7 +1529,7 @@ class ProductTester {
      * Verify order items were created correctly
      */
     private function verifyOrderItems($order) {
-        PathHelper::requireOnce('/data/order_items_class.php');
+        require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
         
         $order_items = new MultiOrderItem(
             array('odi_ord_order_id' => $order->key),
@@ -1618,7 +1618,7 @@ class ProductTester {
             }
         } else {
             // Check if this is a subscription-only order
-            PathHelper::requireOnce('/data/order_items_class.php');
+            require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
             $order_items = new MultiOrderItem(
                 array('odi_ord_order_id' => $order->key),
                 array('odi_order_item_id' => 'ASC')
@@ -1670,8 +1670,8 @@ class ProductTester {
         
         if ($mode === 'stripe_checkout') {
             // Handle Stripe Checkout flow
-            PathHelper::requireOnce('/includes/StripeHelper.php');
-            PathHelper::requireOnce('/data/orders_class.php');
+            require_once(PathHelper::getIncludePath('/includes/StripeHelper.php'));
+            require_once(PathHelper::getIncludePath('/data/orders_class.php'));
             
             $stripe_helper = new StripeHelper();
             $session = SessionControl::get_instance();
@@ -1682,7 +1682,7 @@ class ProductTester {
             if (isset($this->test_billing_user)) {
                 $billing_user = $this->test_billing_user;
             } elseif ($session->get_user_id()) {
-                PathHelper::requireOnce('/data/users_class.php');
+                require_once(PathHelper::getIncludePath('/data/users_class.php'));
                 $billing_user = new User($session->get_user_id(), TRUE);
             }
             
@@ -1741,7 +1741,7 @@ class ProductTester {
                     $test_order->load();
                     
                     // Create order items from cart contents
-                    PathHelper::requireOnce('/data/order_items_class.php');
+                    require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
                     foreach($cart->items as $key => $cart_item) {
                         list($quantity, $product, $data, $price, $discount) = $cart_item;
                         $product_version = $product->get_product_versions(TRUE, $data['product_version']);
@@ -1793,7 +1793,7 @@ class ProductTester {
             $this->simulateStripePayment();
             
             // Find the order that was just created
-            PathHelper::requireOnce('/data/orders_class.php');
+            require_once(PathHelper::getIncludePath('/data/orders_class.php'));
             
             // Get recent test mode orders
             $orders = new MultiOrder(

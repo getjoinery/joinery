@@ -4,9 +4,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 	function items_logic ($get_vars, $post_vars) {
 		$page_vars = array();
 		
-		PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-		PathHelper::requireOnce('includes/Pager.php');
+		require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+		require_once(PathHelper::getIncludePath('includes/Pager.php'));
 		require_once(PathHelper::getIncludePath('plugins/items/data/items_class.php'));  	
 		
 		$settings = Globalvars::get_instance();

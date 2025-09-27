@@ -85,7 +85,7 @@ if (!$session->is_logged_in()) {
 }
 
 // Use PathHelper for other includes
-PathHelper::requireOnce('data/users_class.php');
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 // ❌ WRONG - Don't do this
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -184,8 +184,8 @@ Plugin logic files follow the same LogicResult pattern as core logic files. For 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function my_feature_logic($get_vars, $post_vars) {
-    PathHelper::requireOnce('includes/LogicResult.php');
-    PathHelper::requireOnce('plugins/my-plugin/data/my_data_class.php');
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('plugins/my-plugin/data/my_data_class.php'));
 
     // Business logic processing
     $data = new MyData($get_vars['id'], TRUE);
@@ -219,7 +219,7 @@ Plugin admin pages are accessed via the plugin admin discovery route:
 // PathHelper, Globalvars, and SessionControl are pre-loaded
 
 // Use PathHelper for other includes
-PathHelper::requireOnce('includes/AdminPage.php');
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(5);
@@ -387,7 +387,7 @@ Themes integrate with plugin backend services through data models and the view r
 ```php
 // theme/my-theme/views/items.php
 <?php
-PathHelper::requireOnce('plugins/items/data/items_class.php');
+require_once(PathHelper::getIncludePath('plugins/items/data/items_class.php'));
 
 // Use plugin data models
 $items = new MultiItem(['itm_active' => 1], ['itm_name' => 'ASC']);
@@ -406,8 +406,8 @@ foreach ($items as $item) {
 <?php
 // This theme view will be used instead of plugins/items/views/items/list.php
 // But can still access plugin data models and helpers
-PathHelper::requireOnce('plugins/items/data/items_class.php');
-PathHelper::requireOnce('plugins/items/includes/ItemsHelper.php');
+require_once(PathHelper::getIncludePath('plugins/items/data/items_class.php'));
+require_once(PathHelper::getIncludePath('plugins/items/includes/ItemsHelper.php'));
 
 $items = ItemsHelper::getActiveItems();
 foreach ($items as $item) {
@@ -654,10 +654,10 @@ $routes = [
 
 **Two methods for including files:**
 
-1. **`PathHelper::requireOnce()`** - Direct loading, no overrides
+1. **`PathHelper::getIncludePath()`** - Direct loading, no overrides
    ```php
-   PathHelper::requireOnce('data/user_class.php');  // Data models
-   PathHelper::requireOnce('includes/MyHelper.php'); // System files
+   require_once(PathHelper::getIncludePath('data/user_class.php'));  // Data models
+   require_once(PathHelper::getIncludePath('includes/MyHelper.php')); // System files
    ```
 
 2. **`PathHelper::getThemeFilePath()`** - Theme-aware file resolution with override chain
@@ -674,7 +674,7 @@ $routes = [
    **Override chain:** theme → plugin → base
 
 **When to use:**
-- `PathHelper::requireOnce()`: System files, data models (wrapper around require_once)
+- `PathHelper::getIncludePath()`: Direct file access for system files, data models, plugin files
 - `PathHelper::getIncludePath()`: Direct file access, no theme overrides needed (plugins, data files)
 - `PathHelper::getThemeFilePath()`: Files that themes/plugins can override (views, logic, includes)
 
@@ -763,7 +763,7 @@ This shows detailed routing information in HTML comments.
 
 **Class not found errors:**
 - Distinguish between theme includes (direct) vs views (resolution chain)
-- Use proper PathHelper::requireOnce() for includes
+- Use proper require_once(PathHelper::getIncludePath()) for includes
 - Check abstract method implementation in theme-specific classes
 - Verify class file naming conventions match theme requirements
 

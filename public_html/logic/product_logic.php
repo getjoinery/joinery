@@ -1,19 +1,19 @@
 <?php
 function product_logic($get_vars, $post_vars, $product){
 	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-PathHelper::requireOnce('includes/LogicResult.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/ShoppingCart.php');
-	PathHelper::requireOnce('includes/SystemBase.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
+	require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/questions_class.php');
-	PathHelper::requireOnce('data/products_class.php');
-	PathHelper::requireOnce('data/product_versions_class.php');
-	PathHelper::requireOnce('data/product_requirements_class.php');
-	PathHelper::requireOnce('data/product_requirement_instances_class.php');
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/questions_class.php'));
+	require_once(PathHelper::getIncludePath('data/products_class.php'));
+	require_once(PathHelper::getIncludePath('data/product_versions_class.php'));
+	require_once(PathHelper::getIncludePath('data/product_requirements_class.php'));
+	require_once(PathHelper::getIncludePath('data/product_requirement_instances_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

@@ -2,13 +2,13 @@
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function address_edit_logic($get_vars, $post_vars){
-	PathHelper::requireOnce('includes/SessionControl.php');
-PathHelper::requireOnce('includes/LogicResult.php');
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-	PathHelper::requireOnce('includes/SystemBase.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('data/address_class.php');
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);

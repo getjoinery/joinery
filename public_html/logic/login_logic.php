@@ -3,12 +3,12 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function login_logic($get_vars, $post_vars){
 
-	PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/SessionControl.php');
-	PathHelper::requireOnce('includes/Activation.php');
-	PathHelper::requireOnce('data/users_class.php');
-	PathHelper::requireOnce('data/login_class.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/login_class.php'));
 
 	//HANDLE ACTIVATION FIRST IF PRESENT
 	if ($get_vars['act_code']) {

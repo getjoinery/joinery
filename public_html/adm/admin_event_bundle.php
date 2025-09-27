@@ -1,11 +1,11 @@
 <?php
 
-	PathHelper::requireOnce('includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/groups_class.php');
-	PathHelper::requireOnce('data/group_members_class.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/groups_class.php'));
+	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

@@ -1,16 +1,16 @@
 <?php
 
-	PathHelper::requireOnce('/includes/AdminPage.php');
+	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
-	PathHelper::requireOnce('/includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('/data/users_class.php');
-	PathHelper::requireOnce('/data/products_class.php');
-	PathHelper::requireOnce('/data/events_class.php');
-	PathHelper::requireOnce('/data/orders_class.php');
-	PathHelper::requireOnce('/data/order_items_class.php');
-	PathHelper::requireOnce('/data/product_groups_class.php');
-	PathHelper::requireOnce('/data/product_requirement_instances_class.php');
+	require_once(PathHelper::getIncludePath('/data/users_class.php'));
+	require_once(PathHelper::getIncludePath('/data/products_class.php'));
+	require_once(PathHelper::getIncludePath('/data/events_class.php'));
+	require_once(PathHelper::getIncludePath('/data/orders_class.php'));
+	require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
+	require_once(PathHelper::getIncludePath('/data/product_groups_class.php'));
+	require_once(PathHelper::getIncludePath('/data/product_requirement_instances_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

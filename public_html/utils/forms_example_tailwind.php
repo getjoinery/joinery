@@ -1,8 +1,8 @@
 <?php
 
 	require_once(__DIR__ . '/../includes/PathHelper.php');
-	PathHelper::requireOnce('/includes/SessionControl.php');
-	PathHelper::requireOnce('/includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('/includes/SessionControl.php'));
+	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$session = SessionControl::get_instance();
@@ -20,7 +20,7 @@
 	echo PublicPage::BeginPage('Tailwind forms example');
 	
 	
-	PathHelper::requireOnce('/includes/FormWriterTailwind.php');
+	require_once(PathHelper::getIncludePath('/includes/FormWriterTailwind.php'));
 	$formwriter = new FormWriterTailwind('form1');
 	
 	$validation_rules = array();

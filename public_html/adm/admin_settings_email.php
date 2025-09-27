@@ -1,12 +1,12 @@
 <?php
 	
-	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	PathHelper::requireOnce('data/settings_class.php');
-	PathHelper::requireOnce('data/email_templates_class.php');
-	PathHelper::requireOnce('data/mailing_lists_class.php');
-	PathHelper::requireOnce('data/pages_class.php');
+	require_once(PathHelper::getIncludePath('data/settings_class.php'));
+	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
+	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
+	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -286,7 +286,7 @@
 			echo '<span class="text-muted">• None selected</span>';
 		} else {
 			// Quick validation check
-			PathHelper::requireOnce('includes/EmailSender.php');
+			require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 			$primary_validation = EmailSender::validateService($current_service);
 			if ($primary_validation['valid']) {
 				echo '<span class="text-success">✓ ' . ucfirst($current_service) . ' configured</span>';
@@ -303,7 +303,7 @@
 		} else {
 			// Quick validation check
 			if (!isset($fallback_validation)) {
-				PathHelper::requireOnce('includes/EmailSender.php');
+				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 			}
 			$fallback_validation = EmailSender::validateService($fallback_service);
 			if ($fallback_validation['valid']) {
@@ -470,7 +470,7 @@
 			if (!empty($smtp_host)) {
 				// Test SMTP connection
 				try {
-					PathHelper::requireOnce('includes/SmtpMailer.php');
+					require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
 					
 					// Create test instance
 					$mailer = new SmtpMailer();

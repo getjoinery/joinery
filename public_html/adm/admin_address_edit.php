@@ -1,10 +1,10 @@
 <?php
 
-	PathHelper::requireOnce('data/address_class.php');
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
 
-	PathHelper::requireOnce('includes/SystemBase.php');
-	PathHelper::requireOnce('includes/AdminPage.php');
-	PathHelper::requireOnce('includes/LibraryFunctions.php');
+	require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);

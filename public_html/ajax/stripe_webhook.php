@@ -1,8 +1,8 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-PathHelper::requireOnce('includes/StripeHelper.php');
-PathHelper::requireOnce('data/events_class.php');
-PathHelper::requireOnce('data/orders_class.php');
+require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
+require_once(PathHelper::getIncludePath('data/events_class.php'));
+require_once(PathHelper::getIncludePath('data/orders_class.php'));
 
 try {
     // StripeHelper handles ALL Stripe setup internally

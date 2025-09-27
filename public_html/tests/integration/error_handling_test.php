@@ -7,11 +7,11 @@
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/SessionControl.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 
 // Load consolidated exception classes
-PathHelper::requireOnce('includes/ErrorClasses.php');
+require_once(PathHelper::getIncludePath('includes/ErrorClasses.php'));
 
 class ErrorHandlingTester {
     
@@ -257,7 +257,7 @@ class ErrorHandlingTester {
             $this->output("Test 9: ErrorManager Integration\n");
             
             // Test that ErrorManager exists and can be instantiated
-            PathHelper::requireOnce('includes/ErrorHandler.php');
+            require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
             $errorManager = ErrorManager::getInstance();
             
             $this->assert($errorManager instanceof ErrorManager, 'ErrorManager instance creation');
@@ -276,7 +276,7 @@ class ErrorHandlingTester {
         try {
             $this->output("Test 10: Context Detection\n");
             
-            PathHelper::requireOnce('includes/ErrorHandler.php');
+            require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
             
             $contextData = [
                 'request_uri' => '/test',
@@ -310,8 +310,8 @@ class ErrorHandlingTester {
             $this->output("Test 11: Database Error Logging\n");
             
             // Test that errors are logged to database
-            PathHelper::requireOnce('data/general_errors_class.php');
-            PathHelper::requireOnce('includes/DbConnector.php');
+            require_once(PathHelper::getIncludePath('data/general_errors_class.php'));
+            require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
             
             // Create a test exception with unique message
             $testMessage = 'Test database logging ' . uniqid();

@@ -1,12 +1,12 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-	PathHelper::requireOnce('includes/Globalvars.php');
+	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 	$settings = Globalvars::get_instance();
-	PathHelper::requireOnce('includes/EmailTemplate.php');
-	PathHelper::requireOnce('includes/EmailMessage.php');
-	PathHelper::requireOnce('includes/EmailSender.php');
-	PathHelper::requireOnce('data/email_templates_class.php');
-	PathHelper::requireOnce('data/users_class.php');
+	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
+	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	if($_REQUEST['password'] != 'testemail'){
 		echo 'please enter the password for this utility';

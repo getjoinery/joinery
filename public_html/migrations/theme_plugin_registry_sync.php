@@ -1,9 +1,9 @@
 <?php
 function theme_plugin_registry_sync() {
-    PathHelper::requireOnce('data/themes_class.php');
-    PathHelper::requireOnce('data/plugins_class.php');
-    PathHelper::requireOnce('includes/ThemeManager.php');
-    PathHelper::requireOnce('includes/PluginManager.php');
+    require_once(PathHelper::getIncludePath('data/themes_class.php'));
+    require_once(PathHelper::getIncludePath('data/plugins_class.php'));
+    require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
+    require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
     
     echo "Syncing themes with database registry...\n";
     $theme_manager = ThemeManager::getInstance();
@@ -47,7 +47,7 @@ function theme_plugin_registry_sync() {
     echo "Updated stock/custom status for $updated_count existing plugins.\n";
     
     // Set current theme as active in database
-    PathHelper::requireOnce('includes/Globalvars.php');
+    require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
     $settings = Globalvars::get_instance();
     $current_theme = $settings->get_setting('theme_template');
     

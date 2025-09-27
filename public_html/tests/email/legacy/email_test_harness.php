@@ -33,8 +33,8 @@
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
-PathHelper::requireOnce('includes/Globalvars.php');
-PathHelper::requireOnce('includes/EmailTemplate.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 
 // DO NOT IMPORT OR REFERENCE THIS CLASS IN ANY PRODUCTION CODE
 class EmailTestHarness {

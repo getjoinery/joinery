@@ -2,7 +2,7 @@
 require_once('PathHelper.php');
 require_once('SqlBuilder.php');
 require_once('FieldConstraints.php');
-PathHelper::requireOnce('includes/LibraryFunctions.php');
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 
 interface CustomErrorPage {
@@ -1092,7 +1092,7 @@ abstract class SystemBase {
 			if (method_exists($this, 'get_url')) {
 				$url = $this->get_url();
 				if ($url) {
-					PathHelper::requireOnce('includes/StaticPageCache.php');
+					require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 					StaticPageCache::invalidateUrl($url);
 				}
 			}
@@ -1542,7 +1542,7 @@ class SystemMultiBaseIncremental implements Iterator {
 // we setup the default exception handler.  Thus in this case it is OK for us to
 // require_once things not at the top of the file!
 require_once('SessionControl.php');
-PathHelper::requireOnce('data/general_errors_class.php');
+require_once(PathHelper::getIncludePath('data/general_errors_class.php'));
 
 if (!defined('SKIP_DEFAULT_EXCEPTION_HANDLER')) { 
     // Initialize new error handling system

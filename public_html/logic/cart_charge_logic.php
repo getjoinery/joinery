@@ -3,23 +3,23 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function cart_charge_logic($get_vars, $post_vars){
 
-	PathHelper::requireOnce('includes/ShoppingCart.php');
-PathHelper::requireOnce('includes/LogicResult.php');
-	PathHelper::requireOnce('includes/EmailTemplate.php');
-	PathHelper::requireOnce('includes/EmailSender.php');
-	PathHelper::requireOnce('includes/StripeHelper.php');
-	PathHelper::requireOnce('includes/PaypalHelper.php');
-	PathHelper::requireOnce('includes/Activation.php');
-	PathHelper::requireOnce('data/groups_class.php');
-	PathHelper::requireOnce('data/orders_class.php');
-	PathHelper::requireOnce('data/products_class.php');
-	PathHelper::requireOnce('data/address_class.php');
-	PathHelper::requireOnce('data/phone_number_class.php');
-	PathHelper::requireOnce('data/events_class.php');
-	PathHelper::requireOnce('data/product_details_class.php');
-	PathHelper::requireOnce('data/event_registrants_class.php'); 
-	PathHelper::requireOnce('data/coupon_codes_class.php'); 
-	PathHelper::requireOnce('data/coupon_code_uses_class.php'); 
+	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+	require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
+	require_once(PathHelper::getIncludePath('includes/PaypalHelper.php'));
+	require_once(PathHelper::getIncludePath('includes/Activation.php'));
+	require_once(PathHelper::getIncludePath('data/groups_class.php'));
+	require_once(PathHelper::getIncludePath('data/orders_class.php'));
+	require_once(PathHelper::getIncludePath('data/products_class.php'));
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('data/events_class.php'));
+	require_once(PathHelper::getIncludePath('data/product_details_class.php'));
+	require_once(PathHelper::getIncludePath('data/event_registrants_class.php')); 
+	require_once(PathHelper::getIncludePath('data/coupon_codes_class.php')); 
+	require_once(PathHelper::getIncludePath('data/coupon_code_uses_class.php')); 
 	
 			
 	$page_vars = array();
