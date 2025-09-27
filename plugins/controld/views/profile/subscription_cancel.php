@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('subscription_cancel_logic.php', 'logic', 'system', null, 'controld'));	
 	
@@ -9,8 +9,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$current_order_item = $page_vars['current_order_item'];
 	$account = $page_vars['account'];
 
-	
-	
 	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Cancel Subscription', 
@@ -31,11 +29,9 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	}		
 */
 	//echo PublicPage::tab_menu($tab_menus, 'Change Subscription');
-	
-	
+
 	echo '<h2 class="sec-title">Cancel Subscription</h2>';
-		
-	
+
 	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form("", "post", "/profile/subscription_cancel");
 
@@ -47,8 +43,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	echo $formwriter->end_form();
 
-	
-		
 	echo PublicPage::EndPage();	
 	$page->public_footer($foptions=array('track'=>TRUE));
 

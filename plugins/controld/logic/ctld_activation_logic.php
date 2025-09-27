@@ -4,7 +4,7 @@ function ctld_activation_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/includes/ControlDHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
@@ -17,7 +17,6 @@ function ctld_activation_logic($get_vars, $post_vars){
 	$settings = Globalvars::get_instance(); 
 	$page_vars['settings'] = $settings;
 
-	
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	$session->check_permission(0);
@@ -38,7 +37,6 @@ function ctld_activation_logic($get_vars, $post_vars){
 	$device = new CtldDevice($device_id, TRUE);
 	
 	$device->check_activate();
-	
 
 	$page_vars['device'] = $device;
 	

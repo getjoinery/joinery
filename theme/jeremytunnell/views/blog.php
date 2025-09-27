@@ -1,6 +1,6 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-	PathHelper::requireOnce('includes/ThemeHelper.php');
+	
 	PathHelper::requireOnce('includes/Pager.php');
 	// LibraryFunctions is now guaranteed available - line removed
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -13,8 +13,7 @@
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'post_id', 0, '');	
 	$direction = LibraryFunctions::fetch_variable('direction', 'DESC', 0, '');
-	
-	
+
 	$search_criteria = array('published'=>TRUE, 'deleted'=>false, 'listed'=>true);
 
 	$posts = new MultiPost(
@@ -36,8 +35,7 @@
 		'submenu' => 'Blog',
 	);
 	$page->public_header($hoptions); 
-	
-			
+
 	?>
 	<div class="section-head"><h3 class="section-title h6">Latest stories</h3></div>									
 	<div class="section-content section-content-a">
@@ -99,7 +97,6 @@
 		</nav>
 	</div>
 </div>
-
 
 <?php 
 

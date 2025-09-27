@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctlddevice_delete_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -22,14 +22,9 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('Delete Device', $hoptions);
-	
 
-	
 	$formwriter = $page->getFormWriter();
-	
-	
 
-	
 	$validation_rules = array();
 	$validation_rules['confirm']['required']['value'] = 'true';
 
@@ -46,19 +41,13 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
                             </div>
                         </div>
 	<?php
-	
-		
+
 	echo $formwriter->hiddeninput('device_id', $device->key);
 	
 	echo '<p>You are about to delete this device. If you want to reactivate you will need to set up a new device.</p>';
-	
 
-		
-	
 	echo $formwriter->checkboxinput("Confirm deletion", "confirm", "checkbox", "left", 0, 1, "");
-	
-	
-	
+
 	echo $formwriter->start_buttons('form-btn col-6');
 	echo $formwriter->new_form_button('Delete', 'th-btn');
 	echo $formwriter->end_buttons();

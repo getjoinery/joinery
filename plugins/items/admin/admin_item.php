@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
@@ -29,8 +29,7 @@
 		header("Location: /admin/admin_items");
 		exit();				
 	}
-	
-	
+
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(

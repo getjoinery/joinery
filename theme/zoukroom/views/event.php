@@ -1,9 +1,8 @@
 <?php
-PathHelper::requireOnce('includes/ThemeHelper.php');
+
 	// SessionControl is now guaranteed available - line removed
 	// LibraryFunctions is now guaranteed available - line removed
-	
-	
+
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
@@ -12,7 +11,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	PathHelper::requireOnce('data/event_registrants_class.php');
 
 	require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
-
 
 	$page_vars = event_logic($_GET, $_POST, $event, NULL);
 	// Handle LogicResult return format
@@ -25,8 +23,6 @@ $page_vars = $page_vars->data;
 	
 	$session = SessionControl::get_instance();
 
-
-	
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
 	'title' => 'Checkout',

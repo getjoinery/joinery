@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
@@ -18,8 +18,7 @@
 	$sort = LibraryFunctions::fetch_variable('sort', 'booking_type_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-	
-	
+
 	$search_criteria = array();
 
 	$bookings = new MultiBookingType(
@@ -41,7 +40,6 @@
 		'session' => $session,
 	)
 	);	
-	
 
 	$headers = array("Booking Type", "Status");
 	$altlinks = array('Sync with Calendly'=>'/utils/calendly_synchronize');
@@ -55,7 +53,6 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($bookings as $booking){
-		
 
 		$rowvalues = array();
 		array_push($rowvalues, '<a href="/admin/admin_booking_type?bkt_booking_type_id='.$booking->key.'">'.$booking->get('bkt_name').'</a>');	

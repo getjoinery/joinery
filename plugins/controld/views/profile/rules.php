@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('rules_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -30,11 +30,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	if($device->get('cdd_device_name')){
 		$name = $device->get_readable_name();
 	}
-
-	
-	
-	
-	
 
 	echo '<h5>Custom Rules for device '.$name.'</h5>';
 	echo '		  <table class="table"><thead>
@@ -106,7 +101,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
 	echo '		  </tbody>
 		</table>	';	
-	
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

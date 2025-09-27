@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctld_activation_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -26,7 +26,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('Activation', $hoptions);
-	
 
 	$status = 'Needs Activation';
 	if($device->get('cdd_is_active')){
@@ -43,7 +42,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	}
 	else{
-	
 
 		echo '
 	            <div class="col-lg-6 col-xxl-4">
@@ -75,7 +73,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 										echo '<h3 class="company-name">'.$linkname.'</h3>
 											<input type="text" id="name" name="user_name" value="'.$command.'">';	
 									}
-							
 
                                 echo '
 								</div>
@@ -96,8 +93,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 							
 									echo '<h3 class="company-name">'.$linkname2.'</h3>
                                     <h5 class="price"><a href="'.$link2.'" target="_blank">'.$linkname2.'</a></h5>';
-							
-							
+
                                 echo '
 								</div>
                             </div>
@@ -134,8 +130,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
                     </div>
                 </div>';
 	}
-
-		
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

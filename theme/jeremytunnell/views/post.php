@@ -1,6 +1,6 @@
 <?php
 	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-	PathHelper::requireOnce('includes/ThemeHelper.php');
+	
 	// LibraryFunctions is now guaranteed available - line removed
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
@@ -24,11 +24,9 @@ $page_vars = $page_vars->data;
 	
 	?>
 
-
 				<div class="section-content">
     <article id="post-746" class="typology-post typology-single-post post-746 post type-post status-publish format-standard hentry category-uncategorized">
 
-        
             <header class="entry-header">
 
                 <h1 class="entry-title entry-title-cover-empty"><?php echo $post->get('pst_title'); ?></h1>
@@ -42,16 +40,10 @@ $page_vars = $page_vars->data;
                 
             </header>
 
-                
         <div class="entry-content clearfix">
-                        
-            
+
             <?php echo $post->get('pst_body'); ?>
 
-
-
-                        
-            
         </div>
         
        <!--              	
@@ -62,9 +54,6 @@ $page_vars = $page_vars->data;
 	        
     </article>
 </div>
-			
-
-
 
 	<div class="section-head"><h3 class="section-title h6">About the author</h3></div>	
 	
@@ -93,8 +82,7 @@ $page_vars = $page_vars->data;
 	$settings = Globalvars::get_instance();
 	if($settings->get_setting('show_comments')){
 	?>	
-	
-				
+
 		<div class="section-head"><h3 class="section-title h6">Comments</h3></div>
 		<div id="comments" class="section-content typology-comments">
 	<?php 
@@ -138,8 +126,6 @@ $page_vars = $page_vars->data;
 			}
 		}
 
-
-	
 		if($settings->get_setting('show_comments')){
 				
 				$comments = new MultiComment(
@@ -149,8 +135,6 @@ $page_vars = $page_vars->data;
 					NULL);	
 				$numcomments = $comments->count_all();	
 				$comments->load();	
-
-		
 
 			if($numcomments){
 			?>

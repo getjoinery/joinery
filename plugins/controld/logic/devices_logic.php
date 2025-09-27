@@ -4,7 +4,7 @@ function devices_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Activation.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/includes/ControlDHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
@@ -15,13 +15,11 @@ function devices_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldfilters_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldprofiles_class.php');
 
-	
 	$page_vars = array();
 	
 	$settings = Globalvars::get_instance(); 
 	$page_vars['settings'] = $settings;
 
-	
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 
@@ -31,8 +29,7 @@ function devices_logic($get_vars, $post_vars){
 	}
 	$session->check_permission(0);
 	$session->set_return();
-	
-	
+
 	$user = new User($session->get_user_id(), TRUE);	
 	$page_vars['user'] = $user;
 	
@@ -51,8 +48,7 @@ function devices_logic($get_vars, $post_vars){
 	$devices->load();
 	$page_vars['num_devices'] = $num_devices;
 	$page_vars['devices'] = $devices;
-	
-	
+
 	//DELETED DEVICES
 	$deleted_devices = new MultiCtldDeviceBackup(
 		array(
@@ -125,5 +121,4 @@ function devices_logic($get_vars, $post_vars){
 	
 }
 
-	
 ?>

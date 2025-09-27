@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password_edit_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -29,8 +29,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	echo PublicPage::BeginPage($page_vars['page_title'], $hoptions);
 
 	echo PublicPage::tab_menu($tab_menus, 'Change Password');
-	
-	
+
 	$formwriter = $page->getFormWriter();
 				
 	$validation_rules = array();
@@ -62,7 +61,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	echo $formwriter->new_form_button('Submit', 'th-btn');
 
 	echo $formwriter->end_form();		
-	
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));

@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
@@ -33,8 +33,7 @@
 		exit();				
 	}
 	*/
-	
-	
+
 	$page = new AdminPage();
 	$page->admin_header(	
 	array(
@@ -58,12 +57,9 @@
 	
 	echo '<strong>Type: </strong> '.$booking_type->get('bkt_name').'<br />';
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($booking_type->get('bkt_create_time'), 'UTC', $session->get_timezone()) .'<br />';
-	
-	
-	echo '<strong>Provider: </strong>'.$user->display_name().'<br />';
-	
 
-	
+	echo '<strong>Provider: </strong>'.$user->display_name().'<br />';
+
 	if($booking_type->get('bkt_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($booking_type->get('bkt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
 	}

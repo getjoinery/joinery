@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -20,7 +20,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('My Profile', $hoptions);
-	
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'profilebox') {	
@@ -127,30 +126,20 @@ Team Area
 					                    <div class="col-xl-5">
                         <div class="mb-40 mb-xl-0">
                              <?php
-				
-				
+
 				foreach($page_vars['orders'] as $order) {
 					?>
 					<li>
-					 
 
-						
-						  
 							Order <?php echo $order->key. ' ($'.$order->get('ord_total_cost').')'; ?>
-						 
-						  
-						 
+
 							<?php echo  LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?>
-						 
-						  
-						
-					  
+
 					</li>
 				<?php
 				}
 				?>
-	
-				
+
                         </div>
                     </div>
                 </div>

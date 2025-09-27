@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic', 'system', null, 'controld'));	
 
@@ -29,14 +29,12 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$page->public_header($hoptions);
 	echo PublicPage::BeginPage('Contact Preferences', $hoptions);
 
-	
 	echo PublicPage::tab_menu($tab_menus, 'Change Contact Preferences');
 
 	foreach ($messages as $message){
 		echo PublicPage::alert($message['message_title'], $message['message'], $message['message_type']);
 	}	
 
-	
 	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form("", "post", "/profile/contact_preferences");
 	
@@ -46,13 +44,11 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	else{
 
 		echo $formwriter->checkboxList("Check the box to subscribe:", 'new_list_subscribes', "ctrlHolder", $page_vars['optionvals'], $page_vars['checkedvals'], $page_vars['disabledvals'], $page_vars['readonlyvals']);	
-		
 
 		echo $formwriter->hiddeninput('zone', 'optional');
 		echo $formwriter->new_form_button('Submit', 'th-btn');
 	}
 	echo $formwriter->end_form();
-	
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array());

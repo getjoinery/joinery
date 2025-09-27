@@ -3,7 +3,7 @@
 function rules_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/includes/ControlDHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
@@ -11,20 +11,17 @@ function rules_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctlddevices_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldprofiles_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldrules_class.php');
-	
-	
+
 	$page_vars = array();	
 
 	$settings = Globalvars::get_instance(); 
 	$page_vars['settings'] = $settings;
 
-	
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	$session->check_permission(0);
 	$session->set_return();
-	
-	
+
 	$user = new User($session->get_user_id(), TRUE);	
 	$page_vars['user'] = $user;
 	
@@ -56,7 +53,6 @@ function rules_logic($get_vars, $post_vars){
 		$result = $profile->delete_rule($rule_id);
 		
 		LibraryFunctions::redirect('/profile/rules?device_id='.$device->key.'&profile_choice='.$profile_choice);
-	
 
 	}
 	else if(isset($_POST['cdr_rule_hostname'])){
@@ -112,15 +108,10 @@ function rules_logic($get_vars, $post_vars){
 		//	$filter_out[$filter->get('cdf_filter_pk')] = $filter->get('cdf_is_active');
 		//}
 
-		
 		$page_vars['rules'] = $rules;
 
-			
-		
 	}
-	
-	
-	
+
 	return LogicResult::render($page_vars);
 }
 	

@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('account_edit_logic.php', 'logic', 'system', null, 'controld'));	
 	
@@ -37,8 +37,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	}		
 */
 	echo PublicPage::tab_menu($tab_menus, 'Edit Account');
-	
-	
+
 	$formwriter = $page->getFormWriter();
 	echo $formwriter->begin_form("", "post", "/profile/account_edit");
 
@@ -57,8 +56,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	echo $formwriter->end_form();
 
-	
-		
 	echo PublicPage::EndPage();	
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>

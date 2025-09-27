@@ -2,7 +2,7 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
@@ -18,8 +18,7 @@
 	$sort = LibraryFunctions::fetch_variable('sort', 'booking_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-	
-	
+
 	$search_criteria = array();
 	
 	//ONLY SHOW DELETED TO SUPER ADMINS
@@ -46,7 +45,6 @@
 		'session' => $session,
 	)
 	);	
-	
 
 	$headers = array("Booking", "Booking Time", "Status");
 	$altlinks = array('Sync with Calendly'=>'/utils/calendly_synchronize');

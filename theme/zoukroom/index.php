@@ -1,5 +1,5 @@
 <?php
-PathHelper::requireOnce('includes/ThemeHelper.php');
+
 	PathHelper::requireOnce('includes/Pager.php');
 	// LibraryFunctions is now guaranteed available - line removed
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -21,8 +21,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	$searches = array();
 	$searches['public'] = TRUE;
 	$searches['past'] = FALSE;
-	
-	
 
 	$events = new MultiEvent(
 		$searches,
@@ -31,8 +29,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 		$swaoffset);
 	$events->load();	
 	$numeventsrecords = $events->count_all();	
-	
-
 
 	$page = new PublicPage();
 	$hoptions = array(
@@ -43,8 +39,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 		'submenu' => '',
 	);
 	$page->public_header($hoptions); 
-	
-			
+
 	?>
 	<div class="uk-container uk-container-large">
 		<div class="uk-position-relative uk-visible-toggle uk-light uk-box-shadow-small uk-overflow-hidden uk-border-rounded"
@@ -162,7 +157,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	
 			<?php
 	foreach ($events as $event){
-		
 
 		?>
       <div>
@@ -272,13 +266,10 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 -->	
   </div>
 </div>
-	
-	
 
 <?php /*
 									<p class="date col-lg-12 col-md-12 col-6"><a href="#"><?php echo LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York', '%b %e, %i:%M %p'); ?></a> <span class="lnr lnr-calendar-full"></span></p>
-										
-							
+
 							<?php
 							if($numrecords > $numperpage){
 								$total_pages = $numrecords / $numperpage;
@@ -334,19 +325,10 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 									<?php } ?>
 		                        </ul>
 		                    </nav>
-							
-							
+
 						</div>
-						
-	
+
 */
-
-
-
-
-
-
-
 
 	$page->public_footer(array('track'=>TRUE));
 ?>

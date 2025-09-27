@@ -3,7 +3,7 @@
 function ctlddevice_edit_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/includes/ControlDHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
@@ -16,13 +16,11 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 	$settings = Globalvars::get_instance(); 
 	$page_vars['settings'] = $settings;
 
-	
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	$session->check_permission(0);
 	$session->set_return();
-	
-	
+
 	$user = new User($session->get_user_id(), TRUE);	
 	$page_vars['user'] = $user;
 	
@@ -50,9 +48,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 		$device->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_vars['device'] = $device;
 	}
-	
-	
-	
+
 	if(isset($_POST['device_name'])){
 		$cd = new ControlDHelper();
 		
@@ -80,7 +76,6 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 				}
 			}		
 
-			
 			$device->set('cdd_timezone',strip_tags($_POST['cdd_timezone']));
 			$device->set('cdd_device_name', $device_name);
 			$device->set('cdd_allow_device_edits', $_POST['cdd_allow_device_edits']);
@@ -88,8 +83,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 			$device->save();
 
 			LibraryFunctions::redirect('/profile/devices');
-			
-			
+
 		}
 		else{	
 			if(!$account->can_add_device()){
@@ -104,12 +98,9 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 			//CREATE THE PRIMARY PROFILE
 			$profile_name = 'user'.$user->key . '-'.$empty_device->key.'-profile1';
 			$profile1 = CtldProfile::createProfile($profile_name, $user);
-			
-			
-			$device = CtldDevice::createDevice($empty_device, $profile1, $profile2, $_POST);
-			
 
-			
+			$device = CtldDevice::createDevice($empty_device, $profile1, $profile2, $_POST);
+
 		}
 		
 		LibraryFunctions::redirect('/profile/devices');
@@ -123,10 +114,8 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 			$page_vars['device'] = $device;
 		}
 
-		
 	}
-	
-	
+
 	return LogicResult::render($page_vars);
 }
 	

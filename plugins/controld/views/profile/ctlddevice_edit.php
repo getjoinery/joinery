@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctlddevice_edit_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -29,10 +29,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		$name = $device->get_readable_name();
 	}
 
-	
-	
-	
-	
 	$formwriter = $page->getFormWriter();
 
 	$validation_rules = array();
@@ -110,14 +106,11 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
 	$optionvals = Address::get_timezone_drop_array();
 	echo $formwriter->dropinput("Time zone for scheduling", "cdd_timezone", "ctrlHolder", $optionvals, $device->get('cdd_timezone'), '', FALSE);
-	
 
-	
 	echo $formwriter->start_buttons('form-btn col-6');
 	echo $formwriter->new_form_button('Submit', 'th-btn');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);	
-	
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

@@ -1,13 +1,12 @@
 <?php
-PathHelper::requireOnce('includes/ThemeHelper.php');
+
 	// SessionControl is now guaranteed available - line removed
 	// LibraryFunctions is now guaranteed available - line removed
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 	
 	PathHelper::requireOnce('data/points_class.php');
-	
-		
+
 	echo 'turned off';
 	exit;
 	
@@ -54,9 +53,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 		'title' => 'Urbit Explorer',
 	);
 	$page->public_header($hoptions);
-	
 
-	
 	echo PublicPage::BeginPage('Urbit Explorer');
 			
 	echo '<div class="section padding-top-20">
@@ -112,7 +109,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 			$point->set('pnt_sein', $results->sponsor);
 		}
 
-		
 		if($point){
 			$results= json_decode(exec('node '.$node_dir.'/get-spawn-count.js '.$query_number));
 			echo '# points spawned: '. $results.'<br>';
@@ -131,7 +127,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 			$results= json_decode(exec('node '.$node_dir.'/has-been-linked.js '.$query_number));
 			echo 'Has been booted: '. ($results ? 'yes' : 'no').'<br>';
 		}
-		
 
 		if($point && $point->get('pnt_is_live') === NULL){
 			$results= json_decode(exec('node '.$node_dir.'/is-live.js '.$query_number));
@@ -148,7 +143,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 		}	
 		$point->save();
 	}
-
 
 	$formwriter = new FormWriter("form1", TRUE);
 	
@@ -167,10 +161,7 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 	echo $formwriter->captcha_hidden_input();
 	echo $formwriter->new_form_button('Submit', 'button button-lg button-dark', 'submit1');
 	echo $formwriter->end_form();
-	
 
-	
-	
 	echo '</div></div>';
 	echo PublicPage::EndPage();
 	$page->public_footer(array('track'=>TRUE));

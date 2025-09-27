@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctldfilters_edit_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -32,12 +32,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		$name = $device->get_readable_name();
 	}
 
-	
-	
-	
-	
 	$formwriter = $page->getFormWriter();
-	
 
 	if($profile_choice == 'secondary'){
 		$validation_rules = array();
@@ -66,9 +61,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
                             </div>
                         </div>
 	<?php
-	
-	
-	
+
 	if($device){
 		echo $formwriter->hiddeninput('device_id', $device->key);
 	}
@@ -122,7 +115,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		</div>';
 	}
 
-	
 	if($account->get('cda_plan') == CtldAccount::PREMIUM_PLAN || $account->get('cda_plan') == CtldAccount::PRO_PLAN ){
 		echo '<h5>Ad and Malware</h5>';
 		$optionvals = array("No blocking" => 0, "Light blocking"=>'ads_small', 'Medium blocking'=>'ads_medium' /*, 'Aggressive blocking'=>'ads'*/);
@@ -177,7 +169,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			echo $formwriter->dropinput("Time to end blocking", "end_time", '', $optionvals, $profile->get('cdp_schedule_end'), '', TRUE);	
 			echo '</div>';
 			echo '</div>';
-	
 
 			$optionvals = array(
 				'Monday' => 'mon',
@@ -194,13 +185,11 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			echo $formwriter->checkboxList("Days of the week", 'days_blocked', "", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
 		}			
 	}
-	
-	
+
 	echo $formwriter->start_buttons('form-btn col-6');
 	echo $formwriter->new_form_button('Submit', 'primary');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form(true);	
-	
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

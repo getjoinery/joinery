@@ -1,5 +1,5 @@
 <?php
-PathHelper::requireOnce('includes/ThemeHelper.php');
+
 	// SessionControl is now guaranteed available - line removed
 	// LibraryFunctions is now guaranteed available - line removed
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -55,8 +55,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
           </div>
         </div>
       </div>	
-	
-	
 
 <!-- Blog section -->
       <div class="relative bg-gray-50 py-16 sm:py-24 lg:py-32">
@@ -191,8 +189,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
 </div>
 <?php */ ?>
 
-
-
 <div class="relative bg-white pt-16 pb-32 overflow-hidden">
   <!--<div class="relative">
     <div class="lg:mx-auto lg:max-w-7xl lg:px-8 lg:grid lg:grid-cols-2 lg:grid-flow-col-dense lg:gap-24">
@@ -282,11 +278,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
   </div>
 </div>
 
-
-
-
-	
-	
 <?php /* ?>
 <section class="bg-gray-600">
   <div class="max-w-7xl mx-auto md:grid md:grid-cols-2 md:px-6 lg:px-8">
@@ -402,9 +393,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
   </div>
 </section>		
 <?php */ ?>
-	
-	
-	
 
 <div class="bg-gray-800 mt-24">
   <div class="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:py-16 lg:px-8 lg:flex lg:items-center">
@@ -435,12 +423,6 @@ PathHelper::requireOnce('includes/ThemeHelper.php');
     </div>
   </div>
 </div>
-
-
-
-
-	
-
 
 		<?php
 

@@ -2,11 +2,9 @@
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/AdminPage.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
 
-	
-	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once(PathHelper::getIncludePath('plugins/items/data/items_class.php'));
 
@@ -19,8 +17,7 @@
 	$sort = LibraryFunctions::fetch_variable('sort', 'item_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-	
-	
+
 	$search_criteria = array();
 
 	//ONLY SHOW DELETED TO SUPER ADMINS
@@ -46,7 +43,6 @@
 		'session' => $session,
 	)
 	);	
-	
 
 	$headers = array("Item",  "Created", "Published", "By", "Item Status");
 	$altlinks = array('New Item'=>'/admin/admin_item_edit');

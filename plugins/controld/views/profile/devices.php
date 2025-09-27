@@ -1,7 +1,7 @@
 <?php
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/Globalvars.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'].'/includes/PathHelper.php');
+	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('devices_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -202,7 +202,6 @@ else{
 											<h3 class="company-name">Scheduled blocklist</h3>
 											
 											<h5 class="price">None.</h5>
-											
 
 										</div>
 									</div>
@@ -259,8 +258,7 @@ else{
 								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
 								<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
 							</div>
-							
-							
+
 						</div>
 					</div>
 	<?php
@@ -277,15 +275,13 @@ else{
 								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
 								<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
 							</div>
-							
-							
+
 						</div>
 					</div>
 	<?php		
 		
 	}
 }
-		
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

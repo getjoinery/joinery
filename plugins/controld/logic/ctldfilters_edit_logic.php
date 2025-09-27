@@ -3,27 +3,24 @@
 function ctldfilters_edit_logic($get_vars, $post_vars){
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/ErrorHandler.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/LibraryFunctions.php');
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/SessionControl.php');
+	
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/includes/ControlDHelper.php');
 
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/data/users_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldaccounts_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctlddevices_class.php');
 	require_once($_SERVER['DOCUMENT_ROOT'] . '/plugins/controld/data/ctldprofiles_class.php');
-	
-	
+
 	$page_vars = array();	
 
 	$settings = Globalvars::get_instance(); 
 	$page_vars['settings'] = $settings;
 
-	
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	$session->check_permission(0);
 	$session->set_return();
-	
-	
+
 	$user = new User($session->get_user_id(), TRUE);	
 	$page_vars['user'] = $user;
 	
@@ -34,7 +31,6 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 	}
 	$page_vars['account'] = $account;
 
-	
 	if(isset($_POST['action'])){
 		$profile_choice = LibraryFunctions::fetch_variable_local($post_vars, 'profile_choice', 0, 'required', 'Profile choice is required.', 'safemode', NULL);
 		$page_vars['profile_choice'] = $profile_choice;
@@ -62,7 +58,6 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		}		
 		$page_vars['profile'] = $profile;
 
-		
 		//CHANGE DROPDOWN STRUCTURE
 		if(isset($_POST['block_malware'])){
 			if($_POST['block_malware'] != 0){
@@ -79,8 +74,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 				$_POST['block_ads'] = 0;
 			}
 		}
-		
-		
+
 		if($profile == 'primary'){
 
 			//NOW FIGURE OUT WHAT UPDATES WE HAVE TO THE FILTERS
@@ -93,11 +87,9 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 			//NOW FIGURE OUT WHAT UPDATES WE HAVE TO THE FILTERS
 			$profile->update_remote_filters($_POST);
 			$profile->update_remote_services($_POST);
-					
-					
+
 			$result = $profile->add_or_edit_schedule($device, $_POST);
 
-			
 		}
 		LibraryFunctions::redirect('/profile/devices');
 		exit;
@@ -135,14 +127,9 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		//$page_vars['num_filters'] = $num_devices;
 		$filter_out = array();
 
-	
-		
-		
-		
 		foreach($filters as $filter){
 			$filter_out[$filter->get('cdf_filter_pk')] = $filter->get('cdf_is_active');
 		}
-		
 
 		//DROPDOWN FORMATTING
 		if($filter_out['ads']){
@@ -183,12 +170,9 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		}
 
 		$page_vars['services'] = $service_out;
-			
-		
+
 	}
-	
-	
-	
+
 	return LogicResult::render($page_vars);
 }
 	
