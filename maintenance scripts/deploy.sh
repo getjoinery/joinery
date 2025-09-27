@@ -10,7 +10,7 @@
 # MODIFIED: Added trap-based automatic rollback system
 
 # Deploy script version
-DEPLOY_VERSION="3.07"
+DEPLOY_VERSION="3.09"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -1240,32 +1240,43 @@ verbose_echo "✓ Plugin loading test passed ($plugin_file_count files checked)"
 
 # MODEL TESTS ON STAGING
 verbose_echo "Running model tests on staging..."
-if ! php -r "
+model_test_output=$(php -r "
     \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
     chdir('/var/www/html/$TARGET_SITE/public_html_stage');
-    
+
     // Set output buffering to capture any output
     ob_start();
-    
+
     // Include the model test runner
     try {
         include 'tests/models/run_all.php';
         \$output = ob_get_contents();
         ob_end_clean();
-        
+
         // Check for test failures in output
         if (strpos(\$output, 'FAIL') !== false || strpos(\$output, 'ERROR') !== false) {
-            echo 'Model tests failed - check output for details';
+            echo \"Model test output:\n\";
+            echo \$output;
+            echo \"\nModel tests failed - check output for details\";
             exit(1);
         }
-        
+
         echo 'Model tests completed successfully';
     } catch (Exception \$e) {
         ob_end_clean();
         echo 'Model test error: ' . \$e->getMessage();
         exit(1);
+    } catch (Error \$e) {
+        ob_end_clean();
+        echo 'Model test fatal error: ' . \$e->getMessage();
+        exit(1);
     }
-" > /dev/null 2>&1; then
+" 2>&1)
+model_test_exit_code=$?
+
+if [ $model_test_exit_code -ne 0 ]; then
+    echo "Model test output:"
+    echo "$model_test_output"
     handle_test_failure "Model tests failed in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
     if [ $? -eq 1 ]; then
         exit 1
@@ -1275,21 +1286,29 @@ verbose_echo "✓ Model tests passed on staging"
 
 # APPLICATION BOOTSTRAP TEST ON STAGING
 verbose_echo "Testing application bootstrap on staging..."
-if ! php -r "
+bootstrap_output=$(php -r "
     \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
     chdir('/var/www/html/$TARGET_SITE/public_html_stage');
-    
+
     // Test core includes
     try {
         require_once('includes/PathHelper.php');
-        PathHelper::requireOnce('includes/Globalvars.php');
-        PathHelper::requireOnce('includes/DbConnector.php');
+        require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+        require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
         echo 'Bootstrap test completed successfully';
     } catch (Exception \$e) {
         echo 'Bootstrap error: ' . \$e->getMessage();
         exit(1);
+    } catch (Error \$e) {
+        echo 'Bootstrap fatal error: ' . \$e->getMessage();
+        exit(1);
     }
-" >/dev/null 2>&1; then
+" 2>&1)
+bootstrap_exit_code=$?
+
+if [ $bootstrap_exit_code -ne 0 ]; then
+    echo "Bootstrap test output:"
+    echo "$bootstrap_output"
     handle_test_failure "Application bootstrap test failed in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
     if [ $? -eq 1 ]; then
         exit 1
