@@ -7,13 +7,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic', 'system', null, 'controld'));
 
-	$page_vars = pricing_logic($_GET, $_POST);
-	// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(pricing_logic($_GET, $_POST));
 	$page_choice = $page_vars['page_choice'];
 	$products = $page_vars['products'];
 	$product_versions = $page_vars['product_versions'];

@@ -5,7 +5,7 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('devices_logic.php', 'logic', 'system', null, 'controld'));
 
-	$page_vars = devices_logic($_GET, $_POST);
+	$page_vars = process_logic(devices_logic($_GET, $_POST));
 	$account = $page_vars['account'];
 	$devices = $page_vars['devices'];
 	$num_devices =  $page_vars['num_devices'];
