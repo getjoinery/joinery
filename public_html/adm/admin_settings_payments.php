@@ -61,7 +61,7 @@
 				$user_setting->prepare();
 				$user_setting->save();
 			}
-		}				
+		}
 		LibraryFunctions::redirect('/admin/admin_settings');
 	}
 	
@@ -116,7 +116,7 @@
 		'Payment Settings' => '/admin/admin_settings_payments',
 		'Email Settings' => '/admin/admin_settings_email',
 	);
-	echo AdminPage::tab_menu($tab_menus, 'General Settings');
+	echo AdminPage::tab_menu($tab_menus, 'Payment Settings');
 
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
 	
