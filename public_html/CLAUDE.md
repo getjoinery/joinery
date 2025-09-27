@@ -366,6 +366,15 @@ require_once(PathHelper::getThemeFilePath('profile.php', 'views'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 ```
 
+### Handling Logic Function Results
+
+```php
+// ✅ CORRECT - Always wrap logic calls with process_logic():
+$page_vars = process_logic(profile_logic($_GET, $_POST));
+
+// Automatically handles redirects, errors, and data extraction
+```
+
 ### Getting FormWriter Instances
 
 ```php

@@ -4,13 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('login_logic.php', 'logic'));
 	
-	$page_vars = login_logic($_GET, $_POST);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(login_logic($_GET, $_POST));
 	$settings = $page_vars['settings'];
 	if ($email) {
 		$forgot_link = '/password-reset-1?e=' . rawurlencode(htmlspecialchars($email));

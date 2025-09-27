@@ -4,13 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
-	$page_vars = event_logic($_GET, $_POST, $event);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(event_logic($_GET, $_POST, $event));
 	$event = $page_vars['event'];
 	$settings = Globalvars::get_instance();
 

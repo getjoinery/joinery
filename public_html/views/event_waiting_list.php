@@ -5,13 +5,7 @@
 	require_once(PathHelper::getThemeFilePath('event_waiting_list_logic.php', 'logic'));
 	
 	$event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.', TRUE, 'int');
-	$page_vars = event_waiting_list_logic($_GET, $_POST, $event_id);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(event_waiting_list_logic($_GET, $_POST, $event_id));
 	$event = $page_vars['event'];
 	
 	$page = new PublicPage();
