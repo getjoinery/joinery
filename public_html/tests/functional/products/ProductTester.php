@@ -1743,8 +1743,7 @@ class ProductTester {
                     // Create order items from cart contents
                     require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
                     foreach($cart->items as $key => $cart_item) {
-                        list($quantity, $product, $data, $price, $discount) = $cart_item;
-                        $product_version = $product->get_product_versions(TRUE, $data['product_version']);
+                        list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
                         
                         $order_item = new OrderItem(NULL);
                         $order_item->set('odi_ord_order_id', $test_order->key);
