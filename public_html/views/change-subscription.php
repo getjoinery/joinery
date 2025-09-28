@@ -1,4 +1,5 @@
 <?php
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 require_once(PathHelper::getIncludePath('data/products_class.php'));
 require_once(PathHelper::getThemeFilePath('change_subscription_logic.php', 'logic'));
@@ -18,7 +19,7 @@ echo PublicPage::BeginPage('Choose Your Membership Tier', $hoptions);
 
 // Get current user's tier
 $session = SessionControl::get_instance();
-$user_id = $session->get('usr_user_id');
+$user_id = $session->get_user_id();
 $current_tier = SubscriptionTier::GetUserTier($user_id);
 $current_level = $current_tier ? $current_tier->get('sbt_tier_level') : 0;
 
@@ -82,8 +83,8 @@ $all_tiers = MultiSubscriptionTier::GetAllActive();
                                 <?php
                                 // Get product versions for pricing
                                 $versions = $product->get_product_versions(TRUE);
-                                if (count($versions) > 0):
-                                    $version = $versions[0]; // Get first active version
+                                if ($versions && $versions->count() > 0):
+                                    $version = $versions->get(0); // Get first active version
                                 ?>
                                     <p class="text-3xl font-extrabold text-gray-900">
                                         $<?php echo number_format($version->get('prv_version_price'), 2); ?>
