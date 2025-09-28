@@ -61,13 +61,21 @@
 				$_POST['pro_grp_group_id'] = NULL;
 			}
 
+			// Handle subscription tier ID
+			if($_POST['pro_sbt_subscription_tier_id']){
+				$_POST['pro_sbt_subscription_tier_id'] = (int)$_POST['pro_sbt_subscription_tier_id'];
+			}
+			else{
+				$_POST['pro_sbt_subscription_tier_id'] = NULL;
+			}
+
 			//STORE THE PRODUCT SCRIPTS
 			$product->set('pro_product_scripts', NULL);
 			if(is_array($_POST['product_scripts'])){
 				$product->set('pro_product_scripts', implode(',', $_POST['product_scripts']));
 			}
-			
-			$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_grp_group_id', 'pro_digital_link', 'pro_short_description');
+
+			$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description');
 
 			foreach($editable_fields as $field) {
 				$product->set($field, $_POST[$field]);
@@ -264,6 +272,30 @@
 		$optionvals = $groups->get_dropdown_array();
 		echo $formwriter->dropinput("Event Bundle", "pro_grp_group_id", "ctrlHolder", $optionvals, $product->get('pro_grp_group_id'), '', TRUE);
 	}
+
+	// Add Subscription Tier dropdown
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+	$subscription_tiers = MultiSubscriptionTier::GetAllActive();
+	$tier_options = array('-- None --' => '');
+
+	foreach ($subscription_tiers as $tier) {
+		$display_name = sprintf(
+			'%s (Level %d)',
+			$tier->get('sbt_display_name'),
+			$tier->get('sbt_tier_level')
+		);
+		$tier_options[$display_name] = $tier->key;
+	}
+
+	echo $formwriter->dropinput(
+		"Subscription Tier",
+		"pro_sbt_subscription_tier_id",
+		"ctrlHolder",
+		$tier_options,
+		$product->get('pro_sbt_subscription_tier_id'),
+		'Select a tier this product grants when purchased',
+		TRUE
+	);
 
 	if(!$pro_max_purchase_count_fill = $product->get('pro_max_purchase_count')){
 		$pro_max_purchase_count_fill = 0;

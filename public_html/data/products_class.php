@@ -648,6 +648,7 @@ class Product extends SystemBase {
 	    'pro_product_scripts' => array('type'=>'text'),
 	    'pro_stripe_product_id' => array('type'=>'varchar(64)'),
 	    'pro_stripe_product_id_test' => array('type'=>'varchar(64)'),
+	    'pro_sbt_subscription_tier_id' => array('type'=>'int4'),
 	);
 
 	public static $field_constraints = array();	
