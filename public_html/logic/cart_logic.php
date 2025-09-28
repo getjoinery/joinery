@@ -73,9 +73,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$user = new User($session->get_user_id(), TRUE);
 		$cart->billing_user = array(
-			'first_name' => $user->get('usr_fname'),
-			'last_name' => $user->get('usr_lname'),
-			'email' => $user->get('usr_email')
+			'billing_first_name' => $user->get('usr_fname'),
+			'billing_last_name' => $user->get('usr_lname'),
+			'billing_email' => $user->get('usr_email')
 		);
 		return LogicResult::redirect('/cart');
 	}
@@ -149,7 +149,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$require_login = 0;
 	if(!$session->get_user_id()){
 		//IF NOT LOGGED IN, CHECK TO SEE IF EMAIL EXISTS AND IF SO ASK TO LOG IN
-		$user = User::GetByEmail($cart->billing_user['email']);
+		$user = User::GetByEmail($cart->billing_user['billing_email']);
 		if($user){
 			$require_login = 1;
 		}
