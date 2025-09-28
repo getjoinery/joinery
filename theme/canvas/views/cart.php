@@ -284,7 +284,7 @@ $page_vars = $page_vars->data;
 								<a href="/cart_clear" class="alert-link">clear the cart</a>.
 							</div>
 							<?php else: ?>
-								<?php if($cart->get_total() > 0 && $cart->billing_user['billing_email']): ?>
+								<?php if($cart->get_total() > 0 && $cart->billing_user['email']): ?>
 								
 								<!-- Stripe Payment -->
 								<div class="card shadow-sm rounded-4 mb-4">
@@ -293,6 +293,7 @@ $page_vars = $page_vars->data;
 									</div>
 									<div class="card-body">
 										<?php
+										$formwriter = $page->getFormWriter('form_stripe');
 										if($settings->get_setting('checkout_type') == 'stripe_checkout'):
 											echo $page_vars['stripe_helper']->output_stripe_checkout_form($cart->get_hash());
 										else:
