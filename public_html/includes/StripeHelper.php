@@ -617,7 +617,7 @@ class StripeHelper {
 			}				
 		}
 		else{
-			$create_list['customer_email'] = $cart->billing_user['email'];
+			$create_list['customer_email'] = $cart->billing_user['billing_email'];
 		}		
 		
 		return $create_list;
