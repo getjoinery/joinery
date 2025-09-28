@@ -1234,23 +1234,23 @@ class ProductTester {
             
             if ($prefill_result) {
                 echo "✓ Billing info setup: " . 
-                     htmlspecialchars($cart->billing_user['first_name'] ?? 'N/A') . " " . 
-                     htmlspecialchars($cart->billing_user['last_name'] ?? 'N/A') . " (" . 
-                     htmlspecialchars($cart->billing_user['email'] ?? 'N/A') . ")<br>\n";
+                     htmlspecialchars($cart->billing_user['billing_first_name'] ?? 'N/A') . " " .
+                     htmlspecialchars($cart->billing_user['billing_last_name'] ?? 'N/A') . " (" .
+                     htmlspecialchars($cart->billing_user['billing_email'] ?? 'N/A') . ")<br>\n";
                 return;
             }
         }
         
         // If prefill didn't work, set billing user information manually from JSON config
         $cart->billing_user = [
-            'first_name' => $billing_info['first_name'],
-            'last_name' => $billing_info['last_name'], 
-            'email' => $billing_info['email']
+            'billing_first_name' => $billing_info['first_name'],
+            'billing_last_name' => $billing_info['last_name'],
+            'billing_email' => $billing_info['email']
         ];
         
-        echo "✓ Billing info setup: " . htmlspecialchars($cart->billing_user['first_name']) . " " . 
-             htmlspecialchars($cart->billing_user['last_name']) . " (" . 
-             htmlspecialchars($cart->billing_user['email']) . ")<br>\n";
+        echo "✓ Billing info setup: " . htmlspecialchars($cart->billing_user['billing_first_name']) . " " .
+             htmlspecialchars($cart->billing_user['billing_last_name']) . " (" .
+             htmlspecialchars($cart->billing_user['billing_email']) . ")<br>\n";
     }
     
     /**
