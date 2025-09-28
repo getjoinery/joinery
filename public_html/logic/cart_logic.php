@@ -85,8 +85,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$paypal = new PaypalHelper();
 			$page_vars['paypal_helper'] = $paypal;
 			foreach($cart->items as $key => $cart_item) {
-				list($quantity, $product, $data, $price, $discount) = $cart_item;
-				$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+				list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 				if($product_version->is_subscription()){
 					//TODO:
 					if(!$paypal_product = $paypal->searchProduct($product->get('pro_name'))){

@@ -35,7 +35,7 @@
 			<?php			
 			$total_discount = 0;
 			foreach($cart->items as $key => $cart_item) {
-				list($quantity, $product, $data, $price, $discount) = $cart_item;
+				list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 				$coupon_discount_words = '';
 				//HANDLE COUPONS
 				if($discount){
@@ -144,7 +144,7 @@
 			$optionvals = array();
 			$selected = '';
 			foreach($cart->items as $key => $cart_item) {
-				list($quantity, $product, $data, $price, $discount) = $cart_item;
+				list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 				$name = $data['full_name_first'] . ' ' . $data['full_name_last'];
 				$optionvals[$name] = $data['email'];
 				if(!$selected){

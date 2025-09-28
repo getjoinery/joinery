@@ -222,8 +222,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$stripe_item_list = array();
 			foreach($cart->items as $key => $cart_item) {
 				$email_fill = array();
-				list($quantity, $product, $data, $price, $discount) = $cart_item;
-				$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+				list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 				$product_name = $product->get('pro_name').' '. $product_version->get('prv_version_name');
 				$email_fill['purchase_amount'] = $price - $discount;
 
@@ -271,8 +270,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	foreach($cart->items as $key => $cart_item) {
 		$email_fill = array();
-		list($quantity, $product, $data, $price, $discount) = $cart_item;
-		$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 		$product_name = $product->get('pro_name').' '. $product_version->get('prv_version_name');
 		$email_fill['purchase_amount'] = $price - $discount;
 
