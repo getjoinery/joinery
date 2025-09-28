@@ -156,14 +156,17 @@ class SubscriptionTier extends SystemBase {
     public static function handleProductPurchase($user, $product, $order_item, $order) {
         // Check if product has a subscription tier
         if (!$product->get('pro_sbt_subscription_tier_id')) {
+            error_log('Tier assignment: Product ' . $product->key . ' has no tier assigned');
             return false;
         }
 
         try {
+            error_log('Tier assignment: Attempting to assign tier ' . $product->get('pro_sbt_subscription_tier_id') . ' to user ' . $user->key . ' for product ' . $product->get('pro_name'));
+
             $tier = new SubscriptionTier($product->get('pro_sbt_subscription_tier_id'), TRUE);
 
             // Add user to tier with purchase context
-            $tier->addUser(
+            $result = $tier->addUser(
                 $user->key,
                 'purchase',
                 'order',
@@ -171,11 +174,13 @@ class SubscriptionTier extends SystemBase {
                 null  // No admin user for purchases
             );
 
+            error_log('Tier assignment: Result = ' . ($result ? 'success' : 'failed/skipped'));
             return true;
 
         } catch (Exception $e) {
             // Log error but don't break checkout
             error_log('Subscription tier assignment failed: ' . $e->getMessage());
+            error_log('Stack trace: ' . $e->getTraceAsString());
             return false;
         }
     }
