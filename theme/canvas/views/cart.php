@@ -132,8 +132,8 @@ $page_vars = $page_vars->data;
 								<div class="card-body">
 									<div class="d-flex justify-content-between align-items-center">
 										<div>
-											<h6 class="mb-1"><?php echo htmlspecialchars($cart->billing_user['first_name'], ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars($cart->billing_user['last_name'], ENT_QUOTES, 'UTF-8'); ?></h6>
-											<small class="text-muted"><?php echo htmlspecialchars($cart->billing_user['email'], ENT_QUOTES, 'UTF-8'); ?></small>
+											<h6 class="mb-1"><?php echo htmlspecialchars($cart->billing_user['billing_first_name'], ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars($cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8'); ?></h6>
+											<small class="text-muted"><?php echo htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'); ?></small>
 										</div>
 										<?php
 										$formwriter = $page->getFormWriter('form_billing_user');
@@ -172,19 +172,19 @@ $page_vars = $page_vars->data;
 										<div class="col-md-6">
 											<div class="form-group">
 												<label class="form-label">First Name <span class="text-danger">*</span></label>
-												<?php echo $formwriter->textinput("", "billing_first_name", 'form-control', 30, htmlspecialchars($cart->billing_user['first_name'], ENT_QUOTES, 'UTF-8'), "", 255, ""); ?>
+												<?php echo $formwriter->textinput("", "billing_first_name", 'form-control', 30, htmlspecialchars($cart->billing_user['billing_first_name'], ENT_QUOTES, 'UTF-8'), "", 255, ""); ?>
 											</div>
 										</div>
 										<div class="col-md-6">
 											<div class="form-group">
 												<label class="form-label">Last Name <span class="text-danger">*</span></label>
-												<?php echo $formwriter->textinput("", "billing_last_name", 'form-control', 30, htmlspecialchars($cart->billing_user['last_name'], ENT_QUOTES, 'UTF-8'), "", 255, ""); ?>
+												<?php echo $formwriter->textinput("", "billing_last_name", 'form-control', 30, htmlspecialchars($cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8'), "", 255, ""); ?>
 											</div>
 										</div>
 										<div class="col-12">
 											<div class="form-group">
 												<label class="form-label">Email Address <span class="text-danger">*</span></label>
-												<?php echo $formwriter->textinput("", "billing_email", 'form-control', 30, htmlspecialchars($cart->billing_user['email'], ENT_QUOTES, 'UTF-8'), "", 255, ""); ?>
+												<?php echo $formwriter->textinput("", "billing_email", 'form-control', 30, htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'), "", 255, ""); ?>
 											</div>
 										</div>
 										<div class="col-12">
@@ -284,7 +284,7 @@ $page_vars = $page_vars->data;
 								<a href="/cart_clear" class="alert-link">clear the cart</a>.
 							</div>
 							<?php else: ?>
-								<?php if($cart->get_total() > 0 && $cart->billing_user['email']): ?>
+								<?php if($cart->get_total() > 0 && $cart->billing_user['billing_email']): ?>
 								
 								<!-- Stripe Payment -->
 								<div class="card shadow-sm rounded-4 mb-4">
