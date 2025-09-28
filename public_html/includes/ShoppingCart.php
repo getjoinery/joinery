@@ -202,9 +202,9 @@ class ShoppingCart {
 		foreach($this->items as $key => $cart_item) {
 			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 			if($data['email']){
-				$this->billing_user['first_name'] = $data['full_name_first'];
-				$this->billing_user['last_name'] = $data['full_name_last'];
-				$this->billing_user['email'] = strtolower(trim($data['email']));
+				$this->billing_user['billing_first_name'] = $data['full_name_first'];
+				$this->billing_user['billing_last_name'] = $data['full_name_last'];
+				$this->billing_user['billing_email'] = strtolower(trim($data['email']));
 				return true;
 			}
 			return false;
@@ -215,12 +215,12 @@ class ShoppingCart {
 	public function is_billing_user_complete(){
 		$session = SessionControl::get_instance();
 		if($session->get_user_id()){
-			if($this->billing_user['first_name'] && $this->billing_user['last_name'] && $this->billing_user['email']){
+			if($this->billing_user['billing_first_name'] && $this->billing_user['billing_last_name'] && $this->billing_user['billing_email']){
 				return 1;
 			}			
 		}
 		else{
-			if($this->billing_user['first_name'] && $this->billing_user['last_name'] && $this->billing_user['email'] && $this->billing_user['password'] && $this->billing_user['privacy']){
+			if($this->billing_user['billing_first_name'] && $this->billing_user['billing_last_name'] && $this->billing_user['billing_email'] && $this->billing_user['password'] && $this->billing_user['privacy']){
 				return 1;
 			}
 		}
@@ -233,18 +233,18 @@ class ShoppingCart {
 		}
 		
 		if($data['billing_email']){
-				$this->billing_user['first_name'] = $data['billing_first_name'];
-				$this->billing_user['last_name'] = $data['billing_last_name'];
-				$this->billing_user['email'] = strtolower(trim($data['billing_email']));
+				$this->billing_user['billing_first_name'] = $data['billing_first_name'];
+				$this->billing_user['billing_last_name'] = $data['billing_last_name'];
+				$this->billing_user['billing_email'] = strtolower(trim($data['billing_email']));
 				$this->billing_user['password'] = trim($data['password']);
 				$this->billing_user['privacy'] = $data['privacy'];
 		}
 		else if($data['existing_billing_email']){
 			//IF THE USER TYPED IN A NEW BILLING USER
 			if($data['existing_billing_email'] == 'A different person'){
-				$this->billing_user['first_name'] = $data['billing_first_name'];
-				$this->billing_user['last_name'] = $data['billing_last_name'];
-				$this->billing_user['email'] = strtolower(trim($data['billing_email']));
+				$this->billing_user['billing_first_name'] = $data['billing_first_name'];
+				$this->billing_user['billing_last_name'] = $data['billing_last_name'];
+				$this->billing_user['billing_email'] = strtolower(trim($data['billing_email']));
 				$this->billing_user['password'] = trim($data['password']);
 				$this->billing_user['privacy'] = $data['privacy'];
 			}	

@@ -105,7 +105,7 @@
 		<?php									
 		if($cart->billing_user){	
 			echo '<h2 class="text-lg font-medium text-gray-900">Billing User</h2>';
-			echo '<p>'.htmlspecialchars($cart->billing_user['first_name'], ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars($cart->billing_user['last_name'], ENT_QUOTES, 'UTF-8') . ' ('. htmlspecialchars($cart->billing_user['email'], ENT_QUOTES, 'UTF-8').')</p>';
+			echo '<p>'.htmlspecialchars($cart->billing_user['billing_first_name'], ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars($cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8') . ' ('. htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8').')</p>';
 			$formwriter = $page->getFormWriter('form_billing_user');
 			
 			//echo $formwriter->start_buttons();
@@ -156,9 +156,9 @@
 			echo $formwriter->dropinput("Choose one", "existing_billing_email", NULL, $optionvals, $selected, '', FALSE);
 			*/
 			echo '<div id="new_billing">';
-			echo $formwriter->textinput("Billing First Name", "billing_first_name", NULL, 30, htmlspecialchars($cart->billing_user['first_name'], ENT_QUOTES, 'UTF-8'), "", 255, "");
-			echo $formwriter->textinput("Billing Last Name", "billing_last_name", NULL, 30, htmlspecialchars($cart->billing_user['last_name'], ENT_QUOTES, 'UTF-8'), "", 255, "");
-			echo $formwriter->textinput("Billing Email", "billing_email", NULL, 30, htmlspecialchars($cart->billing_user['email'], ENT_QUOTES, 'UTF-8'), "", 255, ""); 
+			echo $formwriter->textinput("Billing First Name", "billing_first_name", NULL, 30, htmlspecialchars($cart->billing_user['billing_first_name'], ENT_QUOTES, 'UTF-8'), "", 255, "");
+			echo $formwriter->textinput("Billing Last Name", "billing_last_name", NULL, 30, htmlspecialchars($cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8'), "", 255, "");
+			echo $formwriter->textinput("Billing Email", "billing_email", NULL, 30, htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'), "", 255, ""); 
 			echo $formwriter->passwordinput("Create Password", "password", 'sm:col-span-2', 20, "" , "", 255,"");
 			
 			echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "sm:col-span-6", "left", NULL, 1, "");
@@ -228,11 +228,11 @@
 		
 		if($require_login){
 				echo '<div class="alert alert-warning" role="alert">
-				  The email ('.htmlspecialchars($cart->billing_user['email'], ENT_QUOTES, 'UTF-8').') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
+				  The email ('.htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8').') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
 				</div>';
 		}
 		else{
-			if($cart->get_total() > 0 && $cart->billing_user['email']){			
+			if($cart->get_total() > 0 && $cart->billing_user['billing_email']){			
 
 				if($settings->get_setting('checkout_type') == 'stripe_checkout'){	
 					echo '<h2 class="text-lg mb-3 font-medium text-gray-900">Pay with Stripe</h5>';
