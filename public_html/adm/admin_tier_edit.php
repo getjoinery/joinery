@@ -4,6 +4,7 @@
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
 	require_once(PathHelper::getIncludePath('/data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('/data/subscription_tiers_class.php'));
+	require_once(PathHelper::getIncludePath('/data/change_tracking_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -26,6 +27,11 @@
 	if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		if (isset($_POST['tier_id'])) {
 			try {
+				// Get current tier before making changes
+				$old_tier = SubscriptionTier::GetUserTier($user_id);
+				$old_tier_id = $old_tier ? $old_tier->key : null;
+				$old_tier_level = $old_tier ? $old_tier->get('sbt_tier_level') : null;
+
 				if ($_POST['tier_id'] === '0') {
 					// Remove user from all tiers
 					$tier_groups = new MultiGroup(['grp_category' => 'subscription_tier']);
@@ -34,6 +40,23 @@
 					foreach ($tier_groups as $group) {
 						$group->remove_member($user_id);
 					}
+
+					// Record the change in tracking
+					if ($old_tier) {
+						$change = new ChangeTracking(NULL);
+						$change->set('cht_entity_type', 'subscription_tier');
+						$change->set('cht_entity_id', $old_tier_id);
+						$change->set('cht_usr_user_id', $user_id);
+						$change->set('cht_field_name', 'tier_level');
+						$change->set('cht_old_value', $old_tier_level);
+						$change->set('cht_new_value', null);
+						$change->set('cht_change_time', 'now()');
+						$change->set('cht_change_reason', 'manual');
+						$change->set('cht_reference_type', 'admin');
+						$change->set('cht_changed_by_usr_user_id', $session->get_user_id());
+						$change->save();
+					}
+
 					$_SESSION['admin_flash_message'] = 'User tier removed successfully';
 				} else {
 					// Add user to new tier

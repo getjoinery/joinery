@@ -108,8 +108,8 @@ class MultiChangeTracking extends SystemMultiBase {
 
         // Handle any standard filters from parent class
         $sorts = [];
-        if (!empty($this->sorts)) {
-            $sorts = $this->sorts;
+        if (!empty($this->order_by)) {
+            $sorts = $this->order_by;
         }
 
         return $this->_get_resultsv2('cht_change_tracking', $filters, $sorts, $only_count, $debug);

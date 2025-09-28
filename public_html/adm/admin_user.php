@@ -310,6 +310,7 @@
 				else {
 					// Display current subscription tier
 					require_once(PathHelper::getIncludePath('/data/subscription_tiers_class.php'));
+					require_once(PathHelper::getIncludePath('/data/change_tracking_class.php'));
 					$user_tier = SubscriptionTier::GetUserTier($user->key);
 					echo '<h4>Subscription Tier</h4>';
 					if($user_tier) {
@@ -321,6 +322,52 @@
 						echo ' <a href="/admin/admin_tier_edit?user_id=' . $user->key . '">change</a></p>';
 					} else {
 						echo '<p>Free (No active tier) <a href="/admin/admin_tier_edit?user_id=' . $user->key . '">change</a></p>';
+					}
+
+					// Display tier change history
+					$tier_changes = new MultiChangeTracking([
+						'cht_entity_type' => 'subscription_tier',
+						'cht_usr_user_id' => $user->key
+					], ['cht_change_time' => 'DESC'], 10);
+
+					if ($tier_changes->count_all() > 0) {
+						$tier_changes->load();
+						echo '<div style="margin-left: 20px; margin-bottom: 15px; font-size: 0.9em;">';
+						echo '<strong>Tier Change History:</strong><br>';
+						foreach ($tier_changes as $change) {
+							$change_time = LibraryFunctions::convert_time($change->get('cht_change_time'), 'UTC', $session->get_timezone());
+							$old_value = $change->get('cht_old_value') ? 'Level ' . $change->get('cht_old_value') : 'Free';
+							$new_value = $change->get('cht_new_value') ? 'Level ' . $change->get('cht_new_value') : 'Free';
+							$reason = $change->get('cht_change_reason');
+
+							// Get tier names if available
+							if ($change->get('cht_entity_id')) {
+								try {
+									$tier = new SubscriptionTier($change->get('cht_entity_id'), TRUE);
+									$new_value = htmlspecialchars($tier->get('sbt_display_name')) . ' (' . $new_value . ')';
+								} catch (Exception $e) {
+									// Tier might be deleted
+								}
+							}
+
+							echo '• ' . $change_time . ': ' . $old_value . ' → ' . $new_value;
+							if ($reason) {
+								echo ' (' . htmlspecialchars($reason);
+								if ($reason === 'purchase' && $change->get('cht_reference_id')) {
+									echo ' - <a href="/admin/admin_order?ord_order_id=' . $change->get('cht_reference_id') . '">Order #' . $change->get('cht_reference_id') . '</a>';
+								} elseif ($reason === 'manual' && $change->get('cht_changed_by_usr_user_id')) {
+									try {
+										$changed_by = new User($change->get('cht_changed_by_usr_user_id'), TRUE);
+										echo ' by ' . htmlspecialchars($changed_by->display_name());
+									} catch (Exception $e) {
+										// User might be deleted
+									}
+								}
+								echo ')';
+							}
+							echo '<br>';
+						}
+						echo '</div>';
 					}
 
 					echo '<h4>Active Subscriptions</h4>';
