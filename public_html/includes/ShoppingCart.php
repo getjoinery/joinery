@@ -159,11 +159,12 @@ class ShoppingCart {
 		
 		$price = $product->get_price($product_version, $form_data);
 
-		
+
 		//HANDLE COUPONS
 		$discount = $product->total_coupon_discount($price, $product_version, $this->coupon_codes);
 
-		$this->items[] = array(1,	$product,	$form_data, $price, $discount);
+		// Include ProductVersion as 6th element for easy access in views
+		$this->items[] = array(1,	$product,	$form_data, $price, $discount, $product_version);
 	}
 	
 	public function add_coupon($coupon_code){
@@ -196,10 +197,10 @@ class ShoppingCart {
 	}
 	
 	public function billing_user_prefill_from_items(){
-		
+
 		//RETURN THE FIRST ONE
-		foreach($this->items as $key => $cart_item) {  
-			list($quantity, $product, $data, $price, $discount) = $cart_item;
+		foreach($this->items as $key => $cart_item) {
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 			if($data['email']){
 				$this->billing_user['first_name'] = $data['full_name_first'];
 				$this->billing_user['last_name'] = $data['full_name_last'];
@@ -258,8 +259,7 @@ class ShoppingCart {
 	public function update_items_for_coupon(){
 
 		foreach($this->items as $key => $cart_item) {
-			list($quantity, $product, $data, $price, $discount) = $cart_item;
-			$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 			$price = $product->get_price($product_version, $data);
 
 			$discount = $product->total_coupon_discount($price, $product_version, $this->coupon_codes);
@@ -283,7 +283,7 @@ class ShoppingCart {
 	public function get_items_generic() {
 		$item_array = array();
 		foreach($this->items as $key => $cart_item) {
-			list($quantity, $product, $data, $price, $discount) = $cart_item;
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 			$item_array[] = array($key, $quantity, (array)$product, (array)$data);
 		}
 		return $item_array;
@@ -292,8 +292,7 @@ class ShoppingCart {
 	public function get_detailed_items() {
 		$detailed_items = array();
 		foreach ($this->items as $key => $cart_item) {
-			list($quantity, $product, $data, $price, $discount) = $cart_item; 
-			$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 			$name = $product->get('pro_name') . ' - ' . $product_version->get('prv_version_name');
 			
 			$detailed_items[] = array(
