@@ -68,8 +68,25 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 
-	if($_GET['newbilling'] == 1){
-		$cart->determine_billing_user($_POST, true);
+	if($_GET['use_current_user'] == 1 && $session->is_logged_in()){
+		// Use the logged-in user's information
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$user = new User($session->get_user_id(), TRUE);
+		$cart->billing_user = array(
+			'first_name' => $user->get('usr_fname'),
+			'last_name' => $user->get('usr_lname'),
+			'email' => $user->get('usr_email')
+		);
+		return LogicResult::redirect('/cart');
+	}
+	else if($_GET['newbilling'] == 1){
+		// Clear billing user to show the form
+		$cart->billing_user = NULL;
+		// Don't redirect - let the page show the billing form
+	}
+	else if($_POST['billing_email']){
+		// Process billing form submission
+		$cart->determine_billing_user($_POST, false);
 		return LogicResult::redirect('/cart');
 	}
 	else{
