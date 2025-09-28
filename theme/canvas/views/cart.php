@@ -56,7 +56,7 @@ $page_vars = $page_vars->data;
 										$total_discount = 0;
 										$itemcount = 0;
 										foreach($cart->items as $key => $cart_item):
-											list($quantity, $product, $data, $price, $discount) = $cart_item;
+											list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 											$coupon_discount_words = '';
 											//HANDLE COUPONS
 											if($discount):
@@ -326,7 +326,7 @@ $page_vars = $page_vars->data;
 										<h4 class="mb-0 h5">Complete Order</h4>
 									</div>
 									<div class="card-body text-center">
-										<p class="text-muted mb-4">Your order total is $0.00</p>
+										<p class="text-muted mb-4">Your order total is <?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></p>
 										<?php
 										$formwriter = $page->getFormWriter('form4');
 										echo $formwriter->begin_form("", "post", '/cart_charge');
