@@ -202,9 +202,9 @@ if ($tier && $tier->get('sbt_tier_level') >= 40) { // Pro or higher
 ### 7. Implementation Phases
 
 #### Phase 1: Core Implementation (Current Scope)
-1. Add `cht_change_tracking` table (general purpose)
-2. Add `sbt_subscription_tiers` table
-3. Add `pro_sbt_subscription_tier_id` to products table
+1. Add `cht_change_tracking` table (via data class with field_specifications)
+2. Add `sbt_subscription_tiers` table (via data class with field_specifications)
+3. Add `pro_sbt_subscription_tier_id` to Product class field_specifications (auto-creates DB column)
 4. Create ChangeTracker helper class for logging
 5. Modify checkout logic for automatic tier assignment
 6. Create basic helper functions for tier checking
@@ -212,11 +212,12 @@ if ($tier && $tier->get('sbt_tier_level') >= 40) { // Pro or higher
 8. Display user's tier in profile
 
 #### Phase 2: Advanced Features (Future - Out of Scope)
-1. Feature flags system (`sbt_tier_features`)
-2. Resource limits system (`sbt_tier_limits`)
-3. Advanced access control helpers
-4. Analytics and reporting
-5. **Tier Switching Behaviors**:
+1. Add admin menu item for `/adm/admin_subscription_tiers.php`
+2. Feature flags system (`sbt_tier_features`)
+3. Resource limits system (`sbt_tier_limits`)
+4. Advanced access control helpers
+5. Analytics and reporting
+6. **Tier Switching Behaviors**:
    - Downgrade handling and policies
    - Multiple tier support (keeping highest tier)
    - Grace periods for downgrades
@@ -233,18 +234,45 @@ if ($tier && $tier->get('sbt_tier_level') >= 40) { // Pro or higher
    - Migrate existing ControlD users to appropriate tiers
    - Remove controld_subscription_product_script
 
-## Implementation Decisions Needed
+## Implementation Status
 
-### Remaining Implementation Items:
+### ✅ COMPLETED Implementation Items (2025-09-28):
 
-1. **Add `pro_sbt_subscription_tier_id` to Product class**:
-   - Add to `$field_specifications` in `/data/products_class.php`:
-   ```php
-   'pro_sbt_subscription_tier_id' => array('type'=>'int4')
-   ```
-   - System will auto-create column on next update_database run
+1. **[DONE]** Added `pro_sbt_subscription_tier_id` to Product class field_specifications
+   - Modified `/data/products_class.php` to include new field
+   - Database column will auto-create on next update_database run
 
-**That's it!** Everything else is ready to implement.
+2. **[DONE]** Created `ChangeTracking` data model class
+   - Created `/data/change_tracking_class.php`
+   - General-purpose audit trail system for any entity changes
+
+3. **[DONE]** Created `SubscriptionTier` data model class
+   - Created `/data/subscription_tiers_class.php`
+   - Full tier management with group integration
+
+4. **[DONE]** Integrated subscription tier handling in checkout
+   - Modified `/logic/cart_charge_logic.php`
+   - Automatic tier assignment on product purchase
+
+5. **[DONE]** Created admin interface for tier management
+   - Created `/adm/admin_subscription_tiers.php`
+   - Full CRUD operations for subscription tiers
+
+6. **[DONE]** Created user interface for tier selection
+   - Created `/views/change-subscription.php`
+   - Created `/logic/change_subscription_logic.php`
+   - Tier comparison and upgrade options
+
+### Files Modified/Created:
+- **Modified:** `/data/products_class.php` (backup: `products_class.php.bak`)
+- **Modified:** `/logic/cart_charge_logic.php` (backup: `cart_charge_logic.php.bak`)
+- **Created:** `/data/change_tracking_class.php`
+- **Created:** `/data/subscription_tiers_class.php`
+- **Created:** `/adm/admin_subscription_tiers.php`
+- **Created:** `/views/change-subscription.php`
+- **Created:** `/logic/change_subscription_logic.php`
+
+All PHP syntax verified - no errors detected.
 
 ## Benefits of This Approach
 
