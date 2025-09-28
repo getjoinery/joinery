@@ -160,7 +160,14 @@ $page_vars = $page_vars->data;
 
 									echo $formwriter->begin_form("", "post", "/cart");
 									?>
-									
+
+									<?php if($page_vars['session']->is_logged_in()): ?>
+									<div class="alert alert-info d-flex justify-content-between align-items-center mb-3">
+										<span>You are currently logged in.</span>
+										<a href="/cart?use_current_user=1" class="btn btn-sm btn-primary">Use Current User</a>
+									</div>
+									<?php endif; ?>
+
 									<div class="row g-3">
 										<div class="col-md-6">
 											<div class="form-group">
