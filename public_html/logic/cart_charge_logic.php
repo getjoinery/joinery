@@ -77,12 +77,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 
 	//HANDLE THE BILLING USER
-	$billing_user = User::GetByEmail($cart->billing_user['email']); 
+	$billing_user = User::GetByEmail($cart->billing_user['billing_email']);
 	if(!$billing_user){
 		$user_data = array(
-			'usr_first_name' => $cart->billing_user['first_name'],
-			'usr_last_name' => $cart->billing_user['last_name'],
-			'usr_email' => $cart->billing_user['email'],		
+			'usr_first_name' => $cart->billing_user['billing_first_name'],
+			'usr_last_name' => $cart->billing_user['billing_last_name'],
+			'usr_email' => $cart->billing_user['billing_email'],		
 		);
 		
 		if($_POST['password']){
