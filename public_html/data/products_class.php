@@ -1325,6 +1325,10 @@ class MultiProduct extends SystemMultiBase {
 			$filters['pro_product_id'] = '!= '.$this->options['product_id_is_not'];
 		}
 
+		if (isset($this->options['pro_sbt_subscription_tier_id'])) {
+			$filters['pro_sbt_subscription_tier_id'] = [$this->options['pro_sbt_subscription_tier_id'], PDO::PARAM_INT];
+		}
+
 		if (isset($this->options['deleted'])) {
 			$filters['pro_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
 		}
