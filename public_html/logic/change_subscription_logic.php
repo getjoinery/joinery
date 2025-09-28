@@ -1,5 +1,10 @@
 <?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
 function change_subscription_logic($get, $post) {
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('data/users_class.php'));
+
     $page_vars = array();
 
     // Check if user is logged in
@@ -11,8 +16,8 @@ function change_subscription_logic($get, $post) {
     }
 
     // User data for display
-    $page_vars['user'] = new User($session->get('usr_user_id'), TRUE);
+    $page_vars['user'] = new User($session->get_user_id(), TRUE);
 
-    return LogicResult::data($page_vars);
+    return LogicResult::render($page_vars);
 }
 ?>

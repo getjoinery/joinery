@@ -229,10 +229,44 @@ if ($tier && $tier->get('sbt_tier_level') >= 40) { // Pro or higher
    - Stripe webhook handling for subscription events
    - Trial period support with temporary tier access
    - Subscription status checks before tier access
-7. **ControlD Migration**:
-   - Convert existing ControlD product (ID #72) to tier system
-   - Migrate existing ControlD users to appropriate tiers
-   - Remove controld_subscription_product_script
+7. **ControlD Plugin Migration**:
+   - **Current Implementation Analysis**:
+     - ControlD uses hardcoded product IDs (19=Basic, 20=Premium, 21=Pro)
+     - Stores plan level in `cda_ctldaccounts` table (cda_plan: 1=Basic, 2=Premium, 3=Pro)
+     - Uses `controld_subscription_product_script` hook for product purchases
+     - Access control checks `cda_plan` directly (e.g., Premium/Pro for advanced filters, Pro for custom rules)
+     - Device limits enforced via `cda_plan_max_devices` (Basic=1, Premium=3, Pro=10)
+
+   - **Migration Tasks**:
+     a. Create subscription tiers matching ControlD plans:
+        - Basic ControlD (Level 10): 1 device limit
+        - Premium ControlD (Level 20): 3 device limit, advanced filters
+        - Pro ControlD (Level 30): 10 devices, custom rules, all features
+
+     b. Update products to use tier system:
+        - Modify products 19, 20, 21 to set `pro_sbt_subscription_tier_id`
+        - Remove `controld_subscription_product_script` from product scripts
+
+     c. Migrate existing ControlD accounts:
+        - Query all `cda_ctldaccounts` records
+        - Assign users to appropriate tiers based on `cda_plan`
+        - Maintain `cda_ctldaccounts` for device tracking but deprecate plan fields
+
+     d. Refactor access control in ControlD plugin:
+        - Replace `$account->get('cda_plan') == CtldAccount::PREMIUM_PLAN` checks
+        - Use `SubscriptionTier::UserHasMinimumTier($user_id, 20)` instead
+        - Update device limit checks to use tier metadata
+
+     e. Update ControlD views and logic:
+        - `/views/profile/ctldfilters_edit.php`: Check tier level >= 20 for premium features
+        - `/views/profile/rules.php`: Check tier level >= 30 for pro features
+        - `/views/profile/devices.php`: Get device limits from tier metadata
+        - `/logic/devices_logic.php`: Use tier system for plan checks
+
+     f. Add tier metadata for feature flags:
+        - Store device limits in tier metadata
+        - Store feature flags (advanced_filters, custom_rules) in tier metadata
+        - Create helper methods in ControlDHelper for tier-based checks
 
 ## Implementation Status
 
