@@ -377,8 +377,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			if($settings->get_setting('subscription_notification_emails')){
 				$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
 				foreach($notify_emails as $notify_email){
+					$notify_email = trim($notify_email);
+					if(!$notify_email) continue;
+
 					try {
 						$notify_user = User::GetByEmail($notify_email);
+						if(!$notify_user) {
+							// Skip if user doesn't exist
+							continue;
+						}
 						$body = 'Subscription '.$subscription_result['id'].' (Order '. $order->key .') was started by '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
 						$email_inner_template = $settings->get_setting('individual_email_inner_template');
 						EmailSender::sendTemplate($email_inner_template,
@@ -389,7 +396,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 								'recipient' => $notify_user->export_as_array()
 							]
 						);
-					}					
+					}
 					catch (Exception $e) {
 						//DO NOTHING
 						$error = "";
@@ -406,8 +413,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			if($settings->get_setting('single_purchase_notification_emails')){
 				$notify_emails = explode(',', $settings->get_setting('single_purchase_notification_emails'));
 				foreach($notify_emails as $notify_email){
+					$notify_email = trim($notify_email);
+					if(!$notify_email) continue;
+
 					try {
 						$notify_user = User::GetByEmail($notify_email);
+						if(!$notify_user) {
+							// Skip if user doesn't exist
+							continue;
+						}
 						$body = 'Order '. $order->key .' was charged - user: '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
 						$email_inner_template = $settings->get_setting('individual_email_inner_template');
 						EmailSender::sendTemplate($email_inner_template,
@@ -418,7 +432,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 								'recipient' => $notify_user->export_as_array()
 							]
 						);
-					}					
+					}
 					catch (Exception $e) {
 						//DO NOTHING
 						$error = "";
