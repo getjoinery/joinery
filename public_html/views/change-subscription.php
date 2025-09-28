@@ -78,24 +78,36 @@ $all_tiers = MultiSubscriptionTier::GetAllActive();
                     </p>
 
                     <div class="mt-6">
-                        <?php if (count($tier_products) > 0): ?>
-                            <?php foreach ($tier_products as $product): ?>
-                                <?php
-                                // Get product versions for pricing
-                                $versions = $product->get_product_versions(TRUE);
-                                if ($versions && $versions->count() > 0):
-                                    $version = $versions->get(0); // Get first active version
-                                ?>
-                                    <p class="text-3xl font-extrabold text-gray-900">
-                                        $<?php echo number_format($version->get('prv_version_price'), 2); ?>
-                                        <?php if ($version->is_subscription()): ?>
-                                            <span class="text-base font-medium text-gray-500">
-                                                /<?php echo $version->get('prv_price_type'); ?>
-                                            </span>
-                                        <?php endif; ?>
-                                    </p>
-                                <?php endif; ?>
-                            <?php endforeach; ?>
+                        <?php if ($tier_products->count() > 0): ?>
+                            <div class="space-y-3">
+                                <?php foreach ($tier_products as $product): ?>
+                                    <div class="border-t pt-3">
+                                        <p class="text-sm font-medium text-gray-900">
+                                            <?php echo htmlspecialchars($product->get('pro_name')); ?>
+                                        </p>
+                                        <?php
+                                        // Get product versions for pricing
+                                        $versions = $product->get_product_versions(TRUE);
+                                        if ($versions && $versions->count() > 0):
+                                            $version = $versions->get(0); // Get first active version
+                                            $price = $version->get('prv_version_price');
+                                            if ($price > 0):
+                                        ?>
+                                            <p class="text-2xl font-bold text-gray-900">
+                                                $<?php echo number_format($price, 2); ?>
+                                                <?php if ($version->is_subscription()): ?>
+                                                    <span class="text-sm font-medium text-gray-500">
+                                                        /<?php echo $version->get('prv_price_type'); ?>
+                                                    </span>
+                                                <?php endif; ?>
+                                            </p>
+                                        <?php
+                                            endif;
+                                        endif;
+                                        ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
 
@@ -108,14 +120,29 @@ $all_tiers = MultiSubscriptionTier::GetAllActive();
                             <button class="block w-full py-2 px-4 border border-gray-300 rounded-md text-sm font-medium text-gray-400 bg-gray-100 cursor-not-allowed" disabled>
                                 Downgrades Coming Soon
                             </button>
-                        <?php elseif (count($tier_products) > 0): ?>
-                            <?php foreach ($tier_products as $product): ?>
+                        <?php elseif ($tier_products->count() > 0): ?>
+                            <p class="text-sm text-gray-500 mb-3">Select a product:</p>
+                            <?php
+                            $first = true;
+                            foreach ($tier_products as $product):
+                                $versions = $product->get_product_versions(TRUE);
+                                if ($versions && $versions->count() > 0):
+                                    $version = $versions->get(0);
+                                    if ($version->get('prv_version_price') > 0):
+                            ?>
                                 <a href="/product/<?php echo $product->get('pro_link'); ?>"
-                                   class="block w-full py-2 px-4 border border-transparent rounded-md text-center text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
-                                    <?php echo $is_upgrade ? 'Upgrade Now' : 'Select Plan'; ?>
+                                   class="block w-full py-2 px-4 mb-2 border border-transparent rounded-md text-center text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
+                                    <?php echo htmlspecialchars($product->get('pro_name')); ?> -
+                                    $<?php echo number_format($version->get('prv_version_price'), 2); ?>
+                                    <?php if ($version->is_subscription()): ?>
+                                        /<?php echo $version->get('prv_price_type'); ?>
+                                    <?php endif; ?>
                                 </a>
-                                <?php break; // Show only first product as button ?>
-                            <?php endforeach; ?>
+                            <?php
+                                    endif;
+                                endif;
+                            endforeach;
+                            ?>
                         <?php else: ?>
                             <button class="block w-full py-2 px-4 border border-gray-300 rounded-md text-sm font-medium text-gray-400 bg-gray-100 cursor-not-allowed" disabled>
                                 Coming Soon
