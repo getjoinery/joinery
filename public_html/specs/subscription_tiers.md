@@ -1,290 +1,330 @@
-# Subscription Tier System Specification
+# Subscription Tier System Specification - Phase 2
 
 ## Overview
-Add Patreon-style subscription tiers to the system that automatically integrate with the checkout process and use the existing grp_groups infrastructure for user associations.
+Phase 2 extends the completed Phase 1 subscription tier system with user-facing subscription management, feature/limit controls, and advanced tier behaviors.
 
-## Goals
-1. Enable tiered subscription offerings (Free, Basic, Premium, Pro, etc.)
-2. Automatic tier assignment upon product purchase (no product scripts required)
-3. Leverage existing grp_groups system for user-tier associations
-4. Support tier-based feature access control
-5. Allow easy tier upgrades/downgrades
-6. Provide clear tier management interface for admins
+## Phase 1 Status
+✅ **COMPLETED** - See `/specs/implemented/subscription_tiers_phase1.md`
 
-## Current System Analysis
-
-### Existing Infrastructure
-- **Products**: `pro_products` table has `pro_grp_group_id` field for group associations
-- **Groups**: `grp_groups` table with `grp_category` field for categorization
-- **Group Members**: `grm_group_members` links users to groups
-- **Checkout Flow**: `cart_charge_logic.php` already handles group associations for event bundles
-- **Product Scripts**: Current controld implementation uses product scripts (we want to eliminate this requirement)
-
-### Current Limitations
-- No built-in tier hierarchy or progression
-- Product scripts required for custom behavior
-- No tier-specific feature/limit management
-- No automatic tier switching on new purchases
-
-## Proposed Solution
-
-### 1. Database Structure
-
-#### Core Tables (Phase 1)
-- Use `grp_groups` with `grp_category = 'subscription_tier'` to identify tier groups
-- `sbt_subscription_tiers` - Main tier metadata table
-  - `sbt_subscription_tier_id` (primary key)
-  - `sbt_grp_group_id` (references grp_groups)
-  - `sbt_tier_level` (integer for hierarchy)
-  - `sbt_name`, `sbt_display_name`, `sbt_description`
-  - `sbt_badge_color`, `sbt_is_active`
-  - Standard timestamp fields
-
-- `cht_change_tracking` - General-purpose audit trail for any entity changes
-  - `cht_change_tracking_id` (primary key)
-  - `cht_entity_type` (varchar: 'subscription_tier', 'user_status', 'membership', etc.)
-  - `cht_entity_id` (bigint: ID of the entity that changed)
-  - `cht_usr_user_id` (user affected by the change, if applicable)
-  - `cht_field_name` (varchar: what field/attribute changed, e.g., 'tier_level')
-  - `cht_old_value` (text: previous value, can be NULL for new records)
-  - `cht_new_value` (text: new value, can be NULL for deletions)
-  - `cht_change_time` (timestamp)
-  - `cht_change_reason` (varchar: 'purchase', 'admin', 'system', 'expired', etc.)
-  - `cht_reference_type` (varchar: 'order', 'admin_action', etc.)
-  - `cht_reference_id` (bigint: ID of related record, e.g., order_id)
-  - `cht_changed_by_usr_user_id` (user who made the change, if applicable)
-  - `cht_metadata` (text: optional JSON for additional context)
-
-#### Future Tables (Phase 2 - Out of Scope)
-- `sbt_tier_features` - Feature flags per tier
-- `sbt_tier_limits` - Resource limits per tier
-
-#### Product Integration
-- Add new column to `pro_products`: `pro_sbt_subscription_tier_id` (references sbt_subscription_tiers)
-- Keep `pro_grp_group_id` exclusively for event bundles
-- Products (not product versions) determine tier assignment
-- All versions of a product grant the same subscription tier
-
-### 2. Tier Management
-
-#### Tier Hierarchy
-- Each tier has a numeric level (higher = more access)
-- Example: Free=10, Basic=20, Premium=30, Pro=40, Enterprise=50
-- Display properties (badge color, description) in main tier table
-
-#### Phase 2 Features (Out of Scope)
-- Feature flags and resource limits will be added in Phase 2
-
-### 3. Automatic Checkout Integration
-
-#### Purchase Flow
-1. User purchases product with `pro_sbt_subscription_tier_id` set
-2. Checkout process checks for subscription tier ID
-3. If subscription tier is set:
-   - Remove user from all other subscription tier groups
-   - Add user to new tier's group
-   - Create record in `cht_change_tracking`:
-     - entity_type: 'subscription_tier'
-     - entity_id: new tier ID
-     - usr_user_id: user's ID
-     - field_name: 'tier_level'
-     - old_value: previous tier level (or NULL)
-     - new_value: new tier level
-     - change_reason: 'purchase'
-     - reference_type: 'order'
-     - reference_id: order ID
-4. Product's `pro_grp_group_id` remains separate for event bundles
-5. Both can coexist - a product could theoretically grant a tier AND be an event bundle
-
-#### Subscription Types Supported
-This system works with ALL product types:
-- **One-time/Lifetime purchases** - User buys "Lifetime Premium" for $500, gets Premium tier forever
-- **Recurring subscriptions** - User pays $20/month for Premium tier (handled by Stripe)
-- **Limited-time access** - User buys "1 Year Premium" for $200 (would need expiration handling in Phase 2)
-
-The tier assignment happens at purchase regardless of payment type. The product's payment structure (one-time vs recurring) is handled by existing product_versions settings.
-
-#### Key Integration Point
-Modify `cart_charge_logic.php` to add tier handling:
-1. Check for `pro_sbt_subscription_tier_id` before the existing event bundle logic
-2. Handle tier switching automatically if set
-3. Continue with existing `pro_grp_group_id` logic for event bundles
-4. Both features remain independent and can coexist
-
-### 4. Change Tracking System
-
-#### General Purpose Design
-The `cht_change_tracking` table can track any entity changes across the system:
-
-**Example Uses:**
-```php
-// Track subscription tier change
-ChangeTracker::logChange(
-    'subscription_tier',     // entity_type
-    $new_tier_id,           // entity_id
-    $user_id,               // usr_user_id
-    'tier_level',           // field_name
-    $old_tier_level,        // old_value
-    $new_tier_level,        // new_value
-    'purchase',             // change_reason
-    'order',                // reference_type
-    $order_id               // reference_id
-);
-
-// Track user status change
-ChangeTracker::logChange(
-    'user',
-    $user_id,
-    $user_id,
-    'status',
-    'active',
-    'suspended',
-    'admin',
-    'admin_action',
-    $admin_user_id
-);
-
-// Track any future entity changes
-ChangeTracker::logChange(
-    'product',
-    $product_id,
-    null,  // not user-specific
-    'price',
-    '99.99',
-    '149.99',
-    'admin',
-    'admin_action',
-    $admin_user_id
-);
-```
-
-**Benefits:**
-- One table for all audit needs
-- Consistent tracking across all entities
-- Can query all changes for a user across all entity types
-- Can track who made changes and why
-- Flexible enough for future use cases
-
-### 5. Access Control (Phase 1 - Basic)
-
-#### Tier Level Checking
-```php
-// Check minimum tier level
-if (UserTierHelper::hasMinimumTier($user_id, 30)) { // Premium or higher
-    // Allow premium features
-}
-
-// Get user's current tier
-$tier = UserTierHelper::getUserTier($user_id);
-if ($tier && $tier->get('sbt_tier_level') >= 40) { // Pro or higher
-    // Show pro features
-}
-```
-
-#### Phase 2 Access Control (Out of Scope)
-- Feature-specific checking
-- Resource limits and quotas
-
-### 6. User Interface
-
-#### Admin Interface
-- `/adm/admin_subscription_tiers.php` - Manage tiers
-- List all subscription tiers with level, features, limits
-- Create/edit tier groups with subscription_tier category
-- Assign products to tiers
-
-#### User Interface
-- Display current tier in profile (`/profile`)
-- Show available upgrade options
-- Tier comparison page
-- Visual tier badges throughout the system
-
-### 7. Implementation Phases
-
-#### Phase 1: Core Implementation (✅ COMPLETED - September 28, 2025)
-**See `/specs/implemented/subscription_tiers_phase1.md` for full Phase 1 implementation details.**
-
-Phase 1 successfully implemented:
-- Core database structure and models
+Phase 1 delivered:
+- Core database structure with groups integration
 - Automatic tier assignment at checkout
 - Admin interface for tier management
-- User tier display and upgrade options
 - Change tracking system
+- Basic tier display in user profile
 
-#### Phase 2: Advanced Features (Current Specification)
-1. Add admin menu item for `/adm/admin_subscription_tiers.php`
-2. Feature flags system (`sbt_tier_features`)
-3. Resource limits system (`sbt_tier_limits`)
-4. Advanced access control helpers
-5. Analytics and reporting
-6. **User-Facing Subscription Management**:
-   - Complete implementation of subscription change logic for user-facing pages
-   - All subscription actions handled through `/logic/change_subscription_logic.php`
+## Phase 2 Goals
 
-   **User Subscription Actions & Handling:**
+1. **User-Facing Subscription Management** - Enable users to upgrade, downgrade, and cancel subscriptions
+2. **Feature/Limit System** - Control access to features and resources based on tier
+3. **Admin Configuration** - Settings to control subscription change behaviors
+4. **ControlD Migration** - Move from hardcoded plans to tier-based features
 
-   a. **UPGRADE TO HIGHER TIER**
-      - User with active subscription switches to more expensive plan
-      - Stripe: Use `change_subscription()` to update subscription item to new price ID
-      - Stripe prorates charges automatically (charges difference immediately)
-      - Database: Mark old OrderItem with `odi_subscription_cancelled_time = now()`
-      - Create new Order with STATUS_PAID
-      - Create new OrderItem with new subscription details
-      - Run product scripts (e.g., `controld_subscription_product_script`)
-      - Update SubscriptionTier via `handleProductPurchase()`
-      - Update CtldAccount plan levels if applicable
+## Database Changes for Phase 2
 
-   b. **DOWNGRADE TO LOWER TIER**
-      - User switches to less expensive plan
-      - Stripe: Use `change_subscription()` to update subscription item
-      - Stripe credits the difference at next billing cycle
-      - Consider option: immediate vs. end-of-period downgrade
-      - Database: Same as upgrade process
-      - Note: SubscriptionTier::addUser() prevents downgrades via 'purchase' reason
-      - Need to handle tier downgrade separately (manual reassignment)
+### Additional Fields for subscription_tiers Table
+Add to existing `sbt_subscription_tiers` table:
+- `sbt_features` (JSONB) - Stores all feature flags and limits as key-value pairs
 
-   c. **CANCEL SUBSCRIPTION**
-      - User cancels recurring billing
-      - Cancel Types: Immediate (lose access now) or Period End (retain until billing cycle end)
-      - Stripe: `cancel_subscription($subscription_id, 'immediate')` or `'period_end'`
-      - Updates subscription status to 'canceled'
-      - Database: Set `odi_subscription_cancelled_time`
-      - Update `odi_subscription_status` to 'canceled'
-      - Send notification emails if configured
-      - CtldAccount deactivation (set `cda_is_active = false` for immediate)
+Example JSON structure:
+```json
+{
+  "controld_max_devices": 3,
+  "controld_custom_rules": true,
+  "storage_gb": 10,
+  "api_calls_per_month": 10000
+}
+```
 
-   d. **REACTIVATE CANCELLED SUBSCRIPTION**
-      - User with cancelled (but not expired) subscription wants to reactivate
-      - Stripe: If cancelled but not expired: `update()` with `cancel_at_period_end = false`
-      - If fully cancelled: Create new subscription
-      - Database: Clear `odi_subscription_cancelled_time`
-      - Update `odi_subscription_status` to 'active'
-      - Reactivate CtldAccount if needed
 
-   e. **SWITCH BILLING CYCLE**
-      - Change from monthly to annual or vice versa
-      - Stripe: Use `change_subscription()` with new price ID for different interval
-      - Prorating applies
-      - Database: Same as tier change, update ProductVersion reference if different
+## Phase 2 Implementation Components
 
-   f. **PAUSE SUBSCRIPTION**
-      - Temporarily suspend billing (if supported)
-      - Stripe: Use subscription schedules or pause collection feature
-      - Set `pause_collection` behavior
-      - Database: Track pause state in OrderItem
-      - Update CtldAccount access accordingly
+### 1. User-Facing Subscription Management
 
-   g. **APPLY COUPON/DISCOUNT**
-      - Add promotional code to existing subscription
-      - Stripe: Apply coupon to subscription via `update()`
-      - Discount applies to future invoices
-      - Database: Track coupon application in OrderItem, store discount details
+   All subscription business logic is centralized in `/logic/change_subscription_logic.php` with `/views/change-subscription.php` handling only display.
 
-   h. **UPDATE PAYMENT METHOD**
-      - Change credit card on file
-      - Stripe: Update customer's default payment method
-      - No subscription modification needed
-      - Database: No database changes required (handled by Stripe)
+   **Architecture:**
+   - **Logic file (`/logic/change_subscription_logic.php`)**: Handles ALL business logic, permission checks, data preparation, and action processing
+   - **View file (`/views/change-subscription.php`)**: Pure presentation - receives prepared data and displays it
+
+   **Logic File Responsibilities:**
+   ```php
+   // change_subscription_logic.php handles:
+   function change_subscription_logic($get_vars, $post_vars) {
+       // 1. Authentication check
+       // 2. Load user's current subscription and tier
+       // 3. Get admin settings
+       // 4. Process POST actions (upgrade/downgrade/cancel/reactivate)
+       // 5. Prepare view data:
+       $page_vars = [
+           'current_tier' => $tier,
+           'current_subscription' => $subscription,
+           'available_tiers' => $tiers_with_permissions,
+           'can_downgrade' => $settings['subscription_downgrades_enabled'],
+           'can_cancel' => $settings['subscription_cancellation_enabled'],
+           'can_reactivate' => $can_reactivate,
+           'downgrade_timing_text' => $downgrade_text,
+           'cancel_timing_text' => $cancel_text,
+           'tier_actions' => [ // Pre-computed for each tier
+               'tier_1' => ['action' => 'upgrade', 'enabled' => true, 'button_text' => 'Upgrade Now'],
+               'tier_2' => ['action' => 'current', 'enabled' => false, 'button_text' => 'Current Plan'],
+               'tier_3' => ['action' => 'downgrade', 'enabled' => false, 'button_text' => 'Contact Support']
+           ]
+       ];
+
+       return LogicResult::render($page_vars);
+   }
+   ```
+
+   **View File Responsibilities:**
+   ```php
+   // change-subscription.php only displays:
+   foreach ($page_vars['available_tiers'] as $tier) {
+       $action = $page_vars['tier_actions'][$tier->key];
+
+       // Just display based on pre-computed values
+       if ($action['action'] == 'current') {
+           show_current_tier($tier);
+       } elseif ($action['enabled']) {
+           show_action_button($tier, $action['button_text']);
+       } else {
+           show_disabled_tier($tier, $action['button_text']);
+       }
+   }
+
+   // No business logic, no permission checks, no settings checks
+   ```
+
+   All subscription actions are controlled by 6 admin settings
+
+   **a. UPGRADE TO HIGHER TIER**
+
+   **Always Allowed** (upgrades generate revenue)
+
+   **User Action:** Selects higher-priced tier and confirms purchase
+
+   **System Behavior:**
+   - Stripe: Use `change_subscription()` to update subscription to new price ID
+   - Stripe automatically prorates and charges the difference immediately
+   - Database:
+     - Mark old OrderItem with `odi_subscription_cancelled_time = now()`
+     - Create new Order with STATUS_PAID
+     - Create new OrderItem with new subscription details
+     - Update SubscriptionTier via `handleProductPurchase()`
+     - Run any product scripts if configured
+   - User Experience: Immediate access to higher tier features
+
+   ---
+
+   **b. DOWNGRADE TO LOWER TIER**
+
+   **Controlled by Settings:**
+   - `subscription_downgrades_enabled` (bool) - If false, hide downgrade options entirely
+   - `subscription_downgrade_timing` (enum) - Controls when downgrade takes effect
+
+   **Scenario 1: Downgrades Disabled**
+   - Setting: `subscription_downgrades_enabled = false`
+   - UI: Lower tier options are hidden or show "Contact support to downgrade"
+   - User cannot self-service downgrade
+
+   **Scenario 2: Immediate Downgrade**
+   - Settings: `subscription_downgrades_enabled = true`, `subscription_downgrade_timing = 'immediate'`
+   - User Action: Selects lower tier and confirms
+   - Stripe: Use `change_subscription()` with immediate effect
+   - Stripe credits unused time to customer balance (applied to next invoice)
+   - Database: Same as upgrade process
+   - User Experience: Immediately loses higher tier features
+
+   **Scenario 3: End-of-Period Downgrade**
+   - Settings: `subscription_downgrades_enabled = true`, `subscription_downgrade_timing = 'end_of_period'`
+   - User Action: Selects lower tier and confirms
+   - Stripe: Schedule subscription change for end of current billing period
+   - Database: Track pending downgrade
+   - User Experience: Keeps current tier until billing period ends, then automatically downgrades
+
+   ---
+
+   **c. CANCEL SUBSCRIPTION**
+
+   **Controlled by Settings:**
+   - `subscription_cancellation_enabled` (bool) - If false, hide cancel option
+   - `subscription_cancellation_timing` (enum) - When cancellation takes effect
+   - `subscription_cancellation_prorate` (bool) - Whether to refund unused time
+
+   **Scenario 1: Cancellation Disabled**
+   - Setting: `subscription_cancellation_enabled = false`
+   - UI: No cancel button shown, display "Contact support to cancel"
+
+   **Scenario 2: Immediate Cancellation Without Refund**
+   - Settings: `subscription_cancellation_enabled = true`, `subscription_cancellation_timing = 'immediate'`, `subscription_cancellation_prorate = false`
+   - User Action: Clicks cancel and confirms
+   - Stripe: Cancel subscription immediately
+   - No refund issued
+   - Database: Set `odi_subscription_cancelled_time`, update status to 'canceled'
+   - User Experience: Immediately loses access to all tier features
+
+   **Scenario 3: Immediate Cancellation With Proration**
+   - Settings: `subscription_cancellation_enabled = true`, `subscription_cancellation_timing = 'immediate'`, `subscription_cancellation_prorate = true`
+   - User Action: Clicks cancel and confirms
+   - Stripe: Cancel subscription immediately with proration
+   - Refund issued for unused time
+   - Database: Set `odi_subscription_cancelled_time`, update status to 'canceled', record refund
+   - User Experience: Immediately loses access, receives refund
+
+   **Scenario 4: End-of-Period Cancellation**
+   - Settings: `subscription_cancellation_enabled = true`, `subscription_cancellation_timing = 'end_of_period'`
+   - User Action: Clicks cancel and confirms
+   - Stripe: Set `cancel_at_period_end = true`
+   - Database: Set future cancellation date
+   - User Experience: Keeps access until billing period ends
+   - Note: `subscription_cancellation_prorate` setting ignored (no refund needed)
+
+   ---
+
+   **d. REACTIVATE CANCELLED SUBSCRIPTION**
+
+   **Controlled by Setting:**
+   - `subscription_reactivation_enabled` (bool) - If false, no reactivation allowed
+
+   **Scenario 1: Reactivation Disabled**
+   - Setting: `subscription_reactivation_enabled = false`
+   - Cancelled users must purchase new subscription
+   - No "reactivate" option shown
+
+   **Scenario 2: Reactivation Enabled (Period-End Cancellation)**
+   - Setting: `subscription_reactivation_enabled = true`
+   - Subscription was cancelled with `end_of_period` timing
+   - User Action: Clicks "Reactivate" before period ends
+   - Stripe: Update subscription with `cancel_at_period_end = false`
+   - Database: Clear cancellation date
+   - User Experience: Subscription continues normally
+
+   **Scenario 3: Reactivation Enabled (Already Expired)**
+   - Setting: `subscription_reactivation_enabled = true`
+   - Subscription already fully cancelled/expired
+   - User Action: Must purchase new subscription
+   - System: Direct to standard purchase flow (not true reactivation)
+
+   ---
+
+   **e. COMPLEX INTERACTION SCENARIOS**
+
+   **Scenario: Downgrade Scheduled + User Tries to Cancel**
+   - User has pending end-of-period downgrade
+   - User clicks cancel
+   - System: Cancel the pending downgrade and process cancellation per settings
+
+   **Scenario: Cancellation Scheduled + User Tries to Upgrade**
+   - User has pending end-of-period cancellation
+   - User selects upgrade
+   - System: Clear pending cancellation, process immediate upgrade
+
+   **Scenario: Immediate Downgrade + Refund Calculation**
+   - User downgrades immediately mid-cycle
+   - Stripe calculates credit for unused higher-tier time
+   - Credit applied to new lower-tier subscription
+   - If credit exceeds new price, balance carries forward
+
+   ---
+
+   **f. POST ACTION PROCESSING IN LOGIC FILE**
+
+   **All subscription changes are processed in the logic file:**
+   ```php
+   // In change_subscription_logic.php
+   if (isset($post_vars['action'])) {
+       switch ($post_vars['action']) {
+           case 'upgrade':
+               // Validate tier is actually higher
+               // Process with Stripe
+               // Update database
+               // Return redirect or success message
+               break;
+
+           case 'downgrade':
+               // Check if downgrades enabled
+               // Validate timing setting
+               // Process based on immediate vs end-of-period
+               // Update database
+               break;
+
+           case 'cancel':
+               // Check if cancellation enabled
+               // Process based on timing and proration settings
+               // Update database
+               break;
+
+           case 'reactivate':
+               // Check if reactivation enabled
+               // Verify subscription can be reactivated
+               // Process with Stripe
+               // Update database
+               break;
+       }
+   }
+   ```
+
+   **g. DATA PREPARATION FOR VIEW**
+
+   **Logic file prepares ALL display decisions:**
+   ```php
+   // In change_subscription_logic.php
+
+   // For each tier, determine what action is available
+   foreach ($all_tiers as $tier) {
+       $tier_data = [
+           'tier' => $tier,
+           'products' => $tier->getProducts(),
+           'is_current' => ($tier->key == $current_tier->key),
+           'action_type' => null,
+           'button_text' => '',
+           'button_enabled' => false,
+           'message' => ''
+       ];
+
+       if ($tier->level > $current_tier->level) {
+           // Upgrade - always allowed
+           $tier_data['action_type'] = 'upgrade';
+           $tier_data['button_text'] = 'Upgrade Now';
+           $tier_data['button_enabled'] = true;
+       }
+       elseif ($tier->level < $current_tier->level) {
+           // Downgrade - check settings
+           if (!$settings['subscription_downgrades_enabled']) {
+               $tier_data['action_type'] = 'downgrade_disabled';
+               $tier_data['button_text'] = 'Contact Support';
+               $tier_data['message'] = 'Downgrades require support assistance';
+           } else {
+               $tier_data['action_type'] = 'downgrade';
+               $tier_data['button_text'] = ($settings['subscription_downgrade_timing'] == 'immediate')
+                   ? 'Downgrade Now'
+                   : 'Downgrade at Period End';
+               $tier_data['button_enabled'] = true;
+           }
+       }
+       else {
+           $tier_data['action_type'] = 'current';
+           $tier_data['button_text'] = 'Current Plan';
+       }
+
+       $page_vars['tier_display_data'][] = $tier_data;
+   }
+
+   // Prepare cancellation button data
+   if ($has_active_subscription) {
+       $page_vars['show_cancel_button'] = $settings['subscription_cancellation_enabled'];
+       $page_vars['cancel_button_text'] = ($settings['subscription_cancellation_timing'] == 'immediate')
+           ? 'Cancel Immediately'
+           : 'Cancel at Period End';
+   }
+
+   // Prepare reactivation button data
+   if ($has_cancelled_subscription && !$is_expired) {
+       $page_vars['show_reactivate_button'] = $settings['subscription_reactivation_enabled'];
+   }
+   ```
+
+   **The view file simply iterates through prepared data and displays it - no logic decisions!**
 
    **Key Implementation Considerations:**
    - **Proration Handling:** Upgrades charge immediately, downgrades credit at next billing
@@ -321,72 +361,258 @@ Phase 1 successfully implemented:
 
    These core settings cover the most common subscription management scenarios while keeping configuration simple.
 
-7. **Tier Switching Behaviors**:
-   - Downgrade handling and policies
-   - Multiple tier support (keeping highest tier)
-   - Grace periods for downgrades
-   - Refund handling and tier removal
-   - Manual admin tier changes
-   - Email notifications for tier changes
-8. **Recurring Subscription Integration**:
-   - Automatic tier removal on subscription expiration
-   - Stripe webhook handling for subscription events
-   - Trial period support with temporary tier access
-   - Subscription status checks before tier access
-9. **ControlD Plugin Migration**:
-   - **Current Implementation Analysis**:
-     - ControlD uses hardcoded product IDs (19=Basic, 20=Premium, 21=Pro)
-     - Stores plan level in `cda_ctldaccounts` table (cda_plan: 1=Basic, 2=Premium, 3=Pro)
-     - Uses `controld_subscription_product_script` hook for product purchases
-     - Access control checks `cda_plan` directly (e.g., Premium/Pro for advanced filters, Pro for custom rules)
-     - Device limits enforced via `cda_plan_max_devices` (Basic=1, Premium=3, Pro=10)
+### 2. Tier Features/Limits System
 
-   - **Migration Tasks**:
-     a. Create subscription tiers matching ControlD plans:
-        - Basic ControlD (Level 10): 1 device limit
-        - Premium ControlD (Level 20): 3 device limit, advanced filters
-        - Pro ControlD (Level 30): 10 devices, custom rules, all features
+   **Implementation Approach:**
+   - Single JSONB column `sbt_features` added to `sbt_subscription_tiers` table
+   - Stores all features and limits as key-value pairs
+   - No separate tables needed
 
-     b. Update products to use tier system:
-        - Modify products 19, 20, 21 to set `pro_sbt_subscription_tier_id`
-        - Remove `controld_subscription_product_script` from product scripts
+   **Database Change:**
+   ```php
+   // Add to subscription_tiers_class.php field_specifications:
+   'sbt_features' => array('type'=>'jsonb', 'default'=>'{}')
+   ```
 
-     c. Migrate existing ControlD accounts:
-        - Query all `cda_ctldaccounts` records
-        - Assign users to appropriate tiers based on `cda_plan`
-        - Maintain `cda_ctldaccounts` for device tracking but deprecate plan fields
+   **Example JSON Structure:**
+   ```json
+   {
+     "controld_max_devices": 3,
+     "controld_custom_rules": true,
+     "controld_advanced_filters": true,
+     "storage_gb": 10,
+     "api_calls_per_month": 10000,
+     "priority_support": true
+   }
+   ```
 
-     d. Refactor access control in ControlD plugin:
-        - Replace `$account->get('cda_plan') == CtldAccount::PREMIUM_PLAN` checks
-        - Use `SubscriptionTier::UserHasMinimumTier($user_id, 20)` instead
-        - Update device limit checks to use tier metadata
+   **Helper Methods in SubscriptionTier Class:**
+   ```php
+   // Get a specific feature for a tier
+   public function getFeature($key, $default = null) {
+       $features = json_decode($this->get('sbt_features'), true) ?? [];
+       return $features[$key] ?? $default;
+   }
 
-     e. Update ControlD views and logic:
-        - `/views/profile/ctldfilters_edit.php`: Check tier level >= 20 for premium features
-        - `/views/profile/rules.php`: Check tier level >= 30 for pro features
-        - `/views/profile/devices.php`: Get device limits from tier metadata
-        - `/logic/devices_logic.php`: Use tier system for plan checks
+   // Set tier features (admin use)
+   public function setFeatures($features_array) {
+       $this->set('sbt_features', json_encode($features_array));
+   }
 
-     f. Add tier metadata for feature flags:
-        - Store device limits in tier metadata
-        - Store feature flags (advanced_filters, custom_rules) in tier metadata
-        - Create helper methods in ControlDHelper for tier-based checks
+   // Static method to get user's feature value
+   public static function getUserFeature($user_id, $feature_key, $default = null) {
+       // Check cache first
+       if (!isset(self::$user_tier_cache[$user_id])) {
+           self::$user_tier_cache[$user_id] = self::GetUserTier($user_id);
+       }
+       $tier = self::$user_tier_cache[$user_id];
+
+       if (!$tier) return $default;
+
+       return $tier->getFeature($feature_key, $default);
+   }
+   ```
+
+   **Usage in Plugins (e.g., ControlD):**
+   ```php
+   // Check device limit
+   function can_add_device($user_id) {
+       $current_devices = new MultiCtldDevice(['user_id' => $user_id, 'deleted' => false]);
+       $device_count = $current_devices->count_all();
+
+       // Get limit from tier features (default to 1 for free users)
+       $max_devices = SubscriptionTier::getUserFeature($user_id, 'controld_max_devices', 1);
+
+       return $device_count < $max_devices;
+   }
+
+   // Check feature access
+   function can_use_custom_rules($user_id) {
+       return SubscriptionTier::getUserFeature($user_id, 'controld_custom_rules', false);
+   }
+   ```
+
+   **Feature Registration System:**
+
+   Core features are defined in a central file, while plugins define their own features:
+
+   **Core Features Definition:**
+   ```php
+   // In /includes/core_tier_features.json
+   {
+       "storage_gb": {
+           "label": "Storage (GB)",
+           "type": "integer",
+           "default": 5,
+           "description": "Storage space in gigabytes"
+       },
+       "api_calls_per_month": {
+           "label": "Monthly API Calls",
+           "type": "integer",
+           "default": 1000,
+           "description": "Number of API calls allowed per month"
+       },
+       "priority_support": {
+           "label": "Priority Support",
+           "type": "boolean",
+           "default": false,
+           "description": "Access to priority support channels"
+       }
+   }
+   ```
+
+   **Plugin Features Definition:**
+   ```json
+   // In /plugins/controld/tier_features.json
+   {
+       "controld_max_devices": {
+           "label": "Max ControlD Devices",
+           "type": "integer",
+           "default": 1,
+           "min": 0,
+           "max": 100,
+           "description": "Maximum number of devices that can be registered"
+       },
+       "controld_custom_rules": {
+           "label": "Custom DNS Rules",
+           "type": "boolean",
+           "default": false,
+           "description": "Ability to create custom DNS filtering rules"
+       },
+       "controld_advanced_filters": {
+           "label": "Advanced Filters",
+           "type": "boolean",
+           "default": false,
+           "description": "Access to advanced filtering options"
+       }
+   }
+   ```
+
+   **Feature Discovery Function:**
+   ```php
+   // In SubscriptionTier class or helper
+   public static function getAllAvailableFeatures() {
+       $features = [];
+
+       // Load core features
+       $core_file = PathHelper::getIncludePath('includes/core_tier_features.json');
+       if (file_exists($core_file)) {
+           $features = json_decode(file_get_contents($core_file), true);
+       }
+
+       // Load plugin features
+       $plugins = LibraryFunctions::list_plugins();
+       foreach ($plugins as $plugin) {
+           $feature_file = PathHelper::getRootDir() . "/plugins/$plugin/tier_features.json";
+           if (file_exists($feature_file)) {
+               $plugin_features = json_decode(file_get_contents($feature_file), true);
+               $features = array_merge($features, $plugin_features);
+           }
+       }
+
+       return $features;
+   }
+   ```
+
+   **Admin UI Integration:**
+   ```php
+   // In admin tier edit page
+   $available_features = SubscriptionTier::getAllAvailableFeatures();
+   $current_values = $tier->getAllFeatures();
+
+   foreach ($available_features as $key => $definition) {
+       $current_value = $current_values[$key] ?? $definition['default'];
+
+       if ($definition['type'] === 'boolean') {
+           echo $formwriter->checkbox(
+               $definition['label'],
+               $key,
+               $current_value,
+               $definition['description']
+           );
+       } elseif ($definition['type'] === 'integer') {
+           echo $formwriter->textinput(
+               $definition['label'],
+               $key,
+               $current_value,
+               10,
+               '',
+               $definition['description']
+           );
+       }
+   }
+   ```
+
+   **Key Benefits:**
+   - **Single database column** stores all feature values
+   - **Plugins self-document** their tier features
+   - **Admin UI automatically discovers** all available features
+   - **No database changes** when plugins add new features
+   - **Type safety** through feature definitions
+   - **Default values** provided for new tiers
+
+   This approach is:
+   - **Simple**: One column, no extra tables
+   - **Fast**: Tier is cached, JSON parsing is quick for small objects
+   - **Flexible**: Easy to add new features without schema changes
+   - **Maintainable**: Features defined in one place, used everywhere
+
+### 3. ControlD Plugin Migration
+
+**Current Implementation:**
+- ControlD uses hardcoded product IDs (19=Basic, 20=Premium, 21=Pro)
+- Stores plan level in `cda_ctldaccounts` table (cda_plan: 1=Basic, 2=Premium, 3=Pro)
+- Uses `controld_subscription_product_script` hook for product purchases
+- Device limits enforced via `cda_plan_max_devices`
+
+**Migration Steps:**
+
+1. **Create subscription tiers with features:**
+   - Basic Tier: `{"controld_max_devices": 1}`
+   - Premium Tier: `{"controld_max_devices": 3, "controld_advanced_filters": true}`
+   - Pro Tier: `{"controld_max_devices": 10, "controld_advanced_filters": true, "controld_custom_rules": true}`
+
+2. **Update products 19, 20, 21:**
+   - Set `pro_sbt_subscription_tier_id` to corresponding tier
+   - Remove `controld_subscription_product_script` from product scripts
+
+3. **Migrate existing users:**
+   - Query all `cda_ctldaccounts` records
+   - Assign users to appropriate tiers based on `cda_plan`
+
+4. **Refactor ControlD plugin code:**
+   - Replace plan checks with `getUserFeature()` calls
+   - Update views to use feature checks instead of plan levels
+   - Create `/plugins/controld/tier_features.json` file
 
 
-## Benefits of This Approach
+## Implementation Summary
 
-1. **No Product Scripts Required**: Tier assignment happens automatically in checkout
-2. **Leverages Existing Systems**: Uses grp_groups infrastructure already in place
-3. **Flexible**: Can support multiple tier types via group categories
-4. **Scalable**: Easy to add new tiers and features
-5. **Clean Integration**: Minimal changes to existing checkout flow
+Phase 2 builds on the completed Phase 1 foundation to add:
 
+1. **Subscription Management** - Full user control over upgrades, downgrades, and cancellations with Stripe integration
+2. **Feature System** - JSON-based feature flags and limits with plugin self-registration via `tier_features.json` files
+3. **Admin Settings** - 6 essential settings to control subscription change behaviors
+4. **ControlD Migration** - Clear path to move from hardcoded plans to tier-based features
 
-## Next Steps
+Key technical decisions:
+- Single JSONB column for all tier features
+- Plugin feature discovery via JSON definition files
+- Cached tier data for performance
+- Minimal configuration complexity
 
-1. Review and approve this specification with code
-2. Answer implementation decision questions
-3. Implement Phase 1 (Core Implementation)
-4. Test with sample tiers and products
-5. Deploy to production
-6. Plan Phase 2 features
+## Phase 3 (Future)
+
+Phase 3 will focus on **comprehensive documentation** and **expanded payment options**:
+
+**Documentation:**
+- End-user documentation for subscription management
+- Administrator guide for tier configuration
+- Developer documentation for plugin integration
+- API reference for tier features system
+- Migration guides and best practices
+
+**Payment Integration:**
+- PayPal subscription support (if feasible)
+- Integration with PayPalHelper for recurring payments
+- Parallel support for both Stripe and PayPal subscriptions
