@@ -122,8 +122,8 @@ foreach ($items as $item) {
     array_push($rowvalues, $item->get('field_2'));
     array_push($rowvalues, $item->get('field_3'));
     
-    // Action links
-    $actions = '<a href="admin_item_edit.php?id=' . $item->get('primary_key') . '" class="btn btn-sm btn-primary">Edit</a>';
+    // Action links - CRITICAL: Never use .php extension in URLs!
+    $actions = '<a href="/admin/admin_item_edit?id=' . $item->get('primary_key') . '" class="btn btn-sm btn-primary">Edit</a>';
     array_push($rowvalues, $actions);
     
     $page->disprow($rowvalues);
@@ -175,7 +175,7 @@ if ($_POST) {
         $item->save();
         
         // Redirect on success
-        header('Location: admin_items.php?message=saved');
+        header('Location: /admin/admin_items?message=saved');
         exit;
         
     } catch (Exception $e) {
@@ -250,7 +250,7 @@ $page->tableheader($headers, $table_options, $pager);
 $altlinks['Action'] = '/admin/admin_page_name?action=value';
 
 // ❌ WRONG - Breaks routing
-$altlinks['Action'] = '/admin/admin_page_name.php?action=value';
+$altlinks['Action'] = '/admin/admin_page_name?action=value';
 ```
 
 ### Modal/AJAX Integration
@@ -283,7 +283,7 @@ $checkbox = '<input type="checkbox" name="selected_ids[]" value="' . $item->get(
 array_push($rowvalues, $checkbox);
 
 // Add bulk action form
-echo '<form method="post" action="admin_bulk_action.php">
+echo '<form method="post" action="/admin/admin_bulk_action">
     <div class="form-row align-items-center mb-3">
         <div class="col-auto">
             <select name="bulk_action" class="form-control">
