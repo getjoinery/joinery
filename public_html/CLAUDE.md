@@ -98,6 +98,10 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 
 ### Routing & Theme System
 
+**CRITICAL: NEVER use .php extension in URLs or links! All requests go through the routing system.**
+- ❌ WRONG: `<a href="/admin/admin_user_edit.php?id=1">` - Query parameters will be lost!
+- ✅ CORRECT: `<a href="/admin/admin_user_edit?id=1">` - Routes properly with parameters
+
 **Main Entry:** `serve.php` processes all requests via RouteHelper
 **Theme Override:** Checks `/theme/[theme]/views/` first, then `/views/` fallback
 **Plugin Routes:** Admin pages auto-discovered at `/plugins/{plugin}/admin/*`
