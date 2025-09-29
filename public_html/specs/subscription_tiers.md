@@ -18,7 +18,6 @@ Phase 1 delivered:
 1. **User-Facing Subscription Management** - Enable users to upgrade, downgrade, and cancel subscriptions
 2. **Feature/Limit System** - Control access to features and resources based on tier
 3. **Admin Configuration** - Settings to control subscription change behaviors
-4. **ControlD Migration** - Move from hardcoded plans to tier-based features
 
 ## Database Changes for Phase 2
 
@@ -29,10 +28,10 @@ Add to existing `sbt_subscription_tiers` table:
 Example JSON structure:
 ```json
 {
-  "controld_max_devices": 3,
-  "controld_custom_rules": true,
   "storage_gb": 10,
-  "api_calls_per_month": 10000
+  "api_calls_per_month": 10000,
+  "priority_support": true,
+  "max_projects": 5
 }
 ```
 
@@ -138,8 +137,8 @@ Example JSON structure:
    **Scenario 3: End-of-Period Downgrade**
    - Settings: `subscription_downgrades_enabled = true`, `subscription_downgrade_timing = 'end_of_period'`
    - User Action: Selects lower tier and confirms
-   - Stripe: Schedule subscription change for end of current billing period
-   - Database: Track pending downgrade
+   - Stripe: Update subscription with new price, set to take effect at period end using `proration_behavior: 'none'`
+   - Database: Update immediately with future effective date
    - User Experience: Keeps current tier until billing period ends, then automatically downgrades
 
    ---
@@ -209,15 +208,10 @@ Example JSON structure:
 
    **e. COMPLEX INTERACTION SCENARIOS**
 
-   **Scenario: Downgrade Scheduled + User Tries to Cancel**
-   - User has pending end-of-period downgrade
-   - User clicks cancel
-   - System: Cancel the pending downgrade and process cancellation per settings
-
-   **Scenario: Cancellation Scheduled + User Tries to Upgrade**
-   - User has pending end-of-period cancellation
-   - User selects upgrade
-   - System: Clear pending cancellation, process immediate upgrade
+   **Scenario: User Changes Mind About End-of-Period Change**
+   - Since changes are atomic via Stripe, users can make a new change that overwrites the previous one
+   - Example: User schedules end-of-period downgrade, then decides to cancel instead
+   - Stripe handles this naturally - the new change replaces the scheduled one
 
    **Scenario: Immediate Downgrade + Refund Calculation**
    - User downgrades immediately mid-cycle
@@ -334,6 +328,136 @@ Example JSON structure:
    - **Error Handling:** Stripe API failures, concurrent modifications, invalid transitions
    - **Notification Flow:** Customer confirmations, admin notifications, webhook handling
 
+   **Implementation Clarifications:**
+   1. **Stripe Subscription Updates:** Keep the same subscription ID when changing tiers - use Stripe's `update()` method rather than creating new subscriptions
+   2. **Trial Period Handling:** Any tier change ends trial periods immediately - user starts paying for new tier
+   3. **Failed Payment Handling:** If upgrade payment fails, user remains on current tier with error message
+   4. **No Pending Changes:** All subscription changes happen immediately or at period end - no future-dated changes stored
+   5. **Product Selection:** Tier changes are triggered by purchasing a specific product - the view shows available products for each tier
+   6. **Free Tier:** Downgrading to free tier is treated as cancellation - no separate "free tier" concept
+   7. **Subscription Expiration Handling:** Use lazy evaluation - when checking user's tier, if `odi_subscription_period_end` is in the past, sync with Stripe and update tier access accordingly (see detailed implementation below)
+
+   **h. SUBSCRIPTION EXPIRATION HANDLING (LAZY EVALUATION)**
+
+   **No cron jobs needed - subscription status is checked on-demand**
+
+   **Subscription checking lives in OrderItem class, not tier code:**
+
+   **Step 1: Add check_subscription_status() method to OrderItem class:**
+   ```php
+   // In /data/order_items_class.php
+   class OrderItem extends SystemBase {
+
+       /**
+        * Check if subscription is still active, sync with Stripe if needed
+        * @return bool True if subscription is active, false if expired/cancelled
+        */
+       public function check_subscription_status() {
+           // Only check subscriptions
+           if (!$this->get('odi_is_subscription')) {
+               return true; // Non-subscription items are always "active"
+           }
+
+           // Check if period has ended
+           $period_end = strtotime($this->get('odi_subscription_period_end'));
+
+           if ($period_end < time()) {
+               // Period has passed - sync with Stripe
+               try {
+                   $stripe_helper = new StripeHelper();
+
+                   // This existing method updates all subscription fields
+                   $stripe_helper->update_subscription_in_order_item($this);
+
+                   // Check status after update
+                   $status = $this->get('odi_subscription_status');
+                   return in_array($status, ['active', 'trialing']);
+
+               } catch (Exception $e) {
+                   // If Stripe check fails, assume subscription is still valid
+                   // to avoid removing access due to API issues
+                   error_log('Failed to check subscription status: ' . $e->getMessage());
+                   return true; // Fail open - assume valid
+               }
+           }
+
+           // Period hasn't ended yet - check if cancelled
+           if ($this->get('odi_subscription_cancelled_time')) {
+               return false; // Cancelled subscription
+           }
+
+           return true; // Active subscription
+       }
+   }
+   ```
+
+   **Step 2: Enhanced GetPlanOrderItem() in CtldAccount:**
+   ```php
+   // In /plugins/controld/data/ctldaccounts_class.php
+   static function GetPlanOrderItem($user_id) {
+       // ... existing code to get subscription ...
+
+       if ($order_item) {
+           // Check if subscription is still valid
+           if (!$order_item->check_subscription_status()) {
+               return false; // Subscription expired
+           }
+       }
+
+       return $order_item;
+   }
+   ```
+
+   **Step 3: Tier code reacts to subscription changes:**
+   ```php
+   // In SubscriptionTier::GetUserTier()
+   public static function GetUserTier($user_id) {
+       // Check for active subscription (this now includes expiration check)
+       $order_item = CtldAccount::GetPlanOrderItem($user_id);
+
+       if (!$order_item) {
+           // No active subscription - check if user had a tier
+           $current_tier = parent::GetUserTier($user_id);
+           if ($current_tier) {
+               // User had tier but subscription ended - remove it
+               self::removeUserFromAllTiers($user_id);
+
+               // Log the change
+               ChangeTracking::logChange(
+                   'subscription_tier',
+                   null,
+                   $user_id,
+                   'tier_removed',
+                   $current_tier->get('sbt_tier_level'),
+                   null,
+                   'subscription_expired'
+               );
+           }
+           return null;
+       }
+
+       // User has active subscription - return their tier
+       return parent::GetUserTier($user_id);
+   }
+   ```
+
+   **When This Check Occurs:**
+   - User logs in
+   - User accesses tier-gated features
+   - User views their profile/subscription page
+   - Any call to `SubscriptionTier::getUserFeature()`
+
+   **Handles All End Scenarios:**
+   - Subscription cancelled and period ended
+   - Payment failed and subscription suspended
+   - Card expired and subscription terminated
+   - Manual cancellation by admin
+
+   **Failsafe Behavior:**
+   - If Stripe API is unavailable, assume subscription is valid
+   - Prevents accidental tier removal due to temporary API issues
+   - Logs errors for admin review
+
    **Admin-Configurable Settings for Subscription Management:**
 
    The following 5 essential settings control subscription change behaviors:
@@ -413,22 +537,21 @@ Example JSON structure:
    }
    ```
 
-   **Usage in Plugins (e.g., ControlD):**
+   **Usage in Plugins:**
    ```php
-   // Check device limit
-   function can_add_device($user_id) {
-       $current_devices = new MultiCtldDevice(['user_id' => $user_id, 'deleted' => false]);
-       $device_count = $current_devices->count_all();
+   // Example: Check a numeric limit
+   function can_add_item($user_id) {
+       $current_items = // ... count current items
 
-       // Get limit from tier features (default to 1 for free users)
-       $max_devices = SubscriptionTier::getUserFeature($user_id, 'controld_max_devices', 1);
+       // Get limit from tier features (with default for free users)
+       $max_items = SubscriptionTier::getUserFeature($user_id, 'plugin_max_items', 1);
 
-       return $device_count < $max_devices;
+       return $current_items < $max_items;
    }
 
-   // Check feature access
-   function can_use_custom_rules($user_id) {
-       return SubscriptionTier::getUserFeature($user_id, 'controld_custom_rules', false);
+   // Example: Check feature access
+   function has_premium_feature($user_id) {
+       return SubscriptionTier::getUserFeature($user_id, 'plugin_premium_feature', false);
    }
    ```
 
@@ -463,27 +586,21 @@ Example JSON structure:
 
    **Plugin Features Definition:**
    ```json
-   // In /plugins/controld/tier_features.json
+   // In /plugins/{plugin_name}/tier_features.json
    {
-       "controld_max_devices": {
-           "label": "Max ControlD Devices",
+       "plugin_feature_1": {
+           "label": "Feature Name",
            "type": "integer",
            "default": 1,
            "min": 0,
            "max": 100,
-           "description": "Maximum number of devices that can be registered"
+           "description": "Description of what this feature controls"
        },
-       "controld_custom_rules": {
-           "label": "Custom DNS Rules",
+       "plugin_feature_2": {
+           "label": "Another Feature",
            "type": "boolean",
            "default": false,
-           "description": "Ability to create custom DNS filtering rules"
-       },
-       "controld_advanced_filters": {
-           "label": "Advanced Filters",
-           "type": "boolean",
-           "default": false,
-           "description": "Access to advanced filtering options"
+           "description": "Enable/disable this plugin feature"
        }
    }
    ```
@@ -557,33 +674,6 @@ Example JSON structure:
    - **Flexible**: Easy to add new features without schema changes
    - **Maintainable**: Features defined in one place, used everywhere
 
-### 3. ControlD Plugin Migration
-
-**Current Implementation:**
-- ControlD uses hardcoded product IDs (19=Basic, 20=Premium, 21=Pro)
-- Stores plan level in `cda_ctldaccounts` table (cda_plan: 1=Basic, 2=Premium, 3=Pro)
-- Uses `controld_subscription_product_script` hook for product purchases
-- Device limits enforced via `cda_plan_max_devices`
-
-**Migration Steps:**
-
-1. **Create subscription tiers with features:**
-   - Basic Tier: `{"controld_max_devices": 1}`
-   - Premium Tier: `{"controld_max_devices": 3, "controld_advanced_filters": true}`
-   - Pro Tier: `{"controld_max_devices": 10, "controld_advanced_filters": true, "controld_custom_rules": true}`
-
-2. **Update products 19, 20, 21:**
-   - Set `pro_sbt_subscription_tier_id` to corresponding tier
-   - Remove `controld_subscription_product_script` from product scripts
-
-3. **Migrate existing users:**
-   - Query all `cda_ctldaccounts` records
-   - Assign users to appropriate tiers based on `cda_plan`
-
-4. **Refactor ControlD plugin code:**
-   - Replace plan checks with `getUserFeature()` calls
-   - Update views to use feature checks instead of plan levels
-   - Create `/plugins/controld/tier_features.json` file
 
 
 ## Implementation Summary
@@ -603,7 +693,15 @@ Key technical decisions:
 
 ## Phase 3 (Future)
 
-Phase 3 will focus on **comprehensive documentation** and **expanded payment options**:
+Phase 3 will focus on **plugin migrations**, **documentation**, and **expanded payment options**:
+
+**ControlD Plugin Migration:**
+- Migrate from hardcoded plans (Basic=1, Premium=2, Pro=3) to tier-based features
+- Create tier features: `controld_max_devices`, `controld_custom_rules`, `controld_advanced_filters`
+- Update products 19, 20, 21 to use subscription tiers
+- Refactor all plan checks to use `getUserFeature()` calls
+- Migrate existing users from `cda_plan` to subscription tiers
+- Create `/plugins/controld/tier_features.json` for feature registration
 
 **Documentation:**
 - End-user documentation for subscription management
