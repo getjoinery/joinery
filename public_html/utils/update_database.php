@@ -110,8 +110,8 @@
 			return false;
 		}
 		
-		// Display table operation results
-		if ($verbose && !empty($table_result['messages'])) {
+		// Display table operation results (always show schema changes, not just in verbose mode)
+		if (!empty($table_result['messages'])) {
 			echo implode('<br>', $table_result['messages']) . "<br>\n";
 		}
 		
