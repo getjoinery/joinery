@@ -32,6 +32,10 @@ $headers = array('ID', 'Level', 'Name', 'Display Name', 'Members', 'Actions');
         <div class="alert alert-success">Tier saved successfully!</div>
     <?php endif; ?>
 
+    <?php if (isset($_GET['error']) && $_GET['error'] == 'tier_not_found'): ?>
+        <div class="alert alert-danger">The requested subscription tier could not be found.</div>
+    <?php endif; ?>
+
     <?php
     // Display table with altlinks
     $table_options = array(
@@ -47,8 +51,8 @@ $headers = array('ID', 'Level', 'Name', 'Display Name', 'Members', 'Actions');
         $members = $group->get_member_list();
         $member_count = count($members);
 
-        $actions_html = '<a href="admin_subscription_tier_edit.php?id=' . $tier->key . '" class="btn btn-sm btn-primary">Edit</a> ';
-        $actions_html .= '<a href="admin_subscription_tier_members.php?id=' . $tier->key . '" class="btn btn-sm btn-info">View Members</a>';
+        $actions_html = '<a href="/admin/admin_subscription_tier_edit?id=' . $tier->key . '" class="btn btn-sm btn-primary">Edit</a> ';
+        $actions_html .= '<a href="/admin/admin_subscription_tier_members?id=' . $tier->key . '" class="btn btn-sm btn-info">View Members</a>';
 
         $row = array(
             $tier->key,
@@ -127,7 +131,7 @@ $headers = array('ID', 'Level', 'Name', 'Display Name', 'Members', 'Actions');
                                 <td><?php echo htmlspecialchars($product['pro_name']); ?></td>
                                 <td><?php echo htmlspecialchars($product['sbt_display_name']); ?></td>
                                 <td>
-                                    <a href="admin_product_edit.php?pro_product_id=<?php echo $product['pro_product_id']; ?>"
+                                    <a href="/admin/admin_product_edit?pro_product_id=<?php echo $product['pro_product_id']; ?>"
                                        class="btn btn-sm btn-primary">Edit Product</a>
                                 </td>
                             </tr>

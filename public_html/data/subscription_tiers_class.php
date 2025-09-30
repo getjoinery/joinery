@@ -21,11 +21,15 @@ class SubscriptionTier extends SystemBase {
         'sbt_name' => array('type'=>'varchar(100)', 'required'=>true),
         'sbt_display_name' => array('type'=>'varchar(100)', 'required'=>true),
         'sbt_description' => array('type'=>'text'),
+        'sbt_features' => array('type'=>'jsonb', 'default'=>'{}'),
         'sbt_is_active' => array('type'=>'bool', 'default'=>true),
         'sbt_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'sbt_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'sbt_delete_time' => array('type'=>'timestamp(6)')
     );
+
+    // Cache for user tiers to avoid repeated lookups
+    protected static $user_tier_cache = array();
 
     /**
      * Create the associated group when creating a new tier
@@ -35,11 +39,15 @@ class SubscriptionTier extends SystemBase {
         if (!$this->key && !$this->get('sbt_grp_group_id')) {
             // Check if a group with this name already exists in the subscription_tier category
             $existing_groups = new MultiGroup([
-                'grp_name' => $this->get('sbt_name'),
-                'grp_category' => 'subscription_tier'
+                'group_name' => $this->get('sbt_name'),
+                'category' => 'subscription_tier'
             ]);
 
-            if ($existing_groups->count_all() > 0) {
+            $count = $existing_groups->count_all();
+            error_log('SubscriptionTier::save() - Checking for existing group with name: ' . $this->get('sbt_name'));
+            error_log('SubscriptionTier::save() - Found ' . $count . ' existing groups');
+
+            if ($count > 0) {
                 throw new Exception('A subscription tier with the name "' . $this->get('sbt_name') . '" already exists');
             }
 
@@ -48,11 +56,15 @@ class SubscriptionTier extends SystemBase {
             $group->set('grp_category', 'subscription_tier');
             $group->save();
             $this->set('sbt_grp_group_id', $group->key);
-        } elseif ($this->key && $this->is_dirty('sbt_name')) {
-            // If updating tier name, also update the group name
-            $group = new Group($this->get('sbt_grp_group_id'), TRUE);
-            $group->set('grp_name', $this->get('sbt_name'));
-            $group->save();
+        } elseif ($this->key && $this->get('sbt_grp_group_id')) {
+            // If updating existing tier, check if name changed and update group
+            $original = new SubscriptionTier($this->key, TRUE);
+            if ($original->get('sbt_name') != $this->get('sbt_name')) {
+                // Name changed, update the group name too
+                $group = new Group($this->get('sbt_grp_group_id'), TRUE);
+                $group->set('grp_name', $this->get('sbt_name'));
+                $group->save();
+            }
         }
 
         return parent::save($debug);
@@ -249,6 +261,132 @@ class SubscriptionTier extends SystemBase {
         }
 
         return $upgrade_options;
+    }
+
+    /**
+     * Get a specific feature value for this tier
+     * @param string $key Feature key to retrieve
+     * @param mixed $default Default value if feature not found
+     * @return mixed Feature value or default
+     */
+    public function getFeature($key, $default = null) {
+        $features = json_decode($this->get('sbt_features'), true) ?? [];
+        return isset($features[$key]) ? $features[$key] : $default;
+    }
+
+    /**
+     * Set all features for this tier
+     * @param array $features_array Associative array of feature key => value
+     */
+    public function setFeatures($features_array) {
+        $this->set('sbt_features', json_encode($features_array));
+    }
+
+    /**
+     * Get all features for this tier
+     * @return array Associative array of all features
+     */
+    public function getAllFeatures() {
+        return json_decode($this->get('sbt_features'), true) ?? [];
+    }
+
+    /**
+     * Get a user's feature value based on their tier
+     * @param int $user_id User ID
+     * @param string $feature_key Feature key to check
+     * @param mixed $default Default value if user has no tier or feature not found
+     * @return mixed Feature value or default
+     */
+    public static function getUserFeature($user_id, $feature_key, $default = null) {
+        // Check cache first
+        if (!isset(self::$user_tier_cache[$user_id])) {
+            self::$user_tier_cache[$user_id] = self::GetUserTier($user_id);
+        }
+        $tier = self::$user_tier_cache[$user_id];
+
+        if (!$tier) {
+            return $default;
+        }
+
+        return $tier->getFeature($feature_key, $default);
+    }
+
+    /**
+     * Clear tier cache for a specific user
+     * @param int $user_id User ID to clear from cache
+     */
+    public static function clearUserCache($user_id) {
+        unset(self::$user_tier_cache[$user_id]);
+    }
+
+    /**
+     * Get all available features from core and plugins
+     * @return array Array of feature definitions
+     */
+    public static function getAllAvailableFeatures() {
+        $features = [];
+
+        // Load core features
+        $core_file = PathHelper::getIncludePath('includes/core_tier_features.json');
+        if (file_exists($core_file)) {
+            $core_features = json_decode(file_get_contents($core_file), true);
+            if ($core_features) {
+                $features = $core_features;
+            }
+        }
+
+        // Load plugin features
+        $plugins_dir = PathHelper::getRootDir() . '/plugins/';
+        if (is_dir($plugins_dir)) {
+            $plugins = scandir($plugins_dir);
+            foreach ($plugins as $plugin) {
+                if ($plugin == '.' || $plugin == '..') continue;
+
+                $feature_file = $plugins_dir . $plugin . '/tier_features.json';
+                if (file_exists($feature_file)) {
+                    $plugin_features = json_decode(file_get_contents($feature_file), true);
+                    if ($plugin_features) {
+                        // Prefix plugin features to avoid conflicts
+                        foreach ($plugin_features as $key => $definition) {
+                            // Ensure plugin features are prefixed with plugin name
+                            if (strpos($key, $plugin . '_') !== 0) {
+                                $features[$plugin . '_' . $key] = $definition;
+                            } else {
+                                $features[$key] = $definition;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return $features;
+    }
+
+    /**
+     * Remove user from all subscription tier groups
+     * @param int $user_id User ID to remove from all tiers
+     */
+    public static function removeUserFromAllTiers($user_id) {
+        // Get all subscription tier groups
+        $tier_groups = new MultiGroup(['grp_category' => 'subscription_tier']);
+        $tier_groups->load();
+
+        // Remove user from all subscription tier groups
+        foreach ($tier_groups as $group) {
+            $existing_members = new MultiGroupMember([
+                'grm_grp_group_id' => $group->key,
+                'grm_foreign_key_id' => $user_id
+            ]);
+            $existing_members->load();
+
+            foreach ($existing_members as $member) {
+                $member->remove();
+            }
+        }
+
+        // Clear cache for this user
+        self::clearUserCache($user_id);
     }
 }
 
