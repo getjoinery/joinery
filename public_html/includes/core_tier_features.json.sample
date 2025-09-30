@@ -1,0 +1,25 @@
+{
+    "sample_storage_gb": {
+        "label": "Storage (GB)",
+        "type": "integer",
+        "default": 5,
+        "min": 0,
+        "max": 10000,
+        "description": "Storage space in gigabytes"
+    },
+    "sample_api_calls": {
+        "label": "Monthly API Calls",
+        "type": "integer",
+        "default": 1000,
+        "min": 0,
+        "max": 10000000,
+        "description": "Number of API calls allowed per month"
+    },
+    "sample_priority_support": {
+        "label": "Priority Support",
+        "type": "boolean",
+        "default": false,
+        "description": "Access to priority support channels"
+    },
+    "_README": "This is a sample file showing the structure for tier features. Copy entries to core_tier_features.json (without the 'sample_' prefix) when you need to add actual core features. Remove the _README key when using in production."
+}

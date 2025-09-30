@@ -1,63 +1,79 @@
 <?php
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-require_once(PathHelper::getIncludePath('data/products_class.php'));
 require_once(PathHelper::getThemeFilePath('change_subscription_logic.php', 'logic'));
 
+// Process logic - all data preparation happens in the logic file
 $page_vars = process_logic(change_subscription_logic($_GET, $_POST));
 
 $page = new PublicPage();
 $hoptions = array(
-    'title' => 'Change Your Subscription',
+    'title' => 'Manage Your Subscription',
     'breadcrumbs' => array(
         'Change Subscription' => ''
     ),
 );
 $page->public_header($hoptions, NULL);
 
-echo PublicPage::BeginPage('Choose Your Membership Tier', $hoptions);
+$formwriter = $page->getFormWriter('subscription_form');
 
-// Get current user's tier
-$session = SessionControl::get_instance();
-$user_id = $session->get_user_id();
-$current_tier = SubscriptionTier::GetUserTier($user_id);
-$current_level = $current_tier ? $current_tier->get('sbt_tier_level') : 0;
+echo PublicPage::BeginPage('Manage Your Subscription', $hoptions);
 
-// Get all active tiers
-$all_tiers = MultiSubscriptionTier::GetAllActive();
-?>
+// Display messages
+if (isset($page_vars['success_message'])): ?>
+    <div class="alert alert-success mb-4">
+        <?php echo htmlspecialchars($page_vars['success_message']); ?>
+    </div>
+<?php endif; ?>
+
+<?php if (isset($page_vars['error_message'])): ?>
+    <div class="alert alert-danger mb-4">
+        <?php echo htmlspecialchars($page_vars['error_message']); ?>
+    </div>
+<?php endif; ?>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="text-center">
         <h2 class="text-3xl font-extrabold text-gray-900 sm:text-4xl">
             Choose Your Membership Level
         </h2>
-        <?php if ($current_tier): ?>
+        <?php if ($page_vars['current_tier']): ?>
             <p class="mt-3 text-xl text-gray-500">
-                You currently have <strong><?php echo htmlspecialchars($current_tier->get('sbt_display_name')); ?></strong> membership
+                Your current tier: <strong><?php echo htmlspecialchars($page_vars['current_tier']->get('sbt_display_name')); ?></strong>
             </p>
         <?php else: ?>
             <p class="mt-3 text-xl text-gray-500">
                 Join today and unlock premium features
             </p>
         <?php endif; ?>
+
+        <?php if ($page_vars['has_cancelled_subscription'] && !$page_vars['is_expired']): ?>
+            <p class="mt-2 text-sm text-orange-600">
+                Your subscription is scheduled to cancel at the end of your billing period
+            </p>
+        <?php elseif ($page_vars['is_expired']): ?>
+            <p class="mt-2 text-sm text-red-600">
+                Your subscription has expired
+            </p>
+        <?php endif; ?>
     </div>
 
-    <div class="mt-12 space-y-4 sm:mt-16 sm:space-y-0 sm:grid sm:grid-cols-<?php echo count($all_tiers); ?> sm:gap-6 lg:max-w-5xl lg:mx-auto">
+    <?php if ($page_vars['show_reactivate_button']): ?>
+        <div class="mt-6 text-center">
+            <?php echo $formwriter->form_start('reactivate_form', '', 'POST'); ?>
+            <input type="hidden" name="action" value="reactivate">
+            <button type="submit" class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                Reactivate Subscription
+            </button>
+            <?php echo $formwriter->form_end(); ?>
+        </div>
+    <?php endif; ?>
 
-        <?php foreach ($all_tiers as $tier): ?>
+    <div class="mt-12 space-y-4 sm:mt-16 sm:space-y-0 sm:grid sm:grid-cols-<?php echo count($page_vars['tier_display_data']); ?> sm:gap-6 lg:max-w-6xl lg:mx-auto">
+
+        <?php foreach ($page_vars['tier_display_data'] as $tier_data): ?>
             <?php
-            // Get products for this tier
-            $tier_products = new MultiProduct([
-                'pro_sbt_subscription_tier_id' => $tier->key,
-                'pro_is_active' => true,
-                'pro_delete_time' => 'IS NULL'
-            ], ['pro_name' => 'ASC']);
-            $tier_products->load();
-
-            $is_current = $current_tier && $current_tier->key == $tier->key;
-            $is_upgrade = $tier->get('sbt_tier_level') > $current_level;
-            $is_downgrade = $tier->get('sbt_tier_level') < $current_level;
+            $tier = $tier_data['tier'];
+            $is_current = $tier_data['is_current'];
             ?>
 
             <div class="border border-gray-200 rounded-lg shadow-sm divide-y divide-gray-200
@@ -69,7 +85,7 @@ $all_tiers = MultiSubscriptionTier::GetAllActive();
 
                     <?php if ($is_current): ?>
                         <p class="mt-2 text-sm text-indigo-600 font-semibold">Your Current Plan</p>
-                    <?php elseif ($is_downgrade): ?>
+                    <?php elseif ($tier_data['action_type'] == 'downgrade' || $tier_data['action_type'] == 'downgrade_disabled'): ?>
                         <p class="mt-2 text-sm text-gray-500">(Downgrade)</p>
                     <?php endif; ?>
 
@@ -77,34 +93,55 @@ $all_tiers = MultiSubscriptionTier::GetAllActive();
                         <?php echo htmlspecialchars($tier->get('sbt_description')); ?>
                     </p>
 
+                    <?php
+                    // Display features if available
+                    $features = $tier->getAllFeatures();
+                    if (!empty($features)):
+                    ?>
+                        <div class="mt-4">
+                            <p class="text-sm font-medium text-gray-900 mb-2">Features:</p>
+                            <ul class="text-sm text-gray-500 space-y-1">
+                                <?php
+                                $all_available = SubscriptionTier::getAllAvailableFeatures();
+                                foreach ($features as $key => $value):
+                                    if (isset($all_available[$key])):
+                                        $label = $all_available[$key]['label'];
+                                        if ($all_available[$key]['type'] == 'boolean'):
+                                            if ($value):
+                                ?>
+                                                <li>✓ <?php echo htmlspecialchars($label); ?></li>
+                                <?php
+                                            endif;
+                                        else:
+                                ?>
+                                            <li>• <?php echo htmlspecialchars($label); ?>: <?php echo htmlspecialchars($value); ?></li>
+                                <?php
+                                        endif;
+                                    endif;
+                                endforeach;
+                                ?>
+                            </ul>
+                        </div>
+                    <?php endif; ?>
+
                     <div class="mt-6">
-                        <?php if ($tier_products->count() > 0): ?>
+                        <?php if (!empty($tier_data['products'])): ?>
                             <div class="space-y-3">
-                                <?php foreach ($tier_products as $product): ?>
+                                <?php foreach ($tier_data['products'] as $product): ?>
                                     <div class="border-t pt-3">
                                         <p class="text-sm font-medium text-gray-900">
-                                            <?php echo htmlspecialchars($product->get('pro_name')); ?>
+                                            <?php echo htmlspecialchars($product['name']); ?>
                                         </p>
-                                        <?php
-                                        // Get product versions for pricing
-                                        $versions = $product->get_product_versions(TRUE);
-                                        if ($versions && $versions->count() > 0):
-                                            $version = $versions->get(0); // Get first active version
-                                            $price = $version->get('prv_version_price');
-                                            if ($price > 0):
-                                        ?>
+                                        <?php if ($product['price'] > 0): ?>
                                             <p class="text-2xl font-bold text-gray-900">
-                                                $<?php echo number_format($price, 2); ?>
-                                                <?php if ($version->is_subscription()): ?>
+                                                $<?php echo number_format($product['price'], 2); ?>
+                                                <?php if ($product['period']): ?>
                                                     <span class="text-sm font-medium text-gray-500">
-                                                        /<?php echo $version->get('prv_price_type'); ?>
+                                                        /<?php echo htmlspecialchars($product['period']); ?>
                                                     </span>
                                                 <?php endif; ?>
                                             </p>
-                                        <?php
-                                            endif;
-                                        endif;
-                                        ?>
+                                        <?php endif; ?>
                                     </div>
                                 <?php endforeach; ?>
                             </div>
@@ -112,40 +149,52 @@ $all_tiers = MultiSubscriptionTier::GetAllActive();
                     </div>
 
                     <div class="mt-8">
-                        <?php if ($is_current): ?>
+                        <?php if ($tier_data['message']): ?>
+                            <p class="text-sm text-gray-500 mb-2">
+                                <?php echo htmlspecialchars($tier_data['message']); ?>
+                            </p>
+                        <?php endif; ?>
+
+                        <?php if ($tier_data['action_type'] == 'current'): ?>
                             <button class="block w-full py-2 px-4 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-gray-100 cursor-not-allowed" disabled>
-                                Current Plan
+                                <?php echo htmlspecialchars($tier_data['button_text']); ?>
                             </button>
-                        <?php elseif ($is_downgrade): ?>
-                            <button class="block w-full py-2 px-4 border border-gray-300 rounded-md text-sm font-medium text-gray-400 bg-gray-100 cursor-not-allowed" disabled>
-                                Downgrades Coming Soon
-                            </button>
-                        <?php elseif ($tier_products->count() > 0): ?>
-                            <p class="text-sm text-gray-500 mb-3">Select a product:</p>
-                            <?php
-                            $first = true;
-                            foreach ($tier_products as $product):
-                                $versions = $product->get_product_versions(TRUE);
-                                if ($versions && $versions->count() > 0):
-                                    $version = $versions->get(0);
-                                    if ($version->get('prv_version_price') > 0):
-                            ?>
-                                <a href="/product/<?php echo $product->get('pro_link'); ?>"
-                                   class="block w-full py-2 px-4 mb-2 border border-transparent rounded-md text-center text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
-                                    <?php echo htmlspecialchars($product->get('pro_name')); ?> -
-                                    $<?php echo number_format($version->get('prv_version_price'), 2); ?>
-                                    <?php if ($version->is_subscription()): ?>
-                                        /<?php echo $version->get('prv_price_type'); ?>
-                                    <?php endif; ?>
-                                </a>
-                            <?php
-                                    endif;
-                                endif;
-                            endforeach;
-                            ?>
+                        <?php elseif ($tier_data['button_enabled'] && !empty($tier_data['products'])): ?>
+                            <?php if (count($tier_data['products']) == 1): ?>
+                                <?php // Single product - direct action ?>
+                                <?php echo $formwriter->form_start('tier_action_' . $tier->key, '', 'POST'); ?>
+                                <input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
+                                <input type="hidden" name="product_id" value="<?php echo $tier_data['products'][0]['id']; ?>">
+                                <button type="submit" class="block w-full py-2 px-4 border border-transparent rounded-md text-center text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
+                                    <?php echo htmlspecialchars($tier_data['button_text']); ?>
+                                </button>
+                                <?php echo $formwriter->form_end(); ?>
+                            <?php else: ?>
+                                <?php // Multiple products - show dropdown ?>
+                                <?php echo $formwriter->form_start('tier_action_' . $tier->key, '', 'POST'); ?>
+                                <input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
+                                <div class="mb-2">
+                                    <select name="product_id" class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+                                        <option value="">Select a product</option>
+                                        <?php foreach ($tier_data['products'] as $product): ?>
+                                            <option value="<?php echo $product['id']; ?>">
+                                                <?php echo htmlspecialchars($product['name']); ?> -
+                                                $<?php echo number_format($product['price'], 2); ?>
+                                                <?php if ($product['period']): ?>
+                                                    /<?php echo htmlspecialchars($product['period']); ?>
+                                                <?php endif; ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <button type="submit" class="block w-full py-2 px-4 border border-transparent rounded-md text-center text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
+                                    <?php echo htmlspecialchars($tier_data['button_text']); ?>
+                                </button>
+                                <?php echo $formwriter->form_end(); ?>
+                            <?php endif; ?>
                         <?php else: ?>
                             <button class="block w-full py-2 px-4 border border-gray-300 rounded-md text-sm font-medium text-gray-400 bg-gray-100 cursor-not-allowed" disabled>
-                                Coming Soon
+                                <?php echo htmlspecialchars($tier_data['button_text']); ?>
                             </button>
                         <?php endif; ?>
                     </div>
@@ -154,6 +203,18 @@ $all_tiers = MultiSubscriptionTier::GetAllActive();
         <?php endforeach; ?>
 
     </div>
+
+    <?php if ($page_vars['show_cancel_button']): ?>
+        <div class="mt-8 text-center">
+            <?php echo $formwriter->form_start('cancel_form', '', 'POST'); ?>
+            <input type="hidden" name="action" value="cancel">
+            <button type="submit" class="inline-flex justify-center py-2 px-4 border border-red-300 shadow-sm text-sm font-medium rounded-md text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                    onclick="return confirm('Are you sure you want to cancel your subscription?');">
+                <?php echo htmlspecialchars($page_vars['cancel_button_text']); ?>
+            </button>
+            <?php echo $formwriter->form_end(); ?>
+        </div>
+    <?php endif; ?>
 </div>
 
 <?php

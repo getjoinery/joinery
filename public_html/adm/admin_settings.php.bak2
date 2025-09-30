@@ -795,7 +795,7 @@
 	echo $formwriter->dropinput("Registration active", "register_active", '', $optionvals, $settings->get_setting('register_active'), '', FALSE);
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Subscriptions active", "subscriptions_active", '', $optionvals, $settings->get_setting('subscriptions_active'), '', FALSE);
+	echo $formwriter->dropinput("Subscriptions active", "subscriptions_active", '', $optionvals, $settings->get_setting('subscriptions_active'), '', FALSE);	
 
 	$optionvals = Address::get_timezone_drop_array();
 	echo $formwriter->dropinput("Default timezone", "default_timezone", '', $optionvals, $settings->get_setting('default_timezone'), '', FALSE); 
@@ -926,44 +926,22 @@
 	echo $formwriter->dropinput("Product module active", "products_active", '', $optionvals, $settings->get_setting('products_active'), '', FALSE);
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("List regular products on product index", "products_list_items_active", '', $optionvals, $settings->get_setting('products_list_items_active'), '', FALSE);
-
+	echo $formwriter->dropinput("List regular products on product index", "products_list_items_active", '', $optionvals, $settings->get_setting('products_list_items_active'), '', FALSE);	
+	
 	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("List event products on product index", "products_list_events_active", '', $optionvals, $settings->get_setting('products_list_events_active'), '', FALSE);
+	echo $formwriter->dropinput("List event products on product index", "products_list_events_active", '', $optionvals, $settings->get_setting('products_list_events_active'), '', FALSE);	
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Allow coupon codes", "coupons_active", '', $optionvals, $settings->get_setting('coupons_active'), '', FALSE);
 
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Activate pricing (/pricing) page", "pricing_page", '', $optionvals, $settings->get_setting('pricing_page'), '', FALSE);
-
+	
 	$max_subscriptions_per_user = 0;
 	if($settings->get_setting('max_subscriptions_per_user')){
 		$max_subscriptions_per_user = $settings->get_setting('max_subscriptions_per_user');
 	}
 	echo $formwriter->textinput("Max number of subscriptions per user (0 for no limit)", 'max_subscriptions_per_user', '', 20, $max_subscriptions_per_user, "" , 255, "");
-
-	// Subscription Tier Management Settings
-	echo '<h4>Subscription Tier Management</h4>';
-	echo '<p class="text-muted">Control how users can change their subscription tiers</p>';
-
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow subscription downgrades", "subscription_downgrades_enabled", '', $optionvals, $settings->get_setting('subscription_downgrades_enabled'), 'Allow users to downgrade to lower subscription tiers', FALSE);
-
-	$optionvals = array("Immediate"=>'immediate', 'End of billing period' => 'end_of_period');
-	echo $formwriter->dropinput("Downgrade timing", "subscription_downgrade_timing", '', $optionvals, $settings->get_setting('subscription_downgrade_timing'), 'When downgrades take effect (only applies if downgrades are enabled)', FALSE);
-
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow subscription cancellations", "subscription_cancellation_enabled", '', $optionvals, $settings->get_setting('subscription_cancellation_enabled'), 'Allow users to cancel their subscriptions', FALSE);
-
-	$optionvals = array("Immediate"=>'immediate', 'End of billing period' => 'end_of_period');
-	echo $formwriter->dropinput("Cancellation timing", "subscription_cancellation_timing", '', $optionvals, $settings->get_setting('subscription_cancellation_timing'), 'When cancellations take effect', FALSE);
-
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Issue prorated refunds on cancellation", "subscription_cancellation_prorate", '', $optionvals, $settings->get_setting('subscription_cancellation_prorate'), 'Issue refunds for unused time (only for immediate cancellations)', FALSE);
-
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow subscription reactivation", "subscription_reactivation_enabled", '', $optionvals, $settings->get_setting('subscription_reactivation_enabled'), 'Allow users to reactivate cancelled subscriptions before they expire', FALSE);
 	
 	echo '<hr>';
 

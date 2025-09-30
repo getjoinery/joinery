@@ -270,8 +270,61 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 			else{
 				return false;
 			}
-			
-		}		
+
+		}
+	}
+
+	/**
+	 * Check if subscription is still active, sync with Stripe if needed
+	 * This implements lazy evaluation for subscription expiration checking
+	 * @return bool True if subscription is active, false if expired/cancelled
+	 */
+	public function check_subscription_status() {
+		// Only check subscriptions
+		if (!$this->get('odi_is_subscription')) {
+			return true; // Non-subscription items are always "active"
+		}
+
+		// Check if period has ended
+		$period_end = strtotime($this->get('odi_subscription_period_end'));
+
+		if ($period_end < time()) {
+			// Period has passed - sync with Stripe
+			try {
+				require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
+				$stripe_helper = new StripeHelper();
+
+				// This existing method updates all subscription fields
+				$stripe_helper->update_subscription_in_order_item($this);
+
+				// Check status after update
+				$status = $this->get('odi_subscription_status');
+				return in_array($status, ['active', 'trialing']);
+
+			} catch (Exception $e) {
+				// If Stripe check fails, assume subscription is still valid
+				// to avoid removing access due to API issues
+				error_log('Failed to check subscription status for OrderItem ' . $this->key . ': ' . $e->getMessage());
+				return true; // Fail open - assume valid
+			}
+		}
+
+		// Period hasn't ended yet - check if cancelled
+		if ($this->get('odi_subscription_cancelled_time')) {
+			// Check if cancellation time has passed
+			$cancelled_time = strtotime($this->get('odi_subscription_cancelled_time'));
+			if ($cancelled_time < time()) {
+				return false; // Cancelled subscription
+			}
+		}
+
+		// Check current status
+		$status = $this->get('odi_subscription_status');
+		if ($status && !in_array($status, ['active', 'trialing'])) {
+			return false; // Not active status
+		}
+
+		return true; // Active subscription
 	}
 }
 
