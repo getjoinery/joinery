@@ -1,0 +1,10 @@
+{
+  "max_devices": {
+    "type": "integer",
+    "label": "Maximum Devices",
+    "description": "Maximum number of devices allowed for this tier",
+    "default": 1,
+    "min": 0,
+    "max": 999
+  }
+}
