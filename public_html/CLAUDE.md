@@ -227,11 +227,26 @@ class MultiTableName extends SystemMultiBase {
     function authenticate_read($data); // Calls authenticate_read on all children
     
     // Internal Methods (used by concrete implementations)
-    protected function _get_resultsv2($table, $filters = [], $sorts = [], 
+    protected function _get_resultsv2($table, $filters = [], $sorts = [],
                                      $only_count = false, $debug = false);
 	// More methods are available in the SystemMultiBase class
 }
 ```
+
+**⚠️ CRITICAL: Multi-Object Filter Keys**
+
+Multi classes use **custom option keys** that may differ from database column names. Always check the `getMultiResults()` method in the specific Multi class to see which option keys it accepts.
+
+**Common mistake:**
+```php
+// ❌ WRONG - Using database column names directly
+$groups = new MultiGroup(['grp_name' => 'Basic Plan', 'grp_category' => 'subscription_tier']);
+
+// ✅ CORRECT - Using the option keys defined in MultiGroup::getMultiResults()
+$groups = new MultiGroup(['group_name' => 'Basic Plan', 'category' => 'subscription_tier']);
+```
+
+**Always verify option keys** in `/data/[table]_class.php` before using Multi classes!
 
 ### DbConnector Usage and Database Calls
 
