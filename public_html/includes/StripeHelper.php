@@ -1136,6 +1136,18 @@ class StripeHelper {
 		$found_price = NULL;
 		foreach ($stripe_prices->data as $stripe_price) {
 			if($stripe_price->unit_amount / 100 == $price){
+				// Store the price ID if it's not already stored
+				if ($this->test_mode) {
+					if (!$product_version->get('prv_stripe_price_id_test')) {
+						$product_version->set('prv_stripe_price_id_test', $stripe_price->id);
+						$product_version->save();
+					}
+				} else {
+					if (!$product_version->get('prv_stripe_price_id')) {
+						$product_version->set('prv_stripe_price_id', $stripe_price->id);
+						$product_version->save();
+					}
+				}
 				return $stripe_price;
 			}
 		}
@@ -1157,7 +1169,7 @@ class StripeHelper {
 			$stripe_params['currency'] = $currency_code;
 			$stripe_params['product'] = $stripe_product_id;
 			if($product_version->is_subscription()){
-				
+
 				if($product_version->get('prv_trial_period_days')){
 					$stripe_params['recurring'] = array(
 						'interval' => $product_version->is_subscription(),
@@ -1170,10 +1182,18 @@ class StripeHelper {
 			}
 
 			$stripe_price = $this->create_price($stripe_params);
+
+			// Automatically store the price ID on the product version
+			if ($this->test_mode) {
+				$product_version->set('prv_stripe_price_id_test', $stripe_price->id);
+			} else {
+				$product_version->set('prv_stripe_price_id', $stripe_price->id);
+			}
+			$product_version->save();
 		}
 		catch (Exception $e) {
-			
-			throw new SystemDisplayablePermanentError("Stripe price creation failed.  Message: ".$e->getMessage()); 
+
+			throw new SystemDisplayablePermanentError("Stripe price creation failed.  Message: ".$e->getMessage());
 		}
 		return $stripe_price;
 	}
