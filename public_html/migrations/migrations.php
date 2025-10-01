@@ -865,3 +865,19 @@
 		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug, amu_setting_activate) VALUES ('Subscription Tiers', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'products'), 'admin_subscription_tiers', 10, 5, 0, '', 'subscription-tiers', 'subscriptions_active');";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// Setting: subscription_downgrade_prorate
+		$migration = array();
+		$migration['database_version'] = '0.64';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'subscription_downgrade_prorate'";
+		$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('subscription_downgrade_prorate', '1', 1, now(), now(), 'subscriptions');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Setting: subscription_upgrade_prorate
+		$migration = array();
+		$migration['database_version'] = '0.64';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'subscription_upgrade_prorate'";
+		$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('subscription_upgrade_prorate', '1', 1, now(), now(), 'subscriptions');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
