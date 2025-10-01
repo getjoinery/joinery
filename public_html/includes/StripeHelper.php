@@ -897,7 +897,7 @@ class StripeHelper {
 				[
 					'cancel_at_period_end' => true,
 				]
-			);		
+			);
 			if($subscription->cancel_at_period_end){
 				return $subscription;
 			}
@@ -905,8 +905,8 @@ class StripeHelper {
 				return false;
 			}
 		}
-		else if($cancel_type = 'immediate'){
-			$stripe_subscription = $this->get_subscription($subscription_id);			
+		else if($cancel_type == 'immediate'){
+			$stripe_subscription = $this->get_subscription($subscription_id);
 			$subscription = $stripe_subscription->cancel();
 			if($subscription->canceled_at){
 				return $subscription;
@@ -917,8 +917,30 @@ class StripeHelper {
 		}
 		return false;
 	}
-	
-	
+
+	/**
+	 * Reactivate a subscription that was scheduled for cancellation
+	 *
+	 * @param string $subscription_id The Stripe subscription ID
+	 * @return object|false Returns the subscription object on success, false on failure
+	 */
+	public function reactivate_subscription($subscription_id){
+		$subscription = $this->stripe->subscriptions->update(
+			$subscription_id,
+			[
+				'cancel_at_period_end' => false,
+			]
+		);
+
+		if($subscription && !$subscription->cancel_at_period_end){
+			return $subscription;
+		}
+		else{
+			return false;
+		}
+	}
+
+
 	public function create_card_from_token($stripe_token, $stripe_customer_id, $set_as_default=true){
 		try {
 			//STORE PAYMENT METHOD 
