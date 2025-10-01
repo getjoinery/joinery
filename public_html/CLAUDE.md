@@ -505,12 +505,26 @@ $migrations[] = $migration;
 - PostgreSQL database access via psql
 - Web server (Apache) and configuration access
 
-**CRITICAL REQUIREMENT:** Always check PHP files for syntax errors using `php -l filename.php` before declaring any PHP development task complete.
+**CRITICAL REQUIREMENTS for PHP Development:**
+
+1. **Syntax Validation**: Always check PHP files for syntax errors using `php -l filename.php` before declaring any PHP development task complete.
+
+2. **Method Existence Validation**: Run the method existence test on all PHP files created or modified:
+   ```bash
+   php "/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php" /path/to/modified/file.php
+   ```
+   - Investigate any missing methods flagged by the script
+   - Only report task completion after all flags are investigated and resolved
+   - The script will identify calls to non-existent functions and methods
+   - Whitelisted common methods (SystemBase, PDO, etc.) are automatically skipped
 
 ### Common Development Commands
 ```bash
 # PHP Syntax Validation
 php -l filename.php
+
+# Method Existence Validation
+php "/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php" /path/to/file.php
 
 # Check error logs
 tail /var/www/html/joinerytest/logs/error.log
@@ -527,8 +541,9 @@ sudo systemctl restart apache2
 **Usage Pattern:**
 1. Make code changes
 2. Run syntax validation (`php -l filename.php`)
-3. Test changes locally (web server is available)
-4. Check error logs for any issues
+3. Run method existence validation on modified files
+4. Test changes locally (web server is available)
+5. Check error logs for any issues
 
 **Quick Log Check:** `tail /var/www/html/joinerytest/logs/error.log` - Shows recent Apache error.log entries
 
@@ -541,10 +556,11 @@ See **📖 [Plugin Developer Guide](/docs/claude/plugin_developer_guide.md)** fo
 
 1. **Custom Commands**: Check `/home/user1/.claude/commands/` for project-specific slash commands before proceeding
 2. **Syntax Validation**: ALWAYS run `php -l filename.php` on all PHP files before completing any task
-3. **Method Verification**: NEVER assume available functions - always check class definitions first
-4. **Security**: Always validate and sanitize user input
-5. **FormWriter**: Always use FormWriter class for forms
-6. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
+3. **Method Existence Validation**: ALWAYS run method_existence_test.php on created/modified PHP files and investigate any flagged issues before completion
+4. **Method Verification**: NEVER assume available functions - always check class definitions first
+5. **Security**: Always validate and sanitize user input
+6. **FormWriter**: Always use FormWriter class for forms
+7. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
 
 ## Security Notes
 
