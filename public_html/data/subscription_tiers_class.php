@@ -129,12 +129,31 @@ class SubscriptionTier extends SystemBase {
 
     /**
      * Get current subscription tier for a user
+     * Automatically validates subscription status and removes tier if expired
      */
     public static function GetUserTier($user_id) {
+        // Check for active subscription
+        require_once(PathHelper::getIncludePath('data/order_items_class.php'));
+        $subscriptions = new MultiOrderItem(
+            array('user_id' => $user_id, 'is_active_subscription' => true)
+        );
+        $subscriptions->load();
+
+        $has_active_subscription = false;
+        if ($subscriptions->count() > 0) {
+            foreach ($subscriptions as $subscription) {
+                if ($subscription->check_subscription_status()) {
+                    $has_active_subscription = true;
+                    break;
+                }
+            }
+        }
+
         // Get all subscription tier groups the user belongs to
         $user_groups = new MultiGroupMember(['grm_foreign_key_id' => $user_id]);
         $user_groups->load();
 
+        $current_tier = null;
         foreach ($user_groups as $group_member) {
             // Get the group
             $group = new Group($group_member->get('grm_grp_group_id'), TRUE);
@@ -144,12 +163,35 @@ class SubscriptionTier extends SystemBase {
                 // Find the tier for this group
                 $tier = self::GetByColumn('sbt_grp_group_id', $group->key);
                 if ($tier && !$tier->get('sbt_delete_time')) {
-                    return $tier;
+                    $current_tier = $tier;
+                    break;
                 }
             }
         }
 
-        return null;
+        // If user has tier but no active subscription, remove it
+        if ($current_tier && !$has_active_subscription) {
+            error_log('Removing expired tier for user ' . $user_id . ': tier_level=' . $current_tier->get('sbt_tier_level'));
+
+            self::removeUserFromAllTiers($user_id);
+
+            ChangeTracking::logChange(
+                'subscription_tier',
+                null,
+                $user_id,
+                'tier_removed',
+                $current_tier->get('sbt_tier_level'),
+                null,
+                'subscription_expired'
+            );
+
+            // Clear cache
+            self::clearUserCache($user_id);
+
+            return null;
+        }
+
+        return $current_tier;
     }
 
     /**
