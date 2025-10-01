@@ -43,6 +43,8 @@ class ProductVersion extends SystemBase {	public static $prefix = 'esf';
 	    'prv_trial_period_days' => array('type'=>'int4'),
 	    'prv_plan_order_month' => array('type'=>'int4'),
 	    'prv_plan_order_year' => array('type'=>'int4'),
+	    'prv_stripe_price_id' => array('type'=>'varchar(64)'),
+	    'prv_stripe_price_id_test' => array('type'=>'varchar(64)'),
 	);
 
 	public static $field_constraints = array();
