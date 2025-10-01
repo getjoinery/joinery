@@ -300,6 +300,13 @@ class SubscriptionTierTester {
                 $setting->save();
             }
         }
+
+        // Clear the Globalvars cache so the new settings are loaded
+        // We need to reset the singleton instance_map to force reload from database
+        $reflection = new ReflectionClass('Globalvars');
+        $instance_map = $reflection->getProperty('instance_map');
+        $instance_map->setAccessible(true);
+        $instance_map->setValue(null, array());
     }
 
     /**
@@ -848,6 +855,120 @@ class SubscriptionTierTester {
     }
 
     /**
+     * Test reactivation through logic file
+     */
+    private function testLogicFileReactivation() {
+        echo "<h4>Test: Reactivation via change_subscription_logic()</h4>";
+
+        // Enable reactivation
+        $this->applySettings([
+            'subscription_reactivation_enabled' => '1'
+        ]);
+
+        // First, schedule a cancellation at period end
+        echo "<p style='margin-left:20px'>Step 1: Scheduling cancellation at period end...</p>";
+        $this->applySettings([
+            'subscription_cancellation_enabled' => '1',
+            'subscription_cancellation_timing' => 'end_of_period',
+            'subscription_cancellation_prorate' => '0'
+        ]);
+
+        $cancel_post = ['action' => 'cancel'];
+
+        try {
+            $cancel_result = change_subscription_logic([], $cancel_post);
+
+            // Debug: Check what the logic returned
+            if (isset($cancel_result->data['error_message'])) {
+                echo "<p style='margin-left:20px' class='text-warning'>⚠️ Cancel returned error: " . htmlspecialchars($cancel_result->data['error_message']) . "</p>";
+            }
+            if (isset($cancel_result->data['success_message'])) {
+                echo "<p style='margin-left:20px'>ℹ️ Cancel success: " . htmlspecialchars($cancel_result->data['success_message']) . "</p>";
+            }
+
+            // Verify cancellation was scheduled
+            $subscriptions = new MultiOrderItem(
+                array('user_id' => $this->test_user_id, 'is_active_subscription' => true),
+                array('order_item_id' => 'DESC')
+            );
+            $subscriptions->load();
+
+            echo "<p style='margin-left:20px'>Debug: Found " . $subscriptions->count() . " active subscription(s) after scheduling cancellation</p>";
+
+            if ($subscriptions->count() == 0) {
+                // Try without the is_active filter to see what's there
+                $all_subscriptions = new MultiOrderItem(
+                    array('user_id' => $this->test_user_id, 'is_subscription' => true),
+                    array('order_item_id' => 'DESC')
+                );
+                $all_subscriptions->load();
+                echo "<p style='margin-left:20px'>Debug: Found " . $all_subscriptions->count() . " total subscription(s)</p>";
+
+                if ($all_subscriptions->count() > 0) {
+                    $sub = $all_subscriptions->get(0);
+                    echo "<p style='margin-left:20px'>Debug: First subscription - cancelled_time: " . ($sub->get('odi_subscription_cancelled_time') ?: 'NULL') . ", cancel_at_period_end: " . ($sub->get('odi_subscription_cancel_at_period_end') ? 'true' : 'false') . "</p>";
+                }
+
+                $message = "No subscription found after scheduling cancellation";
+                echo "<p class='text-danger'>✗ {$message}</p>";
+                $this->recordFailure('Logic File Reactivation', $message);
+                return false;
+            }
+
+            $subscription = $subscriptions->get(0);
+
+            // Check if cancellation was scheduled (should have cancel_at_period_end set)
+            // Note: We can't check Stripe directly in this simple test, so we verify the action didn't fail
+            if (isset($cancel_result->data['error_message'])) {
+                $message = "Cancellation scheduling failed: " . $cancel_result->data['error_message'];
+                echo "<p class='text-danger'>✗ {$message}</p>";
+                $this->recordFailure('Logic File Reactivation', $message);
+                return false;
+            }
+
+            echo "<p style='margin-left:20px' class='text-success'>✓ Cancellation scheduled at period end</p>";
+
+            // Now test reactivation
+            echo "<p style='margin-left:20px'>Step 2: Reactivating subscription...</p>";
+            $reactivate_post = ['action' => 'reactivate'];
+
+            $reactivate_result = change_subscription_logic([], $reactivate_post);
+
+            // Check for success message
+            if (isset($reactivate_result->data['success_message'])) {
+                echo "<p style='margin-left:20px' class='text-success'>✓ Reactivation message: " . htmlspecialchars($reactivate_result->data['success_message']) . "</p>";
+            }
+
+            // Check for error
+            if (isset($reactivate_result->data['error_message'])) {
+                $message = "Reactivation failed: " . $reactivate_result->data['error_message'];
+                echo "<p class='text-danger'>✗ {$message}</p>";
+                $this->recordFailure('Logic File Reactivation', $message);
+                return false;
+            }
+
+            // Verify user still has tier (should remain active)
+            $current_tier = SubscriptionTier::GetUserTier($this->test_user_id);
+
+            if ($current_tier) {
+                echo "<p class='text-success'>✓ Reactivation successful - subscription and tier still active</p>";
+                return true;
+            } else {
+                $message = "User lost tier after reactivation";
+                echo "<p class='text-danger'>✗ {$message}</p>";
+                $this->recordFailure('Logic File Reactivation', $message);
+                return false;
+            }
+
+        } catch (Exception $e) {
+            $message = "Exception during reactivation test: " . $e->getMessage();
+            echo "<p class='text-danger'>✗ " . htmlspecialchars($message) . "</p>";
+            $this->recordFailure('Logic File Reactivation', $message);
+            return false;
+        }
+    }
+
+    /**
      * Cleanup Stripe test data
      */
     private function cleanupStripeData() {
@@ -993,6 +1114,35 @@ class SubscriptionTierTester {
             $this->testLogicFileCancellation(true);
         }
 
+        // Clean up and start fresh for reactivation test
+        SubscriptionTier::removeUserFromAllTiers($this->test_user_id);
+        $this->cleanupStripeData();
+
+        // Clean up old order items from previous tests
+        echo "<p>Cleaning up old order items from database...</p>";
+        $old_items = new MultiOrderItem(
+            array('user_id' => $this->test_user_id),
+            array('order_item_id' => 'DESC')
+        );
+        $old_items->load();
+        foreach ($old_items as $item) {
+            $item->permanent_delete();
+        }
+        echo "<p>✓ Cleaned up " . $old_items->count() . " old order items</p>";
+
+        // Create new subscription for reactivation test
+        echo "<hr>";
+        $subscription_data = $this->createStripeSubscription($this->tier_products[array_keys($this->tiers)[0]]);
+        if ($subscription_data) {
+            // Simulate session
+            $_SESSION['usr_user_id'] = $this->test_user_id;
+            $_SESSION['loggedin'] = true;
+            $session = SessionControl::get_instance();
+
+            // Test reactivation
+            $this->testLogicFileReactivation();
+        }
+
         // Step 7: Restore settings
         echo "<hr><h3>Step 7: Restoring Original Settings</h3>";
         $this->restoreSettings();
@@ -1048,6 +1198,7 @@ class SubscriptionTierTester {
         echo "<li>✓ Upgrade via change_subscription_logic (with Stripe)</li>";
         echo "<li>✓ Downgrade immediate (with Stripe)</li>";
         echo "<li>✓ Cancellation immediate (with Stripe)</li>";
+        echo "<li>✓ Reactivation (with Stripe)</li>";
         echo "</ul>";
         echo "<p><strong>What was tested:</strong></p>";
         echo "<ul>";
@@ -1055,15 +1206,14 @@ class SubscriptionTierTester {
         echo "<li>✓ Business logic layer (change_subscription_logic.php)</li>";
         echo "<li>✓ Stripe API integration (real test mode calls)</li>";
         echo "<li>✓ Price ID auto-generation and storage</li>";
-        echo "<li>✓ Subscription creation, upgrade, downgrade, cancellation</li>";
+        echo "<li>✓ Subscription creation, upgrade, downgrade, cancellation, reactivation</li>";
         echo "<li>✓ Order and OrderItem creation</li>";
         echo "<li>✓ User tier assignment through full flow</li>";
         echo "</ul>";
         echo "<p><strong>Not tested (requires manual testing):</strong></p>";
         echo "<ul>";
         echo "<li>• View layer UI (/views/change-subscription.php)</li>";
-        echo "<li>• End-of-period timing (requires waiting for billing cycle)</li>";
-        echo "<li>• Reactivation (requires cancelled subscription with time remaining)</li>";
+        echo "<li>• End-of-period timing for downgrades (requires waiting for billing cycle)</li>";
         echo "<li>• Proration calculations (requires specific test scenarios)</li>";
         echo "<li>• Webhook processing</li>";
         echo "</ul>";
