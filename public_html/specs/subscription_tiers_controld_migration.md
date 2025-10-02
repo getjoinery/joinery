@@ -116,12 +116,14 @@ const PRO_PLAN_MAX_DEVICES = 10;
 - Plan/limits/status all handled by subscription tier system
 - No foreign keys reference `cda_ctldaccount_id` anywhere!
 
-**Why Product Display Dropdowns should be removed from the model:**
-- The fields `prv_plan_order_month` and `prv_plan_order_year` are used to control pricing page display
-- These duplicate the tier system's functionality
-- Subscription products should use `/change-subscription` page, not `/pricing`
-- Tiers are automatically ordered by `sbt_tier_level`
-- Removing from model ensures clean separation between regular products and subscription tiers
+**Why Product Display Fields need to be replaced:**
+- The fields `prv_plan_order_month` and `prv_plan_order_year` are hardcoded to support only 3 plans
+- They duplicate functionality and don't support flexible marketing (trials, promotions, private offers)
+- Replace with `prv_display_priority` field:
+  - `prv_display_priority = 0`: Private versions (not shown on public `/pricing` page)
+  - `prv_display_priority > 0`: Public versions (shown on `/pricing`, higher priority = shown first)
+- Tiers are automatically ordered by `sbt_tier_level`, versions by `prv_display_priority`
+- Supports unlimited tiers and flexible version management
 
 **A. Use Core Functions Directly - NO Helper Class Needed!**
 
@@ -295,49 +297,72 @@ For the small number of users, manually assign tiers in admin:
 2. Manually assign appropriate tier in admin interface
 3. Verify access works correctly
 
-**B. Update Product Links & Remove Pricing Page Display (MANUAL ACTION - SQL):**
+**B. Update Product Links (MANUAL ACTION - SQL):**
 ```sql
--- Link ControlD products to tiers
-UPDATE pro_products SET pro_sbt_subscription_tier_id = 10 WHERE pro_product_id = 19; -- Basic
-UPDATE pro_products SET pro_sbt_subscription_tier_id = 20 WHERE pro_product_id = 20; -- Premium
-UPDATE pro_products SET pro_sbt_subscription_tier_id = 30 WHERE pro_product_id = 21; -- Pro
+-- Link ControlD products to tiers (using actual tier primary keys)
+-- Product IDs: 73=Basic, 74=Premium, 75=Pro
+-- Tier IDs: 2=Basic (tier_level 10), 3=Premium (tier_level 20), 4=Pro (tier_level 30)
+UPDATE pro_products SET pro_sbt_subscription_tier_id = 2 WHERE pro_product_id = 73; -- Basic
+UPDATE pro_products SET pro_sbt_subscription_tier_id = 3 WHERE pro_product_id = 74; -- Premium
+UPDATE pro_products SET pro_sbt_subscription_tier_id = 4 WHERE pro_product_id = 75; -- Pro
+
+-- Set display priority for existing product versions (MANUAL - adjust as needed)
+-- Example: UPDATE prv_product_versions SET prv_display_priority = 1 WHERE prv_product_version_id = 199;
 ```
 
 **Note:** These SQL statements must be run manually by the user - no database access during migration.
 
-**C. Remove Pricing Page Fields from Model:**
+**C. Replace Pricing Page Fields in Model:**
 ```php
-// In /data/product_versions_class.php, remove these field specifications:
+// In /data/product_versions_class.php, ADD this field:
+'prv_display_priority' => array('type'=>'int4', 'default'=>0),
+
+// REMOVE these fields:
 // 'prv_plan_order_month' => array('type'=>'int4'),
 // 'prv_plan_order_year' => array('type'=>'int4'),
 
-// The database will automatically drop the columns when update_database runs
+// The database will automatically add the new column and drop the old columns when update_database runs
 ```
 
 **D. Update Admin UI:**
 ```php
-// In /adm/admin_product_version_edit.php, remove lines 158-174:
-// The pricing page dropdown section should be completely removed
+// In /adm/admin_product_version_edit.php, REPLACE lines 158-174 with:
+echo $formwriter->textinput(
+    'Display Priority (0=private, >0=public, higher=preferred):',
+    'prv_display_priority',
+    'ctrlHolder',
+    10,
+    $product_version->get('prv_display_priority'),
+    '',
+    5,
+    'Set to 0 to hide from public /pricing page. Higher values show first when multiple versions exist.'
+);
 ```
 
 **E. Redesign `/pricing` Page to Use Subscription Tiers:**
 
 **1. `/logic/pricing_logic.php` - Complete Rewrite:**
 
-Change from ProductVersion-based filtering to tier-based display:
+Change from ProductVersion-based filtering to tier-based display with priority:
 
 ```php
 // OLD approach (remove):
 // - Queries MultiProductVersion with 'is_monthly_plan' / 'is_yearly_plan'
 // - Sorts by 'plan_order_month' / 'plan_order_year'
-// - Gets products from versions
+// - Limited to 3 plans per billing period
 
 // NEW approach:
-// 1. Get all active subscription tiers ordered by tier_level
-$tiers = SubscriptionTier::GetAllActive(); // Already ordered by sbt_tier_level ASC
+require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
-// 2. For each tier, get associated products
-$tier_products = [];
+// 1. Get all active subscription tiers ordered by tier_level
+$tiers = MultiSubscriptionTier::GetAllActive(); // Already ordered by sbt_tier_level ASC
+
+// 2. Determine billing period (month or year)
+$page_choice = $get_vars['page'] ?? 'month';
+$billing_period = ($page_choice == 'year') ? 'year' : 'month';
+
+// 3. For each tier, get associated products and their best version
+$tier_display_data = [];
 foreach ($tiers as $tier) {
     $products = new MultiProduct([
         'pro_sbt_subscription_tier_id' => $tier->key,
@@ -346,23 +371,45 @@ foreach ($tiers as $tier) {
     ]);
     $products->load();
 
-    if ($products->count() > 0) {
-        $tier_products[] = [
-            'tier' => $tier,
-            'products' => $products
-        ];
+    foreach ($products as $product) {
+        // Get public versions for this billing period, ordered by priority
+        $versions = new MultiProductVersion([
+            'product_id' => $product->key,
+            'prv_display_priority' => '> 0',  // Only public versions
+            'is_active' => TRUE
+        ], ['prv_display_priority' => 'DESC']);
+        $versions->load();
+
+        // Find the best matching version for this billing period
+        $display_version = null;
+        foreach ($versions as $version) {
+            if ($version->get('prv_price_type') == $billing_period) {
+                $display_version = $version;
+                break;  // Take highest priority
+            }
+        }
+
+        if ($display_version) {
+            $tier_display_data[] = [
+                'tier' => $tier,
+                'product' => $product,
+                'version' => $display_version
+            ];
+        }
     }
 }
 
-// 3. Display tiers in order (automatically ordered by tier_level)
-$page_vars['tier_products'] = $tier_products;
+$page_vars['tier_display_data'] = $tier_display_data;
+$page_vars['page_choice'] = $page_choice;
 ```
 
 **Benefits:**
-- Uses tier IDs (10, 20, 30) for natural ordering
-- No need for separate monthly/yearly pages
-- Single source of truth (tier system)
-- Easy to add new tiers - just set tier_level appropriately
+- Uses `sbt_tier_level` for natural ordering (10, 20, 30)
+- Uses `prv_display_priority` for version selection
+- Supports unlimited tiers (not limited to 3)
+- Supports private versions (priority = 0)
+- Flexible marketing (multiple versions per product)
+- Still supports monthly/yearly pages
 
 **2. `/data/product_versions_class.php` - Remove pricing page filters:**
 ```php
@@ -377,18 +424,20 @@ $page_vars['tier_products'] = $tier_products;
 
 **3. `/views/pricing.php` - Update display logic:**
 ```php
-// Update to display tier-based products:
-foreach ($page_vars['tier_products'] as $tier_data) {
-    $tier = $tier_data['tier'];
-    $products = $tier_data['products'];
+// Update to display tier-based products with selected versions:
+foreach ($page_vars['tier_display_data'] as $item) {
+    $tier = $item['tier'];
+    $product = $item['product'];
+    $version = $item['version'];
 
-    // Display tier name/description
+    // Display tier information
     echo '<h3>' . $tier->get('sbt_display_name') . '</h3>';
+    echo '<p>' . $tier->get('sbt_description') . '</p>';
 
-    // Display products for this tier
-    foreach ($products as $product) {
-        // ... existing product display code
-    }
+    // Display product with selected version
+    echo '<h4>' . $product->get('pro_name') . '</h4>';
+    echo '<p>Price: ' . $product->get_readable_price($version->key) . '</p>';
+    // ... rest of product display code using $version
 }
 ```
 
@@ -400,39 +449,38 @@ This file also uses the old pricing logic for displaying plans. Update it to use
 // OLD (line 8):
 require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic', 'system', null, 'controld'));
 
-// NEW - Create controld-specific logic or reuse core tier-based pricing_logic.php
+// NEW - Use tier-based pricing_logic.php (reuse core logic)
+require_once(PathHelper::getIncludePath('logic/pricing_logic.php'));
+$page_vars = process_logic(pricing_logic($_GET, $_POST));
+
 // The loop starting at line 322 should iterate over tier-based products:
-<?php foreach ($page_vars['tier_products'] as $tier_data) {
-    $tier = $tier_data['tier'];
-    $products = $tier_data['products'];
+<?php foreach ($page_vars['tier_display_data'] as $item) {
+    $tier = $item['tier'];
+    $product = $item['product'];
+    $version = $item['version'];
 
-    foreach ($products as $product) {
-        // Get first product version
-        $versions = $product->get_product_versions();
-        $product_version = $versions->count() > 0 ? $versions->get(0) : null;
-
-        // Display product card (existing code from lines 325-358)
-        ?>
-        <div class="col-xl-4 col-md-6">
-            <div class="price-box th-ani">
-                <div class="price-title-wrap">
-                    <h3 class="box-title"><?php echo $product->get('pro_name'); ?></h3>
+    // Display product card (existing code from lines 325-358)
+    ?>
+    <div class="col-xl-4 col-md-6">
+        <div class="price-box th-ani">
+            <div class="price-title-wrap">
+                <h3 class="box-title"><?php echo $product->get('pro_name'); ?></h3>
+                <p class="tier-name"><?php echo $tier->get('sbt_display_name'); ?></p>
+            </div>
+            <?php echo $product->get('pro_short_description'); ?>
+            <h4 class="box-price">
+                <?php echo $product->get_readable_price($version->key); ?>
+                <span class="duration">/<?php echo $version->get('prv_price_type'); ?></span>
+            </h4>
+            <div class="box-content">
+                <div class="available-list">
+                    <?php echo $product->get('pro_description'); ?>
                 </div>
-                <?php echo $product->get('pro_short_description'); ?>
-                <h4 class="box-price">
-                    <?php echo $product->get_readable_price($product_version->key); ?>
-                    <span class="duration">/month</span>
-                </h4>
-                <div class="box-content">
-                    <div class="available-list">
-                        <?php echo $product->get('pro_description'); ?>
-                    </div>
-                    <a href="<?php echo $product->get_url(). '?product_version_id='.$product_version->key; ?>" class="th-btn btn-fw style-radius">Get Started</a>
-                </div>
+                <a href="<?php echo $product->get_url(). '?product_version_id='.$version->key; ?>" class="th-btn btn-fw style-radius">Get Started</a>
             </div>
         </div>
-        <?php
-    }
+    </div>
+    <?php
 }?>
 ```
 
@@ -545,7 +593,7 @@ When user visits `/change-subscription`:
 - Complex product purchase hook
 - ~15 files managing subscriptions
 - Redundant `cda_is_active` field
-- Custom pricing page display dropdowns
+- Custom pricing page display dropdowns (replaced with `prv_display_priority`)
 
 **After:**
 - NO CtldAccount table needed
@@ -554,7 +602,7 @@ When user visits `/change-subscription`:
 - Zero hardcoded plans
 - Core `/change-subscription` for all management
 - No product purchase hook needed
-- No pricing page display fields needed (`prv_plan_order_month`/`prv_plan_order_year` removed)
+- Flexible pricing display with `prv_display_priority` (unlimited tiers, support for private versions)
 - Just 1 file (tier_features.json) + minor updates to existing views/logic
 - Direct use of core functions - no wrapper methods needed
 
