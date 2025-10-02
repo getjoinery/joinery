@@ -3,15 +3,16 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function pricing_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 	require_once(PathHelper::getIncludePath('data/products_class.php'));
+	require_once(PathHelper::getIncludePath('data/product_versions_class.php'));
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
-
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
@@ -20,79 +21,59 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		//TURNED OFF
 		header("HTTP/1.0 404 Not Found");
 		echo 'This feature is turned off';
-		exit();			
+		exit();
 	}
 
+	// Determine billing period (month or year)
+	$page_choice = isset($get_vars['page']) ? $get_vars['page'] : 'month';
+	$billing_period = ($page_choice == 'year') ? 'year' : 'month';
+	$page_vars['page_choice'] = $page_choice;
 
+	// Get all active subscription tiers ordered by tier_level
+	$tiers = MultiSubscriptionTier::GetAllActive();
 
-	
-	
-	$searches = array();
-	$page_choice = $get_vars['page'];
-	
+	// For each tier, get associated products and their best version
+	$tier_display_data = array();
+	foreach ($tiers as $tier) {
+		$products = new MultiProduct(array(
+			'pro_sbt_subscription_tier_id' => $tier->key,
+			'is_active' => TRUE,
+			'deleted' => FALSE
+		));
+		$products->load();
 
-	if($page_choice == 'year'){
-		$sort = 'plan_order_year';
-		$sdirection = 'ASC';
-		$page_vars['page_choice'] = 'year';
-		$searches['is_yearly_plan'] = TRUE;
+		foreach ($products as $product) {
+			// Get public versions for this billing period, ordered by priority
+			$versions = new MultiProductVersion(array(
+				'product_id' => $product->key,
+				'prv_display_priority' => '> 0',
+				'is_active' => TRUE
+			), array('prv_display_priority' => 'DESC'));
+			$versions->load();
 
-		$searches['is_active'] = TRUE;
-		$searches['deleted'] = FALSE;
+			// Find the best matching version for this billing period
+			$display_version = null;
+			foreach ($versions as $version) {
+				if ($version->get('prv_price_type') == $billing_period) {
+					$display_version = $version;
+					break;  // Take highest priority
+				}
+			}
 
-		$product_versions = new MultiProductVersion(
-			$searches,
-			array($sort=>$sdirection),
-			10,
-			0,
-			'AND');
-		$product_versions->load();
-
-
-	}
-	else{
-		$sort = 'plan_order_month';
-		$sdirection = 'ASC';
-		$page_vars['page_choice'] = 'month';
-		$searches['is_monthly_plan'] = TRUE;
-
-		$searches['is_active'] = TRUE;
-		$searches['deleted'] = FALSE;
-
-		$product_versions = new MultiProductVersion(
-			$searches,
-			array($sort=>$sdirection),
-			10,
-			0,
-			'AND');
-		$product_versions->load();
-		
-	}
-
-	$page_vars['product_versions'] = $product_versions;	
-	
-	$count = 0;
-	foreach($product_versions as $product_version){
-		$product = new Product($product_version->get('prv_pro_product_id'), TRUE);
-		
-		if($product->get('pro_is_active') && !$product->get('pro_delete_time')){
-			
-			$products = new MultiProduct();
-			$products->add($product);
-			$count++;
+			if ($display_version) {
+				$tier_display_data[] = array(
+					'tier' => $tier,
+					'product' => $product,
+					'version' => $display_version
+				);
+			}
 		}
 	}
 
-	$page_vars['products'] = $products;	
-	$page_vars['numrecords'] = $count;
+	$page_vars['tier_display_data'] = $tier_display_data;
+	$page_vars['numrecords'] = count($tier_display_data);
+	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
-
-	
-	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')]; 
-	
-	//$page_vars['pager'] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
-	
 	return LogicResult::render($page_vars);
 }
 ?>
-

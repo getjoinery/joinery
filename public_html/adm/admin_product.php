@@ -135,10 +135,14 @@
 				if ($version->get('prv_status')) {
 					echo '<li>' . $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') .
 						' <a href="/admin/admin_product_version_edit?product_id=' . $product->key . '&product_version_id=' . $version->key .
+						'">[Edit]</a>' .
+						' <a href="/admin/admin_product_version_edit?product_id=' . $product->key . '&product_version_id=' . $version->key .
 						'&action=remove_version">[Make Inactive]</a>' .
 						'</li>';
 				} else {
 					echo '<li style="text-decoration: line-through;">' . $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') .
+						' <a href="/admin/admin_product_version_edit?product_id=' . $product->key . '&product_version_id=' . $version->key .
+						'">[Edit]</a>' .
 						' <a href="/admin/admin_product_version_edit?product_id=' . $product->key . '&product_version_id=' . $version->key .
 						'&action=activate_version">[Make Active]</a>' .
 						'</li>';

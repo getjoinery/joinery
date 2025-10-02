@@ -41,8 +41,7 @@ class ProductVersion extends SystemBase {	public static $prefix = 'esf';
 	    'prv_order' => array('type'=>'int4'),
 	    'prv_price_type' => array('type'=>'varchar(10)'),
 	    'prv_trial_period_days' => array('type'=>'int4'),
-	    'prv_plan_order_month' => array('type'=>'int4'),
-	    'prv_plan_order_year' => array('type'=>'int4'),
+	    'prv_display_priority' => array('type'=>'int4', 'default'=>0),
 	    'prv_stripe_price_id' => array('type'=>'varchar(64)'),
 	    'prv_stripe_price_id_test' => array('type'=>'varchar(64)'),
 	);
@@ -74,12 +73,8 @@ class MultiProductVersion extends SystemMultiBase {
 			}
 		}
 
-		if (isset($this->options['is_monthly_plan'])) {
-			$filters['prv_plan_order_month'] = "> 0";
-		}
-
-		if (isset($this->options['is_yearly_plan'])) {
-			$filters['prv_plan_order_year'] = "> 0";
+		if (isset($this->options['prv_display_priority'])) {
+			$filters['prv_display_priority'] = $this->options['prv_display_priority'];
 		}
 
 		return $this->_get_resultsv2('prv_product_versions', $filters, $this->order_by, $only_count, $debug);
