@@ -39,8 +39,9 @@
 			$product_version->set('prv_price_type', $_REQUEST['prv_price_type']);
 			$product_version->set('prv_trial_period_days', $_REQUEST['prv_trial_period_days']);
 			$product_version->set('prv_status', 1);
-			$product_version->set('prv_plan_order_year', $_REQUEST['prv_plan_order_year']);
-			$product_version->set('prv_plan_order_month', $_REQUEST['prv_plan_order_month']);
+			if(isset($_REQUEST['prv_display_priority'])){
+				$product_version->set('prv_display_priority', $_REQUEST['prv_display_priority']);
+			}
 			$product_version->prepare();
 			$product_version->save();
 			$product_version->load();
@@ -63,12 +64,13 @@
 			$product_version->save(); 
 		}
 		else{
-			
+
 			$product_version->set('prv_version_name', $_REQUEST['version_name']);
-			$product_version->set('prv_plan_order_year', $_REQUEST['prv_plan_order_year']);
-			$product_version->set('prv_plan_order_month', $_REQUEST['prv_plan_order_month']);
+			if(isset($_REQUEST['prv_display_priority'])){
+				$product_version->set('prv_display_priority', $_REQUEST['prv_display_priority']);
+			}
 			$product_version->prepare();
-			$product_version->save();			
+			$product_version->save();
 		}
 		
 		LibraryFunctions::redirect('/admin/admin_product?pro_product_id='. $product->key);
@@ -137,11 +139,11 @@
 			
 			echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_version_edit');
 
-			echo $formwriter->textinput('Label', 'version_name', NULL, 100, $product_version->get('prv_plan_order_year'), '', 255, '');
+			echo $formwriter->textinput('Label', 'version_name', NULL, 100, $product_version->get('prv_version_name'), '', 255, '');
 			echo $formwriter->hiddeninput('product_id', $_REQUEST['product_id']);
 			if(!$product_version->key){
 				echo $formwriter->hiddeninput('action', 'new_version');
-				
+
 				echo $formwriter->textinput('Price ('.$currency_symbol.')', 'version_price', 'ctrlHolder', 100, '', '', 255, '');
 
 				$optionvals = array("One price"=>'single', 'User Chooses' => 'user', 'Daily Subscription'=>'day', 'Weekly Subscription'=>'week', 'Monthly Subscription'=>'month', 'Yearly Subscription'=>'year',);
@@ -152,25 +154,26 @@
 			}
 			else{
 				echo $formwriter->hiddeninput('action', 'edit');
+				echo $formwriter->hiddeninput('product_version_id', $product_version->key);
+
+				// Display price as read-only for existing versions
+				echo '<div class="ctrlHolder"><p class="label">Current Price</p>';
+				echo '<div class="textInput"><strong>'.$currency_symbol . $product_version->get('prv_version_price') . ' / ' . $product_version->get('prv_price_type') . '</strong>';
+				echo '<br><em style="color: #666;">Price cannot be edited. To change pricing, create a new version and make this one inactive.</em></div></div>';
 			}
 			
-			//THIS SECTION IS FOR /PRICING PAGE.  USER CHOOSES WHICH PLAN AND THEN SETS AN ORDER
+			//THIS SECTION IS FOR /PRICING PAGE.  USER CHOOSES DISPLAY PRIORITY
 			if($settings->get_setting('pricing_page')){
-				$optionvals = array(
-					'No' => 0, 
-					"Monthly Plan 1"=>1,
-					"Monthly Plan 2"=>2,
-					"Monthly Plan 3"=>3,
-					);
-				echo $formwriter->dropinput("Include on monthly /pricing page?", "prv_plan_order_month", "ctrlHolder", $optionvals, $product_version->get('prv_plan_order_year'), '', FALSE);	
-				
-				$optionvals = array(
-					'No' => 0, 
-					"Yearly Plan 1"=>1,
-					"Yearly Plan 2"=>2,
-					"Yearly Plan 3"=>3,
-					);
-				echo $formwriter->dropinput("Include on yearly /pricing page?", "prv_plan_order_year", "ctrlHolder", $optionvals, $product_version->get('prv_plan_order_year'), '', FALSE);	
+				echo $formwriter->textinput(
+					'Display Priority (0=private, >0=public, higher=preferred):',
+					'prv_display_priority',
+					'ctrlHolder',
+					10,
+					$product_version->get('prv_display_priority'),
+					'',
+					5,
+					'Set to 0 to hide from public /pricing page. Higher values show first when multiple versions exist.'
+				);
 			}
 	
 			echo $formwriter->start_buttons();

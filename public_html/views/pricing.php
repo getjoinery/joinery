@@ -18,7 +18,11 @@
     <h2 class="sr-only">Products</h2>
 	<div class="grid grid-cols-1 gap-y-4 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-10 lg:grid-cols-3 lg:gap-x-8">
 
-	<?php foreach ($page_vars['products'] as $product){ ?>
+	<?php foreach ($page_vars['tier_display_data'] as $item){
+		$tier = $item['tier'];
+		$product = $item['product'];
+		$version = $item['version'];
+	?>
 
       <div class="group relative bg-white border border-gray-200 rounded-lg flex flex-col overflow-hidden">
         <div class="aspect-w-3 aspect-h-4 bg-gray-200 group-hover:opacity-75 sm:aspect-none sm:h-96">
@@ -26,22 +30,23 @@
 				//if($pic = $product->get_picture_link('small')){
 				//	echo '<img src="'.$pic.'" class="w-full h-full object-center object-cover sm:w-full sm:h-full">';
 				//}
-				?>		
-		
+				?>
+
         </div>
         <div class="flex-1 p-4 space-y-2 flex flex-col">
           <h3 class="text-sm font-medium text-gray-900">
-            <a href="<?php echo $product->get_url(); ?>">
+            <a href="<?php echo $product->get_url() . '?product_version_id=' . $version->key; ?>">
               <span aria-hidden="true" class="absolute inset-0"></span>
               <?php echo $product->get('pro_name'); ?>
             </a>
           </h3>
+          <p class="text-xs font-semibold text-gray-600"><?php echo $tier->get('sbt_display_name'); ?></p>
           <p class="text-sm text-gray-500"><?php echo $product->get('pro_description'); ?></p>
           <div class="flex-1 flex flex-col justify-end">
             <!--<p class="text-sm italic text-gray-500">8 colors</p>-->
             <p class="text-base font-medium text-gray-900">
-			<?php 
-				echo $product->get_readable_price();		
+			<?php
+				echo $product->get_readable_price($version->key);
 			?></p>
           </div>
         </div>
