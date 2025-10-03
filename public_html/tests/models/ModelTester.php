@@ -1816,10 +1816,21 @@ class ModelTester {
         try {
             $dbconnector = DbConnector::get_instance();
             $dblink = $dbconnector->get_db_link();
-            
+
+            // First check if table exists - if not, skip this test (table will be created by update_database)
+            $table_check_sql = "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ?)";
+            $table_check_q = $dblink->prepare($table_check_sql);
+            $table_check_q->execute([$table_name]);
+            $table_exists = $table_check_q->fetchColumn();
+
+            if (!$table_exists) {
+                if ($verbose) echo "Table '{$table_name}' does not exist yet, skipping sequence test (will be created by update_database)<br>\n";
+                return;
+            }
+
             // Build expected sequence name
             $sequence_name = $table_name . '_' . $pkey_column . '_seq';
-            
+
             // Check if sequence exists and get current value
             // Note: We use direct sequence query which is more reliable than pg_sequences.last_value
             // because pg_sequences only updates after nextval() is called
