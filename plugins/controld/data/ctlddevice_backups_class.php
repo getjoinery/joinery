@@ -7,7 +7,6 @@ require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/controld/data/ctldprofiles_class.php'));
 require_once(PathHelper::getIncludePath('plugins/controld/data/ctldfilters_class.php'));
 require_once(PathHelper::getIncludePath('plugins/controld/data/ctldservices_class.php'));

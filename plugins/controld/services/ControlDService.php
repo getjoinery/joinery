@@ -36,16 +36,11 @@ class ControlDService {
     }
     
     /**
-     * Get user's ControlD account
+     * Get user's subscription tier
      */
-    public function getUserAccount($user_id) {
-        require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccount_class.php'));
-        $accounts = new MultiCtldAccount(['cta_usr_user_id' => $user_id]);
-        if ($accounts->count_all() > 0) {
-            $accounts->load();
-            return $accounts->get(0);
-        }
-        return null;
+    public function getUserTier($user_id) {
+        require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+        return SubscriptionTier::GetUserTier($user_id);
     }
     
     /**
