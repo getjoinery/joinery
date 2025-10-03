@@ -48,7 +48,7 @@ function profile_logic($get_vars, $post_vars){
 		'Edit Address' => '/profile/address_edit',
 		'Edit Phone Number' => '/profile/phone_numbers_edit',
 		'Change Contact Preferences' => '/profile/contact_preferences',
-		'Change Subscription' => '/profile/subscription_edit',
+		'Change Subscription' => '/profile/change-subscription',
 	);
 
 	//ORDERS
