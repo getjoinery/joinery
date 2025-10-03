@@ -11,10 +11,6 @@ $session->check_permission(5);
 $page = new AdminPage();
 $formwriter = LibraryFunctions::get_formwriter_object('admin_tier_edit', 'admin');
 
-// Debug GET parameters
-error_log('admin_subscription_tier_edit.php - GET params: ' . print_r($_GET, true));
-error_log('admin_subscription_tier_edit.php - REQUEST_URI: ' . $_SERVER['REQUEST_URI']);
-
 // Check if we're editing an existing tier
 $tier_id = isset($_GET['id']) ? intval($_GET['id']) : null;
 $tier = null;
@@ -43,13 +39,17 @@ if (isset($_POST['action'])) {
         try {
             // Process features
             $features = array();
+            $available_features = SubscriptionTier::getAllAvailableFeatures();
             if (isset($_POST['features']) && is_array($_POST['features'])) {
                 foreach ($_POST['features'] as $key => $value) {
-                    // Clean up the value based on type
-                    if ($value === 'true' || $value === '1') {
-                        $features[$key] = true;
-                    } elseif ($value === 'false' || $value === '0' || $value === '') {
-                        $features[$key] = false;
+                    // Get feature definition to check type
+                    $definition = isset($available_features[$key]) ? $available_features[$key] : null;
+
+                    // Convert value based on feature definition type
+                    if ($definition && $definition['type'] === 'integer') {
+                        $features[$key] = intval($value);
+                    } elseif ($definition && $definition['type'] === 'boolean') {
+                        $features[$key] = ($value === '1' || $value === 'true' || $value === true);
                     } elseif (is_numeric($value)) {
                         $features[$key] = intval($value);
                     } else {
