@@ -458,8 +458,8 @@ class MultiSubscriptionTier extends SystemMultiBase {
 
         // Handle any standard filters from parent class
         $sorts = [];
-        if (!empty($this->sorts)) {
-            $sorts = $this->sorts;
+        if (!empty($this->order_by)) {
+            $sorts = $this->order_by;
         }
 
         return $this->_get_resultsv2('sbt_subscription_tiers', $filters, $sorts, $only_count, $debug);
@@ -471,7 +471,7 @@ class MultiSubscriptionTier extends SystemMultiBase {
     public static function GetAllActive() {
         $tiers = new MultiSubscriptionTier(
             ['sbt_is_active' => true, 'sbt_delete_time' => 'IS NULL'],
-            ['sbt_tier_level' => 'ASC']
+            ['sbt_tier_level' => 'ASC', 'sbt_subscription_tier_id' => 'ASC']
         );
         $tiers->load();
         return $tiers;
