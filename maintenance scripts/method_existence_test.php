@@ -26,6 +26,7 @@ class MethodExistenceTest {
     private $function_calls = [];
     private $method_calls = [];
     private $static_calls = [];
+    private $property_accesses = []; // Track $this->property accesses
     private $loaded_classes = [];
     private $namespace = '';
     private $use_statements = [];
@@ -42,6 +43,43 @@ class MethodExistenceTest {
         'DbConnector' => ['get_db_link', 'get_instance', 'set_test_mode', 'close_test_mode'],
         'SystemBase' => ['get', 'set', 'save', 'load', 'prepare', 'soft_delete', 'permanent_delete', 'undelete', 'export_as_array', 'check_for_duplicate'],
         'SystemMultiBase' => ['load', 'count', 'count_all', 'get', 'get_by_key', 'add', 'remove', 'is_valid', 'contains'],
+    ];
+
+    // Blacklist of known incorrect property/method access patterns
+    private $blacklist = [
+        // Property access blacklist - these properties don't exist or are wrong
+        'property' => [
+            '$this->sorts' => 'Use $this->order_by instead (SystemMultiBase stores order in $order_by property)',
+        ],
+        // Method blacklist - obsolete or incorrect methods
+        'method' => [
+            'CtldAccount::' => 'CtldAccount class is obsolete, use SubscriptionTier instead',
+            'getUserAccount' => 'Method is obsolete, use getUserTier() or SubscriptionTier::GetUserTier() instead',
+        ],
+        // Static call blacklist - class::method patterns that are wrong
+        'static' => [
+            'CtldAccount::' => 'CtldAccount class is obsolete, use SubscriptionTier instead',
+        ],
+        // Code pattern blacklist - string patterns to search for in source code
+        'code_pattern' => [
+            // Core files that should never be required (always loaded)
+            "require_once(PathHelper::getIncludePath('includes/PathHelper.php'))" => 'PathHelper is always loaded - never require it',
+            "require_once(PathHelper::getIncludePath('includes/Globalvars.php'))" => 'Globalvars is always loaded - never require it',
+            "require_once(PathHelper::getIncludePath('includes/DbConnector.php'))" => 'DbConnector is always loaded - never require it',
+            "require_once(PathHelper::getIncludePath('includes/SessionControl.php'))" => 'SessionControl is always loaded - never require it',
+            "require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'))" => 'ThemeHelper is always loaded - never require it',
+            "require_once(PathHelper::getIncludePath('includes/PluginHelper.php'))" => 'PluginHelper is always loaded - never require it',
+
+            // Direct path usage
+            '$_SERVER[\'DOCUMENT_ROOT\']' => 'Never use $_SERVER[\'DOCUMENT_ROOT\'] - use PathHelper::getIncludePath() instead',
+            '__DIR__ . \'/../' => 'Avoid __DIR__ navigation - use PathHelper::getIncludePath() for proper path resolution',
+
+            // Constructor without parameters
+            'new Product()' => 'Product constructor requires parameter: new Product(NULL) for new, new Product($id, TRUE) to load',
+            'new User()' => 'User constructor requires parameter: new User(NULL) for new, new User($id, TRUE) to load',
+            'new Order()' => 'Order constructor requires parameter: new Order(NULL) for new, new Order($id, TRUE) to load',
+            'new Event()' => 'Event constructor requires parameter: new Event(NULL) for new, new Event($id, TRUE) to load',
+        ],
     ];
 
     // Track method return types for common patterns
@@ -88,6 +126,12 @@ class MethodExistenceTest {
 
         // Check static calls
         $this->checkStaticCalls();
+
+        // Check property accesses
+        $this->checkPropertyAccesses();
+
+        // Check code patterns
+        $this->checkCodePatterns();
 
         // Summary
         $this->printSummary();
@@ -241,6 +285,16 @@ class MethodExistenceTest {
                         // Regular function call (or possibly constructor without 'new' detected)
                         $this->function_calls[] = [
                             'name' => $token_value,
+                            'line' => $line_number
+                        ];
+                    }
+                } elseif ($prev_token = $this->getPrevToken($i)) {
+                    // Check for property access without method call: $obj->property (not followed by '(')
+                    if (is_array($prev_token) && $prev_token[0] === T_OBJECT_OPERATOR) {
+                        $var_name = $this->getVariableBeforeMethodCall($i);
+                        $this->property_accesses[] = [
+                            'property' => $token_value,
+                            'variable' => $var_name,
                             'line' => $line_number
                         ];
                     }
@@ -572,6 +626,23 @@ class MethodExistenceTest {
     }
 
     /**
+     * Check if a call matches a blacklist pattern
+     */
+    private function checkBlacklist($type, $pattern) {
+        if (!isset($this->blacklist[$type])) {
+            return null;
+        }
+
+        foreach ($this->blacklist[$type] as $blacklisted => $reason) {
+            if (strpos($pattern, $blacklisted) !== false) {
+                return $reason;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Check function calls for existence
      */
     private function checkFunctionCalls() {
@@ -586,11 +657,20 @@ class MethodExistenceTest {
         $found = 0;
         $missing = 0;
         $skipped = 0;
+        $blacklisted = 0;
         $issues = [];
 
         foreach ($this->function_calls as $call) {
             $function_name = $call['name'];
             $line = $call['line'];
+
+            // Check blacklist first
+            $blacklist_reason = $this->checkBlacklist('method', $function_name);
+            if ($blacklist_reason) {
+                $blacklisted++;
+                $issues[] = sprintf("  🚫 Line %4d: %s() - BLACKLISTED: %s", $line, $function_name, $blacklist_reason);
+                continue;
+            }
 
             // Skip if this is a method defined in the file (likely $this->method() without proper detection)
             if (isset($this->defined_methods[$function_name])) {
@@ -613,13 +693,13 @@ class MethodExistenceTest {
         }
 
         if (!empty($issues)) {
-            echo "Missing functions:\n";
+            echo "Issues found:\n";
             foreach ($issues as $issue) {
                 echo $issue . "\n";
             }
         }
 
-        echo sprintf("\n✓ Found: %d  ✗ Missing: %d  ⊘ Skipped: %d\n\n", $found, $missing, $skipped);
+        echo sprintf("\n✓ Found: %d  ✗ Missing: %d  🚫 Blacklisted: %d  ⊘ Skipped: %d\n\n", $found, $missing, $blacklisted, $skipped);
     }
 
     /**
@@ -638,12 +718,22 @@ class MethodExistenceTest {
         $missing = 0;
         $unknown = 0;
         $whitelisted = 0;
+        $blacklisted = 0;
         $issues = [];
 
         foreach ($this->method_calls as $call) {
             $method_name = $call['name'];
             $var_name = $call['variable'];
             $line = $call['line'];
+
+            // Check blacklist first
+            $blacklist_reason = $this->checkBlacklist('method', $method_name);
+            if ($blacklist_reason) {
+                $blacklisted++;
+                $issues[] = sprintf("  🚫 Line %4d: %s->%s() - BLACKLISTED: %s",
+                    $line, $var_name ?: '?', $method_name, $blacklist_reason);
+                continue;
+            }
 
             // Try to determine the class
             $class_name = null;
@@ -680,15 +770,15 @@ class MethodExistenceTest {
         }
 
         if (!empty($issues)) {
-            echo "Missing methods:\n";
+            echo "Issues found:\n";
             foreach ($issues as $issue) {
                 echo $issue . "\n";
             }
             echo "\n";
         }
 
-        echo sprintf("✓ Found: %d  ✗ Missing: %d  ? Unknown: %d  ⊘ Whitelisted: %d\n\n",
-            $found, $missing, $unknown, $whitelisted);
+        echo sprintf("✓ Found: %d  ✗ Missing: %d  🚫 Blacklisted: %d  ? Unknown: %d  ⊘ Whitelisted: %d\n\n",
+            $found, $missing, $blacklisted, $unknown, $whitelisted);
     }
 
     /**
@@ -744,12 +834,29 @@ class MethodExistenceTest {
 
         $found = 0;
         $missing = 0;
+        $blacklisted = 0;
         $issues = [];
 
         foreach ($this->static_calls as $call) {
             $class_name = $call['class'];
             $method_name = $call['method'];
             $line = $call['line'];
+
+            // Check blacklist first (check both class:: and full class::method)
+            $static_pattern = "$class_name::$method_name";
+            $class_pattern = "$class_name::";
+
+            $blacklist_reason = $this->checkBlacklist('static', $static_pattern);
+            if (!$blacklist_reason) {
+                $blacklist_reason = $this->checkBlacklist('static', $class_pattern);
+            }
+
+            if ($blacklist_reason) {
+                $blacklisted++;
+                $issues[] = sprintf("  🚫 Line %4d: %s::%s() - BLACKLISTED: %s",
+                    $line, $class_name, $method_name, $blacklist_reason);
+                continue;
+            }
 
             // Resolve class name
             $resolved_class = $this->resolveClassName($class_name);
@@ -771,13 +878,13 @@ class MethodExistenceTest {
         }
 
         if (!empty($issues)) {
-            echo "Missing classes/methods:\n";
+            echo "Issues found:\n";
             foreach ($issues as $issue) {
                 echo $issue . "\n";
             }
         }
 
-        echo sprintf("\n✓ Found: %d  ✗ Missing: %d\n\n", $found, $missing);
+        echo sprintf("\n✓ Found: %d  ✗ Missing: %d  🚫 Blacklisted: %d\n\n", $found, $missing, $blacklisted);
     }
 
     /**
@@ -805,6 +912,108 @@ class MethodExistenceTest {
     }
 
     /**
+     * Check property accesses
+     */
+    private function checkPropertyAccesses() {
+        if (empty($this->property_accesses)) {
+            echo "No property accesses found.\n\n";
+            return;
+        }
+
+        echo "PROPERTY ACCESSES (" . count($this->property_accesses) . " total)\n";
+        echo str_repeat("-", 80) . "\n";
+
+        $blacklisted = 0;
+        $safe = 0;
+        $issues = [];
+
+        foreach ($this->property_accesses as $access) {
+            $property_name = $access['property'];
+            $var_name = $access['variable'];
+            $line = $access['line'];
+
+            // Build the property pattern for blacklist checking
+            $property_pattern = "{$var_name}->{$property_name}";
+
+            // Check blacklist
+            $blacklist_reason = $this->checkBlacklist('property', $property_pattern);
+            if ($blacklist_reason) {
+                $blacklisted++;
+                $issues[] = sprintf("  🚫 Line %4d: %s - BLACKLISTED: %s",
+                    $line, $property_pattern, $blacklist_reason);
+            } else {
+                $safe++;
+            }
+        }
+
+        if (!empty($issues)) {
+            echo "Issues found:\n";
+            foreach ($issues as $issue) {
+                echo $issue . "\n";
+            }
+        }
+
+        echo sprintf("\n✓ Safe: %d  🚫 Blacklisted: %d\n\n", $safe, $blacklisted);
+    }
+
+    /**
+     * Check source code for blacklisted patterns
+     */
+    private function checkCodePatterns() {
+        if (!isset($this->blacklist['code_pattern'])) {
+            echo "No code patterns configured.\n\n";
+            return;
+        }
+
+        echo "CODE PATTERN ANALYSIS\n";
+        echo str_repeat("-", 80) . "\n";
+
+        $source = file_get_contents($this->file_path);
+        $lines = explode("\n", $source);
+
+        $blacklisted = 0;
+        $issues = [];
+
+        foreach ($this->blacklist['code_pattern'] as $pattern => $reason) {
+            // Search for pattern in source code
+            $line_num = 0;
+            foreach ($lines as $line_num => $line_content) {
+                // Use case-insensitive search for better matching, trim whitespace
+                $trimmed_line = trim($line_content);
+
+                if (strpos($line_content, $pattern) !== false) {
+                    $blacklisted++;
+                    $issues[] = sprintf("  🚫 Line %4d: Contains '%s'\n           → %s",
+                        $line_num + 1,
+                        $this->truncatePattern($pattern),
+                        $reason);
+                }
+            }
+        }
+
+        if (!empty($issues)) {
+            echo "Issues found:\n";
+            foreach ($issues as $issue) {
+                echo $issue . "\n";
+            }
+        } else {
+            echo "✓ No blacklisted code patterns found\n";
+        }
+
+        echo sprintf("\n🚫 Total pattern violations: %d\n\n", $blacklisted);
+    }
+
+    /**
+     * Truncate long patterns for display
+     */
+    private function truncatePattern($pattern, $max_length = 50) {
+        if (strlen($pattern) <= $max_length) {
+            return $pattern;
+        }
+        return substr($pattern, 0, $max_length - 3) . '...';
+    }
+
+    /**
      * Print summary
      */
     private function printSummary() {
@@ -814,6 +1023,7 @@ class MethodExistenceTest {
         echo sprintf("Function calls:       %d\n", count($this->function_calls));
         echo sprintf("Method calls:         %d\n", count($this->method_calls));
         echo sprintf("Static method calls:  %d\n", count($this->static_calls));
+        echo sprintf("Property accesses:    %d\n", count($this->property_accesses));
         echo sprintf("Constructors (new):   %d\n", count($this->constructors));
         echo sprintf("Defined methods:      %d\n", count($this->defined_methods));
         echo sprintf("Namespace:            %s\n", $this->namespace ?: '(global)');
