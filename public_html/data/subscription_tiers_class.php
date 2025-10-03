@@ -44,8 +44,6 @@ class SubscriptionTier extends SystemBase {
             ]);
 
             $count = $existing_groups->count_all();
-            error_log('SubscriptionTier::save() - Checking for existing group with name: ' . $this->get('sbt_name'));
-            error_log('SubscriptionTier::save() - Found ' . $count . ' existing groups');
 
             if ($count > 0) {
                 throw new Exception('A subscription tier with the name "' . $this->get('sbt_name') . '" already exists');
@@ -171,8 +169,6 @@ class SubscriptionTier extends SystemBase {
 
         // If user has tier but no active subscription, remove it
         if ($current_tier && !$has_active_subscription) {
-            error_log('Removing expired tier for user ' . $user_id . ': tier_level=' . $current_tier->get('sbt_tier_level'));
-
             self::removeUserFromAllTiers($user_id);
 
             ChangeTracking::logChange(
@@ -210,13 +206,10 @@ class SubscriptionTier extends SystemBase {
     public static function handleProductPurchase($user, $product, $order_item, $order) {
         // Check if product has a subscription tier
         if (!$product->get('pro_sbt_subscription_tier_id')) {
-            error_log('Tier assignment: Product ' . $product->key . ' has no tier assigned');
             return false;
         }
 
         try {
-            error_log('Tier assignment: Attempting to assign tier ' . $product->get('pro_sbt_subscription_tier_id') . ' to user ' . $user->key . ' for product ' . $product->get('pro_name'));
-
             $tier = new SubscriptionTier($product->get('pro_sbt_subscription_tier_id'), TRUE);
 
             // Add user to tier with purchase context
@@ -228,13 +221,10 @@ class SubscriptionTier extends SystemBase {
                 null  // No admin user for purchases
             );
 
-            error_log('Tier assignment: Result = ' . ($result ? 'success' : 'failed/skipped'));
             return true;
 
         } catch (Exception $e) {
             // Log error but don't break checkout
-            error_log('Subscription tier assignment failed: ' . $e->getMessage());
-            error_log('Stack trace: ' . $e->getTraceAsString());
             return false;
         }
     }

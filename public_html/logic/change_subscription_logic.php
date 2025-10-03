@@ -81,7 +81,6 @@ function change_subscription_logic($get, $post) {
 
     // Handle POST actions
     if (isset($post['action'])) {
-        error_log("DEBUG: Handling POST action: " . $post['action']);
 
         // Check if user has an active subscription
         if (!$current_subscription) {
@@ -96,7 +95,6 @@ function change_subscription_logic($get, $post) {
         try {
             switch ($post['action']) {
                 case 'upgrade':
-                    error_log("DEBUG: Starting upgrade process");
                     // Validate product selection
                     if (!isset($post['product_id'])) {
                         throw new Exception('Please select a plan to upgrade to.');
@@ -129,7 +127,6 @@ function change_subscription_logic($get, $post) {
                     // Get the new price ID from product
                     $versions = $product->get_product_versions();
                     $product_version = $versions->count() > 0 ? $versions->get(0) : null;
-                    error_log("DEBUG: Product {$product->key} has " . $versions->count() . " versions, using version " . ($product_version ? $product_version->key : 'none'));
 
                     if (!$product_version) {
                         throw new Exception('The selected plan does not have any active pricing versions. Please contact support.');
@@ -138,7 +135,6 @@ function change_subscription_logic($get, $post) {
                     // Get appropriate price ID based on test mode
                     $price_id_field = $stripe_helper->test_mode ? 'prv_stripe_price_id_test' : 'prv_stripe_price_id';
                     $new_price_id = $product_version->get($price_id_field);
-                    error_log("DEBUG: Test mode: " . ($stripe_helper->test_mode ? 'yes' : 'no') . ", Price ID field: $price_id_field, New price ID: $new_price_id, Version ID: " . $product_version->key);
 
                     if (!$new_price_id) {
                         $mode = $stripe_helper->test_mode ? 'test' : 'live';
@@ -164,18 +160,15 @@ function change_subscription_logic($get, $post) {
 
                     $item_id = $subscription->items->data[0]->id;
 
-                    error_log("DEBUG: Calling change_subscription with subscription_id: $subscription_id, item_id: $item_id, new_price_id: $new_price_id");
 
                     // Update subscription with Stripe
                     try {
                         $updated_subscription = $stripe_helper->change_subscription($subscription_id, $item_id, $new_price_id);
-                        error_log("DEBUG: change_subscription completed, subscription status: " . $updated_subscription->status);
                     } catch (Exception $e) {
                         throw new Exception('Failed to update your subscription with the payment processor: ' . $e->getMessage());
                     }
 
                     // Subscription updated successfully
-                    error_log("DEBUG: Upgrade successful, creating new order and tier assignment");
 
                     // Create new order for the upgrade
                     $order = new Order(NULL);
@@ -203,11 +196,9 @@ function change_subscription_logic($get, $post) {
 
                     // Update user's tier
                     $tier_result = SubscriptionTier::handleProductPurchase($user, $product, $new_order_item, $order);
-                    error_log("DEBUG: handleProductPurchase returned: " . ($tier_result ? 'true' : 'false'));
 
                     // Success message
                     $page_vars['success_message'] = 'Successfully upgraded to ' . $new_tier->get('sbt_display_name');
-                    error_log("DEBUG: Set success message: " . $page_vars['success_message']);
                     break;
 
                 case 'downgrade':
@@ -281,18 +272,15 @@ function change_subscription_logic($get, $post) {
 
                     $item_id = $subscription->items->data[0]->id;
 
-                    error_log("DEBUG: Calling change_subscription for downgrade with subscription_id: $subscription_id, item_id: $item_id, new_price_id: $new_price_id");
 
                     // Update subscription with Stripe
                     try {
                         $updated_subscription = $stripe_helper->change_subscription($subscription_id, $item_id, $new_price_id);
-                        error_log("DEBUG: change_subscription completed for downgrade, subscription status: " . $updated_subscription->status);
                     } catch (Exception $e) {
                         throw new Exception('Failed to update your subscription with the payment processor: ' . $e->getMessage());
                     }
 
                     // Downgrade successful
-                    error_log("DEBUG: Downgrade successful, creating new order and tier assignment");
 
                     // Create new order
                     $order = new Order(NULL);
@@ -320,11 +308,9 @@ function change_subscription_logic($get, $post) {
 
                     // Update user's tier (use 'subscription_change' reason to allow downgrades)
                     $tier_result = $new_tier->addUser($user_id, 'subscription_change', 'order', $order->key, null);
-                    error_log("DEBUG: addUser for downgrade returned: " . ($tier_result ? 'true' : 'false'));
 
                     // Success message
                     $page_vars['success_message'] = 'Successfully downgraded to ' . $new_tier->get('sbt_display_name');
-                    error_log("DEBUG: Set success message: " . $page_vars['success_message']);
                     break;
 
                 case 'cancel':
