@@ -6,7 +6,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('devices_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = process_logic(devices_logic($_GET, $_POST));
-	$account = $page_vars['account'];
+	$tier = $page_vars['tier'];
 	$devices = $page_vars['devices'];
 	$num_devices =  $page_vars['num_devices'];
 	$user = $page_vars['user'];
@@ -28,8 +28,8 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	echo PublicPage::BeginPage('Devices', $hoptions);
 
-if(!$account){
-	
+if(!$tier){
+
 	?>
 	 <section class="space">
         <div class="container">
@@ -44,51 +44,6 @@ if(!$account){
         </div>
     </section>
 	<?php
-}
-else if(!$account->is_active()){	
-
-	if(!$_GET['showdeleted'] && $num_deleted_devices){
-		?>
-                        <div class="job-content">
-                            <div class="job-post_date">
-								<h3><?php echo $name; ?></h3>
-                                <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
-                                <div class="icon"><a href="/profile/devices?showdeleted=1"><i class="fa-regular fa-trash"></i> Deleted Devices</a></div>
-                            </div>
-                        </div>
-	<?php		
-	}
-
-	foreach($devices as $device){
-
-		echo '
-					<div class="col-lg-6 col-xxl-4">
-					<div class="job-post style2">
-						<div class="job-content">
-							<div class="job-post_date">
-								<span class="date"><i class="fa-regular fa-check"></i>Active</span>
-							</div>
-							<h3 class="box-title">'.$device->get_readable_name().'</h3>
-							<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
-							<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
-						</div>
-						<div class="job-post_author">
-							<div class="job-wrapp">
-								<div class="job-author">
-									<i class="fa-regular fa-lock"></i>
-								</div>
-								<div class="author-info">
-									<h3 class="company-name">Deactivation Code</h3>
-									<h5 class="price">'.$device->get('cdd_deactivation_pin').'</h5>
-
-								</div>
-							</div>
-							
-						</div>
-					</div>
-				</div>';
-
-	}		
 }
 else{			
 
@@ -246,7 +201,10 @@ else{
 		}
 	}
 
-	if($account->can_add_device() && $account->is_active()){
+	// Check if user can add more devices based on tier limit
+	$max_devices = $tier->getFeature('controld_max_devices', 0);
+
+	if($num_devices < $max_devices){
 		?>
 					<div class="col-lg-6 col-xxl-4">
 						<div class="job-post style2">
@@ -263,7 +221,7 @@ else{
 					</div>
 	<?php
 	}
-	else if($account->is_active()){
+	else{
 		?>
 					<div class="col-lg-6 col-xxl-4">
 						<div class="job-post style2">
@@ -278,8 +236,8 @@ else{
 
 						</div>
 					</div>
-	<?php		
-		
+	<?php
+
 	}
 }
 

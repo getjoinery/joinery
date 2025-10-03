@@ -6,7 +6,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = profile_logic($_GET, $_POST);
-	$account = $page_vars['account'];
+	$tier = $page_vars['tier'];
 	$active_subscription =  $page_vars['active_subscription'];
 	
 	$page = new PublicPage();
@@ -71,9 +71,9 @@ Team Area
                                     <div class="about-info_icon"><i class="fa-solid fa-user"></i></div>
                                     <div class="about-info_content">
                                         <p class="about-info_subtitle">Plan</p>
-                                        <h6 class="about-info_title"><?php 
-										if($account){
-											echo $account->readable_plan_name(); 
+                                        <h6 class="about-info_title"><?php
+										if($tier){
+											echo htmlspecialchars($tier->get('sbt_display_name'));
 										}
 										else{
 											echo '<a href="/pricing">Choose a plan</a>';

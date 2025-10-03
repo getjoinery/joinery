@@ -9,7 +9,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$page_vars = ctldfilters_edit_logic($_GET, $_POST);
 	$profile_choice = $page_vars['profile_choice'];
 	$profile =  $page_vars['profile'];
-	$account = $page_vars['account'];
+	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];
 	$filters = $page_vars['filters'];
 	$services = $page_vars['services'];

@@ -9,7 +9,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$page_vars = rules_logic($_GET, $_POST);
 	$profile_choice = $page_vars['profile_choice'];
 	$profile =  $page_vars['profile'];
-	$account = $page_vars['account'];
+	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];
 	$rules = $page_vars['rules'];
 	$user = $page_vars['user'];

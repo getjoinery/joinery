@@ -6,7 +6,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctld_activation_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = ctld_activation_logic($_GET, $_POST);
-	$account = $page_vars['account'];
+	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];
 	$user = $page_vars['user'];
 	$link = $page_vars['link'];

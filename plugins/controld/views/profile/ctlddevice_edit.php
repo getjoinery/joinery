@@ -6,7 +6,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctlddevice_edit_logic.php', 'logic', 'system', null, 'controld'));
 
 	$page_vars = ctlddevice_edit_logic($_GET, $_POST);
-	$account = $page_vars['account'];
+	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];
 	$num_devices =  $page_vars['num_devices'];
 	$user = $page_vars['user'];
