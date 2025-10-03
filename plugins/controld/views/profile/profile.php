@@ -120,7 +120,7 @@ Team Area
                                     </div>
                                 </div>
                             </div>
-                            <a href="/profile/subscription_edit?order_item_id=<?php echo $active_subscription->key; ?>" class="th-btn">Change Plan</a>
+                            <a href="/change-subscription" class="th-btn">Manage Subscription</a>
                         </div>
                     </div>
 					                    <div class="col-xl-5">

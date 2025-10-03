@@ -5,12 +5,11 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
-	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic', 'system', null, 'controld'));
+	require_once(PathHelper::getIncludePath('logic/pricing_logic.php'));
 
 	$page_vars = process_logic(pricing_logic($_GET, $_POST));
 	$page_choice = $page_vars['page_choice'];
-	$products = $page_vars['products'];
-	$product_versions = $page_vars['product_versions'];
+	$tier_display_data = $page_vars['tier_display_data'];
 	
 	$session = SessionControl::get_instance();
 
@@ -319,26 +318,25 @@ Price Area
             </div>
             <div id="monthly" class="wrapper-full">
                 <div class="row justify-content-center">
-					<?php foreach ($product_versions as $product_version){ 
-						$product = new Product($product_version->get('prv_pro_product_id'), TRUE);
+					<?php foreach ($tier_display_data as $item){
+						$tier = $item['tier'];
+						$product = $item['product'];
+						$version = $item['version'];
 					?>
                     <div class="col-xl-4 col-md-6">
                         <div class="price-box th-ani ">
                             <div class="price-title-wrap">
                                 <h3 class="box-title"><?php echo $product->get('pro_name'); ?></h3>
-                                <!--<p class="subtitle">FREE</p>-->
+                                <p class="subtitle"><?php echo $tier->get('sbt_display_name'); ?></p>
                             </div>
                             <!--<p class="box-text">Perfect plan to get started</p>-->
 							<?php echo $product->get('pro_short_description'); ?>
                             <h4 class="box-price">
-								<?php 
-								echo $product->get_readable_price($product_version->key);		
+								<?php
+								echo $product->get_readable_price($version->key);
 								?>
-							<span class="duration">/<?php 
-							
-							echo $page_choice; 
-							?></span></h4>
-                            
+							<span class="duration">/<?php echo $version->get('prv_price_type'); ?></span></h4>
+
                             <div class="box-content">
 								<!--<p class="box-text2">A free plan grants you access to some cool features of Spend.</p>-->
                                 <div class="available-list">
@@ -352,7 +350,7 @@ Price Area
                                         <li class="unavailable">Updates for 1 Year</li>
                                     </ul>-->
                                 </div>
-                                <a href="<?php echo $product->get_url(). '?product_version_id='.$product_version->key; ?>" class="th-btn btn-fw style-radius">Get Started</a>
+                                <a href="<?php echo $product->get_url(). '?product_version_id='.$version->key; ?>" class="th-btn btn-fw style-radius">Get Started</a>
                             </div>
                         </div>
                     </div>

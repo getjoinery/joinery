@@ -7,13 +7,13 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevices_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldprofiles_class.php'));
-	
+
 	$page_vars = array();
 
-	$settings = Globalvars::get_instance(); 
+	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
 	$session = SessionControl::get_instance();
@@ -21,18 +21,18 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 	$session->check_permission(0);
 	$session->set_return();
 
-	$user = new User($session->get_user_id(), TRUE);	
+	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
-	
-	$account = CtldAccount::GetByColumn('cda_usr_user_id', $user->key);
 
-	if(!$account){
-		throw new SystemDisplayablePermanentError("User ".$user->key." does not have an Account.");
+	// Check if user has ControlD access
+	$tier = SubscriptionTier::GetUserTier($user->key);
+	if(!$tier){
+		throw new SystemDisplayablePermanentError("You do not have an active subscription.");
 		exit;
 	}
-	$page_vars['account'] = $account;
+	$page_vars['tier'] = $tier;
 
-	$devices = new MultiCtldAccount(
+	$devices = new MultiCtldDevice(
 		array(
 		'user_id' => $user->key, 
 		'deleted' => false
@@ -85,10 +85,16 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 			LibraryFunctions::redirect('/profile/devices');
 
 		}
-		else{	
-			if(!$account->can_add_device()){
-				throw new SystemDisplayablePermanentError("You cannot add any devices at this time.");
-				exit;				
+		else{
+			// Check device limit
+			$max_devices = SubscriptionTier::getUserFeature($user->key, 'controld_max_devices', 0);
+			$current_devices = new MultiCtldDevice([
+				'user_id' => $user->key,
+				'deleted' => false
+			]);
+			if($current_devices->count_all() >= $max_devices){
+				throw new SystemDisplayablePermanentError("You have reached your device limit of {$max_devices}.");
+				exit;
 			}
 			
 			$empty_device = new CtldDevice(NULL);

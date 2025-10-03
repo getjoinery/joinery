@@ -1,7 +1,8 @@
 <?php
 	
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('rules_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -65,7 +66,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	}
 
-	if($account->get('cda_plan') == CtldAccount::PRO_PLAN){
+	if(SubscriptionTier::getUserFeature($session->get_user_id(), 'controld_custom_rules', false)){
 		if($device->are_filters_editable()){
 			$formwriter = $page->getFormWriter();
 			$validation_rules = array();

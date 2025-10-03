@@ -4,13 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-	$page_vars = pricing_logic($_GET, $_POST);
-	// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(pricing_logic($_GET, $_POST));
 	
 	$page = new PublicPage();
 	$page->public_header(array(
@@ -33,9 +27,12 @@ $page_vars = $page_vars->data;
 
 			<!-- Pricing Cards -->
 			<div class="row justify-content-center gx-4 gy-4">
-				<?php 
+				<?php
 				$cardIndex = 0;
-				foreach ($page_vars['products'] as $product): 
+				foreach ($page_vars['tier_display_data'] as $item):
+					$tier = $item['tier'];
+					$product = $item['product'];
+					$version = $item['version'];
 					$cardIndex++;
 					$isPopular = ($cardIndex == 2); // Make middle plan popular
 				?>
@@ -50,21 +47,13 @@ $page_vars = $page_vars->data;
 						<?php endif; ?>
 
 						<div class="card-header text-center bg-transparent border-0 pt-5 <?php echo $isPopular ? 'pt-4' : ''; ?>">
-							
-							<!-- Product Image -->
-							<?php
-							$pic = $product->get_picture_link('small');
-							if($pic): ?>
-								<div class="mb-4">
-									<img src="<?php echo $pic; ?>" class="img-fluid rounded-circle shadow-sm" alt="<?php echo htmlspecialchars($product->get('pro_name')); ?>" style="width: 80px; height: 80px; object-fit: cover;">
+
+							<!-- Icon -->
+							<div class="mb-4">
+								<div class="bg-primary bg-opacity-10 rounded-circle d-inline-flex align-items-center justify-content-center" style="width: 80px; height: 80px;">
+									<i class="bi-star-fill text-primary fs-3"></i>
 								</div>
-							<?php else: ?>
-								<div class="mb-4">
-									<div class="bg-primary bg-opacity-10 rounded-circle d-inline-flex align-items-center justify-content-center" style="width: 80px; height: 80px;">
-										<i class="bi-star-fill text-primary fs-3"></i>
-									</div>
-								</div>
-							<?php endif; ?>
+							</div>
 
 							<!-- Plan Name -->
 							<h3 class="pricing-title h4 mb-3"><?php echo htmlspecialchars($product->get('pro_name')); ?></h3>
@@ -72,8 +61,9 @@ $page_vars = $page_vars->data;
 							<!-- Price -->
 							<div class="pricing-price mb-3">
 								<div class="h2 text-primary mb-0">
-									<?php echo $product->get_readable_price(); ?>
+									<?php echo $product->get_readable_price($version->key); ?>
 								</div>
+								<p class="text-muted small"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></p>
 							</div>
 						</div>
 
@@ -83,7 +73,7 @@ $page_vars = $page_vars->data;
 							<?php if($product->get('pro_description')): ?>
 							<div class="pricing-description text-center mb-4">
 								<p class="text-muted small">
-									<?php echo htmlspecialchars($product->get('pro_description')); ?>
+									<?php echo $product->get('pro_description'); ?>
 								</p>
 							</div>
 							<?php endif; ?>
@@ -119,7 +109,7 @@ $page_vars = $page_vars->data;
 
 							<!-- Action Button -->
 							<div class="pricing-action mt-4">
-								<a href="<?php echo $product->get_url(); ?>" 
+								<a href="<?php echo $product->get_url() . '?product_version_id=' . $version->key; ?>"
 								   class="btn <?php echo $isPopular ? 'btn-primary' : 'btn-outline-primary'; ?> btn-lg w-100 rounded-pill">
 									Choose This Plan
 									<i class="bi-arrow-right ms-1"></i>
@@ -164,15 +154,15 @@ $page_vars = $page_vars->data;
 							<thead class="table-light">
 								<tr>
 									<th scope="col" class="border-0 py-3">Features</th>
-									<?php foreach ($page_vars['products'] as $product): ?>
-									<th scope="col" class="border-0 py-3 text-center"><?php echo htmlspecialchars($product->get('pro_name')); ?></th>
+									<?php foreach ($page_vars['tier_display_data'] as $item): ?>
+									<th scope="col" class="border-0 py-3 text-center"><?php echo htmlspecialchars($item['product']->get('pro_name')); ?></th>
 									<?php endforeach; ?>
 								</tr>
 							</thead>
 							<tbody>
 								<tr>
 									<td class="fw-semibold">Basic Access</td>
-									<?php foreach ($page_vars['products'] as $product): ?>
+									<?php foreach ($page_vars['tier_display_data'] as $item): ?>
 									<td class="text-center"><i class="bi-check-lg text-success fs-5"></i></td>
 									<?php endforeach; ?>
 								</tr>
@@ -180,7 +170,7 @@ $page_vars = $page_vars->data;
 									<td class="fw-semibold">Premium Support</td>
 									<?php 
 									$supportIndex = 0;
-									foreach ($page_vars['products'] as $product): 
+									foreach ($page_vars['tier_display_data'] as $item): 
 										$supportIndex++;
 									?>
 									<td class="text-center">
@@ -196,7 +186,7 @@ $page_vars = $page_vars->data;
 									<td class="fw-semibold">Advanced Analytics</td>
 									<?php 
 									$analyticsIndex = 0;
-									foreach ($page_vars['products'] as $product): 
+									foreach ($page_vars['tier_display_data'] as $item): 
 										$analyticsIndex++;
 									?>
 									<td class="text-center">

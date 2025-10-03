@@ -7,15 +7,15 @@ function ctlddevice_soft_delete_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/controld/data/ctlddevices_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldprofiles_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldfilters_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldservices_class.php'));
-	
+
 	$page_vars = array();
 
-	$settings = Globalvars::get_instance(); 
+	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
 	$session = SessionControl::get_instance();
@@ -23,15 +23,11 @@ function ctlddevice_soft_delete_logic($get_vars, $post_vars){
 	$session->check_permission(0);
 	$session->set_return();
 
-	$user = new User($session->get_user_id(), TRUE);	
+	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
-	
-	$account = CtldAccount::GetByColumn('cda_usr_user_id', $user->key);
 
-	if(!$account){
-		throw new SystemDisplayablePermanentError("User ".$user->key." does not have an Account.");
-	}
-	$page_vars['account'] = $account;
+	$tier = SubscriptionTier::GetUserTier($user->key);
+	$page_vars['tier'] = $tier;
 
 	$device = new CtldDevice($_REQUEST['device_id'], TRUE);
 	$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));

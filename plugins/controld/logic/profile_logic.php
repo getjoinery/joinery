@@ -12,7 +12,8 @@ function profile_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/controld/data/ctldaccounts_class.php'));
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+	require_once(PathHelper::getIncludePath('data/order_items_class.php'));
 
 	$page_vars = array();
 
@@ -37,8 +38,8 @@ function profile_logic($get_vars, $post_vars){
 	}
 
 
-	$account = CtldAccount::GetByColumn('cda_usr_user_id', $user->key);
-	$page_vars['account'] = $account;
+	$tier = SubscriptionTier::GetUserTier($user->key);
+	$page_vars['tier'] = $tier;
 
 	$page_vars['tab_menus'] = array(
 		'My Profile' => '/profile',
@@ -84,10 +85,14 @@ function profile_logic($get_vars, $post_vars){
 	$page_vars['messages'] = $messages;
 
 	//SUBSCRIPTIONS
-	$order_item = CtldAccount::GetPlanOrderItem($session->get_user_id());
+	$subscriptions = new MultiOrderItem(
+		array('user_id' => $session->get_user_id(), 'is_active_subscription' => true),
+		array('order_item_id' => 'DESC')
+	);
+	$subscriptions->load();
 
-	if($order_item){
-		$page_vars['active_subscription'] = $order_item;
+	if($subscriptions->count() > 0){
+		$page_vars['active_subscription'] = $subscriptions->get(0);
 	}
 	else{
 		$page_vars['active_subscription'] = NULL;

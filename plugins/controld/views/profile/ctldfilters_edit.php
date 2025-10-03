@@ -1,7 +1,8 @@
 <?php
 	
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('ctldfilters_edit_logic.php', 'logic', 'system', null, 'controld'));
 
@@ -115,7 +116,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		</div>';
 	}
 
-	if($account->get('cda_plan') == CtldAccount::PREMIUM_PLAN || $account->get('cda_plan') == CtldAccount::PRO_PLAN ){
+	if(SubscriptionTier::getUserFeature($session->get_user_id(), 'controld_advanced_filters', false)){
 		echo '<h5>Ad and Malware</h5>';
 		$optionvals = array("No blocking" => 0, "Light blocking"=>'ads_small', 'Medium blocking'=>'ads_medium' /*, 'Aggressive blocking'=>'ads'*/);
 		echo $formwriter->dropinput("Ads", "block_ads", "", $optionvals, $filters['ads'], '', TRUE);
