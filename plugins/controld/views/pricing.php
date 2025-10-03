@@ -5,9 +5,8 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = process_logic(pricing_logic($_GET, $_POST));
+	$tier_display_data = $page_vars['tier_display_data'];
 	$page_choice = $page_vars['page_choice'];
-	$products = $page_vars['products'];
-	$product_versions = $page_vars['product_versions'];
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
@@ -81,8 +80,10 @@ Price Area
             </div>
             <div id="monthly" class="wrapper-full">
                 <div class="row justify-content-center">
-					<?php foreach ($product_versions as $product_version){ 
-						$product = new Product($product_version->get('prv_pro_product_id'), TRUE);
+					<?php foreach ($tier_display_data as $item){
+						$tier = $item['tier'];
+						$product = $item['product'];
+						$product_version = $item['version'];
 					?>
                     <div class="col-xl-4 col-md-6">
                         <div class="price-box th-ani ">
