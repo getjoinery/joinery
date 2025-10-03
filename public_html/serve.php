@@ -135,6 +135,7 @@ $routes = [
         '/views/*' => ['view' => 'views/{path}'],
         
         // Routes with special features
+        '/profile' => ['view' => 'views/profile/profile'],
         '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile'],
         '/events' => ['view' => 'views/events', 'check_setting' => 'events_active'],
         
