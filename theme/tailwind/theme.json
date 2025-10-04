@@ -1,0 +1,15 @@
+{
+  "name": "tailwind",
+  "displayName": "Tailwind CSS Theme",
+  "version": "1.0.0",
+  "description": "Legacy Tailwind CSS theme - original core view files",
+  "author": "Joinery",
+  "is_stock": true,
+  "requires": {
+    "php": ">=7.4",
+    "joinery": ">=1.0.0"
+  },
+  "cssFramework": "tailwind",
+  "formWriterBase": "FormWriterHTML5",
+  "publicPageBase": "PublicPageBase"
+}
