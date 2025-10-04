@@ -81,7 +81,7 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 
 ### Directory Structure & Responsibilities
 - `/data/` - Database model classes using Active Record pattern (`[table]_class.php`)
-- `/logic/` - Business logic layer using LogicResult pattern (`[page]_logic.php`) [📖 See Logic Architecture Guide](docs/claude/CLAUDE_logic_architecture.md)
+- `/logic/` - Business logic layer using LogicResult pattern (`[page]_logic.php`) [📖 See Logic Architecture Guide](docs/logic_architecture.md)
 - `/views/` - Base presentation templates
 - `/adm/` - Complete admin interface (currently uses Falcon theme)
 - `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterHTML5, LogicResult, etc.)
@@ -106,7 +106,7 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 **Theme Override:** Checks `/theme/[theme]/views/` first, then `/views/` fallback
 **Plugin Routes:** Admin pages auto-discovered at `/plugins/{plugin}/admin/*`
 
-For complete details on themes, plugins, and routing: **📖 [Plugin Developer Guide](/docs/claude/plugin_developer_guide.md)**
+For complete details on themes, plugins, and routing: **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)**
 
 ## Database & Configuration
 
@@ -337,7 +337,7 @@ if ($registrants->count_all() > 0) {
 
 For complete guidance on creating admin interface pages, including required setup, table patterns, form handling, and best practices, see:
 
-**📖 [Admin Pages Documentation](/docs/claude/CLAUDE_admin_pages.md)**
+**📖 [Admin Pages Documentation](/docs/admin_pages.md)**
 
 
 ## Common Tasks & Quick Reference
@@ -550,7 +550,7 @@ sudo systemctl restart apache2
 ## Plugin Development
 
 Plugins provide backend functionality with admin interfaces at `/plugins/{plugin}/admin/*`.
-See **📖 [Plugin Developer Guide](/docs/claude/plugin_developer_guide.md)** for complete details.
+See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for complete details.
 
 ## Best Practices
 
