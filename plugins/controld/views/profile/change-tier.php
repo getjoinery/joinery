@@ -85,12 +85,12 @@ Price Area
                             <div class="price-title-wrap">
                                 <h3 class="box-title"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></h3>
 								<?php if ($is_current): ?>
-									<p class="subtitle" style="color: var(--theme-color);">CURRENT PLAN</p>
+									<p class="subtitle" style="color: #28a745; font-weight: bold;">CURRENT PLAN</p>
 								<?php elseif ($tier_data['action_type'] == 'downgrade' || $tier_data['action_type'] == 'downgrade_disabled'): ?>
 									<p class="subtitle">(Downgrade)</p>
 								<?php endif; ?>
                             </div>
-							<p class="box-text"><?php echo htmlspecialchars($tier->get('sbt_description')); ?></p>
+							<div class="box-text"><?php echo $tier->get('sbt_description'); ?></div>
 
 							<?php if (!empty($tier_data['products'])): ?>
 								<?php foreach ($tier_data['products'] as $product): ?>
@@ -108,35 +108,6 @@ Price Area
 							<?php endif; ?>
 
                             <div class="box-content">
-								<?php
-								// Display features if available
-								$features = $tier->getAllFeatures();
-								if (!empty($features)):
-								?>
-									<div class="available-list">
-										<ul>
-											<?php
-											$all_available = SubscriptionTier::getAllAvailableFeatures();
-											foreach ($features as $key => $value):
-												if (isset($all_available[$key])):
-													$label = $all_available[$key]['label'];
-													if ($all_available[$key]['type'] == 'boolean'):
-														if ($value):
-											?>
-															<li><?php echo htmlspecialchars($label); ?></li>
-											<?php
-														endif;
-													else:
-											?>
-														<li><?php echo htmlspecialchars($label); ?>: <?php echo htmlspecialchars($value); ?></li>
-											<?php
-													endif;
-												endif;
-											endforeach;
-											?>
-										</ul>
-									</div>
-								<?php endif; ?>
 
 								<?php if ($tier_data['message']): ?>
 									<p class="box-text2"><?php echo htmlspecialchars($tier_data['message']); ?></p>
