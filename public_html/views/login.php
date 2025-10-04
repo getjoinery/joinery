@@ -1,10 +1,16 @@
 <?php
-	
+	// PathHelper is always available - never require it
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('login_logic.php', 'logic'));
 	
-	$page_vars = process_logic(login_logic($_GET, $_POST));
+	$page_vars = login_logic($_GET, $_POST);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	$settings = $page_vars['settings'];
 	if ($email) {
 		$forgot_link = '/password-reset-1?e=' . rawurlencode(htmlspecialchars($email));
@@ -17,92 +23,84 @@
 		'is_valid_page' => $is_valid_page,
 		'title'=>'Log In',
 		'header_only' => true,
-		);
+	);
 	$page->public_header($hoptions,NULL);
+?>
 
-	//echo PublicPage::BeginPage('Log In');
+	<!-- Content
+	============================================= -->
+	<section id="content">
+		<div class="content-wrap py-0">
 
-	?>
+			<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
 
-    <main class="main" id="top">
-      <div class="container" data-layout="container">
+			<div class="section bg-transparent min-vh-100 p-0 m-0">
+				<div class="vertical-middle">
+					<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
 
-        <div class="row flex-center min-vh-100 py-6">
-          <div class="col-sm-10 col-md-8 col-lg-6 col-xl-5 col-xxl-4">
-				<a class="d-flex flex-center mb-4" href="/">
-				<?php
-		  		if($settings->get_setting('logo_link')){
-					echo '<img class="me-2" src="'.$settings->get_setting('logo_link').'" alt="" width="40" />';
-				}
-				?>
-				<span class="font-sans-serif text-primary fw-bolder fs-4 d-inline-block"><?php echo $settings->get_setting('site_name'); ?></span>
-				</a>
-            <div class="card">
-              <div class="card-body p-4 p-sm-5">
-			  
-				<?php 
+						<div class="center mb-4">
+							<a href="/">
+								<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
+							</a>
+						</div>
 
-					foreach($page_vars['display_messages'] AS $display_message) {
-						if($display_message->identifier == 'loginbox') {	
-							echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-						}
-					}   		
+						<div class="card mb-0">
+							<div class="card-body" style="padding: 40px;">
+								
+								<h3>Login to your Account</h3>
 
-					$formwriter = $page->getFormWriter('form1');
+								<?php
+								foreach($page_vars['display_messages'] AS $display_message) {
+									if($display_message->identifier == 'loginbox') {
+										echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+									}
+								}
 
-					$validation_rules = array();
-					$validation_rules['email']['required']['value'] = 'true';
-					$validation_rules['password']['required']['value'] = 'true';
-					echo $formwriter->set_validate($validation_rules);	
-					echo $formwriter->begin_form('form1', 'POST', '/login');
-				?>			  
+								$formwriter = $page->getFormWriter('form1');
 
-                <div class="row flex-between-center mb-2">
-                  <div class="col-auto">
-                    <h5>Log in</h5>
-                  </div>
-                  <div class="col-auto fs-10 text-600"><span class="mb-0 undefined">or</span> <span><a href="/register<?php if(isset($_GET['m'])){ echo '?m='.htmlspecialchars($_GET['m']); } ?>">Create an account</a></span></div>
-                </div>
-                
-                  <div class="mb-3">
-                    <input class="form-control" name="email" id="email" type="email" placeholder="Email address" />
-                  </div>
-                  <div class="mb-3">
-                    <input class="form-control" name="password" id="password" type="password" placeholder="Password" />
-                  </div>
-                  <div class="row flex-between-center">
-                    <div class="col-auto">
-                      <div class="form-check mb-0">
-                        <input class="form-check-input" type="checkbox" id="setcookie" name="setcookie" checked="checked" value="yes" />
-                        <label class="form-check-label mb-0" for="setcookie">Remember me</label>
-                      </div>
-                    </div>
-                    <div class="col-auto"><a class="fs-10" href="<?php echo $forgot_link; ?>">Forgot Password?</a></div>
-                  </div>
-                  <div class="mb-3">
-                    <button class="btn btn-primary d-block w-100 mt-3" type="submit" name="submit">Log in</button>
-                  </div>
-                <!--
-                <div class="position-relative mt-4">
-                  <hr />
-                  <div class="divider-content-center">or log in with</div>
-                </div>
-                <div class="row g-2 mt-2">
-                  <div class="col-sm-6"><a class="btn btn-outline-google-plus btn-sm d-block w-100" href="#"><span class="fab fa-google-plus-g me-2" data-fa-transform="grow-8"></span> google</a></div>
-                  <div class="col-sm-6"><a class="btn btn-outline-facebook btn-sm d-block w-100" href="#"><span class="fab fa-facebook-square me-2" data-fa-transform="grow-8"></span> facebook</a></div>
-                </div>
-				-->
-				<?php echo $formwriter->end_form();	 ?>				
+								$validation_rules = array();
+								$validation_rules['email']['required']['value'] = 'true';
+								$validation_rules['password']['required']['value'] = 'true';
+								echo $formwriter->set_validate($validation_rules);
+								echo $formwriter->begin_form('form1', 'POST', '/login', TRUE, 'class="mb-0"');
+								?>
+								
+								<div class="row">
+									<div class="col-12 form-group">
+										<label for="email">Username:</label>
+										<input type="email" id="email" name="email" value="" class="form-control">
+									</div>
 
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </main>
+									<div class="col-12 form-group">
+										<label for="password">Password:</label>
+										<input type="password" id="password" name="password" value="" class="form-control">
+									</div>
 
-	<?php
-	//echo PublicPage::EndPage();
-	$page->public_footer($foptions=array('track'=>TRUE, 'header_only' => true));
+									<div class="col-12 form-group">
+										<div class="d-flex justify-content-between">
+											<button class="button button-3d button-black m-0" id="login-form-submit" name="login-form-submit" value="login">Login</button>
+											<a href="<?php echo $forgot_link; ?>">Forgot Password?</a>
+										</div>
+									</div>
+								</div>
+								
+								<?php echo $formwriter->end_form(); ?>
 
+								<div class="w-100"></div>
+
+								<div class="text-center w-100">
+									<p style="line-height: 1.6">Don't have an account yet? <a href="/register<?php if(isset($_GET['m'])){ echo '?m='.htmlspecialchars($_GET['m']); } ?>">Register for an Account</a></p>
+								</div>
+							</div>
+						</div>
+
+					</div>
+				</div>
+			</div>
+
+		</div>
+	</section><!-- #content end -->
+
+<?php
+	$page->public_footer($foptions=array('no_wrapper_close'=>true));
 ?>
