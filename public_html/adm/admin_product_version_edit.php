@@ -71,6 +71,12 @@
 			}
 			$product_version->prepare();
 			$product_version->save();
+
+			// Sync Stripe price when editing existing version
+			if($settings->get_setting('checkout_type') != 'none'){
+				$stripe_helper = new StripeHelper();
+				$stripe_price = $stripe_helper->get_or_create_price($product_version, NULL);
+			}
 		}
 		
 		LibraryFunctions::redirect('/admin/admin_product?pro_product_id='. $product->key);

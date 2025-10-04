@@ -89,40 +89,9 @@ if (isset($page_vars['success_message'])): ?>
                         <p class="mt-2 text-sm text-gray-500">(Downgrade)</p>
                     <?php endif; ?>
 
-                    <p class="mt-4 text-sm text-gray-500">
-                        <?php echo htmlspecialchars($tier->get('sbt_description')); ?>
-                    </p>
-
-                    <?php
-                    // Display features if available
-                    $features = $tier->getAllFeatures();
-                    if (!empty($features)):
-                    ?>
-                        <div class="mt-4">
-                            <p class="text-sm font-medium text-gray-900 mb-2">Features:</p>
-                            <ul class="text-sm text-gray-500 space-y-1">
-                                <?php
-                                $all_available = SubscriptionTier::getAllAvailableFeatures();
-                                foreach ($features as $key => $value):
-                                    if (isset($all_available[$key])):
-                                        $label = $all_available[$key]['label'];
-                                        if ($all_available[$key]['type'] == 'boolean'):
-                                            if ($value):
-                                ?>
-                                                <li>✓ <?php echo htmlspecialchars($label); ?></li>
-                                <?php
-                                            endif;
-                                        else:
-                                ?>
-                                            <li>• <?php echo htmlspecialchars($label); ?>: <?php echo htmlspecialchars($value); ?></li>
-                                <?php
-                                        endif;
-                                    endif;
-                                endforeach;
-                                ?>
-                            </ul>
-                        </div>
-                    <?php endif; ?>
+                    <div class="mt-4 text-sm text-gray-500">
+                        <?php echo $tier->get('sbt_description'); ?>
+                    </div>
 
                     <div class="mt-6">
                         <?php if (!empty($tier_data['products'])): ?>
