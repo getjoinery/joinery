@@ -15,7 +15,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		'Edit Address' => '/profile/address_edit',
 		'Edit Phone Number' => '/profile/phone_numbers_edit',
 		'Change Contact Preferences' => '/profile/contact_preferences',
-		'Change Subscription' => '/profile/change-subscription',
+		'Change Tier' => '/profile/change-tier',
 	);
 	
 	$page = new PublicPage();

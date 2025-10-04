@@ -3,9 +3,9 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('change_subscription_logic.php', 'logic'));
+require_once(PathHelper::getThemeFilePath('change_tier_logic.php', 'logic'));
 
-	$page_vars = process_logic(change_subscription_logic($_GET, $_POST));
+	$page_vars = process_logic(change_tier_logic($_GET, $_POST));
 
 	$tab_menus = array(
 		'My Profile' => '/profile',
@@ -14,22 +14,22 @@ require_once(PathHelper::getThemeFilePath('change_subscription_logic.php', 'logi
 		'Edit Address' => '/profile/address_edit',
 		'Edit Phone Number' => '/profile/phone_numbers_edit',
 		'Change Contact Preferences' => '/profile/contact_preferences',
-		'Change Subscription' => '/profile/change-subscription',
+		'Change Tier' => '/profile/change-tier',
 	);
 
 	$page = new PublicPage();
 	$hoptions=array(
-		'title'=>'Change Subscription',
+		'title'=>'Change Tier',
 		'breadcrumbs' => array(
 			'My Profile' => '/profile/profile',
-			'Change Subscription' => '',
+			'Change Tier' => '',
 		),
 	);
 	$page->public_header($hoptions);
 
-	echo PublicPage::BeginPage('Change Subscription', $hoptions);
+	echo PublicPage::BeginPage('Change Tier', $hoptions);
 
-	echo PublicPage::tab_menu($tab_menus, 'Change Subscription');
+	echo PublicPage::tab_menu($tab_menus, 'Change Tier');
 
 	// Display messages
 	if (isset($page_vars['success_message'])) {
@@ -64,7 +64,7 @@ Price Area
 				<div class="text-center mb-4">
 					<?php
 					$formwriter = $page->getFormWriter();
-					echo $formwriter->begin_form("reactivate_form", "POST", "/profile/change-subscription");
+					echo $formwriter->begin_form("reactivate_form", "POST", "/profile/change-tier");
 					?>
 					<input type="hidden" name="action" value="reactivate">
 					<button type="submit" class="th-btn" style="background-color: #28a745;">Reactivate Subscription</button>
@@ -149,7 +149,7 @@ Price Area
 										<?php // Single product - direct action ?>
 										<?php
 										$formwriter = $page->getFormWriter();
-										echo $formwriter->begin_form("tier_action_".$tier->key, "POST", "/profile/change-subscription");
+										echo $formwriter->begin_form("tier_action_".$tier->key, "POST", "/profile/change-tier");
 										?>
 										<input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
 										<input type="hidden" name="product_id" value="<?php echo $tier_data['products'][0]['id']; ?>">
@@ -159,7 +159,7 @@ Price Area
 										<?php // Multiple products - show dropdown ?>
 										<?php
 										$formwriter = $page->getFormWriter();
-										echo $formwriter->begin_form("tier_action_".$tier->key, "POST", "/profile/change-subscription");
+										echo $formwriter->begin_form("tier_action_".$tier->key, "POST", "/profile/change-tier");
 										?>
 										<input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
 										<div class="mb-2">
@@ -207,7 +207,7 @@ Cancel Subscription Area
                                 <div class="col-12 form-group mb-0 text-center">
 									<?php
 									$formwriter = $page->getFormWriter();
-									echo $formwriter->begin_form("cancel_form", "POST", "/profile/change-subscription");
+									echo $formwriter->begin_form("cancel_form", "POST", "/profile/change-tier");
 									?>
 									<input type="hidden" name="action" value="cancel">
 									<button type="submit" class="th-btn style-radius" style="background-color: #dc3545;"

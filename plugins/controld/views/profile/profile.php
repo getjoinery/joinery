@@ -120,7 +120,7 @@ Team Area
                                     </div>
                                 </div>
                             </div>
-                            <a href="/change-subscription" class="th-btn">Manage Subscription</a>
+                            <a href="/profile/change-tier" class="th-btn">Change Tier</a>
                         </div>
                     </div>
 					                    <div class="col-xl-5">

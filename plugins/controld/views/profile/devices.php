@@ -228,7 +228,7 @@ else{
 							<div class="job-content">
 								<div class="job-post_date">
 									<h3 class="box-title">Upgrade for more devices</h3>
-									<a class="th-btn style5" href="/profile/change-subscription">Upgrade</a>
+									<a class="th-btn style5" href="/profile/change-tier">Upgrade</a>
 								</div>
 								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
 								<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
