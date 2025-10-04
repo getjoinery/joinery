@@ -1,10 +1,16 @@
 <?php
-	
+	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('post_logic.php', 'logic'));
 
-	$page_vars = process_logic(post_logic($_GET, $_POST, $post));
+	$page_vars = post_logic($_GET, $_POST, $post);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	$post = $page_vars['post'];
 
 	$page = new PublicPage();
@@ -14,142 +20,206 @@
 	);
 	$page->public_header($hoptions); 
 	
-	echo PublicPage::BeginPage();	
-	echo PublicPage::BeginPanel();
+	echo PublicPage::BeginPage();
 ?>
 
-    <div class="text-lg max-w-prose mx-auto">
-      <h1>
-        <span class="block text-base text-center text-indigo-600 font-semibold tracking-wide uppercase">Blog</span>
-        <span class="mt-2 mb-4 block text-3xl text-center leading-8 font-extrabold tracking-tight text-gray-900 sm:text-4xl"><?php echo $post->get('pst_title'); ?></span>
-      </h1>
-				<p class="text-base text-gray-500 text-center">
-					<?php echo $page_vars['author']->display_name().' at '; ?>
-				  <time datetime="2020-03-16"><?php echo LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'); ?></time>
-				</p>
-	<div class="flow-root text-center">
-		<?php
-		foreach ($page_vars['tags'] as $tag){
-			echo '<a href="/blog/tag/'.urlencode($tag).'" class="inline-block p-1">
-			<span class="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">'.$tag.'</span>
-			</a>';			
-		}
-		?>				   
-	</div> 
-      <!--<p class="mt-8 text-xl text-gray-500 leading-8">Aliquet nec orci mattis amet quisque ullamcorper neque, nibh sem. At arcu, sit dui mi, nibh dui, diam eget aliquam. Quisque id at vitae feugiat egestas ac. Diam nulla orci at in viverra scelerisque eget. Eleifend egestas fringilla sapien.</p>-->
-    
-    <div class="mt-6 prose prose-indigo prose-lg text-gray-500 mx-auto">
-      <?php echo $post->get('pst_body'); ?>
-    </div>
-	
-	<?php if($page_vars['settings']->get_setting('blog_footer_text')){
-	?>
-	<div class="mt-6 prose prose-indigo prose-lg text-gray-500 mx-auto">
-      <?php echo $page_vars['settings']->get_setting('blog_footer_text'); ?>
-    </div>
-	<?php
-	}
-	?>
+<!-- Canvas Blog Single Content -->
+<section id="content">
+	<div class="content-wrap">
+		<div class="container">
+			<div class="row gx-5">
+				
+				<main class="postcontent col-lg-9">
+					<div class="single-post mb-0">
+						
+						<!-- Single Post -->
+						<article class="entry">
+							
+							<!-- Entry Title -->
+							<div class="entry-title text-center mb-4">
+								<span class="badge bg-primary rounded-pill mb-3 px-3 py-2">Blog</span>
+								<h1 class="mb-3 fw-bold"><?php echo htmlspecialchars($post->get('pst_title')); ?></h1>
+							</div>
 
-      <h3>
-        <span class="mt-2 mb-4 block text-xl text-center leading-8 font-extrabold tracking-tight text-gray-900 sm:text-xl">Add Comment</span>
-      </h3>
-
-		<?php
-
-	if($page_vars['settings']->get_setting('comments_active')){
-		if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
-		
-		?>
-
-								<?php
-								$settings = Globalvars::get_instance();
-								$formwriter = $page->getFormWriter('form1');
-								$validation_rules = array();
-								$validation_rules['cmt']['required']['value'] = 'true';
-								$validation_rules['cmt']['minlength']['value'] = 20;
-								$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
-								$validation_rules['name']['required']['value'] = 'true';
-								$validation_rules['name']['minlength']['value'] = 2;
-								$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-								echo $formwriter->set_validate($validation_rules);			
-
-								echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
-
-								echo $formwriter->textinput("Name", "name", NULL, 20, NULL , "",255, "");	
-								//echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 20, @$form_fields->usr_last_name, "" , 255, "");
-								//echo $formwriter->textinput("Email", "usr_email", NULL, 20, '', "" , 255, "");
-								echo $formwriter->textbox('Comment', 'cmt', NULL, 3, 80, NULL, '', '');
+							<!-- Entry Meta -->
+							<div class="entry-meta text-center mb-4">
+								<ul class="list-inline mb-3">
+									<li class="list-inline-item">
+										<i class="bi-person me-1"></i>
+										<span>by <?php echo htmlspecialchars($page_vars['author']->display_name()); ?></span>
+									</li>
+									<li class="list-inline-item">
+										<i class="bi-calendar me-1"></i>
+										<time><?php echo LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'); ?></time>
+									</li>
+								</ul>
 								
-								if(!$page_vars['session']->get_user_id()){
-									echo $formwriter->antispam_question_input('blog');
-									echo $formwriter->honeypot_hidden_input();	
-									echo $formwriter->honeypot_hidden_input('Comment', 'comment');	
-									echo $formwriter->captcha_hidden_input('blog');
-								}
-
-								echo $formwriter->start_buttons('flex justify-end sm:col-span-6');
-								echo $formwriter->new_form_button('Comment', 'secondary');
-								echo $formwriter->end_buttons();
-								echo $formwriter->end_form(true);
-								?>
-
-			<?php 
-		
-		}
-
-		if($page_vars['settings']->get_setting('show_comments')){			
-
-			if($page_vars['numcomments']){
-				?>
-				<script>
-				$(document).ready(function(){
-					$('.commentbutton').click(function(){
-						var cid = $(this).attr('id');
-						$('#' + cid + 'container').toggle(500);
-				  });
-				});
-				</script>
-				<!-- Comments section -->
-			  <h3>
-				<span class="mt-2 mb-4 block text-xl text-center leading-8 font-extrabold tracking-tight text-gray-900 sm:text-xl">Comments</span>
-			  </h3>
-				<div class="flow-root">
-				  <ul role="list" class="-mb-8">
-								
-					<?php
-					foreach($page_vars['comments'] as $comment){ 	
-						echo '
-						<li>
-						  <div class="relative pb-8 mt-4">
-							<span class="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
-							<div class="relative flex items-start space-x-3">
-							  <div class="relative">
-								<img class="h-10 w-10 rounded-full bg-gray-400 flex items-center justify-center ring-8 ring-white" src="/assets/images/blank-avatar.png" alt="">
-
-								<span class="absolute -bottom-0.5 -right-1 bg-white rounded-tl px-0.5 py-px">
-								  <!-- Heroicon name: solid/chat-alt -->
-								  <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-									<path fill-rule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clip-rule="evenodd" />
-								  </svg>
-								</span>
-							  </div>
-							  <div class="min-w-0 flex-1">
-								<div>
-								  <div class="text-sm">
-									<a href="#" class="font-medium text-gray-900">'.htmlspecialchars($comment->get('cmt_author_name')).'</a>
-								  </div>
-								  <p class="mt-0.5 text-sm text-gray-500">'. LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York').'</p>
+								<!-- Tags -->
+								<div class="d-flex justify-content-center flex-wrap gap-2 mb-4">
+									<?php foreach ($page_vars['tags'] as $tag): ?>
+									<a href="/blog/tag/<?php echo urlencode($tag); ?>" class="badge bg-light text-dark text-decoration-none">
+										<i class="bi-tag me-1"></i><?php echo htmlspecialchars($tag); ?>
+									</a>
+									<?php endforeach; ?>
 								</div>
-								<div class="mt-2 text-sm text-gray-700">
-								  <div>'.$comment->get_sanitized_comment().'
-								  <br /><br /><button id="comment'.$comment->key.'" class="commentbutton">Reply to this comment >></button>';
+							</div>
 
-									if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
-											echo '<div id="comment'.$comment->key.'container" style="display:none;">';
+							<!-- Entry Content -->
+							<div class="entry-content">
+								<div class="mb-5">
+									<?php echo $post->get('pst_body'); ?>
+								</div>
+								
+								<?php if($page_vars['settings']->get_setting('blog_footer_text')): ?>
+								<div class="border-top pt-4 mt-5">
+									<?php echo $page_vars['settings']->get_setting('blog_footer_text'); ?>
+								</div>
+								<?php endif; ?>
+							</div>
+
+						</article>
+					</div>
+				</main>
+
+				<!-- Sidebar -->
+				<aside class="sidebar col-lg-3">
+					<div class="sidebar-widgets-wrap">
+						
+						<!-- Back to Blog -->
+						<div class="widget mb-4">
+							<div class="widget-title">
+								<h4 class="border-0 mb-0">Navigation</h4>
+							</div>
+							<div class="widget-content p-3">
+								<a href="/blog" class="btn btn-outline-primary w-100">
+									<i class="bi-arrow-left me-2"></i>Back to Blog
+								</a>
+							</div>
+						</div>
+
+						<!-- Tags Widget -->
+						<?php if (!empty($page_vars['tags'])): ?>
+						<div class="widget mb-4">
+							<div class="widget-title">
+								<h4 class="border-0 mb-0">Tags</h4>
+							</div>
+							<div class="widget-content p-3">
+								<?php foreach ($page_vars['tags'] as $tag): ?>
+									<a href="/blog/tag/<?php echo urlencode($tag); ?>" class="btn btn-outline-secondary btn-sm rounded-pill me-1 mb-1">
+										<?php echo htmlspecialchars($tag); ?>
+									</a>
+								<?php endforeach; ?>
+							</div>
+						</div>
+						<?php endif; ?>
+						
+					</div>
+				</aside>
+			</div>
+
+			<!-- Comments Section -->
+			<?php if($page_vars['settings']->get_setting('comments_active')): ?>
+			<div class="row mt-5">
+				<div class="col-lg-9">
+					
+					<!-- Add Comment Form -->
+					<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
+					<div class="card shadow-sm rounded-4 mb-5">
+						<div class="card-header bg-primary text-white rounded-top-4">
+							<h4 class="mb-0">Add Comment</h4>
+						</div>
+						<div class="card-body p-4">
+							<?php
+							$settings = Globalvars::get_instance();
+							$formwriter = $page->getFormWriter('form1');
+							$validation_rules = array();
+							$validation_rules['cmt']['required']['value'] = 'true';
+							$validation_rules['cmt']['minlength']['value'] = 20;
+							$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
+							$validation_rules['name']['required']['value'] = 'true';
+							$validation_rules['name']['minlength']['value'] = 2;
+							$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+							echo $formwriter->set_validate($validation_rules);
+
+							echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
+							?>
+
+							<div class="row g-3">
+								<div class="col-md-6">
+									<div class="form-group">
+										<label for="name" class="form-label">Name <span class="text-danger">*</span></label>
+										<?php echo $formwriter->textinput("", "name", 'form-control', 20, NULL , "",255, ""); ?>
+									</div>
+								</div>
+								<div class="col-12">
+									<div class="form-group">
+										<label for="cmt" class="form-label">Comment <span class="text-danger">*</span></label>
+										<?php echo $formwriter->textbox('', 'cmt', 'form-control', 4, 80, NULL, '', ''); ?>
+									</div>
+								</div>
+								
+								<?php if(!$page_vars['session']->get_user_id()): ?>
+								<div class="col-12">
+									<?php 
+									echo $formwriter->antispam_question_input('blog');
+									echo $formwriter->honeypot_hidden_input();
+									echo $formwriter->honeypot_hidden_input('Comment', 'comment');
+									echo $formwriter->captcha_hidden_input('blog');
+									?>
+								</div>
+								<?php endif; ?>
+								
+								<div class="col-12">
+									<div class="d-flex justify-content-end">
+										<?php echo $formwriter->new_form_button('Post Comment', 'btn btn-primary'); ?>
+									</div>
+								</div>
+							</div>
+
+							<?php echo $formwriter->end_form(true); ?>
+						</div>
+					</div>
+					<?php endif; ?>
+
+					<!-- Comments Display -->
+					<?php if($page_vars['settings']->get_setting('show_comments') && $page_vars['numcomments']): ?>
+					<div class="card shadow-sm rounded-4">
+						<div class="card-header bg-light">
+							<h4 class="mb-0">Comments (<?php echo $page_vars['numcomments']; ?>)</h4>
+						</div>
+						<div class="card-body p-0">
+							<script>
+							$(document).ready(function(){
+								$('.commentbutton').click(function(){
+									var cid = $(this).attr('id');
+									$('#' + cid + 'container').toggle(500);
+								});
+							});
+							</script>
+							
+							<?php foreach($page_vars['comments'] as $comment): ?>
+							<div class="border-bottom p-4">
+								<div class="d-flex align-items-start">
+									<img class="rounded-circle me-3" src="/includes/images/blank-avatar.png" width="50" height="50" alt="Avatar">
+									<div class="flex-grow-1">
+										<div class="d-flex justify-content-between align-items-start mb-2">
+											<div>
+												<h6 class="mb-0"><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></h6>
+												<small class="text-muted"><?php echo LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></small>
+											</div>
+										</div>
+										<div class="mb-3">
+											<?php echo $comment->get_sanitized_comment(); ?>
+										</div>
+										<button id="comment<?php echo $comment->key; ?>" class="commentbutton btn btn-outline-primary btn-sm">Reply</button>
+										
+										<!-- Reply Form -->
+										<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
+										<div id="comment<?php echo $comment->key; ?>container" style="display:none;" class="mt-3 p-3 bg-light rounded">
+											<?php
 											$settings = Globalvars::get_instance();
 											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key, $settings->get_setting('form_style'));
-	
+
 											$validation_rules = array();
 											$validation_rules['cmt']['required']['value'] = 'true';
 											$validation_rules['cmt']['minlength']['value'] = 20;
@@ -157,125 +227,98 @@
 											$validation_rules['name']['required']['value'] = 'true';
 											$validation_rules['name']['minlength']['value'] = 2;
 											$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-											echo $formwriter->set_validate($validation_rules);			
+											echo $formwriter->set_validate($validation_rules);
 
 											echo $formwriter->begin_form('form'.$comment->key, "post", $_SERVER['REQUEST_URI'], true);
 											echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
-											echo $formwriter->textinput("Your name", "name", NULL, 20, NULL , "",255, "");	
-											//echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 20, @$form_fields->usr_last_name, "" , 255, "");
-											//echo $formwriter->textinput("Email", "usr_email", NULL, 20, '', "" , 255, "");
-											echo $formwriter->textbox('Your reply', 'cmt', NULL, 3, 80, NULL, '', '');
+											?>
 											
-											if(!$page_vars['session']->get_user_id()){
-												echo $formwriter->antispam_question_input('blog');
-												echo $formwriter->honeypot_hidden_input();	
-												echo $formwriter->honeypot_hidden_input('Comment', 'comment');	
-												echo $formwriter->captcha_hidden_input('blog');
-											}
-
-											echo $formwriter->start_buttons('flex justify-end sm:col-span-6');
-											echo $formwriter->new_form_button('Comment', 'secondary');
-											echo $formwriter->end_buttons();
-											echo $formwriter->end_form(true);
-											echo '</div>';
-										}
-
-									$replies = new MultiComment(
-										array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'parent_id'=>$comment->key),
-										array('comment_id'=>'DESC'),
-										NULL,
-										NULL);	 
-									$numreplies = $replies->count_all();
-
-									if($numreplies){
-										$replies->load();
-										echo '<ul role="list" class="-mb-8">';
-										foreach($replies as $reply){ 
-											if($reply->get('cmt_comment_id_parent') == $comment->key){
-												echo '
-												
-												<li>
-												  <div class="relative pb-8 mt-4">
-													<span class="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
-													<div class="relative flex items-start space-x-3">
-													  <div class="relative">
-														<img class="h-10 w-10 rounded-full bg-gray-400 flex items-center justify-center ring-8 ring-white" src="/assets/images/blank-avatar.png" alt="">
-
-														<span class="absolute -bottom-0.5 -right-1 bg-white rounded-tl px-0.5 py-px">
-														  <!-- Heroicon name: solid/chat-alt -->
-														  <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-															<path fill-rule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clip-rule="evenodd" />
-														  </svg>
-														</span>
-													  </div>
-													  <div class="min-w-0 flex-1">
-														<div>
-														  <div class="text-sm">
-															<a href="#" class="font-medium text-gray-900">'.htmlspecialchars($reply->get('cmt_author_name')).'</a>
-														  </div>
-														  <p class="mt-0.5 text-sm text-gray-500">'. LibraryFunctions::convert_time($reply->get('cmt_created_time'), 'UTC', 'America/New_York').'</p>
-														</div>
-														<div class="mt-2 text-sm text-gray-700">
-														  <div>'.$reply->get_sanitized_comment().'</div>
-														</div>
-													  </div>
+											<div class="row g-3">
+												<div class="col-md-6">
+													<div class="form-group">
+														<label class="form-label">Your name</label>
+														<?php echo $formwriter->textinput("", "name", 'form-control', 20, NULL , "",255, ""); ?>
 													</div>
-												  </div>
-												</li>';
-											}
-										}
-										echo '</ul>';
-									}
-									
-								  echo '</div>
+												</div>
+												<div class="col-12">
+													<div class="form-group">
+														<label class="form-label">Your reply</label>
+														<?php echo $formwriter->textbox('', 'cmt', 'form-control', 3, 80, NULL, '', ''); ?>
+													</div>
+												</div>
+												
+												<?php if(!$page_vars['session']->get_user_id()): ?>
+												<div class="col-12">
+													<?php 
+													echo $formwriter->antispam_question_input('blog');
+													echo $formwriter->honeypot_hidden_input();
+													echo $formwriter->honeypot_hidden_input('Comment', 'comment');
+													echo $formwriter->captcha_hidden_input('blog');
+													?>
+												</div>
+												<?php endif; ?>
+												
+												<div class="col-12">
+													<div class="d-flex justify-content-end">
+														<?php echo $formwriter->new_form_button('Reply', 'btn btn-primary btn-sm'); ?>
+													</div>
+												</div>
+											</div>
+
+											<?php echo $formwriter->end_form(true); ?>
+										</div>
+										<?php endif; ?>
+
+										<!-- Replies -->
+										<?php
+										$replies = new MultiComment(
+											array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'parent_id'=>$comment->key),
+											array('comment_id'=>'DESC'),
+											NULL,
+											NULL
+										);	 
+										$numreplies = $replies->count_all();
+
+										if($numreplies):
+											$replies->load();
+											?>
+											<div class="mt-3">
+												<?php foreach($replies as $reply): ?>
+													<?php if($reply->get('cmt_comment_id_parent') == $comment->key): ?>
+													<div class="d-flex align-items-start mt-3 ms-4">
+														<img class="rounded-circle me-3" src="/includes/images/blank-avatar.png" width="40" height="40" alt="Avatar">
+														<div class="flex-grow-1">
+															<div class="bg-light p-3 rounded">
+																<div class="d-flex justify-content-between align-items-start mb-1">
+																	<h6 class="mb-0 small"><?php echo htmlspecialchars($reply->get('cmt_author_name')); ?></h6>
+																	<small class="text-muted"><?php echo LibraryFunctions::convert_time($reply->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></small>
+																</div>
+																<div class="small">
+																	<?php echo $reply->get_sanitized_comment(); ?>
+																</div>
+															</div>
+														</div>
+													</div>
+													<?php endif; ?>
+												<?php endforeach; ?>
+											</div>
+										<?php endif; ?>
+									</div>
 								</div>
-							  </div>
 							</div>
-						  </div>
-						</li>
-
-						<!--
-						<li>
-						  <div class="relative pb-8">
-							<span class="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
-							<div class="relative flex items-start space-x-3">
-							  <div>
-								<div class="relative px-1">
-								  <div class="h-8 w-8 bg-gray-100 rounded-full ring-8 ring-white flex items-center justify-center">
-								  
-									<svg class="h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-									  <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clip-rule="evenodd" />
-									</svg>
-								  </div>
-								</div>
-							  </div>
-							  <div class="min-w-0 flex-1 py-1.5">
-								<div class="text-sm text-gray-500">
-								  <a href="#" class="font-medium text-gray-900">Hilary Mahy</a>
-								  assigned
-								  <a href="#" class="font-medium text-gray-900">Kristin Watson</a>
-								  <span class="whitespace-nowrap">2d ago</span>
-								</div>
-							  </div>
-							</div>
-						  </div>
-						</li>-->
-						';
-					}
-
-					?>
-
-					</ul><!-- end container -->
+							<?php endforeach; ?>
+						</div>
+					</div>
+					<?php endif; ?>
 				</div>
-				<!-- end Comments section -->
-<?php				
-			}
-		}
-	}
-	?>
+			</div>
+			<?php endif; ?>
+
+		</div>
 	</div>
-	<?php
-	echo PublicPage::EndPanel();
-	echo PublicPage::EndPage();
-	$page->public_footer(array('track'=>TRUE));
+</section>
+
+<?php
+echo PublicPage::EndPage();
+$page->public_footer(array('track'=>TRUE));
 ?>
