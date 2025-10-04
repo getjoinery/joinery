@@ -27,8 +27,8 @@ function controld_uninstall() {
             $q->execute();
         }
         
-        // Remove plugin-specific settings
-        $sql = "DELETE FROM stg_settings WHERE stg_name = 'controld_key'";
+        // Remove all plugin settings using the naming convention
+        $sql = "DELETE FROM stg_settings WHERE stg_name LIKE 'controld_%'";
         $q = $dblink->prepare($sql);
         $q->execute();
         
