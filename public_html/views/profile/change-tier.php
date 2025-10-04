@@ -1,22 +1,22 @@
 <?php
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('change_subscription_logic.php', 'logic'));
+require_once(PathHelper::getThemeFilePath('change_tier_logic.php', 'logic'));
 
 // Process logic - all data preparation happens in the logic file
-$page_vars = process_logic(change_subscription_logic($_GET, $_POST));
+$page_vars = process_logic(change_tier_logic($_GET, $_POST));
 
 $page = new PublicPage();
 $hoptions = array(
-    'title' => 'Manage Your Subscription',
+    'title' => 'Change Tier',
     'breadcrumbs' => array(
-        'Change Subscription' => ''
+        'Change Tier' => ''
     ),
 );
 $page->public_header($hoptions, NULL);
 
-$formwriter = $page->getFormWriter('subscription_form');
+$formwriter = $page->getFormWriter('tier_form');
 
-echo PublicPage::BeginPage('Manage Your Subscription', $hoptions);
+echo PublicPage::BeginPage('Change Tier', $hoptions);
 
 // Display messages
 if (isset($page_vars['success_message'])): ?>
