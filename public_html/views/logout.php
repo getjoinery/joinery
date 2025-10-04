@@ -1,5 +1,5 @@
 <?php
-	
+	// PathHelper is always available - never require it
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
@@ -12,42 +12,52 @@
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Log Out',
 		'header_only' => true,
-		),
-	NULL);
+	), NULL);
+?>
 
-	//echo PublicPage::BeginPage('You are now logged out');
-		
-	//echo PublicPage::BeginPanel();
-	?>
+	<!-- Content
+	============================================= -->
+	<section id="content">
+		<div class="content-wrap py-0">
 
-    <main class="main" id="top">
-      <div class="container" data-layout="container">
-        <div class="row flex-center min-vh-100 py-6">
-          <div class="col-sm-10 col-md-8 col-lg-6 col-xl-5 col-xxl-4">
-		  		<a class="d-flex flex-center mb-4" href="/">
-				<?php
-		  		if($settings->get_setting('logo_link')){
-					echo '<img class="me-2" src="'.$settings->get_setting('logo_link').'" alt="" width="40" />';
-				}
-				?>
-				<span class="font-sans-serif text-primary fw-bolder fs-4 d-inline-block"><?php echo $settings->get_setting('site_name'); ?></span>
-				</a>
-            <div class="card">
-              <div class="card-body p-4 p-sm-5">
-                <div class="text-center"><!--<img class="d-block mx-auto mb-4" src="../../../assets/img/icons/spot-illustrations/45.png" alt="shield" width="100" />-->
-                  <h4>Logged out.</h4>
-                  <p>You are <br />now successfully signed out.</p><a class="btn btn-primary btn-sm mt-3" href="/login"><span class="fas fa-chevron-left me-1" data-fa-transform="shrink-4 down-1"></span>Return to Login</a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </main>
+			<div class="section dark p-0 m-0 h-100 position-absolute"></div>
 
-	<?php
-	//echo PublicPage::EndPanel();
-	//echo PublicPage::EndPage();
-	$page->public_footer($foptions=array('track'=>TRUE, 'header_only' => true));
+			<div class="section bg-transparent min-vh-100 p-0 m-0 d-flex">
+				<div class="vertical-middle">
+					<div class="container py-5">
 
+						<div class="text-center">
+							<a href="/">
+								<?php if($settings->get_setting('logo_link')){ ?>
+									<img src="<?php echo $settings->get_setting('logo_link'); ?>" alt="<?php echo $settings->get_setting('site_name'); ?>" style="height: 100px;">
+								<?php } else { ?>
+									<h2><?php echo $settings->get_setting('site_name'); ?></h2>
+								<?php } ?>
+							</a>
+						</div>
+
+						<div class="card mx-auto rounded-0 border-0" style="max-width: 400px;">
+							<div class="card-body text-center" style="padding: 40px;">
+								<i class="bi-check-circle" style="font-size: 48px; color: #28a745;"></i>
+								<h3 class="mt-3">Logged Out</h3>
+								<p class="text-muted mb-4">You have been successfully signed out.</p>
+								<a class="button button-3d button-black m-0" href="/login">
+									<i class="bi-chevron-left me-1"></i> Return to Login
+								</a>
+							</div>
+						</div>
+
+						<div class="text-center text-muted mt-3">
+							<small>Copyrights &copy; All Rights Reserved by <?php echo $settings->get_setting('site_name'); ?>.</small>
+						</div>
+
+					</div>
+				</div>
+			</div>
+
+		</div>
+	</section><!-- #content end -->
+
+<?php
+	$page->public_footer($foptions=array('track'=>TRUE, 'no_wrapper_close'=>true));
 ?>

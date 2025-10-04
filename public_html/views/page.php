@@ -1,8 +1,15 @@
 <?php
+	// PathHelper is always available - never require it
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('page_logic.php', 'logic'));
 
-	$page_vars = process_logic(page_logic($_GET, $_POST, $page, $params));
+	$page_vars = page_logic($_GET, $_POST, $page, $params);
+	// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 	$page = $page_vars['page'];
 
 	$paget = new PublicPage();
@@ -10,12 +17,49 @@
 		'is_valid_page' => $is_valid_page,
 		'title' => $page->get('pag_title')
 	));
-	echo PublicPage::BeginPage($page->get('pag_title'));
-	echo PublicPage::BeginPanel();
-	
-	echo '<div>'. $page->get_filled_content() . '</div>';
-	echo PublicPage::EndPanel();
-	echo PublicPage::EndPage();
-	$paget->public_footer($foptions=array('track'=>TRUE));
 ?>
 
+	<!-- Page Title
+	============================================= -->
+	<section class="page-title bg-transparent">
+		<div class="container">
+			<div class="page-title-row">
+
+				<div class="page-title-content">
+					<h1><?php echo htmlspecialchars($page->get('pag_title')); ?></h1>
+				</div>
+
+				<nav aria-label="breadcrumb">
+					<ol class="breadcrumb">
+						<li class="breadcrumb-item"><a href="/">Home</a></li>
+						<li class="breadcrumb-item active" aria-current="page"><?php echo htmlspecialchars($page->get('pag_title')); ?></li>
+					</ol>
+				</nav>
+
+			</div>
+		</div>
+	</section><!-- .page-title end -->
+
+	<!-- Content
+	============================================= -->
+	<section id="content">
+		<div class="content-wrap">
+			<div class="container">
+
+				<div class="row gx-5">
+					<div class="col-lg-12">
+						<div class="bg-white rounded-4 shadow-sm p-4">
+							<div class="entry-content">
+								<?php echo $page->get_filled_content(); ?>
+							</div>
+						</div>
+					</div>
+				</div>
+
+			</div>
+		</div>
+	</section><!-- #content end -->
+
+<?php
+	$paget->public_footer($foptions=array('track'=>TRUE));
+?>
