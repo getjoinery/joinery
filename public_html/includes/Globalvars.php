@@ -81,9 +81,13 @@ class Globalvars {
 			}
 		}	
 		
-		if(!$found && !$fail_silently){
-			throw new Exception('Setting '.$setting.' does not exist.');
-			exit;	
+		if(!$found){
+			if(!$fail_silently){
+				// Log this for monitoring/debugging
+				error_log("Settings: Returning empty default for missing setting '{$setting}'");
+			}
+			// Return empty string (no caching)
+			return '';
 		}
 		else{
 			return NULL;

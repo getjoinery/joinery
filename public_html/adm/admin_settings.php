@@ -49,17 +49,47 @@
 			NULL,
 			NULL,
 			NULL);
-		$user_settings->load();		 
+		$user_settings->load();
 
 		foreach($user_settings as $user_setting) {
 			if(isset($_POST[$user_setting->get('stg_name')])){
 				$user_setting->set('stg_value', $_POST[$user_setting->get('stg_name')]);
-				$user_setting->set('stg_update_time', 'NOW()'); 
+				$user_setting->set('stg_update_time', 'NOW()');
 				$user_setting->set('stg_usr_user_id', $session->get_user_id());
 				$user_setting->prepare();
 				$user_setting->save();
 			}
-		}				
+		}
+
+		// Track which settings we've processed
+		$processed_settings = array();
+		foreach($user_settings as $user_setting) {
+			$processed_settings[] = $user_setting->get('stg_name');
+		}
+
+		// Auto-create any missing settings that were submitted
+		foreach($_POST as $setting_name => $setting_value) {
+			// Skip if already processed (already exists in database)
+			if(in_array($setting_name, $processed_settings)) continue;
+
+			// Create new setting - only happens on explicit save
+			error_log("Settings: Creating new setting '{$setting_name}' with value '{$setting_value}'");
+
+			$new_setting = new Setting(NULL);
+			$new_setting->set('stg_name', $setting_name);
+			$new_setting->set('stg_value', $setting_value);
+			$new_setting->set('stg_usr_user_id', $session->get_user_id());
+			$new_setting->set('stg_group_name', 'general');
+
+			try {
+				$new_setting->prepare();
+				$new_setting->save();
+			} catch(Exception $e) {
+				// Setting might already exist (race condition) or validation error
+				error_log("Settings: Failed to create '{$setting_name}': " . $e->getMessage());
+			}
+		}
+
 		LibraryFunctions::redirect('/admin/admin_settings');
 	}
 
@@ -76,8 +106,7 @@
 	)
 	);	
 
-	$pageoptions['altlinks'] = array('New Setting'=>'/admin/admin_setting_edit');
-	$pageoptions['altlinks'] += array('Public Menu'=>'/admin/admin_public_menu');
+	$pageoptions['altlinks'] = array('Public Menu'=>'/admin/admin_public_menu');
 	$pageoptions['altlinks'] += array('Admin Menu'=>'/admin/admin_admin_menu'); 
 	$pageoptions['altlinks'] += array('API Keys'=>'/admin/admin_api_keys'); 
 	$pageoptions['altlinks'] += array('Upgrade'=>'/utils/upgrade');
@@ -85,18 +114,6 @@
 	if($settings->get_setting('upgrade_server_active')){
 		$pageoptions['altlinks'] += array('Publish Upgrade'=>'/utils/publish_upgrade');
 	}
-	
-	//GET ALL OF THE PLUGIN SETTINGS PAGES
-	$plugins = LibraryFunctions::list_plugins();
-	foreach($plugins as $plugin){
-		$script_dir = PathHelper::getAbsolutePath('/plugins/'.$plugin.'/admin/');
-		if(is_dir($script_dir)){
-			$settings_files = LibraryFunctions::getFilesWithSubstring($script_dir, 'admin_settings');
-			if(!empty($settings_files)){
-				$pageoptions['altlinks'] += array($plugin.' settings' => '/plugins/'.$plugin.'/admin/'.$settings_files[0]);
-			}
-		}
-	}	
 
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
@@ -1012,6 +1029,20 @@
 		$upgrade_source = 'https://getjoinery.com';
 	}
 	echo $formwriter->textinput("Upgrade source", "upgrade_source", '', 20, $upgrade_source, "" , 255, "");
+
+	echo '<hr><h2>Plugin Settings</h2>';
+
+	// Scan and include plugin settings forms directly in this page
+	$plugins = LibraryFunctions::list_plugins();
+	foreach($plugins as $plugin) {
+		$settings_form = PathHelper::getIncludePath("plugins/$plugin/settings_form.php");
+		if(file_exists($settings_form)) {
+			echo "<div class='plugin-settings-section'>";
+			echo "<h4>" . ucfirst($plugin) . " Plugin</h4>";
+			include($settings_form);
+			echo "</div>";
+		}
+	}
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Submit');
