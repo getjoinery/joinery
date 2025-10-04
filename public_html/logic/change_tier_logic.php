@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function change_subscription_logic($get, $post) {
+function change_tier_logic($get, $post) {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
@@ -19,7 +19,7 @@ function change_subscription_logic($get, $post) {
     // Check if user is logged in
     if (!$session->is_logged_in()) {
         // Redirect to login with return URL
-        header('Location: /login?return=' . urlencode('/change-subscription'));
+        header('Location: /login?return=' . urlencode('/profile/change-tier'));
         exit;
     }
 
