@@ -991,15 +991,21 @@ class RouteHelper {
         }
         error_log("Initial \$is_valid_page: " . ($is_valid_page ? 'true' : 'false'));
         
-        // Handle .php extension hiding and monitoring
+        // Handle .php extension - strict 404 policy
         error_log("Checking for .php extension in: " . var_export($request_path, true));
         if (substr($request_path, -4) === '.php') {
-            // Log warning for monitoring missed links
-            error_log("PURE PHP ROUTING WARNING: Request for .php URL detected: " . $request_path . " - This link should be updated to clean URL format");
-            
             $clean_path = substr($request_path, 0, -4);
-            error_log("Redirecting to clean path: " . $clean_path);
-            header("Location: /$clean_path", true, 301);
+            // Log error for monitoring
+            error_log("ROUTING ERROR: .php extension in URL - returning 404: {$request_path} (should be: {$clean_path})");
+
+            // Return 404 with helpful error message
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo "404 Not Found\n\n";
+            echo "URLs should not include .php extensions.\n\n";
+            echo "Requested: {$request_path}\n";
+            echo "Expected:  {$clean_path}\n\n";
+            echo "Please update all links to use clean URLs without file extensions.";
             exit();
         }
         
