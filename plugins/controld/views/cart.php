@@ -108,7 +108,7 @@ Contact Area
 							echo $formwriter->textinput("Email", "billing_email", NULL, 30, $cart->billing_user['billing_email'], "", 255, ""); 
 							if(!$session->get_user_id()){
 								echo $formwriter->passwordinput("Create Password", "password", '', 20, "" , "", 255,"");
-							
+
 								echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "", "left", NULL, 1, "");
 							}
 							echo '</div>';
