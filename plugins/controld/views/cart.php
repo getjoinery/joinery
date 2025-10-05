@@ -96,8 +96,8 @@ Contact Area
 							</div>';
 					}
 					else{							
-						if($cart->is_billing_user_complete()){	
-							echo '<p>'.$cart->billing_user['first_name'] . ' ' . $cart->billing_user['last_name'] . ' ('. $cart->billing_user['email'].')</p>';
+						if($cart->is_billing_user_complete()){
+							echo '<p>'.$cart->billing_user['billing_first_name'] . ' ' . $cart->billing_user['billing_last_name'] . ' ('. $cart->billing_user['billing_email'].')</p>';
 							$formwriter = $page->getFormWriter('form_billing_user');
 							
 							//echo $formwriter->start_buttons();
@@ -159,9 +159,9 @@ Contact Area
 							
 							echo '<div id="new_billing">';
 
-							echo $formwriter->textinput("First Name", "billing_first_name", NULL, 30, $cart->billing_user['first_name'], "", 255, "");
-							echo $formwriter->textinput("Last Name", "billing_last_name", NULL, 30, $cart->billing_user['last_name'], "", 255, "");
-							echo $formwriter->textinput("Email", "billing_email", NULL, 30, $cart->billing_user['email'], "", 255, ""); 
+							echo $formwriter->textinput("First Name", "billing_first_name", NULL, 30, $cart->billing_user['billing_first_name'], "", 255, "");
+							echo $formwriter->textinput("Last Name", "billing_last_name", NULL, 30, $cart->billing_user['billing_last_name'], "", 255, "");
+							echo $formwriter->textinput("Email", "billing_email", NULL, 30, $cart->billing_user['billing_email'], "", 255, ""); 
 							if(!$session->get_user_id()){
 								echo $formwriter->passwordinput("Create Password", "password", '', 20, "" , "", 255,"");
 							

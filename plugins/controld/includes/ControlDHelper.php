@@ -1017,15 +1017,24 @@ class ControlDHelper{
 
 	//DEBUG CAN BE 'debug_nosend' or 'debug_send' DEPENDING ON WHETHER YOU WANT TO SEND THE REQUEST OR JUST SEE IT
 	public function __construct($debug=0) {
-		
+
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
-		$this->api_key = $settings->get_setting('controld_key');
-		if(!$this->api_key){
-			throw new SystemDisplayablePermanentError("Controld api keys are not present.");
-			exit();			
+
+		// Check test mode (either session variable or debug setting)
+		$this->test_mode = (isset($_SESSION['controld_test_mode']) && $_SESSION['controld_test_mode'])
+			|| $settings->get_setting('debug');
+
+		if($this->test_mode) {
+			$this->api_key = 'TEST_MODE_KEY';
+		} else {
+			$this->api_key = $settings->get_setting('controld_key');
+			if(!$this->api_key){
+				throw new SystemDisplayablePermanentError("Controld api keys are not present.");
+				exit();
+			}
 		}
-		
+
 		if($debug){
 			$this->debug = $debug;
 		}
@@ -1513,6 +1522,11 @@ class ControlDHelper{
 	
 	
 	private function postRequest($url, $data){
+		// Check test mode
+		if($this->test_mode) {
+			return $this->getMockResponse('POST', $url, $data);
+		}
+
 		$access_token=$this->api_key;
 		$curl = curl_init();
 		
@@ -1548,6 +1562,11 @@ class ControlDHelper{
 	
 	
 	private function putRequest($url, $data){
+		// Check test mode
+		if($this->test_mode) {
+			return $this->getMockResponse('PUT', $url, $data);
+		}
+
 		$access_token=$this->api_key;
 		$curl = curl_init();
 		
@@ -1582,7 +1601,12 @@ class ControlDHelper{
 	}
 	
 	private function getRequest($url){
-		$access_token = $this->api_key;	
+		// Check test mode
+		if($this->test_mode) {
+			return $this->getMockResponse('GET', $url);
+		}
+
+		$access_token = $this->api_key;
 		$curl=curl_init();
 		curl_setopt_array($curl, array(
 		  CURLOPT_URL => $url,
@@ -1611,7 +1635,12 @@ class ControlDHelper{
 	}
 	
 	private function deleteRequest($url){
-		$access_token = $this->api_key;	
+		// Check test mode
+		if($this->test_mode) {
+			return $this->getMockResponse('DELETE', $url);
+		}
+
+		$access_token = $this->api_key;
 		$curl=curl_init();
 		curl_setopt_array($curl, array(
 		  CURLOPT_URL => $url,
@@ -1638,6 +1667,84 @@ class ControlDHelper{
 			//echo 'Error: '. $result['error']['message'];
 		}			
 	}
-	
-	
+
+
+	/**
+	 * Check if test mode is active
+	 * @return boolean
+	 */
+	public function isTestMode() {
+		return $this->test_mode;
+	}
+
+	/**
+	 * Get the test request log
+	 * @return array
+	 */
+	public function getTestLog() {
+		return isset($_SESSION['controld_test_log']) ? $_SESSION['controld_test_log'] : array();
+	}
+
+	/**
+	 * Clear the test request log
+	 */
+	public function clearTestLog() {
+		$_SESSION['controld_test_log'] = array();
+	}
+
+	/**
+	 * Generate appropriate mock response based on endpoint
+	 * @param string $method HTTP method (GET, POST, PUT, DELETE)
+	 * @param string $url The API endpoint URL
+	 * @param mixed $data Request data (for POST/PUT)
+	 * @return array Mock response
+	 */
+	private function getMockResponse($method, $url, $data = null) {
+		// Log the request
+		if (!isset($_SESSION['controld_test_log'])) {
+			$_SESSION['controld_test_log'] = array();
+		}
+
+		// Profile creation
+		if (strpos($url, '/profiles') !== false && $method === 'POST' && strpos($url, '/profiles/') === false) {
+			$unique_id = uniqid();
+			$response = ['success' => true, 'body' => ['profiles' => [['PK' => 'TEST_PROFILE_'.$unique_id]]]];
+		}
+		// Device creation
+		elseif (strpos($url, '/devices') !== false && $method === 'POST' && strpos($url, '/devices/') === false) {
+			$unique_id = uniqid();
+			$response = ['success' => true, 'body' => [
+				'PK' => 'TEST_DEVICE_'.$unique_id,
+				'resolvers' => ['uid' => 'TEST_RESOLVER_'.$unique_id]
+			]];
+		}
+		// Device listing (single device)
+		elseif (preg_match('/\/devices\/[^\/]+$/', $url) && $method === 'GET') {
+			$response = ['success' => true, 'body' => ['devices' => [['status' => 1]]]];
+		}
+		// Schedule creation
+		elseif (strpos($url, '/schedules') !== false && $method === 'POST') {
+			$response = ['success' => true, 'body' => ['PK' => 'TEST_SCHEDULE_'.uniqid()]];
+		}
+		// Rule creation
+		elseif (strpos($url, '/rules') !== false && $method === 'POST') {
+			$response = ['success' => true, 'body' => ['PK' => 'TEST_RULE_'.uniqid()]];
+		}
+		// Default for all other operations
+		else {
+			$response = ['success' => true, 'body' => []];
+		}
+
+		// Log the request and response
+		$_SESSION['controld_test_log'][] = array(
+			'method' => $method,
+			'endpoint' => $url,
+			'data' => $data,
+			'timestamp' => time(),
+			'response' => $response
+		);
+
+		return $response;
+	}
+
 }
