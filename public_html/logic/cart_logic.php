@@ -86,6 +86,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	else if($_POST['billing_email']){
 		// Process billing form submission
+		// Validate required fields for logged-out users
+		if(!$session->get_user_id()){
+			if(empty($_POST['privacy'])){
+				throw new SystemDisplayableError('You must agree to the terms of use and privacy policy.');
+			}
+			if(empty($_POST['password'])){
+				throw new SystemDisplayableError('Password is required.');
+			}
+		}
 		$cart->determine_billing_user($_POST, false);
 		return LogicResult::redirect('/cart');
 	}

@@ -124,7 +124,7 @@ $page_vars = $page_vars->data;
 						<div class="col-lg-5 order-lg-1">
 							
 							<!-- Billing Information -->
-							<?php if($cart->billing_user): ?>
+							<?php if($cart->is_billing_user_complete()): ?>
 							<div class="card shadow-sm rounded-4 mb-4">
 								<div class="card-header bg-light">
 									<h4 class="mb-0 h5">Billing Information</h4>
