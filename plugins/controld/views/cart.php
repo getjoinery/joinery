@@ -22,69 +22,13 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	?>
 <!--==============================
-Contact Area   
+Contact Area
 ==============================-->
     <div class="space">
         <div class="container">
-            <div class="row gy-4 flex-row-reverse">
-                <div class="col-lg-6 col-xl-7 order-2">
-                    <div class="contact-item-wrap">
+            <div class="row gy-4">
+                <div class="col-lg-8 order-1">
 
-	
-					<?php
-					$settings = Globalvars::get_instance();
-					if($settings->get_setting('coupons_active')){
-						echo '<h4>Coupons</h4>';
-
-						//DEBUG LIST ALL COUPONS
-						if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
-							echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
-							foreach($page_vars['all_coupons'] as $coupon){
-								$formwriter = $page->getFormWriter('form_test_coupon');
-								echo $formwriter->begin_form("mt-6", "get", '/cart');
-								echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
-								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary', '', 'th-btn');
-								echo $formwriter->end_form();
-							}
-							echo '</div>';
-						}
-
-						
-						$formwriter = $page->getFormWriter('form_coupon');
-						
-						echo $formwriter->begin_form("mt-6", "get", '/cart');
-						echo '<div style="display: flex; align-items: center;">';
-						echo $formwriter->textinput('Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
-						
-						if($page_vars['coupon_error']){
-							echo '<p>'.$page_vars['coupon_error'].'</p>';
-						}
-						//echo $formwriter->start_buttons();
-						echo $formwriter->new_form_button('Add', 'secondary', 'standard', 'th-btn ms-3');
-						//echo $formwriter->end_buttons();
-						echo $formwriter->end_form();
-						echo '</div>';
-
-						foreach($cart->coupon_codes as $coupon_code){
-							$coupon_code_obj = CouponCode::GetByColumn('ccd_code', $coupon_code);
-								?>
-						
-							<div class="media-body">
-								<span class="contact-item_text">Coupon applied: <?php echo $coupon_code . ' ('.$coupon_code_obj->get_readable_discount(). ' discount ) <a href="/cart?rc='.$coupon_code.'">remove</a>'; ?></span>
-							</div>
-								
-								
-								<?php
-							}			
-					}
-					
-					if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
-						echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
-					}
-					?>
-					</div>
-					<br>
-					 
 					<div class="contact-item-wrap">
 						<h4>Billing User</h4>
 					
@@ -194,10 +138,10 @@ Contact Area
 					}								
 
 					?>
-                    <p class="form-messages mb-0 mt-3"></p>			
-					
+                    <p class="form-messages mb-0 mt-3"></p>
+
                 </div>
-                <div class="col-lg-6 col-xl-5 order-1">
+                <div class="col-lg-4 order-2">
                     <div class="contact-item-wrap">
                         <div class="title-area mt-n2 mb-40">
 							<h4>Cart</h4>
@@ -253,13 +197,69 @@ Contact Area
                      
 
                         <div class="contact-item">
-                            
+
                             <div class="media-body">
                                 <span class="contact-item_text">Total
                                     <?php echo $currency_symbol; ?><?php echo  number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></span>
                             </div>
                         </div>
-                    </div>
+                        </div><!-- Close title-area -->
+                    </div><!-- Close contact-item-wrap -->
+
+					<!-- Coupons Section -->
+					<?php
+					$settings = Globalvars::get_instance();
+					if($settings->get_setting('coupons_active')){
+					?>
+					<div class="contact-item-wrap mt-4">
+						<h4>Coupons</h4>
+
+						<?php
+						//DEBUG LIST ALL COUPONS
+						if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+							echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
+							foreach($page_vars['all_coupons'] as $coupon){
+								$formwriter = $page->getFormWriter('form_test_coupon');
+								echo $formwriter->begin_form("mt-6", "get", '/cart');
+								echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
+								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary', '', 'th-btn');
+								echo $formwriter->end_form();
+							}
+							echo '</div>';
+						}
+
+
+						$formwriter = $page->getFormWriter('form_coupon');
+
+						echo $formwriter->begin_form("mt-6", "get", '/cart');
+						echo '<div style="display: flex; align-items: center;">';
+						echo $formwriter->textinput('Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
+
+						if($page_vars['coupon_error']){
+							echo '<p>'.$page_vars['coupon_error'].'</p>';
+						}
+						echo $formwriter->new_form_button('Add', 'secondary', 'standard', 'th-btn ms-3');
+						echo $formwriter->end_form();
+						echo '</div>';
+
+						foreach($cart->coupon_codes as $coupon_code){
+							$coupon_code_obj = CouponCode::GetByColumn('ccd_code', $coupon_code);
+						?>
+						<div class="media-body">
+							<span class="contact-item_text">Coupon applied: <?php echo $coupon_code . ' ('.$coupon_code_obj->get_readable_discount(). ' discount ) <a href="/cart?rc='.$coupon_code.'">remove</a>'; ?></span>
+						</div>
+						<?php
+						}
+						?>
+					</div>
+					<?php
+					}
+
+					if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+						echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
+					}
+					?>
+
                 </div>
             </div>
         </div>
