@@ -31,10 +31,11 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                 console.log('Options:', this.options);
             }
 
-            // Validation options
-            this.errorElement = options.errorElement || 'label';
-            this.errorClass = options.errorClass || 'error';
-            this.validClass = options.validClass || 'valid';
+            // Validation options - use Bootstrap's standard classes
+            this.errorElement = options.errorElement || 'div';
+            this.errorClass = options.errorClass || 'is-invalid';
+            this.validClass = options.validClass || 'is-valid';
+            this.errorLabelClass = options.errorLabelClass || 'invalid-feedback';
             this.errorPlacement = options.errorPlacement;
             this.highlight = options.highlight;
             this.unhighlight = options.unhighlight;
@@ -49,7 +50,7 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             this.form.setAttribute('novalidate', 'novalidate');
 
             // Submit handler
-            this.form.addEventListener('submit', (e) => {
+            this.form.addEventListener('submit', async (e) => {
                 if (this.debug) {
                     console.log('%c=== FORM SUBMIT ATTEMPT ===', 'color: red; font-weight: bold');
                 }
@@ -57,7 +58,7 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                 e.preventDefault();
                 e.stopPropagation();
 
-                const isValid = this.validateForm();
+                const isValid = await this.validateForm();
 
                 if (this.debug) {
                     console.log(`Form validation result: ${isValid ? 'VALID' : 'INVALID'}`);
@@ -113,18 +114,18 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                 // Add event listeners
                 fields.forEach(field => {
                     if (field.type === 'radio' || field.type === 'checkbox') {
-                        field.addEventListener('change', () => {
+                        field.addEventListener('change', async () => {
                             if (this.debug) console.log(`Change event: ${field.name}`);
-                            this.validateField(fieldName);
+                            await this.validateField(fieldName);
                         });
                     } else {
-                        field.addEventListener('blur', () => {
+                        field.addEventListener('blur', async () => {
                             if (this.debug) console.log(`Blur event: ${field.name}`);
-                            this.validateField(fieldName);
+                            await this.validateField(fieldName);
                         });
-                        field.addEventListener('change', () => {
+                        field.addEventListener('change', async () => {
                             if (this.debug) console.log(`Change event: ${field.name}`);
-                            this.validateField(fieldName);
+                            await this.validateField(fieldName);
                         });
                     }
                 });
@@ -146,18 +147,19 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             return fields;
         }
 
-        validateForm() {
+        async validateForm() {
             let isValid = true;
 
             if (this.debug) {
                 console.log('=== Validating entire form ===');
             }
 
-            Object.keys(this.rules).forEach(fieldName => {
-                if (!this.validateField(fieldName)) {
+            for (const fieldName of Object.keys(this.rules)) {
+                const fieldValid = await this.validateField(fieldName);
+                if (!fieldValid) {
                     isValid = false;
                 }
-            });
+            }
 
             if (this.debug) {
                 console.log(`Form is ${isValid ? 'VALID' : 'INVALID'}`);
@@ -166,7 +168,7 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             return isValid;
         }
 
-        validateField(fieldName) {
+        async validateField(fieldName) {
             const cleanName = fieldName.replace(/['"]/g, '');
             const rules = this.rules[fieldName];
 
@@ -209,7 +211,7 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                             : ruleParam;
 
                 // Call validator with validator instance as context
-                const result = validator.call(this, value, fields[0], param);
+                const result = await validator.call(this, value, fields[0], param);
 
                 if (this.debug) {
                     console.log(`Rule ${ruleName}: param=${param}, result=${result}`);
@@ -304,10 +306,9 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
             // Create error element with a unique identifier
             const error = document.createElement(this.errorElement);
-            error.className = this.errorClass + ' joinery-error-label';
+            error.className = this.errorLabelClass + ' joinery-error-label';
             error.setAttribute('data-field', field.name);
             error.textContent = message;
-            error.style.cssText = 'display: block; color: #dc3545; margin-top: 0.25rem; font-size: 0.875rem;';
 
             if (this.debug) {
                 console.log(`Inserting error label for ${field.name}`);
@@ -494,6 +495,76 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             if (!value) return true;
             // Validate date format YYYY-MM-DD
             return /^\d{4}-\d{2}-\d{2}$/.test(value);
+        },
+
+        remote: async function(value, element, param) {
+            // AJAX validation - returns promise
+            if (!value) return true;
+
+            // param can be a URL string or an object with url and data
+            let parsedParam = param;
+            if (typeof param === 'string') {
+                try {
+                    parsedParam = JSON.parse(param);
+                } catch (e) {
+                    // Not JSON, treat as URL string
+                    parsedParam = param;
+                }
+            }
+
+            const url = typeof parsedParam === 'string' ? parsedParam : parsedParam.url;
+            const method = (typeof parsedParam === 'object' && parsedParam.method) ? parsedParam.method : 'GET';
+            const extraData = (typeof parsedParam === 'object' && parsedParam.data) ? parsedParam.data : {};
+            const dataFieldName = (typeof parsedParam === 'object' && parsedParam.dataFieldName) ? parsedParam.dataFieldName : element.name;
+
+            // Build query data
+            const data = { ...extraData };
+            data[dataFieldName] = value;
+
+            if (this.debug) {
+                console.log(`[Remote validation] URL: ${url}, Field: ${dataFieldName}, Value: ${value}`);
+                console.log(`[Remote validation] Data being sent:`, data);
+            }
+
+            try {
+                let response;
+                if (method.toUpperCase() === 'GET') {
+                    // GET request - append to URL
+                    const queryString = new URLSearchParams(data).toString();
+                    const fullUrl = url + (url.includes('?') ? '&' : '?') + queryString;
+
+                    if (this.debug) {
+                        console.log(`[Remote validation] Full URL: ${fullUrl}`);
+                    }
+
+                    response = await fetch(fullUrl, {
+                        method: 'GET',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    });
+                } else {
+                    // POST request
+                    response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: new URLSearchParams(data)
+                    });
+                }
+
+                const result = await response.text();
+
+                if (this.debug) {
+                    console.log(`[Remote validation] Server response: "${result}"`);
+                }
+
+                // jQuery validation returns 'true' or 'false' as strings, or boolean true
+                return result === 'true' || result === true || result === '1';
+            } catch (e) {
+                console.error('Remote validation error:', e);
+                return true; // Assume valid if request fails (fail gracefully)
+            }
         }
     };
 
@@ -510,7 +581,8 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
         max: "Please enter a value less than or equal to {0}.",
         equalTo: "Please enter the same value again.",
         time: "Please enter a valid time (e.g., 14:30 or 2:30 PM).",
-        date: "Please enter a valid date in YYYY-MM-DD format."
+        date: "Please enter a valid date in YYYY-MM-DD format.",
+        remote: "Please fix this field."
     };
 
     // Add custom validators
