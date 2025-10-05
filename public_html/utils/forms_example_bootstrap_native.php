@@ -56,9 +56,16 @@ $validation_rules['text_required']['required']['value'] = 'true';
 $validation_rules['text_required']['minlength']['value'] = '3';
 $validation_rules['text_required']['maxlength']['value'] = '50';
 
-// 2. Email Input
+// 2. Email Input (with AJAX validation to check if email is available)
 $validation_rules['email_field']['required']['value'] = 'true';
 $validation_rules['email_field']['email']['value'] = 'true';
+// Remote validation - send as 'usr_email' parameter which the endpoint expects
+// Use clean URL without .php extension
+$validation_rules['email_field']['remote']['value'] = json_encode(array(
+    'url' => '/ajax/email_check_ajax',
+    'dataFieldName' => 'usr_email'  // Send the value as 'usr_email' parameter
+));
+// Note: Enter an email that exists in your usr_users table to see validation fail
 
 // 3. URL Input
 $validation_rules['url_field']['required']['value'] = 'true';
@@ -136,12 +143,13 @@ $validation_rules['url_prefix']['required']['value'] = 'true';
 echo $formwriter->begin_form('form1', 'POST', '/admin/admin', true);
 
 echo '<h3>Standard Input Types</h3>';
+echo '<p class="text-muted small">The email field demonstrates AJAX validation - it checks if the email is already registered in real-time.</p>';
 
 // 1. Text Input
 echo $formwriter->textinput('Text (Required)', 'text_required', NULL, 100, NULL, 'Enter your full name', 50);
 
-// 2. Email
-echo $formwriter->textinput('Email Address', 'email_field', NULL, 100, '', 'your@email.com', 255, '', TRUE, FALSE, 'email');
+// 2. Email (with AJAX validation)
+echo $formwriter->textinput('Email Address (checks if available)', 'email_field', NULL, 100, '', 'your@email.com', 255, '', TRUE, FALSE, 'email');
 
 // 3. URL
 echo $formwriter->textinput('Website URL', 'url_field', NULL, 100, '', 'https://example.com', 255, '', TRUE, FALSE, 'url');
@@ -265,6 +273,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Pure Joinery validation rules - no jQuery
     const validationOptions = {
         debug: true,
+        messages: {
+            email_field: {
+                remote: "This email address is already registered."
+            }
+        },
         rules: {
             <?php
             // Output the rules in JavaScript format
