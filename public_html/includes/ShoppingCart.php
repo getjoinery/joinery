@@ -209,7 +209,7 @@ class ShoppingCart {
 			}
 			return false;
 		}
-		
+
 	}
 	
 	public function is_billing_user_complete(){
