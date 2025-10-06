@@ -75,8 +75,8 @@ class AdminPage{
 			<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 			<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 			
-			<!-- jQuery validate -->
-			<script type="text/javascript" src="/assets/js/jquery.validate-1.9.1.js"></script>
+			<!-- Joinery validation -->
+			<script src="/assets/js/joinery-validate.js"></script>
 
 
 			<!-- jQuery UI removed - was only needed for old file uploader -->
@@ -96,8 +96,8 @@ class AdminPage{
 			<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 			<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 			
-			<!-- jQuery validate -->
-			<script type="text/javascript" src="/assets/js/jquery.validate-1.9.1.js"></script>			
+			<!-- Joinery validation -->
+			<script src="/assets/js/joinery-validate.js"></script>			
 			
 			<?php
 		}

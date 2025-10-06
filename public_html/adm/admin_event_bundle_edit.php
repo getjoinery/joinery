@@ -56,7 +56,7 @@
 	
 	$validation_rules = array();
 	$validation_rules['grp_name']['required']['value'] = 'true';	 
-	$validation_rules['"event_list[]"']['required']['value'] = 'true';
+	$validation_rules['event_list']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);	
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_event_bundle_edit');

@@ -354,86 +354,63 @@ abstract class FormWriterBase {
 	 * @return string HTML with JavaScript for form validation
 	 */
 	function set_validate($validation_rules, $custom_js = NULL, $debug = false) {
-		$debugtext = '';
-		if ($debug) {
-			$debugtext = ',
-			invalidHandler: function(event, validator) {
-				if (validator.numberOfInvalids()) {
-					let errorList = "Please fix the following errors:\\n\\n";
-					$.each(validator.errorList, function(index, error) {
-						errorList += "- " + error.element.name + ": " + error.message + "\\n";
-					});
-					alert(errorList);
-				}
-			}';
-		}
-		
 		$output = '
-		<script type="text/javascript">
-			$(document).ready(function() {
-				// Custom phone number validator
-				jQuery.validator.addMethod("phoneUS", function(phone_number, element) {
-					phone_number = phone_number.replace(/\\s+/g, "");
-					return this.optional(element) || phone_number.length > 9 &&
-						phone_number.match(/^(1-?)?(\([2-9]\\d{2}\)|[2-9]\\d{2})-?[2-9]\\d{2}-?\\d{4}$/);
-				}, "Please specify a valid phone number");
-				
-				// Time parsing helper function
-				function parseTime(timeStr) {
-					var parts = timeStr.split(":");
-					return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+		<script>
+		document.addEventListener(\'DOMContentLoaded\', function() {
+			const validationOptions = {
+				debug: ' . ($debug ? 'true' : 'false') . ',
+				rules: {';
+
+		// Output rules using the exact pattern from forms_example_bootstrap_native.php
+		$first = true;
+		foreach ($validation_rules as $fieldName => $rules) {
+			if (!$first) $output .= ',';
+			$first = false;
+			$output .= "\n					" . json_encode($fieldName) . ': {';
+			$firstRule = true;
+			foreach ($rules as $ruleName => $ruleData) {
+				if (!$firstRule) $output .= ', ';
+				$firstRule = false;
+				$output .= $ruleName . ': ';
+				if (isset($ruleData['value'])) {
+					$value = $ruleData['value'];
+					$output .= ($value === 'true' || $value === 'false') ? $value : '"' . addslashes($value) . '"';
+				} else {
+					$output .= 'true';
 				}
-
-				// Custom validator to check that end_time is greater than start_time
-				$.validator.addMethod("timeGreaterThan", function(value, element, param) {
-					var startVal = $(param).val();
-					if (!startVal || !value) {
-						return true; // Let the required rule handle empty fields
-					}
-					return parseTime(value) > parseTime(startVal);
-				}, "End time must be after start time.");
-
-				$("#'.$this->formid.'").validate({
-					'.$custom_js.'
-					rules: {';
-		
-		$output .= "\r\n";
-		foreach ($validation_rules as $name => $rules) {
-			$output .= "\t\t\t\t\t\t" . $name . ': {';
-			$output .= "\r\n";
-			foreach ($rules as $type => $value) {
-				$output .= "\t\t\t\t\t\t\t" . $type . ': ' . $value['value'] . ',';
-				$output .= "\r\n";
 			}
-			$output .= "\t\t\t\t\t\t" . '},';
-			$output .= "\r\n";
+			$output .= '}';
 		}
-		$output .= "\t\t\t\t\t" . '},';
-		$output .= "\r\n";
-		
-		$output .= "\t\t\t\t\t" . 'messages: {';
-		$output .= "\r\n";
-		foreach ($validation_rules as $name => $rules) {
-			foreach ($rules as $rule_name => $rule_values) {
-				if (!empty($rule_values['message'])) {
-					$output .= "\t\t\t\t\t\t" . $name . ': {';
-					$output .= "\r\n";
-					$output .= "\t\t\t\t\t\t\t" . $rule_name . ': ' . $rule_values['message'] . ',';
-					$output .= "\r\n";
-					$output .= "\t\t\t\t\t\t" . '},';
-					$output .= "\r\n";
+
+		$output .= '
+				},
+				messages: {';
+
+		// Output custom messages
+		$firstMsg = true;
+		foreach ($validation_rules as $fieldName => $rules) {
+			foreach ($rules as $ruleName => $ruleData) {
+				if (!empty($ruleData['message'])) {
+					if (!$firstMsg) $output .= ',';
+					$firstMsg = false;
+					$output .= "\n					" . json_encode($fieldName) . ': {';
+					$output .= $ruleName . ': ' . $ruleData['message'];
+					$output .= '}';
 				}
 			}
 		}
-		$output .= "\t\t\t\t\t" . '},';	
-		$output .= "\r\n";							
-		$output .= "\t\t\t\t\t" . $this->validate_style_info . $debugtext . '
-				});
-			});
+
+		$output .= '
+				}
+			};
+
+			JoineryValidation.init(\'' . $this->formid . '\', validationOptions);
+		});
 		</script>';
 
 		return $output;
 	}
+
 
 	/**
 	 * Generate buttons for multi-file upload interface

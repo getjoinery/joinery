@@ -182,7 +182,7 @@ class PublicPageTailwind extends PublicPageBase {
 		
 
 		<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-		<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>	
+		<script src="/assets/js/joinery-validate.js"></script>	
 			
 				
 		<!-- Favicon -->

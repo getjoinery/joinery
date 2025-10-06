@@ -27,9 +27,9 @@
 	$validation_rules['ccd_code']['required']['value'] = 'true';
 	$validation_rules['ccd_is_active']['required']['value'] = 'true';	
 	$validation_rules['cmt_body']['required']['value'] = 'true';	
-	$validation_rules['"products_list[]"']['required']['value'] = 'true';	
+	$validation_rules['products_list']['required']['value'] = 'true';
 	$validation_rules['single_checkbox']['required']['value'] = 'true';
-	$validation_rules['"interval[]"']['required']['value'] = 'true';
+	$validation_rules['interval']['required']['value'] = 'true';
 	
 	echo $formwriter->begin_form('', 'post', '');
 	echo $formwriter->textinput('Coupon code', 'ccd_code', NULL, 100, NULL, 'test text', 255);
