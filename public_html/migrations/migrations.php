@@ -881,3 +881,11 @@
 		$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('subscription_upgrade_prorate', '1', 1, now(), now(), 'subscriptions');";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// Remove .php extensions from amu_defaultpage
+		$migration = array();
+		$migration['database_version'] = '0.65';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage LIKE '%.php%'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_defaultpage = REPLACE(amu_defaultpage, '.php', '') WHERE amu_defaultpage LIKE '%.php%';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
