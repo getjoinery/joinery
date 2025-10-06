@@ -394,7 +394,7 @@ abstract class FormWriterBase {
 					if (!$firstMsg) $output .= ',';
 					$firstMsg = false;
 					$output .= "\n					" . json_encode($fieldName) . ': {';
-					$output .= $ruleName . ': ' . $ruleData['message'];
+					$output .= $ruleName . ': ' . json_encode($ruleData['message']);
 					$output .= '}';
 				}
 			}

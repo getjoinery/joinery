@@ -115,10 +115,17 @@
 
 	// Editing an existing email
 	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
-	
+
 	$validation_rules = array();
-	$validation_rules['grp_name']['required']['value'] = 'true';	 
-	//$validation_rules['event_list']['required']['value'] = 'true';
+	$validation_rules['ccd_code']['required']['value'] = 'true';
+
+	// Require either amount or percent discount (at least one must be filled)
+	$validation_rules['ccd_amount_discount']['require_one_group']['value'] = 'discount_fields';
+	$validation_rules['ccd_amount_discount']['require_one_group']['message'] = 'Please enter either an amount or percent discount';
+
+	$validation_rules['ccd_percent_discount']['require_one_group']['value'] = 'discount_fields';
+	$validation_rules['ccd_percent_discount']['require_one_group']['message'] = 'Please enter either an amount or percent discount';
+
 	echo $formwriter->set_validate($validation_rules);	
 
 	?>

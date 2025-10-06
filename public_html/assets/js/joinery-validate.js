@@ -1,8 +1,9 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
+ * @version 1.0.0
  */
-console.log('%c=== JOINERY VALIDATION LOADING ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.0.0 ===', 'color: blue; font-weight: bold');
 console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
 (function() {
@@ -599,6 +600,76 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
         value = value.replace(/\s+/g, "");
         return value.length > 9 && /^(1-?)?(\([2-9]\d{2}\)|[2-9]\d{2})-?[2-9]\d{2}-?\d{4}$/.test(value);
     }, "Please specify a valid phone number");
+
+    /**
+     * require_one_group - At least one field in a named group must be filled
+     * Usage in validation rules:
+     *
+     * $validation_rules['field1']['require_one_group']['value'] = 'group_name';
+     * $validation_rules['field1']['require_one_group']['message'] = 'At least one field in this group is required';
+     *
+     * $validation_rules['field2']['require_one_group']['value'] = 'group_name';
+     * $validation_rules['field2']['require_one_group']['message'] = 'At least one field in this group is required';
+     *
+     * All fields with the same group name will be validated together.
+     * At least one field in the group must have a value for validation to pass.
+     */
+    JoineryValidator.addValidator("require_one_group", function(value, element, groupName) {
+        // groupName is the name of the group (e.g., 'discount_fields')
+        if (!groupName) return true;
+
+        var form = element.form;
+        var validator = this;
+
+        // Build a map of group names to field names if not already built
+        if (!validator.groupFieldsMap) {
+            validator.groupFieldsMap = {};
+        }
+
+        // Build the group map if this group hasn't been processed yet
+        if (!validator.groupFieldsMap[groupName]) {
+            validator.groupFieldsMap[groupName] = [];
+
+            // Find all fields with this group name in their rules
+            for (var fieldName in validator.rules) {
+                if (validator.rules[fieldName].require_one_group === groupName) {
+                    validator.groupFieldsMap[groupName].push(fieldName);
+                }
+            }
+        }
+
+        // Get all field names in this group
+        var fieldNamesInGroup = validator.groupFieldsMap[groupName];
+
+        // Check if at least one field in the group has a value
+        for (var i = 0; i < fieldNamesInGroup.length; i++) {
+            var fieldName = fieldNamesInGroup[i];
+            var field = form.elements[fieldName];
+
+            if (field) {
+                var fieldValue = '';
+
+                // Handle different input types
+                if (field.type === 'checkbox' || field.type === 'radio') {
+                    if (field.checked) {
+                        fieldValue = field.value;
+                    }
+                } else if (field.tagName === 'SELECT') {
+                    fieldValue = field.value;
+                } else {
+                    fieldValue = field.value;
+                }
+
+                // If any field has a value, validation passes
+                if (fieldValue && fieldValue.trim() !== '') {
+                    return true;
+                }
+            }
+        }
+
+        // None of the fields in the group have values - validation fails
+        return false;
+    }, "At least one field in this group is required");
 
     // Expose globally
     window.JoineryValidator = JoineryValidator;
