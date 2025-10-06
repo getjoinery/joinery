@@ -593,7 +593,7 @@ class PublicPageFalcon extends PublicPageBase {
     <!--    JavaScripts-->
     <!-- ===============================================-->
 	
-	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
+	<script src="/assets/js/joinery-validate.js"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('popper.min.js', 'assets/vendors/popper', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('bootstrap.min.js', 'assets/vendors/bootstrap', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('anchor.min.js', 'assets/vendors/anchorjs', 'web', 'falcon'); ?>"></script>
