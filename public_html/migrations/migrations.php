@@ -885,7 +885,7 @@
 		// Remove .php extensions from amu_defaultpage
 		$migration = array();
 		$migration['database_version'] = '0.65';
-		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_defaultpage LIKE '%.php%'";
+		$migration['test'] = NULL;
 		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_defaultpage = REPLACE(amu_defaultpage, '.php', '') WHERE amu_defaultpage LIKE '%.php%';";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;

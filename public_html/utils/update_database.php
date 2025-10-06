@@ -308,10 +308,13 @@
 		$migration_run_count = 0;
 		$migration_skip_count = 0;
 		$migration_fail_count = 0;
-		
+
+		// Track last 5 migrations for summary display
+		$last_migrations = [];
+
 		foreach($validation_result['valid_migrations'] as $migration){
 			$should_run_result = $migclass->shouldRunMigration($migration);
-			
+
 			// Show migration status (skip messages only shown in verbose mode)
 			if($should_run_result['should_run']){
 				echo "WILL RUN migration " . ($migration['database_version'] ?? 'UNKNOWN') . "<br>\n";
@@ -321,28 +324,42 @@
 					echo "SKIPPING migration " . ($migration['database_version'] ?? 'UNKNOWN') . " - Reason: " . $should_run_result['reason'] . "<br>\n";
 				}
 			}
-			
+
 			// Show additional details in verbose mode
 			if ($verbose && isset($should_run_result['hash'])) {
 				echo "  Migration hash: " . $should_run_result['hash'] . "<br>\n";
 			}
-			
+
 			if($should_run_result['should_run']){
 				echo "  Running migration: ".$migration['database_version']."<br>\n";
-				
+
 				// Show SQL if it's an SQL migration
 				if ($verbose && isset($migration['migration_sql']) && $migration['migration_sql']) {
 					echo "  SQL: " . $migration['migration_sql'] . "<br>\n";
 				}
-				
+
 				$result = $migclass->executeMigration($migration);
-				
+
 				if ($result['success']) {
 					echo "  ✓ Successfully applied migration: " . $result['version'] . "<br>\n";
 					$migration_run_count++;
+
+					// Track for summary
+					$last_migrations[] = [
+						'version' => $migration['database_version'] ?? 'UNKNOWN',
+						'status' => 'SUCCESS',
+						'message' => 'Successfully applied'
+					];
 				} else {
 					echo "  ✗ FAILED migration: " . $result['version'] . " - Error: " . $result['error'] . "<br>\n";
 					$migration_fail_count++;
+
+					// Track for summary
+					$last_migrations[] = [
+						'version' => $migration['database_version'] ?? 'UNKNOWN',
+						'status' => 'FAILED',
+						'message' => $result['error']
+					];
 					// Continue processing other migrations even if one fails
 				}
 			} else {
@@ -350,15 +367,58 @@
 				if (isset($should_run_result['error']) && $should_run_result['error']) {
 					echo "  ⚠ ERROR checking migration " . $migration['database_version'] . ": " . $should_run_result['reason'] . "<br>\n";
 					$migration_fail_count++;
+
+					// Track for summary
+					$last_migrations[] = [
+						'version' => $migration['database_version'] ?? 'UNKNOWN',
+						'status' => 'ERROR',
+						'message' => $should_run_result['reason']
+					];
+				} else {
+					// Track for summary
+					$last_migrations[] = [
+						'version' => $migration['database_version'] ?? 'UNKNOWN',
+						'status' => 'SKIPPED',
+						'message' => $should_run_result['reason']
+					];
 				}
 				$migration_skip_count++;
 			}
 		}
-		
+
 		echo "Database migration complete.<br>\n";
 		echo "#Run: ".$migration_run_count."<br>\n";
 		echo "#Failed: ".$migration_fail_count."<br>\n";
 		echo "#Skipped: ".$migration_skip_count."<br>\n";
+
+		// Display last 5 migrations
+		echo "<br>\n<strong>Last 5 Migrations:</strong><br>\n";
+		$display_migrations = array_slice($last_migrations, -5);
+		foreach ($display_migrations as $mig) {
+			$status_symbol = '';
+			switch ($mig['status']) {
+				case 'SUCCESS':
+					$status_symbol = '✓';
+					break;
+				case 'FAILED':
+					$status_symbol = '✗';
+					break;
+				case 'ERROR':
+					$status_symbol = '⚠';
+					break;
+				case 'SKIPPED':
+					$status_symbol = '○';
+					break;
+			}
+			echo sprintf(
+				"  %s [%s] v%s - %s<br>\n",
+				$status_symbol,
+				$mig['status'],
+				$mig['version'],
+				$mig['message']
+			);
+		}
+		echo "<br>\n";
 		
 		// Log the migration run
 		$sql_output = ''; // Collect any error output
