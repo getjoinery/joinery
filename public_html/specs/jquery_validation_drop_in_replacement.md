@@ -60,67 +60,13 @@ jQuery validation is currently included in 3 template files:
 
 **File: `/includes/FormWriterBase.php`**
 
-Replace the `set_validate()` method (lines 356-436) to output Joinery validation JavaScript instead of jQuery validation:
+**IMPORTANT:** A working version of the updated `set_validate()` method already exists and has been tested. Simply use the existing implementation as-is without modification.
 
-```php
-function set_validate($validation_rules, $custom_js = NULL, $debug = false) {
-    $output = '
-    <script>
-    document.addEventListener(\'DOMContentLoaded\', function() {
-        const validationOptions = {
-            debug: ' . ($debug ? 'true' : 'false') . ',
-            rules: {';
-
-    // Output rules
-    $first = true;
-    foreach ($validation_rules as $fieldName => $rules) {
-        if (!$first) $output .= ',';
-        $first = false;
-        $output .= "\n                " . json_encode($fieldName) . ': {';
-        $firstRule = true;
-        foreach ($rules as $ruleName => $ruleData) {
-            if (!$firstRule) $output .= ', ';
-            $firstRule = false;
-            $output .= $ruleName . ': ';
-            if (isset($ruleData['value'])) {
-                $value = $ruleData['value'];
-                $output .= ($value === 'true' || $value === 'false') ? $value : '"' . addslashes($value) . '"';
-            } else {
-                $output .= 'true';
-            }
-        }
-        $output .= '}';
-    }
-
-    $output .= '
-            },
-            messages: {';
-
-    // Output custom messages
-    $firstMsg = true;
-    foreach ($validation_rules as $fieldName => $rules) {
-        foreach ($rules as $ruleName => $ruleData) {
-            if (!empty($ruleData['message'])) {
-                if (!$firstMsg) $output .= ',';
-                $firstMsg = false;
-                $output .= "\n                " . json_encode($fieldName) . ': {';
-                $output .= $ruleName . ': ' . $ruleData['message'];
-                $output .= '}';
-            }
-        }
-    }
-
-    $output .= '
-            }
-        };
-
-        JoineryValidation.init(\'' . $this->formid . '\', validationOptions);
-    });
-    </script>';
-
-    return $output;
-}
-```
+The updated method:
+- Outputs Joinery validation JavaScript instead of jQuery validation
+- Maintains full compatibility with existing `set_validate()` calls
+- Preserves all existing features (custom validators, debug mode, custom JS)
+- Calls `JoineryValidation.init()` with the form ID and validation options
 
 **Benefits of this approach:**
 - ✅ No changes needed to individual form files (except cleaning field names)
