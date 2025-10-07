@@ -26,11 +26,148 @@ Contact Area
 ==============================-->
     <div class="space">
         <div class="container">
-            <div class="row gy-4">
-                <div class="col-lg-8 order-1">
+					<?php
+					
+					if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+						echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
+					}
+					?>
+                    <div class="contact-item-wrap">
+							<div class="title-area mt-n2 mb-40">
+							<h4>Cart</h4>
 
-					<div class="contact-item-wrap">
-						<h4>Billing User</h4>
+							<?php			
+							$total_discount = 0;
+							foreach($cart->items as $key => $cart_item) {
+								list($quantity, $product, $data, $price, $discount) = $cart_item;
+								$product_version = $product->get_product_versions(TRUE, $data['product_version']);
+
+								$coupon_discount_words = '';
+								//HANDLE COUPONS
+								if($discount){
+									$coupon_discount_words = ' ('.$currency_symbol.number_format($discount, 2, '.', ','). ' coupon)'; 
+								}
+								
+								?>
+                        <div class="contact-item">
+                            <div class="contact-item_icon"><i class=""><img src="assets/img/icon/message.svg" alt=""></i>
+                            </div>
+                            <div class="media-body">
+                                <span class="contact-item_title"><?php echo $product->get('pro_name').' '. $product_version->get('prv_version_name');?></span>
+								<span class="contact-item_text"><?php echo $product->get_readable_price($product_version->key). $coupon_discount_words; ?></span>
+                                <span class="contact-item_text"><a href="/cart?r=<?php echo $key; ?>">Remove</a></span>
+								<p class=""><?php echo $product->get('pro_short_description'); ?></p>
+                            </div>
+                        </div>
+				  
+									  
+								<?php
+								$itemcount++;
+							}	
+
+							
+							if($total_discount){
+								
+							?>
+                        <div class="contact-item">
+                            <div class="contact-item_icon"><i class=""><img src="assets/img/icon/message.svg" alt=""></i>
+                            </div>
+                            <div class="media-body">
+                                <span class="contact-item_text">Discount <?php echo $currency_symbol.number_format($total_discount, 2, '.', ','); ?></span>
+								<span class="contact-item_text"><?php echo $currency_symbol . number_format($price, 2, '.', ','). $coupon_discount_words; ?></span>
+                                <span class="contact-item_title"><a href="/cart?r=<?php echo $key; ?>">Remove item</a></span>
+                            </div>
+                        </div>
+						<?php 
+							}
+							?>
+
+                            
+                            
+                     
+
+                        <div class="contact-item">
+
+                            <div class="media-body">
+                                <span class="contact-item_text">Total
+                                    <?php echo $currency_symbol; ?><?php echo  number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></span>
+                            </div>
+                        </div>
+						
+						
+						
+			
+						
+						
+						
+						
+						
+						
+						
+                        </div><!-- Close title-area -->
+					</div>
+
+        
+
+
+
+					<!-- Coupons Section -->
+					<?php
+					$settings = Globalvars::get_instance();
+					if($settings->get_setting('coupons_active')){
+					?>
+					<div class="contact-item-wrap mt-4">
+						<h4>Coupons</h4>
+
+						<?php
+						//DEBUG LIST ALL COUPONS
+						if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+							echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
+							foreach($page_vars['all_coupons'] as $coupon){
+								$formwriter = $page->getFormWriter('form_test_coupon');
+								echo $formwriter->begin_form("mt-6", "get", '/cart');
+								echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
+								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary', '', 'th-btn');
+								echo $formwriter->end_form();
+							}
+							echo '</div>';
+						}
+
+
+						$formwriter = $page->getFormWriter('form_coupon');
+
+						echo $formwriter->begin_form("mt-6", "get", '/cart');
+						echo '<div style="display: flex; align-items: center;">';
+						echo $formwriter->textinput('Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
+
+						if($page_vars['coupon_error']){
+							echo '<p>'.$page_vars['coupon_error'].'</p>';
+						}
+						echo $formwriter->new_form_button('Add', 'secondary', 'standard', 'th-btn ms-3');
+						echo $formwriter->end_form();
+						echo '</div>';
+
+						foreach($cart->coupon_codes as $coupon_code){
+							$coupon_code_obj = CouponCode::GetByColumn('ccd_code', $coupon_code);
+						?>
+						<div class="media-body">
+							<span class="contact-item_text">Coupon applied: <?php echo $coupon_code . ' ('.$coupon_code_obj->get_readable_discount(). ' discount ) <a href="/cart?rc='.$coupon_code.'">remove</a>'; ?></span>
+						</div>
+						<?php
+						}
+						?>
+					</div>
+					<?php
+					}
+					?>
+
+			
+				
+			
+				
+ 
+                    <div class="contact-item-wrap mt-4">
+                        <h4>Billing User</h4>
 					
 					
 						<?php
@@ -122,145 +259,64 @@ Contact Area
 						}	
 					}
 					?>
+					
+					
 					</div>
-					<br>
+					<div class="contact-item-wrap mt-4">
 					<?php 
 					if($cart->is_billing_user_complete()){
 					?>
-						<div class=" contact-item-wrap">
+						
 						<?php
 						if($cart->get_total() > 0){			
 							echo '<h4>Pay with Stripe</h4>';
 							$formwriter = $page->getFormWriter('form_stripe');
 							echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, 'th-btn');					
 						}		
-						?> </div> <?php
+						?>  <?php
 					}								
 
 					?>
-                    <p class="form-messages mb-0 mt-3"></p>
+                    </div>				
+					
 
-                </div>
+					
+					
+					
+		</div>
+	</div>
+
+
+
+
+
+
+
+
+
+				
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ <div class="space">
+        <div class="container">
+            <div class="row gy-4">
+                <div class="col-lg-8 order-1">
+
+					
                 <div class="col-lg-4 order-2">
-                    <div class="contact-item-wrap">
-                        <div class="title-area mt-n2 mb-40">
-							<h4>Cart</h4>
-
-							<?php			
-							$total_discount = 0;
-							foreach($cart->items as $key => $cart_item) {
-								list($quantity, $product, $data, $price, $discount) = $cart_item;
-								$product_version = $product->get_product_versions(TRUE, $data['product_version']);
-
-								$coupon_discount_words = '';
-								//HANDLE COUPONS
-								if($discount){
-									$coupon_discount_words = ' ('.$currency_symbol.number_format($discount, 2, '.', ','). ' coupon)'; 
-								}
-								
-								?>
-                        <div class="contact-item">
-                            <div class="contact-item_icon"><i class=""><img src="assets/img/icon/message.svg" alt=""></i>
-                            </div>
-                            <div class="media-body">
-                                <span class="contact-item_title"><?php echo $product->get('pro_name').' '. $product_version->get('prv_version_name');?></span>
-								<span class="contact-item_text"><?php echo $product->get_readable_price($product_version->key). $coupon_discount_words; ?></span>
-                                <span class="contact-item_text"><a href="/cart?r=<?php echo $key; ?>">Remove</a></span>
-								<p class=""><?php echo $product->get('pro_short_description'); ?></p>
-                            </div>
-                        </div>
-				  
-									  
-								<?php
-								$itemcount++;
-							}	
-
-							
-							if($total_discount){
-								
-							?>
-                        <div class="contact-item">
-                            <div class="contact-item_icon"><i class=""><img src="assets/img/icon/message.svg" alt=""></i>
-                            </div>
-                            <div class="media-body">
-                                <span class="contact-item_text">Discount <?php echo $currency_symbol.number_format($total_discount, 2, '.', ','); ?></span>
-								<span class="contact-item_text"><?php echo $currency_symbol . number_format($price, 2, '.', ','). $coupon_discount_words; ?></span>
-                                <span class="contact-item_title"><a href="/cart?r=<?php echo $key; ?>">Remove item</a></span>
-                            </div>
-                        </div>
-						<?php 
-							}
-							?>
-
-                            
-                            
-                     
-
-                        <div class="contact-item">
-
-                            <div class="media-body">
-                                <span class="contact-item_text">Total
-                                    <?php echo $currency_symbol; ?><?php echo  number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></span>
-                            </div>
-                        </div>
-                        </div><!-- Close title-area -->
-                    </div><!-- Close contact-item-wrap -->
-
-					<!-- Coupons Section -->
-					<?php
-					$settings = Globalvars::get_instance();
-					if($settings->get_setting('coupons_active')){
-					?>
-					<div class="contact-item-wrap mt-4">
-						<h4>Coupons</h4>
-
-						<?php
-						//DEBUG LIST ALL COUPONS
-						if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
-							echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
-							foreach($page_vars['all_coupons'] as $coupon){
-								$formwriter = $page->getFormWriter('form_test_coupon');
-								echo $formwriter->begin_form("mt-6", "get", '/cart');
-								echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
-								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary', '', 'th-btn');
-								echo $formwriter->end_form();
-							}
-							echo '</div>';
-						}
-
-
-						$formwriter = $page->getFormWriter('form_coupon');
-
-						echo $formwriter->begin_form("mt-6", "get", '/cart');
-						echo '<div style="display: flex; align-items: center;">';
-						echo $formwriter->textinput('Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
-
-						if($page_vars['coupon_error']){
-							echo '<p>'.$page_vars['coupon_error'].'</p>';
-						}
-						echo $formwriter->new_form_button('Add', 'secondary', 'standard', 'th-btn ms-3');
-						echo $formwriter->end_form();
-						echo '</div>';
-
-						foreach($cart->coupon_codes as $coupon_code){
-							$coupon_code_obj = CouponCode::GetByColumn('ccd_code', $coupon_code);
-						?>
-						<div class="media-body">
-							<span class="contact-item_text">Coupon applied: <?php echo $coupon_code . ' ('.$coupon_code_obj->get_readable_discount(). ' discount ) <a href="/cart?rc='.$coupon_code.'">remove</a>'; ?></span>
-						</div>
-						<?php
-						}
-						?>
-					</div>
-					<?php
-					}
-
-					if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
-						echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
-					}
-					?>
-
-                </div>
+                    
             </div>
         </div>
     </div>
