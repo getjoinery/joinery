@@ -55,7 +55,7 @@ else{
 	//$options['altlinks'] = array('Edit Url'=>'/admin/admin_url_edit?url_url_id='.$url->key);
 	$page->begin_box($options);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("form", "post", "/admin/admin_order_delete");
 
 	echo '<fieldset><h4>Confirm Delete</h4>';

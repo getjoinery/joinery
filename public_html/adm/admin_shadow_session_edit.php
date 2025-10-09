@@ -43,7 +43,7 @@
 	echo '<h2>Edit sessions for '.$user->display_name() .'</h2>';
 
 	// Editing an existing event
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_shadow_session_edit');
 	echo '<fieldset>';
 	echo '<div class="fields full">';

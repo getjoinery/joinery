@@ -66,7 +66,7 @@
 	$page->begin_box($options);
 
 	// Editing an existing product
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	$validation_rules['prq_title']['required']['value'] = 'true';

@@ -52,7 +52,7 @@ else{
 	$pageoptions['title'] = 'Delete Page Content '.$page_content->get('pac_location_name');
 	$page->begin_box($pageoptions);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("form", "post", "/admin/admin_page_content_permanent_delete");
 
 	echo '<fieldset><h4>Confirm Delete</h4>';

@@ -83,7 +83,7 @@
 		array_push($rowvalues, $status);
 
 		if($comment->get('cmt_delete_time')){
-			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$formwriter = $page->getFormWriter('form2');
 			$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
 			$delform .= $formwriter->hiddeninput('action', 'undelete');
 			$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
@@ -91,7 +91,7 @@
 			$delform .= $formwriter->end_form();
 		}
 		else{
-			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$formwriter = $page->getFormWriter('form2');
 			$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
 			$delform .= $formwriter->hiddeninput('action', 'delete');
 			$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
@@ -101,7 +101,7 @@
 		array_push($rowvalues, $delform);
 
 		if($comment->get('cmt_is_approved')){
-			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$formwriter = $page->getFormWriter('form2');
 			$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
 			$delform .= $formwriter->hiddeninput('action', 'unapprove');
 			$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
@@ -109,7 +109,7 @@
 			$delform .= $formwriter->end_form();
 		}
 		else{
-			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$formwriter = $page->getFormWriter('form2');
 			$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
 			$delform .= $formwriter->hiddeninput('action', 'approve');
 			$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);

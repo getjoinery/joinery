@@ -37,7 +37,7 @@
 	)
 	);	
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("", "get", "/admin/admin_yearly_report_donations");
 	echo $formwriter->dateinput("Start Date (UTC Time)", "startdate", "dateinput", 30, $startdate, "", 10);
 	echo $formwriter->dateinput("End Date (UTC Time)", "enddate", "dateinput", 30, $enddate, "", 10);

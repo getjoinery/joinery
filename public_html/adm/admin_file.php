@@ -87,7 +87,7 @@
 
 	$page->begin_box($options);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 
 	if($file->is_image()){
 		echo '<div style="float:left; margin-right:30px; margin-bottom:30px;"><img src="/uploads/small/'.$file->get('fil_name').'"/></div>';
@@ -175,7 +175,7 @@
 
 	}
 	echo '<tr><td colspan="2">';
-	$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+	$formwriter = $page->getFormWriter('form2');
 	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_file?fil_file_id='. $file->key);
 
 	$sessions = new MultiEventSessions(

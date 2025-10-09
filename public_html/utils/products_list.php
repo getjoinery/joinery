@@ -3,6 +3,7 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('products_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
 	//OVERRIDE GET VARS
 	$_GET['numperpage'] = 100;
@@ -58,7 +59,7 @@
 		}
 		else{
 			$settings = Globalvars::get_instance();
-			$formwriter = LibraryFunctions::get_formwriter_object("product_form".$product->key, $settings->get_setting('form_style'));
+			$formwriter = new FormWriter("product_form".$product->key);
 			echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
 			echo $formwriter->hiddeninput('product_id', $product->key);
 			if ($product->output_product_form($formwriter, $page_vars['user'], null)) {

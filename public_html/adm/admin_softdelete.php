@@ -28,7 +28,7 @@
 
 		echo '<h1>Delete User</h1>';
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("form", "post", "/profile/users_delete?disptype=return");
 
 	echo '<fieldset><h4>Confirm Delete</h4>';

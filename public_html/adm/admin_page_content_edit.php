@@ -95,7 +95,7 @@
       <div class="p-3">';
 	
 	// Editing an existing email
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	$validation_rules['pac_body']['required']['value'] = 'true';
@@ -153,7 +153,7 @@
 	
 	if(count($optionvals)){
 
-		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
+		$formwriter = $page->getFormWriter('form_load_version');
 
 		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_page_content_edit');
 		echo $formwriter->hiddeninput('pac_page_content_id', $page_content->key);

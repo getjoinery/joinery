@@ -99,7 +99,7 @@
 		
 
 	
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+		$formwriter = new FormWriter('form1');
 		echo $formwriter->begin_form("", "get", "/utils/stripe_charges_synchronize");
 		echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
 		echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);

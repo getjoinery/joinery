@@ -181,7 +181,7 @@
 </script>
 	<?php
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	$validation_rules['qst_question']['required']['value'] = 'true';
@@ -279,7 +279,7 @@
 		}
 		else{
 			echo '<h4>Add New Question Option</h4>';
-			$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+			$formwriter = $page->getFormWriter('form2');
 			
 			$validation_rules = array();
 			$validation_rules['qop_question_option_label']['required']['value'] = 'true';

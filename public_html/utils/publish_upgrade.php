@@ -127,7 +127,7 @@
 
 
 		// Editing an existing order
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');	
+		$formwriter = new FormWriter('form1');	
 		
 		
 		echo $formwriter->begin_form('form1', 'POST', '/utils/publish_upgrade');

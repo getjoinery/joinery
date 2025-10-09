@@ -7,7 +7,8 @@ The system uses Joinery Validation, a pure JavaScript validation library with no
 Validation is handled automatically through FormWriter. Define rules in PHP, and the validation JavaScript is generated for you:
 
 ```php
-$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+// Get FormWriter from the page object (in views and admin pages)
+$formwriter = $page->getFormWriter('form1');
 
 $validation_rules = array();
 $validation_rules['email']['required']['value'] = 'true';
