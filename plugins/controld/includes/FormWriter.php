@@ -1,14 +1,14 @@
 <?php
 // PathHelper is already loaded by the time this file is included
 // We just need the dependencies
-if (!class_exists('FormWriterMasterBootstrap')) {
-    require_once(PathHelper::getIncludePath('includes/FormWriterMasterBootstrap.php'));
+if (!class_exists('FormWriterBootstrap')) {
+    require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
 }
 
 // FormWriter class for ControlD plugin theme
 // Extends the base Bootstrap FormWriter with ControlD-specific styling
 
-class FormWriter extends FormWriterMasterBootstrap { 
+class FormWriter extends FormWriterBootstrap { 
 
 	public $validate_style_info = '
 							ignore: ":hidden:not(input[type=\'checkbox\'], input[type=\'radio\'])",
@@ -92,67 +92,8 @@ class FormWriter extends FormWriterMasterBootstrap {
 		
 		return $output;		
 	}
-	
-	// Override button methods with ControlD styling
-	function new_button($type="button", $class="", $id="", $onclick="", $text="", $btn_type="primary", $hint="", $override_styles=false){
-		
-		if($override_styles){
-			//USE WHATEVER WAS PROVIDED
-		}
-		else{
-			if($btn_type == 'primary'){
-				$class = $this->button_primary_class.' '.$class;
-			}
-			else{
-				$class = $this->button_secondary_class.' '.$class;
-			}
-		}
-		
-		$output = '';
-		
-		if($onclick){
-			$onclick = 'onclick="'.$onclick.'"';
-		}
-		
-		$output .= '<button type="'.$type.'" class="'.$class.'" id="'.$id.'" '.$onclick.'>'.$text.'</button>';
-		
-		if($hint){
-			$output .= '<small class="form-text text-muted">'.$hint.'</small>';
-		}
-		
-		return $output;
-	}
-	
-	function new_form_button($class="", $id="", $onclick="", $text="", $btn_type="primary", $hint="", $override_styles=false){
-		
-		if($override_styles){
-			//USE WHATEVER WAS PROVIDED
-		}
-		else{
-			if($btn_type == 'primary'){
-				$class = $this->button_primary_class.' '.$class;
-			}
-			else{
-				$class = $this->button_secondary_class.' '.$class;
-			}
-		}
-		
-		$output = '';
-		
-		if($onclick){
-			$onclick = 'onclick="'.$onclick.'"';
-		}
-		
-		$output .= '<button type="submit" class="'.$class.'" id="'.$id.'" '.$onclick.'>'.$text.'</button>';
-		
-		if($hint){
-			$output .= '<small class="form-text text-muted">'.$hint.'</small>';
-		}
-		
-		return $output;
-	}
-	
-	// All other methods are inherited from FormWriterMasterBootstrap
+
+	// All button methods are inherited from FormWriterBootstrap
 	// This provides a complete FormWriter implementation for ControlD theme
 }
 ?>
