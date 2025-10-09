@@ -54,7 +54,7 @@ else{
 		   <h3>Add Phone Number</h3>
 <?php }
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("", "post", "/admin/admin_phone_edit");
 
 	PhoneNumber::PlainForm($formwriter, $phone_number);

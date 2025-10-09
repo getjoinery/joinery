@@ -52,7 +52,7 @@ else{
 	$pageoptions['title'] = 'Delete Email Template '.$email_template->get('emt_name');
 	$page->begin_box($pageoptions);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("form", "post", "/admin/admin_email_template_permanent_delete");
 
 	echo '<fieldset><h4>Confirm Delete</h4>';

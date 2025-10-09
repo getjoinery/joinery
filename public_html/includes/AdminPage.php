@@ -8,6 +8,16 @@ require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
 
 class AdminPage extends PublicPageFalcon {
 
+    /**
+     * Get FormWriter instance for admin pages
+     * Admin pages always use Bootstrap FormWriter
+     */
+    public function getFormWriter($form_id = 'form1') {
+        require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
+        return new FormWriterBootstrap($form_id);
+    }
+
+
 
 
 	public function admin_header($options=array()) {

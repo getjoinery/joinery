@@ -52,7 +52,7 @@ else{
 	$pageoptions['title'] = 'Delete Post '.$post->get('pst_title');
 	$page->begin_box($pageoptions);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("form", "post", "/admin/admin_post_permanent_delete");
 
 	echo '<fieldset><h4>Confirm Delete</h4>';

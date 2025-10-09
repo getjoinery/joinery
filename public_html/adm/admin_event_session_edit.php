@@ -205,7 +205,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing event
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	//$validation_rules['evs_start_time_time']['required']['value'] = 'true';
@@ -310,7 +310,7 @@
 		$page->begin_box($pageoptions);
 
 		// Editing an existing event
-		$formwriter = LibraryFunctions::get_formwriter_object('form2', 'admin');
+		$formwriter = $page->getFormWriter('form2');
 		
 		echo $formwriter->begin_form('form2', 'POST', '/admin/admin_event_session_edit');
 		
@@ -342,7 +342,7 @@
 
 		//$page->begin_box();
 		echo '<hr><div style="margin-left:20px"><h4>Bulk upload</h4>';
-		$formwriter = LibraryFunctions::get_formwriter_object('fileupload', 'admin');
+		$formwriter = $page->getFormWriter('fileupload');
 	
 		echo $formwriter->file_upload_full(array('evs_event_session_id'=> $event_session->key));
 		echo $formwriter->end_form();

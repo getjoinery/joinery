@@ -387,7 +387,7 @@
 
 	$page->begin_box();
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 
 	$validation_rules = array();
 	$validation_rules['eml_subject']['required']['value'] = 'true';

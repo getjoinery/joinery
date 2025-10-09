@@ -66,7 +66,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing email
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	$validation_rules['eml_description']['required']['value'] = 'true';

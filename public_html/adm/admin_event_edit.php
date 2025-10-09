@@ -140,7 +140,7 @@
       <div class="p-3">';
 
 	// Editing an existing event
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	$validation_rules['evt_name']['required']['value'] = 'true';
@@ -330,7 +330,7 @@
 	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 	if(count($optionvals)){
-		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
+		$formwriter = $page->getFormWriter('form_load_version');
 		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_event_edit');
 		echo $formwriter->hiddeninput('evt_event_id', $event->key);
 		echo $formwriter->dropinput("Load another description", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);

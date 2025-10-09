@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('/includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
@@ -35,7 +36,7 @@ $page->admin_header([
         <h5 class="mb-3">Check Domain Authentication</h5>
         
         <?php
-        $formwriter = LibraryFunctions::get_formwriter_object('domain_check_form', 'admin');
+        $formwriter = new FormWriter('domain_check_form');
         
         $validation_rules = array();
         $validation_rules['domain']['required']['value'] = 'true';

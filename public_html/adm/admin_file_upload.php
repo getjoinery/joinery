@@ -28,7 +28,7 @@
 	$page->begin_box($pageoptions);
 
 	/*
-	$formwriter = LibraryFunctions::get_formwriter_object('fileupload2', 'admin');
+	$formwriter = $page->getFormWriter('fileupload2');
 	echo '<form id="fileupload2"  name="fileupload2" method="post" action="/admin/admin_file_upload_process" enctype="multipart/form-data">';
 	echo '<fieldset class="inlineLabels">';
 	echo $formwriter->fileinput("File to Upload", "files[]", "ctrlHolder", 30, '');
@@ -40,7 +40,7 @@
 	echo '<hr>';
 	*/
 
-	$formwriter = LibraryFunctions::get_formwriter_object('fileupload', 'admin');
+	$formwriter = $page->getFormWriter('fileupload');
 	echo $formwriter->file_upload_full();
 	echo $formwriter->end_form();
 

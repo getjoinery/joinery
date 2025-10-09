@@ -132,7 +132,7 @@
 		}
 
 		echo '<tr><td colspan="3">';
-		$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
+		$formwriter = $page->getFormWriter('form3');
 		echo $formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
 
 		$groups = new MultiGroup(
@@ -163,7 +163,7 @@
 			NULL);  //OFFSET
 		$events->load();
 
-		$formwriter = LibraryFunctions::get_formwriter_object('form4', 'admin');
+		$formwriter = $page->getFormWriter('form4');
 		echo $formwriter->begin_form('form4', 'POST', '/admin/admin_email_recipients_modify');
 		$optionvals = $events->get_dropdown_array();
 

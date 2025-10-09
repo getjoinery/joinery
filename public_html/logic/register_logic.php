@@ -1,6 +1,8 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
+require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
+
 function register_logic($get_vars, $post_vars){
 	// Check if the page was requested with jQuery, if so, we should process this page differently
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
@@ -36,7 +38,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	if ($post_vars) {
 
-		$formwriter = LibraryFunctions::get_formwriter_object();
+		$formwriter = new FormWriter('form1');
 		if(!$formwriter->honeypot_check($post_vars)){
 			LibraryFunctions::display_404_page();
 		}

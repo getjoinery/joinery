@@ -72,15 +72,16 @@ abstract class PublicPageBase {
 	
 	/**
 	 * Get a FormWriter instance appropriate for this page
-	 * Wrapper around LibraryFunctions::get_formwriter_object() for cleaner view code
-	 * 
+	 * Uses PathHelper's standard theme/plugin override pattern for cleaner view code
+	 *
 	 * @param string $form_id The form identifier (default: 'form1')
 	 * @return FormWriter The appropriate FormWriter instance
 	 */
 	public function getFormWriter($form_id = 'form1') {
-		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-		return LibraryFunctions::get_formwriter_object($form_id);
-	}
+        // Load FormWriter using standard theme/plugin override pattern
+        require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
+        return new FormWriter($form_id);
+    }
 	
 	public static function get_public_menu(){
 		require_once(PathHelper::getIncludePath('data/public_menus_class.php'));
@@ -680,8 +681,7 @@ abstract class PublicPageBase {
 
 		if($search_on){
 			echo '<div class="col-sm-auto">';
-			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-			$formwriter = LibraryFunctions::get_formwriter_object('search_form', 'admin');
+			$formwriter = $this->getFormWriter('search_form');
 
 			echo $formwriter->begin_form("search_form", "get", $pager->base_url());
 			echo $pager->url_vars_as_hidden_input(array('searchterm'));

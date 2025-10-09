@@ -54,7 +54,7 @@
 	}
 	$page->begin_box($options);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 
 	/*
  	echo '<div id="actionmenu"><div id="actiontitle">Page Actions</div><ul>'

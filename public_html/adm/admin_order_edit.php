@@ -58,7 +58,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing order
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');	
+	$formwriter = $page->getFormWriter('form1');	
 
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_order_edit');
 

@@ -77,7 +77,7 @@
       <div class="p-3">';
 	
 	// Editing an existing email
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	$validation_rules['loc_name']['required']['value'] = 'true';
@@ -137,7 +137,7 @@
 	
 	if(count($optionvals)){
 
-		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
+		$formwriter = $page->getFormWriter('form_load_version');
 		
 		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_location_edit');
 		echo $formwriter->hiddeninput('loc_location_id', $location->key);

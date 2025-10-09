@@ -566,7 +566,7 @@
 		$pageoptions['title'] = 'System Upgrades';
 		$page->begin_box($pageoptions);
 
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+		$formwriter = new FormWriter('form1');
 		echo $formwriter->begin_form("form", "post", "/utils/upgrade");
 
 		echo 'Local system Version: '.$settings->get_setting('system_version').'<br>';

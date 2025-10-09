@@ -49,7 +49,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing contact_type
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	echo $formwriter->set_validate($validation_rules);		

@@ -35,7 +35,7 @@
 		<?php
 	}
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form7', 'admin');
+	$formwriter = $page->getFormWriter('form7');
 
 	echo $formwriter->begin_form("uniForm", "post", "/profile/phone_verify_send?disptype=returnadmin");
 
@@ -51,7 +51,7 @@
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form8', 'admin');
+	$formwriter = $page->getFormWriter('form8');
 
 	echo $formwriter->begin_form("uniForm", "post", "/profile/phone_verify_check?disptype=returnadmin");
 	echo $formwriter->textinput("Verification Code", "act_code", "ctrlHolder", 20, @$act_code, '',255, '');

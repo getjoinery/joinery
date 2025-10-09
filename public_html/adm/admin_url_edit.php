@@ -76,7 +76,7 @@
 		$options['title'] = 'Edit Url';
 		$page->begin_box($options);
 
-		$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+		$formwriter = $page->getFormWriter('form1');
 		
 		$validation_rules = array();
 		$validation_rules['url_incoming']['required']['value'] = 'true'; 
