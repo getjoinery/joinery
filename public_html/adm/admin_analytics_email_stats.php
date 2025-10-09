@@ -72,7 +72,7 @@ switch ($interval)
 		echo "Houston, we have a problem.";
 }
 
-$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+$formwriter = $page->getFormWriter('form1');
 echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_email_stats");
 echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);
 echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $enddate, "", 10);

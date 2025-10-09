@@ -374,7 +374,7 @@ if (!empty($display_messages)) {
     <div class="col-12">
         <h5 class="mb-3">Cache Diagnostic Tool</h5>
                 <?php
-                $formwriter = LibraryFunctions::get_formwriter_object('diagnose_form', 'admin');
+                $formwriter = $page->getFormWriter('diagnose_form');
 
                 $validation_rules = array();
                 $validation_rules['diagnose_url']['required']['value'] = 'true';
@@ -448,7 +448,7 @@ if (!empty($display_messages)) {
     <div class="col-md-6">
         <h5 class="mb-3">Invalidate Specific URL</h5>
                 <?php
-                $formwriter = LibraryFunctions::get_formwriter_object('invalidate_form', 'admin');
+                $formwriter = $page->getFormWriter('invalidate_form');
 
                 $validation_rules = array();
                 $validation_rules['url']['required']['value'] = 'true';
@@ -468,7 +468,7 @@ if (!empty($display_messages)) {
     <div class="col-md-6">
         <h5 class="mb-3">Mark URL as Non-Cacheable</h5>
                 <?php
-                $formwriter = LibraryFunctions::get_formwriter_object('nostatic_form', 'admin');
+                $formwriter = $page->getFormWriter('nostatic_form');
 
                 $validation_rules = array();
                 $validation_rules['url']['required']['value'] = 'true';

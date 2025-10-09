@@ -470,7 +470,7 @@
 	}
 
 	echo '<tr><td colspan="4">';
-	$formwriter = LibraryFunctions::get_formwriter_object('form3', 'admin');
+	$formwriter = $page->getFormWriter('form3');
 	$validation_rules = array();
 	$validation_rules['evt_event_id']['required']['value'] = 'true';
 	echo $formwriter->set_validate($validation_rules);
@@ -525,7 +525,7 @@
 	}
 
 	echo '<tr><td colspan="2">';
-	$formwriter = LibraryFunctions::get_formwriter_object('form5', 'admin');
+	$formwriter = $page->getFormWriter('form5');
 
 	$validation_rules = array();
 	$validation_rules['grp_group_id']['required']['value'] = 'true';

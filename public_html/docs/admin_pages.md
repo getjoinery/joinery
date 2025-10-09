@@ -55,7 +55,8 @@ $page->admin_header([
 ### Form Structure with FormWriter
 ```php
 <?php
-$formwriter = LibraryFunctions::get_formwriter_object('form_name', 'admin');
+// Get FormWriter instance from the page object
+$formwriter = $page->getFormWriter('form_name');
 
 $validation_rules = array();
 $validation_rules['field_name']['required']['value'] = 'true';
@@ -69,6 +70,8 @@ echo $formwriter->end_buttons();
 echo $formwriter->end_form();
 ?>
 ```
+
+**Note:** Admin pages use `$page->getFormWriter()` which automatically provides the Bootstrap FormWriter appropriate for admin interfaces.
 
 ## Table-Based Admin Pages
 

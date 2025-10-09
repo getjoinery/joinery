@@ -9,7 +9,7 @@ $session = SessionControl::get_instance();
 $session->check_permission(5);
 
 $page = new AdminPage();
-$formwriter = LibraryFunctions::get_formwriter_object('admin_tier_edit', 'admin');
+$formwriter = $page->getFormWriter('admin_tier_edit');
 
 // Check if we're editing an existing tier
 $tier_id = isset($_GET['id']) ? intval($_GET['id']) : null;

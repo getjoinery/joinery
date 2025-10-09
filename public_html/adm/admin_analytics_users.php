@@ -44,7 +44,7 @@ $mintotal = 2;
 
 <?php
 
-$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+$formwriter = $page->getFormWriter('form1');
 echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_users");
 
 echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);

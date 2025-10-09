@@ -84,8 +84,9 @@ class Comment extends SystemBase {	public static $prefix = 'cmt';
 			if(strlen($data['comment'] > 0)){
 				LibraryFunctions::display_404_page();			
 			}		
-		
-			$formwriter = LibraryFunctions::get_formwriter_object();
+
+			require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
+			$formwriter = new FormWriter('form1');
 
 			if(!$formwriter->honeypot_check($data)){
 				LibraryFunctions::display_404_page();		

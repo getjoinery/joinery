@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -91,7 +92,7 @@ if (!$run_test) {
             <h5 class="mb-3">Run Authentication Test</h5>
             
             <?php
-            $formwriter = LibraryFunctions::get_formwriter_object('email_test_form', 'admin');
+            $formwriter = new FormWriter('email_test_form');
             
             // No validation rules - just plain form
             $form_html = $formwriter->begin_form('email_test_form', 'POST', '/utils/email_send_test');

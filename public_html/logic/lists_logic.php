@@ -1,6 +1,8 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
+require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
+
 function lists_logic($get_vars, $post_vars, $params){
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -40,7 +42,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	if($_POST){
 	
 		if(!$session->get_user_id()){
-			$formwriter = LibraryFunctions::get_formwriter_object();
+			$formwriter = new FormWriter('form1');
 			if(!$formwriter->honeypot_check($_POST)){
 				LibraryFunctions::display_404_page();			
 			}

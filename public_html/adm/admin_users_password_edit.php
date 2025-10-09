@@ -45,7 +45,7 @@
 	$pageoptions['title'] = 'Change Password';
 	$page->begin_box($pageoptions);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form("form1", "post", "/admin/admin_users_password_edit");
 	echo $formwriter->hiddeninput("usr_user_id", $user->key);
 

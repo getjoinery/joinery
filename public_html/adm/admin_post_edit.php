@@ -96,7 +96,7 @@
       <div class="p-3">';
 
 	// Editing an existing email
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	
 	$validation_rules = array();
 	$validation_rules['pst_description']['required']['value'] = 'true';
@@ -165,7 +165,7 @@
 	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 	if(count($optionvals)){
-		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
+		$formwriter = $page->getFormWriter('form_load_version');
 
 		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_post_edit');
 		echo $formwriter->hiddeninput('pst_post_id', $post->key);

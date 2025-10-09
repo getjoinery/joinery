@@ -572,10 +572,14 @@ In views with PublicPage available (most frontend views):
 $formwriter = $page->getFormWriter('form1');
 ```
 
-In contexts without PublicPage (admin, utilities, logic files):
+In different contexts:
 ```php
-// Direct method - for admin pages, utilities, etc.
-$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+// Admin pages - use the page object
+$formwriter = $page->getFormWriter('form1'); // $page is AdminPage instance
+
+// Utilities and logic files - direct instantiation
+require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
+$formwriter = new FormWriter('form1');
 ```
 
 The `$page->getFormWriter()` method automatically:

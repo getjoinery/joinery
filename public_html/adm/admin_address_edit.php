@@ -53,7 +53,7 @@
 
 				<?php
 
-				$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+				$formwriter = $page->getFormWriter('form1');
 
 				$validation_rules = array();
 				$validation_rules['usa_type']['required']['value'] = 'true';

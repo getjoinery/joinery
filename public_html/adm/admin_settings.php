@@ -126,7 +126,7 @@
 	);
 	echo AdminPage::tab_menu($tab_menus, 'General Settings');
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 
 		?>
 		<script type="text/javascript">

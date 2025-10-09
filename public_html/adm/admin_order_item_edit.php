@@ -87,7 +87,7 @@
 	$pageoptions['title'] = "Edit Order Item";
 	$page->begin_box($pageoptions);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 
 	$validation_rules = array();
 	if(!$order_item->key || !$order->is_stripe_order()){

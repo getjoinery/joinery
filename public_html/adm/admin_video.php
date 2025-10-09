@@ -66,7 +66,7 @@
 
 	$page->begin_box($options);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 
 	echo '<strong>User:</strong> ('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a><br />';
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($video->get('vid_create_time'), 'UTC', $session->get_timezone()) .'<br />';

@@ -109,7 +109,7 @@
 
 	$page->begin_box($options);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 
 	?>
 	<script type="text/javascript">

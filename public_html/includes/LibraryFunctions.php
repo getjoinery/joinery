@@ -6,14 +6,11 @@ require_once('PluginHelper.php');
 
 class LibraryFunctions {
 
-
-
 	// Function translate_data_types() has been moved to DatabaseUpdater class.
 	// It was database-specific and only used by DatabaseUpdater.
 	
 	// Function extract_length_from_spec() has been removed.
 	// It was only used once and has been inlined in ModelTester.php
-
 
 	/**
 	 * splits single name string into salutation, first, last, suffix
@@ -192,168 +189,6 @@ class LibraryFunctions {
 	}
 	
 	
-	static function get_formwriter_object($form_id = 'form1', $override_name=NULL, $override_path=NULL){
-		//IF OVERRIDE IS PRESENT, GET THE SPECIFIC ONE
-		
-
-		if($override_path){
-			if (!file_exists($override_path)) {
-				throw new Exception("Override FormWriter file not found: $override_path");
-			}
-			require_once($override_path);
-
-			if (!class_exists('FormWriter')) {
-				throw new Exception("FormWriter class not found in override file: $override_path");
-			}
-
-			try {
-				return new FormWriter($form_id);
-			} catch (Error $e) {
-				throw new Exception("Failed to instantiate override FormWriter: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
-			}
-		}	
-		
-		if($override_name == 'admin' || $override_name == 'bootstrap'){
-			require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
-			try {
-				return new FormWriterBootstrap($form_id);
-			} catch (Error $e) {
-				throw new Exception("Failed to instantiate admin FormWriter (Bootstrap): " . $e->getMessage());
-			}
-		}
-		else if($override_name == 'tailwind'){
-			require_once(PathHelper::getIncludePath('includes/FormWriterTailwind.php'));
-			try {
-				return new FormWriterTailwind($form_id);
-			} catch (Error $e) {
-				throw new Exception("Failed to instantiate tailwind FormWriter: " . $e->getMessage());
-			}
-		}
-		else if($override_name == 'uikit'){
-			require_once(PathHelper::getIncludePath('includes/FormWriterUIKit.php'));
-			try {
-				return new FormWriterUIKit($form_id);
-			} catch (Error $e) {
-				throw new Exception("Failed to instantiate UIKit FormWriter: " . $e->getMessage());
-			}
-		}
-		else if($override_name == 'plain' || $override_name == 'html5'){
-			require_once(PathHelper::getIncludePath('includes/FormWriterHTML5.php'));
-			try {
-				return new FormWriterHTML5($form_id);
-			} catch (Error $e) {
-				throw new Exception("Failed to instantiate HTML5 FormWriter: " . $e->getMessage());
-			}
-		}
-		
-		// Use ThemeHelper for theme-based selection
-		try {
-			require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
-			$theme = ThemeHelper::getInstance(); // Gets current theme
-
-			// First check if theme has custom FormWriter
-			$formWriterPath = $theme->getIncludePath('includes/FormWriter.php');
-
-			if (file_exists($formWriterPath)) {
-				require_once($formWriterPath);
-
-				// Verify class exists after include
-				if (!class_exists('FormWriter')) {
-					throw new Exception("FormWriter class not found in theme file: $formWriterPath");
-				}
-
-				try {
-					return new FormWriter($form_id);
-				} catch (Error $e) {
-					throw new Exception("Failed to instantiate theme FormWriter: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
-				}
-			}
-
-			// Use base class from theme manifest
-			$baseClass = $theme->getFormWriterBase();
-			if ($baseClass && $baseClass !== 'FormWriter') {
-				$baseClassPath = PathHelper::getIncludePath("includes/{$baseClass}.php");
-				if (file_exists($baseClassPath)) {
-					require_once($baseClassPath);
-
-					// Verify class exists after include
-					if (!class_exists($baseClass)) {
-						throw new Exception("FormWriter base class '$baseClass' not found in file: $baseClassPath");
-					}
-
-					try {
-						return new $baseClass($form_id);
-					} catch (Error $e) {
-						throw new Exception("Failed to instantiate FormWriter base class '$baseClass': " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
-					}
-				}
-			}
-
-			// If theme doesn't specify, determine from CSS framework
-			$cssFramework = $theme->getCssFramework();
-			switch($cssFramework) {
-				case 'bootstrap':
-					require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
-					try {
-						return new FormWriterBootstrap($form_id);
-					} catch (Error $e) {
-						throw new Exception("Failed to instantiate FormWriterBootstrap: " . $e->getMessage());
-					}
-
-				case 'tailwind':
-					require_once(PathHelper::getIncludePath('includes/FormWriterTailwind.php'));
-					try {
-						return new FormWriterTailwind($form_id);
-					} catch (Error $e) {
-						throw new Exception("Failed to instantiate FormWriterTailwind: " . $e->getMessage());
-					}
-
-				case 'uikit':
-					require_once(PathHelper::getIncludePath('includes/FormWriterUIKit.php'));
-					try {
-						return new FormWriterUIKit($form_id);
-					} catch (Error $e) {
-						throw new Exception("Failed to instantiate FormWriterUIKit: " . $e->getMessage());
-					}
-			}
-
-		} catch (Exception $e) {
-			// Re-throw with context instead of silently logging
-			throw new Exception("ThemeHelper error in get_formwriter_object: " . $e->getMessage());
-		}
-		
-		// LEGACY FALLBACK: Updated to support plugin themes
-		$settings = Globalvars::get_instance();
-		$theme_template = $settings->get_setting('theme_template', true, true);
-
-		// Try directory theme FormWriter first
-		if (ThemeHelper::themeExists($theme_template)) {
-			$theme_form = PathHelper::getBasePath() . '/theme/' . $theme_template . '/includes/FormWriter.php';
-			if (file_exists($theme_form)) {
-				require_once($theme_form);
-
-				// Verify class exists after include
-				if (!class_exists('FormWriter')) {
-					throw new Exception("FormWriter class not found in legacy theme file: $theme_form");
-				}
-
-				try {
-					return new FormWriter($form_id);
-				} catch (Error $e) {
-					throw new Exception("Failed to instantiate legacy theme FormWriter: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
-				}
-			}
-		}
-
-		// Final default - Bootstrap
-		require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
-		try {
-			return new FormWriterBootstrap($form_id);
-		} catch (Error $e) {
-			throw new Exception("Failed to instantiate default FormWriterBootstrap: " . $e->getMessage());
-		}	
-							
-	}
 	
 	
 	// Function get_plugin_file_path() has been removed.
@@ -504,7 +339,6 @@ class LibraryFunctions {
 		return preg_match('/^[A-Z0-9._%+\\-\\#!$%&\'*\/=?^_`{}|~]+@[A-Z0-9.-]+\.[A-Z]{2,10}$/i', $email) > 0;
 	}
 
-
 	
 	//CONVERT NESTED OBJECT TO PHP ARRAY
 	static function objToArray($obj, &$arr){ 
@@ -529,12 +363,9 @@ class LibraryFunctions {
 		return $arr;
 	}
 
-
-
 	static function DatetimeIntoDaysAgo($dt) {
 		return intval(time() / 86400) - intval($dt->format('U') / 86400);
 	}
-
 
 	static function VariableLengthHash($str, $len, $salt=NULL) {
 		if (!$salt) {
@@ -599,7 +430,6 @@ class LibraryFunctions {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-
 		$sql = "INSERT INTO slg_system_logs (slg_type, slg_log_entry) VALUES (:slg_type, :slg_log_entry)";
 		try{
 
@@ -614,8 +444,6 @@ class LibraryFunctions {
 
 		return TRUE;
 	}
-
-
 
 	static function GetLocationData($zip_code=NULL, $city=NULL, $state=NULL) {
 		return FALSE;
@@ -839,13 +667,11 @@ class LibraryFunctions {
 		$amsnip = strstr($timeconv, "am");
 		$pmsnip = strstr($timeconv, "pm");
 
-
 		if($amsnip == "am"){
 			$timeconv = str_replace($amsnip, "", $timeconv);
 
 			$hours = trim(strtok($timeconv, ":"));
 			$mins = trim(strtok(":"));
-
 
 			if($hours < 10){
 				$hours = '0'.$hours;
@@ -872,7 +698,6 @@ class LibraryFunctions {
 	}
 
 	static function getTimezoneFromPoint($lat, $long){
-
 
 		$ch =curl_init();
 		$url =  "http://www.earthtools.org/timezone/$lat/$long";
@@ -962,7 +787,6 @@ class LibraryFunctions {
 		return $dt;
 
 	}
-
 
 	//GET CURRENT TIMEZONE ABBREVIATION FOR GIVEN TIME AND TIMEZONE
 	static function get_time_abbr($tz, $time){
@@ -1210,8 +1034,6 @@ class LibraryFunctions {
 		return $bounds;
 	}
 
-
-
 	/*********************************************************************
 	//FETCH A VARIABLE FROM $_GET, $_POST, OR REQUEST
 	$varname - Name of var to fetch.
@@ -1282,7 +1104,6 @@ class LibraryFunctions {
 		return $defaultvalue;
 
 	}
-
 
 	/*********************************************************************
 	//FETCH A VARIABLE FROM ARRAY PASSED INTO A FUNCTION
@@ -1359,7 +1180,6 @@ class LibraryFunctions {
 	Edit_Table
 
 	Adds a row or updates a row in a table based on whether that row already exists.
-
 
 	INPUT:
 	$dbhelper - Database helper object;  	$dbhelper = new DbConnector();
@@ -1450,7 +1270,6 @@ class LibraryFunctions {
 			$column_meta[$row->column_name]['data_type'] = $row->data_type;
 			$column_meta[$row->column_name]['is_nullable'] = $row->is_nullable;
 		}
-
 
 		//BIND VALUES AND PREPARE STATEMENT
 		//$q = $dblink->prepare($sql);
@@ -1609,7 +1428,6 @@ class LibraryFunctions {
 		}
 
     }
-
 
 	/*
 		Paul's Simple Diff Algorithm v 0.1

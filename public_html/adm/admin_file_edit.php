@@ -72,7 +72,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing file
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_file_edit');
 	echo $formwriter->hiddeninput('fil_file_id', $file->key);
 

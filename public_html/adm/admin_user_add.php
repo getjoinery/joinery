@@ -39,7 +39,7 @@ else{
 	$pageoptions['title'] = 'Add User';
 	$page->begin_box($pageoptions);
 
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+	$formwriter = $page->getFormWriter('form1');
 
 	$validation_rules = array();
 	$validation_rules['usr_first_name']['required']['value'] = 'true';
