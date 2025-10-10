@@ -58,6 +58,17 @@ Price Area
 				<?php elseif ($page_vars['is_expired']): ?>
 					<p class="mt-2 text-danger">Your subscription has expired</p>
 				<?php endif; ?>
+
+				<div class="pricing-tabs">
+					<div class="switch-area">
+						<a href="/profile/change-tier?period=month" class="toggler <?php echo (!isset($_GET['period']) || $_GET['period'] == 'month') ? 'toggler--is-active' : ''; ?> ms-0" id="filt-monthly">Monthly</a>
+						<a href="/profile/change-tier?period=<?php echo (isset($_GET['period']) && $_GET['period'] == 'year') ? 'month' : 'year'; ?>" class="toggle" style="pointer-events: auto;">
+							<input type="checkbox" id="switcher" class="check" <?php echo (isset($_GET['period']) && $_GET['period'] == 'year') ? 'checked' : ''; ?> style="pointer-events: none;">
+							<b class="b switch" style="pointer-events: none;"></b>
+						</a>
+						<a href="/profile/change-tier?period=year" class="toggler <?php echo (isset($_GET['period']) && $_GET['period'] == 'year') ? 'toggler--is-active' : ''; ?>" id="filt-yearly">Yearly</a>
+					</div>
+				</div>
             </div>
 
 			<?php if ($page_vars['show_reactivate_button']): ?>
