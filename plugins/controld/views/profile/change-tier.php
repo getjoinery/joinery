@@ -90,8 +90,8 @@ Price Area
 									<p class="subtitle">(Downgrade)</p>
 								<?php endif; ?>
                             </div>
-							<div class="box-text"><?php echo $tier->get('sbt_description'); ?></div>
 
+							<p class="box-text">&nbsp;</p>
 							<?php if (!empty($tier_data['products'])): ?>
 								<?php foreach ($tier_data['products'] as $product): ?>
 									<h4 class="box-price">
@@ -108,6 +108,8 @@ Price Area
 							<?php endif; ?>
 
                             <div class="box-content">
+
+								<?php echo $tier->get('sbt_description'); ?>
 
 								<?php if ($tier_data['message']): ?>
 									<p class="box-text2"><?php echo htmlspecialchars($tier_data['message']); ?></p>
