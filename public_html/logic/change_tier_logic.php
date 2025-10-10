@@ -468,11 +468,11 @@ function change_tier_logic($get, $post) {
         foreach ($tier_products as $product) {
             $versions = $product->get_product_versions();
             $product_version = $versions->count() > 0 ? $versions->get(0) : null;
-            if ($product_version && $product_version->get('prv_stripe_price_id')) {
+            if ($product_version) {
                 $tier_data['products'][] = array(
                     'id' => $product->key,
                     'name' => $product->get('pro_name'),
-                    'price' => $product_version->get('prv_price'),
+                    'price' => $product_version->get('prv_version_price'),
                     'period' => $product_version->is_subscription()
                 );
             }

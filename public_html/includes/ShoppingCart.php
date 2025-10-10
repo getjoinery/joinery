@@ -69,14 +69,25 @@ class ShoppingCart {
 	public function add_item($product, $form_data) {
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
-		
+
 		$product_version = $product->get_product_versions(TRUE, $form_data['product_version']);
 
 		// First lets validate we can add this item to the cart!
-		// DO NOT ALLOW THE CART TO HOLD RECURRING AND NON RECURRING AT THE SAME time 
+		// DO NOT ALLOW THE CART TO HOLD RECURRING AND NON RECURRING AT THE SAME time
 		if(!$this->can_add_to_cart($product_version)){
 			throw new ShoppingCartException(
 					'Sorry, the cart may contain only one subscription, and it cannot be mixed with other items.  Remove the other items or the subscription or check out with those first. <a href="/cart">Return to the cart</a>');
+		}
+
+		// Ensure Stripe price ID exists if Stripe is enabled
+		$checkout_type = $settings->get_setting('checkout_type');
+		if ($checkout_type == 'stripe_regular' || $checkout_type == 'stripe_checkout') {
+			$stripe_helper = new StripeHelper();
+			try {
+				$stripe_helper->get_or_create_price($product_version);
+			} catch (Exception $e) {
+				throw new ShoppingCartException('Unable to process this product: ' . $e->getMessage());
+			}
 		}
 		
 		
