@@ -20,8 +20,6 @@ class CtldDevice extends SystemBase {
 	public static $prefix = 'cdd';
 	public static $tablename = 'cdd_ctlddevices';
 	public static $pkey_column = 'cdd_ctlddevice_id';
-	public static $permanent_delete_actions = array(
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	/**
 	 * Field specifications define database column properties and validation rules

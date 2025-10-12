@@ -14,8 +14,6 @@ class CtldFilter extends SystemBase {
 	public static $prefix = 'cdf';
 	public static $tablename = 'cdf_ctldfilters';
 	public static $pkey_column = 'cdf_ctldfilter_id';
-	public static $permanent_delete_actions = array(
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	/**
 	 * Field specifications define database column properties and validation rules

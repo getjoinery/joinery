@@ -7,6 +7,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 require_once(PathHelper::getIncludePath('plugins/items/data/items_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class ItemRelationException extends SystemBaseException {}
 
@@ -15,10 +16,10 @@ class ItemRelation extends SystemBase {
 	public static $tablename = 'itr_item_relations';
 	public static $pkey_column = 'itr_item_relation_id';
 	public static $url_namespace = 'item_relation';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(
-		//'pac_itr_item_relation_id' => 'delete',
-		//'com_itr_item_relation_id' => 'null'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'itr_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 	/**
 	 * Field specifications define database column properties and validation rules

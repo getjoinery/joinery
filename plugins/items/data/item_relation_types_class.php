@@ -11,9 +11,6 @@ class ItemRelationType extends SystemBase {
 	public static $prefix = 'itt';
 	public static $tablename = 'itt_item_relation_types';
 	public static $pkey_column = 'itt_item_relation_type_id';
-	public static $permanent_delete_actions = array(
-		'itr_itt_item_relation_type_id' => 'delete',
-	); //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	/**
 	 * Field specifications define database column properties and validation rules

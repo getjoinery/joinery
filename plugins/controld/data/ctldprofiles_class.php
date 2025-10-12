@@ -19,8 +19,6 @@ class CtldProfile extends SystemBase {
 	public static $prefix = 'cdp';
 	public static $tablename = 'cdp_ctldprofiles';
 	public static $pkey_column = 'cdp_ctldprofile_id';
-	public static $permanent_delete_actions = array(
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	/**
 	 * Field specifications define database column properties and validation rules

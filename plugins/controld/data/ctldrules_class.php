@@ -14,8 +14,6 @@ class CtldRule extends SystemBase {
 	public static $prefix = 'cdr';
 	public static $tablename = 'cdr_ctldrules';
 	public static $pkey_column = 'cdr_ctldrule_id';
-	public static $permanent_delete_actions = array(
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	/**
 	 * Field specifications define database column properties and validation rules

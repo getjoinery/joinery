@@ -15,11 +15,6 @@ class Item extends SystemBase {
 	public static $tablename = 'itm_items';
 	public static $pkey_column = 'itm_item_id';
 	public static $url_namespace = 'item';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(
-		'itr_item_id_left' => 'delete',
-		'itr_item_id_right' => 'delete',
-		//'com_itm_item_id' => 'null'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	/**
 	 * Field specifications define database column properties and validation rules
