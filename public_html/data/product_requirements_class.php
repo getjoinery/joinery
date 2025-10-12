@@ -18,8 +18,6 @@ class DisplayablePermanentProductRequirementException extends ProductRequirement
 class ProductRequirement extends SystemBase {	public static $prefix = 'prq';
 	public static $tablename = 'prq_product_requirements';
 	public static $pkey_column = 'prq_product_requirement_id';
-	public static $permanent_delete_actions = array(		'pri_prq_product_requirement_id' => 'delete',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

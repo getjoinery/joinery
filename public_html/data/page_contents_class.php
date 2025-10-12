@@ -14,7 +14,10 @@ class PageContentException extends SystemBaseException {}
 class PageContent extends SystemBase {	public static $prefix = 'pac';
 	public static $tablename = 'pac_page_contents';
 	public static $pkey_column = 'pac_page_content_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = [
+		'pac_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

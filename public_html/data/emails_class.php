@@ -16,9 +16,10 @@ class EmailNotSentException extends EmailException {};
 class Email extends SystemBase {	public static $prefix = 'eml';
 	public static $tablename = 'eml_emails';
 	public static $pkey_column = 'eml_email_id';
-	public static $permanent_delete_actions = array(		'erc_eml_email_id' => 'delete',
-		'erg_eml_email_id' => 'delete',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'eml_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 	const FORMAT_HTML = 1;
 	const FORMAT_PLAINTEXT = 2;

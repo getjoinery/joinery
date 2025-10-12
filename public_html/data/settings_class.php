@@ -14,6 +14,10 @@ class SettingException extends SystemBaseException {}
 class Setting extends SystemBase {	public static $prefix = 'stg';
 	public static $tablename = 'stg_settings';
 	public static $pkey_column = 'stg_setting_id';
+
+	protected static $foreign_key_actions = [
+		'stg_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 	public static $permanent_delete_actions = array(
 	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 

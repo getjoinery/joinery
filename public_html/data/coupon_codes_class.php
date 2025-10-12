@@ -16,9 +16,6 @@ class CouponCodeException extends SystemBaseException {}
 class CouponCode extends SystemBase {	public static $prefix = 'ccd';
 	public static $tablename = 'ccd_coupon_codes';
 	public static $pkey_column = 'ccd_coupon_code_id';
-	public static $permanent_delete_actions = array(		'ccp_ccd_coupon_code_id' => 'prevent',
-		'ccu_cco_coupon_code_id' => 'null'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

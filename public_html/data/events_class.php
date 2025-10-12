@@ -52,16 +52,14 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	public static $tablename = 'evt_events';
 	public static $pkey_column = 'evt_event_id';
 	public static $url_namespace = 'event';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(		'evs_evt_event_id' => 'delete',	
-		'evr_evt_event_id' => 'prevent',
-		'erg_evt_event_id' => 'prevent',
-		'msg_evt_event_id' => 'delete',
-		'pro_evt_event_id' => 'prevent',
-		'sev_evt_event_id' => 'delete',
-		'fil_evt_event_id' => 'null',
-		
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
+
+	protected static $foreign_key_actions = [
+		'evt_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'evt_usr_user_id_leader' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'evt_ety_event_type_id' => ['action' => 'prevent', 'message' => 'Cannot delete event type - events exist'],
+		'evt_loc_location_id' => ['action' => 'null']
+	];
+
 	const STATUS_ACTIVE = 1;
 	const STATUS_COMPLETED = 2;
 	const STATUS_CANCELED = 3;

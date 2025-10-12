@@ -14,8 +14,10 @@ class CouponCodeUseException extends SystemBaseException {}
 class CouponCodeUse extends SystemBase {	public static $prefix = 'ccu';
 	public static $tablename = 'ccu_coupon_code_uses';
 	public static $pkey_column = 'ccu_coupon_code_use_id';
-	public static $permanent_delete_actions = array(
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'ccu_ord_order_id' => ['action' => 'null']
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

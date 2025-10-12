@@ -17,10 +17,10 @@ class FileException extends SystemBaseException {}
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
 	public static $pkey_column = 'fil_file_id';
-	public static $permanent_delete_actions = array(		'esf_fil_file_id' => 'prevent',
-		'evt_fil_file_id' => 'prevent',
-		'mlt_fil_file_id' => 'null'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'fil_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

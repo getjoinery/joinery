@@ -14,9 +14,7 @@ class EmailTemplateStoreException extends SystemBaseException {}
 class EmailTemplateStore extends SystemBase {	public static $prefix = 'emt';
 	public static $tablename = 'emt_email_templates';
 	public static $pkey_column = 'emt_email_template_id';
-	public static $permanent_delete_actions = array(		'mlt_emt_email_template_id' => 'prevent'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
+
 	const TEMPLATE_TYPE_OUTER = 1;
 	const TEMPLATE_TYPE_INNER = 2;
 	const TEMPLATE_TYPE_FOOTER = 3;

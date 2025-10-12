@@ -28,9 +28,10 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	public static $tablename = 'mlt_mailing_lists';
 	public static $pkey_column = 'mlt_mailing_list_id';
 	public static $url_namespace = 'list';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(		'mlr_mlt_mailing_list_id' => 'prevent',
-		
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prmailing_list', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'mlt_emt_email_template_id' => ['action' => 'prevent', 'message' => 'Cannot delete email template - mailing lists exist']
+	];
 	
 	const VISIBILITY_PRIVATE = 0;  //NOT LISTED ANYWHERE FOR SUBSCRIPTION, MUST BE SIGNED UP BY AN ADMIN
 	const VISIBILITY_PUBLIC = 1;  //LISTED ON /LISTS

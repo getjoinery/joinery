@@ -14,7 +14,10 @@ class VisitorEventException extends SystemBaseException {}
 class VisitorEvent extends SystemBase {	public static $prefix = 'vse';
 	public static $tablename = 'vse_visitor_events';
 	public static $pkey_column = 'vse_visitor_event_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = [
+		'vse_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules
