@@ -741,209 +741,168 @@ abstract class SystemBase {
 	}
 	
 	
-	//DEFAULT ACTION ON PERMANENT DELETE IS TO SKIP ALL ROWS WITH FOREIGN KEY 
-	//FOR OTHER BEHAVIOR SET THE permanent_delete_actions ARRAY
-	//OPTIONS FOR permanent_delete_actions ARRAY:
-	//'delete' = DELETE THE ROW WITH THE FOREIGN KEY
-	//'null' = SET THE FOREIGN KEY TO NULL
-	//value = SET THE FOREIGN KEY TO A VALUE
-	//'skip' = SKIP THE FOREIGN KEY
-	//'prevent' = IF FOREIGN KEY ROWS ARE PRESENT, DO NOT ALLOW PERMANENT DELETE...THROWS AN ERROR
-	//DOES NOT CASCADE.  IF YOU NEED CASCADE DELETE, THEN CALL THE permanent_delete() FUNCTION DIRECTLY ON THE OTHER CLASS
-	function permanent_delete($debug=false){
-		// Check if the primary key is incorrectly included in permanent_delete_actions
-		if(isset(static::$permanent_delete_actions) && array_key_exists(static::$pkey_column, static::$permanent_delete_actions)){
-			throw new SystemBaseException('Primary key ' . static::$pkey_column . ' should not be included in permanent_delete_actions for ' . static::$tablename . '. The main record deletion is handled automatically.');
+	/**
+	 * Perform a dry run of deletion to see what would be affected
+	 * Returns structured array of all actions that would be taken
+	 */
+	public function permanent_delete_dry_run() {
+		$db = DbConnector::get_instance()->get_db_link();
+		$results = [
+			'primary' => [
+				'table' => static::$tablename,
+				'key' => static::$pkey_column,
+				'value' => $this->key,
+				'action' => 'delete'
+			],
+			'dependencies' => [],
+			'total_affected' => 1,  // Start with the primary record
+			'can_delete' => true,
+			'blocking_reasons' => []
+		];
+
+		// Get all deletion rules for this table from the database
+		$sql = "SELECT * FROM del_deletion_rules
+				WHERE del_source_table = ?
+				ORDER BY del_id";
+		$stmt = $db->prepare($sql);
+		$stmt->execute([static::$tablename]);
+
+		// Process each dependent relationship
+		while ($rule = $stmt->fetch(PDO::FETCH_ASSOC)) {
+			$dep_table = $rule['del_target_table'];
+			$dep_column = $rule['del_target_column'];
+
+			// Check if records exist
+			$count_sql = "SELECT COUNT(*) FROM {$dep_table} WHERE {$dep_column} = ?";
+			$count_stmt = $db->prepare($count_sql);
+			$count_stmt->execute([$this->key]);
+			$count = $count_stmt->fetchColumn();
+
+			if ($count > 0) {
+				$dependency = [
+					'table' => $dep_table,
+					'column' => $dep_column,
+					'count' => $count,
+					'action' => $rule['del_action'],
+					'action_value' => $rule['del_action_value'],
+					'message' => $rule['del_message']
+				];
+
+				// Check if this would prevent deletion
+				if ($rule['del_action'] === 'prevent') {
+					$results['can_delete'] = false;
+					$results['blocking_reasons'][] = $rule['del_message'] ??
+						"Cannot delete: {$count} record(s) in {$dep_table} depend on this record";
+					$dependency['blocks_deletion'] = true;
+				} else {
+					// Add to total affected count
+					if ($rule['del_action'] === 'cascade') {
+						$results['total_affected'] += $count;
+					}
+				}
+
+				$results['dependencies'][] = $dependency;
+			}
 		}
-		
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();  
-		
+
+		return $results;
+	}
+
+	/**
+	 * Perform the actual permanent deletion
+	 */
+	public function permanent_delete($debug=false) {
+		$db = DbConnector::get_instance()->get_db_link();
 
 		if(!$debug){
-			$this_transaction = false;
-			if(!$dblink->inTransaction()){
-				$dblink->beginTransaction();
-				$this_transaction = true;
-			}	
+			$db->beginTransaction();
 		}
 
-		// Use LibraryFunctions method instead of duplicate query
-		$tables_and_columns = LibraryFunctions::get_tables_and_columns();
+		try {
+			// Get all deletion rules for this table from the database
+			// This is much more efficient than scanning information_schema
+			$sql = "SELECT * FROM del_deletion_rules
+					WHERE del_source_table = ?
+					ORDER BY del_id";
+			$stmt = $db->prepare($sql);
+			$stmt->execute([static::$tablename]);
 
-		// Convert to the format expected by the existing foreign key detection logic
-		// MAKE A LIST OF FOUND FOREIGN KEYS (preserving original comment)
-		$found_foreign_keys = array();
-		foreach ($tables_and_columns as $table_name => $columns) {
-			foreach ($columns as $column) {
-				if (str_contains($column, static::$pkey_column)) {
-					if ($debug) {
-						echo static::$pkey_column . ' is in ' . $column . "\n<br>";
+			// Process each dependent relationship
+			while ($rule = $stmt->fetch(PDO::FETCH_ASSOC)) {
+				$dep_table = $rule['del_target_table'];
+				$dep_column = $rule['del_target_column'];
+
+				// Check if records exist
+				$count_sql = "SELECT COUNT(*) FROM {$dep_table} WHERE {$dep_column} = ?";
+				$count_stmt = $db->prepare($count_sql);
+				$count_stmt->execute([$this->key]);
+				$count = $count_stmt->fetchColumn();
+
+				if ($count > 0) {
+					switch ($rule['del_action']) {
+						case 'prevent':
+							throw new SystemDisplayableError(
+								"Cannot delete: $count records in {$dep_table} column {$dep_column} " .
+								($rule['del_message'] ?? 'depend on this record')
+							);
+
+						case 'cascade':
+							// Default action - delete dependent records
+							if($debug){
+								echo "DELETE FROM {$dep_table} WHERE {$dep_column} = {$this->key}<br>";
+							} else {
+								$del_sql = "DELETE FROM {$dep_table} WHERE {$dep_column} = ?";
+								$del_stmt = $db->prepare($del_sql);
+								$del_stmt->execute([$this->key]);
+							}
+							break;
+
+						case 'null':
+							if($debug){
+								echo "UPDATE {$dep_table} SET {$dep_column} = NULL WHERE {$dep_column} = {$this->key}<br>";
+							} else {
+								$null_sql = "UPDATE {$dep_table} SET {$dep_column} = NULL WHERE {$dep_column} = ?";
+								$null_stmt = $db->prepare($null_sql);
+								$null_stmt->execute([$this->key]);
+							}
+							break;
+
+						case 'set_value':
+							$value = $rule['del_action_value'];
+							if($debug){
+								echo "UPDATE {$dep_table} SET {$dep_column} = {$value} WHERE {$dep_column} = {$this->key}<br>";
+							} else {
+								$set_sql = "UPDATE {$dep_table} SET {$dep_column} = ? WHERE {$dep_column} = ?";
+								$set_stmt = $db->prepare($set_sql);
+								$set_stmt->execute([$value, $this->key]);
+							}
+							break;
 					}
-					$found_foreign_keys[$column] = $table_name;
 				}
 			}
+
+			// Delete the main record
+			if($debug){
+				echo "DELETE FROM " . static::$tablename . " WHERE " . static::$pkey_column . " = {$this->key}<br>";
+			} else {
+				$sql = "DELETE FROM " . static::$tablename . " WHERE " . static::$pkey_column . " = ?";
+				$stmt = $db->prepare($sql);
+				$stmt->execute([$this->key]);
+			}
+
+			if(!$debug){
+				$db->commit();
+				$this->key = NULL;
+			}
+
+		} catch (Exception $e) {
+			if(!$debug){
+				$db->rollback();
+			}
+			throw $e;
 		}
-		
-		//If no permanent_delete_actions specified, we'll use default behavior (delete) for all foreign keys
-		$has_permanent_delete_actions = isset(static::$permanent_delete_actions) && !empty(static::$permanent_delete_actions);
 
-		//CHECK FOR 'PREVENT' CONSTRAINT FIRST AND IF FOUND, THEN ABORT THE PERMANENT DELETE WITH AN ERROR
-		foreach($found_foreign_keys as $column=>$table_name){
-			$action = 'delete';  //DELETE IS DEFAULT
-			if($has_permanent_delete_actions){
-				foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
-					if($pcolumn == $column){
-						$action = $paction;
-					}
-				}
-			}
-			
-			if($action == 'prevent'){
-				if($debug){
-					echo 'Checking "prevent" constraint on foreign key '.$column.' in '.$table_name. ': ';
-				}
-				$sql = 'SELECT COUNT(1) FROM '.$table_name.' WHERE '.$column.'=:param1';
-				
-				try{
-					$q = $dblink->prepare($sql);
-					$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-					$q->execute();
-					$count = $q->fetchColumn();
-				}
-				catch(PDOException $e){
-					$dbhelper->handle_query_error($e);
-				}
-				if($count > 0){
-					if($debug){
-						echo "Prevent: ".$column." <br>\n";
-					}
-					else{
-						//IF FOUND, ERROR AND ABORT PERMANENT DELETE
-						if($this_transaction){
-							$dblink->rollBack();
-						}
-						
-						throw new SystemBaseException('Cannot permanent delete '.static::$pkey_column.'='.$this->key.' from '.static::$tablename.'. Columns exist in table '. $table_name);
-						return false;
-					}
-					
-				}
-			}								
-		}
-			
-
-
-
-		//IF NO PREVENT CONSTRAINT EXISTS, THEN DO THE DELETES
-		foreach($found_foreign_keys as $column=>$table_name){
-			
-			$action = 'delete';  //DELETE IS DEFAULT
-			if($has_permanent_delete_actions){
-				foreach(static::$permanent_delete_actions as $pcolumn=>$paction){
-					if($pcolumn == $column){
-						$action = $paction;
-					}
-				}
-			}
-			
-			if($action == 'prevent'){	
-				//DO NOTHING
-			}					
-			else if($action == 'delete'){
-
-			
-				$sql = 'DELETE FROM '.$table_name.' WHERE '.$column.'=:param1';
-				
-				if($debug){
-					$sql = str_replace(':param1', $this->key, $sql);
-					echo $sql . "<br>";
-				}
-				else{
-
-					try{
-						$q = $dblink->prepare($sql);
-						$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-						$q->execute();
-					}
-					catch(PDOException $e){
-						$dbhelper->handle_query_error($e);
-					}
-				}
-			}
-			else if($action == 'null'){
-			
-				$sql = 'UPDATE '.$table_name.' SET '.$column.'=NULL WHERE '.$column.'=:param1';
-				if($debug){
-					$sql = str_replace(':param1', $this->key, $sql);
-					echo $sql . "<br>";
-				}
-				else{	
-					try{
-						$q = $dblink->prepare($sql);
-						$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-						$q->execute();
-					}
-					catch(PDOException $e){
-						$dbhelper->handle_query_error($e);
-					}
-				}					
-			}
-			else if($action == 'skip'){
-				if($debug){
-					echo 'Skipping '.$column . "<br>";
-				}
-			}
-			else{
-				$sql = 'UPDATE '.$table_name.' SET '.$column.'='.$action.' WHERE '.$column.'=:param1';
-				if($debug){
-					$sql = str_replace(':param1', $this->key, $sql);
-					echo $sql . "<br>";
-				}
-				else{	
-					
-					try{
-						$q = $dblink->prepare($sql);
-						$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-						$q->execute();
-					}
-					catch(PDOException $e){
-						$dbhelper->handle_query_error($e);
-					}
-							
-				}					
-			}		
-		}			
-
-		
-		
-		// Finally, delete the main record itself
-		if(!$debug){
-			$sql = 'DELETE FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = :param1';
-			try{
-				$q = $dblink->prepare($sql);
-				$q->bindParam(':param1', $this->key, PDO::PARAM_INT);
-				$q->execute();
-			}
-			catch(PDOException $e){
-				if($this_transaction){
-					$dblink->rollBack();
-				}
-				$dbhelper->handle_query_error($e);
-			}
-		} else {
-			$sql = 'DELETE FROM ' . static::$tablename . ' WHERE ' . static::$pkey_column . ' = ' . $this->key;
-			echo $sql . "<br>";
-		}
-		
-		if(!$debug){
-			if($this_transaction){
-				$dblink->commit();
-			}
-		
-			$this->key = NULL;
-		}
-		return true;		
+		return true;
 	}
 
 	function safe_load_and_set($key, $value, $and_prepare=FALSE) { 
