@@ -385,7 +385,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		
 		try {
 		
-			$user = User::GetByEmail(trim($data['email']));
+			$user = User::GetByEmail(trim($data['usr_email']));
 			if(!$user){
 				$tdata = array(
 					'usr_first_name' => $data['usr_first_name'],
@@ -461,6 +461,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			}
 		}		
 		
+	return $user;
 	}
 
 	public function export_as_array() {
