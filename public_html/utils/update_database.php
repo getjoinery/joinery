@@ -228,13 +228,17 @@
 			}
 		}
 
-		// Step 3.5: Register deletion rules for all models
-		echo "-----DELETION RULES-----<br>\n";
+		// Step 3.5: Register deletion rules for core models only (plugins handled separately)
+		echo "-----DELETION RULES (CORE)-----<br>\n";
 		require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
 
 		try {
-			DeletionRule::registerAllModels();
-			echo "✓ Deletion rules registered successfully<br>\n";
+			// Register rules for core models only, without affecting plugin rules
+			DeletionRule::registerModelsFromDiscovery([
+				'include_plugins' => false,
+				'verbose' => $verbose
+			]);
+			echo "✓ Core deletion rules registered successfully<br>\n";
 		} catch (Exception $e) {
 			echo "⚠ Warning: Failed to register deletion rules - " . $e->getMessage() . "<br>\n";
 			// Don't fail the entire update if deletion rule registration fails

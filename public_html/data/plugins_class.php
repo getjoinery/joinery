@@ -444,6 +444,12 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 			
 			// Delete plugin record
 			$this->permanent_delete();
+
+			// Remove deletion rules for this plugin's models
+			// (Do this AFTER permanent_delete so the rules exist when needed)
+			require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+			$plugin_helper = PluginHelper::getInstance($plugin_name);
+			$plugin_helper->removePluginDeletionRules();
 			
 			$results['success'] = true;
 			$results['messages'][] = "Plugin '{$plugin_name}' uninstalled successfully";
