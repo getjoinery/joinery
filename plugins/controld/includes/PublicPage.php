@@ -713,8 +713,9 @@ Career Area
     All Js File
 ============================== -->
 
-    <!--<script src="/plugins/controld/assets/js/vendor/jquery-3.7.1.min.js"></script> //LOADED IN THE HEADER-->  
-	<script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"></script>
+    <!--<script src="/plugins/controld/assets/js/vendor/jquery-3.7.1.min.js"></script> //LOADED IN THE HEADER-->
+	<!-- Joinery Validation (Pure JS, no jQuery dependency) -->
+	<script src="/assets/js/joinery-validate.js"></script>
     <!-- Swiper Slider -->
     <script src="/plugins/controld/assets/js/swiper-bundle.min.js"></script>
     <!-- Bootstrap -->

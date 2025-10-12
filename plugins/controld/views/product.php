@@ -98,10 +98,10 @@ Career Area
 					echo $formwriter->hiddeninput('product_id', $product_id);
 
 					if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
-						
-                                
+
+
 						echo $formwriter->new_form_button('Add to Cart' , 'primary', 'full', 'th-btn');
-					}	
+					}
 					echo $formwriter->end_form(true);
 					$product->output_javascript($formwriter, array());
 				}
