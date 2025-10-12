@@ -39,10 +39,12 @@ class FormWriter extends FormWriterBootstrap {
 	protected $textintput_label_class_horizontal = ' form-group';
 	protected $textintput_container_class = ' form-group';
 	protected $textintput_label_class = '';
-	protected $textintput_input_class = '';
-	
+	// Removed: protected $textintput_input_class = '';
+	// Now inherits 'form-control' from FormWriterBootstrap for proper validation styling
+
 	protected $textbox_container_class = ' form-group';
-	protected $textbox_textarea_class = '';
+	// Removed: protected $textbox_textarea_class = '';
+	// Now inherits 'form-control' from FormWriterBootstrap for proper validation styling
 
 	protected $checkboxinput_container_class = ' form-group';
 	// Removed: protected $checkboxinput_input_class = '';
@@ -50,8 +52,9 @@ class FormWriter extends FormWriterBootstrap {
 
 	protected $checkboxList_container_class = ' form-group';
 	protected $checkboxList_wrapper_class = '';
-	protected $checkboxList_input_class_checkbox = '';	
-	protected $checkboxList_input_class_radio = '';	
+	// Removed dead code: protected $checkboxList_input_class_checkbox = '';
+	// Removed dead code: protected $checkboxList_input_class_radio = '';
+	// Parent class uses $checkboxList_input_class instead	
 	
 	protected $timeinput_container_class = ' form-group';
 	protected $timeinput_input_class = 'timepicker';
