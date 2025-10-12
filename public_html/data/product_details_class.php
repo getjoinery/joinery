@@ -11,7 +11,10 @@ class ProductDetailNotSentException extends ProductDetailException {};
 class ProductDetail extends SystemBase {	public static $prefix = 'prd';
 	public static $tablename = 'prd_product_details';
 	public static $pkey_column = 'prd_product_detail_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'prd_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

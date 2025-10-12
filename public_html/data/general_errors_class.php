@@ -14,7 +14,10 @@ class GeneralErrorException extends SystemBaseException {}
 class GeneralError extends SystemBase {	public static $prefix = 'err';
 	public static $tablename = 'err_general_errors';
 	public static $pkey_column = 'err_general_error_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'err_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

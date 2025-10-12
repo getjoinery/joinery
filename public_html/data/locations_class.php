@@ -15,8 +15,6 @@ class Location extends SystemBase {	public static $prefix = 'loc';
 	public static $tablename = 'loc_locations';
 	public static $pkey_column = 'loc_location_id';
 	public static $url_namespace = 'location';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(		'evt_loc_location_id' => 'null',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

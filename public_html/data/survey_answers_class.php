@@ -16,7 +16,10 @@ class SurveyAnswerException extends SystemBaseException {}
 class SurveyAnswer extends SystemBase {	public static $prefix = 'sva';
 	public static $tablename = 'sva_survey_answers';
 	public static $pkey_column = 'sva_survey_answer_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'sva_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 	/**
 	 * Field specifications define database column properties and validation rules

@@ -14,8 +14,6 @@ class EventTypeException extends SystemBaseException {}
 class EventType extends SystemBase {	public static $prefix = 'ety';
 	public static $tablename = 'ety_event_types';
 	public static $pkey_column = 'ety_event_type_id';
-	public static $permanent_delete_actions = array(		'evt_ety_event_type_id' => 'prevent',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

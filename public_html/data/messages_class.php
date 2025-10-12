@@ -11,7 +11,10 @@ class MessageNotSentException extends MessageException {};
 class Message extends SystemBase {	public static $prefix = 'msg';
 	public static $tablename = 'msg_messages';
 	public static $pkey_column = 'msg_message_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = [
+		'msg_usr_user_id_sender' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

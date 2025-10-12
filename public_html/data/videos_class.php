@@ -14,9 +14,11 @@ class VideoException extends SystemBaseException {}
 class Video extends SystemBase {	public static $prefix = 'vid';
 	public static $tablename = 'vid_videos';
 	public static $pkey_column = 'vid_video_id';
-	public static $permanent_delete_actions = array(		'evs_vid_video_id' => 'prevent',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	public static $url_namespace = 'video'; 
+	public static $url_namespace = 'video';
+
+	protected static $foreign_key_actions = [
+		'vid_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

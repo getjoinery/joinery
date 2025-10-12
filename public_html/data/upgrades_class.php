@@ -11,8 +11,10 @@ class UpgradeNotSentException extends UpgradeException {};
 class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	public static $tablename = 'upg_upgrades';
 	public static $pkey_column = 'upg_upgrade_id';
-	public static $permanent_delete_actions = array(
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = [
+		'upg_upg_upgrade_id_requires' => ['action' => 'prevent', 'message' => 'Cannot delete upgrade - required by other upgrades']
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

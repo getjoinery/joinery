@@ -17,9 +17,6 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	public static $tablename = 'pag_pages';
 	public static $pkey_column = 'pag_page_id';
 	public static $url_namespace = 'page';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(		'pac_pag_page_id' => 'delete',
-		'com_pag_page_id' => 'null'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

@@ -38,8 +38,11 @@ class EventRegistrantUnviewableDisplayException extends EventRegistrantException
 class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 	public static $tablename = 'evr_event_registrants';
 	public static $pkey_column = 'evr_event_registrant_id';
-	public static $permanent_delete_actions = array(		'odi_evr_event_registrant_id' => 'prevent'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = [
+		'evr_grp_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete group - event registrations exist'],
+		'evr_ord_order_id' => ['action' => 'null']
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

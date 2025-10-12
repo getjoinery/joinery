@@ -17,8 +17,10 @@ class CouponCodeProductException extends SystemBaseException {}
 class CouponCodeProduct extends SystemBase {	public static $prefix = 'ccp';
 	public static $tablename = 'ccp_coupon_code_products';
 	public static $pkey_column = 'ccp_coupon_code_product_id';
-	public static $permanent_delete_actions = array(
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'ccp_ccd_coupon_code_id' => ['action' => 'prevent', 'message' => 'Cannot delete coupon code - products exist']
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

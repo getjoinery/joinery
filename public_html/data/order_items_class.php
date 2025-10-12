@@ -21,9 +21,13 @@ class OrderItemException extends SystemBaseException {}
 class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	public static $tablename = 'odi_order_items';
 	public static $pkey_column = 'odi_order_item_id';
-	public static $permanent_delete_actions = array(		'evr_odi_order_item_id' => 'delete',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
-	
+
+	protected static $foreign_key_actions = [
+		'odi_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'odi_pro_product_id' => ['action' => 'prevent', 'message' => 'Cannot delete product - order items exist'],
+		'odi_evr_event_registrant_id' => ['action' => 'prevent', 'message' => 'Cannot delete event registration - order items exist']
+	];
+
 	public const STATUS_UNPAID = 1;
 	public const STATUS_PAID = 2;
 	public const STATUS_ERROR = 3;

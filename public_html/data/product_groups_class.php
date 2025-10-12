@@ -14,8 +14,6 @@ class ProductGroupException extends SystemBaseException {}
 class ProductGroup extends SystemBase {	public static $prefix = 'prg';
 	public static $tablename = 'prg_product_groups';
 	public static $pkey_column = 'prg_product_group_id';
-	public static $permanent_delete_actions = array(		'pro_prg_product_group_id' => 'prevent'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules
