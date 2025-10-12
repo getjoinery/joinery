@@ -89,6 +89,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$user_data['password'] = $_POST['password'];
 		}
 		$billing_user = User::CreateCompleteNew($user_data, true, true, false);
+		if(!$billing_user){
+			throw new SystemDisplayablePermanentError("Failed to create or retrieve billing user.");
+		}
 	}
 	
 	if($settings->get_setting('checkout_type') == 'stripe_regular' || $settings->get_setting('checkout_type') == 'stripe_checkout'){
