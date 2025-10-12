@@ -242,7 +242,7 @@ Contact Area
 
 							echo $formwriter->textinput("First Name", "billing_first_name", NULL, 30, $cart->billing_user['billing_first_name'], "", 255, "");
 							echo $formwriter->textinput("Last Name", "billing_last_name", NULL, 30, $cart->billing_user['billing_last_name'], "", 255, "");
-							echo $formwriter->textinput("Email", "billing_email", NULL, 30, $cart->billing_user['billing_email'], "", 255, ""); 
+							echo $formwriter->textinput("Email", "billing_email", NULL, 30, $cart->billing_user['billing_email'], "", 255, "");
 							if(!$session->get_user_id()){
 								echo $formwriter->passwordinput("Create Password", "password", '', 20, "" , "", 255,"");
 

@@ -45,8 +45,9 @@ class FormWriter extends FormWriterBootstrap {
 	protected $textbox_textarea_class = '';
 
 	protected $checkboxinput_container_class = ' form-group';
-	protected $checkboxinput_input_class = '';
-	
+	// Removed: protected $checkboxinput_input_class = '';
+	// Now inherits 'form-check-input' from FormWriterBootstrap for proper validation styling
+
 	protected $checkboxList_container_class = ' form-group';
 	protected $checkboxList_wrapper_class = '';
 	protected $checkboxList_input_class_checkbox = '';	
