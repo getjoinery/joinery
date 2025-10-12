@@ -251,7 +251,17 @@ class PluginHelper extends ComponentBase {
         // Clear any cached plugin states
         $settings = Globalvars::get_instance();
         $settings->set_setting("plugin_{$this->name}_active", 1);
-        
+
+        // Register deletion rules for all models (including new plugin models)
+        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        try {
+            DeletionRule::registerAllModels();
+        } catch (Exception $e) {
+            // Don't fail plugin activation if deletion rule registration fails
+            // Log the error but continue
+            error_log("Failed to register deletion rules after plugin activation: " . $e->getMessage());
+        }
+
         return true;
     }
     

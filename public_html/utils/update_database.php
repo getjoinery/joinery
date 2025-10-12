@@ -215,19 +215,32 @@
 		if (!empty($constraint_result['messages'])) {
 			echo implode('<br>', $constraint_result['messages']) . "<br>\n";
 		}
-		
+
 		if (!empty($constraint_result['warnings'])) {
 			foreach ($constraint_result['warnings'] as $warning) {
 				echo 'WARNING: ' . $warning . "<br>\n";
 			}
 		}
-		
+
 		if (!empty($constraint_result['errors'])) {
 			foreach ($constraint_result['errors'] as $error) {
 				echo 'ERROR: ' . $error . "<br>\n";
 			}
 		}
-		
+
+		// Step 3.5: Register deletion rules for all models
+		echo "-----DELETION RULES-----<br>\n";
+		require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+
+		try {
+			DeletionRule::registerAllModels();
+			echo "✓ Deletion rules registered successfully<br>\n";
+		} catch (Exception $e) {
+			echo "⚠ Warning: Failed to register deletion rules - " . $e->getMessage() . "<br>\n";
+			// Don't fail the entire update if deletion rule registration fails
+			// This allows the system to continue working even if the new deletion system isn't fully set up
+		}
+
 		// Check for any database schema errors before attempting migrations
 		$schema_errors = array_merge(
 			$table_result['errors'] ?? [],
