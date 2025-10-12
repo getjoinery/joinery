@@ -1135,19 +1135,19 @@ class Product extends SystemBase {
 						}
 						list($value, $message) = $value_message;
 						$rules[$field_name][$constraint] = $value;
-						$messages[$field_name][$constraint] = "'$message'";
+						$messages[$field_name][$constraint] = $message;
 						$error_message_objects[$field_name] = $field_container;
 					}
 				}
 			}
-			
+
 			//ADD IN THE PRODUCT REQUIREMENT INSTANCES
 			$instances_validations = $this->get_requirement_validation();
 			foreach($instances_validations as $instance_validation){
 				foreach($instance_validation as $field=>$valuearray){
 						$value = $valuearray['required'];
 						$rules[$field] = array(key($valuearray)=>$value['value']);
-					
+
 				}
 			}
 
@@ -1158,37 +1158,67 @@ class Product extends SystemBase {
 			}
 			*/
 
-			//ADD IN EXTRA DATA 
+			//ADD IN EXTRA DATA
 			if(count($extra_data)){
 				foreach($extra_data as $field=>$valuearray){
 						$value = $valuearray['required'];
 						$rules[$field] = array(key($valuearray)=>$value['value']);
-					
+
+				}
+			}
+
+			// Generate JoineryValidation JavaScript (migrated from jQuery Validate)
+			echo "
+				document.addEventListener('DOMContentLoaded', function() {
+					const validationOptions = {
+						debug: false,
+						rules: {";
+
+			// Output rules
+			$first = true;
+			foreach ($rules as $fieldName => $fieldRules) {
+				if (!$first) echo ',';
+				$first = false;
+				echo "\n\t\t\t\t\t\t" . json_encode($fieldName) . ': {';
+				$firstRule = true;
+				foreach ($fieldRules as $ruleName => $ruleValue) {
+					if (!$firstRule) echo ', ';
+					$firstRule = false;
+					echo $ruleName . ': ';
+					// Handle boolean values
+					if ($ruleValue === 'true' || $ruleValue === 'false') {
+						echo $ruleValue;
+					} else {
+						echo json_encode($ruleValue);
+					}
+				}
+				echo '}';
+			}
+
+			echo "
+						},
+						messages: {";
+
+			// Output custom messages
+			$firstMsg = true;
+			foreach ($messages as $fieldName => $fieldMessages) {
+				foreach ($fieldMessages as $ruleName => $message) {
+					if (!empty($message)) {
+						if (!$firstMsg) echo ',';
+						$firstMsg = false;
+						echo "\n\t\t\t\t\t\t" . json_encode($fieldName) . ': {';
+						echo $ruleName . ': ' . json_encode($message);
+						echo '}';
+					}
 				}
 			}
 
 			echo "
-				$(document).ready(function() {
+						}
+					};
 
-					error_message_array = eval(" . json_encode($error_message_objects) . ");
-
-					$.validator.addMethod(
-									'regex',
-									function(value, element, regexp) {
-											var check = false;
-											var re = new RegExp(regexp);
-											return this.optional(element) || re.test(value);
-									}
-					);
-
-					$('#".$form_id."').validate({
-							rules: " . str_replace('"', '', json_encode($rules)) . ",
-							messages: " . str_replace('"', '', json_encode($messages)) . ",";
-
-					echo $formwriter->validate_style_info;
-					echo "
-					});
-			});
+					JoineryValidation.init('" . $form_id . "', validationOptions);
+				});
 			";
 		}
 		echo '</script>';
