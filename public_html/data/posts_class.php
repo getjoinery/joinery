@@ -19,9 +19,10 @@ class Post extends SystemBase {	public static $prefix = 'pst';
 	public static $tablename = 'pst_posts';
 	public static $pkey_column = 'pst_post_id';
 	public static $url_namespace = 'post';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
-	public static $permanent_delete_actions = array(		'cmt_pst_post_id' => 'delete',
-		'grm_pst_post_id' => 'delete'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'pst_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

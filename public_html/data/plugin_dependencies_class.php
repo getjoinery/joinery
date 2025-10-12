@@ -11,8 +11,11 @@ class PluginDependencyNotSentException extends PluginDependencyException {}
 class PluginDependency extends SystemBase {    public static $prefix = 'pld';
     public static $tablename = 'pld_plugin_dependencies';
     public static $pkey_column = 'pld_plugin_dependency_id';
-    public static $permanent_delete_actions = array(
-    );  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+    protected static $foreign_key_actions = [
+        'pdp_plg_plugin_id_dependee' => ['action' => 'prevent', 'message' => 'Cannot delete plugin - dependencies exist'],
+        'pdp_plv_plugin_version_id' => ['action' => 'prevent', 'message' => 'Cannot delete plugin version - dependencies exist']
+    ];
 
         /**
      * Field specifications define database column properties and validation rules

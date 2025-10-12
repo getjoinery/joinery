@@ -25,46 +25,6 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $tablename = 'usr_users';
 	public static $pkey_column = 'usr_user_id';
 
-	public static $permanent_delete_actions = array(
-		'act_usr_user_id' => 'delete',
-		'lfe_usr_user_id' => 'delete',
-		'log_usr_user_id' => 'delete',
-		'evl_usr_user_id' => 'delete',
-		'ers_usr_user_id' => 'delete',
-		'ord_usr_user_id' => User::USER_DELETED,
-		'odi_usr_user_id' => User::USER_DELETED,
-		'eml_usr_user_id' => User::USER_DELETED,
-		'erc_usr_user_id' => 'delete',
-		'evt_usr_user_id' => User::USER_DELETED,
-		'evr_usr_user_id' => 'delete',
-		'pst_usr_user_id' => User::USER_DELETED,
-		'phn_usr_user_id' => 'delete',
-		'usa_usr_user_id' => 'delete',
-		'vid_usr_user_id' => User::USER_DELETED,
-		'fil_usr_user_id' => User::USER_DELETED,
-		'msg_usr_user_id_recipient' => 'delete',
-		'msg_usr_user_id_sender' => User::USER_DELETED,
-		'grp_usr_user_id_created' => User::USER_DELETED,
-		'bkn_usr_user_id_booked' => User::USER_DELETED,
-		'bkn_usr_user_id_client' => User::USER_DELETED,
-		'cls_usr_user_id_logged_in' => 'delete',
-		'cls_usr_user_id_billing' => User::USER_DELETED,
-		'cmt_usr_user_id' => 'delete',
-		'cnv_usr_user_id' => User::USER_DELETED,
-		'err_usr_user_id' => User::USER_DELETED,
-		'evt_usr_user_id_leader' => User::USER_DELETED,
-		'pac_usr_user_id' => User::USER_DELETED,
-		'sev_usr_user_id' => 'delete',
-		'siv_usr_user_id' => User::USER_DELETED,
-		'stg_usr_user_id' => User::USER_DELETED,
-		'sva_usr_user_id' => User::USER_DELETED,
-		'vse_usr_user_id' => User::USER_DELETED,
-		'prd_usr_user_id' => User::USER_DELETED,
-		'mlr_usr_user_id' => 'delete',
-		'ewl_usr_user_id' => 'delete'
-
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
-
 	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;

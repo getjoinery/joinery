@@ -12,9 +12,6 @@ class CommentNotSentException extends CommentException {};
 class Comment extends SystemBase {	public static $prefix = 'cmt';
 	public static $tablename = 'cmt_comments';
 	public static $pkey_column = 'cmt_comment_id';
-	public static $permanent_delete_actions = array(
-		'cmt_comment_id_parent' => 'null'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

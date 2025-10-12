@@ -17,13 +17,10 @@ class GroupException extends SystemBaseException {}
 class Group extends SystemBase {	public static $prefix = 'grp';
 	public static $tablename = 'grp_groups';
 	public static $pkey_column = 'grp_group_id';
-	public static $permanent_delete_actions = array(		'evr_grp_group_id' => 'prevent',
-		'evt_grp_group_id' => 'null',
-		'grm_grp_group_id' => 'delete',
-		'pro_grp_group_id' => 'prevent',
-		'erg_grp_group_id' => 'prevent',
-		'fil_grp_group_id' => 'null'
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'grp_usr_user_id_created' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
 
 	/**
 	 * Field specifications define database column properties and validation rules

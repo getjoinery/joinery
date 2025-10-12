@@ -18,13 +18,11 @@ class OrderException extends SystemBaseException {}
 class Order extends SystemBase {	public static $prefix = 'ord';
 	public static $tablename = 'ord_orders';
 	public static $pkey_column = 'ord_order_id';
-	public static $permanent_delete_actions = array(
-		'odi_ord_order_id' => 'delete',
-		'cls_ord_order_id' => 'delete',
-		'evr_ord_order_id' => 'null',
-		'ccu_ord_order_id' => 'null',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
-	
+
+	protected static $foreign_key_actions = [
+		'ord_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
+
 	public const STATUS_UNPAID = 1;
 	public const STATUS_PAID = 2;
 	public const STATUS_ERROR = 3;

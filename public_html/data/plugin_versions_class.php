@@ -11,8 +11,6 @@ class PluginVersionNotSentException extends PluginVersionException {}
 class PluginVersion extends SystemBase {    public static $prefix = 'plv';
     public static $tablename = 'plv_plugin_versions';
     public static $pkey_column = 'plv_plugin_version_id';
-    public static $permanent_delete_actions = array(
-    );  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
         /**
      * Field specifications define database column properties and validation rules

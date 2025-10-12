@@ -15,9 +15,10 @@ class AdminMenuException extends SystemBaseException {}
 class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	public static $tablename = 'amu_admin_menus';
 	public static $pkey_column = 'amu_admin_menu_id';
-	public static $permanent_delete_actions = array(
-		 
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'adm_adm_admin_menu_id_parent' => ['action' => 'null']
+	];
 
 	/**
 	 * Field specifications define database column properties and validation rules

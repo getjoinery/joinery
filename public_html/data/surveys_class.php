@@ -16,11 +16,6 @@ class SurveyException extends SystemBaseException {}
 class Survey extends SystemBase {	public static $prefix = 'svy';
 	public static $tablename = 'svy_surveys';
 	public static $pkey_column = 'svy_survey_id';
-	public static $permanent_delete_actions = array(
-		'srq_svy_survey_id' => 'prevent',
-		'sva_svy_survey_id' => 'prevent',
-		'evt_svy_survey_id' => 'prevent',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

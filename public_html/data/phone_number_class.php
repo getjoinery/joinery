@@ -15,9 +15,6 @@ class DisplayablePhoneNumberException extends PhoneNumberException implements Di
 class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	public static $tablename = 'phn_phone_numbers';
 	public static $pkey_column = 'phn_phone_number_id';
-	public static $permanent_delete_actions = array(		'act_activation_codes' => 'delete',
-		'usr_phn_phone_number_id' => 'prevent',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
 
 		/**
 	 * Field specifications define database column properties and validation rules

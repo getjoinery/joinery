@@ -17,12 +17,7 @@ class QuestionException extends SystemBaseException {}
 class Question extends SystemBase {	public static $prefix = 'qst';
 	public static $tablename = 'qst_questions';
 	public static $pkey_column = 'qst_question_id';
-	public static $permanent_delete_actions = array(
-		'qop_qst_question_id' => 'delete',		'srq_qst_question_id' => 'prevent',
-		'sva_qst_question_id' => 'prevent',
-		'oir_qst_question_id' => 'prevent',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
-	
+
 	const LANGUAGE_ENGLISH = 1;
 	
 	const TYPE_SHORT_TEXT = 1;

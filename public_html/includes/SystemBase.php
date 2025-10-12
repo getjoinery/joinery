@@ -750,8 +750,8 @@ abstract class SystemBase {
 		$results = [
 			'primary' => [
 				'table' => static::$tablename,
-				'key' => static::$pkey_column,
-				'value' => $this->key,
+				'key_column' => static::$pkey_column,
+				'key' => $this->key,
 				'action' => 'delete'
 			],
 			'dependencies' => [],
@@ -795,10 +795,8 @@ abstract class SystemBase {
 						"Cannot delete: {$count} record(s) in {$dep_table} depend on this record";
 					$dependency['blocks_deletion'] = true;
 				} else {
-					// Add to total affected count
-					if ($rule['del_action'] === 'cascade') {
-						$results['total_affected'] += $count;
-					}
+					// Add to total affected count for all non-prevent actions
+					$results['total_affected'] += $count;
 				}
 
 				$results['dependencies'][] = $dependency;
@@ -814,8 +812,10 @@ abstract class SystemBase {
 	public function permanent_delete($debug=false) {
 		$db = DbConnector::get_instance()->get_db_link();
 
-		if(!$debug){
+		$this_transaction = false;
+		if(!$debug && !$db->inTransaction()){
 			$db->beginTransaction();
+			$this_transaction = true;
 		}
 
 		try {
@@ -890,13 +890,16 @@ abstract class SystemBase {
 				$stmt->execute([$this->key]);
 			}
 
-			if(!$debug){
+			if($this_transaction){
 				$db->commit();
+			}
+
+			if(!$debug){
 				$this->key = NULL;
 			}
 
 		} catch (Exception $e) {
-			if(!$debug){
+			if($this_transaction){
 				$db->rollback();
 			}
 			throw $e;

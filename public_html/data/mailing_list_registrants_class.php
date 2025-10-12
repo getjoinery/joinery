@@ -16,7 +16,10 @@ class MailingListRegistrantException extends SystemBaseException {}
 class MailingListRegistrant extends SystemBase {	public static $prefix = 'mlr';
 	public static $tablename = 'mlr_mailing_list_registrants';
 	public static $pkey_column = 'mlr_mailing_list_registrant_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'mlr_mlt_mailing_list_id' => ['action' => 'prevent', 'message' => 'Cannot delete mailing list - registrants exist']
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

@@ -50,9 +50,10 @@ class EventSession extends SystemBase {
 	public static $prefix = 'evs';
 	public static $tablename = 'evs_event_sessions';
 	public static $pkey_column = 'evs_event_session_id';
-	public static $permanent_delete_actions = array(		'sev_evs_event_session_id' => 'delete',
-		'esf_evs_event_session_id' => 'delete',
-	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'evs_vid_video_id' => ['action' => 'prevent', 'message' => 'Cannot delete video - event sessions exist']
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules
