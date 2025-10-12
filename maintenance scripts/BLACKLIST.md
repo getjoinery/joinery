@@ -164,6 +164,10 @@ Issues found:
 - `new Order()` → Requires parameter
 - `new Event()` → Requires parameter
 
+**Field Specification Anti-Patterns:**
+- `'type'=>'serial'` → Use `'type'=>'int8'` with `'serial'=>true` (PostgreSQL serial is pseudo-type)
+- `'type' => 'serial'` → Use `'type'=>'int8'` with `'serial'=>true` (PostgreSQL serial is pseudo-type)
+
 ## Future Enhancements
 
 Potential additions to the blacklist:

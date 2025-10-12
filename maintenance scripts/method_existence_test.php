@@ -80,6 +80,10 @@ class MethodExistenceTest {
             'new User()' => 'User constructor requires parameter: new User(NULL) for new, new User($id, TRUE) to load',
             'new Order()' => 'Order constructor requires parameter: new Order(NULL) for new, new Order($id, TRUE) to load',
             'new Event()' => 'Event constructor requires parameter: new Event(NULL) for new, new Event($id, TRUE) to load',
+
+            // Field specification anti-patterns
+            "'type'=>'serial'" => "Use 'type'=>'int8' with 'serial'=>true instead of 'type'=>'serial' (PostgreSQL serial is a pseudo-type)",
+            "'type' => 'serial'" => "Use 'type'=>'int8' with 'serial'=>true instead of 'type'=>'serial' (PostgreSQL serial is a pseudo-type)",
         ],
     ];
 
