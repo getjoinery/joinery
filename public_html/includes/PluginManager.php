@@ -143,6 +143,17 @@ class PluginManager extends AbstractExtensionManager {
             $plugin->set('plg_is_stock', false);
             $plugin->save();
         }
+
+        // Register deletion rules for this plugin's models
+        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        try {
+            DeletionRule::registerModelsFromDiscovery([
+                'include_plugins' => true,
+                'plugin_filter' => $name
+            ]);
+        } catch (Exception $e) {
+            error_log("Failed to register deletion rules for plugin {$name}: " . $e->getMessage());
+        }
     }
     
     /**
@@ -407,7 +418,14 @@ class PluginManager extends AbstractExtensionManager {
      * @return array Array of newly synced plugin names
      */
     public function syncWithFilesystem() {
-        return $this->sync();
+        $result = parent::sync();
+
+        // Register deletion rules for ALL active plugins
+        // This ensures deletion rules are up-to-date even if plugin code changed
+        require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+        PluginHelper::registerAllActiveDeletionRules();
+
+        return $result;
     }
     
     /**

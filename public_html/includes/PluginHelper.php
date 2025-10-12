@@ -252,14 +252,17 @@ class PluginHelper extends ComponentBase {
         $settings = Globalvars::get_instance();
         $settings->set_setting("plugin_{$this->name}_active", 1);
 
-        // Register deletion rules for all models (including new plugin models)
+        // Register deletion rules for this plugin's models only
         require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
         try {
-            DeletionRule::registerAllModels();
+            DeletionRule::registerModelsFromDiscovery([
+                'include_plugins' => true,
+                'plugin_filter' => $this->name
+            ]);
         } catch (Exception $e) {
             // Don't fail plugin activation if deletion rule registration fails
             // Log the error but continue
-            error_log("Failed to register deletion rules after plugin activation: " . $e->getMessage());
+            error_log("Failed to register deletion rules for plugin {$this->name}: " . $e->getMessage());
         }
 
         return true;
@@ -296,10 +299,81 @@ class PluginHelper extends ComponentBase {
         // Clear cached plugin state
         $settings = Globalvars::get_instance();
         $settings->set_setting("plugin_{$this->name}_active", 0);
-        
+
+        // Remove deletion rules for this plugin's models
+        $this->removePluginDeletionRules();
+
         return true;
     }
-    
+
+    /**
+     * Remove all deletion rules for this plugin's models
+     * Public so it can be called during plugin uninstall
+     */
+    public function removePluginDeletionRules() {
+        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+
+        try {
+            // Get all model files for this plugin
+            $plugin_data_dir = $this->getIncludePath('data');
+            if (!is_dir($plugin_data_dir)) {
+                return; // No data models to clean up
+            }
+
+            $db = DbConnector::get_instance()->get_db_link();
+
+            // Find all *_class.php files in plugin's data directory
+            $files = glob($plugin_data_dir . '/*_class.php');
+            foreach ($files as $file) {
+                require_once($file);
+
+                // Extract class name from filename
+                $basename = basename($file, '.php');
+                $class_name = str_replace('_class', '', $basename);
+                $class_name = implode('', array_map('ucfirst', explode('_', $class_name)));
+
+                // Check if class exists and has tablename
+                if (class_exists($class_name)) {
+                    $reflection = new ReflectionClass($class_name);
+                    if ($reflection->hasProperty('tablename')) {
+                        $table = $reflection->getStaticPropertyValue('tablename');
+
+                        // Delete all rules where this table is the target
+                        $stmt = $db->prepare("DELETE FROM del_deletion_rules WHERE del_target_table = ?");
+                        $stmt->execute([$table]);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            error_log("Failed to remove deletion rules for plugin {$this->name}: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Register deletion rules for all active plugins
+     * This is useful when rebuilding the deletion rules system
+     */
+    public static function registerAllActiveDeletionRules() {
+        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        require_once(PathHelper::getIncludePath('data/plugins_class.php'));
+
+        // Get all active plugins
+        $plugins = new MultiPlugin(['plg_active' => 1]);
+        $plugins->load();
+
+        foreach ($plugins as $plugin) {
+            $plugin_name = $plugin->get('plg_name');
+            try {
+                DeletionRule::registerModelsFromDiscovery([
+                    'include_plugins' => true,
+                    'plugin_filter' => $plugin_name
+                ]);
+            } catch (Exception $e) {
+                error_log("Failed to register deletion rules for plugin {$plugin_name}: " . $e->getMessage());
+            }
+        }
+    }
+
     // Plugin-specific getters
     
     /**

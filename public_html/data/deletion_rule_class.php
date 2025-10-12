@@ -29,34 +29,45 @@ class DeletionRule extends SystemBase {
     private static $rules_cache = [];
 
     /**
-     * Scan all loaded models and register their foreign key actions
-     * This truncates and rebuilds the entire rules table to ensure consistency
+     * Register deletion rules for a set of model classes
+     * Discovers and loads model classes, then registers each one incrementally
+     *
+     * @param array $options Options to pass to discover_model_classes:
+     *   - 'include_plugins' => bool - Whether to include plugin models
+     *   - 'plugin_filter' => string - Specific plugin name to filter to
+     *   - 'verbose' => bool - Show progress output
      */
-    public static function registerAllModels() {
-        $db = DbConnector::get_instance()->get_db_link();
+    public static function registerModelsFromDiscovery($options = []) {
+        // Use LibraryFunctions to discover and load model classes
+        $classes = LibraryFunctions::discover_model_classes(array_merge([
+            'require_tablename' => true,
+            'require_field_specifications' => true,
+        ], $options));
 
-        // Truncate the table to rebuild from scratch
-        // This ensures no stale rules persist
-        $db->exec("TRUNCATE TABLE del_deletion_rules");
-
-        // Clear the cache since we're rebuilding
-        self::$rules_cache = [];
-
-        // Now register all model rules
-        foreach (get_declared_classes() as $class) {
-            if (is_subclass_of($class, 'SystemBase')) {
-                self::registerModelRules($class);
-            }
+        // Register rules for each discovered model
+        foreach ($classes as $class) {
+            self::registerModelRules($class);
         }
     }
 
     /**
      * Register a specific model's foreign key actions
      * Auto-detects foreign keys from field_specifications and applies cascade as default
+     * Incrementally updates only this model's rules without affecting other models
      */
     public static function registerModelRules($model_class) {
         $reflection = new ReflectionClass($model_class);
         $table = $reflection->getStaticPropertyValue('tablename');
+
+        $db = DbConnector::get_instance()->get_db_link();
+
+        // Delete existing rules for this target table only
+        // This allows us to rebuild rules for one model without affecting others
+        $stmt = $db->prepare("DELETE FROM del_deletion_rules WHERE del_target_table = ?");
+        $stmt->execute([$table]);
+
+        // Clear cache for any source tables that pointed to this target
+        self::$rules_cache = [];
 
         // Get field specifications to auto-detect foreign keys
         $field_specs = $reflection->getStaticPropertyValue('field_specifications', []);
