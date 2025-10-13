@@ -24,17 +24,15 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 <!--==============================
 Contact Area
 ==============================-->
-    <div class="space">
+
+<div class="space">
         <div class="container">
-					<?php
-					
-					if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
-						echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'</div>';
-					}
-					?>
-                    <div class="contact-item-wrap">
-							<div class="title-area mt-n2 mb-40">
-							<h4>Cart</h4>
+            <div class="row gy-4 flex-row-reverse">
+                <div class="col-lg-6 col-xl-7">
+					<div class="contact-item-wrap">
+                        <div class="title-area mt-n2 mb-25">
+                            <h3 class="sec-title">Cart</h3>
+                        </div>
 
 							<?php			
 							$total_discount = 0;
@@ -93,21 +91,9 @@ Contact Area
                                     <?php echo $currency_symbol; ?><?php echo  number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></span>
                             </div>
                         </div>
-						
-						
-						
-			
-						
-						
-						
-						
-						
-						
-						
-                        </div><!-- Close title-area -->
 					</div>
-
-        
+						
+						
 
 
 
@@ -116,8 +102,10 @@ Contact Area
 					$settings = Globalvars::get_instance();
 					if($settings->get_setting('coupons_active')){
 					?>
-					<div class="contact-item-wrap mt-4">
-						<h4>Coupons</h4>
+					<div class="contact-item-wrap mt-40">
+                        <div class="title-area mt-n2 mb-25">
+                            <h3 class="sec-title">Coupons</h3>
+                        </div>
 
 						<?php
 						//DEBUG LIST ALL COUPONS
@@ -160,16 +148,15 @@ Contact Area
 					<?php
 					}
 					?>
-
-			
-				
-			
-				
- 
-                    <div class="contact-item-wrap mt-4">
-                        <h4>Billing User</h4>
 					
 					
+                    
+                </div>
+                <div class="col-lg-6 col-xl-5">
+                    <div class="contact-item-wrap">
+                        <div class="title-area mt-n2 mb-40">
+                            <h3 class="sec-title">Billing User</h3>
+                        </div>
 						<?php
 					if($require_login){
 							echo '<div class="alert alert-warning" role="alert">
@@ -259,67 +246,48 @@ Contact Area
 						}	
 					}
 					?>
-					
-					
-					</div>
-					<div class="contact-item-wrap mt-4">
+                    </div>
+
+
+
+
 					<?php 
 					if($cart->is_billing_user_complete()){
 					?>
-						
+						<div class="contact-item-wrap mt-40">
+                        <div class="title-area mt-n2 mb-25">
+                            <h3 class="sec-title">Checkout</h3>
+                        </div>
 						<?php
 						if($cart->get_total() > 0){			
-							echo '<h4>Pay with Stripe</h4>';
 							$formwriter = $page->getFormWriter('form_stripe');
 							echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, 'th-btn');					
 						}		
-						?>  <?php
-					}								
-
+						?>  
+						</div>
+					<?php
+					}									
 					?>
-                    </div>				
-					
-
-					
-					
-					
-		</div>
-	</div>
 
 
 
 
-
-
-
-
-
-				
-
-
-
-
-
-
-
-
-
-
-
-
-
-
- <div class="space">
-        <div class="container">
-            <div class="row gy-4">
-                <div class="col-lg-8 order-1">
-
-					
-                <div class="col-lg-4 order-2">
                     
+					
+					
+                </div>
             </div>
         </div>
     </div>
+
+
+
+
+
+
+
+
+
 
            
 
