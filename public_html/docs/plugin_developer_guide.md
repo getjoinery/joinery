@@ -164,15 +164,22 @@ class MyData extends SystemBase {
     public static $prefix = 'mdt';
     public static $tablename = 'mdt_my_data';
     public static $pkey_column = 'mdt_id';
-    
+
     public static $field_specifications = [
         'mdt_id' => ['required' => true, 'type' => 'int'],
         'mdt_name' => ['required' => true, 'type' => 'varchar', 'length' => 255],
         'mdt_description' => ['type' => 'text'],
         'mdt_created' => ['type' => 'timestamp', 'default' => 'CURRENT_TIMESTAMP']
     ];
+
+    // Define foreign key behavior (optional - defaults to cascade)
+    protected static $foreign_key_actions = [
+        'mdt_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+    ];
 }
 ```
+
+**Deletion Behavior**: For complete documentation on defining foreign key actions, cascading deletes, and the deletion system, see the [Deletion System Documentation](deletion_system.md).
 
 ### Business Logic Files
 
