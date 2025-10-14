@@ -9,6 +9,11 @@ require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
 class AdminPage extends PublicPageFalcon {
 
     /**
+     * Store header options for use in footer
+     */
+    protected $header_options = array();
+
+    /**
      * Get FormWriter instance for admin pages
      * Admin pages always use Bootstrap FormWriter
      */
@@ -24,26 +29,38 @@ class AdminPage extends PublicPageFalcon {
 		$session = SessionControl::get_instance();
 		$_GLOBALS['page_header_loaded'] = true;
 		$options['vertical_menu'] =  MultiAdminMenu::getadminmenu($session->get_permission(), $options['menu-id']);
-		
+
 		$options['hide_horizontal_menu'] = true;
 		$options['full_width'] = true;
-		
+
+		// Store options for use in footer
+		$this->header_options = $options;
+
 		$this->public_header($options);
-		echo AdminPage::BeginPage($options['readable_title']);
+
+		// Check for no_page_card option
+		if (isset($options['no_page_card']) && $options['no_page_card'] === true) {
+			echo AdminPage::BeginPageNoCard($options);
+		} else {
+			echo AdminPage::BeginPage($options['readable_title']);
+		}
+
 		return true;
-	
-		
 	}
 
 	public function admin_footer($options=array()) {
 		$session = SessionControl::get_instance();
 		$session->clear_clearable_messages();
 		$settings = Globalvars::get_instance();
-		
-		echo AdminPage::EndPage();
-		
+
+		// Check for no_page_card option from header
+		if (isset($this->header_options['no_page_card']) && $this->header_options['no_page_card'] === true) {
+			echo AdminPage::EndPageNoCard();
+		} else {
+			echo AdminPage::EndPage();
+		}
+
 		$this->public_footer($options);
-	
 	}
 
 

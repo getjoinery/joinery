@@ -206,12 +206,13 @@
 	array(
 		'menu-id'=> 'users-list',
 		'page_title' => 'User',
-		'readable_title' => 'User',
+		'readable_title' => $user->display_name(),
 		'breadcrumbs' => array(
 			'Users'=>'/admin/admin_users',
 			$user->display_name() => '',
 		),
 		'session' => $session,
+		'no_page_card' => true,
 	)
 	);
 
@@ -250,411 +251,481 @@
 			$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
 		}
 
-		$page->begin_box($options);
+		// Don't use begin_box for new layout
+
+	// Get mailing list subscriptions
+	$user_subscribed_list = array();
+	$search_criteria = array('deleted' => false, 'user_id' => $user->key);
+	$user_lists = new MultiMailingListRegistrant($search_criteria);
+	$user_lists->load();
+	foreach ($user_lists as $user_list){
+		$mailing_list = new MailingList($user_list->get('mlr_mlt_mailing_list_id'), TRUE);
+		$user_subscribed_list[] = $mailing_list->get('mlt_name');
+	}
+
+	// Get tier info
+	require_once(PathHelper::getIncludePath('/data/subscription_tiers_class.php'));
+	require_once(PathHelper::getIncludePath('/data/change_tracking_class.php'));
+	$user_tier = SubscriptionTier::GetUserTier($user->key);
+
+	// Get tier change history
+	$tier_changes = new MultiChangeTracking([
+		'cht_entity_type' => 'subscription_tier',
+		'cht_usr_user_id' => $user->key
+	], ['cht_change_time' => 'DESC'], 10);
 	?>
 
-          <!-- Profile Image -->
-              <!--<img class="profile-user-img rounded-circle img-fluid mx-auto d-block" src="../../../images/5.jpg" alt="User profile picture">-->
-			<?php
-			//if ($event->get('evt_picture_link')) {
-				//echo '<img src="' .  $event->get('evt_picture_link') . '" alt="' . htmlspecialchars($event->get('evt_name'), ENT_QUOTES) . '" width="450" />';
-			//}
-			?>
+	<!-- Two Column Layout -->
+	<div class="row g-3 mb-3">
+		<!-- LEFT COLUMN: Account Information -->
+		<div class="col-xxl-6">
+			<div class="card">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-user me-2"></span>Account Information</h6>
+				</div>
+				<div class="card-body">
+					<table class="table table-borderless fs-10 fw-medium mb-0">
+						<tbody>
+							<tr>
+								<td class="p-1" style="width: 35%;">Email:</td>
+								<td class="p-1">
+									<a class="text-600 text-decoration-none" href="mailto:<?php echo htmlspecialchars($user->get('usr_email')); ?>">
+										<?php echo htmlspecialchars($user->get('usr_email')); ?>
+									</a>
+									<?php if($user->get('usr_email_is_verified')): ?>
+										<span class="badge rounded-pill badge-subtle-success ms-2">
+											<span>Verified</span><span class="fas fa-check ms-1" data-fa-transform="shrink-4"></span>
+										</span>
+									<?php else: ?>
+										<span class="badge rounded-pill badge-subtle-warning ms-2">
+											<span>Unverified</span><span class="fas fa-exclamation-triangle ms-1" data-fa-transform="shrink-4"></span>
+										</span>
+									<?php endif; ?>
+								</td>
+							</tr>
+							<tr>
+								<td class="p-1" style="width: 35%;">Signed Up:</td>
+								<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($user->get('usr_signup_date'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></td>
+							</tr>
+							<?php if($user->get('usr_delete_time')): ?>
+							<tr>
+								<td class="p-1" style="width: 35%;">Status:</td>
+								<td class="p-1">
+									<span class="badge badge-danger">Deleted at <?php echo LibraryFunctions::convert_time($user->get('usr_delete_time'), 'UTC', $session->get_timezone()); ?></span>
+								</td>
+							</tr>
+							<?php endif; ?>
+							<?php if($user->get('usr_is_admin_disabled')): ?>
+							<tr>
+								<td class="p-1" style="width: 35%;">Admin Status:</td>
+								<td class="p-1">
+									<span class="badge badge-warning">Admin Disabled (<?php echo htmlspecialchars($user->get('usr_admin_disabled_comment')); ?>)</span>
+								</td>
+							</tr>
+							<?php elseif($user->get('usr_is_disabled')): ?>
+							<tr>
+								<td class="p-1" style="width: 35%;">Status:</td>
+								<td class="p-1"><span class="badge badge-warning">Disabled</span></td>
+							</tr>
+							<?php endif; ?>
+							<tr>
+								<td class="p-1" style="width: 35%;">Phone:</td>
+								<td class="p-1 text-600">
+									<?php if($numphonerecords): ?>
+										<?php foreach($phone_numbers as $phone_number): ?>
+											<a href="tel:<?php echo htmlspecialchars($phone_number->get_phone_string()); ?>" class="text-600 text-decoration-none">
+												<?php echo htmlspecialchars($phone_number->get_phone_string()); ?>
+											</a>
+											<a href="/admin/admin_phone_edit?phn_phone_number_id=<?php echo $phone_number->key; ?>&usr_user_id=<?php echo $user->key; ?>" class="fs-11 ms-2">[edit]</a>
+											<br>
+										<?php endforeach; ?>
+									<?php else: ?>
+										<a href="/admin/admin_phone_edit?usr_user_id=<?php echo $user->key; ?>" class="fs-11">[Add Phone Number]</a>
+									<?php endif; ?>
+								</td>
+							</tr>
+							<tr>
+								<td class="p-1" style="width: 35%;">Address:</td>
+								<td class="p-1 text-600">
+									<?php if($numaddressrecords): ?>
+										<?php foreach($addresses as $address): ?>
+											<?php echo htmlspecialchars($address->get_address_string(' ')); ?>
+											<a href="/admin/admin_address_edit?usa_address_id=<?php echo $address->key; ?>" class="fs-11 ms-2">[edit]</a>
+											<br>
+										<?php endforeach; ?>
+									<?php else: ?>
+										<a href="/admin/admin_address_edit?usr_user_id=<?php echo $user->key; ?>" class="fs-11">[Add Address]</a>
+									<?php endif; ?>
+								</td>
+							</tr>
+							<tr>
+								<td class="p-1" style="width: 35%;">Timezone:</td>
+								<td class="p-1 text-600">
+									<?php echo htmlspecialchars($user->get('usr_timezone')); ?>
+									<a href="/admin/admin_users_edit?usr_user_id=<?php echo $user->key; ?>" class="fs-11 ms-2">[edit]</a>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
 
-				<p class="text-center">
-				<?php
-				echo 'Email address:  <strong>'.$user->get('usr_email').'</strong> ';
-				if($user->get('usr_email_is_verified')) {
-					echo ' <b>Verified</b>';
-				}
-				else{
-					echo ' <b>Unverified</b>';
-				}
+			<!-- Subscription Tier Card -->
+			<div class="card mt-3">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-star me-2"></span>Subscription Tier</h6>
+				</div>
+				<div class="card-body">
+					<table class="table table-borderless fs-10 fw-medium mb-0">
+						<tbody>
+							<tr>
+								<td class="p-1" style="width: 35%;">Current Tier:</td>
+								<td class="p-1">
+									<?php if($user_tier): ?>
+										<strong><?php echo htmlspecialchars($user_tier->get('sbt_display_name')); ?></strong>
+										(Level <?php echo $user_tier->get('sbt_tier_level'); ?>)
+									<?php else: ?>
+										<strong>Free</strong> (No active tier)
+									<?php endif; ?>
+									<a href="/admin/admin_tier_edit?user_id=<?php echo $user->key; ?>" class="fs-11 ms-2">[change]</a>
+								</td>
+							</tr>
+						</tbody>
+					</table>
 
-				$user_subscribed_list = array();
-				$search_criteria = array('deleted' => false, 'user_id' => $user->key);
-				$user_lists = new MultiMailingListRegistrant(
-					$search_criteria);
-				$user_lists->load();
+					<?php if($tier_changes->count_all() > 0): ?>
+						<?php $tier_changes->load(); ?>
+						<div class="border-top mt-3 pt-3">
+							<h6 class="fs-10 mb-2">Tier Change History:</h6>
+							<div class="fs-10 text-600">
+								<?php foreach($tier_changes as $change): ?>
+									<?php
+										$change_time = LibraryFunctions::convert_time($change->get('cht_change_time'), 'UTC', $session->get_timezone());
+										$old_value = $change->get('cht_old_value') ? 'Level ' . $change->get('cht_old_value') : 'Free';
+										$new_value = $change->get('cht_new_value') ? 'Level ' . $change->get('cht_new_value') : 'Free';
+										$reason = $change->get('cht_change_reason');
 
-				foreach ($user_lists as $user_list){
-					$mailing_list = new MailingList($user_list->get('mlr_mlt_mailing_list_id'), TRUE);
-					$user_subscribed_list[] = $mailing_list->get('mlt_name');
-				}
+										if ($change->get('cht_entity_id')) {
+											try {
+												$tier = new SubscriptionTier($change->get('cht_entity_id'), TRUE);
+												$new_value = htmlspecialchars($tier->get('sbt_display_name')) . ' (' . $new_value . ')';
+											} catch (Exception $e) {}
+										}
+									?>
+									<div class="mb-1">
+										• <?php echo $change_time; ?>: <?php echo $old_value; ?> → <?php echo $new_value; ?>
+										<?php if($reason): ?>
+											(<?php echo htmlspecialchars($reason); ?>
+											<?php if($reason === 'purchase' && $change->get('cht_reference_id')): ?>
+												- <a href="/admin/admin_order?ord_order_id=<?php echo $change->get('cht_reference_id'); ?>">Order #<?php echo $change->get('cht_reference_id'); ?></a>
+											<?php elseif($reason === 'manual' && $change->get('cht_changed_by_usr_user_id')): ?>
+												<?php
+													try {
+														$changed_by = new User($change->get('cht_changed_by_usr_user_id'), TRUE);
+														echo ' by ' . htmlspecialchars($changed_by->display_name());
+													} catch (Exception $e) {}
+												?>
+											<?php endif; ?>)
+										<?php endif; ?>
+									</div>
+								<?php endforeach; ?>
+							</div>
+						</div>
+					<?php endif; ?>
+				</div>
+			</div>
 
-				echo '<br>';
-				if(!empty($user_subscribed_list)){
-					echo 'This user is subscribed to the following lists: '.implode(', ', $user_subscribed_list).'<br>';
-				}
+			<!-- Mailing Lists Card -->
+			<?php if(!empty($user_subscribed_list)): ?>
+			<div class="card mt-3">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-envelope-open me-2"></span>Mailing List Subscriptions</h6>
+				</div>
+				<div class="card-body">
+					<p class="fs-10 mb-0">This user is subscribed to: <strong><?php echo implode(', ', $user_subscribed_list); ?></strong></p>
+				</div>
+			</div>
+			<?php endif; ?>
 
-				/*
-				if($user->get('usr_contact_preferences_last_changed')) {
-					echo ', last change:  '. LibraryFunctions::convert_time($event_registration->get('usr_contact_preferences_last_changed'), 'UTC', $session->get_timezone());
-				}
-				*/
-				?>
-				</p>
+			<!-- Groups Card -->
+			<div class="card mt-3">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-users me-2"></span>Groups</h6>
+				</div>
+				<div class="card-body">
+					<div class="table-responsive">
+						<table class="table table-sm fs-10 mb-0">
+							<thead>
+								<tr class="border-bottom">
+									<th class="py-2">Group</th>
+									<th class="py-2 text-end">Action</th>
+								</tr>
+							</thead>
+							<tbody>
+								<?php foreach($groups as $group): ?>
+									<?php $groupmember = $group->is_member_in_group($user->key); ?>
+									<tr>
+										<td class="py-2"><?php echo htmlspecialchars($group->get('grp_name')); ?></td>
+										<td class="py-2 text-end">
+											<form method="POST" action="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>" style="display: inline;">
+												<input type="hidden" name="action" value="remove_from_group" />
+												<input type="hidden" name="grm_group_member_id" value="<?php echo $groupmember->key; ?>" />
+												<button type="submit" class="btn btn-sm btn-falcon-default">Remove</button>
+											</form>
+										</td>
+									</tr>
+								<?php endforeach; ?>
+								<tr>
+									<td colspan="2" class="pt-3">
+										<?php
+											$formwriter = $page->getFormWriter('form5');
+											$validation_rules = array();
+											$validation_rules['grp_group_id']['required']['value'] = 'true';
+											echo $formwriter->set_validate($validation_rules);
+											echo $formwriter->begin_form('form5', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
 
-              <p class="text-center"><?php echo 'Signed up: '.LibraryFunctions::convert_time($user->get('usr_signup_date'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></p>
+											$group_drops = new MultiGroup(
+												array('category'=>'user'),
+												NULL,
+												NULL,
+												NULL);
+											$group_drops->load();
 
-			  <p class="text-center">
-			  <?php
-				if($user->get('usr_delete_time')){
-					echo 'Status: Deleted at '.LibraryFunctions::convert_time($user->get('usr_delete_time'), 'UTC', $session->get_timezone()).'<br />';
-				}
-				if($user->get('usr_is_admin_disabled')) {
-					echo 'Admin Disabled (' . $user->get('usr_admin_disabled_comment') .')';
-				} else if($user->get('usr_is_disabled')) {
-					echo 'Disabled';
-				}
-				else {
-					// Display current subscription tier
-					require_once(PathHelper::getIncludePath('/data/subscription_tiers_class.php'));
-					require_once(PathHelper::getIncludePath('/data/change_tracking_class.php'));
-					$user_tier = SubscriptionTier::GetUserTier($user->key);
-					echo '<h4>Subscription Tier</h4>';
-					if($user_tier) {
-						echo '<p><strong>' . htmlspecialchars($user_tier->get('sbt_display_name')) . '</strong>';
-						echo ' (Level ' . $user_tier->get('sbt_tier_level') . ')';
-						echo ' <a href="/admin/admin_tier_edit?user_id=' . $user->key . '">change</a></p>';
-					} else {
-						echo '<p>Free (No active tier) <a href="/admin/admin_tier_edit?user_id=' . $user->key . '">change</a></p>';
-					}
+											foreach($groups as $group) {
+												if($group_drops->contains_key($group->key)){
+													$group_drops->remove_by_key($group->key);
+												}
+											}
 
-					// Display tier change history
-					$tier_changes = new MultiChangeTracking([
-						'cht_entity_type' => 'subscription_tier',
-						'cht_usr_user_id' => $user->key
-					], ['cht_change_time' => 'DESC'], 10);
+											$optionvals = $group_drops->get_dropdown_array();
+											echo $formwriter->hiddeninput('action', 'add_to_group');
+											echo $formwriter->hiddeninput('usr_user_id', $user->key);
+											echo $formwriter->dropinput("Add to group", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+											echo $formwriter->new_form_button('Add');
+											echo $formwriter->end_form();
+										?>
+									</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
 
-					if ($tier_changes->count_all() > 0) {
-						$tier_changes->load();
-						echo '<div style="margin-left: 20px; margin-bottom: 15px; font-size: 0.9em;">';
-						echo '<strong>Tier Change History:</strong><br>';
-						foreach ($tier_changes as $change) {
-							$change_time = LibraryFunctions::convert_time($change->get('cht_change_time'), 'UTC', $session->get_timezone());
-							$old_value = $change->get('cht_old_value') ? 'Level ' . $change->get('cht_old_value') : 'Free';
-							$new_value = $change->get('cht_new_value') ? 'Level ' . $change->get('cht_new_value') : 'Free';
-							$reason = $change->get('cht_change_reason');
+		<!-- RIGHT COLUMN: Subscription Status -->
+		<div class="col-xxl-6">
+			<!-- Active Subscriptions -->
+			<div class="card">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-credit-card me-2"></span>Active Subscriptions</h6>
+				</div>
+				<div class="card-body">
+					<?php if($active_subscriptions->count() > 0): ?>
+						<?php foreach($active_subscriptions as $subscription): ?>
+							<?php
+								$stripe_helper = new StripeHelper();
+								$stripe_helper->update_subscription_in_order_item($subscription);
+								$status_words = $subscription->get('odi_subscription_status') ? $subscription->get('odi_subscription_status') : 'active';
+							?>
+							<div class="mb-3 p-2 bg-body-tertiary rounded">
+								<div class="fs-10 fw-semi-bold">
+									<a href="/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
+										Order <?php echo $subscription->get('odi_ord_order_id'); ?>
+									</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
+								</div>
+								<div class="fs-11 text-600 mt-1">
+									Status: <span class="text-success"><?php echo htmlspecialchars($status_words); ?></span><br>
+									<?php if($subscription->get('odi_subscription_period_end')): ?>
+										Period ends: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone()); ?><br>
+									<?php endif; ?>
+									<a href="/profile/orders_recurring_action?order_item_id=<?php echo $subscription->key; ?>" class="text-danger">cancel</a>
+								</div>
+							</div>
+						<?php endforeach; ?>
+					<?php else: ?>
+						<p class="text-600 fs-10 mb-0">No active subscriptions</p>
+					<?php endif; ?>
+				</div>
+			</div>
 
-							// Get tier names if available
-							if ($change->get('cht_entity_id')) {
-								try {
-									$tier = new SubscriptionTier($change->get('cht_entity_id'), TRUE);
-									$new_value = htmlspecialchars($tier->get('sbt_display_name')) . ' (' . $new_value . ')';
-								} catch (Exception $e) {
-									// Tier might be deleted
-								}
-							}
+			<!-- Cancelled Subscriptions -->
+			<div class="card mt-3">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-ban me-2"></span>Cancelled Subscriptions</h6>
+				</div>
+				<div class="card-body">
+					<?php if($cancelled_subscriptions->count() > 0): ?>
+						<?php foreach($cancelled_subscriptions as $subscription): ?>
+							<div class="mb-2 p-2 bg-body-tertiary rounded">
+								<div class="fs-10 fw-semi-bold">
+									<a href="/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
+										Order <?php echo $subscription->get('odi_ord_order_id'); ?>
+									</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
+								</div>
+								<div class="fs-11 text-600 mt-1">
+									Canceled: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()); ?>
+									<?php if($subscription->get('odi_subscription_period_end')): ?>
+										<br>Last day: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone()); ?>
+									<?php endif; ?>
+								</div>
+							</div>
+						<?php endforeach; ?>
+					<?php else: ?>
+						<p class="text-600 fs-10 mb-0">No cancelled subscriptions</p>
+					<?php endif; ?>
+				</div>
+			</div>
+		</div>
+	</div>
 
-							echo '• ' . $change_time . ': ' . $old_value . ' → ' . $new_value;
-							if ($reason) {
-								echo ' (' . htmlspecialchars($reason);
-								if ($reason === 'purchase' && $change->get('cht_reference_id')) {
-									echo ' - <a href="/admin/admin_order?ord_order_id=' . $change->get('cht_reference_id') . '">Order #' . $change->get('cht_reference_id') . '</a>';
-								} elseif ($reason === 'manual' && $change->get('cht_changed_by_usr_user_id')) {
-									try {
-										$changed_by = new User($change->get('cht_changed_by_usr_user_id'), TRUE);
-										echo ' by ' . htmlspecialchars($changed_by->display_name());
-									} catch (Exception $e) {
-										// User might be deleted
-									}
-								}
-								echo ')';
-							}
-							echo '<br>';
-						}
-						echo '</div>';
-					}
-
-					echo '<h4>Active Subscriptions</h4>';
-					foreach($active_subscriptions as $subscription){
-						$stripe_helper = new StripeHelper();
-						$stripe_helper->update_subscription_in_order_item($subscription);
-						$status_words = 'active';
-						if($subscription->get('odi_subscription_status')){
-							$status_words = $subscription->get('odi_subscription_status');
-						}
-
-						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month, Status: '.$status_words;
-
-						if($subscription->get('odi_subscription_period_end')){
-							$status .= ' period ends on '.LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone());
-						}
-
-						$status .= ' <a href="/profile/orders_recurring_action?order_item_id='. $subscription->key . '">cancel</a>';
-
-						?><span><?php echo $status; ?></span><br />
-						<?php
-					}
-
-					echo '<h4>Cancelled Subscriptions</h4>';
-					foreach($cancelled_subscriptions as $subscription){
-
-						$status = '<a href="/admin/admin_order?ord_order_id='.$subscription->get('odi_ord_order_id').'">Order '.$subscription->get('odi_ord_order_id').'</a> $'.$subscription->get('odi_price') .'/month canceled on '. LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
-
-						if($subscription->get('odi_subscription_period_end')){
-							$status .= ' last day is '.LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone());
-						}
-						?><span><?php echo $status; ?></span><br />
-						<?php
-					}
-
-				}
-				?>
-				</p>
-
-						<p class="text-center">
-						<?php
-						if($numphonerecords){
-							foreach($phone_numbers as $phone_number)	 {
-								echo 'Phone: '.$phone_number->get_phone_string() . ' [<a class="sortlink" href="/admin/admin_phone_edit?phn_phone_number_id='. $phone_number->key. '&usr_user_id='. $user->key . '">edit</a>]<br />';
-							}
-						}
-						else{
-							echo ' [<a class="sortlink" href="/admin/admin_phone_edit?usr_user_id='. $user->key . '">Add Phone Number</a>]<br />';
-						}
-						?>
-						</p>
-
-						<p class="text-center">
-						<?php
-						if($numaddressrecords){
-							foreach($addresses as $address) {
-
-								echo 'Address: '.$address->get_address_string(' ') . ' [<a class="sortlink" href="/admin/admin_address_edit?usa_address_id='. $address->key .'">edit</a>]<br />' ;
-
-								$page->disprow($rowvalues);
-							}
-						}
-						else{
-							echo ' [<a class="sortlink" href="/admin/admin_address_edit?usr_user_id='. $user->key . '">Add address</a>]<br />';
-						}
-
-						echo '<br />Timezone: '.$user->get('usr_timezone'). ' [<a href="/admin/admin_users_edit?usr_user_id='.$user->key.'">edit</a>]';
-						?>
-						</p>
-
-	<?php $page->end_box(); ?>
-<?php
-
-	$headers = array("Event", "Added", "Expires", "Action");
-	$altlinks = array();
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => "Events"
-	);
-	$page->tableheader($headers, $box_vars);
-
-	$event_ids_for_user = array();
-	foreach ($event_registrations as $event_registration){
-		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
-		$event_ids_for_user[] = $event->key;
-		$rowvalues = array();
-
-		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.LibraryFunctions::convert_time($event->get('evt_start_time'), "UTC", "UTC", 'M j, Y') . ' <strong>'.$event->getString('evt_name', 50). '</strong> '. $event->get('evt_location').'</a>');
-
-		array_push($rowvalues, LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone()));
-		array_push($rowvalues, LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone()));
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='.$user->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
-		<input type="hidden" class="hidden" name="evt_event_id" id="evt_event_id" value="'.$event->key.'" />
-		<button type="submit">Remove</button>
-		</form>';
-		array_push($rowvalues, $delform);
-
-		$page->disprow($rowvalues);
-	}
-
-	echo '<tr><td colspan="4">';
-	$formwriter = $page->getFormWriter('form3');
-	$validation_rules = array();
-	$validation_rules['evt_event_id']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);
-	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
-
-	$events = new MultiEvent(
-		array('deleted'=>false),
-		array('start_time'=>'DESC'),		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$events->load();
-
-	foreach($event_ids_for_user as $event_id) {
-		if($events->contains_key($event_id)){
-			$events->remove_by_key($event_id);
-		}
-	}
-
-	$optionvals = $events->get_dropdown_array();
-	echo $formwriter->hiddeninput('action', 'add_to_event');
-	echo $formwriter->hiddeninput('usr_user_id', $user->key);
-	echo $formwriter->dropinput("Add to event", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-	echo $formwriter->new_form_button('Add');
-	echo $formwriter->end_form();
-	echo '</td></tr>';
-
-	$page->endtable();
-
+	<?php
+	// Get groups data before displaying
 	$groups = Group::get_groups_for_member($user->key, 'user', false, 'objects');
+	?>
 
-	$headers = array("Group", "Action");
-	$altlinks = array();
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => "Groups"
-	);
-	$page->tableheader($headers, $box_vars);
+	<!-- Events Card (Full Width) -->
+	<div class="card mb-3">
+		<div class="card-header bg-body-tertiary">
+			<h6 class="mb-0"><span class="fas fa-calendar me-2"></span>Events</h6>
+		</div>
+		<div class="card-body">
+			<div class="table-responsive">
+				<table class="table table-sm fs-10 mb-0">
+					<thead>
+						<tr class="border-bottom">
+							<th class="py-2">Event</th>
+							<th class="py-2 text-center">Added</th>
+							<th class="py-2 text-center">Expires</th>
+							<th class="py-2 text-end">Action</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php
+							$event_ids_for_user = array();
+							foreach ($event_registrations as $event_registration):
+								$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
+								$event_ids_for_user[] = $event->key;
+						?>
+							<tr>
+								<td class="py-2">
+									<a href="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>">
+										<?php echo LibraryFunctions::convert_time($event->get('evt_start_time'), "UTC", "UTC", 'M j, Y'); ?>
+										<strong><?php echo htmlspecialchars($event->getString('evt_name', 50)); ?></strong>
+										<?php echo htmlspecialchars($event->get('evt_location')); ?>
+									</a>
+								</td>
+								<td class="py-2 text-center fs-11"><?php echo LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone(), 'M j'); ?></td>
+								<td class="py-2 text-center fs-11"><?php echo LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone(), 'M j'); ?></td>
+								<td class="py-2 text-end">
+									<form method="POST" action="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>" style="display: inline;">
+										<input type="hidden" name="action" value="remove_from_event" />
+										<input type="hidden" name="evt_event_id" value="<?php echo $event->key; ?>" />
+										<button type="submit" class="btn btn-sm btn-falcon-default">Remove</button>
+									</form>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+						<tr>
+							<td colspan="4" class="pt-3">
+								<?php
+									$formwriter = $page->getFormWriter('form3');
+									$validation_rules = array();
+									$validation_rules['evt_event_id']['required']['value'] = 'true';
+									echo $formwriter->set_validate($validation_rules);
+									echo $formwriter->begin_form('form2', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
 
-    foreach($groups as $group) {
-		$groupmember = $group->is_member_in_group($user->key);
+									$events = new MultiEvent(
+										array('deleted'=>false),
+										array('start_time'=>'DESC'),
+										NULL,
+										NULL);
+									$events->load();
 
-		$rowvalues = array();
-		array_push($rowvalues, $group->get('grp_name'));
-		$delform = '<form id="form4" class="form4" name="form4" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_group" />
-		<input type="hidden" class="hidden" name="grm_group_member_id" id="grm_group_member_id" value="'.$groupmember->key.'" />
-		<button type="submit">Remove</button>
-		</form>';
-		array_push($rowvalues, $delform);
+									foreach($event_ids_for_user as $event_id) {
+										if($events->contains_key($event_id)){
+											$events->remove_by_key($event_id);
+										}
+									}
 
-		$page->disprow($rowvalues);
-	}
+									$optionvals = $events->get_dropdown_array();
+									echo $formwriter->hiddeninput('action', 'add_to_event');
+									echo $formwriter->hiddeninput('usr_user_id', $user->key);
+									echo $formwriter->dropinput("Add to event", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+									echo $formwriter->new_form_button('Add');
+									echo $formwriter->end_form();
+								?>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
 
-	echo '<tr><td colspan="2">';
-	$formwriter = $page->getFormWriter('form5');
+	<!-- Orders -->
+	<div class="card mb-3">
+		<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
+			<h6 class="mb-0"><span class="fas fa-shopping-cart me-2"></span>Orders</h6>
+		</div>
+		<div class="card-body p-0">
+			<div class="table-responsive">
+				<table class="table table-sm table-striped fs-10 mb-0">
+					<thead class="bg-body-tertiary">
+						<tr>
+							<th class="py-2 ps-3">Order ID</th>
+							<th class="py-2 text-center">Order Time</th>
+							<th class="py-2">Products</th>
+							<th class="py-2 text-end pe-3">Total</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php
+							$PRODUCT_ID_TO_NAME_CACHE = array();
+							foreach($orders as $order):
+								$order_items = $order->get_order_items();
+								$order_items_out = array();
+								foreach($order_items as $order_item):
+									if (array_key_exists($order_item->get('odi_pro_product_id'), $PRODUCT_ID_TO_NAME_CACHE)) {
+										$title = $PRODUCT_ID_TO_NAME_CACHE[$order_item->get('odi_pro_product_id')];
+									} else {
+										$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
+										$title = $product->get('pro_name');
+										$PRODUCT_ID_TO_NAME_CACHE[$product->key] = $title;
+									}
 
-	$validation_rules = array();
-	$validation_rules['grp_group_id']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);
-	echo $formwriter->begin_form('form5', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
+									$this_out = htmlspecialchars($title) . ' ($'. number_format($order_item->get('odi_price'), 2) .')';
 
-	$group_drops = new MultiGroup(
-		array('category'=>'user'),  //SEARCH
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$group_drops->load();
+									if($order_item->get('odi_subscription_cancelled_time')){
+										$status_words = $order_item->get('odi_subscription_status') ? $order_item->get('odi_subscription_status') : 'canceled';
+										$this_out .= '<br><span class="fs-11 text-600">'. htmlspecialchars($status_words). ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()).'</span>';
+									}
+									else if($order_item->get('odi_subscription_status')){
+										$this_out .=  '<br><span class="fs-11 text-600">STATUS: '. htmlspecialchars($order_item->get('odi_subscription_status')).'</span>';
+									}
 
-	foreach($groups as $group) {
-		if($group_drops->contains_key($group->key)){
-			$group_drops->remove_by_key($group->key);
-		}
-	}
+									$order_items_out[] = $this_out;
+								endforeach;
+						?>
+							<tr>
+								<td class="py-2 ps-3 fw-semi-bold">
+									<a href="/admin/admin_order?ord_order_id=<?php echo $order->key; ?>">Order <?php echo $order->key; ?></a>
+								</td>
+								<td class="py-2 text-center"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone()); ?></td>
+								<td class="py-2"><?php echo implode('<br>', $order_items_out); ?></td>
+								<td class="py-2 text-end pe-3 fw-semi-bold">$<?php echo number_format($order->get('ord_total_cost'), 2); ?></td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
 
-	$optionvals = $group_drops->get_dropdown_array();
-	echo $formwriter->hiddeninput('action', 'add_to_group');
-	echo $formwriter->hiddeninput('usr_user_id', $user->key);
-	echo $formwriter->dropinput("Add to group", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-	echo $formwriter->new_form_button('Add');
-	echo $formwriter->end_form();
-	echo '</td></tr>';
-
-	$page->endtable();
-
-	//VIEW STATS
-
-	$headers = array("Session", "Last Viewed", "# Views");
-	$altlinks = array();
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => "Session Visits"
-	);
-	$page->tableheader($headers, $box_vars);
-
-	foreach ($event_registrations as $event_registration){
-		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
-		$searches = array();
-		$searches['event_id'] = $event_registration->get('evr_evt_event_id');
-		$event_sessions = new MultiEventSessions(
-			$searches,
-			array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
-		$event_sessions->load();
-
-		foreach ($event_sessions as $event_session){
-			$rowvalues = array();
-
-			if($visit_time = $event_session->get_last_visited_time_for_user($user->key)){
-				if($event_session->get('evs_session_number')){
-					$session_num = 'Session '.$event_session->get('evs_session_number'). ' - ';
-				}
-				else{
-					$session_num = '';
-				}
-				array_push($rowvalues, $event->get('evt_name') . ' - '. $session_num . $event_session->get('evs_title'));
-				array_push($rowvalues, LibraryFunctions::convert_time($visit_time, 'UTC', $session->get_timezone()));
-				array_push($rowvalues, $event_session->get_number_visits_for_user($user->key));
-
-			}
-			$page->disprow($rowvalues);
-		}
-	}
-
-	$page->endtable();
-
-	$PRODUCT_ID_TO_NAME_CACHE = array();
-
-	$headers = array('Order ID', 'Order Time', 'Products', 'Total');
-	$altlinks = array();
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => "Orders"
-	);
-	$page->tableheader($headers, $box_vars);
-
-	foreach($orders as $order) {
-		$rowvalues = array();
-
-		if($order->get('ord_usr_user_id')){
-			$order_user = new User($order->get('ord_usr_user_id'), TRUE);
-		}
-		else{
-			$order_user = new User(NULL);
-		}
-
-		$min_status = NULL;
-
-		$order_items = $order->get_order_items();
-		$order_items_out = array();
-		foreach($order_items as $order_item) {
-
-			if (array_key_exists($order_item->get('odi_pro_product_id'), $PRODUCT_ID_TO_NAME_CACHE)) {
-				$title = $PRODUCT_ID_TO_NAME_CACHE[$order_item->get('odi_pro_product_id')];
-			} else {
-				$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
-				$title = $product->get('pro_name');
-				$PRODUCT_ID_TO_NAME_CACHE[$product->key] = $title;
-			}
-
-			$this_out = $title . ' ($'. $order_item->get('odi_price') .')';
-
-			if($order_item->get('odi_subscription_cancelled_time')){
-				$status_words = 'canceled';
-				if($order_item->get('odi_subscription_status')){
-					$status_words = $order_item->get('odi_subscription_status');
-				}
-				$this_out .= ' '. $status_words. ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
-			}
-			else if($order_item->get('odi_subscription_status')){
-				$this_out .=  ' STATUS: '. $order_item->get('odi_subscription_status');
-			}
-
-			$order_items_out[] = $this_out;
-
-		}
-
-		array_push($rowvalues, '<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>');
-
-		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone()));
-		array_push($rowvalues, implode('<br>', $order_items_out));
-		array_push($rowvalues, '$'.$order->get('ord_total_cost'));
-
-		//array_push($rowvalues, $status_to_html[$min_status ?: 1]);
-		$page->disprow($rowvalues);
-	}
-	$page->endtable();
-
+	<?php
 	/*
+	REMOVED OLD CODE - Addresses and Phone Numbers sections
+	These are now integrated into the Account Information card above
 	?>
 
      <h2>Addresses</h2>
@@ -677,8 +748,6 @@
 		$page->disprow($rowvalues);
 	}
 	$page->endtable();
-	*/
-	/*
 	?>
 
      <h2>Phone Numbers</h2>
@@ -697,7 +766,173 @@
 
 	$page->endtable();
 	*/
+	?>
 
+	<!-- Email and Login Activity Side by Side -->
+	<div class="row g-3 mb-3">
+		<!-- Received Emails Column -->
+		<div class="col-lg-6">
+			<div class="card">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-inbox me-2"></span>Received Emails</h6>
+				</div>
+				<div class="card-body p-0">
+					<div class="table-responsive">
+						<table class="table table-sm fs-10 mb-0">
+							<thead class="bg-body-tertiary">
+								<tr>
+									<th class="py-2 ps-3">Subject</th>
+									<th class="py-2 text-center">Status</th>
+									<th class="py-2 text-center">Sent Date</th>
+								</tr>
+							</thead>
+							<tbody>
+								<?php
+									$received_emails = new MultiEmailRecipient(
+										array('user_id' => $user->key, 'sent' => TRUE),
+										NULL,
+										20,
+										0);
+									$received_emails->load();
+
+									foreach ($received_emails as $received_email):
+										$email = new Email($received_email->get('erc_eml_email_id'), TRUE);
+								?>
+									<tr>
+										<td class="py-2 ps-3">
+											<a href="/admin/admin_email_view?eml_email_id=<?php echo $email->key; ?>">
+												<?php echo htmlspecialchars($email->get('eml_subject')); ?>
+											</a>
+										</td>
+										<td class="py-2 text-center fs-11"><?php echo htmlspecialchars($email->get_status_text()); ?></td>
+										<td class="py-2 text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
+									</tr>
+								<?php endforeach; ?>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+
+			<?php if($user->get('usr_permission') > 0): ?>
+			<!-- Sent Emails -->
+			<div class="card mt-3">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-paper-plane me-2"></span>Sent Emails</h6>
+				</div>
+				<div class="card-body p-0">
+					<div class="table-responsive">
+						<table class="table table-sm fs-10 mb-0">
+							<thead class="bg-body-tertiary">
+								<tr>
+									<th class="py-2 ps-3">Subject</th>
+									<th class="py-2 text-center">Status</th>
+									<th class="py-2 text-center">Sent Date</th>
+								</tr>
+							</thead>
+							<tbody>
+								<?php
+									$emails = new MultiEmail(
+										array('user_id' => $user->key),
+										NULL,
+										20,
+										0);
+									$emails->load();
+
+									foreach ($emails as $email):
+								?>
+									<tr>
+										<td class="py-2 ps-3"><?php echo htmlspecialchars($email->get('eml_subject')); ?></td>
+										<td class="py-2 text-center fs-11"><?php echo htmlspecialchars($email->get_status_text()); ?></td>
+										<td class="py-2 text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
+									</tr>
+								<?php endforeach; ?>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+			<?php endif; ?>
+		</div>
+
+		<!-- Right Column: Session Visits and Logins -->
+		<div class="col-lg-6">
+			<!-- Session Visits -->
+			<div class="card">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-eye me-2"></span>Session Visits</h6>
+				</div>
+				<div class="card-body p-0">
+					<div class="table-responsive">
+						<table class="table table-sm fs-10 mb-0">
+							<thead class="bg-body-tertiary">
+								<tr>
+									<th class="py-2 ps-3">Session</th>
+									<th class="py-2 text-center">Last Viewed</th>
+									<th class="py-2 text-center"># Views</th>
+								</tr>
+							</thead>
+							<tbody>
+								<?php
+									foreach ($event_registrations as $event_registration):
+										$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
+										$searches = array();
+										$searches['event_id'] = $event_registration->get('evr_evt_event_id');
+										$event_sessions = new MultiEventSessions(
+											$searches,
+											array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
+										$event_sessions->load();
+
+										foreach ($event_sessions as $event_session):
+											if($visit_time = $event_session->get_last_visited_time_for_user($user->key)):
+												$session_num = $event_session->get('evs_session_number') ? 'Session '.$event_session->get('evs_session_number'). ' - ' : '';
+								?>
+									<tr>
+										<td class="py-2 ps-3"><?php echo htmlspecialchars($event->get('evt_name') . ' - '. $session_num . $event_session->get('evs_title')); ?></td>
+										<td class="py-2 text-center"><?php echo LibraryFunctions::convert_time($visit_time, 'UTC', $session->get_timezone()); ?></td>
+										<td class="py-2 text-center"><?php echo $event_session->get_number_visits_for_user($user->key); ?></td>
+									</tr>
+								<?php
+											endif;
+										endforeach;
+									endforeach;
+								?>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+
+			<!-- Recent Logins -->
+			<div class="card mt-3">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-sign-in-alt me-2"></span>Recent Logins</h6>
+				</div>
+				<div class="card-body p-0">
+					<div class="table-responsive">
+						<table class="table table-sm fs-10 mb-0">
+							<thead class="bg-body-tertiary">
+								<tr>
+									<th class="py-2 ps-3">Time</th>
+								</tr>
+							</thead>
+							<tbody>
+								<?php foreach ($logins as $login): ?>
+									<tr>
+										<td class="py-2 ps-3"><?php echo LibraryFunctions::convert_time($login->log_login_time, "UTC", $session->get_timezone()); ?></td>
+									</tr>
+								<?php endforeach; ?>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<?php
+	//OLD CODE BELOW - REMOVED
+	/*
 	$received_emails = new MultiEmailRecipient(
 		array('user_id' => $user->key, 'sent' => TRUE),
 		NULL,
@@ -751,58 +986,8 @@
 		foreach ($emails as $email) {
 			$rowvalues = array();
 
-			array_push($rowvalues, '('.$email->key.') '.$email->get('eml_subject'));
-			array_push($rowvalues, $email->get_status_text());
-			array_push($rowvalues, LibraryFunctions::convert_time( $email->get('eml_sent_time'), "UTC", $session->get_timezone()));
-
-			$emails = new MultiEmailRecipient(
-				array('email_id' => $email->key, 'sent' => TRUE)
-				);
-			$numemails = $emails->count_all();
-
-			array_push($rowvalues, $numemails);
-			$page->disprow($rowvalues);
-		}
-		$page->endtable();
-
-	}
-
-/*
-?>
-		<h2>Recurring Emails Sent</h2>
-
-<?php
-
-	$page->tableheader(array('Send Time', 'Email Address', 'Template'), 'recurring_mail_table');
-
-	foreach (RecurringMailer::GetSentEmails($user->key) as $email) {
-		$page->disprow(
-			array(
-				$email['ers_send_time'],
-				$email['ers_usr_email'],
-				$email['ers_template_name'])
-			);
-	}
-
-	$page->endtable();
-*/
-
-	$headers = array("Time");
-	$altlinks = array();
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => "Logins"
-	);
-	$page->tableheader($headers, $box_vars);
-
-	foreach ($logins as $login)
-	{
-		$rowvalues = array();
-		array_push($rowvalues, LibraryFunctions::convert_time($login->log_login_time, "UTC", $session->get_timezone()));
-		$page->disprow($rowvalues);
-	}
-
-  	$page->endtable();
+			//REMOVED - SEE NEW EMAIL/LOGIN LAYOUT ABOVE
+			*/
 
 	if($_SESSION['permission'] == 10){
 		/*
