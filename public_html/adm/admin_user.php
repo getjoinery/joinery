@@ -313,12 +313,53 @@
 		'cht_usr_user_id' => $user->key
 	], ['cht_change_time' => 'DESC'], $list_limit);
 
+	// Get groups count
+	$groups = Group::get_groups_for_member($user->key, 'user', false, 'objects');
+	$num_groups = count($groups);
+
+	// Count received emails
+	$received_emails_count = new MultiEmailRecipient(
+		array('user_id' => $user->key, 'sent' => TRUE),
+		NULL,
+		$list_limit,
+		0);
+	$num_received_emails = $received_emails_count->count_all();
+
+	// Count sent emails
+	$sent_emails_count = new MultiEmail(
+		array('user_id' => $user->key),
+		NULL,
+		$list_limit,
+		0);
+	$num_sent_emails = $sent_emails_count->count_all();
+
+	// Count session visits for this user
+	$num_session_visits = 0;
+	foreach ($event_registrations as $event_registration) {
+		$searches_count = array();
+		$searches_count['event_id'] = $event_registration->get('evr_evt_event_id');
+		$event_sessions_count = new MultiEventSessions(
+			$searches_count,
+			array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
+		$event_sessions_count->load();
+
+		foreach ($event_sessions_count as $event_session_count) {
+			if ($event_session_count->get_last_visited_time_for_user($user->key)) {
+				$num_session_visits++;
+			}
+		}
+	}
+
 	// Create Pager objects for record count display
 	$events_pager = new Pager(array('numrecords' => $numeventsregistrations, 'numperpage' => $list_limit ?: $numeventsregistrations));
 	$orders_pager = new Pager(array('numrecords' => $numorders, 'numperpage' => $list_limit ?: $numorders));
+	$groups_pager = new Pager(array('numrecords' => $num_groups, 'numperpage' => $list_limit ?: $num_groups));
+	$active_subscriptions_pager = new Pager(array('numrecords' => $num_active_subscriptions, 'numperpage' => $list_limit ?: $num_active_subscriptions));
+	$cancelled_subscriptions_pager = new Pager(array('numrecords' => $num_cancelled_subscriptions, 'numperpage' => $list_limit ?: $num_cancelled_subscriptions));
 	$received_emails_pager = new Pager(array('numrecords' => $num_received_emails, 'numperpage' => $list_limit ?: $num_received_emails));
 	$sent_emails_pager = new Pager(array('numrecords' => $num_sent_emails, 'numperpage' => $list_limit ?: $num_sent_emails));
 	$logins_pager = new Pager(array('numrecords' => $num_logins, 'numperpage' => $list_limit ?: $num_logins));
+	$session_visits_pager = new Pager(array('numrecords' => $num_session_visits, 'numperpage' => $list_limit ?: $num_session_visits));
 	?>
 
 	<!-- Two Column Layout -->
@@ -330,7 +371,7 @@
 					<h6 class="mb-0"><span class="fas fa-user me-2"></span>Account Information</h6>
 				</div>
 				<div class="card-body">
-					<table class="table table-borderless fs-10 fw-medium mb-0">
+					<table class="table table-borderless fs-9 fw-medium mb-0">
 						<tbody>
 							<tr>
 								<td class="p-1" style="width: 35%;">Email:</td>
@@ -422,7 +463,7 @@
 					<h6 class="mb-0"><span class="fas fa-star me-2"></span>Subscription Tier</h6>
 				</div>
 				<div class="card-body">
-					<table class="table table-borderless fs-10 fw-medium mb-0">
+					<table class="table table-borderless fs-9 fw-medium mb-0">
 						<tbody>
 							<tr>
 								<td class="p-1" style="width: 35%;">Current Tier:</td>
@@ -488,7 +529,7 @@
 					<h6 class="mb-0"><span class="fas fa-envelope-open me-2"></span>Mailing List Subscriptions</h6>
 				</div>
 				<div class="card-body">
-					<p class="fs-10 mb-0">This user is subscribed to: <strong><?php echo implode(', ', $user_subscribed_list); ?></strong></p>
+					<p class="fs-9 mb-0">This user is subscribed to: <strong><?php echo implode(', ', $user_subscribed_list); ?></strong></p>
 				</div>
 			</div>
 			<?php endif; ?>
@@ -500,7 +541,7 @@
 				</div>
 				<div class="card-body">
 					<div class="table-responsive">
-						<table class="table table-sm fs-10 mb-0">
+						<table class="table table-sm fs-9 mb-0">
 							<thead>
 								<tr class="border-bottom">
 									<th class="py-2">Group</th>
@@ -555,6 +596,7 @@
 							</tbody>
 						</table>
 					</div>
+					<?php echo $groups_pager->record_count_info(count($groups)); ?>
 				</div>
 			</div>
 		</div>
@@ -575,7 +617,7 @@
 								$status_words = $subscription->get('odi_subscription_status') ? $subscription->get('odi_subscription_status') : 'active';
 							?>
 							<div class="mb-3 p-2 bg-body-tertiary rounded">
-								<div class="fs-10 fw-semi-bold">
+								<div class="fs-9 fw-semi-bold">
 									<a href="/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
 										Order <?php echo $subscription->get('odi_ord_order_id'); ?>
 									</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
@@ -590,9 +632,10 @@
 							</div>
 						<?php endforeach; ?>
 					<?php else: ?>
-						<p class="text-600 fs-10 mb-0">No active subscriptions</p>
+						<p class="text-600 fs-9 mb-0">No active subscriptions</p>
 					<?php endif; ?>
 				</div>
+				<?php echo $active_subscriptions_pager->record_count_info($active_subscriptions->count()); ?>
 			</div>
 
 			<!-- Cancelled Subscriptions -->
@@ -604,7 +647,7 @@
 					<?php if($cancelled_subscriptions->count() > 0): ?>
 						<?php foreach($cancelled_subscriptions as $subscription): ?>
 							<div class="mb-2 p-2 bg-body-tertiary rounded">
-								<div class="fs-10 fw-semi-bold">
+								<div class="fs-9 fw-semi-bold">
 									<a href="/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
 										Order <?php echo $subscription->get('odi_ord_order_id'); ?>
 									</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
@@ -618,16 +661,15 @@
 							</div>
 						<?php endforeach; ?>
 					<?php else: ?>
-						<p class="text-600 fs-10 mb-0">No cancelled subscriptions</p>
+						<p class="text-600 fs-9 mb-0">No cancelled subscriptions</p>
 					<?php endif; ?>
 				</div>
+				<?php echo $cancelled_subscriptions_pager->record_count_info($cancelled_subscriptions->count()); ?>
 			</div>
 		</div>
 	</div>
 
 	<?php
-	// Get groups data before displaying
-	$groups = Group::get_groups_for_member($user->key, 'user', false, 'objects');
 
 	// Events Table
 	$headers = array('Event', 'Added', 'Expires', 'Action');
@@ -786,7 +828,7 @@
 				</div>
 				<div class="card-body p-0">
 					<div class="table-responsive">
-						<table class="table table-sm fs-10 mb-0">
+						<table class="table table-sm fs-9 mb-0">
 							<thead class="bg-body-tertiary">
 								<tr>
 									<th class="py-2 ps-3">Subject</th>
@@ -801,7 +843,6 @@
 										NULL,
 										$list_limit,
 										0);
-									$num_received_emails = $received_emails->count_all();
 									$received_emails->load();
 
 									foreach ($received_emails as $received_email):
@@ -832,7 +873,7 @@
 				</div>
 				<div class="card-body p-0">
 					<div class="table-responsive">
-						<table class="table table-sm fs-10 mb-0">
+						<table class="table table-sm fs-9 mb-0">
 							<thead class="bg-body-tertiary">
 								<tr>
 									<th class="py-2 ps-3">Subject</th>
@@ -847,7 +888,6 @@
 										NULL,
 										$list_limit,
 										0);
-									$num_sent_emails = $emails->count_all();
 									$emails->load();
 
 									foreach ($emails as $email):
@@ -876,7 +916,7 @@
 				</div>
 				<div class="card-body p-0">
 					<div class="table-responsive">
-						<table class="table table-sm fs-10 mb-0">
+						<table class="table table-sm fs-9 mb-0">
 							<thead class="bg-body-tertiary">
 								<tr>
 									<th class="py-2 ps-3">Session</th>
@@ -912,6 +952,7 @@
 							</tbody>
 						</table>
 					</div>
+					<?php echo $session_visits_pager->record_count_info($num_session_visits); ?>
 				</div>
 			</div>
 
@@ -922,7 +963,7 @@
 				</div>
 				<div class="card-body p-0">
 					<div class="table-responsive">
-						<table class="table table-sm fs-10 mb-0">
+						<table class="table table-sm fs-9 mb-0">
 							<thead class="bg-body-tertiary">
 								<tr>
 									<th class="py-2 ps-3">Time</th>
