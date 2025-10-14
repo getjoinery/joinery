@@ -315,9 +315,6 @@
 					echo '<h4>Subscription Tier</h4>';
 					if($user_tier) {
 						echo '<p><strong>' . htmlspecialchars($user_tier->get('sbt_display_name')) . '</strong>';
-						if($user_tier->get('sbt_description')) {
-							echo ' - ' . htmlspecialchars($user_tier->get('sbt_description'));
-						}
 						echo ' (Level ' . $user_tier->get('sbt_tier_level') . ')';
 						echo ' <a href="/admin/admin_tier_edit?user_id=' . $user->key . '">change</a></p>';
 					} else {
