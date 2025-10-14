@@ -258,10 +258,8 @@
 		$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
 	}
 
-	// Add "Show All" option if not already showing all
-	if (!$show_all) {
-		$options['altlinks']['Show All'] = '/admin/admin_user?usr_user_id=' . $user->key . '&show_all=1';
-	}
+	// Build show all URL for card footers
+	$show_all_url = !$show_all ? '/admin/admin_user?usr_user_id=' . $user->key . '&show_all=1' : null;
 
 	// Build dropdown button from altlinks
 	$dropdown_button = '';
@@ -596,7 +594,7 @@
 							</tbody>
 						</table>
 					</div>
-					<?php echo $groups_pager->record_count_info(count($groups)); ?>
+					<?php echo $groups_pager->record_count_info(count($groups), array('show_all_url' => $show_all_url)); ?>
 				</div>
 			</div>
 		</div>
@@ -635,7 +633,7 @@
 						<p class="text-600 fs-9 mb-0">No active subscriptions</p>
 					<?php endif; ?>
 				</div>
-				<?php echo $active_subscriptions_pager->record_count_info($active_subscriptions->count()); ?>
+				<?php echo $active_subscriptions_pager->record_count_info($active_subscriptions->count(), array('show_all_url' => $show_all_url)); ?>
 			</div>
 
 			<!-- Cancelled Subscriptions -->
@@ -664,7 +662,7 @@
 						<p class="text-600 fs-9 mb-0">No cancelled subscriptions</p>
 					<?php endif; ?>
 				</div>
-				<?php echo $cancelled_subscriptions_pager->record_count_info($cancelled_subscriptions->count()); ?>
+				<?php echo $cancelled_subscriptions_pager->record_count_info($cancelled_subscriptions->count(), array('show_all_url' => $show_all_url)); ?>
 			</div>
 		</div>
 	</div>
@@ -861,7 +859,7 @@
 							</tbody>
 						</table>
 					</div>
-					<?php echo $received_emails_pager->record_count_info($received_emails->count()); ?>
+					<?php echo $received_emails_pager->record_count_info($received_emails->count(), array('show_all_url' => $show_all_url)); ?>
 				</div>
 			</div>
 
@@ -901,7 +899,7 @@
 							</tbody>
 						</table>
 					</div>
-					<?php echo $sent_emails_pager->record_count_info($emails->count()); ?>
+					<?php echo $sent_emails_pager->record_count_info($emails->count(), array('show_all_url' => $show_all_url)); ?>
 				</div>
 			</div>
 			<?php endif; ?>
@@ -952,7 +950,7 @@
 							</tbody>
 						</table>
 					</div>
-					<?php echo $session_visits_pager->record_count_info($num_session_visits); ?>
+					<?php echo $session_visits_pager->record_count_info($num_session_visits, array('show_all_url' => $show_all_url)); ?>
 				</div>
 			</div>
 
@@ -978,7 +976,7 @@
 							</tbody>
 						</table>
 					</div>
-					<?php echo $logins_pager->record_count_info(count($logins)); ?>
+					<?php echo $logins_pager->record_count_info(count($logins), array('show_all_url' => $show_all_url)); ?>
 				</div>
 			</div>
 		</div>
