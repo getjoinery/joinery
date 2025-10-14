@@ -113,7 +113,15 @@ class PublicPageFalcon extends PublicPageBase {
 			}
 
 			$output .= '
-				</div>
+				</div>';
+
+			// Add action button on the right if provided
+			if (!empty($options['header_action'])) {
+				$output .= '
+				<div>' . $options['header_action'] . '</div>';
+			}
+
+			$output .= '
 			</div>';
 		}
 
