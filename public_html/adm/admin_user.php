@@ -29,6 +29,10 @@
 	$session->check_permission(5);
 	$session->set_return();
 
+	// Check if "show all" is enabled
+	$show_all = isset($_GET['show_all']) && $_GET['show_all'] == '1';
+	$list_limit = $show_all ? NULL : 10;
+
 	$user = new User($_GET['usr_user_id'], TRUE);
 	include(PathHelper::getAbsolutePath('/utils/registrant_maintenance.php'));
 	include(PathHelper::getAbsolutePath('/utils/order_maintenance.php'));
@@ -111,36 +115,38 @@
 	$orders = new MultiOrder(
 		$search_criteria,
 		array('ord_order_id'=>'DESC'),
-		NULL,
+		$list_limit,
 		NULL);
-	$orders->load();
 	$numorders = $orders->count_all();
+	$orders->load();
 
 	$searches['user_id'] = $user->key;
 	$event_registrations = new MultiEventRegistrant(
 		$searches,
 		NULL, //array('event_id'=>'DESC'),
-		NULL,
+		$list_limit,
 		NULL);
-	$event_registrations->load();
 	$numeventsregistrations = $event_registrations->count_all();
+	$event_registrations->load();
 
 	//SUBSCRIPTIONS
 	$active_subscriptions = new MultiOrderItem(
 	array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
 	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	15, //NUMBER PER PAGE
+	$list_limit, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
+	$num_active_subscriptions = $active_subscriptions->count_all();
 	$active_subscriptions->load();
 
 	//SUBSCRIPTIONS
 	$cancelled_subscriptions = new MultiOrderItem(
 	array('user_id' => $user->key, 'is_cancelled_subscription' => true), //SEARCH CRITERIA
 	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
-	15, //NUMBER PER PAGE
+	$list_limit, //NUMBER PER PAGE
 	NULL //OFFSET
 	);
+	$num_cancelled_subscriptions = $cancelled_subscriptions->count_all();
 	$cancelled_subscriptions->load();
 	/*
 	$search_criteria = NULL;
@@ -189,7 +195,22 @@
 
 	*/
 
-	$sql = 'SELECT * FROM log_logins WHERE log_usr_user_id='.$user->key.' ORDER BY log_login_time DESC LIMIT 10';
+	// Get total count of logins
+	$sql_count = 'SELECT COUNT(*) as count FROM log_logins WHERE log_usr_user_id='.$user->key;
+	try{
+		$q_count = $dblink->prepare($sql_count);
+		$q_count->execute();
+		$num_logins = $q_count->fetch(PDO::FETCH_OBJ)->count;
+	}
+	catch(PDOException $e){
+		$dbhelper->handle_query_error($e);
+	}
+
+	// Get logins with limit
+	$sql = 'SELECT * FROM log_logins WHERE log_usr_user_id='.$user->key.' ORDER BY log_login_time DESC';
+	if (!$show_all) {
+		$sql .= ' LIMIT 10';
+	}
 
 	try{
 		$q = $dblink->prepare($sql);
@@ -200,6 +221,60 @@
 		$dbhelper->handle_query_error($e);
 	}
 	$logins = $q->fetchAll();
+
+	$settings = Globalvars::get_instance();
+	$webDir = $settings->get_setting('webDir');
+
+	// Build altlinks array
+	$options = array();
+	$options['altlinks'] = array();
+
+	if(!$user->get('usr_delete_time')) {
+		if($_SESSION['permission'] > 7){
+			$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
+			if($settings->get_setting('checkout_type')){
+				$options['altlinks']['Payment Methods'] = '/admin/admin_user_payment_methods?usr_user_id='.$user->key;
+			}
+			if(!$user->get('usr_email_is_verified')){
+				$options['altlinks']['Resend activation email'] = '/admin/admin_email_verify?usr_user_id='.$user->key;
+			}
+			$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
+
+			$options['altlinks']['Change password'] = '/admin/admin_users_password_edit?usr_user_id='.$user->key;
+			$options['altlinks']['Soft Delete'] = '/admin/admin_user?action=delete&usr_user_id='.$user->key;
+
+			if(!$user->get('usr_is_activated')) {
+				$options['altlinks']['Activate User'] = '/admin/admin_activate?usr_user_id='.$user->key;
+			}
+			if ($_SESSION['permission'] == 10) {
+				$options['altlinks']['Log in as user'] = '/admin/admin_user_login_as?usr_user_id='.$user->key;
+			}
+		}
+	}
+	else {
+		$options['altlinks']['Undelete'] = '/admin/admin_users_undelete?usr_user_id='.$user->key;
+	}
+	if ($_SESSION['permission'] == 10) {
+		$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
+	}
+
+	// Add "Show All" option if not already showing all
+	if (!$show_all) {
+		$options['altlinks']['Show All'] = '/admin/admin_user?usr_user_id=' . $user->key . '&show_all=1';
+	}
+
+	// Build dropdown button from altlinks
+	$dropdown_button = '';
+	if (!empty($options['altlinks'])) {
+		$dropdown_button = '<div class="dropdown">';
+		$dropdown_button .= '<button class="btn btn-falcon-default btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
+		foreach ($options['altlinks'] as $label => $url) {
+			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item">' . htmlspecialchars($label) . '</a>';
+		}
+		$dropdown_button .= '</div>';
+		$dropdown_button .= '</div>';
+	}
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -213,45 +288,9 @@
 		),
 		'session' => $session,
 		'no_page_card' => true,
+		'header_action' => $dropdown_button,
 	)
 	);
-
-	$settings = Globalvars::get_instance();
-	$webDir = $settings->get_setting('webDir');
-
-		$options['title'] = $user->display_name() . ' (' . $user->key . ')';
-
-		if(!$user->get('usr_delete_time')) {
-			if($_SESSION['permission'] > 7){
-				$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
-				if($settings->get_setting('checkout_type')){
-					$options['altlinks']['Payment Methods'] = '/admin/admin_user_payment_methods?usr_user_id='.$user->key;
-				}
-				if(!$user->get('usr_email_is_verified')){
-					$options['altlinks']['Resend activation email'] = '/admin/admin_email_verify?usr_user_id='.$user->key;
-				}
-				$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
-
-				$options['altlinks']['Change password'] = '/admin/admin_users_password_edit?usr_user_id='.$user->key;
-				$options['altlinks']['Soft Delete'] = '/admin/admin_user?action=delete&usr_user_id='.$user->key;
-
-				if(!$user->get('usr_is_activated')) {
-					$options['altlinks']['Activate User'] = '/admin/admin_activate?usr_user_id='.$user->key;
-				}
-				if ($_SESSION['permission'] == 10) {
-					$options['altlinks']['Log in as user'] = '/admin/admin_user_login_as?usr_user_id='.$user->key;
-				}
-
-			}
-		}
-		else {
-			$options['altlinks']['Undelete'] = '/admin/admin_users_undelete?usr_user_id='.$user->key;
-		}
-		if ($_SESSION['permission'] == 10) {
-			$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
-		}
-
-		// Don't use begin_box for new layout
 
 	// Get mailing list subscriptions
 	$user_subscribed_list = array();
@@ -272,7 +311,7 @@
 	$tier_changes = new MultiChangeTracking([
 		'cht_entity_type' => 'subscription_tier',
 		'cht_usr_user_id' => $user->key
-	], ['cht_change_time' => 'DESC'], 10);
+	], ['cht_change_time' => 'DESC'], $list_limit);
 	?>
 
 	<!-- Two Column Layout -->
@@ -791,8 +830,9 @@
 									$received_emails = new MultiEmailRecipient(
 										array('user_id' => $user->key, 'sent' => TRUE),
 										NULL,
-										20,
+										$list_limit,
 										0);
+									$num_received_emails = $received_emails->count_all();
 									$received_emails->load();
 
 									foreach ($received_emails as $received_email):
@@ -835,8 +875,9 @@
 									$emails = new MultiEmail(
 										array('user_id' => $user->key),
 										NULL,
-										20,
+										$list_limit,
 										0);
+									$num_sent_emails = $emails->count_all();
 									$emails->load();
 
 									foreach ($emails as $email):
