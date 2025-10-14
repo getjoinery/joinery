@@ -58,9 +58,79 @@ class PublicPageFalcon extends PublicPageBase {
 
 	public static function EndPage($options=array()) {
 		$output = '</div></div>
-          '; 
+          ';
 		return $output;
-	}	
+	}
+
+	/**
+	 * Begin page content without outer card wrapper
+	 * Displays page title and breadcrumbs in a clean header section
+	 */
+	public static function BeginPageNoCard($options=array()) {
+		$output = '
+		<!-- Page Header -->
+		<div class="mb-3">';
+
+		// Only show header if there's a title or breadcrumbs
+		if (!empty($options['readable_title']) || !empty($options['breadcrumbs'])) {
+			$output .= '
+			<div class="d-flex flex-wrap flex-between-center mb-2">
+				<div>';
+
+			// Page Title
+			if (!empty($options['readable_title'])) {
+				$output .= '
+					<h2 class="mb-2">' . htmlspecialchars($options['readable_title']) . '</h2>';
+			}
+
+			// Breadcrumbs
+			if (!empty($options['breadcrumbs']) && is_array($options['breadcrumbs'])) {
+				$output .= '
+					<nav aria-label="breadcrumb">
+						<ol class="breadcrumb mb-0">';
+
+				$breadcrumb_count = count($options['breadcrumbs']);
+				$current_index = 0;
+
+				foreach ($options['breadcrumbs'] as $name => $url) {
+					$current_index++;
+					$is_last = ($current_index === $breadcrumb_count);
+
+					if ($is_last || empty($url)) {
+						// Last item or no URL - display as active
+						$output .= '
+							<li class="breadcrumb-item active" aria-current="page">' . htmlspecialchars($name) . '</li>';
+					} else {
+						// Regular breadcrumb with link
+						$output .= '
+							<li class="breadcrumb-item"><a href="' . htmlspecialchars($url) . '">' . htmlspecialchars($name) . '</a></li>';
+					}
+				}
+
+				$output .= '
+						</ol>
+					</nav>';
+			}
+
+			$output .= '
+				</div>
+			</div>';
+		}
+
+		$output .= '
+		</div>
+		';
+
+		return $output;
+	}
+
+	/**
+	 * End page content without outer card wrapper
+	 */
+	public static function EndPageNoCard($options=array()) {
+		// No closing markup needed since we don't open any wrapping containers
+		return '';
+	}
 
 	public static function BeginPanel($options=array()) {
 		$output = '<div>'; 
