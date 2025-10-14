@@ -338,7 +338,33 @@ class Pager{
 		$out = $new_page.'?'.implode('&', $new_get_vars);
 		$out .= $this->remaining_var_string;
 		return $out;
-		
+
+	}
+
+	/**
+	 * Output record count info for card footers
+	 * Shows "X records" or "X records (showing Y)" format
+	 *
+	 * @param int $showing_count Number of records currently displayed
+	 * @return string HTML output for record count display
+	 */
+	function record_count_info($showing_count = null) {
+		if ($this->numrecords == 0) {
+			return '';
+		}
+
+		$output = '<div class="card-footer bg-body-tertiary py-2">';
+		$output .= '<div class="fs-10 text-600">';
+		$output .= $this->numrecords . ' record' . ($this->numrecords != 1 ? 's' : '');
+
+		if ($showing_count !== null && $showing_count < $this->numrecords) {
+			$output .= ' (showing ' . $showing_count . ')';
+		}
+
+		$output .= '</div>';
+		$output .= '</div>';
+
+		return $output;
 	}
 
 }
