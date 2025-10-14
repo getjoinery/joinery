@@ -346,9 +346,11 @@ class Pager{
 	 * Shows "X records" or "X records (showing Y)" format
 	 *
 	 * @param int $showing_count Number of records currently displayed
+	 * @param array $options Optional configuration array
+	 *                       - 'show_all_url': URL for "show all" link
 	 * @return string HTML output for record count display
 	 */
-	function record_count_info($showing_count = null) {
+	function record_count_info($showing_count = null, $options = array()) {
 		if ($this->numrecords == 0) {
 			return '';
 		}
@@ -359,6 +361,11 @@ class Pager{
 
 		if ($showing_count !== null && $showing_count < $this->numrecords) {
 			$output .= ' (showing ' . $showing_count . ')';
+
+			// Add "show all" link if URL is provided in options
+			if (isset($options['show_all_url']) && $options['show_all_url']) {
+				$output .= ' <a href="' . htmlspecialchars($options['show_all_url']) . '" class="text-primary">show all</a>';
+			}
 		}
 
 		$output .= '</div>';
