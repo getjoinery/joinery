@@ -312,6 +312,13 @@
 		'cht_entity_type' => 'subscription_tier',
 		'cht_usr_user_id' => $user->key
 	], ['cht_change_time' => 'DESC'], $list_limit);
+
+	// Create Pager objects for record count display
+	$events_pager = new Pager(array('numrecords' => $numeventsregistrations, 'numperpage' => $list_limit ?: $numeventsregistrations));
+	$orders_pager = new Pager(array('numrecords' => $numorders, 'numperpage' => $list_limit ?: $numorders));
+	$received_emails_pager = new Pager(array('numrecords' => $num_received_emails, 'numperpage' => $list_limit ?: $num_received_emails));
+	$sent_emails_pager = new Pager(array('numrecords' => $num_sent_emails, 'numperpage' => $list_limit ?: $num_sent_emails));
+	$logins_pager = new Pager(array('numrecords' => $num_logins, 'numperpage' => $list_limit ?: $num_logins));
 	?>
 
 	<!-- Two Column Layout -->
@@ -621,145 +628,107 @@
 	<?php
 	// Get groups data before displaying
 	$groups = Group::get_groups_for_member($user->key, 'user', false, 'objects');
+
+	// Events Table
+	$headers = array('Event', 'Added', 'Expires', 'Action');
+	$table_options = array('title' => 'Events', 'card' => true);
+	$page->tableheader($headers, $table_options, $events_pager);
+
+	$event_ids_for_user = array();
+	foreach ($event_registrations as $event_registration):
+		$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
+		$event_ids_for_user[] = $event->key;
+
+		$event_cell = '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.
+			LibraryFunctions::convert_time($event->get('evt_start_time'), "UTC", "UTC", 'M j, Y').' '.
+			'<strong>'.htmlspecialchars($event->getString('evt_name', 50)).'</strong> '.
+			htmlspecialchars($event->get('evt_location')).
+			'</a>';
+
+		$added_cell = LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone(), 'M j');
+		$expires_cell = LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone(), 'M j');
+
+		$action_cell = '<form method="POST" action="/admin/admin_user?usr_user_id='.$user->key.'" style="display: inline;">'.
+			'<input type="hidden" name="action" value="remove_from_event" />'.
+			'<input type="hidden" name="evt_event_id" value="'.$event->key.'" />'.
+			'<button type="submit" class="btn btn-sm btn-falcon-default">Remove</button>'.
+			'</form>';
+
+		$page->disprow(array($event_cell, $added_cell, $expires_cell, $action_cell));
+	endforeach;
+
+	// Add event form row
+	$formwriter = $page->getFormWriter('form3');
+	$validation_rules = array();
+	$validation_rules['evt_event_id']['required']['value'] = 'true';
+	$add_form = $formwriter->set_validate($validation_rules);
+	$add_form .= $formwriter->begin_form('form2', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
+
+	$events = new MultiEvent(
+		array('deleted'=>false),
+		array('start_time'=>'DESC'),
+		NULL,
+		NULL);
+	$events->load();
+
+	foreach($event_ids_for_user as $event_id) {
+		if($events->contains_key($event_id)){
+			$events->remove_by_key($event_id);
+		}
+	}
+
+	$optionvals = $events->get_dropdown_array();
+	$add_form .= $formwriter->hiddeninput('action', 'add_to_event');
+	$add_form .= $formwriter->hiddeninput('usr_user_id', $user->key);
+	$add_form .= $formwriter->dropinput("Add to event", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+	$add_form .= $formwriter->new_form_button('Add');
+	$add_form .= $formwriter->end_form();
+
+	echo '<tr><td colspan="4" class="pt-3">'.$add_form.'</td></tr>';
+
+	$page->endtable($events_pager);
+
+	// Orders Table
+	$headers = array('Order ID', 'Order Time', 'Products', 'Total');
+	$table_options = array('title' => 'Orders', 'card' => true);
+	$page->tableheader($headers, $table_options, $orders_pager);
+
+	$PRODUCT_ID_TO_NAME_CACHE = array();
+	foreach($orders as $order):
+		$order_items = $order->get_order_items();
+		$order_items_out = array();
+		foreach($order_items as $order_item):
+			if (array_key_exists($order_item->get('odi_pro_product_id'), $PRODUCT_ID_TO_NAME_CACHE)) {
+				$title = $PRODUCT_ID_TO_NAME_CACHE[$order_item->get('odi_pro_product_id')];
+			} else {
+				$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
+				$title = $product->get('pro_name');
+				$PRODUCT_ID_TO_NAME_CACHE[$product->key] = $title;
+			}
+
+			$this_out = htmlspecialchars($title) . ' ($'. number_format($order_item->get('odi_price'), 2) .')';
+
+			if($order_item->get('odi_subscription_cancelled_time')){
+				$status_words = $order_item->get('odi_subscription_status') ? $order_item->get('odi_subscription_status') : 'canceled';
+				$this_out .= '<br><span class="fs-11 text-600">'. htmlspecialchars($status_words). ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()).'</span>';
+			}
+			else if($order_item->get('odi_subscription_status')){
+				$this_out .=  '<br><span class="fs-11 text-600">STATUS: '. htmlspecialchars($order_item->get('odi_subscription_status')).'</span>';
+			}
+
+			$order_items_out[] = $this_out;
+		endforeach;
+
+		$order_id_cell = '<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>';
+		$order_time_cell = LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone());
+		$products_cell = implode('<br>', $order_items_out);
+		$total_cell = '$'.number_format($order->get('ord_total_cost'), 2);
+
+		$page->disprow(array($order_id_cell, $order_time_cell, $products_cell, $total_cell));
+	endforeach;
+
+	$page->endtable($orders_pager);
 	?>
-
-	<!-- Events Card (Full Width) -->
-	<div class="card mb-3">
-		<div class="card-header bg-body-tertiary">
-			<h6 class="mb-0"><span class="fas fa-calendar me-2"></span>Events</h6>
-		</div>
-		<div class="card-body">
-			<div class="table-responsive">
-				<table class="table table-sm fs-10 mb-0">
-					<thead>
-						<tr class="border-bottom">
-							<th class="py-2">Event</th>
-							<th class="py-2 text-center">Added</th>
-							<th class="py-2 text-center">Expires</th>
-							<th class="py-2 text-end">Action</th>
-						</tr>
-					</thead>
-					<tbody>
-						<?php
-							$event_ids_for_user = array();
-							foreach ($event_registrations as $event_registration):
-								$event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
-								$event_ids_for_user[] = $event->key;
-						?>
-							<tr>
-								<td class="py-2">
-									<a href="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>">
-										<?php echo LibraryFunctions::convert_time($event->get('evt_start_time'), "UTC", "UTC", 'M j, Y'); ?>
-										<strong><?php echo htmlspecialchars($event->getString('evt_name', 50)); ?></strong>
-										<?php echo htmlspecialchars($event->get('evt_location')); ?>
-									</a>
-								</td>
-								<td class="py-2 text-center fs-11"><?php echo LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone(), 'M j'); ?></td>
-								<td class="py-2 text-center fs-11"><?php echo LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone(), 'M j'); ?></td>
-								<td class="py-2 text-end">
-									<form method="POST" action="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>" style="display: inline;">
-										<input type="hidden" name="action" value="remove_from_event" />
-										<input type="hidden" name="evt_event_id" value="<?php echo $event->key; ?>" />
-										<button type="submit" class="btn btn-sm btn-falcon-default">Remove</button>
-									</form>
-								</td>
-							</tr>
-						<?php endforeach; ?>
-						<tr>
-							<td colspan="4" class="pt-3">
-								<?php
-									$formwriter = $page->getFormWriter('form3');
-									$validation_rules = array();
-									$validation_rules['evt_event_id']['required']['value'] = 'true';
-									echo $formwriter->set_validate($validation_rules);
-									echo $formwriter->begin_form('form2', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
-
-									$events = new MultiEvent(
-										array('deleted'=>false),
-										array('start_time'=>'DESC'),
-										NULL,
-										NULL);
-									$events->load();
-
-									foreach($event_ids_for_user as $event_id) {
-										if($events->contains_key($event_id)){
-											$events->remove_by_key($event_id);
-										}
-									}
-
-									$optionvals = $events->get_dropdown_array();
-									echo $formwriter->hiddeninput('action', 'add_to_event');
-									echo $formwriter->hiddeninput('usr_user_id', $user->key);
-									echo $formwriter->dropinput("Add to event", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-									echo $formwriter->new_form_button('Add');
-									echo $formwriter->end_form();
-								?>
-							</td>
-						</tr>
-					</tbody>
-				</table>
-			</div>
-		</div>
-	</div>
-
-	<!-- Orders -->
-	<div class="card mb-3">
-		<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
-			<h6 class="mb-0"><span class="fas fa-shopping-cart me-2"></span>Orders</h6>
-		</div>
-		<div class="card-body p-0">
-			<div class="table-responsive">
-				<table class="table table-sm table-striped fs-10 mb-0">
-					<thead class="bg-body-tertiary">
-						<tr>
-							<th class="py-2 ps-3">Order ID</th>
-							<th class="py-2 text-center">Order Time</th>
-							<th class="py-2">Products</th>
-							<th class="py-2 text-end pe-3">Total</th>
-						</tr>
-					</thead>
-					<tbody>
-						<?php
-							$PRODUCT_ID_TO_NAME_CACHE = array();
-							foreach($orders as $order):
-								$order_items = $order->get_order_items();
-								$order_items_out = array();
-								foreach($order_items as $order_item):
-									if (array_key_exists($order_item->get('odi_pro_product_id'), $PRODUCT_ID_TO_NAME_CACHE)) {
-										$title = $PRODUCT_ID_TO_NAME_CACHE[$order_item->get('odi_pro_product_id')];
-									} else {
-										$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
-										$title = $product->get('pro_name');
-										$PRODUCT_ID_TO_NAME_CACHE[$product->key] = $title;
-									}
-
-									$this_out = htmlspecialchars($title) . ' ($'. number_format($order_item->get('odi_price'), 2) .')';
-
-									if($order_item->get('odi_subscription_cancelled_time')){
-										$status_words = $order_item->get('odi_subscription_status') ? $order_item->get('odi_subscription_status') : 'canceled';
-										$this_out .= '<br><span class="fs-11 text-600">'. htmlspecialchars($status_words). ' at '.LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()).'</span>';
-									}
-									else if($order_item->get('odi_subscription_status')){
-										$this_out .=  '<br><span class="fs-11 text-600">STATUS: '. htmlspecialchars($order_item->get('odi_subscription_status')).'</span>';
-									}
-
-									$order_items_out[] = $this_out;
-								endforeach;
-						?>
-							<tr>
-								<td class="py-2 ps-3 fw-semi-bold">
-									<a href="/admin/admin_order?ord_order_id=<?php echo $order->key; ?>">Order <?php echo $order->key; ?></a>
-								</td>
-								<td class="py-2 text-center"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone()); ?></td>
-								<td class="py-2"><?php echo implode('<br>', $order_items_out); ?></td>
-								<td class="py-2 text-end pe-3 fw-semi-bold">$<?php echo number_format($order->get('ord_total_cost'), 2); ?></td>
-							</tr>
-						<?php endforeach; ?>
-					</tbody>
-				</table>
-			</div>
-		</div>
-	</div>
 
 	<?php
 	/*
@@ -851,6 +820,7 @@
 							</tbody>
 						</table>
 					</div>
+					<?php echo $received_emails_pager->record_count_info($received_emails->count()); ?>
 				</div>
 			</div>
 
@@ -891,6 +861,7 @@
 							</tbody>
 						</table>
 					</div>
+					<?php echo $sent_emails_pager->record_count_info($emails->count()); ?>
 				</div>
 			</div>
 			<?php endif; ?>
@@ -966,6 +937,7 @@
 							</tbody>
 						</table>
 					</div>
+					<?php echo $logins_pager->record_count_info(count($logins)); ?>
 				</div>
 			</div>
 		</div>
