@@ -42,51 +42,106 @@
 		exit();
 	}
 
+	// Build dropdown actions
+	$options['altlinks'] = array('Edit Page' => '/admin/admin_page_edit?pag_page_id='.$page->key);
+	$options['altlinks'] += array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
+	if(!$page->get('pag_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Soft Delete'] = '/admin/admin_page?action=delete&pag_page_id='.$page->key;
+	}
+	else if($_SESSION['permission'] >= 8){
+		$options['altlinks']['Undelete'] = '/admin/admin_page?action=undelete&pag_page_id='.$page->key;
+	}
+	$options['altlinks'] += array('Permanent Delete' => '/admin/admin_page_permanent_delete?pag_page_id='.$page->key);
+
+	// Build dropdown button from altlinks
+	$dropdown_button = '';
+	if (!empty($options['altlinks'])) {
+		$dropdown_button = '<div class="dropdown">';
+		$dropdown_button .= '<button class="btn btn-falcon-default btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
+		foreach ($options['altlinks'] as $label => $url) {
+			$is_danger = strpos($label, 'Delete') !== false;
+			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+		}
+		$dropdown_button .= '</div>';
+		$dropdown_button .= '</div>';
+	}
+
 	$paget = new AdminPage();
 	$paget->admin_header(
 	array(
 		'menu-id'=> 'pages',
+		'page_title' => 'Page',
+		'readable_title' => $page->get('pag_title'),
 		'breadcrumbs' => array(
 			'Pages'=>'/admin/admin_pages',
 			$page->get('pag_title')=>'',
 		),
 		'session' => $session,
+		'no_page_card' => true,
+		'header_action' => $dropdown_button,
 	)
 	);
+	?>
 
-	$options['title'] = $page->get('pag_title');
-	$options['altlinks'] = array('Edit Page' => '/admin/admin_page_edit?pag_page_id='.$page->key);
-	$options['altlinks'] += array('Permanent Delete' => '/admin/admin_page_permanent_delete?pag_page_id='.$page->key);
-	if(!$page->get('pag_delete_time') && $_SESSION['permission'] >= 8) {
-		$options['altlinks']['Soft Delete'] = '/admin/admin_page?action=delete&pag_page_id='.$page->key;
-	}
-	else if($_SESSION['permission'] >= 8){
-		$options['altlinks']['Restore Soft Delete'] = '/admin/admin_page?action=undelete&pag_page_id='.$page->key;
-	}
+	<!-- Page Information Card -->
+	<div class="card mb-3">
+		<div class="card-header bg-body-tertiary">
+			<h5 class="mb-0">Page Information</h5>
+		</div>
+		<div class="card-body">
+			<table class="table table-borderless mb-0" style="font-size: 0.875rem;">
+				<tbody>
+					<tr>
+						<td class="p-1 text-800 fw-semi-bold" style="width: 180px;">Title</td>
+						<td class="p-1 text-600"><?php echo htmlspecialchars($page->get('pag_title')); ?></td>
+					</tr>
+					<tr>
+						<td class="p-1 text-800 fw-semi-bold">Link</td>
+						<td class="p-1 text-600"><a href="<?php echo htmlspecialchars($page->get_url()); ?>" target="_blank"><?php echo htmlspecialchars(LibraryFunctions::get_absolute_url($page->get_url())); ?></a></td>
+					</tr>
+					<tr>
+						<td class="p-1 text-800 fw-semi-bold">Created</td>
+						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($page->get('pag_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+					</tr>
+					<tr>
+						<td class="p-1 text-800 fw-semi-bold">Status</td>
+						<td class="p-1">
+							<?php if($page->get('pag_delete_time')): ?>
+								<span class="badge badge-danger">Deleted at <?php echo LibraryFunctions::convert_time($page->get('pag_delete_time'), 'UTC', $session->get_timezone()); ?></span>
+							<?php elseif($page->get('pag_published_time')): ?>
+								<span class="badge badge-subtle-success">Published</span>
+							<?php else: ?>
+								<span class="badge badge-subtle-secondary">Unpublished</span>
+							<?php endif; ?>
+						</td>
+					</tr>
+					<?php if($page->get('pag_published_time')): ?>
+					<tr>
+						<td class="p-1 text-800 fw-semi-bold">Published</td>
+						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($page->get('pag_published_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+					</tr>
+					<?php endif; ?>
+					<?php if($page->get('pag_last_edit_time')): ?>
+					<tr>
+						<td class="p-1 text-800 fw-semi-bold">Last Edited</td>
+						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($page->get('pag_last_edit_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+					</tr>
+					<?php endif; ?>
+				</tbody>
+			</table>
+		</div>
+	</div>
 
-	$paget->begin_box($options);
-	echo '<strong>Title:</strong> '.$page->get('pag_title').'<br />';
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($page->get('pag_create_time'), 'UTC', $session->get_timezone()) .'<br />';
-	if($page->get('pag_delete_time')){
-		echo '<strong>Status: Deleted</strong> at '.LibraryFunctions::convert_time($page->get('pag_delete_time'), 'UTC', $session->get_timezone()).'<br />';
-	}
-	else if($page->get('pag_published_time')){
-		echo '<strong>Published:</strong> ' . LibraryFunctions::convert_time($page->get('pag_published_time'), 'UTC', $session->get_timezone()). '<br />';
-	}
-	else{
-		echo '<strong>UNPUBLISHED</strong><br />';
-	}
-
-	echo '<strong>Link:</strong> <a href="'.$page->get_url().'">'.$page->get_url('short').'</a><br />';
-
+	<?php
+	// Page Content Table
 	$headers = array("Content",  "Published", "Creator", "Status");
 	$altlinks = array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
-		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
 		'altlinks' => $altlinks,
 		'title' => 'Page Content',
-		//'search_on' => TRUE
+		'card' => true
 	);
 	$paget->tableheader($headers, $table_options, NULL);
 
@@ -120,11 +175,19 @@
 		$paget->disprow($rowvalues);
 	}
 	$paget->endtable($pager);
+	?>
 
-	echo '<h3>Preview</h3>';
-	echo '<iframe src="'.$page->get_url().'" width="100%" height="500" style="border:1px solid black;"></iframe>';
+	<!-- Page Preview Card (Full Width) -->
+	<div class="card mt-3">
+		<div class="card-header bg-body-tertiary">
+			<h5 class="mb-0">Page Preview</h5>
+		</div>
+		<div class="card-body p-0">
+			<iframe src="<?php echo htmlspecialchars($page->get_url()); ?>" width="100%" height="500" style="border:none;"></iframe>
+		</div>
+	</div>
 
-	$paget->end_box();
+	<?php
 
 	$paget->admin_footer();
 ?>

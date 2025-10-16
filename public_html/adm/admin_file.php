@@ -57,150 +57,280 @@
 		exit();
 	}
 
-	$page = new AdminPage();
-	$page->admin_header(
-	array(
-		'menu-id'=> 'files-parent',
-		'page_title' => 'Files',
-		'readable_title' => 'Files',
-		'breadcrumbs' => array(
-			'Files'=>'/admin/admin_files',
-			'File: ' . $file->get('fil_title') => '',
-		),
-		'session' => $session,
-	)
-	);
-
-	$options['title'] = 'File: '.$file->get('fil_title');
+	// Build dropdown actions
 	$options['altlinks'] = array();
-
-	$options['altlinks'] += array('Edit file' => '/admin/admin_file_edit?fil_file_id='.$file->key);
+	$options['altlinks'] += array('Edit File' => '/admin/admin_file_edit?fil_file_id='.$file->key);
 	if($file->get('fil_delete_time')){
 		$options['altlinks'] += array('Undelete' => '/admin/admin_file?action=undelete&fil_file_id='.$file->key);
 	}
 	else{
-		$options['altlinks'] += array('Delete' => '/admin/admin_file?action=delete&fil_file_id='.$file->key);
+		$options['altlinks'] += array('Soft Delete' => '/admin/admin_file?action=delete&fil_file_id='.$file->key);
 	}
 	if($session->get_user_id() == 1){
-		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_file_delete?fil_file_id='.$file->key);
+		$options['altlinks'] += array('Permanently Delete' => '/admin/admin_file_delete?fil_file_id='.$file->key);
 	}
 
-	$page->begin_box($options);
-
-	$formwriter = $page->getFormWriter('form1');
-
-	if($file->is_image()){
-		echo '<div style="float:left; margin-right:30px; margin-bottom:30px;"><img src="/uploads/small/'.$file->get('fil_name').'"/></div>';
+	// Build dropdown button from altlinks
+	$dropdown_button = '';
+	if (!empty($options['altlinks'])) {
+		$dropdown_button = '<div class="dropdown">';
+		$dropdown_button .= '<button class="btn btn-falcon-default btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
+		foreach ($options['altlinks'] as $label => $url) {
+			$is_danger = strpos($label, 'Delete') !== false;
+			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+		}
+		$dropdown_button .= '</div>';
+		$dropdown_button .= '</div>';
 	}
-	echo '<strong>Name:</strong> '.$file->get('fil_name') .'<br />';
-	echo '<strong>Title:</strong> '.$file->get('fil_title') .'<br />';
-	echo '<strong>File permissions:</strong> ';
-	$group_or_event=false;
+
+	$page = new AdminPage();
+	$page->admin_header(
+	array(
+		'menu-id'=> 'files-parent',
+		'page_title' => 'File',
+		'readable_title' => $file->get('fil_title'),
+		'breadcrumbs' => array(
+			'Files'=>'/admin/admin_files',
+			$file->get('fil_title') => '',
+		),
+		'session' => $session,
+		'no_page_card' => true,
+		'header_action' => $dropdown_button,
+	)
+	);
+
+	// Get permission text
+	$permission_text = '';
+	$group_or_event = false;
 	if($file->get('fil_grp_group_id')){
 		$group = new Group($file->get('fil_grp_group_id'), TRUE);
-		echo 'ONLY logged in users in the "'.$group->get('grp_name').'" group ';
-		$group_or_event=true;
+		$permission_text .= 'Only logged in users in the "'.$group->get('grp_name').'" group ';
+		$group_or_event = true;
 	}
 	if($file->get('fil_evt_event_id')){
 		$event = new Event($file->get('fil_evt_event_id'), TRUE);
-		echo 'ONLY logged in users registered for the "'.$event->get('evt_name').'" event ';
-		$group_or_event=true;
+		$permission_text .= 'Only logged in users registered for the "'.$event->get('evt_name').'" event ';
+		$group_or_event = true;
 	}
 	if($group_or_event){
 		if($file->get('fil_min_permission') > 0){
-			echo 'with minimum permission ('.$file->get('fil_min_permission').') ';
+			$permission_text .= 'with minimum permission ('.$file->get('fil_min_permission').') ';
 		}
 	}
 	else{
 		if($file->get('fil_min_permission') === NULL){
-			echo 'Anyone ';
+			$permission_text .= 'Anyone ';
 		}
 		else if($file->get('fil_min_permission') === 0){
-			echo 'Anyone logged in';
+			$permission_text .= 'Anyone logged in';
 		}
 		else{
-			echo 'Minimum permission ('.$file->get('fil_min_permission').') ';
+			$permission_text .= 'Minimum permission ('.$file->get('fil_min_permission').') ';
 		}
 	}
+	$permission_text .= 'can access this file.';
+	?>
 
-	echo '<br />';
-	echo '<strong>Description:</strong> '.$file->get('fil_description') .'<br />';
-	echo '<strong>User:</strong> ('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a><br />';
-	echo '<strong>Uploaded:</strong> '.LibraryFunctions::convert_time($file->get('fil_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+	<!-- Two Column Layout -->
+	<div class="row g-3">
+		<!-- Left Column -->
+		<div class="col-xxl-6">
+			<!-- File Preview Card (for images) -->
+			<?php if($file->is_image()): ?>
+			<div class="card mb-3">
+				<div class="card-header bg-body-tertiary">
+					<h5 class="mb-0">File Preview</h5>
+				</div>
+				<div class="card-body text-center">
+					<img src="/uploads/medium/<?php echo htmlspecialchars($file->get('fil_name')); ?>" alt="File Preview" class="img-fluid rounded" style="max-height: 400px;">
+				</div>
+			</div>
+			<?php endif; ?>
 
-	echo '<br />';
-	if($file->is_image()){
-		echo '<div class="padding10px">Full size:  <pre><a href="'.$file->get_url('standard','short').'">'.$file->get_url('standard','short').'</a></pre></div>';
-		echo '<div class="padding10px">Large size:  <pre><a href="'.$file->get_url('large','short').'">'.$file->get_url('large','short').'</a></pre></div>';
-		echo '<div class="padding10px">Medium size:  <pre><a href="'.$file->get_url('medium','short').'">'.$file->get_url('medium','short').'</a></pre></div>';
-		echo '<div class="padding10px">Small size:  <pre><a href="'.$file->get_url('small','short').'">'.$file->get_url('small','short').'</a></pre></div>';
-		echo '<div class="padding10px">Large thumbnail size:  <pre><a href="'.$file->get_url('lthumbnail','short').'">'.$file->get_url('lthumbnail','short').'</a></pre></div>';
-		echo '<div class="padding10px">Thumbnail size:  <pre><a href="'.$file->get_url('thumbnail','short').'">'.$file->get_url('thumbnail','short').'</a></pre></div>';
-		//echo '<div class="padding10px"><img src="/uploads/medium/'.$file->get('fil_name').'"/></div>';
-	}
-	else{
-		echo '<strong>Direct link:</strong> <a href="/uploads/'.$file->get('fil_name').'"/>/uploads/'.$file->get('fil_name').'</a>';
-	}
+			<!-- File Information Card -->
+			<div class="card mb-3">
+				<div class="card-header bg-body-tertiary">
+					<h5 class="mb-0">File Information</h5>
+				</div>
+				<div class="card-body">
+					<table class="table table-borderless mb-0" style="font-size: 0.875rem;">
+						<tbody>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold" style="width: 180px;">Title</td>
+								<td class="p-1 text-600"><?php echo htmlspecialchars($file->get('fil_title')); ?></td>
+							</tr>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Filename</td>
+								<td class="p-1 text-600"><code><?php echo htmlspecialchars($file->get('fil_name')); ?></code></td>
+							</tr>
+							<?php if($file->get('fil_mime_type')): ?>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">File Type</td>
+								<td class="p-1"><span class="badge badge-subtle-info"><?php echo htmlspecialchars($file->get('fil_mime_type')); ?></span></td>
+							</tr>
+							<?php endif; ?>
+							<?php if($file->get('fil_size')): ?>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">File Size</td>
+								<td class="p-1 text-600"><?php echo LibraryFunctions::format_bytes($file->get('fil_size')); ?></td>
+							</tr>
+							<?php endif; ?>
+							<?php if($file->get('fil_description')): ?>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Description</td>
+								<td class="p-1 text-600"><?php echo htmlspecialchars($file->get('fil_description')); ?></td>
+							</tr>
+							<?php endif; ?>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Uploader</td>
+								<td class="p-1 text-600"><a href="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>"><?php echo htmlspecialchars($user->display_name()); ?> (ID: <?php echo $user->key; ?>)</a></td>
+							</tr>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Uploaded</td>
+								<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($file->get('fil_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+							</tr>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Status</td>
+								<td class="p-1">
+									<?php if($file->get('fil_delete_time')): ?>
+										<span class="badge badge-danger">Deleted</span>
+									<?php else: ?>
+										<span class="badge badge-subtle-success">Active</span>
+									<?php endif; ?>
+								</td>
+							</tr>
+							<?php if($file->get('fil_gal_gallery_id')): ?>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Gallery</td>
+								<td class="p-1 text-600"><a href="/admin/admin_gallery?gal_gallery_id=<?php echo $file->get('fil_gal_gallery_id'); ?>">Gallery</a></td>
+							</tr>
+							<?php endif; ?>
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
 
-	/*
-	$event_sessions = $file->get_event_sessions();
+		<!-- Right Column -->
+		<div class="col-xxl-6">
+			<!-- Access Permissions Card -->
+			<div class="card mb-3">
+				<div class="card-header bg-body-tertiary">
+					<h5 class="mb-0">Access Permissions</h5>
+				</div>
+				<div class="card-body">
+					<table class="table table-borderless mb-0" style="font-size: 0.875rem;">
+						<tbody>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold" style="width: 180px;">Access Level</td>
+								<td class="p-1">
+									<?php if($group_or_event): ?>
+										<span class="badge badge-subtle-warning">Restricted</span>
+									<?php else: ?>
+										<span class="badge badge-subtle-success">Public</span>
+									<?php endif; ?>
+								</td>
+							</tr>
+							<?php if($file->get('fil_grp_group_id')): ?>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Restricted to Group</td>
+								<td class="p-1 text-600">
+									<a href="/admin/admin_group?grp_group_id=<?php echo $file->get('fil_grp_group_id'); ?>" class="badge badge-subtle-primary"><?php echo htmlspecialchars($group->get('grp_name')); ?></a>
+								</td>
+							</tr>
+							<?php endif; ?>
+							<?php if($file->get('fil_evt_event_id')): ?>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Restricted to Event</td>
+								<td class="p-1 text-600">
+									<a href="/admin/admin_event?evt_event_id=<?php echo $file->get('fil_evt_event_id'); ?>" class="badge badge-subtle-info"><?php echo htmlspecialchars($event->get('evt_name')); ?></a>
+								</td>
+							</tr>
+							<?php endif; ?>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Min. Permission Level</td>
+								<td class="p-1 text-600"><?php echo ($file->get('fil_min_permission') !== NULL) ? $file->get('fil_min_permission') : 'None'; ?></td>
+							</tr>
+						</tbody>
+					</table>
+					<div class="alert alert-info mt-3 mb-0" style="font-size: 0.875rem;">
+						<i class="bi bi-info-circle me-2"></i>
+						<?php echo $permission_text; ?>
+					</div>
+				</div>
+			</div>
 
-	$headers = array("Event Session",  "Action");
-	$altlinks = array();
-	//$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
-	$table_options = array(
-		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
-		'altlinks' => $altlinks,
-		'title' => 'Add to event session',
-		//'search_on' => TRUE
-	);
-	$page->tableheader($headers, $table_options);
+			<!-- Image Size Links Card (for images only) -->
+			<?php if($file->is_image()): ?>
+			<div class="card mb-3">
+				<div class="card-header bg-body-tertiary">
+					<h5 class="mb-0">Image Size Variations</h5>
+				</div>
+				<div class="card-body">
+					<table class="table table-borderless mb-0" style="font-size: 0.875rem;">
+						<tbody>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold" style="width: 140px;">Full Size</td>
+								<td class="p-1">
+									<a href="<?php echo htmlspecialchars($file->get_url('standard')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('standard','short')); ?></a>
+								</td>
+							</tr>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Large</td>
+								<td class="p-1">
+									<a href="<?php echo htmlspecialchars($file->get_url('large')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('large','short')); ?></a>
+								</td>
+							</tr>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Medium</td>
+								<td class="p-1">
+									<a href="<?php echo htmlspecialchars($file->get_url('medium')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('medium','short')); ?></a>
+								</td>
+							</tr>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Small</td>
+								<td class="p-1">
+									<a href="<?php echo htmlspecialchars($file->get_url('small')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('small','short')); ?></a>
+								</td>
+							</tr>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Large Thumb</td>
+								<td class="p-1">
+									<a href="<?php echo htmlspecialchars($file->get_url('lthumbnail')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('lthumbnail','short')); ?></a>
+								</td>
+							</tr>
+							<tr>
+								<td class="p-1 text-800 fw-semi-bold">Thumbnail</td>
+								<td class="p-1">
+									<a href="<?php echo htmlspecialchars($file->get_url('thumbnail')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('thumbnail','short')); ?></a>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+			<?php else: ?>
+			<!-- Direct Link Card (for non-images) -->
+			<div class="card mb-3">
+				<div class="card-header bg-body-tertiary">
+					<h5 class="mb-0">Direct Link</h5>
+				</div>
+				<div class="card-body">
+					<a href="/uploads/<?php echo htmlspecialchars($file->get('fil_name')); ?>" target="_blank" class="btn btn-falcon-default">
+						<i class="bi bi-download me-1"></i> Download File
+					</a>
+					<div class="mt-3">
+						<small class="text-600">Direct URL:</small><br>
+						<code style="font-size: 0.75rem;">/uploads/<?php echo htmlspecialchars($file->get('fil_name')); ?></code>
+					</div>
+				</div>
+			</div>
+			<?php endif; ?>
+		</div>
+	</div>
 
-	foreach($event_sessions as $event_session){
-		$event = new Event($event_session->get('evs_evt_event_id'), TRUE);
-
-		$rowvalues = array();
-		array_push($rowvalues, '<a href="/admin/admin_event_sessions?evt_event_id='.$event->key.'">'.$event->get('evt_name'). ' - '.$event_session->get('evs_title').'</a>');
-
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_file?fil_file_id='.$file->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="fileremove" />
-		<input type="hidden" class="hidden" name="fil_file_id" value="'.$file->key.'" />
-		<input type="hidden" class="hidden" name="evs_event_session_id" value="'.$event_session->key.'" />
-		<button type="submit">Delete</button>
-		</form>';
-
-		array_push($rowvalues, $delform);
-
-		$page->disprow($rowvalues);
-
-	}
-	echo '<tr><td colspan="2">';
-	$formwriter = $page->getFormWriter('form2');
-	echo $formwriter->begin_form('form2', 'POST', '/admin/admin_file?fil_file_id='. $file->key);
-
-	$sessions = new MultiEventSessions(
-		array('deleted'=>true),
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$sessions->load();
-
-	$optionvals = $sessions->get_sessions_dropdown_array();
-	echo $formwriter->hiddeninput('action', 'fileadd');
-	echo $formwriter->hiddeninput('fil_file_id', $file->key);
-	//echo $formwriter->hiddeninput('evs_event_session_id', $event_session->key);
-	//echo $formwriter->dropinput("Add to session", "evs_event_session_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-
-	echo $formwriter->dropinput("Add to session", "evs_event_session_id", "ctrlHolder", $optionvals, NULL, '', TRUE, FALSE, '/ajax/session_search_ajax');
-
-	echo $formwriter->new_form_button('Submit');
-
-	echo '</td></tr>';
-	$page->endtable();
-	*/
-
-	$page->end_box();
-
+	<?php
 	$page->admin_footer();
 ?>
 
