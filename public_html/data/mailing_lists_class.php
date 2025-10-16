@@ -12,6 +12,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
 $settings = Globalvars::get_instance();
@@ -62,6 +63,7 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	    'mlt_link' => array('type'=>'varchar(255)', 'required'=>true),
 	    'mlt_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'mlt_delete_time' => array('type'=>'timestamp(6)'),
+	    'mlt_emt_welcome_email_template_id' => array('type'=>'int4'),
 	    'mlt_emt_email_template_id' => array('type'=>'int4'),
 	    'mlt_fil_file_id' => array('type'=>'int4'),
 	    'mlt_ctt_contact_type_id' => array('type'=>'int4'),
@@ -163,17 +165,18 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 			$registrant->save();
 			$registrant->load();
 			
-			if($this->get('mlt_send_welcome_email')){
+			if($this->get('mlt_emt_welcome_email_template_id')){
 				//SEND WELCOME EMAIL
 				$user = new User($usr_user_id, TRUE);
-				EmailSender::sendTemplate('mailing_list_subscribe',
+				$template = new EmailTemplateStore($this->get('mlt_emt_welcome_email_template_id'), TRUE);
+				EmailSender::sendTemplate($template->get('emt_machine_name'),
 					$user->get('usr_email'),
 					[
-						'subject' => 'Welcome to our mailing list',
+						'subject' => $template->get('emt_subject'),
 						'mailing_list' => $this,
 						'recipient' => $user->export_as_array()
 					]
-				);	
+				);
 			}
 			
 			$status = true;
