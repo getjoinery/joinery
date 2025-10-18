@@ -398,13 +398,18 @@ $page_vars = process_logic(profile_logic($_GET, $_POST));
 ### Getting FormWriter Instances
 
 ```php
-// In views with PublicPage available (preferred):
+// In views with PublicPage available:
 $formwriter = $page->getFormWriter('form1');
 
-// In admin pages, utilities, or logic files:
-$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
+// In admin pages and utilities (where AdminPage is available):
+$formwriter = $page->getFormWriter('form1');
 
-// The wrapper automatically detects the correct FormWriter for the theme
+// In logic files or other contexts without a page object:
+// Directly require the appropriate FormWriter class for your context
+require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
+$formwriter = new FormWriterBootstrap('form1');
+
+// The page->getFormWriter() method automatically detects the correct FormWriter for the theme
 ```
 
 ### Session Check (Admin Pages)
