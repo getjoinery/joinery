@@ -1408,7 +1408,7 @@ else
 fi
 returnvalue=$?
 
-if [[ "$returnvalue" != 1 ]]; then
+if [[ "$returnvalue" != 0 ]]; then
     echo "ERROR: Database update failed."
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "DEBUGGING: You can examine the staged files to understand what was deployed."
