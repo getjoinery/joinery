@@ -103,12 +103,6 @@
 		exit;
 	}
 
-	if(posix_getpwuid(fileowner($live_directory))['name'] != 'www-data'){
-		echo $live_directory . ' (live_directory) must be owned by www-data.  Aborting upgrade.<br>';
-		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
-		exit;
-	}
-
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
@@ -135,6 +129,21 @@
 	$sourceFile = $decode_response['upgrade_location'];
 
 	if ($_POST && $_POST['confirm']){
+
+		// Check ownership (relaxed for test/debug environments)
+		$current_owner = posix_getpwuid(fileowner($live_directory))['name'];
+		$is_debug = $settings->get_setting('debug');
+
+		if($current_owner != 'www-data' && !$is_debug){
+			echo $live_directory . ' (live_directory) must be owned by www-data.  Aborting upgrade.<br>';
+			echo 'Instead, it is owned by '.$current_owner.' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
+			exit;
+		}
+		else if($current_owner != 'www-data' && $is_debug){
+			echo '<div style="border: 2px solid #856404; padding: 15px; margin: 20px 0; background-color: #fff3cd; color: #856404;">';
+			echo '<strong>⚠️ TEST ENVIRONMENT:</strong> Files owned by '.$current_owner.' instead of www-data (allowed in debug mode)<br>';
+			echo '</div>';
+		}
 
 		// Display dry-run banner if enabled
 		if($dry_run){
@@ -704,6 +713,29 @@
 			echo '</div>';
 		echo '</fieldset>';
 		echo $formwriter->end_form();
+
+		// Add JavaScript to disable submit button after click to prevent double submission
+		echo '<script>
+		document.addEventListener("DOMContentLoaded", function() {
+			var form = document.getElementById("form");
+			if (form) {
+				form.addEventListener("submit", function(e) {
+					var submitButton = form.querySelector("button[type=\'submit\'], input[type=\'submit\']");
+					if (submitButton && !submitButton.disabled) {
+						submitButton.disabled = true;
+						submitButton.style.opacity = "0.6";
+						submitButton.style.cursor = "not-allowed";
+						var originalText = submitButton.textContent || submitButton.value;
+						if (submitButton.textContent !== undefined) {
+							submitButton.textContent = "Processing...";
+						} else {
+							submitButton.value = "Processing...";
+						}
+					}
+				});
+			}
+		});
+		</script>';
 
 		$page->end_box();
 
