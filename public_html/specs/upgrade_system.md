@@ -618,17 +618,46 @@ public static function validatePHPSyntax($directory, $verbose = false) {
 
 ### Phase 2: Migrate deploy.sh to Use DeploymentHelper (High Priority)
 
-**Goal:** Replace inline bash/PHP code in deploy.sh with calls to DeploymentHelper
+**Goal:** Replace inline bash/PHP code in deploy.sh with calls to DeploymentHelper AND fix backwards exit codes
 
-1. **Replace validation code:**
+1. **Fix Backwards Exit Codes (CRITICAL):**
+   - **update_database.php (lines 511-514):** Change `exit(1)` for success to `exit(0)`, and `exit(0)` for failure to `exit(1)`
+   - **deploy.sh (line ~1411):** Change `if [[ "$returnvalue" != 1 ]]` to `if [[ "$returnvalue" != 0 ]]`
+   - **upgrade.php:** Update to use correct exit codes (currently uses backwards codes from update_database.php)
+
+   **Before (WRONG):**
+   ```php
+   // update_database.php lines 511-514
+   if(update_database($verbose, $upgrade, $cleanup)){
+       echo 'Database update script successful'. "<br>\n";
+       exit(1);  // BACKWARDS!
+   } else {
+       echo 'Database update script failed'. "<br>\n";
+       exit(0);  // BACKWARDS!
+   }
+   ```
+
+   **After (CORRECT):**
+   ```php
+   // update_database.php lines 511-514
+   if(update_database($verbose, $upgrade, $cleanup)){
+       echo 'Database update script successful'. "<br>\n";
+       exit(0);  // SUCCESS - Standard Unix
+   } else {
+       echo 'Database update script failed'. "<br>\n";
+       exit(1);  // FAILURE - Standard Unix
+   }
+   ```
+
+2. **Replace validation code:**
    - Lines 1102-1123: PHP syntax validation → `DeploymentHelper::validatePHPSyntax()`
    - Lines 1125-1239: Plugin loading tests → `DeploymentHelper::testPluginLoading()`
    - Lines 1287-1317: Bootstrap test → `DeploymentHelper::testBootstrap()`
 
-2. **Replace theme/plugin preservation:**
+3. **Replace theme/plugin preservation:**
    - Lines 539-675: Custom theme/plugin preservation → `DeploymentHelper::preserveCustomThemesPlugins()`
 
-3. **Replace rollback code:**
+4. **Replace rollback code:**
    - Lines 107-180: Rollback function → `DeploymentHelper::performRollback()`
 
 **Example Usage in deploy.sh:**
