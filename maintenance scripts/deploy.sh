@@ -10,7 +10,7 @@
 # MODIFIED: Added trap-based automatic rollback system
 
 # Deploy script version
-DEPLOY_VERSION="3.09"
+DEPLOY_VERSION="3.5"
 
 # Helper function for verbose output
 verbose_echo() {
