@@ -17,7 +17,10 @@
 	
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
-	
+
+	// Increase execution time for large zip file creation (5 minutes)
+	set_time_limit(300);
+
 	if(isset($_REQUEST['version_major']) && isset($_REQUEST['version_minor'])){
 
 		$version_major = $_REQUEST['version_major'];
@@ -147,7 +150,16 @@
 		$upgrades = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 10, 0);
 		$upgrades->load();
 		foreach ($upgrades as $upgrade){
-			echo 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). ' - '. LibraryFunctions::convert_time($upgrade->get('upg_create_time'), 'UTC', $session->get_timezone()) . ' - '. substr($upgrade->get('upg_release_notes'), 0, 30) .'<br />';
+			$version_string = 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). ' - '. LibraryFunctions::convert_time($upgrade->get('upg_create_time'), 'UTC', $session->get_timezone()) . ' - '. substr($upgrade->get('upg_release_notes'), 0, 30);
+
+			// Check if zip file exists
+			$zip_filename = $upgrade->get('upg_name');
+			$zip_path = $full_site_dir.'/static_files/'.$zip_filename;
+			if (!file_exists($zip_path)) {
+				$version_string .= ' <span style="color: red; font-weight: bold;">[ZIP FILE MISSING]</span>';
+			}
+
+			echo $version_string.'<br />';
 		}
 		echo '<br><br>';
 
