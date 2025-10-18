@@ -508,10 +508,10 @@
 	if(!isset($noautorun)){
 		if(update_database($verbose, $upgrade, $cleanup)){
 			echo 'Database update script successful'. "<br>\n";
-			exit(1);  // RETURN 1 FOR THE DEPLOY SCRIPT
+			exit(0);  // SUCCESS - Standard Unix convention
 		} else {
 			echo 'Database update script failed'. "<br>\n";
-			exit(0);
+			exit(1);  // FAILURE - Standard Unix convention
 		}
 	}
 ?>
