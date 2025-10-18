@@ -79,14 +79,51 @@ cleanup_and_rollback() {
         echo "DEPLOYMENT FAILED - AUTOMATIC ROLLBACK"
         echo "========================================="
         echo "Attempting automatic rollback for site: $TARGET_SITE"
-        
-        if perform_rollback "$TARGET_SITE"; then
+
+        # Call DeploymentHelper::performRollback()
+        rollback_result=$(php -r "
+            // DeploymentHelper may not be available if deployment failed early
+            // So we need to check for PathHelper first
+            if (file_exists('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php')) {
+                require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
+            } else if (file_exists('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php')) {
+                require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
+            } else {
+                echo 'ERROR:PathHelper not found';
+                exit(1);
+            }
+
+            require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
+
+            \$result = DeploymentHelper::performRollback('/var/www/html/$TARGET_SITE');
+
+            if (!\$result['success']) {
+                echo 'ERROR:' . \$result['message'];
+                exit(1);
+            } else {
+                echo 'SUCCESS:' . \$result['message'];
+                if (isset(\$result['failed_dir'])) {
+                    echo ':' . \$result['failed_dir'];
+                }
+                exit(0);
+            }
+        " 2>&1)
+        rollback_exit=$?
+
+        if [ $rollback_exit -eq 0 ]; then
             echo "✓ Automatic rollback completed successfully."
+            failed_location=$(echo "$rollback_result" | grep "^SUCCESS:" | cut -d: -f3)
+            if [ -n "$failed_location" ]; then
+                echo "Failed deployment preserved at: $failed_location"
+            else
+                echo "Failed deployment preserved for debugging."
+            fi
         else
             echo "✗ Automatic rollback failed. Manual intervention required."
+            echo "$rollback_result" | grep "^ERROR:" | while IFS=: read -r prefix message; do
+                echo "  $message"
+            done
         fi
-        
-        echo "Failed deployment preserved for debugging."
     fi
     
     exit $exit_code
@@ -103,81 +140,6 @@ REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/Tunnell-Software/mem
 THEME_PLUGIN_USER="getjoinery"
 THEME_PLUGIN_TOKEN="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"
 THEME_PLUGIN_REPO_URL="https://${THEME_PLUGIN_USER}:${THEME_PLUGIN_TOKEN}@github.com/getjoinery/joinery.git"
-
-# Improved rollback function
-perform_rollback() {
-    local target_site="$1"
-    local public_html_dir="/var/www/html/$target_site/public_html"
-    local backup_dir="/var/www/html/$target_site/public_html_last"
-    
-    echo "Starting rollback process..."
-    
-    # Check if backup exists
-    if [[ ! -d "$backup_dir" ]] || [[ -z "$(ls -A "$backup_dir" 2>/dev/null)" ]]; then
-        echo "ERROR: No backup available to rollback to."
-        return 1
-    fi
-    
-    # Create a temporary directory for the failed deployment
-    local failed_dir="/var/www/html/$target_site/public_html_failed_$(date +%Y%m%d_%H%M%S)"
-    echo "Moving failed deployment to: $failed_dir"
-    
-    # Move the entire failed public_html to preserve it for debugging
-    if [[ -d "$public_html_dir" ]]; then
-        mv "$public_html_dir" "$failed_dir" && {
-            # Create .htaccess to block web access to failed deployment directory
-            echo "Creating .htaccess to block web access to failed deployment directory..."
-            cat > "$failed_dir/.htaccess" << 'EOF'
-# Block all web access to failed deployment directory
-Order Deny,Allow
-Deny from all
-
-# Alternative syntax for Apache 2.4+
-<RequireAll>
-    Require all denied
-</RequireAll>
-EOF
-        } || {
-            echo "ERROR: Could not move failed deployment. Attempting alternative cleanup..."
-            
-            # Alternative: Thorough directory-by-directory cleanup
-            cd "$public_html_dir" || return 1
-            
-            # Remove each subdirectory individually
-            for item in */; do
-                if [[ -d "$item" ]]; then
-                    echo "  Removing: $item"
-                    rm -rf "$item" || echo "    Warning: Could not remove $item"
-                fi
-            done
-            
-            # Remove files
-            find . -maxdepth 1 -type f -delete 2>/dev/null || true
-            
-            # Remove any remaining hidden files/directories
-            find . -maxdepth 1 -name ".*" -not -name "." -not -name ".." -exec rm -rf {} + 2>/dev/null || true
-        }
-    fi
-    
-    # Recreate public_html directory if it doesn't exist
-    mkdir -p "$public_html_dir"
-    
-    # Restore from backup using copy (safer than move)
-    echo "Restoring from backup..."
-    cp -r "$backup_dir"/* "$public_html_dir/" || {
-        echo "ERROR: Failed to restore from backup"
-        return 1
-    }
-    
-    # Fix permissions
-    echo "Fixing permissions after rollback..."
-    chown -R www-data:user1 "$public_html_dir" 2>/dev/null || echo "Warning: Could not change ownership"
-    chmod -R 775 "$public_html_dir" 2>/dev/null || echo "Warning: Could not change permissions"
-    
-    echo "Rollback completed successfully."
-    echo "Failed deployment preserved at: $failed_dir"
-    return 0
-}
 
 # Function to fix permissions
 fix_permissions() {
@@ -532,145 +494,6 @@ deploy_theme_plugin() {
     rm -rf "$plugins_stage_dir"
     
     echo "Theme and plugin download from joinery repository complete."
-    return 0
-}
-
-# Function to merge themes and plugins into public_html after main code deployment
-preserve_custom_themes_plugins() {
-    local target_site="$1"
-    local site_root="/var/www/html/$target_site"
-    local public_html_dir="$site_root/public_html"
-    local staging_dir="$site_root/public_html_stage"
-    
-    local theme_count=0
-    local theme_added=0
-    local theme_updated=0
-    local theme_preserved=0
-    
-    # SHOW STATUS FOR ALL THEMES (STOCK AND CUSTOM)
-    if [[ -d "$staging_dir/theme" ]]; then
-        for staging_theme_path in "$staging_dir/theme"/*/; do
-            if [[ -d "$staging_theme_path" ]]; then
-                theme_name=$(basename "$staging_theme_path")
-                staging_manifest="$staging_theme_path/theme.json"
-                theme_version=$(get_json_value "$staging_manifest" "version" "unknown")
-                theme_description=$(get_json_value "$staging_manifest" "description" "")
-                ((theme_count++))
-                
-                # Check if theme exists in previous deployment
-                existing_theme_path="$site_root/public_html_last/theme/$theme_name"
-                if [[ -d "$existing_theme_path" ]]; then
-                    existing_manifest="$existing_theme_path/theme.json"
-                    if [[ -f "$existing_manifest" ]]; then
-                        is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
-                        if [[ "$is_stock" == "false" ]]; then
-                            verbose_echo "  🔒 PRESERVING custom theme: $theme_name v$theme_version - $theme_description"
-                            ((theme_preserved++))
-                            # Copy custom theme over stock version in staging
-                            cp -r "$existing_theme_path" "$staging_dir/theme/" || {
-                                echo "ERROR: Failed to preserve custom theme $theme_name"
-                                return 1
-                            }
-                        else
-                            verbose_echo "  📦 UPDATING stock theme: $theme_name v$theme_version - $theme_description"
-                            ((theme_updated++))
-                        fi
-                    else
-                        verbose_echo "  📦 UPDATING theme: $theme_name v$theme_version - $theme_description"
-                        ((theme_updated++))
-                    fi
-                else
-                    verbose_echo "  ✨ ADDING new theme: $theme_name v$theme_version - $theme_description"
-                    ((theme_added++))
-                fi
-            fi
-        done
-    fi
-    
-    local plugin_count=0
-    local plugin_added=0
-    local plugin_updated=0
-    local plugin_preserved=0
-    
-    # SHOW STATUS FOR ALL PLUGINS (STOCK AND CUSTOM)
-    if [[ -d "$staging_dir/plugins" ]]; then
-        for staging_plugin_path in "$staging_dir/plugins"/*/; do
-            if [[ -d "$staging_plugin_path" ]]; then
-                plugin_name=$(basename "$staging_plugin_path")
-                staging_manifest="$staging_plugin_path/plugin.json"
-                plugin_version=$(get_json_value "$staging_manifest" "version" "unknown")
-                plugin_description=$(get_json_value "$staging_manifest" "description" "")
-                ((plugin_count++))
-                
-                # Check if plugin exists in previous deployment
-                existing_plugin_path="$site_root/public_html_last/plugins/$plugin_name"
-                if [[ -d "$existing_plugin_path" ]]; then
-                    existing_manifest="$existing_plugin_path/plugin.json"
-                    if [[ -f "$existing_manifest" ]]; then
-                        is_stock=$(get_json_value "$existing_manifest" "is_stock" "true")
-                        if [[ "$is_stock" == "false" ]]; then
-                            verbose_echo "  🔒 PRESERVING custom plugin: $plugin_name v$plugin_version - $plugin_description"
-                            ((plugin_preserved++))
-                            # Copy custom plugin over stock version in staging  
-                            cp -r "$existing_plugin_path" "$staging_dir/plugins/" || {
-                                echo "ERROR: Failed to preserve custom plugin $plugin_name"
-                                return 1
-                            }
-                        else
-                            verbose_echo "  🔌 UPDATING stock plugin: $plugin_name v$plugin_version - $plugin_description"
-                            ((plugin_updated++))
-                        fi
-                    else
-                        verbose_echo "  🔌 UPDATING plugin: $plugin_name v$plugin_version - $plugin_description"
-                        ((plugin_updated++))
-                    fi
-                else
-                    verbose_echo "  ⚡ ADDING new plugin: $plugin_name v$plugin_version - $plugin_description"
-                    ((plugin_added++))
-                fi
-            fi
-        done
-    fi
-    
-    # Show summary
-    local theme_msg=""
-    local plugin_msg=""
-    
-    if [ $theme_count -gt 0 ]; then
-        if [ $theme_updated -gt 0 ] && [ $theme_added -eq 0 ] && [ $theme_preserved -eq 0 ]; then
-            theme_msg="Updated $theme_updated themes"
-        elif [ $theme_added -gt 0 ] && [ $theme_updated -eq 0 ] && [ $theme_preserved -eq 0 ]; then
-            theme_msg="Added $theme_added themes"
-        else
-            local parts=()
-            [ $theme_added -gt 0 ] && parts+=("$theme_added new")
-            [ $theme_updated -gt 0 ] && parts+=("$theme_updated updated")  
-            [ $theme_preserved -gt 0 ] && parts+=("$theme_preserved preserved")
-            theme_msg="Themes: $(IFS=', '; echo "${parts[*]}")"
-        fi
-    fi
-    
-    if [ $plugin_count -gt 0 ]; then
-        if [ $plugin_updated -gt 0 ] && [ $plugin_added -eq 0 ] && [ $plugin_preserved -eq 0 ]; then
-            plugin_msg="Updated $plugin_updated plugins"
-        elif [ $plugin_added -gt 0 ] && [ $plugin_updated -eq 0 ] && [ $plugin_preserved -eq 0 ]; then
-            plugin_msg="Added $plugin_added plugins"
-        else
-            local parts=()
-            [ $plugin_added -gt 0 ] && parts+=("$plugin_added new")
-            [ $plugin_updated -gt 0 ] && parts+=("$plugin_updated updated")
-            [ $plugin_preserved -gt 0 ] && parts+=("$plugin_preserved preserved")
-            plugin_msg="Plugins: $(IFS=', '; echo "${parts[*]}")"
-        fi
-    fi
-    
-    if [ -n "$theme_msg" ] && [ -n "$plugin_msg" ]; then
-        echo "✓ $theme_msg, $plugin_msg"
-    elif [ -n "$theme_msg" ]; then
-        echo "✓ $theme_msg"
-    elif [ -n "$plugin_msg" ]; then
-        echo "✓ $plugin_msg" 
-    fi
     return 0
 }
 
@@ -1089,137 +912,118 @@ if ! deploy_theme_plugin "$TARGET_SITE"; then
     exit 1
 fi
 
-# PRESERVE CUSTOM THEMES AND PLUGINS FROM EXISTING PUBLIC_HTML
+# PRESERVE CUSTOM THEMES AND PLUGINS FROM EXISTING PUBLIC_HTML (using DeploymentHelper)
 verbose_echo "Preserving custom themes and plugins from existing deployment..."
-if ! preserve_custom_themes_plugins "$TARGET_SITE"; then
-    echo "ERROR: Custom theme/plugin preservation failed."
+preservation_output=$(php -r "
+    require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
+    require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
+
+    \$verbose = $VERBOSE ? true : false;
+    \$result = DeploymentHelper::preserveCustomThemesPlugins('/var/www/html/$TARGET_SITE', \$verbose);
+
+    if (!\$result['success']) {
+        echo 'ERROR:' . \$result['message'] . PHP_EOL;
+        exit(1);
+    } else {
+        echo 'SUCCESS:' . \$result['summary'];
+        exit(0);
+    }
+" 2>&1)
+preservation_exit=$?
+
+if [ $preservation_exit -ne 0 ]; then
+    echo "$preservation_output" | grep "^ERROR:" | while IFS=: read -r prefix message; do
+        echo "ERROR: $message"
+    done
     exit 1
+else
+    summary=$(echo "$preservation_output" | grep "^SUCCESS:" | cut -d: -f2-)
+    echo "$summary"
 fi
 
 # RUN PRE-DEPLOYMENT TESTS ON STAGING
 echo "Running pre-deployment tests on staging environment..."
 
-# PHP SYNTAX VALIDATION ON STAGING
+# PHP SYNTAX VALIDATION ON STAGING (using DeploymentHelper)
 verbose_echo "Validating PHP syntax on staging files..."
-php_error_count=0
-php_file_count=0
-while IFS= read -r -d '' file; do
-    ((php_file_count++))
-    if ! php -l "$file" >/dev/null 2>&1; then
-        echo "SYNTAX ERROR in: $file"
-        php -l "$file"
-        ((php_error_count++))
-    else
-        verbose_echo "  ✓ $file"
-    fi
-done < <(find "/var/www/html/$TARGET_SITE/public_html_stage" -name "*.php" -print0)
+php_validation_output=$(php -r "
+    require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
+    require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 
-if [[ $php_error_count -gt 0 ]]; then
-    handle_test_failure "$php_error_count PHP syntax errors found in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
+    \$verbose = $VERBOSE ? true : false;
+    \$result = DeploymentHelper::validatePHPSyntax('/var/www/html/$TARGET_SITE/public_html_stage', \$verbose);
+
+    if (!\$result['success']) {
+        echo 'ERRORS_FOUND:' . count(\$result['errors']) . ':' . \$result['files_checked'] . PHP_EOL;
+        foreach (\$result['errors'] as \$error) {
+            echo 'ERROR:' . \$error['file'] . ':' . \$error['line'] . ':' . \$error['message'] . PHP_EOL;
+        }
+        exit(1);
+    } else {
+        echo 'SUCCESS:' . \$result['files_checked'];
+        exit(0);
+    }
+" 2>&1)
+php_validation_exit=$?
+
+if [ $php_validation_exit -ne 0 ]; then
+    # Parse error output
+    error_count=$(echo "$php_validation_output" | grep "^ERRORS_FOUND:" | cut -d: -f2)
+    files_checked=$(echo "$php_validation_output" | grep "^ERRORS_FOUND:" | cut -d: -f3)
+
+    echo "$php_validation_output" | grep "^ERROR:" | while IFS=: read -r prefix file line message; do
+        echo "SYNTAX ERROR in: $file (line $line)"
+        echo "  $message"
+    done
+
+    handle_test_failure "$error_count PHP syntax errors found in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
     if [ $? -eq 1 ]; then
         exit 1
     fi
+else
+    files_checked=$(echo "$php_validation_output" | grep "^SUCCESS:" | cut -d: -f2)
+    verbose_echo "✓ PHP syntax validation passed ($files_checked files checked)"
 fi
-verbose_echo "✓ PHP syntax validation passed ($php_file_count files checked)"
 
-# PLUGIN LOADING TEST ON STAGING
+# PLUGIN LOADING TEST ON STAGING (using DeploymentHelper)
 verbose_echo "Testing plugin class file loading on staging..."
-plugin_error_count=0
-plugin_file_count=0
-while IFS= read -r -d '' file; do
-    ((plugin_file_count++))
+plugin_test_output=$(php -r "
+    require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
+    require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 
-    # OPTION 2: First check for parse/syntax errors
-    syntax_check=$(php -l "$file" 2>&1)
-    syntax_check_exit_code=$?
+    \$verbose = $VERBOSE ? true : false;
+    \$result = DeploymentHelper::testPluginLoading('/var/www/html/$TARGET_SITE/public_html_stage', \$verbose);
 
-    if [[ $syntax_check_exit_code -ne 0 ]]; then
-        echo "SYNTAX ERROR in: $file"
-        echo "  Error details: $syntax_check"
-        ((plugin_error_count++))
-        continue
-    fi
-
-    # Test if the file can be included without errors
-    # CRITICAL: Set working directory and document root so PathHelper works correctly
-    plugin_test_output=$(php -r "
-        \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
-        chdir('/var/www/html/$TARGET_SITE/public_html_stage');
-
-        error_reporting(E_ALL);
-
-        \$has_error = false;
-        \$shutdown_error_captured = false;
-
-        // OPTION 5: Register shutdown function to catch fatal errors
-        register_shutdown_function(function() use (&\$has_error, &\$shutdown_error_captured) {
-            \$error = error_get_last();
-            if (\$error && (\$error['type'] & (E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR))) {
-                if (!\$shutdown_error_captured) {
-                    echo 'FATAL ERROR: ' . \$error['message'] . ' in ' . \$error['file'] . ' on line ' . \$error['line'] . \"\n\";
-                    \$has_error = true;
-                }
-            }
-        });
-
-        set_error_handler(function(\$errno, \$errstr, \$errfile, \$errline) use (&\$has_error) {
-            // Only treat actual errors and warnings as failures, ignore deprecation notices
-            if (\$errno & (E_ERROR | E_WARNING | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR)) {
-                echo \"PHP Error (\$errno): \$errstr in \$errfile on line \$errline\n\";
-                \$has_error = true;
-                exit(1);
-            }
-            // Ignore E_DEPRECATED, E_USER_DEPRECATED, E_NOTICE, E_STRICT
-            return true;
-        });
-
-        try {
-            // Bootstrap PathHelper first so plugin files can use it
-            require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
-
-            // Now test the plugin file
-            include_once '$file';
-
-            // Only output SUCCESS if we got this far without errors
-            if (!\$has_error) {
-                echo 'SUCCESS';
-            }
-        } catch (Exception \$e) {
-            \$shutdown_error_captured = true;
-            echo 'EXCEPTION: ' . \$e->getMessage() . ' in ' . \$e->getFile() . ' on line ' . \$e->getLine() . \"\n\";
-            exit(1);
-        } catch (Error \$e) {
-            \$shutdown_error_captured = true;
-            echo 'FATAL ERROR: ' . \$e->getMessage() . ' in ' . \$e->getFile() . ' on line ' . \$e->getLine() . \"\n\";
-            exit(1);
+    if (!\$result['success']) {
+        echo 'ERRORS_FOUND:' . count(\$result['errors']) . ':' . \$result['files_checked'] . PHP_EOL;
+        foreach (\$result['errors'] as \$error) {
+            echo 'ERROR:' . \$error['file'] . ':' . \$error['type'] . ':' . \$error['message'] . PHP_EOL;
         }
-    " 2>&1)
+        exit(1);
+    } else {
+        echo 'SUCCESS:' . \$result['files_checked'];
+        exit(0);
+    }
+" 2>&1)
+plugin_test_exit=$?
 
-    plugin_test_exit_code=$?
+if [ $plugin_test_exit -ne 0 ]; then
+    # Parse error output
+    error_count=$(echo "$plugin_test_output" | grep "^ERRORS_FOUND:" | cut -d: -f2)
+    files_checked=$(echo "$plugin_test_output" | grep "^ERRORS_FOUND:" | cut -d: -f3)
 
-    # Trim whitespace and carriage returns from output for comparison
-    plugin_test_output_trimmed=$(echo "$plugin_test_output" | tr -d '\r' | xargs)
-
-    if [[ $plugin_test_exit_code -ne 0 ]] || [[ "$plugin_test_output_trimmed" != "SUCCESS" ]]; then
-        echo "PLUGIN LOADING ERROR in: $file"
-        echo "  Error details: $plugin_test_output"
-        ((plugin_error_count++))
-    else
-        verbose_echo "  ✓ $(basename $file)"
-    fi
-done < <(find "/var/www/html/$TARGET_SITE/public_html_stage/plugins" -name "*_class.php" -print0 2>/dev/null)
-
-if [[ $plugin_error_count -gt 0 ]]; then
     echo ""
     echo "========================================="
     echo "PLUGIN LOADING FAILURES DETECTED"
     echo "========================================="
-    echo "ERROR: $plugin_error_count plugin loading errors found in staging."
+    echo "ERROR: $error_count plugin loading errors found in staging."
     echo ""
-    echo "Common causes:"
-    echo "  - Improper includes of guaranteed files (PathHelper, Globalvars, DbConnector, etc.)"
-    echo "  - Syntax errors in plugin class files"
-    echo "  - Missing dependencies or class definitions"
+
+    echo "$plugin_test_output" | grep "^ERROR:" | while IFS=: read -r prefix file type message; do
+        echo "  [$type] $file"
+        echo "    $message"
+    done
+
     echo ""
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "You can manually test plugin files with:"
@@ -1235,8 +1039,10 @@ if [[ $plugin_error_count -gt 0 ]]; then
     else
         exit 1
     fi
+else
+    files_checked=$(echo "$plugin_test_output" | grep "^SUCCESS:" | cut -d: -f2)
+    verbose_echo "✓ Plugin loading test passed ($files_checked files checked)"
 fi
-verbose_echo "✓ Plugin loading test passed ($plugin_file_count files checked)"
 
 # MODEL TESTS ON STAGING
 verbose_echo "Running model tests on staging..."
@@ -1284,37 +1090,54 @@ if [ $model_test_exit_code -ne 0 ]; then
 fi
 verbose_echo "✓ Model tests passed on staging"
 
-# APPLICATION BOOTSTRAP TEST ON STAGING
+# APPLICATION BOOTSTRAP TEST ON STAGING (using DeploymentHelper)
 verbose_echo "Testing application bootstrap on staging..."
 bootstrap_output=$(php -r "
-    \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
-    chdir('/var/www/html/$TARGET_SITE/public_html_stage');
+    require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
+    require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 
-    // Test core includes
-    try {
-        require_once('includes/PathHelper.php');
-        require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-        require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-        echo 'Bootstrap test completed successfully';
-    } catch (Exception \$e) {
-        echo 'Bootstrap error: ' . \$e->getMessage();
+    \$verbose = $VERBOSE ? true : false;
+    \$result = DeploymentHelper::testBootstrap('/var/www/html/$TARGET_SITE/public_html_stage', \$verbose);
+
+    if (!\$result['success']) {
+        echo 'ERRORS_FOUND:' . count(\$result['errors']) . PHP_EOL;
+        foreach (\$result['errors'] as \$error) {
+            echo 'ERROR:' . \$error['type'] . ':' . \$error['message'] . PHP_EOL;
+        }
         exit(1);
-    } catch (Error \$e) {
-        echo 'Bootstrap fatal error: ' . \$e->getMessage();
-        exit(1);
+    } else {
+        echo 'SUCCESS';
+        exit(0);
     }
 " 2>&1)
 bootstrap_exit_code=$?
 
 if [ $bootstrap_exit_code -ne 0 ]; then
-    echo "Bootstrap test output:"
-    echo "$bootstrap_output"
+    # Parse error output
+    error_count=$(echo "$bootstrap_output" | grep "^ERRORS_FOUND:" | cut -d: -f2)
+
+    echo ""
+    echo "========================================="
+    echo "BOOTSTRAP TEST FAILED"
+    echo "========================================="
+    echo "ERROR: Application bootstrap test failed in staging."
+    echo ""
+
+    echo "$bootstrap_output" | grep "^ERROR:" | while IFS=: read -r prefix type message; do
+        echo "  [$type] $message"
+    done
+
+    echo ""
+    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
+    echo "========================================="
+
     handle_test_failure "Application bootstrap test failed in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
     if [ $? -eq 1 ]; then
         exit 1
     fi
+else
+    verbose_echo "✓ Application bootstrap test passed on staging"
 fi
-verbose_echo "✓ Application bootstrap test passed on staging"
 
 echo "✓ All pre-deployment tests passed on staging"
 
@@ -1357,10 +1180,27 @@ if [[ "$returnvalue" != 0 ]]; then
         exit 1
     fi
     
-    # Attempt rollback
+    # Attempt rollback using DeploymentHelper
     if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
-        if ! perform_rollback "$TARGET_SITE"; then
+        rollback_result=$(php -r "
+            require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
+            require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
+
+            \$result = DeploymentHelper::performRollback('/var/www/html/$TARGET_SITE');
+
+            if (!\$result['success']) {
+                echo 'ERROR:' . \$result['message'];
+                exit(1);
+            } else {
+                exit(0);
+            }
+        " 2>&1)
+
+        if [ $? -ne 0 ]; then
             echo "ERROR: Composer setup failed and rollback failed. Manual intervention required."
+            echo "$rollback_result" | grep "^ERROR:" | while IFS=: read -r prefix message; do
+                echo "  $message"
+            done
             exit 1
         fi
     else
@@ -1387,8 +1227,25 @@ if [[ ! -f /var/www/html/$TARGET_SITE/public_html/utils/update_database.php ]]; 
     
     # Check if this is an initial deployment (no backup to restore)
     if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
-        if ! perform_rollback "$TARGET_SITE"; then
+        rollback_result=$(php -r "
+            require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
+            require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
+
+            \$result = DeploymentHelper::performRollback('/var/www/html/$TARGET_SITE');
+
+            if (!\$result['success']) {
+                echo 'ERROR:' . \$result['message'];
+                exit(1);
+            } else {
+                exit(0);
+            }
+        " 2>&1)
+
+        if [ $? -ne 0 ]; then
             echo "ERROR: Rollback failed. Manual intervention required."
+            echo "$rollback_result" | grep "^ERROR:" | while IFS=: read -r prefix message; do
+                echo "  $message"
+            done
             exit 1
         fi
     else
