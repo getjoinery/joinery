@@ -1,9 +1,8 @@
 <?php
-	require_once( __DIR__ . '/../includes/Globalvars.php');
-	require_once( __DIR__ . '/../includes/SessionControl.php');
-	require_once( __DIR__ . '/../includes/AdminPage.php');
-	require_once( __DIR__ . '/../includes/LibraryFunctions.php');
-	require_once( __DIR__ . '/../data/upgrades_class.php');
+	// PathHelper, Globalvars, SessionControl are pre-loaded - no need to require them
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('data/upgrades_class.php'));
 
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
@@ -20,9 +19,23 @@
 	$session->check_permission(8);
 	
 	if(isset($_REQUEST['version_major']) && isset($_REQUEST['version_minor'])){
-	
+
 		$version_major = $_REQUEST['version_major'];
 		$version_minor = $_REQUEST['version_minor'];
+		$verbose = isset($_GET['verbose']) ? true : false;
+
+		// Check if this version already exists in the database
+		$existing = new MultiUpgrade(
+			array('major_version' => $version_major, 'minor_version' => $version_minor),
+			array(),
+			1
+		);
+		$existing->load();
+
+		if ($existing->count() > 0) {
+			echo "Version {$version_major}.{$version_minor} already exists. Please use a different version number.<br>";
+			exit;
+		}
 
 		$filename = 'current_upgrade'.$version_major.'-'.$version_minor.'.upg.zip';
 		
@@ -77,9 +90,22 @@
 		echo 'Creating zip: '.$file_output_location.'<br>';
 		$exclude_filenames = array('.git', '.gitignore');
 		$remove_relative_path = 'var/www/html/'.$site_template.'/';
-		create_zip($files_list, $file_output_location, $exclude_filenames, $remove_relative_path, true);
+		$zip_result = create_zip($files_list, $file_output_location, $exclude_filenames, $remove_relative_path, true, $verbose);
 
-		if(!file_exists($file_output_location)){
+		if(!$zip_result) {
+			// Clean up failed file
+			if(file_exists($file_output_location)) {
+				@unlink($file_output_location);
+			}
+			echo "Failed to create zip file<br>";
+			exit;
+		}
+
+		if(!file_exists($file_output_location) || filesize($file_output_location) == 0){
+			// Clean up empty/partial file
+			if(file_exists($file_output_location)) {
+				@unlink($file_output_location);
+			}
 			echo "Failed to write the zip file: $file_output_location...aborting.<br>";
 			exit;
 		}
@@ -103,9 +129,9 @@
 
 
 		$page = new AdminPage();
-		$page->admin_header(	
+		$page->admin_header(
 		array(
-			'menu-id'=> 'orders-list',
+			'menu-id'=> 'settings',
 			'page_title' => 'Publish Upgrade',
 			'readable_title' => 'Publish Upgrade',
 			'breadcrumbs' => $breadcrumbs,
@@ -126,8 +152,8 @@
 		echo '<br><br>';
 
 
-		// Editing an existing order
-		$formwriter = new FormWriter('form1');	
+		// Get FormWriter using theme-aware pattern
+		$formwriter = $page->getFormWriter('form1');	
 		
 		
 		echo $formwriter->begin_form('form1', 'POST', '/utils/publish_upgrade');
@@ -167,6 +193,28 @@
 
 		echo $formwriter->end_form();
 
+		// Add JavaScript to disable submit button after click to prevent double submission
+		echo '<script>
+		document.addEventListener("DOMContentLoaded", function() {
+			var form = document.getElementById("form1");
+			if (form) {
+				form.addEventListener("submit", function(e) {
+					var submitButton = form.querySelector("button[type=\'submit\'], input[type=\'submit\']");
+					if (submitButton && !submitButton.disabled) {
+						submitButton.disabled = true;
+						submitButton.style.opacity = "0.6";
+						submitButton.style.cursor = "not-allowed";
+						var originalText = submitButton.textContent || submitButton.value;
+						if (submitButton.textContent !== undefined) {
+							submitButton.textContent = "Publishing...";
+						} else {
+							submitButton.value = "Publishing...";
+						}
+					}
+				});
+			}
+		});
+		</script>';
 
 		$page->end_box();
 
@@ -194,14 +242,13 @@
 		return $results;
 	}
 	
-	function create_zip($files = array(),$destination = '', $exclude_filenames = array(), $remove_relative_path = '', $overwrite = false) {
+	function create_zip($files = array(),$destination = '', $exclude_filenames = array(), $remove_relative_path = '', $overwrite = false, $verbose = false) {
 		//if the zip file already exists and overwrite is false, return false
-		if(file_exists($destination) && !$overwrite) { 
+		if(file_exists($destination) && !$overwrite) {
 			echo 'File already exists: '.$destination;
-			exit;
-			//return false; 
+			return false;
 		}
-		
+
 		$numfiles = 0;
 
 		//if we have good files...
@@ -210,73 +257,91 @@
 			$zip = new ZipArchive();
 			if($zip->open($destination,$overwrite ? ZIPARCHIVE::OVERWRITE : ZIPARCHIVE::CREATE) !== true) {
 				echo 'Failed to create zip file: '.$destination;
-				exit;
-				//return false;
+				return false;
 			}
 			//add the files
 			foreach($files as $file) {
 				$numfiles++;
 				if($numfiles % 500 == 0){
-					echo 'Writing to zip file...<br>';
+					if($verbose) {
+						echo 'Writing to zip file...<br>';
+					}
 					//HANDLE THE MAX LIMIT OF FILES FOR ZIPARCHIVE
 					if(!$zip->close()){
 						echo 'Zip file failed to close.';
-						exit;
-					}	
-					
+						return false;
+					}
+
 					if($zip->open($destination, ZIPARCHIVE::CREATE) !== true) {
 						echo 'Failed to create zip file: '.$destination;
-						exit;
-						//return false;
-					}					
+						return false;
+					}
 				}
 				//SKIP EXCLUDED FILES
 				if(in_array(basename($file), $exclude_filenames)){
-					echo 'Excluded file: '.$file.'<br>';
+					if($verbose) {
+						echo 'Excluded file: '.$file.'<br>';
+					}
 					continue;
 				}
 				else if (is_dir($file)){
-					echo 'Excluded directory: '.$file.'<br>';
+					if($verbose) {
+						echo 'Excluded directory: '.$file.'<br>';
+					}
 					continue;
 				}
 				else if(!file_exists($file) || !is_readable($file)){
-					echo 'Excluded nonexistent or unreadable file: '.$file.'<br>';
+					if($verbose) {
+						echo 'Excluded nonexistent or unreadable file: '.$file.'<br>';
+					}
 					continue;
 				}
 				else{
-					echo $numfiles.' Adding file: '.$file.'<br>';
+					if($verbose) {
+						echo $numfiles.' Adding file: '.$file.'<br>';
+					} else {
+						echo '.';
+						// Add line break and flush every 100 files
+						if($numfiles % 100 == 0) {
+							echo '<br>';
+							flush();
+						}
+					}
 					$zip->addFile(realpath($file),ltrim(str_replace($remove_relative_path, '', $file), '/'));
 
 				}
 			}
-			
+
 			//debug
-			echo 'The zip archive contains ',$zip->numFiles,' files with a status of ',$zip->getStatusString().'<br>';
+			if($verbose) {
+				echo 'The zip archive contains ',$zip->numFiles,' files with a status of ',$zip->getStatusString().'<br>';
+			} else {
+				echo '<br>The zip archive contains ',$zip->numFiles,' files with a status of ',$zip->getStatusString().'<br>';
+			}
 			
 			//close the zip -- done!
-			
+
 			if($zip->close()){
 				return true;
 			}
 			else{
 				echo 'Zip file failed to close.';
-				exit;
-			}	
-			
+				return false;
+			}
+
 			//check to make sure the file exists
 			if(file_exists($destination)){
 				return true;
 			}
 			else{
 				echo 'Zip file failed to save.';
-				exit;
-			}	
+				return false;
+			}
 		}
 		else
 		{
 				echo 'There are no valid files for the zip file.';
-				exit;
-				//return false;
+				return false;
 		}
 	}	
 
