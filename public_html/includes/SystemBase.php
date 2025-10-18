@@ -481,27 +481,29 @@ abstract class SystemBase {
 					$field_type = static::$field_specifications[$field]['type'];
 					$counter++;
 					$param_name = $param_string . $counter;
+					$value = $this->get($field);
 					if(str_contains($field_type, 'int')){
-						$q->bindParam($param_name, $this->get($field), PDO::PARAM_INT);
+						$q->bindParam($param_name, $value, PDO::PARAM_INT);
 					}
 					else if(str_contains($field_type, 'bool')){
-						$q->bindParam($param_name, $this->get($field), PDO::PARAM_BOOL);
-					} 
+						$q->bindParam($param_name, $value, PDO::PARAM_BOOL);
+					}
 					else{
-						$q->bindParam($param_name, $this->get($field), PDO::PARAM_STR);
+						$q->bindParam($param_name, $value, PDO::PARAM_STR);
 					}
 				}
 			}
 			else{
 				$field_type = static::$field_specifications[$fields]['type'];
+				$value = $this->get($fields);
 				if(str_contains($field_type, 'int')){
-					$q->bindParam(':param1', $this->get($fields), PDO::PARAM_INT);
+					$q->bindParam(':param1', $value, PDO::PARAM_INT);
 				}
 				else if(str_contains($field_type, 'bool')){
-					$q->bindParam(':param1', $this->get($fields), PDO::PARAM_BOOL);
-				} 
+					$q->bindParam(':param1', $value, PDO::PARAM_BOOL);
+				}
 				else{
-					$q->bindParam(':param1', $this->get($fields), PDO::PARAM_STR);
+					$q->bindParam(':param1', $value, PDO::PARAM_STR);
 				}
 			}
 			
