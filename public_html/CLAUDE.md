@@ -566,6 +566,7 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 5. **Security**: Always validate and sanitize user input
 6. **FormWriter**: Always use FormWriter class for forms
 7. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
+8. **Version Numbers**: ALWAYS look for version numbers in files when making changes and increment them appropriately
 
 ## Security Notes
 
