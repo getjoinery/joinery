@@ -13,8 +13,13 @@ THEME_PLUGIN_TOKEN="github_pat_11BPUFN5Y0YtDOSWNsFveA_Uxh1Rb0K1O7Zhp2aG4hQJ0Y60c
 THEME_PLUGIN_REPO_URL="https://${THEME_PLUGIN_USER}:${THEME_PLUGIN_TOKEN}@github.com/getjoinery/joinery.git"
 
 # CONFIGURE YOUR PATHS HERE
-THEMES_SOURCE_DIR="/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/theme"
-PLUGINS_SOURCE_DIR="/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/plugins"
+# Linux server paths (default)
+THEMES_SOURCE_DIR="/home/user1/joinery/joinery/theme"
+PLUGINS_SOURCE_DIR="/home/user1/joinery/joinery/plugins"
+
+# WSL/Windows paths (commented out - uncomment if deploying from WSL)
+# THEMES_SOURCE_DIR="/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/theme"
+# PLUGINS_SOURCE_DIR="/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/plugins"
 
 # Default behavior settings
 USE_SYMLINKS=true  # Default to symlinks, use --nosymlink to copy instead
@@ -143,8 +148,21 @@ if [[ -d "$TARGET_DIR" ]]; then
             exit 0
         fi
         echo "Clearing target directory..."
+        # Preserve .claude symlink during cleanup
+        if [[ -L "$TARGET_DIR/.claude" ]]; then
+            echo "Preserving .claude symlink..."
+            CLAUDE_LINK_TARGET=$(readlink "$TARGET_DIR/.claude")
+        fi
+
         rm -rf "$TARGET_DIR"/*
-        rm -rf "$TARGET_DIR"/.*
+        # Remove hidden files but preserve . and ..
+        find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -name ".*" ! -name "." ! -name ".." -exec rm -rf {} +
+
+        # Restore .claude symlink if it existed
+        if [[ -n "$CLAUDE_LINK_TARGET" ]]; then
+            echo "Restoring .claude symlink to $CLAUDE_LINK_TARGET..."
+            ln -sf "$CLAUDE_LINK_TARGET" "$TARGET_DIR/.claude"
+        fi
         echo "Directory cleared."
     else
         echo "Using existing empty directory: $TARGET_DIR"
