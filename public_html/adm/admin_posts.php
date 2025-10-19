@@ -1,35 +1,13 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('/data/posts_class.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_posts_logic.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-	$session->set_return();
-
-	$numperpage = 30;
-	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'post_id', 0, '');
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-
-	$search_criteria = array();
-
-	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
-		$search_criteria['deleted'] = false;
-	}
-
-	$posts = new MultiPost(
-		$search_criteria,
-		array($sort=>$sdirection),
-		$numperpage,
-		$offset);
-	$numrecords = $posts->count_all();
-	$posts->load();
+	$page_vars = process_logic(admin_posts_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -86,4 +64,3 @@
 	$page->endtable($pager);
 	$page->admin_footer();
 ?>
-
