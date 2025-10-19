@@ -1,34 +1,33 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_form_error_logic.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-	require_once(PathHelper::getIncludePath('data/log_form_errors_class.php'));
-	require_once(PathHelper::getIncludePath('data/users_class.php'));
+$page_vars = process_logic(admin_form_error_logic($_GET, $_POST));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(9);
-	$session->set_return();
+$session = $page_vars['session'];
+$form_error = $page_vars['form_error'];
+$user = $page_vars['user'];
 
-	$form_error = new FormError($_GET['lfe_log_form_error_id'], TRUE);
-	$user = new User($form_error->get('lfe_usr_user_id'), TRUE);
+$page = new AdminPage();
 
-	$page = new AdminPage();
+$page->admin_header(
+array(
+	'menu-id'=> null,
+	'page_title' => 'Error',
+	'readable_title' => 'Error',
+	'breadcrumbs' => NULL,
+	'session' => $session,
+)
+);
 
-	$page->admin_header(
-	array(
-		'menu-id'=> null,
-		'page_title' => 'Error',
-		'readable_title' => 'Error',
-		'breadcrumbs' => NULL,
-		'session' => $session,
-	)
-	);
+if ($form_error->get('lfe_page')) {
+	echo '<p>Page w/Error: ' . $form_error->get('lfe_page') . '</p>';
+}
 
-	if ($form_error->get('lfe_page')) {
-		echo '<p>Page w/Error: ' . $form_error->get('lfe_page') . '</p>';
-	}
+echo '<pre>'. $form_error->display_time($session) . "\n\n" . 'Errors:<br>-------------------<br>' . htmlspecialchars($form_error->get('lfe_error')).'<br><br>';
+echo 'All formfields:<br>-------------------<br><br>' . htmlspecialchars($form_error->get('lfe_form')).'</pre>';
 
-	echo '<pre>'. $form_error->display_time($session) . "\n\n" . 'Errors:<br>-------------------<br>' . htmlspecialchars($form_error->get('lfe_error')).'<br><br>';
-	echo 'All formfields:<br>-------------------<br><br>' . htmlspecialchars($form_error->get('lfe_form')).'</pre>';
+$page->admin_footer();
 
-	$page->admin_footer();
+?>

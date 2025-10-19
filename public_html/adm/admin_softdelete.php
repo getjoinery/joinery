@@ -1,51 +1,46 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_softdelete_logic.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
+$page_vars = process_logic(admin_softdelete_logic($_GET, $_POST));
 
-	require_once(PathHelper::getIncludePath('/data/users_class.php'));
+$session = $page_vars['session'];
+$user = $page_vars['user'];
+$usr_user_id = $page_vars['usr_user_id'];
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(9);
-	$session->set_return("/admin/admin_users");
+$page = new AdminPage();
 
-	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to edit.');
+$page->admin_header(
+array(
+	'menu-id'=> 'users',
+	'page_title' => 'Soft Delete',
+	'readable_title' => 'Soft Delete',
+	'breadcrumbs' => NULL,
+	'session' => $session,
+)
+);
 
-	$user = new User($usr_user_id, TRUE);
+	echo '<h1>Delete User</h1>';
 
-	$page = new AdminPage();
+$formwriter = $page->getFormWriter('form1');
+echo $formwriter->begin_form("form", "post", "/profile/users_delete?disptype=return");
 
-	$page->admin_header(
-	array(
-		'menu-id'=> 'users',
-		'page_title' => 'Soft Delete',
-		'readable_title' => 'Soft Delete',
-		'breadcrumbs' => NULL,
-		'session' => $session,
-	)
-	);
+echo '<fieldset><h4>Confirm Delete</h4>';
+	echo '<div class="fields full">';
+	echo '<p>WARNING:  This will delete this user ('.$user->display_name() . ').</p>';
 
-		echo '<h1>Delete User</h1>';
+echo $formwriter->hiddeninput("confirm", 1);
+echo $formwriter->hiddeninput("usr_user_id", $usr_user_id);
 
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form("form", "post", "/profile/users_delete?disptype=return");
+echo $formwriter->start_buttons();
+echo $formwriter->new_form_button('Submit');
+echo $formwriter->end_buttons();
 
-	echo '<fieldset><h4>Confirm Delete</h4>';
-		echo '<div class="fields full">';
-		echo '<p>WARNING:  This will delete this user ('.$user->display_name() . ').</p>';
+	echo '</div>';
+echo '</fieldset>';
+echo $formwriter->end_form();
 
-	echo $formwriter->hiddeninput("confirm", 1);
-	echo $formwriter->hiddeninput("usr_user_id", $usr_user_id);
-
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-
-		echo '</div>';
-	echo '</fieldset>';
-	echo $formwriter->end_form();
-
-	$page->admin_footer();
+$page->admin_footer();
 
 ?>

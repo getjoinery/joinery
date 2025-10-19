@@ -1,28 +1,28 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+require_once(PathHelper::getIncludePath('adm/logic/admin_email_view_logic.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	$email = new Email($_REQUEST['eml_email_id'], TRUE);
+$page_vars = process_logic(admin_email_view_logic($_GET, $_POST));
 
-	$page = new AdminPage();
-	$page->admin_header(31);
+$session = $page_vars['session'];
+$email = $page_vars['email'];
 
-	echo '<h2>Email</h2>';
-	echo '<a href="/admin/admin_user?usr_user_id='.$email->get('eml_usr_user_id').'">back to user</a><br /><br />';
+$page = new AdminPage();
+$page->admin_header(31);
 
-	if($email->get('eml_delete_time')){
-		echo 'Status: Deleted<br>';
-	}
-	echo '<p>Sent: '.LibraryFunctions::convert_time( $email->get('eml_subject'), "UTC", $session->get_timezone(), '%m/%d/%Y').'</p>';
-	echo '<p>Subject: '.$email->get('eml_subject').'</p>';
-	
-	echo '<p>'.$email->get('eml_message_html').'</p>';
+echo '<h2>Email</h2>';
+echo '<a href="/admin/admin_user?usr_user_id='.$email->get('eml_usr_user_id').'">back to user</a><br /><br />';
 
-	$page->admin_footer();
+if($email->get('eml_delete_time')){
+	echo 'Status: Deleted<br>';
+}
+echo '<p>Sent: '.LibraryFunctions::convert_time( $email->get('eml_subject'), "UTC", $session->get_timezone(), '%m/%d/%Y').'</p>';
+echo '<p>Subject: '.$email->get('eml_subject').'</p>';
+
+echo '<p>'.$email->get('eml_message_html').'</p>';
+
+$page->admin_footer();
 
 ?>

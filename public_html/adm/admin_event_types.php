@@ -1,48 +1,46 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('data/event_types_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(7);
+require_once(PathHelper::getIncludePath('adm/logic/admin_event_types_logic.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-	$page = new AdminPage();
-	$page->admin_header(	
-	array(
-		'menu-id'=> 'events',
-		'page_title' => 'Event Types',
-		'readable_title' => 'Event Types',
-		'breadcrumbs' => array(
-			'Events'=>'/admin/admin_products', 
-			'Event Types' => '',
-		),
-		'session' => $session,
-	)
-	);
+$page_vars = process_logic(admin_event_types_logic($_GET, $_POST));
 
-	$event_types = new MultiEventType();
-	$event_types->load();
+$session = $page_vars['session'];
+$event_types = $page_vars['event_types'];
 
-	$headers = array('Event Type Name');
-	$altlinks = array();
-	if($_SESSION['permission'] > 7){
-		$altlinks['New Event Type'] = '/admin/admin_event_type_edit';
-	}
-	$box_vars =	array(
-		'altlinks' => $altlinks,
-		'title' => 'Event Types'
-	);
-	$page->tableheader($headers, $box_vars);
+$page = new AdminPage();
+$page->admin_header(
+array(
+	'menu-id'=> 'events',
+	'page_title' => 'Event Types',
+	'readable_title' => 'Event Types',
+	'breadcrumbs' => array(
+		'Events'=>'/admin/admin_products',
+		'Event Types' => '',
+	),
+	'session' => $session,
+)
+);
 
-	foreach($event_types as $event_type) {
-		$rowvalues=array();
-		array_push($rowvalues, $event_type->get('ety_name'));
-		$page->disprow($rowvalues);
-	}
+$headers = array('Event Type Name');
+$altlinks = array();
+if($session->get_permission() > 7){
+	$altlinks['New Event Type'] = '/admin/admin_event_type_edit';
+}
+$box_vars = array(
+	'altlinks' => $altlinks,
+	'title' => 'Event Types'
+);
+$page->tableheader($headers, $box_vars);
 
-	$page->endtable();
+foreach($event_types as $event_type) {
+	$rowvalues=array();
+	array_push($rowvalues, $event_type->get('ety_name'));
+	$page->disprow($rowvalues);
+}
 
-	$page->admin_footer();
+$page->endtable();
+
+$page->admin_footer();
 
 ?>
