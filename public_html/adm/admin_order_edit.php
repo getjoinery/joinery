@@ -1,97 +1,56 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
-	
-	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 
-	require_once(PathHelper::getIncludePath('/data/orders_class.php'));
-	require_once(PathHelper::getIncludePath('/data/orders_class.php'));
-	require_once(PathHelper::getIncludePath('/data/products_class.php'));
+require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_order_edit_logic.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+$page_vars = process_logic(admin_order_edit_logic($_GET, $_POST));
+extract($page_vars);
 
-	if (isset($_REQUEST['ord_order_id'])) {
-		$order = new Order($_REQUEST['ord_order_id'], TRUE);
-	} else {
-		$order = new Order(NULL);
-	}
+require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 
-	if($_POST){
+$page = new AdminPage();
+$page->admin_header(
+array(
+	'menu-id'=> 'orders-list',
+	'page_title' => 'Edit Order',
+	'readable_title' => 'Edit Order',
+	'breadcrumbs' => $breadcrumbs,
+	'session' => $session,
+)
+);
 
-		$order->set('ord_usr_user_id', $_POST['ord_usr_user_id']);
-		
-		if(!$order->key || !$order->is_stripe_order()){
-			$order->set('ord_total_cost', $_POST['ord_total_cost']);
-			$order->set('ord_status', Order::STATUS_PAID);
+$pageoptions['title'] = "Edit Order";
+$page->begin_box($pageoptions);
 
-			if($_POST['ord_timestamp_date'] && $_POST['ord_timestamp_time']){
-				$time_combined = $_POST['ord_timestamp_date'] . ' ' . LibraryFunctions::toDBTime($_POST['ord_timestamp_time']);
-				$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-				$order->set('ord_timestamp', $utc_time);
-				//$event->set('evt_start_time_local', $time_combined);
-			}
-		}
-		
-		$order->prepare();
-		$order->save();
-		
-		LibraryFunctions::redirect('/admin/admin_order?ord_order_id='.$order->key);
-		return;
-	}
+// Editing an existing order
+$formwriter = $page->getFormWriter('form1');
 
-	$breadcrumbs = array('Orders'=>'/admin/admin_orders');
-	$breadcrumbs += array('Order Edit'=>'');
+echo $formwriter->begin_form('form1', 'POST', '/admin/admin_order_edit');
 
-	$page = new AdminPage();
-	$page->admin_header(	
-	array(
-		'menu-id'=> 'orders-list',
-		'page_title' => 'Edit Order',
-		'readable_title' => 'Edit Order',
-		'breadcrumbs' => $breadcrumbs,
-		'session' => $session,
-	)
-	);
-	
-	$pageoptions['title'] = "Edit Order";
-	$page->begin_box($pageoptions);
+if($order->key){
+	echo $formwriter->hiddeninput('ord_order_id', $order->key);
+	echo $formwriter->hiddeninput('action', 'edit');
+}
 
-	// Editing an existing order
-	$formwriter = $page->getFormWriter('form1');	
+$optionvals = $users->get_dropdown_array();
 
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_order_edit');
+echo $formwriter->dropinput("Billing User", "ord_usr_user_id", "ctrlHolder", $optionvals, $order_user ? $order_user->key : NULL, '', TRUE, FALSE, '/ajax/user_search_ajax');
 
-	if($order->key){
-		echo $formwriter->hiddeninput('ord_order_id', $order->key);
-		echo $formwriter->hiddeninput('action', 'edit');
-	}
+//ALLOW THESE OTHER FIELDS IF IT IS A NEW ORDER OR NOT A STRIPE ORDER
+if(!$order->key || !$order->is_stripe_order()){
+	echo $formwriter->textinput('Order total', 'ord_total_cost', NULL, 100, $order->get('ord_total_cost'), '', 255, '');
 
-	if($order->get('ord_usr_user_id')){
-		$order_user = new User($order->get('ord_usr_user_id'), TRUE);
-	}
-	
-	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => 'ASC'));
-	$users->load();
-	$optionvals = $users->get_dropdown_array();
-	
-	echo $formwriter->dropinput("Billing User", "ord_usr_user_id", "ctrlHolder", $optionvals, $order_user->key, '', TRUE, FALSE, '/ajax/user_search_ajax');	
+	echo $formwriter->datetimeinput('Order time', 'ord_timestamp', 'ctrlHolder', LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
+}
 
-	//ALLOW THESE OTHER FIELDS IF IT IS A NEW ORDER OR NOT A STRIPE ORDER
-	if(!$order->key || !$order->is_stripe_order()){
-		echo $formwriter->textinput('Order total', 'ord_total_cost', NULL, 100, $order->get('ord_total_cost'), '', 255, '');
+echo $formwriter->start_buttons();
+echo $formwriter->new_form_button('Submit');
+echo $formwriter->end_buttons();
 
-		echo $formwriter->datetimeinput('Order time', 'ord_timestamp', 'ctrlHolder', LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');	
-	}		
+echo $formwriter->end_form();
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+$page->end_box();
 
-	echo $formwriter->end_form();
-
-	$page->end_box();
-
-	$page->admin_footer();
+$page->admin_footer();
 
 ?>

@@ -1,58 +1,11 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_api_key_edit_logic.php'));
 
-	require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-	$settings = Globalvars::get_instance();
-
-	if (isset($_REQUEST['apk_api_key_id'])) {
-		$api_key = new ApiKey($_REQUEST['apk_api_key_id'], TRUE);
-	}
-	else {
-		$api_key = new ApiKey(NULL);
-	}
-
-	if($_POST){
-
-		$editable_fields = array('apk_name','apk_is_active','apk_permission', 'apk_ip_restriction');
-
-		foreach($editable_fields as $field) {
-			$api_key->set($field, $_POST[$field]);
-		}
-
-		if($_POST['apk_start_time_date'] && $_POST['apk_start_time_time']){
-			$time_combined = $_POST['apk_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['apk_start_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-			$api_key->set('apk_start_time', $utc_time);
-			//$api_key->set('apk_start_time_local', $time_combined);
-		}
-
-		if($_POST['apk_expires_time_date'] && $_POST['apk_expires_time_time']){
-			$time_combined = $_POST['evt_expires_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evt_expires_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-			$api_key->set('evt_expires_time', $utc_time);
-			//$api_key->set('evt_expires_time_local', $time_combined);
-		}
-
-		$api_key->set('apk_usr_user_id', $session->get_user_id());
-		$public_key = 'public_'.LibraryFunctions::random_string(16);
-		//$secret_key = 'secret_'.LibraryFunctions::random_string(16);
-		$secret_key = 'test1';
-		$api_key->set('apk_public_key', $public_key);
-		$api_key->set('apk_secret_key', ApiKey::GenerateKey($secret_key));
-
-		$api_key->prepare();
-		$api_key->save();
-		$api_key->load();
-
-		LibraryFunctions::redirect('/admin/admin_api_key?apk_api_key_id='. $api_key->key);
-		return;
-	}
+	$page_vars = process_logic(admin_api_key_edit_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(

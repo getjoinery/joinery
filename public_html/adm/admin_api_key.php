@@ -6,36 +6,11 @@
 
 	require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-	$session->set_return();
+	require_once(PathHelper::getIncludePath('adm/logic/admin_api_key_logic.php'));
 
-	$api_key = new ApiKey($_GET['apk_api_key_id'], TRUE);
+	$page_vars = process_logic(admin_api_key_logic($_GET, $_POST));
 
-	if($_REQUEST['action'] == 'soft_delete'){
-		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$api_key->soft_delete();
-
-		//$returnurl = $session->get_return();
-		header("Location: /admin/admin_api_keys");
-		exit();
-	}
-	if($_REQUEST['action'] == 'undelete'){
-		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$api_key->undelete();
-
-		//$returnurl = $session->get_return();
-		header("Location: /admin/admin_api_keys");
-		exit();
-	}
-	if($_REQUEST['action'] == 'permanent_delete'){
-		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$api_key->permanent_delete();
-
-		//$returnurl = $session->get_return();
-		header("Location: /admin/admin_api_keys");
-		exit();
-	}
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -70,8 +45,6 @@
 
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($api_key->get('apk_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
-	$owner = new User($api_key->get('apk_usr_user_id'), TRUE);
-	$now = LibraryFunctions::get_current_time_obj('UTC');
 	$rowvalues = array();
 
 	echo '<strong>Public key:</strong> '. $api_key->get('apk_public_key').'<br>';

@@ -6,27 +6,11 @@
 
 	require_once(PathHelper::getIncludePath('data/contact_types_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+	require_once(PathHelper::getIncludePath('adm/logic/admin_contact_type_logic.php'));
 
-	$contact_type = new ContactType($_REQUEST['ctt_contact_type_id'], TRUE);
+	$page_vars = process_logic(admin_contact_type_logic($_GET, $_POST));
 
-	if($_REQUEST['action'] == 'delete'){
-		$contact_type->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$contact_type->soft_delete();
-
-		header("Location: /admin/admin_contact_types");
-		exit();
-	}
-	else if($_REQUEST['action'] == 'undelete'){
-		$contact_type->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$contact_type->undelete();
-
-		header("Location: /admin/admin_contact_types");
-		exit();
-	}
-
-	$session->set_return();
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(

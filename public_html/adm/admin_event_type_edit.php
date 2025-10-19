@@ -1,43 +1,19 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_event_type_edit_logic.php'));
 
-	require_once(PathHelper::getIncludePath('data/event_types_class.php'));
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(7);
-	
-	if (isset($_REQUEST['ety_event_type_id'])) {
-		$event_type = new EventType($_REQUEST['ety_event_type_id'], TRUE);
-	} else {
-		$event_type = new EventType(NULL);
-	}
-
-	if ($_POST) {
-		// Submitting a product edit
-
-		$editable_fields = array('ety_name');
-
-		foreach($editable_fields as $field) {
-			$event_type->set($field, $_POST[$field]);
-		}
-
-		$event_type->save();
-
-		LibraryFunctions::redirect('/admin/admin_event_types');	
-		return;
-	} 
+	$page_vars = process_logic(admin_event_type_edit_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'events',
 		'page_title' => 'Event Types',
 		'readable_title' => 'Event Types',
 		'breadcrumbs' => array(
-			'Events'=>'/admin/admin_events', 
+			'Events'=>'/admin/admin_events',
 			'Event Types' => '',
 		),
 		'session' => $session,
@@ -49,10 +25,10 @@
 
 	// Editing an existing product
 	$formwriter = $page->getFormWriter('form1');
-	
+
 	$validation_rules = array();
 	$validation_rules['ety_name']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);				
+	echo $formwriter->set_validate($validation_rules);
 
 	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_event_type_edit');
 	if($event_type->key){
@@ -64,7 +40,7 @@
 	echo $formwriter->new_form_button('Submit');
 	echo $formwriter->end_buttons();
 	echo $formwriter->end_form();
-	
+
 	$page->end_box();
 
 	$page->admin_footer();
