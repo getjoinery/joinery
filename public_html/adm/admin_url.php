@@ -6,36 +6,11 @@
 
 	require_once(PathHelper::getIncludePath('data/urls_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-	$session->set_return();
+	require_once(PathHelper::getIncludePath('adm/logic/admin_url_logic.php'));
 
-	$url = new Url($_GET['url_url_id'], TRUE);
+	$page_vars = process_logic(admin_url_logic($_GET, $_POST));
 
-	if($_REQUEST['action'] == 'soft_delete'){
-		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$url->soft_delete();
-
-		//$returnurl = $session->get_return();
-		header("Location: /admin/admin_urls");
-		exit();
-	}
-	if($_REQUEST['action'] == 'undelete'){
-		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$url->undelete();
-
-		//$returnurl = $session->get_return();
-		header("Location: /admin/admin_urls");
-		exit();
-	}
-	if($_REQUEST['action'] == 'permanent_delete'){
-		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$url->permanent_delete();
-
-		//$returnurl = $session->get_return();
-		header("Location: /admin/admin_urls");
-		exit();
-	}
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(

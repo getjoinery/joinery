@@ -1,58 +1,33 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_comment_edit_logic.php'));
 
-	require_once(PathHelper::getIncludePath('data/comments_class.php'));
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-
-	if (isset($_REQUEST['cmt_comment_id'])) {
-		$comment = new Comment($_REQUEST['cmt_comment_id'], TRUE);
-	} else {
-		$comment = new Comment(NULL);
-	}
-
-	if($_POST){
-		
-		$editable_fields = array('cmt_body', 'cmt_author_name', 'cmt_is_approved');
-
-		foreach($editable_fields as $field) {
-			$comment->set($field, $_POST[$field]);
-		}
-
-		$comment->prepare();
-		$comment->save();
-		$comment->load();
-		
-		LibraryFunctions::redirect('/admin/admin_comment?cmt_comment_id='. $comment->key);
-		return;
-	}
+	$page_vars = process_logic(admin_comment_edit_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'comments',
 		'breadcrumbs' => array(
-			'Comments'=>'/admin/admin_comments', 
+			'Comments'=>'/admin/admin_comments',
 			'Edit Comment' => '',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$pageoptions['title'] = "Edit Comment";
 	$page->begin_box($pageoptions);
 
 	// Editing an existing email
 	$formwriter = $page->getFormWriter('form1');
-	
+
 	$validation_rules = array();
 	$validation_rules['cmt_body']['required']['value'] = 'true';
 	$validation_rules['cmt_body']['minlength']['value'] = 10;
-	echo $formwriter->set_validate($validation_rules);	
+	echo $formwriter->set_validate($validation_rules);
 
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_comment_edit');
 
@@ -60,8 +35,8 @@
 		echo $formwriter->hiddeninput('cmt_comment_id', $comment->key);
 		echo $formwriter->hiddeninput('action', 'edit');
 	}
-	
-	echo $formwriter->textinput('Commenter Name', 'cmt_author_name', NULL, 100, $comment->get('cmt_author_name'), '', 255, '');		
+
+	echo $formwriter->textinput('Commenter Name', 'cmt_author_name', NULL, 100, $comment->get('cmt_author_name'), '', 255, '');
 
 	$optionvals = array("No"=>0, "Yes"=>1);
 	echo $formwriter->dropinput("Approved", "cmt_is_approved", "ctrlHolder", $optionvals, $comment->get('cmt_is_approved'), '', FALSE);

@@ -7,43 +7,11 @@
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-	$session->set_return();
+	require_once(PathHelper::getIncludePath('adm/logic/admin_group_members_logic.php'));
 
-	if($_POST['action'] == 'add_to_group'){
-		//ADD THE USER TO A GROUP
-		$group = new Group($_POST['grp_group_id'], TRUE);
-		$group->add_member($user->key);
-		header("Location: /admin/admin_group_members?grp_group_id=".$group->key);
-		exit();
-	}
-	else if($_POST['action'] == 'remove_from_group'){
-		$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
-		$groupmember->remove();
-		header("Location: /admin/admin_group_members?grp_group_id=".$groupmember->get('grm_grp_group_id'));
-		exit();
-	}
+	$page_vars = process_logic(admin_group_members_logic($_GET, $_POST));
 
-	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, 0, '');
-	$group = new Group($grp_group_id, TRUE);
-
-	$numperpage = 30;
-	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'group_member_id', 0, '');
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-
-	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-
-	$group_members = new MultiGroupMember(
-		array('group_id' => $group->key),  //SEARCH CRITERIA
-		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
-		$numperpage,  //NUM PER PAGE
-		$offset,  //OFFSET
-		'AND'  //AND OR OR
-	);
-	$numrecords = $group_members->count_all();
-	$group_members->load();
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(

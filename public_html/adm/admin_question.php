@@ -8,26 +8,11 @@
 	require_once(PathHelper::getIncludePath('/data/questions_class.php'));
 	require_once(PathHelper::getIncludePath('/data/question_options_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-	$session->set_return();
+	require_once(PathHelper::getIncludePath('adm/logic/admin_question_logic.php'));
 
-	$question = new Question($_REQUEST['qst_question_id'], TRUE);
+	$page_vars = process_logic(admin_question_logic($_GET, $_POST));
 
-	if($_REQUEST['action'] == 'delete'){
-		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$question->soft_delete();
-
-		header("Location: /admin/admin_questions");
-		exit();
-	}
-	else if($_REQUEST['action'] == 'undelete'){
-		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$question->soft_delete();
-
-		header("Location: /admin/admin_questions");
-		exit();
-	}
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -64,7 +49,6 @@
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($question->get('qst_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
 	if($_POST){
-		$valid = $question->validate_answers($_REQUEST['question_'.$question->key]);
 		echo '<b>'.$valid.'</b>';
 	}
 

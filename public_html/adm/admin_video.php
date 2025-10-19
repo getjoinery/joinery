@@ -7,62 +7,11 @@
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/videos_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-	$session->set_return();
+	require_once(PathHelper::getIncludePath('adm/logic/admin_video_logic.php'));
 
-	$video = new Video($_GET['vid_video_id'], TRUE);
-	$user = new User($video->get('vid_usr_user_id'), TRUE);
+	$page_vars = process_logic(admin_video_logic($_GET, $_POST));
 
-	if($_REQUEST['action'] == 'remove'){
-		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$video->permanent_delete();
-
-		//$returnurl = $session->get_return();
-		header("Location: /admin/admin_videos");
-		exit();
-	}
-
-	if($_REQUEST['action'] == 'delete'){
-		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$video->soft_delete();
-
-		header("Location: /admin/admin_videos");
-		exit();
-	}
-	else if($_REQUEST['action'] == 'undelete'){
-		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$video->undelete();
-
-		header("Location: /admin/admin_videos");
-		exit();
-	}
-
-	// Build dropdown actions
-	$options['altlinks'] = array('Edit Video'=>'/admin/admin_video_edit?vid_video_id='.$video->key);
-	if($video->get('vid_delete_time')){
-		$options['altlinks']['Undelete'] = '/admin/admin_video?action=undelete&vid_video_id='.$video->key;
-	}
-	else{
-		$options['altlinks']['Soft Delete'] = '/admin/admin_video?action=delete&vid_video_id='.$video->key;
-	}
-	if($session->get_user_id() == 1){
-		$options['altlinks'] += array('Permanently Delete' => '/admin/admin_video?action=remove&vid_video_id='.$video->key);
-	}
-
-	// Build dropdown button from altlinks
-	$dropdown_button = '';
-	if (!empty($options['altlinks'])) {
-		$dropdown_button = '<div class="dropdown">';
-		$dropdown_button .= '<button class="btn btn-falcon-default btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
-		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
-			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
-		}
-		$dropdown_button .= '</div>';
-		$dropdown_button .= '</div>';
-	}
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -80,36 +29,6 @@
 	)
 	);
 
-	// Get permission text
-	$permission_text = '';
-	$group_or_event = false;
-	if($video->get('vid_grp_group_id')){
-		$group = new Group($video->get('vid_grp_group_id'), TRUE);
-		$permission_text .= 'Only logged in users in the "'.$group->get('grp_name').'" group ';
-		$group_or_event = true;
-	}
-	if($video->get('vid_evt_event_id')){
-		$event = new Event($video->get('vid_evt_event_id'), TRUE);
-		$permission_text .= 'Only logged in users registered for the "'.$event->get('evt_name').'" event ';
-		$group_or_event = true;
-	}
-	if($group_or_event){
-		if($video->get('vid_min_permission') > 0){
-			$permission_text .= 'with minimum permission ('.$video->get('vid_min_permission').') ';
-		}
-	}
-	else{
-		if($video->get('vid_min_permission') === NULL){
-			$permission_text .= 'Anyone ';
-		}
-		else if($video->get('vid_min_permission') === 0){
-			$permission_text .= 'Anyone logged in';
-		}
-		else{
-			$permission_text .= 'Minimum permission ('.$video->get('vid_min_permission').') ';
-		}
-	}
-	$permission_text .= 'can access this video.';
 	?>
 
 	<!-- Two Column Layout -->

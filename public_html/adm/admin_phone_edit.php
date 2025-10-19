@@ -1,36 +1,10 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('/includes/Activation.php'));
-
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_phone_edit_logic.php'));
 
-	require_once(PathHelper::getIncludePath('/data/phone_number_class.php'));
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-
-	$phn_phone_number_id = LibraryFunctions::fetch_variable('phn_phone_number_id', NULL, 0, '');
-
-	$phone_number = NULL;
-	if($phn_phone_number_id){
-		$phone_number = new PhoneNumber($phn_phone_number_id, TRUE);
-		$user_id = $phone_number->get('phn_usr_user_id');
-	}
-	else{
-		$user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must pass a user id');
-	}
-
-if($_POST){
-
-	$phone_number = PhoneNumber::CreateFromForm($_POST, $user_id, $phone_number, FALSE);
-
-	//NOW REDIRECT
-	LibraryFunctions::redirect('/admin/admin_user?usr_user_id='. $user_id );
-	return;
-
-}
-else{
+	$page_vars = process_logic(admin_phone_edit_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -73,5 +47,4 @@ else{
 
 <?php
 	$page->admin_footer();
-}
 ?>
