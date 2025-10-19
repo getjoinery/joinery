@@ -57,25 +57,25 @@
 		$title = $content_version->get('cnv_title');
 	}
 
-	$locationt = new AdminPage();
-	$locationt->admin_header(	
+	$page = new AdminPage();
+	$page->admin_header(
 	array(
 		'menu-id'=> 'locations',
 		'breadcrumbs' => array(
-			'Locations'=>'/admin/admin_locations', 
+			'Locations'=>'/admin/admin_locations',
 			'Edit Location' => '',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$locationoptions['title'] = "Edit Location";
-	$locationt->begin_box($locationoptions);
+	$page->begin_box($locationoptions);
 
 	echo '<div class="row">
     <div class="col-md-8">
       <div class="p-3">';
-	
+
 	// Editing an existing email
 	$formwriter = $page->getFormWriter('form1');
 	
@@ -153,8 +153,8 @@
 	</div>
 </div>	';
 
-	$locationt->end_box();
+	$page->end_box();
 
-	$locationt->admin_footer();
+	$page->admin_footer();
 
 ?>
