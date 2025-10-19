@@ -10,7 +10,7 @@ class PublicPageFalcon extends PublicPageBase {
 	protected function getTableClasses() {
 		return [
 			'wrapper' => 'table-responsive scrollbar',
-			'table' => 'table table-sm fs-9',
+			'table' => 'table fs-9',
 			'header' => 'thead-light'
 		];
 	}
