@@ -1,20 +1,7 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(10);
+require_once(PathHelper::getIncludePath('adm/logic/admin_user_login_as_logic.php'));
 
-	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user here.');
-	$user = new User($usr_user_id, TRUE);
-	
-	$_SESSION['usr_user_id'] = $usr_user_id;
-	$_SESSION['permission'] = $user->get('usr_permission');
-
-	//NOW REDIRECT
-	$returnurl = $session->get_return();
-	header("Location: /");
-	exit();
+process_logic(admin_user_login_as_logic($_GET, $_POST));
 
 ?>

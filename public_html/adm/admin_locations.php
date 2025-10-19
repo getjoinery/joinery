@@ -1,76 +1,54 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_locations_logic.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/locations_class.php'));
+$page_vars = process_logic(admin_locations_logic($_GET, $_POST));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-	$session->set_return();
+$session = $page_vars['session'];
+$locations = $page_vars['locations'];
+$numrecords = $page_vars['numrecords'];
+$numperpage = $page_vars['numperpage'];
 
-	$numperpage = 30;
-	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'location_id', 0, '');
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
+$page = new AdminPage();
+$page->admin_header(
+array(
+	'menu-id'=> 'locations',
+	'page_title' => 'Locations',
+	'readable_title' => 'Locations',
+	'breadcrumbs' => array(
+		'Events'=>'/admin/admin_events',
+		'Locations' => '',
+	),
+	'session' => $session,
+)
+);
 
-	$search_criteria = array();
+$headers = array("Location",  "Description", "Deleted");
+$altlinks = array('New Location'=>'/admin/admin_location_edit');
+$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
+$table_options = array(
+	'altlinks' => $altlinks,
+	'title' => 'Locations',
+);
+$page->tableheader($headers, $table_options, $pager);
 
-	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
-		$search_criteria['deleted'] = false;
+foreach ($locations as $location){
+
+	$rowvalues = array();
+	array_push($rowvalues, '<a href="/admin/admin_location?loc_location_id='.$location->key.'">'.$location->get('loc_name').'</a>');
+	array_push($rowvalues, $location->get('loc_short_description'));
+
+	$status = 'Active';
+	if($location->get('loc_delete_time')) {
+		$status = 'Deleted';
 	}
+	array_push($rowvalues, $status);
 
-	$locations = new MultiLocation(
-		$search_criteria,
-		array($sort=>$sdirection),
-		$numperpage,
-		$offset);
-	$numrecords = $locations->count_all();
-	$locations->load();
+	$page->disprow($rowvalues);
+}
 
-	$page = new AdminPage();
-	$page->admin_header(
-	array(
-		'menu-id'=> 'locations',
-		'breadcrumbs' => array(
-			'Emails'=>'/admin/admin_emails',
-			'Locations' => '',
-		),
-		'session' => $session,
-	)
-	);
-
-	$headers = array("Location",  "Description", "Deleted");
-	$altlinks = array('New Location'=>'/admin/admin_location_edit');
-	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
-	$table_options = array(
-		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
-		'altlinks' => $altlinks,
-		'title' => 'Locations',
-		//'search_on' => TRUE
-	);
-	$page->tableheader($headers, $table_options, $pager);
-
-	foreach ($locations as $location){
-
-		$rowvalues = array();
-		array_push($rowvalues, '<a href="/admin/admin_location?loc_location_id='.$location->key.'">'.$location->get('loc_name').'</a>');
-		array_push($rowvalues, $location->get('loc_short_description'));
-		//array_push($rowvalues, LibraryFunctions::convert_time($location->get('loc_delete_time'), 'UTC', $session->get_timezone()));
-		//array_push($rowvalues, '('.$user->key.') <a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
-
-		$status = 'Active';
-		if($location->get('loc_delete_time')) {
-			$status = 'Deleted';
-		}
-		array_push($rowvalues, $status);
-
-		$page->disprow($rowvalues);
-	}
-
-	$page->endtable($pager);
-	$page->admin_footer();
+$page->endtable($pager);
+$page->admin_footer();
 ?>
-
