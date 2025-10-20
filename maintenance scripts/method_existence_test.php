@@ -56,6 +56,7 @@ class MethodExistenceTest {
             'CtldAccount::' => 'CtldAccount class is obsolete, use SubscriptionTier instead',
             'getUserAccount' => 'Method is obsolete, use getUserTier() or SubscriptionTier::GetUserTier() instead',
             'get_formwriter_object' => 'Removed - use $page->getFormWriter() in views/admin, or direct instantiation: require_once(PathHelper::getThemeFilePath(\'FormWriter.php\', \'includes\')); $fw = new FormWriter()',
+            'LogicResult::data' => 'Method does not exist - use LogicResult::render() instead for all return statements in logic files',
         ],
         // Static call blacklist - class::method patterns that are wrong
         'static' => [
