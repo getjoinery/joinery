@@ -1,61 +1,10 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
-	
-	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('/includes/StripeHelper.php'));
 
-	require_once(PathHelper::getIncludePath('/data/address_class.php'));
-	require_once(PathHelper::getIncludePath('/data/product_groups_class.php'));
-	require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
-	require_once(PathHelper::getIncludePath('/data/orders_class.php'));
-	require_once(PathHelper::getIncludePath('/data/products_class.php'));
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_order_logic.php'));
 
-	$settings = Globalvars::get_instance();
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-	$session->set_return();
-	
-	$settings = Globalvars::get_instance();
-	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
-
-	$order_id = LibraryFunctions::fetch_variable('ord_order_id', 0, 0, TRUE);
-	$order = new Order($order_id, TRUE);
-
-	$stripe_helper = new StripeHelper();
-	$charge = $stripe_helper->update_order_refund_amount_from_stripe($order);
-
-	if($order->get('ord_usr_user_id')){
-		$order_user = new User($order->get('ord_usr_user_id'), TRUE);
-	}
-	else{
-		$order_user = new User(NULL);		
-	}
-
-	// Build dropdown actions
-	$options['altlinks'] = array();
-	if ($_SESSION['permission'] >= 8) {
-		$options['altlinks']['Edit Order'] = '/admin/admin_order_edit?ord_order_id=' . $order->key;
-		$options['altlinks']['Add Order Item'] = '/admin/admin_order_item_edit?ord_order_id='.$order->key;
-	}
-	if ($_SESSION['permission'] == 10) {
-		$options['altlinks']['Permanent Delete'] = '/admin/admin_order_delete?ord_order_id=' . $order->key;
-	}
-
-	// Build dropdown button from altlinks
-	$dropdown_button = '';
-	if (!empty($options['altlinks'])) {
-		$dropdown_button = '<div class="dropdown">';
-		$dropdown_button .= '<button class="btn btn-falcon-default btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
-		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
-			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
-		}
-		$dropdown_button .= '</div>';
-		$dropdown_button .= '</div>';
-	}
+	$page_vars = process_logic(admin_order_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -72,13 +21,6 @@
 		'header_action' => $dropdown_button,
 	)
 	);
-
-	// Get billing address if exists
-	$billing_address = '';
-	if($order->get('ord_usa_address_id')){
-		$address = new Address($order->get('ord_usa_address_id'), TRUE);
-		$billing_address = $address->get_address_string('<br>');
-	}
 	?>
 
 	<!-- Two Column Layout -->
@@ -166,16 +108,9 @@
 				</div>
 				<div class="card-body">
 					<?php
-					$PRODUCT_ID_TO_NAME_CACHE = array();
-					$order_items = $order->get_order_items();
-
 					if(count($order_items) > 0):
 						foreach($order_items as $order_item):
 							$product_data = $order_item->get_data();
-
-							if($order_item->get('odi_is_subscription')){
-								$result = $stripe_helper->update_subscription_in_order_item($order_item);
-							}
 
 							if($order_item->get('odi_usr_user_id')){
 								$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);
