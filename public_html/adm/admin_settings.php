@@ -1,5 +1,5 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
@@ -8,90 +8,14 @@
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+	require_once(PathHelper::getIncludePath('adm/logic/admin_settings_logic.php'));
 
+	$page_vars = process_logic(admin_settings_logic($_GET, $_POST));
+
+	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
 
-	// Check if validation should run (performance optimization)
-	$run_validation = isset($_GET['run_validation']) && $_GET['run_validation'] == '1';
-
-	if($_POST){
-		
-		if($settings->get_setting('preview_image') != $_POST['preview_image']){
-			//AUTO INCREMENT THE PREVIEW IMAGE INDEX IF IT HAS CHANGED
-			$search_criteria = array();
-			$search_criteria['setting_name'] = 'preview_image_increment';
-			$user_settings = new MultiSetting(
-				$search_criteria,
-				NULL,
-				NULL,
-				NULL,
-				NULL
-			);
-			$user_settings->load();	
-			foreach($user_settings as $user_setting) {
-				if($user_setting->get('stg_name') == 'preview_image_increment'){
-					$user_setting->set('stg_value', $settings->get_setting('preview_image_increment') + 1);
-					$user_setting->set('stg_update_time', 'NOW()'); 
-					$user_setting->set('stg_usr_user_id', $session->get_user_id());
-					$user_setting->prepare();
-					$user_setting->save();					
-				}
-			}			
-		}
-
-		$search_criteria = array();
-		//$search_criteria['setting_like'] = $searchterm;
-		$user_settings = new MultiSetting(
-			$search_criteria,
-			NULL,
-			NULL,
-			NULL,
-			NULL);
-		$user_settings->load();
-
-		foreach($user_settings as $user_setting) {
-			if(isset($_POST[$user_setting->get('stg_name')])){
-				$user_setting->set('stg_value', $_POST[$user_setting->get('stg_name')]);
-				$user_setting->set('stg_update_time', 'NOW()');
-				$user_setting->set('stg_usr_user_id', $session->get_user_id());
-				$user_setting->prepare();
-				$user_setting->save();
-			}
-		}
-
-		// Track which settings we've processed
-		$processed_settings = array();
-		foreach($user_settings as $user_setting) {
-			$processed_settings[] = $user_setting->get('stg_name');
-		}
-
-		// Auto-create any missing settings that were submitted
-		foreach($_POST as $setting_name => $setting_value) {
-			// Skip if already processed (already exists in database)
-			if(in_array($setting_name, $processed_settings)) continue;
-
-			// Create new setting - only happens on explicit save
-			error_log("Settings: Creating new setting '{$setting_name}' with value '{$setting_value}'");
-
-			$new_setting = new Setting(NULL);
-			$new_setting->set('stg_name', $setting_name);
-			$new_setting->set('stg_value', $setting_value);
-			$new_setting->set('stg_usr_user_id', $session->get_user_id());
-			$new_setting->set('stg_group_name', 'general');
-
-			try {
-				$new_setting->prepare();
-				$new_setting->save();
-			} catch(Exception $e) {
-				// Setting might already exist (race condition) or validation error
-				error_log("Settings: Failed to create '{$setting_name}': " . $e->getMessage());
-			}
-		}
-
-		LibraryFunctions::redirect('/admin/admin_settings');
-	}
+	$run_validation = $page_vars['run_validation'];
 
 	$page = new AdminPage();
 	$page->admin_header(	
