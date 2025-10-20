@@ -1,68 +1,10 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('includes/Activation.php'));
-
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_email_logic.php'));
 
-	require_once(PathHelper::getIncludePath('data/emails_class.php'));
-	require_once(PathHelper::getIncludePath('data/email_recipient_groups_class.php'));
-	require_once(PathHelper::getIncludePath('data/groups_class.php'));
-	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-	$session->set_return();
-
-	$email = new Email($_REQUEST['eml_email_id'], TRUE);
-
-	if($_REQUEST['action'] == 'delete'){
-		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		//REMOVE THE RECIPIENTS
-		EmailRecipient::DeleteAll($email->key);
-		$email->soft_delete();
-
-		header("Location: /admin/admin_emails");
-		exit();
-	}
-	else if($_REQUEST['action'] == 'undelete'){
-		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$email->undelete();
-
-		header("Location: /admin/admin_emails");
-		exit();
-	}
-	else if($_REQUEST['action'] == 'unqueue'){
-		$email->set('eml_status', Email::EMAIL_CREATED);
-		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$email->save();
-		//REMOVE THE RECIPIENTS
-		EmailRecipient::DeleteAll($email->key);
-
-		header("Location: /admin/admin_emails");
-		exit();
-	}
-
-	if($_REQUEST['action'] == 'addgroup'){
-		//ADD GROUP TO EMAIL
-		$email->add_recipient_group(NULL, $_POST['grp_group_id']);
-		$returnurl = $session->get_return();
-		header("Location: $returnurl");
-		exit();
-	}
-	else if($_REQUEST['action'] == 'remove'){
-		$email_recipient_group = new EmailRecipientGroup($_POST['erg_email_recipient_group_id'], TRUE);
-		$email_recipient_group->permanent_delete();
-		$returnurl = $session->get_return();
-		header("Location: $returnurl");
-		exit();
-	}
-	else if($_REQUEST['action'] == 'addevent'){
-		//ADD GROUP TO EMAIL
-		$email->add_recipient_group($_POST['evt_event_id'], NULL);
-		$returnurl = $session->get_return();
-		header("Location: $returnurl");
-		exit();
-	}
+	$page_vars = process_logic(admin_email_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -195,21 +137,6 @@
 
 	}
 	else{
-		$numperpage = 50;
-		$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-		$sort = LibraryFunctions::fetch_variable('sort', 'email', 0, '');
-		$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-
-		$search_criteria = array('email_id' => $email->key);
-
-		$recipients = new MultiEmailRecipient(
-			$search_criteria,
-			array($sort=>$sdirection),
-			$numperpage,
-			$offset);
-		$numrecords = $recipients->count_all();
-		$recipients->load();
-
 		if($email->get('eml_status') == Email::EMAIL_QUEUED){
 			$pageoptions['altlinks'] = array(
 				'Remove From Queue'=>'/admin/admin_email?action=unqueue&eml_email_id='.$email->key

@@ -5,9 +5,11 @@
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('includes/UploadHandler.php'));
 
+	require_once(PathHelper::getIncludePath('adm/logic/admin_file_upload_logic.php'));
+
+	$page_vars = process_logic(admin_file_upload_logic($_GET, $_POST));
+
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-	$session->set_return();
 
 	$page = new AdminPage();
 	$page->admin_header(

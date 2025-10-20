@@ -6,21 +6,12 @@ require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
+require_once(PathHelper::getIncludePath('adm/logic/admin_user_add_logic.php'));
+
+$page_vars = process_logic(admin_user_add_logic($_GET, $_POST));
+
 $settings = Globalvars::get_instance();
 $session = SessionControl::get_instance();
-$session->check_permission(8);
-
-if ($_POST){
-
-	$user = User::CreateCompleteNew($_POST, $_POST['send_activation_email'], false, false);
-
-	//NOW REDIRECT
-	$session = SessionControl::get_instance();
-	header("Location: /admin/admin_user?usr_user_id=$user->key");
-	exit();
-
-}
-else{
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -84,5 +75,4 @@ else{
 	$page->end_box();
 
 	$page->admin_footer();
-}
 ?>

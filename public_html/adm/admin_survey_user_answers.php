@@ -1,81 +1,54 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_survey_user_answers_logic.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('data/questions_class.php'));
 
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+$session = SessionControl::get_instance();
+$session->check_permission(5);
+$session->set_return();
 
-	require_once(PathHelper::getIncludePath('data/surveys_class.php'));
-	require_once(PathHelper::getIncludePath('data/questions_class.php'));
-	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/survey_answers_class.php'));
+$page_vars = process_logic(admin_survey_user_answers_logic($_GET, $_POST));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-	$session->set_return();
+$page = new AdminPage();
+$page->admin_header(
+array(
+	'menu-id'=> 'surveys',
+	'page_title' => 'Add User',
+	'readable_title' => 'Add User',
+	'breadcrumbs' => array(
+		'Surveys'=>'/admin/admin_surveys',
+		$page_vars['survey']->get('svy_name'). ' answers' =>'/admin/admin_survey_users?svy_survey_id='.$page_vars['survey']->key,
+		$page_vars['user']->display_name() .'\'s answers' => '',
+	),
+	'session' => $session,
+)
+);
 
-	$numperpage = 30;
-	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'question_id', 0, '');
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '');
+$headers = array("Question", "Answer", "Last Update");
+$altlinks = array();
+$altlinks += array();
+$pager = new Pager(array('numrecords'=>$page_vars['numrecords'], 'numperpage'=> $page_vars['numperpage']));
+$table_options = array(
+	'altlinks' => $altlinks,
+	'title' => $page_vars['user']->display_name(). '\'s answers to survey "'.$page_vars['survey']->get('svy_name').'"',
+);
+$page->tableheader($headers, $table_options, $pager);
 
-	$survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 'DESC', 1, 'You must pass a survey.');
-	$user_id = LibraryFunctions::fetch_variable('usr_user_id', 'DESC', 1, 'You must pass a user.');
-	$survey = new Survey($survey_id, TRUE);
-	$user = new User($user_id, TRUE);
+foreach ($page_vars['answers'] as $answer){
+	$question = new Question($answer->get('sva_qst_question_id'), TRUE);
 
-	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
+	$rowvalues = array();
 
-	$answers = new MultiSurveyAnswer(
-		array('svy_survey_id' => $survey->key, 'usr_user_id' => $user->key),  //SEARCH CRITERIA
-		array($sort=>$sdirection),  //SORT AND DIRECTION array($usrsort=>$usrsdirection)
-		//$numperpage,  //NUM PER PAGE
-		//$offset,  //OFFSET
-		//'OR'
-		);
-	$numrecords = $answers->count_all();
-	$answers->load();
+	array_push($rowvalues, $question->get('qst_question'));
+	array_push($rowvalues, $question->get_answer_readable($answer->get('sva_answer')));
 
-	$page = new AdminPage();
-	$page->admin_header(
-	array(
-		'menu-id'=> 'surveys',
-		'page_title' => 'Add User',
-		'readable_title' => 'Add User',
-		'breadcrumbs' => array(
-			'Surveys'=>'/admin/admin_surveys',
-			$survey->get('svy_name'). ' answers' =>'/admin/admin_survey_users?svy_survey_id='.$survey->key,
-			$user->display_name() .'\'s answers' => '',
-		),
-		'session' => $session,
-	)
-	);
+	array_push($rowvalues, LibraryFunctions::convert_time($answer->get('sva_create_time'), "UTC", $session->get_timezone(), 'M j, Y'));
 
-	$headers = array("Question", "Answer", "Last Update");
-	$altlinks = array();
-	$altlinks += array();
-	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
-	$table_options = array(
-		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
-		'altlinks' => $altlinks,
-		'title' => $user->display_name(). '\'s answers to survey "'.$survey->get('svy_name').'"',
-		//'search_on' => TRUE
-	);
-	$page->tableheader($headers, $table_options, $pager);
+	$page->disprow($rowvalues);
+}
+$page->endtable($pager);
 
-	foreach ($answers as $answer){
-		$question = new Question($answer->get('sva_qst_question_id'), TRUE);
-
-		$rowvalues = array();
-
-		array_push($rowvalues, $question->get('qst_question'));
-		array_push($rowvalues, $question->get_answer_readable($answer->get('sva_answer')));
-
-		array_push($rowvalues, LibraryFunctions::convert_time($answer->get('sva_create_time'), "UTC", $session->get_timezone(), 'M j, Y'));
-
-		$page->disprow($rowvalues);
-	}
-	$page->endtable($pager);
-
-	$page->admin_footer();
+$page->admin_footer();
 ?>
-
