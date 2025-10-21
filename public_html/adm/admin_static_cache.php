@@ -232,7 +232,7 @@ $stats = StaticPageCache::getCacheStats();
 $cached_urls = StaticPageCache::getCachedUrls(50);
 
 // Get the index to see all entries (cached and nostatic)
-$index_file = PathHelper::getAbsolutePath('cache/static_pages/index.json');
+$index_file = PathHelper::getSiteRoot() . '/cache/static_pages/index.json';
 $all_urls = [];
 
 if (file_exists($index_file)) {
