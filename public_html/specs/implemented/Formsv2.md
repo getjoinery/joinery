@@ -774,31 +774,52 @@ public function textinput($name, $label = '', $options = []) {
 }
 ```
 
-### Backend Validation Bridge
+### Backend Validation (Integrated in FormWriterV2Base)
+
+FormWriterV2Base uses the existing Validator class directly - no wrapper needed:
 
 ```php
-class FormWriterV2Validator {
+abstract class FormWriterV2Base {
     protected $validator;  // Existing Validator instance
 
-    public function __construct() {
-        $this->validator = new Validator();
+    public function __construct($form_id, $options = []) {
+        // ... other initialization
+        $this->validator = new Validator();  // Use existing Validator directly
     }
 
-    public function validate($field_name, $value, $rules) {
+    protected function validateField($field_name, $value, $rules) {
         $errors = [];
 
         foreach ($rules as $rule => $param) {
             switch ($rule) {
-                // Use existing Validator methods
+                // Use existing Validator methods directly
                 case 'required':
-                    if ($param && !$this->validator->validateGeneral($value, $field_name)) {
-                        $errors[] = $this->validator->errors[0];
+                    if ($param && !$this->validator->validateGeneral($value, $field_name, $rules['messages']['required'] ?? null)) {
+                        $errors[] = end($this->validator->errors);
                     }
                     break;
 
                 case 'email':
-                    if ($param && !$this->validator->validateEmail($value, $field_name)) {
-                        $errors[] = $this->validator->errors[0];
+                    if ($param && !$this->validator->validateEmail($value, $field_name, $rules['messages']['email'] ?? null)) {
+                        $errors[] = end($this->validator->errors);
+                    }
+                    break;
+
+                case 'zip':
+                    if ($param && !$this->validator->validateZip($value, $field_name, $rules['messages']['zip'] ?? null)) {
+                        $errors[] = end($this->validator->errors);
+                    }
+                    break;
+
+                case 'number':
+                    if ($param && !$this->validator->validateNumber($value, $field_name, $rules['messages']['number'] ?? null)) {
+                        $errors[] = end($this->validator->errors);
+                    }
+                    break;
+
+                case 'date':
+                    if ($param && !$this->validator->validateDate($value, $field_name, $rules['messages']['date'] ?? null)) {
+                        $errors[] = end($this->validator->errors);
                     }
                     break;
 
@@ -823,7 +844,26 @@ class FormWriterV2Validator {
                 // New validation types for v2
                 case 'minlength':
                     if (strlen($value) < $param) {
-                        $errors[] = "Must be at least {$param} characters";
+                        $errors[] = $rules['messages']['minlength'] ?? "Must be at least {$param} characters";
+                    }
+                    break;
+
+                case 'maxlength':
+                    if (strlen($value) > $param) {
+                        $errors[] = $rules['messages']['maxlength'] ?? "Must be no more than {$param} characters";
+                    }
+                    break;
+
+                case 'pattern':
+                    if (!preg_match($param, $value)) {
+                        $errors[] = $rules['messages']['pattern'] ?? "Invalid format";
+                    }
+                    break;
+
+                case 'matches':
+                    // Field comparison - $param is the field name to match
+                    if ($value !== ($this->values[$param] ?? null)) {
+                        $errors[] = $rules['messages']['matches'] ?? "Does not match {$param}";
                     }
                     break;
 
@@ -1075,7 +1115,7 @@ abstract class FormWriterV2Base {
     public function __construct($form_id, $options = []) {
         $this->form_id = $form_id;
         $this->options = array_merge($this->getDefaultOptions(), $options);
-        $this->validator = new FormWriterV2Validator();
+        $this->validator = new Validator();  // Use existing Validator directly
 
         // Store values array if provided
         if (isset($this->options['values'])) {
@@ -1928,12 +1968,10 @@ class User extends SystemBase {
 ### Phase 1: New Files Only
 ```
 /includes/
-├── FormWriterV2Base.php           # NEW - Abstract base class
+├── FormWriterV2Base.php           # NEW - Abstract base class (includes CSRF + validation)
 ├── FormWriterV2Bootstrap.php      # NEW - Bootstrap implementation
 ├── FormWriterV2Tailwind.php       # NEW - Tailwind implementation
-├── FormWriterV2Validator.php      # NEW - Validation bridge to existing validators
-├── FormWriterV2CSRF.php           # NEW - CSRF token management
-├── Validator.php                  # EXISTING - new methods added (non-breaking)
+├── Validator.php                  # EXISTING - used directly, no wrapper needed
 ├── FieldConstraints.php           # EXISTING - unchanged
 └── SystemBase.php                 # EXISTING - unchanged (validation array already supported)
 
