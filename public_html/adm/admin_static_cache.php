@@ -34,7 +34,7 @@ if ($action) {
                     $session->save_message($message);
                 } else {
                     // Get the actual cache directory path for better error messaging
-                    $cache_dir = PathHelper::getAbsolutePath('cache/static_pages/');
+                    $cache_dir = PathHelper::getSiteRoot() . '/cache/static_pages/';
                     $message = new DisplayMessage(
                         'Failed to enable caching. Cache directory may not be writable. Check permissions on: ' . $cache_dir,
                         'Error',
@@ -246,7 +246,7 @@ if (file_exists($index_file)) {
         if (is_array($entry) && isset($entry['status'])) {
             if ($entry['status'] === 'cached') {
                 // For cached entries, get file info
-                $cache_file = PathHelper::getAbsolutePath('cache/static_pages/' . $hash . '.html');
+                $cache_file = PathHelper::getSiteRoot() . '/cache/static_pages/' . $hash . '.html';
                 if (file_exists($cache_file)) {
                     $all_urls[] = [
                         'url' => $entry['url'],

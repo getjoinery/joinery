@@ -16,7 +16,7 @@ class StaticPageCache {
      */
     private static function init() {
         if (self::$cache_dir === null) {
-            self::$cache_dir = PathHelper::getAbsolutePath('cache/static_pages/');
+            self::$cache_dir = PathHelper::getSiteRoot() . '/cache/static_pages/';
             self::$index_path = self::$cache_dir . 'index.json';
 
             // Create cache directory if it doesn't exist
