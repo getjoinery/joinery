@@ -23,7 +23,8 @@ class StaticPageCache {
             if (!is_dir(self::$cache_dir)) {
                 // Use recursive creation with proper error handling
                 // The 'true' parameter creates parent directories as needed
-                if (!@mkdir(self::$cache_dir, 0755, true)) {
+                // Use 0775 to give group write permissions
+                if (!@mkdir(self::$cache_dir, 0775, true)) {
                     // Check if directory was created by another process (race condition)
                     if (!is_dir(self::$cache_dir)) {
                         error_log("StaticPageCache: Failed to create cache directory: " . self::$cache_dir . " - " . error_get_last()['message']);
@@ -32,14 +33,21 @@ class StaticPageCache {
                     }
                 }
 
+                // Set proper ownership (www-data:user1) to match system pattern
+                @chgrp(self::$cache_dir, 'user1');
+
+                // Ensure proper permissions (775 = rwxrwxr-x)
+                @chmod(self::$cache_dir, 0775);
+
                 // Log successful creation
                 error_log("StaticPageCache: Successfully created cache directory: " . self::$cache_dir);
             }
 
-            // Auto-fix permissions if directory is not writable
+            // Auto-fix permissions if directory is not writable by group
             if (!is_writable(self::$cache_dir)) {
-                // Try to fix permissions - use 755 for directories
-                @chmod(self::$cache_dir, 0755);
+                // Try to fix permissions - use 775 for directories (group needs write)
+                @chmod(self::$cache_dir, 0775);
+                @chgrp(self::$cache_dir, 'user1');
 
                 // If still not writable, log and continue without caching
                 if (!is_writable(self::$cache_dir)) {
