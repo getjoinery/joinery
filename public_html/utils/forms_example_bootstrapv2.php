@@ -1,0 +1,476 @@
+<?php
+/**
+ * FormWriter v2 Bootstrap Test & Example File
+ *
+ * Demonstrates all features of FormWriter v2:
+ * - Clean options array API
+ * - Auto-filling values from array
+ * - Auto-detection of validation from model field names
+ * - Manual validation specification
+ * - Built-in CSRF protection
+ * - All field types
+ * - Error handling
+ * - Comparison with v1 code
+ *
+ * @version 2.0.0
+ */
+
+require_once(__DIR__ . '/../includes/PathHelper.php');
+require_once(PathHelper::getIncludePath('/includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+
+$session = SessionControl::get_instance();
+// No permission check for testing
+
+$page = new PublicPage();
+$hoptions = array(
+    'is_valid_page' => true,
+    'title' => 'FormWriter v2 Test - All Features'
+);
+$page->public_header($hoptions, NULL);
+
+echo PublicPage::BeginPage('FormWriter v2 Test - Complete Feature Demonstration');
+
+// Load FormWriter v2
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+
+// ============================================================================
+// DEMONSTRATION: VALUES AUTO-FILLING
+// ============================================================================
+
+echo '<h2>1. Values Auto-Filling Demo</h2>';
+echo '<p>Values array is passed once to the form, fields automatically populate:</p>';
+
+// Prepare mock values (would normally come from model export)
+$mock_values = [
+    'usr_email' => 'test@example.com',
+    'usr_first_name' => 'John',
+    'usr_last_name' => 'Doe',
+    'usr_phone' => '555-123-4567',
+    'preference' => 'option2'
+];
+
+$formwriter1 = new FormWriterV2Bootstrap('values_demo_form', [
+    'action' => '/test/submit',
+    'method' => 'POST',
+    'values' => $mock_values  // Pass all values at once!
+]);
+
+$formwriter1->begin_form();
+
+echo '<div class="row">';
+echo '<div class="col-md-6">';
+// All these fields auto-fill from values array
+$formwriter1->textinput('usr_email', 'Email');
+$formwriter1->textinput('usr_first_name', 'First Name');
+$formwriter1->textinput('usr_last_name', 'Last Name');
+$formwriter1->textinput('usr_phone', 'Phone');
+$formwriter1->radioinput('preference', 'Preference', [
+    'options' => [
+        'option1' => 'Option 1',
+        'option2' => 'Option 2',
+        'option3' => 'Option 3'
+    ]
+]);
+echo '</div>';
+
+// Show the code
+echo '<div class="col-md-6">';
+echo '<div class="card bg-light">';
+echo '<div class="card-body">';
+echo '<h5>Code:</h5>';
+echo '<pre><code>';
+echo htmlspecialchars('// ONE LINE to pass all values
+$formwriter = new FormWriterV2Bootstrap(\'form\', [
+    \'values\' => $mock_values
+]);
+
+// All fields auto-fill - no \'value\' parameter needed!
+$formwriter->textinput(\'usr_email\', \'Email\');
+$formwriter->textinput(\'usr_first_name\', \'First Name\');
+$formwriter->textinput(\'usr_last_name\', \'Last Name\');');
+echo '</code></pre>';
+echo '</div></div></div></div>';
+
+$formwriter1->submitbutton('submit', 'Test Submit');
+$formwriter1->end_form();
+
+// ============================================================================
+// DEMONSTRATION: AUTO-DETECTION OF VALIDATION
+// ============================================================================
+
+echo '<hr><h2>2. Auto-Detection of Validation Demo</h2>';
+echo '<p>Fields with model prefixes (usr_, pro_, evt_, etc.) automatically get validation from the model:</p>';
+
+$formwriter2 = new FormWriterV2Bootstrap('auto_validation_form', [
+    'action' => '/test/validate',
+    'method' => 'POST'
+]);
+
+$formwriter2->begin_form();
+
+echo '<div class="row">';
+echo '<div class="col-md-6">';
+
+// These auto-detect validation from User model (if usr_ fields exist in User::$field_specifications)
+$formwriter2->textinput('usr_email', 'Email Address', [
+    'placeholder' => 'user@example.com',
+    'helptext' => 'Validation auto-detected from User model'
+]);
+
+$formwriter2->textinput('usr_first_name', 'First Name', [
+    'placeholder' => 'John'
+]);
+
+// Manual field - specify validation explicitly
+$formwriter2->textinput('custom_field', 'Custom Field', [
+    'validation' => [
+        'required' => true,
+        'minlength' => 5,
+        'maxlength' => 20,
+        'messages' => [
+            'required' => 'This custom field is required',
+            'minlength' => 'Must be at least 5 characters'
+        ]
+    ],
+    'helptext' => 'Manual validation (no model prefix)'
+]);
+
+echo '</div>';
+echo '<div class="col-md-6">';
+echo '<div class="card bg-light">';
+echo '<div class="card-body">';
+echo '<h5>Code:</h5>';
+echo '<pre><code>';
+echo htmlspecialchars('// AUTO-DETECTED - Field has usr_ prefix
+$formwriter->textinput(\'usr_email\', \'Email\');
+// No validation parameter needed!
+
+// MANUAL - No model prefix
+$formwriter->textinput(\'custom_field\', \'Label\', [
+    \'validation\' => [
+        \'required\' => true,
+        \'minlength\' => 5
+    ]
+]);');
+echo '</code></pre>';
+echo '</div></div></div></div>';
+
+$formwriter2->submitbutton('submit', 'Test Validation');
+$formwriter2->end_form();
+
+// ============================================================================
+// DEMONSTRATION: ALL FIELD TYPES
+// ============================================================================
+
+echo '<hr><h2>3. All Field Types Demo</h2>';
+
+$formwriter3 = new FormWriterV2Bootstrap('all_fields_form', [
+    'action' => '/test/all-fields',
+    'method' => 'POST',
+    'enctype' => 'multipart/form-data'  // For file uploads
+]);
+
+$formwriter3->begin_form();
+
+// Text Input
+$formwriter3->textinput('text_field', 'Text Input', [
+    'placeholder' => 'Enter text',
+    'validation' => ['required' => true, 'minlength' => 3],
+    'helptext' => 'At least 3 characters required'
+]);
+
+// Password Input
+$formwriter3->passwordinput('password', 'Password', [
+    'validation' => [
+        'required' => true,
+        'minlength' => 8,
+        'pattern' => '/(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])/',
+        'messages' => [
+            'pattern' => 'Must contain uppercase, lowercase, and number'
+        ]
+    ],
+    'strength_meter' => true
+]);
+
+// Password Confirmation
+$formwriter3->passwordinput('password_confirm', 'Confirm Password', [
+    'validation' => [
+        'required' => true,
+        'matches' => 'password',
+        'messages' => [
+            'matches' => 'Passwords do not match'
+        ]
+    ]
+]);
+
+// Textarea
+$formwriter3->textarea('comments', 'Comments', [
+    'rows' => 4,
+    'placeholder' => 'Enter your comments',
+    'validation' => ['minlength' => 10, 'maxlength' => 500]
+]);
+
+// Dropdown
+$formwriter3->dropinput('country', 'Country', [
+    'options' => [
+        '' => '-- Select Country --',
+        'us' => 'United States',
+        'ca' => 'Canada',
+        'uk' => 'United Kingdom'
+    ],
+    'validation' => ['required' => true],
+    'empty_option' => '-- Select Country --'
+]);
+
+// Checkbox
+$formwriter3->checkboxinput('accept_terms', 'I accept the terms and conditions', [
+    'validation' => [
+        'required' => true,
+        'messages' => [
+            'required' => 'You must accept the terms to continue'
+        ]
+    ]
+]);
+
+// Radio Buttons
+$formwriter3->radioinput('subscription', 'Subscription Plan', [
+    'options' => [
+        'free' => 'Free',
+        'basic' => 'Basic ($9.99/mo)',
+        'premium' => 'Premium ($19.99/mo)'
+    ],
+    'validation' => ['required' => true]
+]);
+
+// Date Input
+$formwriter3->dateinput('start_date', 'Start Date', [
+    'min' => '2025-01-01',
+    'max' => '2025-12-31',
+    'validation' => 'date'
+]);
+
+// File Input
+$formwriter3->fileinput('document', 'Upload Document', [
+    'accept' => '.pdf,.doc,.docx',
+    'helptext' => 'PDF or Word documents only'
+]);
+
+// Hidden Input
+$formwriter3->hiddeninput('form_id', '', ['value' => 'test123']);
+
+// Submit Button
+$formwriter3->submitbutton('submit', 'Submit Form', ['class' => 'btn btn-primary btn-lg']);
+
+$formwriter3->end_form();
+
+// ============================================================================
+// DEMONSTRATION: VALIDATION TYPE SHORTHANDS
+// ============================================================================
+
+echo '<hr><h2>4. Validation Type Shorthands Demo</h2>';
+echo '<p>Use predefined validation types instead of writing rules repeatedly:</p>';
+
+$formwriter4 = new FormWriterV2Bootstrap('validation_types_form', [
+    'action' => '/test/types',
+    'method' => 'POST'
+]);
+
+$formwriter4->begin_form();
+
+echo '<div class="row">';
+echo '<div class="col-md-6">';
+
+// Email shorthand
+$formwriter4->textinput('email', 'Email', [
+    'validation' => 'email',  // Shorthand for email validation
+    'placeholder' => 'user@example.com'
+]);
+
+// Phone shorthand
+$formwriter4->textinput('phone', 'Phone', [
+    'validation' => 'phone',  // Shorthand for phone validation
+    'placeholder' => '(555) 123-4567'
+]);
+
+// ZIP shorthand
+$formwriter4->textinput('zip', 'ZIP Code', [
+    'validation' => 'zip',  // Shorthand for ZIP validation
+    'placeholder' => '12345'
+]);
+
+// URL shorthand
+$formwriter4->textinput('website', 'Website', [
+    'validation' => 'url',  // Shorthand for URL validation
+    'placeholder' => 'https://example.com'
+]);
+
+// Number shorthand
+$formwriter4->textinput('age', 'Age', [
+    'validation' => 'number',  // Shorthand for number validation
+    'placeholder' => '25'
+]);
+
+echo '</div>';
+echo '<div class="col-md-6">';
+echo '<div class="card bg-light">';
+echo '<div class="card-body">';
+echo '<h5>Code:</h5>';
+echo '<pre><code>';
+echo htmlspecialchars('// Use validation type shorthands
+$formwriter->textinput(\'email\', \'Email\', [
+    \'validation\' => \'email\'  // Simple!
+]);
+
+$formwriter->textinput(\'phone\', \'Phone\', [
+    \'validation\' => \'phone\'
+]);
+
+$formwriter->textinput(\'zip\', \'ZIP\', [
+    \'validation\' => \'zip\'
+]);');
+echo '</code></pre>';
+echo '</div></div></div></div>';
+
+$formwriter4->submitbutton('submit', 'Test Types');
+$formwriter4->end_form();
+
+// ============================================================================
+// DEMONSTRATION: CSRF PROTECTION
+// ============================================================================
+
+echo '<hr><h2>5. CSRF Protection Demo</h2>';
+echo '<p>CSRF tokens are automatically generated and validated for POST forms:</p>';
+
+$formwriter5 = new FormWriterV2Bootstrap('csrf_demo_form', [
+    'action' => '/test/csrf',
+    'method' => 'POST'  // CSRF is ON by default for POST
+]);
+
+echo '<div class="alert alert-info">';
+echo '<strong>Note:</strong> Check the form source - you\'ll see a hidden _csrf_token field automatically added!';
+echo '</div>';
+
+$formwriter5->begin_form();
+$formwriter5->textinput('test_field', 'Test Field');
+$formwriter5->submitbutton('submit', 'Submit with CSRF');
+$formwriter5->end_form();
+
+echo '<div class="card bg-light mt-3">';
+echo '<div class="card-body">';
+echo '<h5>Server-side validation:</h5>';
+echo '<pre><code>';
+echo htmlspecialchars('// In your logic file
+if ($_SERVER[\'REQUEST_METHOD\'] === \'POST\') {
+    $formwriter = new FormWriterV2Bootstrap(\'form_id\', $_POST);
+
+    // Validate CSRF first
+    if (!$formwriter->validateCSRF($_POST)) {
+        return LogicResult::Error(\'Security token expired\');
+    }
+
+    // Then validate form data
+    if (!$formwriter->validate($_POST)) {
+        return LogicResult::Error(\'Validation failed\',
+            $formwriter->getErrors());
+    }
+
+    // Process form...
+}');
+echo '</code></pre>';
+echo '</div></div>';
+
+// ============================================================================
+// COMPARISON: V1 vs V2
+// ============================================================================
+
+echo '<hr><h2>6. V1 vs V2 Comparison</h2>';
+
+echo '<div class="row">';
+echo '<div class="col-md-6">';
+echo '<h4>FormWriter v1 (Old Way)</h4>';
+echo '<pre><code>';
+echo htmlspecialchars('// V1 - Verbose and repetitive
+$formwriter->textinput(
+    \'email\',           // field name
+    \'text\',            // type
+    20,                 // size
+    $user->get(\'usr_email\'),  // value
+    \'\',                // id
+    255,                // maxlength
+    \'\',                // extra
+    true,               // required
+    false,              // readonly
+    \'Email Address\',  // label
+    \'\',                // placeholder
+    false               // disabled
+);
+
+// Separate validation setup
+$validator = new Validator();
+if (!$validator->validateEmail($_POST[\'email\'])) {
+    // Handle error
+}');
+echo '</code></pre>';
+echo '</div>';
+
+echo '<div class="col-md-6">';
+echo '<h4>FormWriter v2 (New Way)</h4>';
+echo '<pre><code>';
+echo htmlspecialchars('// V2 - Clean and simple
+$formwriter = new FormWriterV2Bootstrap(\'form\', [
+    \'values\' => $user->export_as_array()
+]);
+
+$formwriter->textinput(\'usr_email\', \'Email Address\');
+// That\'s it! Value auto-filled AND validation
+// auto-detected from User model!
+
+// Validation happens automatically
+if (!$formwriter->validate($_POST)) {
+    $errors = $formwriter->getErrors();
+}');
+echo '</code></pre>';
+echo '</div>';
+echo '</div>';
+
+// ============================================================================
+// SUCCESS METRICS
+// ============================================================================
+
+echo '<hr><h2>FormWriter v2 Benefits</h2>';
+echo '<div class="row">';
+
+echo '<div class="col-md-4">';
+echo '<div class="card">';
+echo '<div class="card-body">';
+echo '<h5 class="card-title">70-80% Less Code</h5>';
+echo '<p class="card-text">Options arrays replace 20+ parameters. Values array eliminates repetitive value assignments.</p>';
+echo '</div></div></div>';
+
+echo '<div class="col-md-4">';
+echo '<div class="card">';
+echo '<div class="card-body">';
+echo '<h5 class="card-title">Zero Configuration</h5>';
+echo '<p class="card-text">Auto-detection means most forms need NO validation specification at all.</p>';
+echo '</div></div></div>';
+
+echo '<div class="col-md-4">';
+echo '<div class="card">';
+echo '<div class="card-body">';
+echo '<h5 class="card-title">Unified Validation</h5>';
+echo '<p class="card-text">Single source of truth - same rules for frontend JS, backend PHP, and model save().</p>';
+echo '</div></div></div>';
+
+echo '</div>';
+
+echo '<hr>';
+echo '<div class="alert alert-success">';
+echo '<strong>Phase 1 Implementation:</strong> FormWriter v2 is completely separate from v1. ';
+echo 'All existing code continues to work unchanged. Use FormWriterV2Bootstrap directly for new forms.';
+echo '</div>';
+
+echo PublicPage::EndPage();
+
+$page->public_footer();

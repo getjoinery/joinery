@@ -211,5 +211,105 @@ class Validator {
 		$this->errors[] = $description;
 	}
 
+	// Validate phone number
+	function validatePhone($theinput, $blankname, $description = ''){
+		// Accept various phone formats: (123) 456-7890, 123-456-7890, 123.456.7890, 1234567890
+		$result = preg_match('/^\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})$/', $theinput);
+		if ($result){
+			return true;
+		}else{
+			if($description == NULL){
+				$description = $blankname . ': ' . 'You did not enter a valid phone number.';
+			}
+			$this->errors[] = $description;
+			return false;
+		}
+	}
+
+	// Validate URL
+	function validateURL($theinput, $blankname, $description = ''){
+		$result = preg_match('/^https?:\/\/.+/', $theinput);
+		if ($result){
+			return true;
+		}else{
+			if($description == NULL){
+				$description = $blankname . ': ' . 'You did not enter a valid URL.';
+			}
+			$this->errors[] = $description;
+			return false;
+		}
+	}
+
+	// Validate SSN (Social Security Number)
+	function validateSSN($theinput, $blankname, $description = ''){
+		// Accept formats: 123-45-6789 or 123456789
+		$result = preg_match('/^([0-9]{3})[-]?([0-9]{2})[-]?([0-9]{4})$/', $theinput);
+		if ($result){
+			return true;
+		}else{
+			if($description == NULL){
+				$description = $blankname . ': ' . 'You did not enter a valid SSN.';
+			}
+			$this->errors[] = $description;
+			return false;
+		}
+	}
+
+	// Validate EIN (Employer Identification Number)
+	function validateEIN($theinput, $blankname, $description = ''){
+		// Accept formats: 12-3456789 or 123456789
+		$result = preg_match('/^([0-9]{2})[-]?([0-9]{7})$/', $theinput);
+		if ($result){
+			return true;
+		}else{
+			if($description == NULL){
+				$description = $blankname . ': ' . 'You did not enter a valid EIN.';
+			}
+			$this->errors[] = $description;
+			return false;
+		}
+	}
+
+	// Validate credit card number (basic Luhn algorithm check)
+	function validateCard($theinput, $blankname, $description = ''){
+		// Remove spaces and dashes
+		$cardNumber = preg_replace('/[\s\-]/', '', $theinput);
+
+		// Check if it's numeric and has a reasonable length
+		if (!preg_match('/^[0-9]{13,19}$/', $cardNumber)) {
+			if($description == NULL){
+				$description = $blankname . ': ' . 'You did not enter a valid credit card number.';
+			}
+			$this->errors[] = $description;
+			return false;
+		}
+
+		// Luhn algorithm validation
+		$sum = 0;
+		$length = strlen($cardNumber);
+		$parity = $length % 2;
+
+		for ($i = 0; $i < $length; $i++) {
+			$digit = (int)$cardNumber[$i];
+			if ($i % 2 == $parity) {
+				$digit *= 2;
+				if ($digit > 9) {
+					$digit -= 9;
+				}
+			}
+			$sum += $digit;
+		}
+
+		if ($sum % 10 == 0) {
+			return true;
+		} else {
+			if($description == NULL){
+				$description = $blankname . ': ' . 'You did not enter a valid credit card number.';
+			}
+			$this->errors[] = $description;
+			return false;
+		}
+	}
+
 }
 ?>

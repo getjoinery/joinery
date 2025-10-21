@@ -601,6 +601,79 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
         return value.length > 9 && /^(1-?)?(\([2-9]\d{2}\)|[2-9]\d{2})-?[2-9]\d{2}-?\d{4}$/.test(value);
     }, "Please specify a valid phone number");
 
+    // General phone validator (not US-specific)
+    JoineryValidator.addValidator("phone", function(value, element) {
+        if (!value) return true;
+        // Accept formats: (123) 456-7890, 123-456-7890, 123.456.7890, 1234567890
+        return /^\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})$/.test(value);
+    }, "Please enter a valid phone number");
+
+    // ZIP code validator
+    JoineryValidator.addValidator("zip", function(value, element) {
+        if (!value) return true;
+        // Accept 5 digit or 5+4 digit ZIP codes
+        return /^[0-9]{5}([- ]?[0-9]{4})?$/.test(value);
+    }, "Please enter a valid ZIP code");
+
+    // SSN validator
+    JoineryValidator.addValidator("ssn", function(value, element) {
+        if (!value) return true;
+        // Accept formats: 123-45-6789 or 123456789
+        return /^([0-9]{3})[-]?([0-9]{2})[-]?([0-9]{4})$/.test(value);
+    }, "Please enter a valid SSN");
+
+    // EIN validator
+    JoineryValidator.addValidator("ein", function(value, element) {
+        if (!value) return true;
+        // Accept formats: 12-3456789 or 123456789
+        return /^([0-9]{2})[-]?([0-9]{7})$/.test(value);
+    }, "Please enter a valid EIN");
+
+    // Credit card validator (Luhn algorithm)
+    JoineryValidator.addValidator("credit_card", function(value, element) {
+        if (!value) return true;
+
+        // Remove spaces and dashes
+        var cardNumber = value.replace(/[\s\-]/g, '');
+
+        // Check if numeric and reasonable length
+        if (!/^[0-9]{13,19}$/.test(cardNumber)) {
+            return false;
+        }
+
+        // Luhn algorithm
+        var sum = 0;
+        var length = cardNumber.length;
+        var parity = length % 2;
+
+        for (var i = 0; i < length; i++) {
+            var digit = parseInt(cardNumber.charAt(i));
+            if (i % 2 == parity) {
+                digit *= 2;
+                if (digit > 9) {
+                    digit -= 9;
+                }
+            }
+            sum += digit;
+        }
+
+        return (sum % 10) == 0;
+    }, "Please enter a valid credit card number");
+
+    // Pattern validator
+    JoineryValidator.addValidator("pattern", function(value, element, param) {
+        if (!value) return true;
+        // param is the regex pattern
+        var regex = new RegExp(param);
+        return regex.test(value);
+    }, "Please match the required format");
+
+    // Matches validator (alias for equalTo)
+    JoineryValidator.addValidator("matches", function(value, element, param) {
+        // Use the existing equalTo validator
+        return JoineryValidator.validators.equalTo.call(this, value, element, param);
+    }, "Please enter the same value again");
+
     /**
      * require_one_group - At least one field in a named group must be filled
      * Usage in validation rules:
