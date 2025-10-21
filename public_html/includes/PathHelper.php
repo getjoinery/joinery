@@ -13,11 +13,17 @@ class PathHelper {
         }
         return self::$root_dir;
     }
-    
+
+    public static function getSiteRoot() {
+        // Get the site root directory (one level up from public_html)
+        // e.g., /var/www/html/sitename
+        return dirname(self::getRootDir());
+    }
+
     public static function getIncludePath($relativePath) {
         return self::getRootDir() . '/' . ltrim($relativePath, '/');
     }
-    
+
     public static function getBasePath() {
         return self::getRootDir() . '/';
     }
